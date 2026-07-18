@@ -1298,6 +1298,30 @@ export type ApprovalChoice = "allow-once" | "allow-session" | "allow-always" | "
  * pick the right card. Default `"tool"` is the standard approval dialog.
  */
 export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action" | "rationale";
+/**
+ * Renderer-safe view of the host-sealed substrate selected for a builtin shell
+ * invocation. It intentionally omits command, CWD, directories, the permit or
+ * receipt, nonce, HMAC, and the free-form capability reason.
+ */
+export type HostShellExecutionPlanAuditProjection = {
+  version: "host-shell-execution-plan/v2";
+  identity: string;
+  platform: NodeJS.Platform;
+  requestedSandbox: boolean;
+  mode: "asrt" | "plain" | "blocked";
+  fallbackReason:
+    | "none"
+    | "windows-partial-shell-acl-unsafe"
+    | "requested-sandbox-unavailable"
+    | "active-sandbox-not-shell-contained";
+  requiresExplicitUserApproval: boolean;
+  capability: {
+    kind: "none" | "asrt" | "partial" | "fs-only";
+    confidence: "verified" | "assumed" | "policy-best-effort";
+    platform: NodeJS.Platform;
+    confines?: SandboxConfinement;
+  };
+};
 
 export type ApprovalRequest = {
   id: string;
@@ -1351,6 +1375,12 @@ export type ApprovalRequest = {
    * ensuring record/lookup key symmetry in user-approval-store.
    */
   approvalCacheKey?: string;
+  /**
+   * Host-issued execution-plan projection for canonical builtin shell calls.
+   * It is display-only and never contains the private one-shot permit binding
+   * or action input.
+   */
+  executionPlan?: HostShellExecutionPlanAuditProjection;
   /**
    * Issue #691 — OS-level execution sandbox capability captured at
    * request build time. Renderer surfaces this in the approval card so

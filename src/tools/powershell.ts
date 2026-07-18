@@ -8,7 +8,7 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { delimiter, isAbsolute, join, resolve as pathResolve } from "node:path";
+import { delimiter, join } from "node:path";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 
@@ -24,13 +24,24 @@ import {
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
 import {
-  isAsrtSandboxActive,
   wrapToolCommand,
   cleanupAsrtSandboxAfterCommand,
   getDefaultSensitiveReadDenyPaths,
   getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
-import { isActiveSandboxShellContained } from "../permissions/sandbox-capability.js";
+import {
+  getHostShellExecutionPlan,
+  isIssuedHostShellExecutionPlan,
+} from "../permissions/sandbox-capability.js";
+import {
+  getHostShellExecutionPlanAuditProjection,
+  requiresExplicitHostShellFallbackApproval,
+} from "../permissions/host-shell-execution-plan.js";
+import {
+  canonicalizeHostShellAllowedDirectories,
+  consumeHostShellExecutionPermit,
+  resolveHostShellWorkingDirectory,
+} from "../permissions/host-shell-execution-permit.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -143,7 +154,18 @@ export interface PowerShellAstSummary {
   commands: PowerShellAstCommand[];
 }
 
+const canonicalPowerShellTools = new WeakSet<object>();
+
+export function isCanonicalPowerShellTool(tool: unknown): tool is PowerShellTool {
+  return typeof tool === "object" && tool !== null && canonicalPowerShellTools.has(tool);
+}
+
 export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
+  constructor() {
+    super();
+    if (new.target === PowerShellTool) canonicalPowerShellTools.add(this);
+  }
+
   readonly name = "powershell";
   readonly description = "Run a non-interactive PowerShell command in the local repository.";
   readonly inputSchema = PowerShellToolInputSchema;
@@ -164,11 +186,7 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     input: z.infer<typeof PowerShellToolInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolResult> {
-    const resolvedCwd = input.cwd
-      ? isAbsolute(input.cwd)
-        ? pathResolve(input.cwd)
-        : pathResolve(ctx.cwd, input.cwd)
-      : ctx.cwd;
+    const resolvedCwd = resolveHostShellWorkingDirectory(ctx.cwd, input.cwd);
     const cwdViolation = validateShellWorkingDirectory(resolvedCwd, ctx.cwd, ctx.extraAllowedDirectories);
     if (cwdViolation) {
       return { output: cwdViolation, isError: true };
@@ -183,30 +201,62 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
       return { output: commandPathViolation, isError: true };
     }
 
+    // §691: the executor seals the host-shell substrate before permission
+    // routing. The supplied plan must come from the live host provider; a
+    // structural lookalike cannot downgrade an active ASRT route to plain spawn.
+    const suppliedHostShellPlan = ctx.hostShellExecutionPlan;
+    if (
+      suppliedHostShellPlan !== undefined &&
+      !isIssuedHostShellExecutionPlan(suppliedHostShellPlan)
+    ) {
+      return {
+        output: "PowerShell spawn failed: shell execution plan was not issued by the host.",
+        isError: true,
+        metadata: { sandboxed: false, isolation: "none" },
+      };
+    }
+    const hostShellPlan = suppliedHostShellPlan ?? getHostShellExecutionPlan();
+    // A requested-sandbox fallback is an honest plain host child, never an ASRT child.
+    // Its opaque permit exists only after an allow-once approval for this exact
+    // command/cwd/tool-use tuple and is consumed before spawn.
+    if (requiresExplicitHostShellFallbackApproval(hostShellPlan)) {
+      const permitAccepted = consumeHostShellExecutionPermit({
+        permit: ctx.hostShellExecutionPermit,
+        plan: hostShellPlan,
+        toolName: "powershell",
+        toolUseId:
+          typeof ctx.metadata.toolUseId === "string"
+            ? ctx.metadata.toolUseId
+            : undefined,
+        command: input.command,
+        requestedCwd: input.cwd,
+        executionCwd: ctx.cwd,
+        resolvedCwd,
+        timeoutSeconds: input.timeoutSeconds,
+        allowedDirectories: canonicalizeHostShellAllowedDirectories(ctx.extraAllowedDirectories),
+      });
+      if (!permitAccepted) {
+        return {
+          output: "PowerShell spawn failed: requested-sandbox shell execution requires a one-shot host approval permit.",
+          isError: true,
+          metadata: { sandboxed: false, isolation: "none" },
+        };
+      }
+    }
     const preflightError = await validatePowerShellCommand(input.command);
     if (preflightError) {
       return { output: preflightError, isError: true, metadata: { preflightDenied: true } };
     }
-
-    // §691: ASRT (Anthropic sandbox-runtime) adoption for the PowerShell spawn
-    // path — parity with bash.ts. The sandbox is gated once at boot
-    // (`initializeAsrtSandbox`); `isAsrtSandboxActive()` reflects that decision
-    // with no runtime re-evaluation. On Windows this becomes true after the
-    // one-time srt-win setup is ready; before then boot degrades and pwsh falls
-    // through to the plain spawn.
-    //
-    // When the gate is OFF (the DEFAULT), this is skipped and pwsh runs via the
-    // unchanged `spawnPowerShell` path.
-    if (isAsrtSandboxActive()) {
-      if (!isActiveSandboxShellContained()) {
-        return {
-          output:
-            "PowerShell spawn failed: ASRT shell tools require filesystem and process isolation; " +
-            "the active sandbox is only partially confined.",
-          isError: true,
-          metadata: { sandboxed: true },
-        };
-      }
+    if (hostShellPlan.mode === "blocked") {
+      return {
+        output:
+          "PowerShell spawn failed: ASRT shell tools require filesystem and process isolation; " +
+          "the active sandbox is only partially confined.",
+        isError: true,
+        metadata: { sandboxed: false, isolation: "none" },
+      };
+    }
+    if (hostShellPlan.mode === "asrt") {
       // Namespace-scoped write-jail (owner plugin sandbox root ∪ allowed
       // directories), not the bare cwd. cwd stays readable.
       const writePaths = deriveSandboxWritePaths({
@@ -223,7 +273,17 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
       );
     }
 
-    return spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds);
+    const plainResult = await spawnPowerShell(input.command, resolvedCwd, input.timeoutSeconds);
+    if (!hostShellPlan.requiresExplicitUserApproval) return plainResult;
+    return {
+      ...plainResult,
+      metadata: {
+        ...plainResult.metadata,
+        sandboxed: false,
+        isolation: "none",
+        sandboxExecutionPlan: getHostShellExecutionPlanAuditProjection(hostShellPlan),
+      },
+    };
   }
 }
 
@@ -462,7 +522,7 @@ function posixSingleQuote(arg: string): string {
  *
  * Filesystem jail mirrors bash.ts: `allowWrite` = the derived write-jail, and
  * the read-jail HOME-leak fix denies `$HOME` then re-allows cwd + write paths.
- * Windows ASRT is not shell-contained and ASRT 0.0.64 cannot accept the
+ * Windows ASRT is not shell-contained and ASRT 0.0.66 cannot accept the
  * per-exec allowRead/allowWrite grants this path needs, so executeTyped refuses
  * before this function on win32; the win32 binShell branch remains defensive
  * for future ASRT capability changes.
@@ -526,7 +586,7 @@ async function spawnPowerShellWithSandbox(
     return {
       output: `PowerShell spawn failed: ${(err as Error).message}`,
       isError: true,
-      metadata: { sandboxed: true },
+      metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
     };
   }
 
@@ -535,7 +595,7 @@ async function spawnPowerShellWithSandbox(
     return {
       output: "PowerShell spawn failed: ASRT returned an empty argv",
       isError: true,
-      metadata: { sandboxed: true },
+      metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
     };
   }
 
@@ -600,7 +660,7 @@ async function spawnPowerShellWithSandbox(
           ? `PowerShell executable not found: ${executable}`
           : `PowerShell spawn failed: ${err.message}`,
         isError: true,
-        metadata: { sandboxed: true },
+        metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
       });
     });
   });
@@ -620,6 +680,7 @@ async function spawnPowerShell(
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
         env: buildSafeChildEnv(),
+        shell: false,
       },
     );
     trackManagedChildProcess(child, { label: "tool:powershell" });

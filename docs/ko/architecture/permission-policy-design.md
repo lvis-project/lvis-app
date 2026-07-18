@@ -242,18 +242,18 @@ export function canonicalizePathForMatch(rawPath: string): string {
 
 **Eval pipeline:** numeric order short-circuit. Layer N deny → Layer N+1 ~ skip. **단 audit 에는 `denyReasons: [{layer, reason}]` 으로 *현재 deny 이유 1건* 만 기록** (forensics 가 다른 hypothetical 결정을 보고 싶으면 별도 dry-run 모드로).
 
-**Runtime mode semantics:** `default` 는 read 허용 + write/shell/network ask. `strict` 는 read 포함 모든 도구 실행을 ask. `auto` 는 user-visible write/shell/network 를 foreground reviewer 로 보내고 LOW 만 allow+audit, MED/HIGH 는 main-owned approval modal 로 사용자 결정을 받는다. Chat 문장 감지나 executor 재시도 메모리는 승인 권한으로 사용하지 않는다. `auto` headless mutation 은 reviewer/deferred queue 로 보낸다. `allow` 는 명시적 전체허용 opt-in 이며 Layer 0 sensitive path, Layer 1 directory scope, deny rules, overlay-trigger-origin mutation guard 는 우회하지 않는다.
+**Runtime mode semantics:** `default` 는 read 허용 + write/shell/network 및 `decisionOverride: "ask"` builtin meta를 ask 한다. `strict` 는 read 포함 모든 도구 실행을 ask. `auto` 는 user-visible write/shell/network 및 `decisionOverride: "ask"` builtin meta를 같은 foreground reviewer lane으로 보내고, 설정된 foreground 자동승인 임계값(low/medium; off면 기존 modal 경로)까지 allow+audit, 그 초과/HIGH 는 main-owned approval modal 로 사용자 결정을 받는다. Chat 문장 감지나 executor 재시도 메모리는 승인 권한으로 사용하지 않는다. `auto` headless mutation 은 reviewer/deferred queue 로 보낸다. `allow` 는 명시적 전체허용 opt-in 이며 Layer 0 sensitive path, Layer 1 directory scope, deny rules, overlay-trigger-origin mutation guard 는 우회하지 않는다.
 
-**Auto mode 의 silent skip 금지:** `confirm` (Layer 1 외부 path) 은 auto mode 에서도 ask. Auto mode 의 자동 허용 대상은 foreground reviewer LOW 로 판정된 *user-visible write/shell/network only* (dir-confirm/headless/hard approval gates 제외).
+**Auto mode 의 silent skip 금지:** `confirm` (Layer 1 외부 path) 은 auto mode 에서도 ask. foreground 자동승인이 low/medium으로 활성화된 경우에만, Auto mode 의 자동 허용 대상은 그 임계값 이하로 판정된 user-visible write/shell/network 및 `decisionOverride: "ask"` builtin meta이며, dir-confirm/headless/hard approval gate는 제외한다.
 
 ### Layer 3 — Category × Source × Registry pattern
 
 **5-axis ToolCategory:** `read | write | shell | network | meta`
 
-- `meta` = control-flow / UI tools (`ask_user_question`, `agent_spawn`)
+- `meta` = control-flow / UI tools (`ask_user_question`, `agent_spawn`, `agent_interrupt`)
   - `decisionOverride` field 로 Layer 3 결정 우회 가능
   - `ask_user_question.decisionOverride = "always-allow-with-audit"` → 실행은 별도 path (executor short-circuit)
-  - `agent_spawn.decisionOverride = "ask"` → write 와 동등 처리하되 카테고리는 `meta` (rule classifier 가 *control flow* 신호로 활용 가능)
+  - `decisionOverride = "ask"` 인 builtin meta (예: `agent_spawn`, `agent_interrupt`)는 write/shell/network와 같은 foreground reviewer lane을 사용하되 카테고리는 `meta`로 유지한다 (rule classifier 가 *control flow* 신호로 활용 가능)
 
 **Migration map (final):**
 - `bash.ts`: `dangerous` → `shell`

@@ -35,6 +35,10 @@ import {
   GENESIS_MARKER,
   verifyChain,
 } from "../hmac-chain.js";
+import {
+  buildHostShellExecutionPlan,
+  getHostShellExecutionPlanAuditProjection,
+} from "../../permissions/host-shell-execution-plan.js";
 
 let testHome: string;
 let auditDir: string;
@@ -139,6 +143,69 @@ describe("AuditLogger permission audit chain", () => {
     expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
   });
 
+  it("chains the allowlist-only Plan-B projection without leaking its capability reason", async () => {
+    const logger = new AuditLogger();
+    logger.setupPermissionAuditChain(SECRET);
+    const plan = buildHostShellExecutionPlan({
+      platform: "win32",
+      requestedSandbox: true,
+      activeCapability: {
+        kind: "asrt",
+        confidence: "verified",
+        platform: "win32",
+        reason: "host-only partial ASRT diagnostic",
+        confines: { filesystem: true, process: false, network: true },
+      },
+    });
+    const executionPlan = getHostShellExecutionPlanAuditProjection(plan);
+
+    await logger.appendPermissionAuditEntry({
+      decision: "ask",
+      auditId: "plan-ask",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      toolUseId: "plan-tool-use",
+      executionPlan,
+      tool: "bash",
+      source: "builtin",
+      category: "shell",
+      layer: 6,
+      reason: "requires explicit Plan-B approval",
+    });
+    await logger.appendPermissionAuditEntry({
+      decision: "deny",
+      auditId: "plan-deny",
+      ts: "2026-05-09T00:00:01.000Z",
+      trustOrigin: "user-keyboard",
+      toolUseId: "plan-tool-use",
+      executionPlan,
+      tool: "bash",
+      source: "builtin",
+      category: "shell",
+      denyReasons: [{ layer: 6, reason: "user denied", source: "tool-executor" }],
+    });
+
+    const lines = readPermissionAuditLines(logger.getPermissionAuditLogFile());
+    expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
+    const entries = lines.map((line) => JSON.parse(line) as { executionPlan?: unknown; toolUseId?: string });
+    expect(entries).toHaveLength(2);
+    for (const entry of entries) {
+      expect(entry.toolUseId).toBe("plan-tool-use");
+      expect(entry.executionPlan).toEqual(executionPlan);
+    }
+    const serialized = JSON.stringify(entries);
+    expect(serialized).not.toContain("host-only partial ASRT diagnostic");
+    expect(serialized).not.toContain("command");
+    expect(serialized).not.toContain("allowedDirectories");
+
+    const tampered = [...lines];
+    const first = JSON.parse(tampered[0]!) as {
+      executionPlan: { fallbackReason: string };
+    };
+    first.executionPlan.fallbackReason = "none";
+    tampered[0] = JSON.stringify(first);
+    expect(verifyChain(SECRET, tampered)).toMatchObject({ ok: false });
+  });
   it("appends deferred_resolve entries to the permission audit chain", async () => {
     const logger = new AuditLogger();
     logger.setupPermissionAuditChain(SECRET);

@@ -319,7 +319,7 @@ describe("asrt-windows-support adapter", () => {
     expect(verifyWindowsWfpEgress).not.toHaveBeenCalled();
   });
 
-  it("normalizes the ASRT 0.0.64 ready sandbox-user shape", () => {
+  it("normalizes the ASRT 0.0.66 ready sandbox-user shape", () => {
     expect(
       normalizeAsrtWindowsUserState({
         provisioned: true,

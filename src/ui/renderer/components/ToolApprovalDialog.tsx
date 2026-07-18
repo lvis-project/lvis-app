@@ -42,7 +42,6 @@ import {
   formatEvaluationLimits,
   PermissionEvaluationContextPanel,
 } from "./permissions/PermissionEvaluationContextPanel.js";
-import { isWeakSandbox } from "../../../permissions/sandbox-capability.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
 
@@ -997,8 +996,9 @@ export function approvalReviewRows(
   // sandbox so the user sees how this tool will be isolated (or not).
   // `kind: "none"` is the current real-world state; the row stays
   // present so users learn to look for it once isolation lands.
-  if (request.sandboxCapability) {
-    const cap = request.sandboxCapability;
+  const displayedSandbox = request.executionPlan?.capability ?? request.sandboxCapability;
+  if (displayedSandbox) {
+    const cap = displayedSandbox;
     // MAJOR-2.1 SOT consumer fix: per-kind Korean labels instead of
     // binary weak/strong. "partial" was incorrectly shown as "OS 격리
     // 없음" (factually wrong — partial isolation IS present), and
@@ -1010,16 +1010,18 @@ export function approvalReviewRows(
       sandboxValue = t("toolApprovalDialog.sandboxPartial");
     } else if (cap.kind === "fs-only") {
       sandboxValue = t("toolApprovalDialog.sandboxFsOnly");
-    } else if (isWeakSandbox(cap)) {
+    } else if (
+      cap.kind === "none" ||
+      cap.confidence === "assumed"
+    ) {
       sandboxValue = t("toolApprovalDialog.sandboxNone");
     } else if (
       cap.confines &&
       !(cap.confines.filesystem && cap.confines.process && cap.confines.network)
     ) {
-      // Confines honesty. `isWeakSandbox` is confines-BLIND: it reports
-      // "strong" for ANY verified non-none ASRT, but Windows srt-win is partial
-      // (filesystem + network, no process isolation). Show the per-dimension
-      // breakdown whenever the active substrate is not full.
+      // Confines honesty: a verified non-none capability can still be partial.
+      // For example, Windows srt-win lacks process confinement. Show the
+      // per-dimension breakdown whenever the active substrate is not full.
       sandboxValue = t("toolApprovalDialog.sandboxNetworkOnly", {
         net: cap.confines.network ? "✓" : "✗",
         fs: cap.confines.filesystem ? "✓" : "✗",
@@ -1028,10 +1030,16 @@ export function approvalReviewRows(
     } else {
       sandboxValue = t("toolApprovalDialog.sandboxActive", { kind: cap.kind });
     }
+    // A sealed plain-shell fallback can require a one-shot decision on any
+    // platform. Show only that host-owned approval fact, never a raw fallback
+    // reason or private permit binding.
+    if (request.executionPlan?.requiresExplicitUserApproval === true) {
+      sandboxValue += ` · ${t("toolApprovalDialog.allowOnce")}`;
+    }
     rows.push({
       label: t("toolApprovalDialog.rowSandbox"),
       value: sandboxValue,
-      testId: "tool-approval-sandbox",
+      testId: request.executionPlan ? "tool-approval-execution-plan" : "tool-approval-sandbox",
     });
   }
   if (isNonUserTrustOrigin(request.trustOrigin)) {

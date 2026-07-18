@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { PermissionCheckResult, ReviewerDispatchOutcome } from "../../../permissions/permission-manager.js";
 import {
+  buildHostShellExecutionPlan,
+  getHostShellExecutionPlanAuditProjection,
+} from "../../../permissions/host-shell-execution-plan.js";
+import {
   FOREGROUND_RATIONALE_PRODUCTION_ENABLED,
   RATIONALE_ACTIVATION_PREREQUISITES,
   RATIONALE_GUARDED_ACTIVATION_EVIDENCE,
@@ -259,6 +263,77 @@ describe("foreground rationale contract", () => {
     expect(Object.isFrozen(control)).toBe(true);
     expect(Object.isFrozen(control.action.sandboxExecutionPlan.nested)).toBe(true);
     expect(Object.isFrozen(control.sealedAction.finalInput.nested)).toBe(true);
+  });
+
+  it("binds the sealed host-shell plan into v2 rationale action identity", () => {
+    const anchor = createAnchor();
+    const noneCapability = {
+      kind: "none" as const,
+      confidence: "verified" as const,
+      platform: "darwin" as const,
+      reason: "no sandbox configured",
+      confines: { filesystem: false, process: false, network: false },
+    };
+    // V2 seals the requested-sandbox fallback reason into the route identity.
+    const requestedOn = getHostShellExecutionPlanAuditProjection(
+      buildHostShellExecutionPlan({
+        platform: "darwin",
+        requestedSandbox: true,
+        activeCapability: noneCapability,
+      }),
+    );
+    const requestedOff = getHostShellExecutionPlanAuditProjection(
+      buildHostShellExecutionPlan({
+        platform: "darwin",
+        requestedSandbox: false,
+        activeCapability: noneCapability,
+      }),
+    );
+    expect(requestedOn).toMatchObject({
+      requestedSandbox: true,
+      fallbackReason: "requested-sandbox-unavailable",
+      requiresExplicitUserApproval: true,
+    });
+    expect(requestedOff).toMatchObject({
+      requestedSandbox: false,
+      fallbackReason: "none",
+      requiresExplicitUserApproval: false,
+    });
+    expect(requestedOn.identity).not.toBe(requestedOff.identity);
+
+    const v2 = (hostShellExecutionPlan: typeof requestedOn) => ({
+      version: "rationale-sandbox-execution-plan/v2",
+      executionCwd: "workspace",
+      allowedDirectories: ["workspace"],
+      capability: {
+        kind: hostShellExecutionPlan.capability.kind,
+        confidence: hostShellExecutionPlan.capability.confidence,
+        platform: hostShellExecutionPlan.capability.platform,
+        ...(hostShellExecutionPlan.capability.confines === undefined
+          ? {}
+          : {
+              confines: {
+                filesystem: hostShellExecutionPlan.capability.confines.filesystem,
+                process: hostShellExecutionPlan.capability.confines.process,
+                network: hostShellExecutionPlan.capability.confines.network,
+              },
+            }),
+      },
+      hostShellExecutionPlan,
+    });
+    const onAction = createAction(anchor.anchorId, {
+      sandboxExecutionPlan: v2(requestedOn),
+    });
+    const offAction = createAction(anchor.anchorId, {
+      sandboxExecutionPlan: v2(requestedOff),
+    });
+
+    expect(onAction.actionDigest).not.toBe(offAction.actionDigest);
+    expect(onAction.sandboxExecutionPlan).toMatchObject({
+      version: "rationale-sandbox-execution-plan/v2",
+      hostShellExecutionPlan: { requestedSandbox: true },
+    });
+    expect(Object.isFrozen(onAction.sandboxExecutionPlan)).toBe(true);
   });
 
   it("accepts only a fresh/cache foreground ask from an untainted keyboard turn", () => {

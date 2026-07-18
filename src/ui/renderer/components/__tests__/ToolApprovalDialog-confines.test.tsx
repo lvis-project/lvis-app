@@ -84,7 +84,78 @@ describe("ToolApprovalDialog sandbox confines label", () => {
     );
     expect(row?.value).toContain("OS 격리 없음");
   });
+  it("uses the safe host execution plan instead of a contradictory process capability", () => {
+    const request = makeRequest({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "process-wide capability must not override the sealed shell plan",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    // The host gate rejects structural lookalikes before IPC. This confirms the
+    // renderer still derives its row only from the safe projection and displays
+    // none of the extra host-only fields if such a value reaches it.
+    request.executionPlan = {
+      version: "host-shell-execution-plan/v2",
+      identity: "host-shell-execution-plan/v2:win32:windows-partial-shell-acl-unsafe",
+      platform: "win32",
+      requestedSandbox: true,
+      mode: "plain",
+      fallbackReason: "windows-partial-shell-acl-unsafe",
+      requiresExplicitUserApproval: true,
+      capability: {
+        kind: "none",
+        confidence: "verified",
+        platform: "win32",
+        confines: { filesystem: false, process: false, network: false },
+      },
+      binding: "HOST-ONLY-binding",
+      command: "HOST-ONLY-command",
+      cwd: "HOST-ONLY-cwd",
+      reason: "HOST-ONLY-reason",
+    } as unknown as NonNullable<ApprovalRequest["executionPlan"]>;
 
+    const rows = approvalReviewRows(request, "shell", "Get-ChildItem", "user", "builtin", "BUILTIN");
+    const planRow = rows.find((row) => row.testId === "tool-approval-execution-plan");
+    expect(planRow?.value).toContain("OS 격리 없음");
+    expect(planRow?.value).toContain("한 번만 허용");
+    expect(rows.some((row) => row.testId === "tool-approval-sandbox")).toBe(false);
+    expect(planRow?.value).not.toContain("HOST-ONLY-binding");
+    expect(planRow?.value).not.toContain("HOST-ONLY-command");
+    expect(planRow?.value).not.toContain("HOST-ONLY-cwd");
+    expect(planRow?.value).not.toContain("HOST-ONLY-reason");
+  });
+
+  it("shows one-shot approval for a generic requested-unavailable plan without exposing its reason", () => {
+    const request = makeRequest({
+      kind: "none",
+      confidence: "verified",
+      platform: "linux",
+      reason: "process capability must not override the sealed shell plan",
+    });
+    request.executionPlan = {
+      version: "host-shell-execution-plan/v2",
+      identity: "host-shell-execution-plan/v2:linux:requested-sandbox-unavailable",
+      platform: "linux",
+      requestedSandbox: true,
+      mode: "plain",
+      fallbackReason: "requested-sandbox-unavailable",
+      requiresExplicitUserApproval: true,
+      capability: {
+        kind: "none",
+        confidence: "verified",
+        platform: "linux",
+        confines: { filesystem: false, process: false, network: false },
+      },
+      reason: "HOST-ONLY-requested-unavailable-reason",
+    } as unknown as NonNullable<ApprovalRequest["executionPlan"]>;
+
+    const rows = approvalReviewRows(request, "shell", "Get-ChildItem", "user", "builtin", "BUILTIN");
+    const planRow = rows.find((row) => row.testId === "tool-approval-execution-plan");
+    expect(planRow?.value).toContain("OS 격리 없음");
+    expect(planRow?.value).toContain("한 번만 허용");
+    expect(planRow?.value).not.toContain("HOST-ONLY-requested-unavailable-reason");
+  });
   it("falls back to full-active label when confines is absent (legacy)", () => {
     // A verified non-none ASRT with no declared confines keeps the old
     // all-or-nothing label — preserving existing fixtures.
