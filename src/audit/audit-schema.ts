@@ -19,6 +19,7 @@
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { ExecutionMode } from "../permissions/permission-manager.js";
 import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
+import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 
 export type TrustOrigin = HookTrustOrigin;
 export type PermissionMode = ExecutionMode;
@@ -106,6 +107,13 @@ export interface AuditCommon {
   auditId: string;
   /** Tool-call correlation id (when applicable). */
   toolUseId?: string;
+  /**
+   * Public-safe host shell substrate selected for this exact invocation.
+   * This excludes tool arguments, directories, approval bindings, permits,
+   * nonces, HMACs, and capability reasons.
+   */
+  executionPlan?: HostShellExecutionPlanAuditProjection;
+
   /** Trust origin propagated through the eval pipeline. */
   trustOrigin: TrustOrigin;
   /**
@@ -113,6 +121,15 @@ export interface AuditCommon {
    * For the first entry of the file this is HMAC(secret, "genesis").
    */
   prevHash: string;
+}
+
+/**
+ * Host-owned correlation metadata threaded only through audit writers. It is
+ * never renderer payload data and never carries approval material.
+ */
+export interface ToolExecutionAuditMetadata {
+  readonly toolUseId?: string;
+  readonly executionPlan?: HostShellExecutionPlanAuditProjection;
 }
 
 /**

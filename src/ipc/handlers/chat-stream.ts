@@ -150,6 +150,9 @@ export async function runStreamedTurn(
           toolCategory: meta.category,
           pluginId: meta.pluginId,
           mcpServerId: meta.mcpServerId,
+          ...(meta.executionPlan !== undefined
+            ? { executionPlan: meta.executionPlan }
+            : {}),
           ...(uiPayload && { uiPayload }),
           durationMs,
         }),

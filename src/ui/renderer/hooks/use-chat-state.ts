@@ -358,7 +358,7 @@ export function useChatState(api: LvisApi) {
           );
         });
       } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, result, isError, uiPayload, durationMs, source, toolCategory, pluginId, mcpServerId } = ev;
+        const { groupId, toolUseId, result, isError, uiPayload, durationMs, source, toolCategory, pluginId, mcpServerId, executionPlan } = ev;
         clearPermissionReviewDwell(permissionReviewKey(groupId, toolUseId));
         setEntries((p) => applyToolEnd(
           dropPermissionReviewEntries(p, { groupId, toolUseId }),
@@ -373,6 +373,7 @@ export function useChatState(api: LvisApi) {
             ...(toolCategory ? { category: toolCategory } : {}),
             ...(pluginId ? { pluginId } : {}),
             ...(mcpServerId ? { mcpServerId } : {}),
+            ...(executionPlan !== undefined ? { executionPlan } : {}),
           },
         ));
       } else if (ev.type === "error") {

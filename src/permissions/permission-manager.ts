@@ -22,6 +22,10 @@ import {
   resolveReviewerSandboxCacheState,
   type ReviewerSandboxCacheState,
 } from "./sandbox-capability.js";
+import {
+  getHostShellExecutionPlanAuditProjection,
+  type HostShellExecutionPlan,
+} from "./host-shell-execution-plan.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
@@ -274,6 +278,8 @@ export interface ReviewerDispatchInput {
    */
   pluginId?: string;
   workerId?: string;
+  /** Executor-sealed substrate for canonical builtin shell invocations only. */
+  hostShellExecutionPlan?: HostShellExecutionPlan;
 }
 
 /**
@@ -321,7 +327,9 @@ function sameReviewerSandboxCacheState(
     ac.platform === bc.platform &&
     ac.confines?.filesystem === bc.confines?.filesystem &&
     ac.confines?.process === bc.confines?.process &&
-    ac.confines?.network === bc.confines?.network
+    ac.confines?.network === bc.confines?.network &&
+    canonicalStringify(a.hostShellExecutionPlan ?? null) ===
+      canonicalStringify(b.hostShellExecutionPlan ?? null)
   );
 }
 // LLM caller retry wiring lives in conversation-loop.ts scope.
@@ -1208,6 +1216,9 @@ export class PermissionManager {
     const cache = this.verdictCache!;
     const queue = this.deferredQueue!;
     const cacheIdentityInput = input.cacheIdentityInput ?? input.finalInput;
+    const hostShellExecutionPlanAudit = input.hostShellExecutionPlan === undefined
+      ? undefined
+      : getHostShellExecutionPlanAuditProjection(input.hostShellExecutionPlan);
 
     const lookupKey = {
       toolName,
@@ -1226,6 +1237,7 @@ export class PermissionManager {
       mcpServerId: input.mcpServerId,
       pluginId: input.pluginId,
       workerId: input.workerId,
+      hostShellExecutionPlan: hostShellExecutionPlanAudit,
     };
     // ── User-approval memory hit ──────────────────────────────────────────
     // Check the user-approval store before consulting the LLM classifier.
@@ -1249,6 +1261,7 @@ export class PermissionManager {
         input.mcpServerId,
         input.workerId,
         input.pluginId,
+        input.hostShellExecutionPlan,
       );
     const buildCacheContext = (sandboxCacheState: ReviewerSandboxCacheState) => {
       const sandboxScope = sandboxCacheState.capability;
@@ -1260,6 +1273,7 @@ export class PermissionManager {
           reviewerOutcomeContractVersion: 1,
           sandboxKind: sandboxScope.kind,
           sandboxConfidence: sandboxScope.confidence,
+          hostShellExecutionPlan: sandboxCacheState.hostShellExecutionPlan ?? null,
         },
         sandboxWrapState: sandboxCacheState,
       };

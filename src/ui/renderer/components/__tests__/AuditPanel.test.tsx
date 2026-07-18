@@ -177,6 +177,52 @@ describe("AuditPanel", () => {
     });
   });
 
+  it("shows only the public execution-plan projection for a Windows Plan-B audit entry", async () => {
+    const executionPlan = {
+      version: "host-shell-execution-plan/v2",
+      identity: "host-shell-execution-plan/v2:win32:windows-partial-shell-acl-unsafe",
+      platform: "win32",
+      requestedSandbox: true,
+      mode: "plain",
+      fallbackReason: "windows-partial-shell-acl-unsafe",
+      requiresExplicitUserApproval: true,
+      capability: {
+        kind: "none",
+        confidence: "verified",
+        platform: "win32",
+        confines: { filesystem: false, process: false, network: false },
+      },
+    };
+    const fetcher = makeFetcher({
+      entries: [makeEntry({
+        auditId: "windows-plan-b",
+        tool: "powershell",
+        toolUseId: "tool-use-plan-b",
+        executionPlan,
+      })],
+    });
+
+    await act(async () => {
+      render(<AuditPanel open onClose={() => {}} fetcher={fetcher} />);
+    });
+    fireEvent.click(screen.getByText("powershell"));
+
+    await waitFor(() => {
+      const detail = screen.getByTestId("audit-entry-detail-windows-plan-b");
+      const rendered = JSON.parse(detail.textContent ?? "{}") as {
+        executionPlan?: Record<string, unknown>;
+      };
+      expect(rendered.executionPlan).toEqual(executionPlan);
+      expect(detail.textContent).not.toContain("hostShellExecutionPermitBinding");
+      expect(detail.textContent).not.toContain("oneShotPermitBinding");
+      expect(detail.textContent).not.toContain("permit");
+      expect(detail.textContent).not.toContain("binding");
+      expect(detail.textContent).not.toContain("command");
+      expect(detail.textContent).not.toContain("requestedCwd");
+      expect(detail.textContent).not.toContain("allowedDirectories");
+    });
+  });
+
   it("invokes onClose when × is clicked", async () => {
     const fetcher = makeFetcher({ entries: [] });
     const onClose = vi.fn();
