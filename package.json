@@ -1,7 +1,11 @@
 {
   "name": "lvis-app",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "private": true,
+  "lvisRelease": {
+    "tagDistribution": "public",
+    "signing": "unsigned"
+  },
   "type": "module",
   "imports": {
     "#components/*": "./src/components/*.tsx",
@@ -96,7 +100,7 @@
     "@anthropic-ai/sandbox-runtime": "0.0.66",
     "@modelcontextprotocol/ext-apps": "1.7.4",
     "@modelcontextprotocol/sdk": "1.29.0",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "ai": "~7.0.2",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
@@ -315,7 +319,7 @@
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "window": {
         "width": 540,
-        "height": 420
+        "height": 280
       },
       "contents": [
         {
@@ -328,24 +332,6 @@
           "y": 130,
           "type": "link",
           "path": "/Applications"
-        },
-        {
-          "x": 140,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/setup.command"
-        },
-        {
-          "x": 270,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/uninstall.command"
-        },
-        {
-          "x": 400,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/README.txt"
         }
       ]
     },

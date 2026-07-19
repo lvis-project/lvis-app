@@ -3,10 +3,6 @@ name: Build Installers
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: Branch, tag, or SHA to build
-        required: false
-        default: main
       skip_code_sign:
         description: Build unsigned internal installers
         required: false
@@ -20,13 +16,60 @@ on:
       - "v*.*.*"
 
 jobs:
+  # Public tag semantics are verified from the immutable event SHA. The profile
+  # never controls secret injection; public tag secrets are fixed in workflow.
+  release-profile:
+    name: Verify immutable unsigned release profile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact source head
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Expected source SHA must be 40 lowercase hexadecimal characters" >&2
+            exit 1
+          fi
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "Checkout HEAD does not equal immutable event source SHA" >&2
+            exit 1
+          fi
+      - name: Require an immutable protected public tag
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_PROTECTED" != "true" ]; then
+            echo "Public tag releases require an active immutable v* tag ruleset" >&2
+            exit 1
+          fi
+      - name: Verify immutable unsigned release profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release-profile.mjs \
+            --event-name "${{ github.event_name }}" \
+            --ref-name "${{ github.ref_name }}" \
+            --source-sha "${{ github.sha }}"
+
   installers:
     name: ${{ matrix.name }}
-    # Explicit least-privilege: electron-builder's GitHub publisher
-    # needs `contents: write` to create the release and upload assets.
-    # Everything else stays at the default (read).
+    needs: release-profile
+    # Matrix builds only produce workflow artifacts. The atomic publisher owns
+    # the sole contents:write permission in its separate job.
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -47,7 +90,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact source head
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "Checkout HEAD does not equal immutable event source SHA" >&2
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@v2
       - name: Restore package manager and installer caches
         uses: actions/cache@v6
@@ -100,17 +155,16 @@ jobs:
         run: |
           set -euo pipefail
           args=("--${{ matrix.target }}")
-          # Skip code signing when:
-          #   1. workflow_dispatch with skip_code_sign=true (default)
-          #   2. tag-push BUT relevant platform cert secret is empty (graceful degradation —
-          #      otherwise electron-builder's codesign.js resolves empty CSC_LINK as cwd and
-          #      throws "<workspace> not a file"). Mac uses CSC_LINK; Win uses WIN_CSC_LINK.
-          #      Linux doesn't sign so this guard skips noop on linux target.
-          # When skipping, emit `skip_sign=true` step output so the smoke gate below can
-          # also skip — unsigned mac app can't pass Gatekeeper-driven smoke launch.
-          if [ "${{ github.event_name == 'push' && 'false' || inputs.skip_code_sign }}" = "true" ] \
-             || { [ "${{ matrix.target }}" = "mac" ] && [ -z "${CSC_LINK:-}" ]; } \
-             || { [ "${{ matrix.target }}" = "win" ] && [ -z "${WIN_CSC_LINK:-}" ]; }; then
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Public tags are currently unsigned by deliberate policy. This is
+            # event-fixed, not inferred from secrets or tagged source output.
+            args+=("--skip-code-sign")
+            echo "skip_sign=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.skip_code_sign }}" = "true" ] \
+            || { [ "${{ matrix.target }}" = "mac" ] && [ -z "${CSC_LINK:-}" ]; } \
+            || { [ "${{ matrix.target }}" = "win" ] && [ -z "${WIN_CSC_LINK:-}" ]; }; then
+            # Manual candidates are secret-free; default to unsigned unless a
+            # future protected workflow deliberately adds signing evidence.
             args+=("--skip-code-sign")
             echo "skip_sign=true" >> "$GITHUB_OUTPUT"
           else
@@ -127,43 +181,16 @@ jobs:
           # uploads them atomically.
           node scripts/build-installers.mjs "${args[@]}"
         env:
-          # GH_TOKEN is required by electron-builder's GitHub publisher to
-          # create/update the release and upload assets.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # A tag push is an external release: public builds must set the
-          # channel explicitly and must never receive an embedded demo key.
-          # Manual workflow-dispatch candidates remain internal and may use
-          # the demo activation secret when it is configured.
-          # The secret value is ALREADY the codec ciphertext
-          # (LVIS-DEMO:v1:<...>), NOT the raw API key. When set,
-          # scripts/build-main-esbuild.mjs validates it and embeds it verbatim
-          # into the bundle so the demo chip activates with no paste step on
-          # fresh installs (on-the-fly encryption only happens for a plaintext
-          # repo-root .env.demo, which CI does not use). Public tag builds
-          # deliberately receive an empty value so the public-channel guard
-          # can prove there is no embedded activation source.
-          # See docs/onboarding/demo-activation.md (Embedded activation key).
+          # Public tag behavior is fixed by the GitHub event, never a value
+          # emitted by tagged source. Both public tags and manual candidates
+          # receive no embedded activation or signing secrets in this workflow.
           LVIS_DISTRIBUTION_CHANNEL: ${{ github.event_name == 'push' && 'public' || 'internal' }}
-          LVIS_EMBED_DEMO_ACTIVATION: ${{ github.event_name == 'workflow_dispatch' && secrets.LVIS_EMBED_DEMO_ACTIVATION || '' }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          LVIS_EMBED_DEMO_ACTIVATION: ""
       - name: Smoke launch packaged app
-        # macOS Gatekeeper blocks launch of unsigned .app bundles. When the
-        # matrix entry is mac AND signing was skipped (either via
-        # workflow_dispatch `skip_code_sign=true` OR via graceful-degradation
-        # when `CSC_LINK` is empty on tag-push), the smoke step would always
-        # fail at app boot — making the entire job fail and the Upload
-        # installers step skip, hiding the perfectly-good unsigned dmg/zip
-        # artifacts. Skip smoke for that combination so the artifacts upload
-        # and can be inspected / hand-attached to a release. All other
-        # combinations (mac+signed, linux/win always) still run smoke.
-        # `steps.build.outputs.skip_sign` is set by the Build installer step
-        # above and is the SOT for whether code-sign was applied.
+        # macOS Gatekeeper blocks launch of unsigned .app bundles. Public tags
+        # and secret-free manual candidates therefore skip only this macOS
+        # launch gate so their artifacts can upload; Linux/Windows still run
+        # smoke. `steps.build.outputs.skip_sign` is the signing SOT.
         if: matrix.target != 'mac' || steps.build.outputs.skip_sign != 'true'
         shell: bash
         env:
@@ -220,12 +247,62 @@ jobs:
   # artifacts but skip the Release upload, matching prior behavior.
   publish-release:
     name: Publish GitHub Release assets (atomic)
-    needs: installers
+    needs: [release-profile, installers]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact source head
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "Checkout HEAD does not equal immutable event source SHA" >&2
+            exit 1
+          fi
+      - name: Verify protected annotated tag still resolves to event SHA
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          EXPECTED_TAG: ${{ github.ref_name }}
+          REF_PROTECTED: ${{ github.ref_protected }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_PROTECTED" != "true" ]; then
+            echo "Public tag releases require an active immutable v* tag ruleset" >&2
+            exit 1
+          fi
+
+          tag_ref="$(curl --fail --silent --show-error --retry 3 \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/git/ref/tags/${EXPECTED_TAG}")"
+          tag_object_type="$(jq --raw-output '.object.type // empty' <<<"$tag_ref")"
+          tag_object_sha="$(jq --raw-output '.object.sha // empty' <<<"$tag_ref")"
+          if [ "$tag_object_type" != "tag" ] || [[ ! "$tag_object_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Public release tag must remain an annotated tag" >&2
+            exit 1
+          fi
+
+          tag_object="$(curl --fail --silent --show-error --retry 3 \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}")"
+          target_type="$(jq --raw-output '.object.type // empty' <<<"$tag_object")"
+          target_sha="$(jq --raw-output '.object.sha // empty' <<<"$tag_object")"
+          if [ "$target_type" != "commit" ] || [ "$target_sha" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "Annotated tag does not resolve to the immutable event source SHA" >&2
+            exit 1
+          fi
       - name: Download all platform installers
         uses: actions/download-artifact@v8
         with:
@@ -278,22 +355,12 @@ jobs:
           # Keep the release draft until a human (or the release script)
           # publishes it — matches the prior electron-builder default.
           draft: true
-          # This is the minimum durable disclosure on every public tag draft.
-          # A release operator may add the curated changelog before publishing,
-          # but must not replace this unsigned-distribution warning.
-          body: |
-            ## Important: unsigned and not notarized
-
-            This is an operator-approved unsigned public release. It is not signed with a Windows Authenticode certificate and it is not macOS notarized.
-
-            - **Windows:** SmartScreen and an "Unknown publisher" prompt are expected. Download only from this official GitHub Release.
-            - **macOS:** Gatekeeper may block the first launch because the app is unsigned and not notarized. Do not bypass OS protections unless you independently trust this release.
-            - **Linux:** verify the downloaded asset checksum from this official GitHub Release before installation.
-
-            The public tag build contains no embedded internal demo activation key.
-          # Append to whatever body the release was created with (the
-          # initial Release draft is auto-created by GitHub on tag push;
-          # we do not overwrite its body here).
+          # Current public tag policy is only unsigned, so the disclosure is a
+          # reviewed static template rather than tagged source output.
+          body_path: .github/release-bodies/public-unsigned.md
+          target_commitish: ${{ github.sha }}
+          # Replace the initial GitHub draft body with the profile template.
+          # Curated notes added before publishing must retain its disclosure.
           append_body: false
           generate_release_notes: false
           fail_on_unmatched_files: true
