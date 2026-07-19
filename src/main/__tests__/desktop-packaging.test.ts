@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -9,7 +9,7 @@ const root = resolve(__dirname, "..", "..", "..");
 function readPackageJson(): {
   build: {
     extraResources: Array<{ from: string; to: string }>;
-    dmg: { contents: Array<{ path?: string }> };
+    dmg: { contents: Array<{ path?: string; type?: string; x?: number; y?: number }> };
     nsis: Record<string, unknown>;
   };
 } {
@@ -64,21 +64,12 @@ describe("desktop packaging", () => {
     );
   });
 
-  it("ships a macOS uninstall helper in the DMG extras", () => {
+  it("ships only the app and Applications link in the public DMG", () => {
     const pkg = readPackageJson();
-    expect(pkg.build.dmg.contents).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ path: "build/dmg-extras/uninstall.command" }),
-      ]),
-    );
-    const scriptStat = statSync(
-      join(root, "build", "dmg-extras", "uninstall.command"),
-    );
-    if (process.platform === "win32") {
-      expect(scriptStat.size).toBeGreaterThan(0);
-    } else {
-      expect(scriptStat.mode & 0o111).not.toBe(0);
-    }
+    expect(pkg.build.dmg.contents).toEqual([
+      { type: "file", x: 140, y: 130 },
+      { path: "/Applications", type: "link", x: 400, y: 130 },
+    ]);
   });
 
   it("keeps the macOS uninstaller on fixed LVIS data paths", () => {
