@@ -1,8 +1,10 @@
 # Changelog
 
-## v0.5.3 — 2026-07-19
+## v0.5.4 — 2026-07-19
 
 Hardening release for marketplace recovery, permission review, Windows shell safety, and A2A interoperability. Windows OS sandboxing remains opt-in.
+
+> **Public distribution safety:** release tags build as `public` and never receive an embedded internal demo activation key. This release is intentionally unsigned.
 
 ### Plugin Doctor and Marketplace
 
