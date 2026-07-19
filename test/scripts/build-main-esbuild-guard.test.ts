@@ -68,5 +68,8 @@ describe("build-main-esbuild public-channel embed guard (#1498)", () => {
     expect(workflow).not.toContain(
       "LVIS_EMBED_DEMO_ACTIVATION: ${{ secrets.LVIS_EMBED_DEMO_ACTIVATION }}",
     );
+    expect(workflow).toContain("## Important: unsigned and not notarized");
+    expect(workflow).toContain("Windows:** SmartScreen");
+    expect(workflow).toContain("macOS:** Gatekeeper");
   });
 });
