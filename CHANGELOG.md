@@ -1,8 +1,14 @@
 # Changelog
 
-## v0.5.3 — 2026-07-19
+## v0.5.5 — 2026-07-19
 
 Hardening release for marketplace recovery, permission review, Windows shell safety, and A2A interoperability. Windows OS sandboxing remains opt-in.
+
+> **Public distribution safety:** release tags build as `public` and never receive an embedded internal demo activation key. This release is intentionally unsigned.
+
+### Security
+
+- Updated `adm-zip` to `0.6.0` to remediate GHSA-xcpc-8h2w-3j85 / CVE-2026-39244 (crafted ZIP memory-exhaustion denial of service).
 
 ### Plugin Doctor and Marketplace
 

@@ -47,6 +47,35 @@ delivery to 1-factor for people outside that network boundary.
 - Enforced in `scripts/build-main-esbuild.mjs` (`assertNoPublicEmbed`); the
   threat model is documented in `src/main/demo-embedded-activation.ts`.
 
+## Immutable Public Tag Release Profile
+
+The current public tag profile is deliberately **unsigned only**. The
+`release-profile` job checks the tagged `package.json#lvisRelease` only after
+checking out the immutable GitHub event SHA. It fails unless the tag is exactly
+`v` plus `package.json.version`, `tagDistribution` is `public`, and `signing`
+is `unsigned`.
+
+- Tag installers are checked out at `github.sha`, verify `HEAD` matches that
+  SHA, receive no embedded demo activation or signing credentials, and always
+  use `--skip-code-sign`.
+- Before a public tag is pushed, an active `v*` tag ruleset must prohibit
+  creation, updates, and deletions, and permit bypass only for designated
+  release operators. The workflow fails closed unless
+  `github.ref_protected` is true, and the publisher re-reads the annotated
+  tag's peeled commit through the GitHub API immediately before attaching the
+  draft Release assets. It must still equal `github.sha`.
+- The public distribution channel and empty demo activation input are fixed by
+  the GitHub event expression, never by output emitted from tagged source.
+- `workflow_dispatch` remains a secret-free internal candidate and never
+  creates a GitHub Release.
+- The draft uses the tracked unsigned disclosure template. Before publication,
+  the operator must replace both `PENDING` entries with the approval and
+  deferred signed Windows-evidence reference. This is a manual publish gate.
+
+A future signed/notarized release requires a separate reviewed workflow and
+positive platform signature/notarization evidence. It must not be enabled by
+adding secrets to this unsigned workflow.
+
 ## Update Checklist
 
 - State whether the document is active, implemented, superseded, or historical before adding new detail.
