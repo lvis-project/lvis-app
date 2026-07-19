@@ -4,7 +4,7 @@
  * Verifies every legal transition + that out-of-order events stay
  * no-op. 2026-05-20 redesign — the `welcome` stage was removed; the
  * new chain order is:
- *   showcase → login → memory → personalized_welcome → tour → done
+ *   showcase → memory → personalized_welcome → tour → done
  * Memory now precedes the welcome card so the welcome can reference
  * the 호칭/자기소개 the user just typed.
  *
@@ -61,7 +61,6 @@ describe("nextOnboardingStage", () => {
     const result = transitionStage("idle", [
       { type: "probe-start" },
       { type: "showcase-start" },
-      { type: "login-success" },
       { type: "memory-finish" },
       { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
@@ -69,20 +68,10 @@ describe("nextOnboardingStage", () => {
     expect(result).toBe("done");
   });
 
-  it("login-skip still advances to memory", () => {
-    const result = transitionStage("idle", [
-      { type: "probe-start" },
-      { type: "showcase-start" },
-      { type: "login-skip" },
-    ]);
-    expect(result).toBe("memory");
-  });
-
   it("tour-skip completes onboarding without an extra plugin popup", () => {
     const result = transitionStage("idle", [
       { type: "probe-start" },
       { type: "showcase-start" },
-      { type: "login-success" },
       { type: "memory-finish" },
       { type: "personalized-welcome-accept" },
       { type: "tour-skip" },
@@ -94,13 +83,13 @@ describe("nextOnboardingStage", () => {
     expect(
       nextOnboardingStage("showcase", { type: "personalized-welcome-accept" }),
     ).toBe("showcase");
-    expect(nextOnboardingStage("idle", { type: "login-success" })).toBe(
+    expect(nextOnboardingStage("idle", { type: "memory-finish" })).toBe(
       "idle",
     );
     expect(
       nextOnboardingStage("memory", { type: "personalized-welcome-accept" }),
     ).toBe("memory");
-    expect(nextOnboardingStage("tour", { type: "login-success" })).toBe(
+    expect(nextOnboardingStage("tour", { type: "memory-finish" })).toBe(
       "tour",
     );
   });
@@ -114,30 +103,9 @@ describe("nextOnboardingStage", () => {
     );
   });
 
-  it("logout-reset collapses chain to idle from any stage", () => {
-    // 2026-05-20 — Settings → 로그아웃 path. 모든 stage 가 idle 로 회귀해야
-    // 후속 boot probe 가 ScenarioShowcase 를 재진입시킨다. `done` 도 포함 —
-    // 사용자가 onboarding 완료 후 로그아웃 했다면 다시 idle 로 보내야 함.
-    const stages: OnboardingChainStage[] = [
-      "idle",
-      "showcase",
-      "login",
-      "memory",
-      "personalized_welcome",
-      "tour",
-      "done",
-    ];
-    for (const stage of stages) {
-      expect(nextOnboardingStage(stage, { type: "logout-reset" })).toBe(
-        "idle",
-      );
-    }
-  });
-
   it("showcase → happy path traversal terminates at done", () => {
     const result = transitionStage("showcase", [
       { type: "showcase-start" },
-      { type: "login-success" },
       { type: "memory-finish" },
       { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
@@ -176,7 +144,7 @@ describe("onboardingChainReducer (state record)", () => {
       { type: "showcase-start", scenarioId: "docs" },
     );
     expect(next).toEqual({
-      stage: "login",
+      stage: "memory",
       selectedScenarioId: "docs",
       memorySeed: { nickname: "", introduction: "" },
     });
@@ -192,7 +160,7 @@ describe("onboardingChainReducer (state record)", () => {
       { type: "showcase-start" },
     );
     expect(next).toEqual({
-      stage: "login",
+      stage: "memory",
       selectedScenarioId: null,
       memorySeed: { nickname: "", introduction: "" },
     });
@@ -234,7 +202,6 @@ describe("onboardingChainReducer (state record)", () => {
     const result = transitionState(initialOnboardingChainState, [
       { type: "probe-start" },
       { type: "showcase-start", scenarioId: "meeting" },
-      { type: "login-success" },
       { type: "memory-finish", nickname: "Ken", introduction: "PM" },
       { type: "personalized-welcome-accept" },
       { type: "tour-finish" },
@@ -246,25 +213,6 @@ describe("onboardingChainReducer (state record)", () => {
       // Finishing the tour records the "chain" reason
       // so the post-tour first-task proposal is allowed to fire.
       completionReason: "chain",
-    });
-  });
-
-  it("logout-reset collapses to idle and wipes selection + memory seed", () => {
-    // 2026-05-20 — 로그아웃은 chain context 전체를 fresh boot 처럼 회귀시킨다.
-    // selectedScenarioId 와 memorySeed 가 살아남으면 재진입한 ScenarioShowcase /
-    // MemorySeed 가 "이미 채워진" 상태로 mount 되어 신규 부팅 UX 가 손상됨.
-    const next = onboardingChainReducer(
-      {
-        stage: "done",
-        selectedScenarioId: "multi-agent",
-        memorySeed: { nickname: "Ken", introduction: "PM" },
-      },
-      { type: "logout-reset" },
-    );
-    expect(next).toEqual({
-      stage: "idle",
-      selectedScenarioId: null,
-      memorySeed: { nickname: "", introduction: "" },
     });
   });
 });
@@ -296,7 +244,7 @@ describe("onboardingChainReducer — completionReason (post-tour-first-task gate
       { ...initialOnboardingChainState, stage: "showcase" },
       { type: "showcase-start", scenarioId: "docs" },
     );
-    expect(afterShowcase.stage).toBe("login");
+    expect(afterShowcase.stage).toBe("memory");
     expect(afterShowcase.completionReason).toBeUndefined();
   });
 
@@ -319,20 +267,5 @@ describe("onboardingChainReducer — completionReason (post-tour-first-task gate
     });
     expect(afterLateProbe.stage).toBe("done");
     expect(afterLateProbe.completionReason).toBe("chain");
-  });
-
-  it("logout-reset clears a prior completionReason", () => {
-    const doneViaChain = onboardingChainReducer(
-      {
-        stage: "tour",
-        selectedScenarioId: null,
-        memorySeed: { nickname: "", introduction: "" },
-      },
-      { type: "tour-finish" },
-    );
-    expect(doneViaChain.completionReason).toBe("chain");
-    const reset = onboardingChainReducer(doneViaChain, { type: "logout-reset" });
-    expect(reset.stage).toBe("idle");
-    expect(reset.completionReason).toBeUndefined();
   });
 });
