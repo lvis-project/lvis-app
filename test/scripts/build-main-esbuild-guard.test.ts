@@ -17,12 +17,14 @@
  */
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
 const buildScript = resolve(repoRoot, "scripts", "build-main-esbuild.mjs");
+const installersWorkflow = resolve(repoRoot, ".github", "workflows", "build-installers.yml");
 
 /** A structurally valid activation wire string (guard checks the shape, not decryptability). */
 const VALID_EMBED = "LVIS-DEMO:v1:QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo";
@@ -53,5 +55,18 @@ describe("build-main-esbuild public-channel embed guard (#1498)", () => {
     // heavy esbuild bundle runs — proving it is a pre-build gate.
     expect(result.stdout ?? "").not.toContain("embedded activation key: present");
     expect(result.stdout ?? "").not.toContain("OK ->");
+  });
+
+  it("makes tag-pushed installer builds public and omits the embedded demo secret", () => {
+    const workflow = readFileSync(installersWorkflow, "utf8");
+    expect(workflow).toContain(
+      "LVIS_DISTRIBUTION_CHANNEL: ${{ github.event_name == 'push' && 'public' || 'internal' }}",
+    );
+    expect(workflow).toContain(
+      "LVIS_EMBED_DEMO_ACTIVATION: ${{ github.event_name == 'workflow_dispatch' && secrets.LVIS_EMBED_DEMO_ACTIVATION || '' }}",
+    );
+    expect(workflow).not.toContain(
+      "LVIS_EMBED_DEMO_ACTIVATION: ${{ secrets.LVIS_EMBED_DEMO_ACTIVATION }}",
+    );
   });
 });
