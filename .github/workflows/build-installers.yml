@@ -278,6 +278,19 @@ jobs:
           # Keep the release draft until a human (or the release script)
           # publishes it — matches the prior electron-builder default.
           draft: true
+          # This is the minimum durable disclosure on every public tag draft.
+          # A release operator may add the curated changelog before publishing,
+          # but must not replace this unsigned-distribution warning.
+          body: |
+            ## Important: unsigned and not notarized
+
+            This is an operator-approved unsigned public release. It is not signed with a Windows Authenticode certificate and it is not macOS notarized.
+
+            - **Windows:** SmartScreen and an "Unknown publisher" prompt are expected. Download only from this official GitHub Release.
+            - **macOS:** Gatekeeper may block the first launch because the app is unsigned and not notarized. Do not bypass OS protections unless you independently trust this release.
+            - **Linux:** verify the downloaded asset checksum from this official GitHub Release before installation.
+
+            The public tag build contains no embedded internal demo activation key.
           # Append to whatever body the release was created with (the
           # initial Release draft is auto-created by GitHub on tag push;
           # we do not overwrite its body here).

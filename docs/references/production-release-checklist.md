@@ -83,6 +83,31 @@ on the target OS instead of relying on cross-platform packaging. The publish
 job also attaches `LVIS-latest-*` stable alias assets for the website download
 links; do not publish a release that only has versioned `LVIS-X.Y.Z-*` assets.
 
+## Explicit Unsigned Public Release Exception
+
+Signed and notarized artifacts are the default production path. If developer
+registration or signing identities are unavailable, an external release may be
+published unsigned only as an explicit operator-approved exception. It is not a
+signed candidate and must never be represented as having satisfied the signed
+Windows evidence gates below.
+
+Before publishing an unsigned draft, the release operator must verify all of
+the following:
+
+- the tag pipeline sets `LVIS_DISTRIBUTION_CHANNEL=public` and provides no
+  embedded demo activation source;
+- all three platform builds complete and the build logs report that the embedded
+  activation key is absent;
+- the draft has all versioned assets, every `LVIS-latest-*` alias, and update
+  metadata; and
+- the public release body prominently states that it is unsigned/not notarized,
+  calls out Windows SmartScreen/Unknown publisher and macOS Gatekeeper, directs
+  users to the official GitHub Release, and gives Linux checksum guidance.
+
+Record the operator approval and deferred signed-candidate evidence in the
+release body. Once signing is available, cut a signed replacement and complete
+every signed Windows gate before treating that path as verified.
+
 ## Windows Installer Path
 
 The Windows release path is a full offline NSIS installer. Keep `oneClick`,
@@ -110,8 +135,11 @@ Do not treat a missing/non-readable ASRT precondition as a successful skip.
 Move that candidate to a documented manual release gate instead. Hosted CI
 cannot prove interactive UAC and cross-account desktop boundaries.
 
-The following manual Windows gates are release-blocking. Any failure blocks the
-release and requires a SID/profile handoff fix before the full gate is rerun.
+The following manual Windows gates are release-blocking for a signed release.
+For an explicit unsigned exception, record them as deferred in the public
+release body; any later signed release must complete them before it can claim
+signed Windows deployment evidence. Any failure then blocks the signed release
+and requires a SID/profile handoff fix before the full gate is rerun.
 
 - [ ] On a clean VM, record the signed candidate SHA, Windows build, evidence
       URL, and `whoami /user` SID for both the initiating standard user and the
