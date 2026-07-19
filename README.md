@@ -180,13 +180,17 @@ Outputs are written under `release/`.
 | Linux | `LVIS-<version>-linux-<arch>.AppImage`, `.deb`, `.rpm` |
 | Windows | `LVIS-<version>-windows-<arch>-setup.exe`, `LVIS-<version>-windows-<arch>.zip` |
 
-Unsigned internal verification builds are opt-in:
+The current tag-driven public release profile is deliberately **unsigned** while developer registration and signing identities are unavailable. Tag builds are pinned to the GitHub event SHA, receive no demo-activation or signing secrets, and always pass `--skip-code-sign`; their GitHub Release stays a draft until the operator verifies assets and completes its unsigned disclosure record.
+
+Before a public tag is pushed, an active `v*` tag ruleset must prohibit updates and deletions; the publisher re-checks the annotated tag’s peeled commit against the event SHA before it creates the draft Release.
+Manual workflow-dispatch builds are also secret-free internal candidates. A signed/notarized release path must be added later as a separately reviewed workflow with platform signature and notarization evidence; it is not silently enabled by setting a secret.
+Only designated release operators may bypass the matching tag creation, update, and deletion rules.
+
+For local unsigned verification:
 
 ```bash
 node scripts/build-installers.mjs --current --skip-code-sign
 ```
-
-The GitHub Actions Build Installers workflow creates macOS, Linux, and Windows artifacts. Use `skip_code_sign=true` only for internal unsigned validation. Production release builds require signing/notarization secrets and `skip_code_sign=false`.
 
 macOS installer and macOS development support Apple Silicon only. Intel Mac (`darwin/x64`) is not supported and fails fast during `uv` bootstrap or installer build.
 

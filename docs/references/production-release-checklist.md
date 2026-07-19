@@ -83,6 +83,41 @@ on the target OS instead of relying on cross-platform packaging. The publish
 job also attaches `LVIS-latest-*` stable alias assets for the website download
 links; do not publish a release that only has versioned `LVIS-X.Y.Z-*` assets.
 
+## Explicit Unsigned Public Release Exception
+
+Signing and notarization remain the desired future production path, but the
+current public tag workflow intentionally supports only an explicit,
+operator-approved unsigned release while developer registration or signing
+identities are unavailable. It is not a signed candidate and must never be
+represented as having satisfied the signed Windows evidence gates below.
+
+Before publishing an unsigned draft, the release operator must verify all of
+the following:
+
+- the tagged `package.json#lvisRelease` is exactly `tagDistribution: public`
+  with `signing: unsigned`, and the profile check ran from the immutable event
+  SHA;
+- all installer and publisher checkouts report `HEAD == github.sha`;
+- an active `v*` tag ruleset restricts creation, updates, and deletions to
+  designated release operators, and the publisher's final annotated-tag
+  peeled-SHA check still equals `github.sha`;
+- the tag pipeline fixes `LVIS_DISTRIBUTION_CHANNEL=public`, provides no
+  embedded demo activation or signing secrets, and forces `--skip-code-sign`;
+- all three platform builds complete and the build logs report that the embedded
+  activation key is absent;
+- the draft has all versioned assets, every `LVIS-latest-*` alias, and update
+  metadata; and
+- the public release body prominently states that it is unsigned/not notarized,
+  calls out Windows SmartScreen/Unknown publisher and macOS Gatekeeper, directs
+  users to the official GitHub Release, and gives Linux checksum guidance.
+
+The generated unsigned body starts with two `PENDING` operator records. Before
+manually publishing, replace both with the actual approval and deferred
+signed-candidate evidence reference; the operator must treat an unfilled record
+as a publication blocker. A future signed release must add its own reviewed
+workflow and positive platform signature/notarization evidence before it can
+make signed claims.
+
 ## Windows Installer Path
 
 The Windows release path is a full offline NSIS installer. Keep `oneClick`,
@@ -110,8 +145,11 @@ Do not treat a missing/non-readable ASRT precondition as a successful skip.
 Move that candidate to a documented manual release gate instead. Hosted CI
 cannot prove interactive UAC and cross-account desktop boundaries.
 
-The following manual Windows gates are release-blocking. Any failure blocks the
-release and requires a SID/profile handoff fix before the full gate is rerun.
+The following manual Windows gates are release-blocking for a signed release.
+For an explicit unsigned exception, record them as deferred in the public
+release body; any later signed release must complete them before it can claim
+signed Windows deployment evidence. Any failure then blocks the signed release
+and requires a SID/profile handoff fix before the full gate is rerun.
 
 - [ ] On a clean VM, record the signed candidate SHA, Windows build, evidence
       URL, and `whoami /user` SID for both the initiating standard user and the
@@ -177,14 +215,10 @@ Perform on each platform artifact before uploading:
 - Plugin native deps (for example `better-sqlite3`): rerun electron-rebuild; `bun install` handles this in postinstall.
 - Python runtime: pin shared envs by host-managed Python plugin lockfile content plus OS/arch. For every release, review the active plugin lockfile diff and packaged asset boundary (include uv, exclude venv/wheelhouse/model cache).
 
-## Publish (Later — NOT part of scaffolding)
+## Direct local publishing (not the public release path)
 
-When users have completed cert/DSN setup, publish with:
-
-```bash
-npx electron-builder --publish=always
-```
-
-This pushes artifacts + `latest.yml` to GitHub Releases, where electron-updater
-will discover them via the default GitHub provider declared in
-`package.json → build.publish`.
+Do not use `npx electron-builder --publish=always` for a public release. It
+bypasses the three-OS workflow, SHA pinning, atomic asset assembly, unsigned
+operator record, and draft verification. Public releases use the tag-triggered
+**Build Installers** workflow and are published only after its draft has passed
+the checks above.
