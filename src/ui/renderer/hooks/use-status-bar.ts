@@ -62,6 +62,32 @@ const TOAST_MARQUEE_BASE_TTL_MS = 4000;
 const TOAST_MARQUEE_MS_PER_CHAR = 280;
 const TOAST_MARQUEE_MAX_TTL_MS = 45_000;
 
+type ToastInput = {
+  severity: ToastItem["severity"];
+  message: string;
+  ttlMs?: number;
+  notification?: ToastItem["notification"];
+};
+
+function createToastItem(id: string, input: ToastInput, defaultToastTtlMs: number): ToastItem {
+  const ttlMs = resolveToastTtlMs(input.message, input.ttlMs ?? defaultToastTtlMs);
+  return {
+    id,
+    severity: input.severity,
+    message: input.message,
+    ttlMs,
+    expiresAt: Date.now() + ttlMs,
+    notification: input.notification,
+  };
+}
+
+function appendToast(queue: ToastItem[], item: ToastItem): ToastItem[] {
+  if (queue.length >= TOAST_QUEUE_CAP) {
+    return [...queue.slice(queue.length - TOAST_QUEUE_CAP + 1), item];
+  }
+  return [...queue, item];
+}
+
 function resolveToastTtlMs(message: string, requestedTtlMs: number): number {
   const charCount = Array.from(message).length;
   if (charCount <= TOAST_MARQUEE_CHAR_THRESHOLD) return requestedTtlMs;
@@ -81,28 +107,31 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   const toastCounterRef = useRef(0);
 
   const pushToast = useCallback(
-    (input: {
-      severity: ToastItem["severity"];
-      message: string;
-      ttlMs?: number;
-      notification?: ToastItem["notification"];
-    }) => {
+    (input: ToastInput) => {
       const id = `toast:${++toastCounterRef.current}`;
-      const ttlMs = resolveToastTtlMs(input.message, input.ttlMs ?? defaultToastTtlMs);
-      const expiresAt = Date.now() + ttlMs;
+      const item = createToastItem(id, input, defaultToastTtlMs);
       setToasts((prev) => {
-        const newItem: ToastItem = {
-          id,
-          severity: input.severity,
-          message: input.message,
-          ttlMs,
-          expiresAt,
-          notification: input.notification,
-        };
-        if (prev.length >= TOAST_QUEUE_CAP) {
-          return [...prev.slice(prev.length - TOAST_QUEUE_CAP + 1), newItem];
-        }
-        return [...prev, newItem];
+        return appendToast(prev, item);
+      });
+      return id;
+    },
+    [defaultToastTtlMs],
+  );
+
+  /**
+   * Replace an existing toast in its current queue position, or append it when
+   * absent. Install progress uses a stable ID so every download chunk updates
+   * one live status item instead of creating a growing notification backlog.
+   */
+  const upsertToast = useCallback(
+    (id: string, input: ToastInput) => {
+      const item = createToastItem(id, input, defaultToastTtlMs);
+      setToasts((prev) => {
+        const index = prev.findIndex((toast) => toast.id === id);
+        if (index === -1) return appendToast(prev, item);
+        const next = [...prev];
+        next[index] = item;
+        return next;
       });
       return id;
     },
@@ -164,7 +193,7 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   // `removePersistent` remain for the transient pre-turn auto-compact
   // indicator (App.tsx), which is operational state, not a model cell.
   useStatusBarNotifications({ api, pushToast });
-  useStatusBarInstall({ api, pushToast });
+  useStatusBarInstall({ api, pushToast, upsertToast });
 
   return {
     persistent,
