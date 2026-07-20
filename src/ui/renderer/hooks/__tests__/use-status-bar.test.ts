@@ -296,6 +296,55 @@ describe("useStatusBar — install lifecycle producer", () => {
     expect(result.current.toasts[0]?.message).toBe("my-plugin … 다운로드 중");
   });
 
+  it("updates one toast for download chunks and replaces it with the install result", () => {
+    let progressHandler: ((payload: InstallProgressPayload) => void) | null = null;
+    let resultHandler: ((payload: { slug: string; success: boolean; error?: string }) => void) | null = null;
+
+    const api = statusBarApi({
+      onPluginInstallProgress: vi.fn((handler) => {
+        progressHandler = handler;
+        return noop();
+      }),
+      onPluginInstallResult: vi.fn((handler) => {
+        resultHandler = handler;
+        return noop();
+      }),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    act(() => {
+      progressHandler!({
+        slug: "work-assistant",
+        phase: "downloading",
+        bytesDownloaded: 1_200,
+        bytesTotal: 241_400,
+      });
+      progressHandler!({
+        slug: "work-assistant",
+        phase: "downloading",
+        bytesDownloaded: 4_800,
+        bytesTotal: 241_400,
+      });
+    });
+
+    expect(result.current.toasts).toHaveLength(1);
+    const progressToastId = result.current.toasts[0]?.id;
+    expect(result.current.toasts[0]?.message).toBe("4.7 KB / 235.7 KB · work-assistant 다운로드 중");
+    expect(result.current.pendingCount).toBe(0);
+
+    act(() => {
+      resultHandler!({ slug: "work-assistant", success: true });
+    });
+
+    expect(result.current.toasts).toHaveLength(1);
+    expect(result.current.toasts[0]).toMatchObject({
+      id: progressToastId,
+      severity: "success",
+      message: "work-assistant 설치 완료",
+    });
+  });
+
   it("renders verifying label for phase=verifying", () => {
     let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
 
