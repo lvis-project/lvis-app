@@ -317,4 +317,37 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     // file must not be created.
     await expect(readFile(missingPath, "utf-8")).rejects.toThrow();
   });
+
+  it("removes legacy pluginAccess tools grants while preserving event grants", async () => {
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "work-assistant",
+          manifestPath: "work-assistant/plugin.json",
+          enabled: true,
+          installSource: "user",
+          approvedPluginAccess: {
+            plugins: [null, {
+              pluginId: "ms-graph",
+              tools: ["msgraph_calendar_list"],
+              events: ["email.new"],
+            }],
+          },
+        }],
+      }),
+      "utf-8",
+    );
+
+    const registry = await readPluginRegistry(registryPath);
+    expect(registry.plugins[0]?.approvedPluginAccess).toEqual({
+      plugins: [{ pluginId: "ms-graph", events: ["email.new"] }],
+    });
+
+    const persisted = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(persisted.plugins[0]?.approvedPluginAccess).toEqual({
+      plugins: [{ pluginId: "ms-graph", events: ["email.new"] }],
+    });
+  });
 });

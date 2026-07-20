@@ -38,7 +38,6 @@ const harness = vi.hoisted(() => ({
     isPluginEnabled: vi.fn(() => true),
     getApprovedPluginAccess: vi.fn(() => undefined),
     registerDisposer: vi.fn(),
-    assertPluginToolAccess: vi.fn(),
     resolveToolOwner: vi.fn((toolName: string) => `${toolName}-owner`),
   },
 }));

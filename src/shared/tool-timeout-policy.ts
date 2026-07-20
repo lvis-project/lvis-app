@@ -22,9 +22,9 @@
  *    to a ceiling timer so the underlying work actually stops (tools that
  *    participate in `executionContext.abortSignal` propagate the
  *    cancellation), not just gets ignored.
- *  - `hostApi.callTool` (plugin tool invocation from host code or another
- *    plugin) routes through the same executor and inherits `globalCeilingMs`
- *    — there is no separate plugin-callTool key (single SoT).
+ *  - Plugin-owned UI and MCP tool execution routes through the same executor
+ *    and inherits `globalCeilingMs` — there is no separate plugin timeout
+ *    key (single SoT).
  *  - MCP requests have their own default + max ceiling with an absolute
  *    wall-clock deadline so streaming activity reset cannot extend a request
  *    beyond `mcpRequestMaxMs`.

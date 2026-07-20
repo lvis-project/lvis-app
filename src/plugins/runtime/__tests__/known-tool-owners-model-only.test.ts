@@ -3,9 +3,9 @@
  *
  * The ownership map is the pre-runtime `??` fallback in `resolveToolOwner`
  * (`methodMap.get(m)?.pluginId ?? knownToolOwners.get(m)`), which feeds
- * plugin-to-plugin access control (`assertPluginToolAccess`) and the "plugin
- * still installing" guard (`throwIfToolOwnerNotReady`). Today's `tools`(string[])
- * was model-facing only, so the map must contain ONLY model-visible names
+ * the "plugin still installing" guard (`throwIfToolOwnerNotReady`). Today's
+ * `tools`(string[]) was model-facing only, so the map must contain ONLY
+ * model-visible names
  * (model-only + dual) — NEVER app-only names. A naive `.map(t => t.name)`
  * (all names) would silently add them to the access-control map — a membership
  * widening.

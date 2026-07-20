@@ -481,15 +481,11 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
           if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
           const record = entry as Record<string, unknown>;
           if (typeof record.pluginId !== "string" || record.pluginId.trim().length === 0) return [];
-          const tools = Array.isArray(record.tools)
-            ? record.tools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
-            : undefined;
           const events = Array.isArray(record.events)
             ? record.events.filter((event): event is string => typeof event === "string" && event.trim().length > 0)
             : undefined;
           return [{
             pluginId: record.pluginId,
-            tools,
             events,
           }];
         });
