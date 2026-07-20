@@ -92,6 +92,38 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     );
   });
 
+  it("REJECTS retired pluginAccess.plugins[].tools grants (fail-closed)", async () => {
+    const validator = await buildManifestValidator();
+    const result = validator({
+      id: "retired-plugin-access-tool-grant",
+      name: "Retired Plugin Access Tool Grant",
+      version: "1.0.0",
+      description: "A manifest carrying the removed cross-plugin tool grant.",
+      publisher: "LVIS",
+      entry: "dist/index.js",
+      tools: [],
+      pluginAccess: {
+        plugins: [
+          {
+            pluginId: "ms-graph",
+            events: ["ms-graph.snapshot.ready"],
+            tools: ["msgraph_email_list"],
+          },
+        ],
+      },
+    });
+
+    expect(result).toBe(false);
+    expect(validator.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          keyword: "additionalProperties",
+          params: expect.objectContaining({ additionalProperty: "tools" }),
+        }),
+      ]),
+    );
+  });
+
   it("accepts networkAccess.allowPrivateNetworks", async () => {
     const validator = await buildManifestValidator();
     expect(

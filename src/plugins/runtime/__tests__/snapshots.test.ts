@@ -111,7 +111,7 @@ describe("readEnabledManifestSnapshots", () => {
     try {
       const manifestPath = join(dir, "plugin.json");
       await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
-      const access = { plugins: [{ pluginId: "test-other", tools: ["other_ping"] }] };
+      const access = { plugins: [{ pluginId: "test-other", events: ["other.event"] }] };
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true, approvedPluginAccess: access as never }],

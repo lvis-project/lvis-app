@@ -4688,7 +4688,7 @@ interface ToolMeta {
 |---|---|---|---|
 | Built-in shell Zod schema default | `shellDefaultMs` | `60_000` | model 이 `timeoutSeconds` 미명시 시 기본 (Zod schema 가 `/ 1000` 변환해 seconds 노출) |
 | Built-in shell Zod schema max | `shellMaxMs` | `120_000` | model 이 input 으로 줄 수 있는 상한 (Zod schema 가 `/ 1000` 변환) |
-| Executor 글로벌 ceiling | `globalCeilingMs` | `120_000` | `runWithCeiling` AbortController-linked last-resort cap. `hostApi.callTool` 경로도 invoker 가 executor 거치므로 같은 ceiling 으로 cover (별도 키 없음) |
+| Executor 글로벌 ceiling | `globalCeilingMs` | `120_000` | `runWithCeiling` AbortController-linked last-resort cap. 플러그인 자신의 UI/MCP tool invocation도 executor를 거치므로 같은 ceiling으로 cover (별도 키 없음) |
 | Sub-agent ceiling | `subAgentCeilingMs` | `600_000` | `agent_spawn` 처럼 자체 sub-agent loop 를 가진 tool 의 ceiling. globalCeiling 보다 길어야 inner round chain 이 살아남는다 |
 | MCP request default | `mcpRequestDefaultMs` | `60_000` | per-server `connectionTimeoutMs` 미선언 시 |
 | MCP request max ceiling | `mcpRequestMaxMs` | `120_000` | server 선언 timeout 은 dispatch+ingestion 두 단 모두 이 값으로 clamp/reject. SSE streaming activity reset 도 *absolute wall-clock deadline* 으로 clamp 되어 server 가 chunk 흘리며 영원히 잡고 있을 수 없다 |
