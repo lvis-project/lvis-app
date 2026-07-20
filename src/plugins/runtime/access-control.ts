@@ -2,8 +2,7 @@
  * Cross-plugin access-control policy.
  *
  * Consolidates the deny/allow gate + audit + error-message construction for
- * the four plugin trust boundaries the runtime enforces:
- *   - tool invocation across plugins (`assertToolAccess`)
+ * the three plugin trust boundaries the runtime enforces:
  *   - event subscription across plugins (`assertEventSubscribeAccess`)
  *   - event emission of another plugin's event (`assertEventEmitAccess`)
  *   - renderer→plugin invocation allowlist (`assertUiActionInvokable`)
@@ -19,34 +18,6 @@ type AuditLog = (
   message: string,
   data?: unknown,
 ) => void;
-
-/**
- * Enforce that `callerPluginId` may call `method` on its owning plugin. A
- * self-owned tool or an unowned method is always allowed; otherwise the
- * caller must hold an explicit tool grant.
- */
-export function assertToolAccess(opts: {
-  callerPluginId: string;
-  method: string;
-  targetPluginId: string | undefined;
-  getAccessGrant: () => PluginAccessSpec | undefined;
-  auditLog?: AuditLog;
-}): void {
-  const { callerPluginId, method, targetPluginId } = opts;
-  if (!targetPluginId || targetPluginId === callerPluginId) return;
-  const rule = opts
-    .getAccessGrant()
-    ?.plugins.find((entry) => entry.pluginId === targetPluginId);
-  if (rule?.tools?.includes(method)) return;
-  opts.auditLog?.("error", "plugin_tool_access_denied", {
-    callerPluginId,
-    targetPluginId,
-    method,
-  });
-  throw new Error(
-    `Plugin '${callerPluginId}' is not allowed to call tool '${method}' on plugin '${targetPluginId}'`,
-  );
-}
 
 /**
  * Enforce that `callerPluginId` may subscribe to `eventType` from its owning

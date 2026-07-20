@@ -43,6 +43,7 @@ import { sanitizeZipEntryPath } from "./zip-entry-path.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PublicKeyInput } from "./envelope-verifier.js";
 import type { PluginAccessSpec, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
+import { stripLegacyPluginToolGrants } from "./registry.js";
 import {
   hashReceiptFiles,
   writeInstallReceipt,
@@ -426,7 +427,7 @@ export class PluginArtifactStore {
             installSource: registryEntry.installSource,
             manifestSha256: registryEntry.manifestSha256,
             bundleRefs: registryEntry.bundleRefs,
-            approvedPluginAccess: registryEntry.approvedPluginAccess,
+            approvedPluginAccess: stripLegacyPluginToolGrants(registryEntry.approvedPluginAccess).access,
           }, null, 2)}\n`,
         );
       }
@@ -458,11 +459,12 @@ export class PluginArtifactStore {
       const safeSlug = assertSafeArtifactSlug(slug);
       const raw = await readFile(resolve(this.cacheRoot, safeSlug, version, "registry-entry.json"), "utf-8");
       const parsed = JSON.parse(raw) as Partial<CachedRegistryEntrySnapshot>;
+      const approvedPluginAccess = stripLegacyPluginToolGrants(parsed.approvedPluginAccess).access;
       return {
-        installSource: parsed.installSource,
-        manifestSha256: typeof parsed.manifestSha256 === "string" ? parsed.manifestSha256 : undefined,
-        bundleRefs: Array.isArray(parsed.bundleRefs) ? parsed.bundleRefs : undefined,
-        approvedPluginAccess: parsed.approvedPluginAccess,
+        ...(parsed.installSource ? { installSource: parsed.installSource } : {}),
+        ...(typeof parsed.manifestSha256 === "string" ? { manifestSha256: parsed.manifestSha256 } : {}),
+        ...(Array.isArray(parsed.bundleRefs) ? { bundleRefs: parsed.bundleRefs } : {}),
+        ...(approvedPluginAccess ? { approvedPluginAccess } : {}),
       };
     } catch {
       return null;

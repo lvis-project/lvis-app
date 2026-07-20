@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
-import type { InstallPolicy, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
+import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
 
 /**
@@ -35,6 +35,37 @@ interface LegacyRegistryEntry extends Omit<PluginRegistryEntry, "installSource">
 }
 
 /**
+ * Remove the retired `pluginAccess.plugins[].tools` grant from persisted
+ * state while preserving event grants and approval scopes. Registry files are
+ * user-owned JSON, so this narrows the runtime shape defensively even when an
+ * old entry was written by a previous host version.
+ */
+export function stripLegacyPluginToolGrants(
+  access: PluginAccessSpec | undefined,
+): { access: PluginAccessSpec | undefined; changed: boolean } {
+  if (!access || !Array.isArray(access.plugins)) return { access, changed: false };
+  let changed = false;
+  const plugins = access.plugins.flatMap((target) => {
+    if (!target || typeof target !== "object" || Array.isArray(target)) {
+      changed = true;
+      return [];
+    }
+
+    const record = target as unknown as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(record, "tools")) return [target];
+    changed = true;
+    const eventOnlyTarget = Object.fromEntries(
+      Object.entries(record).filter(([key]) => key !== "tools"),
+    );
+    return [eventOnlyTarget as unknown as typeof target];
+  });
+  return {
+    access: changed ? { ...access, plugins } : access,
+    changed,
+  };
+}
+
+/**
  * Map a legacy entry onto the new {@link PluginRegistryEntryInstallSource}
  * enum. Returns `null` when the entry already conforms (no migration
  * needed).
@@ -60,16 +91,18 @@ interface LegacyRegistryEntry extends Omit<PluginRegistryEntry, "installSource">
  */
 function migrateLegacyEntry(
   entry: LegacyRegistryEntry,
-  out: { devLinkRewritten: boolean },
+  out: { devLinkRewritten: boolean; legacyToolGrantsRemoved: boolean },
 ): PluginRegistryEntry | null {
   const hasLegacy = entry.installedBy !== undefined || entry._devLinked !== undefined;
   const hasDevLinkInstallSource = entry.installSource === "dev-link";
+  const cleanedAccess = stripLegacyPluginToolGrants(entry.approvedPluginAccess);
   // Already-conformant entries (new shape, no dev-link, no legacy fields)
   // require no migration — whether or not installSource is set. (An entry
   // with no derivable installSource was previously rebuilt into a structurally
   // identical object on every read, triggering a needless re-persist + log
   // each boot.)
-  if (!hasLegacy && !hasDevLinkInstallSource) return null;
+  if (!hasLegacy && !hasDevLinkInstallSource && !cleanedAccess.changed) return null;
+  if (cleanedAccess.changed) out.legacyToolGrantsRemoved = true;
   let installSource: PluginRegistryEntryInstallSource | undefined;
   if (hasDevLinkInstallSource || entry._devLinked === true) {
     installSource = "local-dev";
@@ -89,7 +122,7 @@ function migrateLegacyEntry(
   if (entry.manifestSha256 !== undefined) migrated.manifestSha256 = entry.manifestSha256;
   if (entry.enabled !== undefined) migrated.enabled = entry.enabled;
   if (entry.bundleRefs !== undefined) migrated.bundleRefs = entry.bundleRefs;
-  if (entry.approvedPluginAccess !== undefined) migrated.approvedPluginAccess = entry.approvedPluginAccess;
+  if (cleanedAccess.access !== undefined) migrated.approvedPluginAccess = cleanedAccess.access;
   if (installSource !== undefined) migrated.installSource = installSource;
   return migrated;
 }
@@ -126,7 +159,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
   // no-ops. This is idempotent: an already-migrated entry returns
   // `null` from migrateLegacyEntry and is left alone.
   let migratedCount = 0;
-  const out = { devLinkRewritten: false };
+  const out = { devLinkRewritten: false, legacyToolGrantsRemoved: false };
   const plugins: PluginRegistryEntry[] = parsed.plugins.map((entry) => {
     const migrated = migrateLegacyEntry(entry, out);
     if (migrated !== null) {
@@ -157,16 +190,29 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     );
   }
   if (migratedCount > 0) {
+    if (out.legacyToolGrantsRemoved) {
+      plog(
+        "info",
+        {
+          pluginId: "<registry>",
+          phase: PluginPhase.DISCOVERY_START,
+          reason: "legacy_plugin_tool_grants_removed",
+          registryPath,
+        },
+        "registry contained retired pluginAccess.tools grants — removed them and retained event grants",
+      );
+    }
+
     plog(
       "info",
       {
         pluginId: "<registry>",
         phase: PluginPhase.DISCOVERY_START,
-        reason: "legacy_install_source_migrated",
+        reason: "legacy_registry_migrated",
         migratedCount,
         registryPath,
       },
-      `registry migrated ${migratedCount} legacy entries (installedBy/_devLinked → installSource)`,
+      `registry migrated ${migratedCount} legacy entries`,
     );
   }
   if (migratedCount > 0) {
