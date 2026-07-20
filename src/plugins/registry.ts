@@ -45,14 +45,19 @@ export function stripLegacyPluginToolGrants(
 ): { access: PluginAccessSpec | undefined; changed: boolean } {
   if (!access || !Array.isArray(access.plugins)) return { access, changed: false };
   let changed = false;
-  const plugins = access.plugins.map((target) => {
+  const plugins = access.plugins.flatMap((target) => {
+    if (!target || typeof target !== "object" || Array.isArray(target)) {
+      changed = true;
+      return [];
+    }
+
     const record = target as unknown as Record<string, unknown>;
-    if (!Object.prototype.hasOwnProperty.call(record, "tools")) return target;
+    if (!Object.prototype.hasOwnProperty.call(record, "tools")) return [target];
     changed = true;
     const eventOnlyTarget = Object.fromEntries(
       Object.entries(record).filter(([key]) => key !== "tools"),
     );
-    return eventOnlyTarget as unknown as typeof target;
+    return [eventOnlyTarget as unknown as typeof target];
   });
   return {
     access: changed ? { ...access, plugins } : access,

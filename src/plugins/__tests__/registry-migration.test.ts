@@ -329,7 +329,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
           enabled: true,
           installSource: "user",
           approvedPluginAccess: {
-            plugins: [{
+            plugins: [null, {
               pluginId: "ms-graph",
               tools: ["msgraph_calendar_list"],
               events: ["email.new"],
