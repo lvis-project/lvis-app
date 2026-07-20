@@ -923,7 +923,9 @@
     }
   },
   "startupTimeoutMs": 6500,
-  "eventSubscriptions": [],
+  "eventSubscriptions": [
+    "work_assistant.snapshot.requested"
+  ],
   "emittedEvents": [
     "email.new",
     "email.action.needed",
@@ -935,10 +937,18 @@
     "calendar.event.upcoming",
     "calendar.event.starting",
     "calendar.event.conflict.detected",
-    "ms-graph.auth.changed"
+    "ms-graph.auth.changed",
+    "ms-graph.snapshot.ready"
   ],
   "pluginAccess": {
-    "plugins": []
+    "plugins": [
+      {
+        "pluginId": "work-assistant",
+        "events": [
+          "work_assistant.snapshot.requested"
+        ]
+      }
+    ]
   },
   "notificationEvents": [
     {

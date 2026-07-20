@@ -248,7 +248,7 @@ describe("invokePluginTool app-only branch — reaches the structural ceiling (#
   });
 });
 
-// #1556 — a nested plugin-origin `ctx.callTool` (HostApi.callTool builds
+// #1556 — a nested plugin-origin `ctx.callTool` dispatches with
 // `origin: "plugin"` and never forwards `userAction`, even while riding a
 // UI-rooted chain via `parentOrigin: "ui"`) targeting an app-only-visibility
 // non-status method must throw an error naming the REAL manifest constraint,
@@ -462,7 +462,7 @@ describe("runWithInvocationOrigin — an mcp-app chain cannot be laundered", () 
   it("keeps 'mcp-app' through a nested plugin-origin ctx.callTool hop", async () => {
     await runWithInvocationOrigin("mcp-app", undefined, async () => {
       expect(currentInvocationOrigin()).toBe("mcp-app");
-      // The inner hop HostApi.callTool builds: origin "plugin", no parentOrigin.
+      // The inner ctx.callTool hop uses origin "plugin", with no parentOrigin.
       await runWithInvocationOrigin("plugin", undefined, async () => {
         expect(currentInvocationOrigin()).toBe("mcp-app");
       });
