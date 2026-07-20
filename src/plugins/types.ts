@@ -70,7 +70,6 @@ export interface DependencySpec {
 
 export interface PluginAccessTarget {
   pluginId: string;
-  tools?: string[];
   events?: string[];
 }
 
@@ -999,10 +998,6 @@ export interface PluginHostApi {
       }
   >;
 
-  // Plugin-owned OAuth keeps provider-specific auth inside plugins; the host
-  // exposes only generic HostApi surfaces.
-  callTool<T = unknown>(toolName: string, payload?: unknown): Promise<T>;
-
   // ─── LLM 접근 (선제성 기능용) ────────────────────────────────────────
   /**
    * 호스트 LLM 프로바이더를 통한 텍스트 생성.
@@ -1098,10 +1093,8 @@ export interface PluginHostApi {
    *
    * **Caller binding:** the partition is decided by the host from the
    * plugin id of the HostApi instance — plugins cannot name a different
-   * plugin's partition. Cross-plugin chaining must go through `callTool`
-   * to a tool owned by the partition-owning plugin (the target tool's
-   * handler receives that plugin's HostApi instance and so opens the
-   * viewer in the right partition).
+   * plugin's partition. A plugin cannot reuse another plugin's partition;
+   * its own UI or auth flow must open a viewer through its own HostApi.
    *
    * **Allow-list:** `url` host must match `manifest.auth.partitionDomains`
    * (dot-boundary suffix). Navigation outside the allow-list is canceled

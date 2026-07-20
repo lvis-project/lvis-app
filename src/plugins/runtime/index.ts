@@ -61,7 +61,6 @@ import { ConfigOverrideStore } from "./config-overrides.js";
 import {
   assertEventEmitAccess,
   assertEventSubscribeAccess,
-  assertToolAccess,
   assertUiActionInvokable,
 } from "./access-control.js";
 import { PreparationTracker } from "./preparation.js";
@@ -437,9 +436,8 @@ export class PluginRuntime {
 
   /**
    * #885 v6 — MODEL-ONLY (ratified security decision §2.4a). The `knownToolOwners`
-   * map is the pre-runtime `??` fallback in `resolveToolOwner`, feeding
-   * `assertPluginToolAccess` (plugin-to-plugin access control) and the "plugin still
-   * installing" guard (`throwIfToolOwnerNotReady`). Today's `tools[]` was model-facing
+   * map is the pre-runtime `??` fallback in `resolveToolOwner`, feeding the
+   * "plugin still installing" guard (`throwIfToolOwnerNotReady`). Today's `tools[]` was model-facing
    * only; a naive all-names `.map` would silently add the app-only auth trio to the
    * access-control map (a widening). `isModelVisible` reproduces today's EXACT set;
    * UI-only ownership still resolves at runtime via `methodMap` (all names), which stays
@@ -447,9 +445,8 @@ export class PluginRuntime {
    *
    * HOLDS AFTER app-only tools became registry `Tool`s. Registry membership (what may
    * execute under the gate) and model exposure (what the LLM is shown) were split apart;
-   * THIS map is the THIRD, independent concern — who owns a name for plugin-to-plugin
-   * access control — and it does NOT follow either. It stays exactly the model-visible
-   * set.
+   * THIS map independently records names while a plugin is starting, and stays
+   * exactly the model-visible set.
    *
    * ONE method, three callers (`rememberPluginManifest`, `load`, single-plugin add), so
    * the MODEL-ONLY `.filter(isModelVisible)` lives once. Pinned by
@@ -1600,16 +1597,6 @@ export class PluginRuntime {
 
   resolveToolOwner(method: string): string | undefined {
     return this.methodMap.get(method)?.pluginId ?? this.knownToolOwners.get(method);
-  }
-
-  assertPluginToolAccess(callerPluginId: string, method: string): void {
-    assertToolAccess({
-      callerPluginId,
-      method,
-      targetPluginId: this.resolveToolOwner(method),
-      getAccessGrant: () => this.getPluginAccessGrant(callerPluginId),
-      auditLog: this.auditLog,
-    });
   }
 
   assertPluginEventAccess(callerPluginId: string, eventType: string): void {

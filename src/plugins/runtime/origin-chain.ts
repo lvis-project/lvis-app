@@ -19,8 +19,8 @@
  * `ctx.callTool("<inner_auth_tool>")` above to actually run, `inner_auth_tool`
  * must be model-visible in the owner plugin's `tools[]` (the governed
  * ToolExecutor path). An app-only-visibility *non-status* method cannot be
- * invoked from a plugin-origin `ctx.callTool` — HostApi.callTool never forwards
- * `userAction`, so the user-activation gate can never be satisfied, and
+ * invoked from a plugin-origin `ctx.callTool` — the nested dispatcher never
+ * forwards `userAction`, so the user-activation gate can never be satisfied, and
  * forwarding it is intentionally out of scope (no shipped first-party plugin
  * nests into an app-only method this way). Attempting it throws the explicit
  * "app-only-visibility method … cannot be invoked from a plugin-origin

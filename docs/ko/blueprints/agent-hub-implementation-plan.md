@@ -3,6 +3,8 @@
 > **Scope.** v3 mockup (`lvis-app/docs/design/agent-hub-work-board-v3.html`) 합의 결과를 production plugin 으로 구현. 기존 `lvis-plugin-agent-hub` repo 를 활용하고, host 측 §8 ApprovalGate 와 ms-graph plugin 의 calendar method 를 재사용한다. 본 계획은 9 Lane × 4 Wave 로 worker 격리 dispatch 를 가정한다.
 > **Status.** Plan only. 본 문서가 구현 코드를 포함하지 않는다. 각 lane 의 dispatch prompt 까지가 산출물.
 > **매니페스트 포맷 (removed in #885 Phase R):** 본 계획의 `tools[]` / `uiActions` / `toolSchemas` manifest 스니펫은 pre-v6 (legacy) 포맷이다. v6 에서는 pure `Tool[]` + `_meta.ui.visibility` 로 대체됐다 — 실제 구현 시 [`plugin-contract-v6-design.md`](../architecture/plugin-contract-v6-design.md) 를 따를 것.
+> **2026-07-19 통신 계약 변경:** 플러그인 간 직접 tool 호출은 지원하지 않는다. 이 계획을 구현할 때 다른 플러그인 데이터는 명명된 `emitEvent` / `onEvent` 요청·응답 계약으로 교환하고, 이벤트 권한만 매니페스트에 선언한다.
+> 아래의 이전 직접 호출·tool grant 인용은 역사적 조사 기록이며, 현재 구현 지시로 사용하면 안 된다.
 
 ---
 
@@ -11,7 +13,7 @@
 ### 1.1 Goal
 
 1. v3 mockup 의 6 영역 (마이워크 3 row + 팀보드 3 row) 을 plugin UI 로 구현해 host viewport slot 안에 mount 한다.
-2. `lvis-plugin-ms-graph` 의 `msgraph_calendar_today` / `msgraph_calendar_list` 를 HostApi `callTool` 로 호출해 일정 카드를 채운다 (자체 SDK 금지).
+2. `lvis-plugin-ms-graph`에 일정 snapshot 요청 이벤트를 발행하고 응답 이벤트를 수신해 일정 카드를 채운다 (자체 SDK 금지).
 3. 승인 요청 카드 + 컨펌 모달은 host §8 ApprovalGate 와 bridge 한다 — plugin 자체 approval queue 를 만들지 않는다.
 4. LLM 5줄 분석 카드는 plugin 진입 시 1회 overlay 제안으로 staged 한다.
 5. 9 lane × 4 wave 격리 dispatch 가 가능한 산출물 단위로 쪼갠 task 를 정의한다.
@@ -55,11 +57,12 @@
 **근거 인용 (`src/hostPlugin.ts`):**
 
 ```ts
-// src/hostPlugin.ts L283-297 — calendar pre-load via hostApi.callTool
-const today = await context.hostApi.callTool<unknown[]>("msgraph_calendar_today", {});
+// calendar data is requested asynchronously from the ms-graph plugin
+const requestId = crypto.randomUUID();
+context.hostApi.emitEvent("agent_hub.calendar_snapshot.requested", { requestId, range: "today" });
 ```
 
-→ 이미 ms-graph 의 method 를 callTool 로 호출하는 패턴이 동작 중. v3 의 "오늘 일정" 카드도 동일 entry-point 사용.
+→ `onEvent("ms-graph.calendar_snapshot.ready", …)`에서 같은 `requestId`의 응답을 받아 캐시를 갱신한다. v3의 "오늘 일정" 카드는 이 요청/응답 계약을 사용한다.
 
 **근거 인용 (`plugin.json` L97-110):**
 
@@ -94,7 +97,7 @@ for (const key of configSchemaKeys) {
 
 ### A2. `lvis-plugin-ms-graph` 의 calendar method 노출 여부
 
-**확인 결과:** 이미 12+ calendar tool 이 manifest 에 노출되어 있고, agent-hub plugin 은 manifest `pluginAccess.plugins[].tools` 에 `msgraph_calendar_today` 1건만 화이트리스트에 올려놓은 상태.
+**현재 계약:** calendar tool은 ms-graph 자체 UI/MCP surface로만 호출되고, Agent Hub는 매니페스트의 이벤트 grant로 calendar snapshot 요청과 응답을 선언한다.
 
 **근거 인용 (`lvis-plugin-ms-graph/plugin.json`):**
 
@@ -117,21 +120,20 @@ for (const key of configSchemaKeys) {
 "pluginAccess": {
   "plugins": [{
     "pluginId": "ms-graph",
-    "tools": ["msgraph_calendar_today"],
-    "events": ["email.action.needed"]
+    "events": ["ms-graph.calendar_snapshot.ready", "email.action.needed"]
   }]
 }
 ```
 
 **v3 요구사항 매핑:**
 
-| v3 카드 | 필요 ms-graph tool | 현재 화이트리스트 | 액션 |
+| v3 카드 | 필요 이벤트 데이터 | 요청/응답 계약 | 액션 |
 |------|---|---|---|
-| 마이워크 Row 2 "오늘 일정" (Outlook) | `msgraph_calendar_today` | 있음 | 그대로 |
-| 팀보드 Row 1 "오늘 팀원 전체 일정" | `msgraph_calendar_list` (date range + attendees aggregate) | 없음 | **추가 필요** |
-| (선택) 일정 정정 confirm modal action | `msgraph_calendar_update` | 없음 | **Lane 5 가 승인 후 호출 시 추가 필요** |
+| 마이워크 Row 2 "오늘 일정" (Outlook) | 오늘 일정 snapshot | `agent_hub.calendar_snapshot.requested` → `ms-graph.calendar_snapshot.ready` | **선언 필요** |
+| 팀보드 Row 1 "오늘 팀원 전체 일정" | 참석자 포함 기간 snapshot | 같은 요청에 range·attendees 옵션 포함 | **계약 확장 필요** |
+| (선택) 일정 정정 confirm modal action | 일정 정정 결과 | `agent_hub.calendar_update.requested` → 결과 이벤트 | **Lane 5가 계약 정의** |
 
-→ Lane 4 (팀보드 데이터) 에서 `pluginAccess.plugins[].tools` 에 `msgraph_calendar_list` 추가. Lane 5 가 confirm-modal 의 "일정 일괄 수정" action 을 실행할 때 `msgraph_calendar_update` 도 추가. 두 항목 모두 manifest schema PR 에서 함께 처리 (No-Fallback 룰).
+→ Lane 4는 calendar snapshot 요청·응답 이벤트 grant를 함께 선언하고, Lane 5의 일정 정정은 별도의 요청·결과 이벤트 계약으로 모델링한다. 두 계약 모두 manifest event schema sweep과 함께 처리한다.
 
 ### A3. host §8 ApprovalGate API 인터페이스
 
@@ -226,7 +228,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 │     S2SyncingState.tsx                                      │
 │     S5PartialSync.tsx                                       │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ bridge.callTool / bridge.onEvent
+                           │ bridge.callTool (own tools) / bridge.onEvent
 ┌──────────────────────────┴──────────────────────────────────┐
 │ Layer 2 — State (in-renderer)                               │
 │ ─────────────────────────────────────────────────────────── │
@@ -260,12 +262,12 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 │ Layer 4 — Integration                                       │
 │ ─────────────────────────────────────────────────────────── │
 │   hubClient.ts          ─ Agent Hub backend FastAPI         │
-│   hostApi.callTool      ─ ms-graph methods                  │
+│   hostApi.emitEvent/onEvent ─ ms-graph calendar snapshots   │
 │   hostApi.callLlm       ─ vendor-agnostic LLM               │
 │   hostApi.openAuthWindow─ S0–S2 web login                   │
 │   §8 bridge             ─ ApprovalGate via                  │
 │                           agent-action-requester.ts (Lane 5)│
-│   manifest pluginAccess ─ ms-graph calendar tools화이트리스트│
+│   manifest pluginAccess ─ calendar request/response event grant│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -424,7 +426,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 | 항목 | Lane | PR scope |
 |------|------|----------|
 | `version` 0.2.0 bump | Lane 1 | manifest + package.json + RELEASING.md |
-| `pluginAccess.plugins[].tools` 2건 추가 | Lane 4 | manifest + AJV schema sweep |
+| calendar request/response event 2건 선언 | Lane 4 | manifest + event schema sweep |
 | 신규 5 tool 추가 (각 app-visible; pre-v6 uiActions 5건 — legacy) | Lane 3+4+5 | tool handler 파일 + manifest 동기 |
 | `ui.entry` 변경 + detached-window 설정 제거 | Lane 1, Lane 6 | manifest + tsup config + UI bundle 출력 경로 |
 | `configSchema` 4 key 추가 | Lane 1 + Lane 7 | manifest + hostPlugin.ts configSchemaKeys + Zustand store reader |
@@ -513,7 +515,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
     visibleCount: number;
   }
   ```
-- **Body.** 내부적으로 `hostApi.callTool("msgraph_calendar_list", { since, until, includeAttendees: true })` 호출 → ms-graph 응답을 v3 attendee avatar 스택용 shape 로 transform.
+- **Body.** `agent_hub.calendar_snapshot.requested`를 발행하고 같은 `requestId`의 ready 이벤트를 캐시에서 받아 v3 attendee avatar 스택용 shape로 transform.
 
 ### 5.4 `agent_hub_briefing_summarize`
 
@@ -650,7 +652,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 - `src/tools/team-summary.ts` — `summarizeTeamWeek` — `hostApi.callLlm` 으로 paragraph 2건 (wins / risks)
 - `src/__tests__/team-kpi.test.ts` — pure aggregation function tests
 - `src/__tests__/team-board-v3.test.ts` — handler integration tests
-- `plugin.json` — `pluginAccess.plugins[0].tools` 에 `msgraph_calendar_list`, `msgraph_calendar_update` 추가 (Lane 1 PR 와 충돌 방지 위해 Lane 4 가 _마지막에_ 머지)
+- `plugin.json` — calendar snapshot 및 update 요청/결과 이벤트를 선언하고 해당 event grant를 추가 (Lane 1 PR 와 충돌 방지 위해 Lane 4 가 _마지막에_ 머지)
 
 **의존성.** Lane 1 머지. Lane 3 (`emittedEvents.briefing.generated`) + Lane 5 (`emittedEvents.approval.bridged`) 와 `plugin.json` 3-way race 가능 — rebase-then-merge 강제, 마지막 머지자가 manifest sweep 책임. Lane 3 의 `today-team-schedule.ts` 와 type 공유.
 
@@ -986,8 +988,8 @@ Deliverables (one PR titled "feat(agent-hub): v0.2.0 manifest + build skeleton f
 1. plugin.json — apply Section 4 changes:
    - version: 0.1.27 → 0.2.0
    - dependencies[].required: false → true (ms-graph)
-   - pluginAccess.plugins[0].tools: keep existing + DO NOT add msgraph_calendar_list
-     yet (Lane 4 will add). Keep ms-graph entry as-is for now.
+   - pluginAccess.plugins[0].events: declare only the calendar snapshot ready event;
+     Lane 4 adds the matching request/response event contract after its emit and handler sites exist.
    - tools[]: append the 5 new tool names listed in Section 4
    - (pre-v6, legacy) uiActions object: add the same 5 names — v6 에서는 각 tool 에 `_meta.ui.visibility` 부여
    - ui[0].entry: dist/ui/agent-hub-panel.js → dist/ui/agent-hub-panel-v3.js
@@ -1120,7 +1122,7 @@ Done = PR merged + build artifact verified + RELEASING.md notes present.
 | 결정 | 의미 | plan 내 위치 |
 |------|------|------|
 | D1 | Plugin UI 호스팅 = host viewport slot, detached BrowserWindow 아님 | manifest detached-window 설정 제거 (Section 4, Lane 1) |
-| D2 | MS Graph = lvis-plugin-ms-graph 의 method 를 HostApi callTool | Section 5.3, Lane 4 의 manifest pluginAccess 갱신 |
+| D2 | MS Graph = 명명된 calendar snapshot 요청·응답 이벤트 | Section 5.3, Lane 4 의 manifest event grant 갱신 |
 | D3 | Approval = host §8 ApprovalGate 와 bridge | Section 2 A3 + Section 5.5 + Lane 5 |
 | D4 | 기존 lvis-plugin-agent-hub repo 활용 | Section 1.2 non-goal + 모든 lane 의 격리 path |
 | D5 | LLM briefing trigger = plugin 진입 시 1회, Proactive 미연계 | Section 1.2 + Section 5.4 + R3 mitigation (5분 cache) |

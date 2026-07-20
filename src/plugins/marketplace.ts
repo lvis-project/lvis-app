@@ -1877,9 +1877,9 @@ export class PluginMarketplaceService {
         const manifestSha256 = shaOfManifest(manifest);
         // Mirror the marketplace install path's grant of `manifest.pluginAccess`
         // into `approvedPluginAccess`. Without this,
-        // `assertPluginEventAccess` / `assertPluginToolAccess` find no grant for
-        // a dev-sideloaded plugin and any cross-plugin event subscribe / tool
-        // call from its createPlugin path throws "not allowed to subscribe to
+        // `assertPluginEventAccess` finds no grant for a dev-sideloaded plugin
+        // and any cross-plugin event subscribe / emit from its createPlugin
+        // path throws "not allowed to subscribe to
         // event ... from plugin ...". Dev mode is gated by `isDevModeUnlocked()`
         // upstream, so this isn't an additional trust delegation — just brings
         // installLocal to parity with marketplace install.

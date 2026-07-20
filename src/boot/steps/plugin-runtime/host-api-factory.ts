@@ -21,7 +21,6 @@ import { normalizeAllowedHosts } from "../../../main/host-allow-list.js";
 import { evaluateHostFetch } from "../../../main/host-fetch-guard.js";
 import type { AuditLogger } from "../../../audit/audit-logger.js";
 import type { PluginRuntime } from "../../../plugins/runtime.js";
-import { currentInvocationOrigin } from "../../../plugins/runtime/origin-chain.js";
 import { instrumentEffectsByPath } from "../../../permissions/hostapi-effect-recorder.js";
 import { enforceMutatingEffects, gateMutatingEffect } from "../../../permissions/effect-enforcement.js";
 import { recordEffect } from "../../../permissions/effect-ledger.js";
@@ -570,32 +569,6 @@ export function createHostApiFactory(
         incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
         return null;
       },
-      callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> => {
-        // The recording wrapper records a `callTool` READ marker on the OUTER
-        // ledger; re-entering the executor opens a FRESH inner ledger scope, so
-        // the nested tool's own mutating effects are counted there, not here. If
-        // the inner tool MUTATES, the executor propagates a `callTool-child` WRITE
-        // back onto this outer ledger (see executor.ts).
-        pluginRuntime.assertPluginToolAccess(pluginId, toolName);
-        const invoker = lateBinding.pluginToolInvokerRef.fn;
-        if (!invoker) {
-          throw new Error("Plugin tool executor is not wired; plugin callTool denied");
-        }
-        // Issue #664 P2 — propagate the effective origin chain into the
-        // inner invocation. When this HostApi.callTool is reached from a
-        // wrapper handler that itself runs inside a UI-rooted chain, the
-        // ambient AsyncLocalStorage frame already holds "ui" and the inner
-        // invoker reads it through `currentInvocationOrigin()`. We pass
-        // `parentOrigin` explicitly so a wrapper that calls into a fresh
-        // async frame (queueMicrotask, setTimeout boundary) still inherits.
-        const parentOrigin = currentInvocationOrigin();
-        return invoker(toolName, payload, {
-          origin: "plugin",
-          callerPluginId: pluginId,
-          ownerPluginId: pluginRuntime.resolveToolOwner(toolName),
-          ...(parentOrigin ? { parentOrigin } : {}),
-        }) as Promise<T>;
-      },
       callLlm: async (prompt, opts) => {
         if (lateBinding.pluginCallLlmRef.fn) {
           return lateBinding.pluginCallLlmRef.fn(pluginId, prompt, opts);
@@ -916,9 +889,7 @@ export function createHostApiFactory(
       //
       // The partition is computed from `pluginId` of *this* HostApi
       // instance (one HostApi per plugin per `PluginRuntime.start` call)
-      // — cross-plugin cookie reuse must route through a `callTool` to a
-      // tool owned by the partition-owning plugin so its handler gets
-      // its own HostApi (and hence its own partition).
+      // — plugins cannot reuse another plugin's cookie partition.
       openAuthPartitionViewer: async (opts: { url: string; windowTitle?: string }) => {
         const safeUrlForLog = (() => {
           try {
