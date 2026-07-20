@@ -1198,9 +1198,30 @@
     ],
     "reasoning": "STT transcription egress to Azure OpenAI / OpenAI Whisper endpoints via host-mediated fetch."
   },
+  "pluginAccess": {
+    "plugins": [
+      {
+        "pluginId": "work-assistant",
+        "events": [
+          "work_assistant.calendar.sync.requested",
+          "work_assistant.meeting.prep.requested",
+          "work_assistant.meeting.recording.requested"
+        ]
+      }
+    ]
+  },
   "eventSubscriptions": [
     {
       "type": "host.theme.changed"
+    },
+    {
+      "type": "work_assistant.calendar.sync.requested"
+    },
+    {
+      "type": "work_assistant.meeting.prep.requested"
+    },
+    {
+      "type": "work_assistant.meeting.recording.requested"
     }
   ],
   "emittedEvents": [

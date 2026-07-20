@@ -22,30 +22,18 @@
     "plugins": [
       {
         "pluginId": "ms-graph",
-        "tools": [
-          "msgraph_calendar_today",
-          "msgraph_calendar_list",
-          "msgraph_email_list"
-        ],
         "events": [
           "email.new",
           "calendar.event.upcoming",
           "calendar.event.starting",
           "calendar.event.conflict.detected",
           "calendar.event.added",
-          "ms-graph.auth.changed"
+          "ms-graph.auth.changed",
+          "ms-graph.snapshot.ready"
         ]
       },
       {
         "pluginId": "meeting",
-        "tools": [
-          "meeting_session_detail",
-          "meeting_list_preps",
-          "meeting_bulk_upsert_preps",
-          "meeting_register_scheduled_meetings",
-          "meeting_open_prep",
-          "meeting_open_floating_window"
-        ],
         "events": [
           "meeting.summary.created",
           "meeting.ended"
@@ -223,6 +211,7 @@
     "calendar.event.conflict.detected",
     "work_board.work_item.due_soon",
     "ms-graph.auth.changed",
+    "ms-graph.snapshot.ready",
     "ep-api.video-conference.reserved"
   ],
   "emittedEvents": [
@@ -236,7 +225,11 @@
     "work_assistant.alert.video-conference-prep-register",
     "work_assistant.alert.calendar-conflict-prep",
     "work_assistant.alert.meeting-room-suggest",
-    "work_assistant.alert.webex-link-missing"
+    "work_assistant.alert.webex-link-missing",
+    "work_assistant.snapshot.requested",
+    "work_assistant.calendar.sync.requested",
+    "work_assistant.meeting.prep.requested",
+    "work_assistant.meeting.recording.requested"
   ],
   "notificationEvents": [
     {

@@ -380,9 +380,9 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
       });
     };
 
-    // Faithful reproduction of the hostApi.callTool closure (plugin-runtime.ts):
-    // record the nested READ marker on the OUTER ledger, capture the parent
-    // origin, then delegate through the real invoker.
+    // Faithful reproduction of a nested executor invocation: record the READ
+    // marker on the OUTER ledger, capture the parent origin, then delegate
+    // through the real invoker.
     const ctxCallTool = async (toolName: string, payload?: unknown): Promise<string> => {
       recordChokepoint("callTool", toolName);
       const parentOrigin = currentInvocationOrigin();
