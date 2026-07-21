@@ -528,4 +528,44 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("materializes omitted Tool visibility into independent arrays", async () => {
+    const validator = await buildManifestValidator();
+    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-default-visibility-"));
+    try {
+      const file = join(dir, "plugin.json");
+      await writeFile(
+        file,
+        JSON.stringify({
+          id: "default-visibility-plugin",
+          name: "Default Visibility Plugin",
+          version: "1.0.0",
+          description: "Exercises default Tool visibility materialization.",
+          publisher: "LVIS",
+          entry: "dist/index.js",
+          tools: [
+            { name: "first_default", inputSchema: { type: "object", properties: {} } },
+            { name: "second_default", inputSchema: { type: "object", properties: {} } },
+          ],
+        }),
+        "utf-8",
+      );
+
+      const parsed = await parsePluginJson(file, validator);
+      const first = parsed.tools[0]?._meta?.ui?.visibility;
+      const second = parsed.tools[1]?._meta?.ui?.visibility;
+      if (!first || !second) {
+        throw new Error("Expected omitted Tool visibility to be materialized");
+      }
+
+      expect(first).toEqual(["model", "app"]);
+      expect(second).toEqual(["model", "app"]);
+      expect(first).not.toBe(second);
+
+      first.pop();
+      expect(second).toEqual(["model", "app"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
