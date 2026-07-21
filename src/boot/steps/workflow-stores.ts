@@ -38,10 +38,6 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     notificationService,
     approvalGate,
     networkFetch,
-    privateNetworkFetch,
-    demoActiveVendor,
-    demoHostMap,
-    isAppliedDemoHostMap,
     toolRegistry,
     settingsService,
     pluginRuntime,
@@ -109,10 +105,6 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
       }
     },
     networkFetch,
-    privateNetworkFetch,
-    demoActiveVendor,
-    demoHostMap,
-    demoHostMapApplied: isAppliedDemoHostMap,
   };
 
   // §4.2 Step 4: builtin tools + request_plugin / tool_search meta tools.

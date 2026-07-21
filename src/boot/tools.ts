@@ -36,68 +36,34 @@ import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor } from "../main/idle-scheduler.js";
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
-import { demoHostMapContainsHost } from "../main/demo-host-resolver.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("lvis");
 
-type DemoHostResolverDeps = {
-  demoActiveVendor?: string;
-  demoHostMap?: string;
-  demoHostMapApplied?: boolean;
-  privateNetworkFetch?: typeof fetch;
-};
-
-function isDemoHostResolverMappedUrl(
-  input: unknown,
-  deps?: DemoHostResolverDeps,
-): boolean {
-  const args = input && typeof input === "object"
-    ? input as Record<string, unknown>
-    : {};
-  return (
-    deps?.demoActiveVendor === "azure-foundry" &&
-    deps.demoHostMapApplied === true &&
-    typeof args.url === "string" &&
-    demoHostMapContainsHost(deps.demoHostMap, args.url)
-  );
-}
-
-function isDemoHostResolverMappedFetchInput(
-  input: Parameters<typeof fetch>[0],
-  deps?: DemoHostResolverDeps,
-): boolean {
-  if (typeof input === "string" || input instanceof URL) {
-    return isDemoHostResolverMappedUrl({ url: input.toString() }, deps);
-  }
-  return isDemoHostResolverMappedUrl({ url: input.url }, deps);
-}
-
 function webFetchRequiresPrivateNetwork(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  _deps?: WorkflowToolDeps,
 ): boolean {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
     : {};
-  return args.allowPrivateNetwork === true || isDemoHostResolverMappedUrl(input, deps);
+  return args.allowPrivateNetwork === true;
 }
 
 function webFetchPrivateNetworkPolicy(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  _deps?: WorkflowToolDeps,
 ): boolean | ((url: URL) => boolean) {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
     : {};
   if (args.allowPrivateNetwork === true) return true;
-  if (!isDemoHostResolverMappedUrl(input, deps)) return false;
-  return (url: URL) => demoHostMapContainsHost(deps?.demoHostMap, url.toString());
+  return false;
 }
 
 function webFetchPrivateNetworkApprovalCacheKey(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  deps?: WorkflowToolDeps,
 ): string | undefined {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
@@ -118,7 +84,7 @@ function webFetchPrivateNetworkApprovalCacheKey(
 
 function webFetchCategoryForInput(
   input: unknown,
-  deps?: DemoHostResolverDeps,
+  deps?: WorkflowToolDeps,
 ): "read" | "network" {
   return webFetchRequiresPrivateNetwork(input, deps) ? "network" : "read";
 }
@@ -174,20 +140,11 @@ function decodeCommonHtmlEntities(value: string): string {
 }
 
 function webFetchFetchImpl(
-  input: unknown,
-  deps: WorkflowToolDeps | undefined,
+  _input: unknown,
+  _deps: WorkflowToolDeps | undefined,
   networkFetch: typeof fetch,
 ): typeof fetch {
-  if (!isDemoHostResolverMappedUrl(input, deps)) return networkFetch;
-  return (async (fetchInput: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    if (!isDemoHostResolverMappedFetchInput(fetchInput, deps)) {
-      return networkFetch(fetchInput, init);
-    }
-    if (!deps?.privateNetworkFetch) {
-      throw new Error("web_fetch: private endpoint fetch is not configured for mapped demo host");
-    }
-    return deps.privateNetworkFetch(fetchInput, init);
-  }) as typeof fetch;
+  return networkFetch;
 }
 
 // ─── web_search provider response shapes ────────────────────────────
@@ -453,14 +410,6 @@ export interface WorkflowToolDeps {
   getApprovalGate?: () => ApprovalGate | undefined;
   /** Electron network-stack fetch used when host-resolver-rules are active. */
   networkFetch?: typeof fetch;
-  /** Direct Electron fetch for demo host-map URLs when system proxy/PAC is active. */
-  privateNetworkFetch?: typeof fetch;
-  /** Captured demo vendor before packaged env scrub. */
-  demoActiveVendor?: string;
-  /** Captured Chromium host-resolver-rules map before packaged env scrub. */
-  demoHostMap?: string;
-  /** True only when Chromium host-resolver-rules were validated and applied at boot. */
-  demoHostMapApplied?: boolean;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
 }

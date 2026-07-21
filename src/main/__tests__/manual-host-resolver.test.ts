@@ -171,11 +171,10 @@ describe("applyManualHostResolverRules — writer/reader path read-back", () => 
   }
 
   it("reads back the exact map a SettingsService persisted (CRITICAL path unity)", async () => {
-    // Writer: persist a manual-mode host map via the real SettingsService.
+    // Writer: persist a host map via the real SettingsService.
     const service = new SettingsService({ userDataPath });
     await service.patch({
       llm: {
-        authMode: "manual",
         hostResolverMap: "10.0.0.10 endpoint.example.com\n10.0.0.11 cdn.example.com",
       },
     });
@@ -183,7 +182,7 @@ describe("applyManualHostResolverRules — writer/reader path read-back", () => 
     // Reader: applyManualHostResolverRules must read the SAME file and install
     // the switch with the persisted mappings.
     const { app, calls } = makeCommandLineSpy();
-    const applied = applyManualHostResolverRules(app, userDataPath, {} as NodeJS.ProcessEnv);
+    const applied = applyManualHostResolverRules(app, userDataPath);
 
     expect(applied).toBe(true);
     expect(calls).toHaveLength(1);
@@ -193,46 +192,14 @@ describe("applyManualHostResolverRules — writer/reader path read-back", () => 
     );
   });
 
-  it("does not apply when authMode is login (demo owns the map)", async () => {
+  it("applies the persisted map without an environment-dependent mode", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({
-      llm: { authMode: "login", hostResolverMap: "10.0.0.10 endpoint.example.com" },
+      llm: { hostResolverMap: "10.0.0.10 endpoint.example.com" },
     });
 
     const { app, calls } = makeCommandLineSpy();
-    const applied = applyManualHostResolverRules(app, userDataPath, {} as NodeJS.ProcessEnv);
-
-    expect(applied).toBe(false);
-    expect(calls).toHaveLength(0);
-  });
-
-  it("is a no-op when the demo foundry vendor is active", async () => {
-    const service = new SettingsService({ userDataPath });
-    await service.patch({
-      llm: { authMode: "manual", hostResolverMap: "10.0.0.10 endpoint.example.com" },
-    });
-
-    const { app, calls } = makeCommandLineSpy();
-    const applied = applyManualHostResolverRules(app, userDataPath, {
-      LVIS_DEMO_VENDOR: "azure-foundry",
-    } as NodeJS.ProcessEnv);
-
-    expect(applied).toBe(false);
-    expect(calls).toHaveLength(0);
-  });
-
-  it("still applies the manual map for a non-foundry demo vendor", async () => {
-    // Gate is pinned to azure-foundry — a future demo vendor that does not
-    // install its own host map must not silently drop the manual map.
-    const service = new SettingsService({ userDataPath });
-    await service.patch({
-      llm: { authMode: "manual", hostResolverMap: "10.0.0.10 endpoint.example.com" },
-    });
-
-    const { app, calls } = makeCommandLineSpy();
-    const applied = applyManualHostResolverRules(app, userDataPath, {
-      LVIS_DEMO_VENDOR: "some-future-vendor",
-    } as NodeJS.ProcessEnv);
+    const applied = applyManualHostResolverRules(app, userDataPath);
 
     expect(applied).toBe(true);
     expect(calls).toHaveLength(1);
@@ -241,7 +208,7 @@ describe("applyManualHostResolverRules — writer/reader path read-back", () => 
 
   it("returns false when no map is configured", () => {
     const { app, calls } = makeCommandLineSpy();
-    const applied = applyManualHostResolverRules(app, userDataPath, {} as NodeJS.ProcessEnv);
+    const applied = applyManualHostResolverRules(app, userDataPath);
     expect(applied).toBe(false);
     expect(calls).toHaveLength(0);
   });

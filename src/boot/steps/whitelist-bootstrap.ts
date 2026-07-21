@@ -3,7 +3,6 @@
 
 
 import { app } from "electron";
-import { join } from "node:path";
 import { whitelistRegistry } from "../../plugins/whitelist/whitelist-registry.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../plugins/marketplace-keys.js";
 import {
@@ -13,14 +12,13 @@ import {
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import { createLogger } from "../../lib/logger.js";
 import { emitEvent } from "../types.js";
-import { isDemoEnabled } from "../../main/demo-credentials.js";
 import { t } from "../../i18n/index.js";
 
 const log = createLogger("whitelist-bootstrap");
 
 export interface WhitelistBootstrapInput {
   bootAuditLogger: AuditLogger;
-  /** Online toggle — disabled in tests + when `isDemoEnabled()` is true. */
+  /** Online toggle — disabled in tests or user-selected offline mode. */
   online?: boolean;
   /**
    * Cluster review optional fix — app-shutdown AbortSignal. When the app
@@ -32,8 +30,6 @@ export interface WhitelistBootstrapInput {
 }
 
 function isOnlineByDefault(): boolean {
-  // Demo / kiosk path: skip network. The registry loads the bundled snapshot.
-  if (isDemoEnabled()) return false;
   // E2E + unit tests set this so they don't hit the public CDN.
   if (process.env.LVIS_WHITELIST_OFFLINE === "1") return false;
   return true;
@@ -41,21 +37,6 @@ function isOnlineByDefault(): boolean {
 
 function isE2eTestRuntime(): boolean {
   return process.env.LVIS_E2E === "1" && process.env.NODE_ENV === "test";
-}
-
-function resolveDemoSnapshotPath(): string {
-  if (isE2eTestRuntime() && process.env.LVIS_E2E_WHITELIST_SNAPSHOT_PATH) {
-    return process.env.LVIS_E2E_WHITELIST_SNAPSHOT_PATH;
-  }
-
-  // Electron always defines `process.resourcesPath`, including defaultApp
-  // dev/test launches where it points at Electron's own resources directory.
-  // Use packaged resources only for packaged app runs; otherwise use the repo
-  // resources directory so demo E2E can load the checked-in snapshot.
-  const isDefaultApp = !!(process as { defaultApp?: boolean }).defaultApp;
-  return process.resourcesPath && !isDefaultApp
-    ? join(process.resourcesPath, "marketplace-whitelist.demo.json")
-    : join(process.cwd(), "resources", "marketplace-whitelist.demo.json");
 }
 
 function installE2eWhitelistPublicKeyOverride(): void {
@@ -75,13 +56,10 @@ export async function wireWhitelistRegistry(input: WhitelistBootstrapInput): Pro
   const { bootAuditLogger } = input;
   const online = input.online ?? isOnlineByDefault();
   const userDataDir = app.getPath("userData");
-  const demoSnapshotPath = resolveDemoSnapshotPath();
   installE2eWhitelistPublicKeyOverride();
 
   await whitelistRegistry.init({
     userDataDir,
-    demoSnapshotPath,
-    useDemoSnapshot: isDemoEnabled(),
     online,
     ...(input.appShutdownSignal ? { signal: input.appShutdownSignal } : {}),
     audit: (input: string) => {

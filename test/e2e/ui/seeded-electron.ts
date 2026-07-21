@@ -82,7 +82,7 @@ export function buildE2eBaseSettings(onboardingCompleted = true, locale: "ko" | 
 /**
  * Secrets to seed into `lvis-secrets.json` so the host reports a usable LLM key
  * at boot (`lvis:settings:has-api-key` → `getSecret("llm.apiKey.<provider>")`),
- * which enables the chat composer. Before #1201 a demo-key path resolved this
+ * which enables the chat composer. Before #1201 a fixture-key path resolved this
  * implicitly; that path is gone, so e2e seeds an explicit key for every vendor
  * (covers whichever `llm.provider` a spec ends up with — default azure-foundry).
  *
@@ -129,7 +129,6 @@ export function buildLlmSettings(vendor: LLMVendor = "openai", model?: string): 
   return {
     ...buildE2eBaseSettings(true),
     llm: {
-      authMode: "manual",
       provider: vendor,
       vendors,
       streamSmoothing: "none",

@@ -1,20 +1,19 @@
 /**
  * First-boot tour gate — decides whether the boot probe should skip the
- * onboarding chain because the user has ALREADY seen the SpotlightTour.
+ * optional first-boot tour because the user has ALREADY seen it.
  *
  * Why this exists (the bug it fixes):
- *   The boot probe in App.tsx skipped the chain only when
+ *   The boot probe in App.tsx skipped the tour only when
  *   `settings.features.onboardingCompleted === true` or an LLM vendor key
- *   was present. Older builds reached the chain's `done` stage only after
- *   a separate PluginShowcase popup. A user who finished the SpotlightTour
- *   but quit before closing that popup left the flag `false`, so the tour
- *   re-appeared on every launch. Tour completion is recorded separately in
+ *   was present. A user who finished the SpotlightTour but quit before the
+ *   completion setting was stored could see the tour again on the next launch.
+ *   Tour completion is recorded separately in
  *   the tour-state store
  *   (`completedScenarios`), which the boot probe never consulted.
  *
  *   This helper closes that gap: if the tour-state store says the user
  *   completed `first-boot-essentials`, the boot probe treats them as a
- *   returning user and skips the chain — independent of the
+ *   returning user and skips the tour — independent of the
  *   `onboardingCompleted` flag.
  *
  * The argument is the raw result of `api.tour.getState()` (a discriminated

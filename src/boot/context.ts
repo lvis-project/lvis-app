@@ -79,12 +79,8 @@ export interface BootContext {
 
   // ── Network fetch surface (setupNetworkFetch) ──────────────────────────────
   networkFetch: typeof fetch;
-  privateNetworkFetch: typeof fetch;
   pluginNetworkFetch: typeof fetch;
   llmFetch: typeof fetch;
-  demoActiveVendor: string;
-  demoHostMap: string | undefined;
-  isAppliedDemoHostMap: boolean;
 
   // ── Home docs seed ─────────────────────────────────────────────────────────
   lvisHomeDocUpgradeMarkers: LvisHomeDocUpgradeMarker[];
