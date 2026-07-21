@@ -21,7 +21,7 @@ const buildOptions = {
   bundle: true,
   format: "esm",
   platform: "node",
-  target: ["node20"],
+  target: ["node22"],
   legalComments: "none",
   external: [
     "electron",
