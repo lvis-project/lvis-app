@@ -191,7 +191,7 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     expect(createProvider).not.toHaveBeenCalled();
   });
 
-  it("drops a stored API key for a keyless local (http) OpenAI-compatible endpoint", async () => {
+  it("keeps a stored API key for a saved OpenAI-compatible private endpoint", async () => {
     const createProvider = vi.fn(() => ({
       vendor: "openai-compatible" as const,
       streamTurn: async function* () {},
@@ -221,15 +221,13 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
     } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
 
-    // Part C — never attach a bearer token to a non-https (local) endpoint: it
-    // would leak in plaintext and trip the adapter's credentialed-baseUrl https
-    // guard. Keyless-capable local providers run without a key.
     expect(createProvider).toHaveBeenCalledWith(
       expect.objectContaining({
         vendor: "openai-compatible",
-        apiKey: "",
+        apiKey: "stored-key",
         model: "team/model",
         baseUrl: "http://localhost:8000/v1",
+        fetch: expect.any(Function),
       }),
     );
   });
@@ -363,16 +361,27 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
       body: "{}",
     });
 
-    expect(fetchPublicHttpResponse).toHaveBeenCalledWith(
-      "https://future.example/v1/chat/completions",
-      expect.objectContaining({
+    const [, init] = fetchPublicHttpResponse.mock.calls[0] as [
+      string,
+      RequestInit & {
+        allowLoopback?: false | ((url: URL) => boolean);
+        allowPrivateNetworks?: false | ((url: URL) => boolean);
+        fetchImpl?: typeof fetch;
+      },
+    ];
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe("{}");
+    expect(init.fetchImpl).toEqual(expect.any(Function));
+    expect(init.maxRedirects).toBe(0);
+    expect(init.allowPrivateNetworks).toBe(false);
+    expect(init.allowLoopback).toBe(false);
+    await expect(
+      guardedFetch?.("https://other.example/v1/chat/completions", {
         method: "POST",
         body: "{}",
-        allowLoopback: false,
-        fetchImpl: expect.any(Function),
-        maxRedirects: 0,
       }),
-    );
+    ).rejects.toThrow("configured origin");
+    expect(fetchPublicHttpResponse).toHaveBeenCalledTimes(1);
   });
 
   it("scopes keyless marketplace loopback runtime fetches to the preset origin", async () => {
@@ -437,11 +446,11 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
       string,
       RequestInit & {
         allowLoopback?: false | ((url: URL) => boolean);
-        allowPrivateNetworks?: boolean;
+        allowPrivateNetworks?: false | ((url: URL) => boolean);
         fetchImpl?: typeof fetch;
       },
     ];
-    expect(init.allowPrivateNetworks).toBeUndefined();
+    expect(init.allowPrivateNetworks).toBe(false);
     expect(init.maxRedirects).toBe(0);
     expect(init.allowLoopback).toEqual(expect.any(Function));
     const allowLoopback = init.allowLoopback as (url: URL) => boolean;

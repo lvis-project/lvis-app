@@ -971,6 +971,41 @@ describe("VercelUnifiedProvider openai-compatible", () => {
 
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
+
+  it("allows credentialed HTTP only with an exact-origin guarded provider fetch", async () => {
+    vi.resetModules();
+    const createCompatSpy = vi.fn(() => vi.fn(() => ({ __mock: "compat" })));
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: createCompatSpy,
+    }));
+
+    const { createGuardedModelProviderFetch } = await import("../../marketplace-provider-fetch.js");
+    const trustedFetch = createGuardedModelProviderFetch(
+      "http://10.232.178.100:30000/v1",
+    );
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai-compatible",
+      "internal-key",
+      "http://10.232.178.100:30000/v1",
+      trustedFetch,
+    );
+
+    await collect(
+      provider.streamTurn({
+        model: "Qwen3.6-35B-A3B-NVFP4",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    );
+
+    expect(createCompatSpy).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: "internal-key",
+      baseURL: "http://10.232.178.100:30000/v1",
+    }));
+
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
 });
 
 describe("VercelUnifiedProvider openai — custom baseUrl proxy guard", () => {

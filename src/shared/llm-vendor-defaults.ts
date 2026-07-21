@@ -475,6 +475,35 @@ export function isSelfHostedVllmVendor(v: LLMVendor): boolean {
   return SELF_HOSTED_VLLM_VENDOR_IDS.has(v);
 }
 
+/**
+ * Network-trust class — the saved self-hosted OpenAI-compatible endpoints a user
+ * may point at a private/loopback address and, for that exact configured origin,
+ * carry credentials over insecure (plain-HTTP) transport.
+ *
+ * This is the single SOT for NETWORK TRUST: private/loopback network access plus
+ * insecure-credentialed HTTP for a *saved* self-hosted endpoint. It gates the
+ * `createGuardedModelProviderFetch` runtime-fetch selection (provider.ts,
+ * reviewer-permission-wiring.ts) and the saved-self-hosted model-list sync
+ * (model-list.ts).
+ *
+ * DELIBERATELY DISTINCT from {@link isSelfHostedVllmVendor}, which is
+ * request-shaping (chat_template_kwargs / continue_final_message length
+ * continuation). The two sets mirror each other TODAY but must stay
+ * independently editable — a future keyless commercial gateway could be trusted
+ * on the network without running a vLLM chat template, so it would belong in one
+ * set but not the other. Editing one must never silently move the other.
+ */
+const SELF_HOSTED_TRUSTED_NETWORK_VENDOR_IDS = new Set<LLMVendor>([
+  "openai-compatible",
+  "litellm",
+  "ollama",
+  "lmstudio",
+]);
+
+export function isSelfHostedTrustedNetworkVendor(v: LLMVendor): boolean {
+  return SELF_HOSTED_TRUSTED_NETWORK_VENDOR_IDS.has(v);
+}
+
 export function canUseLlmVendorWithoutApiKey(
   vendor: LLMVendor,
   block: Pick<LLMVendorSettings, "baseUrl">,

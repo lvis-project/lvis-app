@@ -17,6 +17,7 @@ import {
   isDefaultVisibleLLMVendor,
   isMarketplaceEligibleLLMVendor,
   isRetiredLlmModel,
+  isSelfHostedTrustedNetworkVendor,
   isSelfHostedVllmVendor,
   normalizeLlmVendorModel,
 } from "../llm-vendor-defaults.js";
@@ -163,6 +164,23 @@ describe("LLM vendor defaults", () => {
     // Non-openai-compatible vendors are false too.
     expect(isSelfHostedVllmVendor("openai")).toBe(false);
     expect(isSelfHostedVllmVendor("claude")).toBe(false);
+  });
+
+  it("classifies the self-hosted trusted-network class for private/loopback + insecure-credentialed HTTP", () => {
+    // Network-trust SOT — distinct concept from the vLLM request-extension set,
+    // even though it mirrors the same ids today. Editing one must not move the
+    // other; this pins the current membership.
+    expect(isSelfHostedTrustedNetworkVendor("openai-compatible")).toBe(true);
+    expect(isSelfHostedTrustedNetworkVendor("litellm")).toBe(true);
+    expect(isSelfHostedTrustedNetworkVendor("ollama")).toBe(true);
+    expect(isSelfHostedTrustedNetworkVendor("lmstudio")).toBe(true);
+    // Commercial OpenAI-compatible gateways are NOT network-trusted.
+    expect(isSelfHostedTrustedNetworkVendor("openrouter")).toBe(false);
+    expect(isSelfHostedTrustedNetworkVendor("groq")).toBe(false);
+    expect(isSelfHostedTrustedNetworkVendor("deepseek")).toBe(false);
+    // First-party vendors are excluded too.
+    expect(isSelfHostedTrustedNetworkVendor("openai")).toBe(false);
+    expect(isSelfHostedTrustedNetworkVendor("claude")).toBe(false);
   });
 
   it("requires a configured base URL before treating a provider as keyless-ready", () => {
