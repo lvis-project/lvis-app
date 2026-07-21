@@ -27,15 +27,28 @@ describe("boot LLM fetch wiring regression guards", () => {
 
   it("scopes Electron fetch injection to Azure Foundry providers", async () => {
     const bootSource = await readBootWiring();
-    // The turn provider factory moved out of conversation-loop.ts into
-    // engine/turn/provider.ts (C9 decomposition); the azure-foundry fetch
-    // scoping is preserved there as a free fn (`deps.llmFetch`, not `this.deps`).
+    // The turn provider factory (engine/turn/provider.ts) and the reviewer
+    // wiring (boot/steps/reviewer-permission-wiring.ts) both delegate runtime
+    // fetch selection to the shared selectProviderRuntimeFetch (cluster M1
+    // hoist). The azure-foundry Electron-fetch scoping is the single SOT inside
+    // that selector, so guard it there rather than at each former inline ladder.
     const providerSource = await readSource("../engine/turn/provider.ts");
-
-    expect(bootSource).toContain(
-      '...(llmVendor === "azure-foundry" ? { fetch: llmFetch } : {}),',
+    const fetchSelectorSource = await readSource(
+      "../engine/llm/marketplace-provider-fetch.ts",
     );
-    expect(providerSource).toContain('config.vendor === "azure-foundry" && deps.llmFetch');
+
+    // Single SOT: only azure-foundry receives the Electron main-process llmFetch.
+    expect(fetchSelectorSource).toContain('vendor === "azure-foundry"');
+    expect(fetchSelectorSource).toContain("? llmFetch");
+
+    // The reviewer wiring (part of bootSource) routes through the shared
+    // selector, forwarding the Electron llmFetch for only the azure branch.
+    expect(bootSource).toContain("selectProviderRuntimeFetch({");
+
+    // The turn provider factory routes through the same selector and passes the
+    // Electron fetch as deps.llmFetch — no inline azure branch remains here.
+    expect(providerSource).toContain("selectProviderRuntimeFetch({");
+    expect(providerSource).toContain("llmFetch: deps.llmFetch,");
     expect(providerSource).toContain("createLoopProvider,");
   });
 

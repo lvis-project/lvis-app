@@ -8,7 +8,7 @@ import type {
 import {
   getLlmVendorSettings,
   isLLMVendor,
-  isSelfHostedVllmVendor,
+  isSelfHostedTrustedNetworkVendor,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import {
@@ -223,7 +223,7 @@ function isSavedSelfHostedModelListEndpoint(
   if (
     resolved.isDraftEndpoint ||
     !resolved.baseUrl ||
-    !isSelfHostedVllmVendor(vendor)
+    !isSelfHostedTrustedNetworkVendor(vendor)
   ) {
     return false;
   }
