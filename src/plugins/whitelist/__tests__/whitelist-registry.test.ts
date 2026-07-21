@@ -2,12 +2,12 @@
  * #893 Stage 2 — whitelist registry unit tests.
  *
  * Covers the four tier-3 decision branches + monotonicity rollback guard +
- * the stale-grace window + the demo-snapshot path. Network fetch is faked
+ * the stale-grace window. Network fetch is faked
  * with the test-only `online: false` flag so the suite never touches the
  * public CDN.
  */
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
@@ -368,63 +368,6 @@ describe("WhitelistRegistry — stale grace windows", () => {
     expect(decision.kind).toBe("deny");
     if (decision.kind === "deny") {
       expect(decision.reason).toBe("whitelist-stale-exceeded");
-    }
-  });
-});
-
-describe("WhitelistRegistry — demo snapshot path", () => {
-  it("loads the demo snapshot when useDemoSnapshot is true", async () => {
-    const userDataDir = freshUserData();
-    const demoDir = freshUserData();
-    const demoPath = join(demoDir, "marketplace-whitelist.demo.json");
-    const signed = makeSigned({
-      issuedAt: "2026-05-17T00:00:00.000Z",
-      expiresAt: "2030-01-01T00:00:00.000Z",
-    });
-    mkdirSync(demoDir, { recursive: true });
-    writeFileSync(demoPath, signed.body, "utf-8");
-    writeFileSync(`${demoPath}.sig`, signed.signature, "utf-8");
-
-    await whitelistRegistry.init({
-      userDataDir,
-      demoSnapshotPath: demoPath,
-      useDemoSnapshot: true,
-      online: false,
-      now: () => Date.parse("2026-05-18T00:00:00.000Z"),
-    });
-
-    const status = whitelistRegistry.status();
-    expect(status.source).toBe("demo-snapshot");
-    expect(status.state).toBe("fresh");
-    const decision = whitelistRegistry.isAllowed("meeting", "llm.apiKey.openai");
-    expect(decision.kind).toBe("allow");
-  });
-
-  it("falls through to remote/cache when useDemoSnapshot is omitted even with a demo path", async () => {
-    const userDataDir = freshUserData();
-    const demoDir = freshUserData();
-    const demoPath = join(demoDir, "marketplace-whitelist.demo.json");
-    const signed = makeSigned({
-      issuedAt: "2026-05-17T00:00:00.000Z",
-      expiresAt: "2030-01-01T00:00:00.000Z",
-    });
-    writeFileSync(demoPath, signed.body, "utf-8");
-    writeFileSync(`${demoPath}.sig`, signed.signature, "utf-8");
-
-    // useDemoSnapshot omitted → demo skipped → no cache → no remote
-    // (online:false) → no-cache-and-offline.
-    await whitelistRegistry.init({
-      userDataDir,
-      demoSnapshotPath: demoPath,
-      online: false,
-      now: () => Date.parse("2026-05-18T00:00:00.000Z"),
-    });
-
-    expect(whitelistRegistry.isNoCacheOffline()).toBe(true);
-    const decision = whitelistRegistry.isAllowed("meeting", "llm.apiKey.openai");
-    expect(decision.kind).toBe("deny");
-    if (decision.kind === "deny") {
-      expect(decision.reason).toBe("whitelist-unreachable");
     }
   });
 });

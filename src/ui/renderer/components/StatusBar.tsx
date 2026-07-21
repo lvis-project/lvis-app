@@ -114,7 +114,7 @@ export function StatusBar(props: StatusBarProps) {
                 )}
               </>
             );
-            // Z onboarding chain — the vendor/model cell is the final
+            // First-boot tour — the vendor/model cell is the final
             // SpotlightTour anchor (step 7). Tagging it here keeps the
             // anchor close to the rendered DOM rather than requiring a
             // separate wrapper component.

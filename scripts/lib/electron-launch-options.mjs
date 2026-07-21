@@ -1,7 +1,6 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-import { loadRepoDemoEnv } from "./demo-env-loader.mjs";
 import { WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG } from "../electron-flags.mjs";
 
 export const WINDOWS_SAFE_ELECTRON_FLAGS = Object.freeze([
@@ -78,11 +77,9 @@ export function applyUtf8Env(env) {
 export function prepareElectronLaunchEnv(
   env,
   {
-    demoEnvRoot,
     platform = process.platform,
   } = {},
 ) {
-  if (demoEnvRoot) loadRepoDemoEnv(env, demoEnvRoot);
   applyWindowsNoSandboxEnv(env, platform);
   applyUtf8Env(env);
   delete env.ELECTRON_RUN_AS_NODE;

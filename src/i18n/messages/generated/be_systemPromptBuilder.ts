@@ -47,9 +47,6 @@ export const en = {
   "be_systemPromptBuilder.currentSessionTitle": "Current session title: \"{title}\"",
   "be_systemPromptBuilder.conversationContinuityGuard": "## Conversation Output Rules\n\n- Write only the body to show the user in the final answer.\n- Do not output hidden metadata, XML/HTML tags, session title tags, or checkpoint markers.\n- In particular, the strings `<title>...</title>`, `[checkpoint]`, and `[checkpoint-suggested]` are forbidden in output.\n- Checkpoints and session summaries are automatically handled by the host at context preflight before the next turn.\n- When finishing a response, close Markdown syntax and terminate after the body is complete.",
 
-  // User Onboarding Context section
-  "be_systemPromptBuilder.userOnboardingContextHeading": "User Onboarding Context",
-
   // Skill catalog record fallback
   "be_systemPromptBuilder.skillNoDescription": "No description",
 
@@ -112,9 +109,6 @@ export const ko: Record<keyof typeof en, string> = {
   // Conversation Continuity Guard section
   "be_systemPromptBuilder.currentSessionTitle": "현재 세션 제목: \"{title}\"",
   "be_systemPromptBuilder.conversationContinuityGuard": "## 대화 연속성 출력 규칙\n\n- 최종 답변에는 사용자에게 보여줄 본문만 작성하세요.\n- 숨은 메타데이터, XML/HTML 태그, 세션 제목 태그, 체크포인트 마커를 출력하지 마세요.\n- 특히 `<title>...</title>`, `[checkpoint]`, `[checkpoint-suggested]` 문자열은 출력 금지입니다.\n- 체크포인트와 세션 요약은 host 가 다음 턴 시작 전 context preflight 에서 자동 처리합니다.\n- 답변을 마칠 때는 Markdown 문법을 닫고, 본문이 완성된 뒤 종료하세요.",
-
-  // User Onboarding Context section
-  "be_systemPromptBuilder.userOnboardingContextHeading": "사용자 온보딩 컨텍스트",
 
   // Skill catalog record fallback
   "be_systemPromptBuilder.skillNoDescription": "설명 없음",
