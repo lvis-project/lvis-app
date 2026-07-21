@@ -180,12 +180,6 @@ jobs:
           # `needs: installers`) assembles every platform's artifacts and
           # uploads them atomically.
           node scripts/build-installers.mjs "${args[@]}"
-        env:
-          # Public tag behavior is fixed by the GitHub event, never a value
-          # emitted by tagged source. Both public tags and manual candidates
-          # receive no embedded activation or signing secrets in this workflow.
-          LVIS_DISTRIBUTION_CHANNEL: ${{ github.event_name == 'push' && 'public' || 'internal' }}
-          LVIS_EMBED_DEMO_ACTIVATION: ""
       - name: Smoke launch packaged app
         # macOS Gatekeeper blocks launch of unsigned .app bundles. Public tags
         # and secret-free manual candidates therefore skip only this macOS

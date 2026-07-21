@@ -8,7 +8,7 @@
  *   4. active-vendor cross-check (settings.llm.provider)
  *
  * Load order:
- *   `init()` → load disk cache → fetch remote (when online & not demo) →
+ *   `init()` → load disk cache → fetch remote (when online) →
  *   verify signature envelope → check `issuedAt` monotonicity → swap.
  *
  * `isAllowed(pluginId, key, manifestSha256?)` is synchronous and never
@@ -21,8 +21,6 @@
  *   - "stale-past-grace"    — past 7d grace, deny `whitelist-stale-exceeded`
  *   - "no-cache"            — never had a successful load, deny `whitelist-unreachable`
  */
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { createLogger } from "../../lib/logger.js";
 import { verifyEnvelope } from "../envelope-verifier.js";
 import { WHITELIST_PUBLIC_KEYS, WHITELIST_PRIMARY_KEY_ID } from "../marketplace-keys.js";
@@ -59,7 +57,7 @@ export type WhitelistState =
   | "stale-past-grace"
   | "no-cache";
 
-export type WhitelistSource = "remote" | "cache" | "demo-snapshot";
+export type WhitelistSource = "remote" | "cache";
 
 export interface WhitelistStatus {
   state: WhitelistState;
@@ -71,17 +69,7 @@ export interface WhitelistStatus {
 export interface WhitelistInitOptions {
   /** Electron `app.getPath("userData")`. The cache lives under `marketplace-whitelist/`. */
   userDataDir: string;
-  /**
-   * Path to the demo whitelist snapshot baked into asar. When set AND
-   * `useDemoSnapshot === true`, the registry loads this file exclusively
-   * and skips the network fetch entirely.
-   * Demo path bypasses the monotonicity guard so a kiosk re-launch doesn't
-   * reject the snapshot.
-   */
-  demoSnapshotPath?: string;
-  /** Captured demo-mode flag from boot. Prefer this over reading scrubbed env. */
-  useDemoSnapshot?: boolean;
-  /** Skip the network fetch (for tests + offline demo). Cache + demo still apply. */
+  /** Skip the network fetch for offline tests or user-selected offline mode. */
   online: boolean;
   /** Wall-clock now provider — injected for deterministic tests. Defaults to `Date.now`. */
   now?: () => number;
@@ -164,22 +152,6 @@ class WhitelistRegistry {
     this.noCacheOffline = false;
     const audit = opts.audit ?? (() => {});
     const telemetry = opts.telemetry ?? (() => {});
-
-    // Demo snapshot path — kiosk / pre-prod / offline trade show.
-    // Caller (boot/steps/whitelist-bootstrap.ts) supplies `useDemoSnapshot`
-    // from `isDemoEnabled()` after `captureDemoCredentials()` runs; no env
-    // fallback is honored.
-    const useDemoSnapshot = opts.useDemoSnapshot === true;
-    if (opts.demoSnapshotPath && useDemoSnapshot) {
-      const loaded = await this.tryLoadDemoSnapshot(opts.demoSnapshotPath);
-      if (loaded) {
-        this.snapshot = { doc: loaded, source: "demo-snapshot" };
-        audit(`whitelist_loaded source=demo-snapshot issuedAt=${loaded.issuedAt}`);
-        telemetry("whitelist_fetch_ok", { source: "demo-snapshot" });
-        return;
-      }
-      log.warn("demo mode active but demo snapshot failed to load — falling through to cache/remote");
-    }
 
     const cache = new WhitelistCache(opts.userDataDir);
     const cached = await cache.load().catch((err) => {
@@ -394,62 +366,6 @@ class WhitelistRegistry {
     }
   }
 
-  /**
-   * Cluster review M2 (doc) — DEMO SNAPSHOT EXPIRY POLICY
-   *
-   * The demo snapshot bundled at `resources/marketplace-whitelist.demo.json`
-   * intentionally ships with a multi-year `expiresAt` (currently 2030-01-01).
-   * Kiosk / trade-show machines must function for the lifetime of the demo
-   * build (signed app binary) without a network round-trip to the live
-   * registry, so a short expiry would brick the bundled offline experience
-   * during long trade-show runs or air-gapped deployments.
-   *
-   * Production catalog (the live `lvis-project/marketplace-whitelist` repo)
-   * uses a rolling 90-day expiry and is fetched + verified at boot via
-   * `whitelist-fetcher.ts`. The demo path is gated behind `useDemoSnapshot`
-   * (derived from `isDemoEnabled()` at boot) so production builds without
-   * a captured demo activation never load this snapshot.
-   *
-   * Do NOT shorten the demo snapshot's `expiresAt` to match production —
-   * that is an environment-policy decision, not a security regression.
-   */
-  private async tryLoadDemoSnapshot(path: string): Promise<WhitelistDocument | null> {
-    try {
-      if (!existsSync(path)) {
-        log.warn(`demo snapshot missing: ${path}`);
-        return null;
-      }
-      const body = await readFile(path, "utf-8");
-      const sigPath = `${path}.sig`;
-      // Ralph cycle 1 MEDIUM fix — demo snapshot signature is now MANDATORY.
-      // Previously the verifier accepted the snapshot bare when `.sig` was
-      // missing, on the theory that asar code-signing covered the trust
-      // model. That assumption fails for two paths the comment didn't
-      // account for: (a) a dev/test build where the asar isn't code-signed
-      // at all and (b) on-disk tampering of the asar's static resources.
-      // Fail closed when the sig is absent — operators can always
-      // regenerate one with the existing `whitelist-v1` keypair.
-      if (!existsSync(sigPath)) {
-        log.warn(`demo snapshot signature missing (fail-closed): ${sigPath}`);
-        return null;
-      }
-      const sigRaw = await readFile(sigPath, "utf-8");
-      const envelope = JSON.parse(sigRaw) as SignatureEnvelope;
-      const verify = verifyEnvelope(
-        Buffer.from(body, "utf-8"),
-        envelope,
-        this.publicKeys,
-      );
-      if (!verify.ok) {
-        log.warn(`demo snapshot signature invalid: ${verify.reason}`);
-        return null;
-      }
-      return parseWhitelistDocument(body);
-    } catch (err) {
-      log.warn(`demo snapshot load failed: ${(err as Error).message}`);
-      return null;
-    }
-  }
 }
 
 /** Process-wide singleton. Boot calls `init`; getSecret calls `isAllowed`. */

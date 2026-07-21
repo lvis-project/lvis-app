@@ -11,7 +11,6 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { getPluginInstallAliases } from "./utils/plugin-install-aliases.js";
 import { parsePluginDoctorViewKey, toPluginDoctorViewKey } from "./utils/plugin-doctor-view.js";
-import { summarizePluginReadiness } from "./onboarding/first-run-readiness.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { useAppMode } from "./hooks/use-app-mode.js";
@@ -21,7 +20,7 @@ import { usePinnedProjects } from "./hooks/use-pinned-projects.js";
 import { useRoutineOverlay } from "./hooks/use-routine-overlay.js";
 import { useSendMessage } from "./hooks/use-send-message.js";
 import { usePluginViewRouting } from "./hooks/use-plugin-view-routing.js";
-import { useOnboardingChainController } from "./hooks/use-onboarding-chain-controller.js";
+import { useOnboardingTourController } from "./hooks/use-onboarding-tour-controller.js";
 import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.js";
 import { useChatStatusIndicators } from "./hooks/use-chat-status-indicators.js";
 import { MainContent } from "./MainContent.js";
@@ -135,23 +134,13 @@ export function App() {
   );
 
   // App state
-  // Z onboarding chain controller — owns hasApiKey, the chain reducer, the
-  // demo-reactivation flag, the boot-probe generation, and the four onboarding
-  // effects (boot probe / completion+tour broadcast / logout+reactivate /
-  // ⌘?-shortcut). Surfaces effectiveHasApiKey (the chain-masked key state) and
-  // checkApiKey. See use-onboarding-chain-controller.ts.
   const {
-    chainStage,
-    dispatchChain,
-    selectedScenarioId,
-    memorySeedNickname,
-    memorySeedIntroduction,
     tourCompleted,
+    onTourComplete,
+    onTourDismiss,
     checkApiKey,
     effectiveHasApiKey,
-    reactivationOpen,
-    setReactivationOpen,
-  } = useOnboardingChainController(api);
+  } = useOnboardingTourController(api);
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   // Inline-settings (work mode): which tab SettingsContent opens on, and the
@@ -504,11 +493,6 @@ export function App() {
     );
   }, [pluginCards, pluginViews]);
 
-  const firstRunPluginSummary = useMemo(
-    () => summarizePluginReadiness(pluginCards),
-    [pluginCards],
-  );
-
   // Marketplace URL — sourced from settings (marketplace.cloudBaseUrl).
   const { marketplaceUrl, loaded: marketplaceUrlLoaded } = useMarketplaceUrl(api);
   // Ready only when settings have been fetched AND the URL is non-empty.
@@ -716,9 +700,8 @@ export function App() {
   );
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
-  // `effectiveLlmReady` combines the chain-masked key state with explicit
-  // keyless-compatible provider readiness. See useOnboardingChainController
-  // for the masking rationale (#1014).
+  // `effectiveLlmReady` combines the provider-key probe with explicit
+  // keyless-compatible provider readiness.
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveLlmReady, onOpenSettings,
@@ -929,25 +912,13 @@ export function App() {
 
       <AppDialogs
         api={api}
-        onOpenSettings={onOpenSettings}
         deferredQueueOpen={deferredQueueOpen}
         onDeferredQueueOpenChange={setDeferredQueueOpen}
         approvalQueue={approvalQueue}
         onApprovalDecide={handleApprovalDecide}
-        onboardingDialogsSuspended={activeView === "settings"}
-        chainStage={chainStage}
-        dispatchChain={dispatchChain}
-        selectedScenarioId={selectedScenarioId}
-        memorySeedNickname={memorySeedNickname}
-        memorySeedIntroduction={memorySeedIntroduction}
         tourCompleted={tourCompleted}
-        checkApiKey={checkApiKey}
-        reactivationOpen={reactivationOpen}
-        onReactivationOpenChange={setReactivationOpen}
-        firstRunPluginSummary={firstRunPluginSummary}
-        marketplaceUrlReady={marketplaceUrlReady}
-        bootstrapStatus={bootstrapStatus}
-        onRetryBootstrap={retryBootstrap}
+        onTourComplete={onTourComplete}
+        onTourDismiss={onTourDismiss}
         installedPluginIds={pluginCards.map((c) => c.id)}
         onComposerSeedText={setQuestion}
       />

@@ -28,7 +28,6 @@ let crashDir: string;
 function makeSettings(): AppSettings {
   return {
     llm: {
-      authMode: "manual",
       provider: "anthropic",
       streamSmoothing: "none",
       fallbackChain: [],

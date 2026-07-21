@@ -192,12 +192,6 @@ export type LLMVendorSettingsRenderer = {
 
 export type AppSettings = {
   llm: {
-    /**
-     * #893 — Top-level auth toggle. `"manual"` shows the vendor dropdown +
-     * per-vendor settings; `"login"` collapses everything down to a single
-     * Login button whose backend chooses the vendor.
-     */
-    authMode: "manual" | "login";
     provider: string;
     marketplaceProviderPresetId?: string;
     vendors: Record<string, LLMVendorSettingsRenderer>;
@@ -497,62 +491,6 @@ export type LvisApi = {
   hasMarketplaceApiKey: () => Promise<boolean>;
   deleteMarketplaceApiKey: () => Promise<{ ok: true }>;
   /**
-   * #893 — Top-level mockup credential login. On `ok: true` the host has
-   * installed the demo API key into the encrypted secret store AND flipped
-   * top-level settings (`authMode = "login"`, `provider = <vendor>`). The
-   * vendor is decided by the backend (captured `LVIS_DEMO_VENDOR`, default
-   * `"azure-foundry"`) — the renderer never sends one. The `error` codes are
-   * kebab-case English (`invalid-credentials`, `no-demo-key`); the
-   * user-facing Korean text is constructed in the caller.
-   */
-  loginMockup: (payload: { username: string; password: string }) => Promise<
-    | {
-        ok: true;
-        vendor: string;
-        model?: string;
-        baseUrl?: string;
-        vertexProject?: string;
-        vertexLocation?: string;
-        fieldsApplied: string[];
-      }
-    | { ok: false; error: string }
-  >;
-  /**
-   * Tutorial-X1 — Auth progress IPC. The host emits real progress events
-   * for each step of the `loginMockup` flow on `lvis:auth:progress` so the
-   * LoginModal checklist animates against actual main-process work, not a
-   * renderer `setTimeout` illusion. `onProgress` returns the unsubscribe
-   * function. Event payloads use kebab-case English `step` + `status`
-   * codes (CLAUDE.md error-language rule).
-   */
-  auth: {
-    onProgress: (
-      handler: (event: {
-        step:
-          | "credentials-validating"
-          | "llm-key-issuing"
-          | "sandbox-preparing"
-          | "complete";
-        status: "running" | "done" | "failed";
-        vendor?: string;
-        error?: string;
-      }) => void,
-    ) => () => void;
-
-
-
-    broadcastLogoutReset?: () => Promise<
-      | { ok: true }
-      | { ok: false; error: "unauthorized-frame" }
-    >;
-    broadcastReactivateDemo?: () => Promise<
-      | { ok: true }
-      | { ok: false; error: "unauthorized-frame" }
-    >;
-    onLogoutReset?: (handler: () => void) => () => void;
-    onReactivateDemo?: (handler: () => void) => () => void;
-  };
-  /**
    * Interactive PTY terminal (#1444, workspace rail). `spawn` is idempotent per
    * tab (a remount replays the scrollback rather than starting a fresh shell);
    * `onData` / `onExit` return unsubscribe functions (the onChatStream pattern).
@@ -603,63 +541,6 @@ export type LvisApi = {
     onFallback: (handler: (payload: { from: string; to: string }) => void) => () => void;
   };
   /**
-   * Demo activation bridge. `status` exposes only the captured activation
-   * state from main; it does not read `process.env` in the renderer because
-   * packaged builds scrub `LVIS_DEMO_*` before preload inherits env. `activate`
-   * decrypts a pasted activation string back into the original `.env.demo`
-   * payload, persists it under `~/.lvis/secrets/.env.demo`, and injects the
-   * keys so the downstream auth handler can see them.
-   *
-   * Error codes are kebab-case English; the renderer translates each into
-   * a Korean message in the LoginModal.
-   */
-  demo: {
-    status: () => Promise<
-      | {
-          ok: true;
-          activated: boolean;
-          vendor: string | null;
-          autoActivatable: boolean;
-          ollamaAvailable: boolean;
-        }
-      | { ok: false; error: "unauthorized-frame" }
-    >;
-    activate: (code: string) => Promise<
-      | { ok: true; vendor: string; requiresRelaunch?: boolean }
-      | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
-    >;
-    /**
-     * Embedded activation — same chain as `activate` with the build-time
-     * embedded key as the code source (`status().autoActivatable` advertises
-     * availability). `no-embedded-code` routes back to manual paste.
-     */
-    activateEmbedded: () => Promise<
-      | { ok: true; vendor: string; requiresRelaunch?: boolean }
-      | { ok: false; error: "no-embedded-code" | "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
-    >;
-    /**
-     * #1498 — local Ollama fallback. `status().ollamaAvailable` advertises
-     * a reachable local server; this re-probes before configuring the
-     * vendor so a server stopped between the status check and the click
-     * fails closed with `no-ollama`.
-     */
-    activateOllama: () => Promise<
-      | { ok: true; vendor: "ollama" }
-      | { ok: false; error: "no-ollama" | "persist-failed" | "unauthorized-frame" }
-    >;
-    relaunchAfterActivation: () => Promise<
-      | { ok: true }
-      | { ok: false; error: "not-armed" | "unauthorized-frame" }
-    >;
-
-
-
-    clearDemo: () => Promise<
-      | { ok: true }
-      | { ok: false; error: "clear-failed" | "unauthorized-frame" }
-    >;
-  };
-  /**
    * Tutorial-C — SpotlightTour state + broadcast bridge. The host persists
    * the tour state under `~/.lvis/onboarding/tour-state.json` (Storage
    * Namespace per Feature). `tour.start` fans out to every open window
@@ -705,24 +586,6 @@ export type LvisApi = {
     >;
     onStart: (handler: (payload: { scenarioId: string }) => void) => () => void;
   };
-  /**
-   * Install a plugin from the Memory Seed recommendation flow. Delegates to
-   * the canonical `lvis:plugins:install` channel so onboarding reuses the
-   * entire marketplace install pipeline (download → verify → register →
-   * restart broadcasts) rather than forking an onboarding-only install loop.
-   * Error codes are kebab-case English; the renderer translates for the user.
-   */
-  tutorialInstallPlugin: (pluginId: string) => Promise<
-    | { ok: true; pluginId: string }
-    | { ok: false; error: string; message: string }
-  >;
-
-
-
-  onboardingContextSet: (content: string) => Promise<
-    | { ok: true }
-    | { ok: false; error: string; message: string }
-  >;
   openSettingsWindow: (initialTab?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSettingsWindowSaved: (handler: () => void) => () => void;

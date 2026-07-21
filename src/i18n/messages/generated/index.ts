@@ -111,7 +111,6 @@ import { en as en_htmlPreview } from "./htmlPreview.js";
 import { en as en_inputActionBar } from "./inputActionBar.js";
 import { en as en_lazyCalendar } from "./lazyCalendar.js";
 import { en as en_llmTab } from "./llmTab.js";
-import { en as en_loginModalConversational } from "./loginModalConversational.js";
 import { en as en_mainToolbar } from "./mainToolbar.js";
 import { en as en_marketplaceAnnouncementBanner } from "./marketplaceAnnouncementBanner.js";
 import { en as en_marketplaceTab } from "./marketplaceTab.js";
@@ -120,7 +119,6 @@ import { en as en_mcpAppPipPanel } from "./mcpAppPipPanel.js";
 import { en as en_mcpAppView } from "./mcpAppView.js";
 import { en as en_mcpTab } from "./mcpTab.js";
 import { en as en_memorySearchPanel } from "./memorySearchPanel.js";
-import { en as en_memorySeedDialog } from "./memorySeedDialog.js";
 import { en as en_messageQueuePanel } from "./messageQueuePanel.js";
 import { en as en_messageQueueStore } from "./messageQueueStore.js";
 import { en as en_midnight } from "./midnight.js";
@@ -133,15 +131,12 @@ import { en as en_permissionEvaluationContextPanel } from "./permissionEvaluatio
 import { en as en_permissionModeBadge } from "./permissionModeBadge.js";
 import { en as en_permissionReviewStatusCard } from "./permissionReviewStatusCard.js";
 import { en as en_permissionsTab } from "./permissionsTab.js";
-import { en as en_personalizedWelcome } from "./personalizedWelcome.js";
 import { en as en_pluginAuthSection } from "./pluginAuthSection.js";
 import { en as en_pluginConfigSchemaForm } from "./pluginConfigSchemaForm.js";
 import { en as en_pluginConfigTab } from "./pluginConfigTab.js";
 import { en as en_pluginGridButton } from "./pluginGridButton.js";
 import { en as en_pluginInstallDialog } from "./pluginInstallDialog.js";
 import { en as en_pluginPerfTab } from "./pluginPerfTab.js";
-import { en as en_pluginRecommendationMatrix } from "./pluginRecommendationMatrix.js";
-import { en as en_pluginShowcase } from "./pluginShowcase.js";
 import { en as en_pluginUninstallDialog } from "./pluginUninstallDialog.js";
 import { en as en_postTourFirstTask } from "./postTourFirstTask.js";
 import { en as en_privacyTab } from "./privacyTab.js";
@@ -151,7 +146,6 @@ import { en as en_rolesTab } from "./rolesTab.js";
 import { en as en_rosePine } from "./rosePine.js";
 import { en as en_routinePanel } from "./routinePanel.js";
 import { en as en_savedToast } from "./savedToast.js";
-import { en as en_scenarioShowcase } from "./scenarioShowcase.js";
 import { en as en_sessionResumeDivider } from "./sessionResumeDivider.js";
 import { en as en_sessionTodoPanel } from "./sessionTodoPanel.js";
 import { en as en_settingsContent } from "./settingsContent.js";
@@ -298,7 +292,6 @@ export const generatedEn: Record<string, string> = {
   ...en_inputActionBar,
   ...en_lazyCalendar,
   ...en_llmTab,
-  ...en_loginModalConversational,
   ...en_mainToolbar,
   ...en_marketplaceAnnouncementBanner,
   ...en_marketplaceTab,
@@ -307,7 +300,6 @@ export const generatedEn: Record<string, string> = {
   ...en_mcpAppView,
   ...en_mcpTab,
   ...en_memorySearchPanel,
-  ...en_memorySeedDialog,
   ...en_messageQueuePanel,
   ...en_messageQueueStore,
   ...en_midnight,
@@ -320,15 +312,12 @@ export const generatedEn: Record<string, string> = {
   ...en_permissionModeBadge,
   ...en_permissionReviewStatusCard,
   ...en_permissionsTab,
-  ...en_personalizedWelcome,
   ...en_pluginAuthSection,
   ...en_pluginConfigSchemaForm,
   ...en_pluginConfigTab,
   ...en_pluginGridButton,
   ...en_pluginInstallDialog,
   ...en_pluginPerfTab,
-  ...en_pluginRecommendationMatrix,
-  ...en_pluginShowcase,
   ...en_pluginUninstallDialog,
   ...en_postTourFirstTask,
   ...en_privacyTab,
@@ -338,7 +327,6 @@ export const generatedEn: Record<string, string> = {
   ...en_rosePine,
   ...en_routinePanel,
   ...en_savedToast,
-  ...en_scenarioShowcase,
   ...en_sessionResumeDivider,
   ...en_sessionTodoPanel,
   ...en_settingsContent,

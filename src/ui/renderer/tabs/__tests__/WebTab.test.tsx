@@ -12,7 +12,7 @@ import type { LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 const WEB_SETTINGS = {
-  llm: { authMode: "manual", provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
+  llm: { provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
   chat: { systemPrompt: "", autoCompact: true },
   webSearch: { provider: "none" },
   webView: { preferredFlow: "in-app" },
