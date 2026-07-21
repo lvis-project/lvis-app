@@ -3,7 +3,7 @@
  * "send one channel to every open app window" broadcast pattern.
  *
  * Before this helper, every one-way main → renderer fan-out site
- * (`tour.ts` tour-start, `demo.ts` auth logout / reactivate, …)
+ * (`tour.ts` tour-start, settings updates, …)
  * re-derived the same loop:
  *
  *   const targets = deps.getAppWindows?.() ?? [deps.getMainWindow()];

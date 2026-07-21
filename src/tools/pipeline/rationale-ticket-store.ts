@@ -77,6 +77,7 @@ export type RationaleTicketStoreAuditOperation =
   | "transitioned"
   | "retired"
   | "allow-once-consumed"
+  | "reviewer-authorized-once-consumed"
   | "receipt-revoked"
   | "replay-rejected";
 
@@ -109,7 +110,7 @@ export interface InProcessRationaleTicketStoreOptions {
 
 export type RationaleTicketStoreTransitionEvent = Exclude<
   RationaleTicketEventName,
-  "allow-once"
+  "allow-once" | "reviewer-authorize-once"
 >;
 
 interface TicketTombstone {
@@ -304,8 +305,11 @@ export class InProcessRationaleTicketStore {
     outcomes?: RationaleTicketResolvedOutcomes | null;
     now?: number;
   }): HostRationaleTicketSnapshot | null {
-    if ((input.event as RationaleTicketEventName) === "allow-once") {
-      throw new TypeError("allow-once requires one-shot receipt consumption");
+    if ((input.event as RationaleTicketEventName) === "allow-once" ||
+        (input.event as RationaleTicketEventName) === "reviewer-authorize-once") {
+      throw new TypeError(
+        "allow-once and reviewer-authorize-once require one-shot receipt consumption",
+      );
     }
     const requestedNow = input.now ?? Date.now();
     assertFiniteNow(requestedNow);
@@ -429,6 +433,69 @@ export class InProcessRationaleTicketStore {
     );
     if (committed.ticket.state !== "allowed_once") {
       throw new Error("allow-once CAS failed to commit terminal state");
+    }
+    return receipt;
+  }
+
+  /**
+   * Reviewer auto-approve-on-aligned terminal. Mirrors {@link consumeAllowOnce}
+   * exactly — same one-shot receipt kind, same CAS/authenticity guarantees,
+   * same single-use terminal — but is minted by the host reviewer (fresh +
+   * aligned + non-high) instead of a user modal, and is driven from the
+   * `rationale_ready` state through the distinct `reviewer-authorize-once`
+   * transition so the store audit trail records the provenance. A second
+   * consume fails CAS because the first drives the ticket to its terminal
+   * `allowed_once` state.
+   */
+  consumeReviewerAuthorizedOnce(
+    expectation: RationaleTicketCasExpectation,
+    now = Date.now(),
+  ): HostConsumedAllowOnceReceipt | null {
+    assertFiniteNow(now);
+    now = this.#observeTimeAndPrune(now);
+    const entry = this.#resolveExpectation(expectation, now, "reviewer-authorize-once");
+    if (!entry) return null;
+
+    let ticket: RationaleTicketStateRecord;
+    try {
+      ticket = transitionRationaleTicket(
+        entry.ticket,
+        createRationaleTicketEvent(entry.control, "reviewer-authorize-once"),
+      );
+    } catch {
+      this.#retireUnexpected(entry, "stale-replay", now);
+      return null;
+    }
+
+    let receiptId = randomUUID();
+    while (this.#receipts.has(receiptId)) receiptId = randomUUID();
+    const receipt = seal({
+      contractVersion: RATIONALE_CONTROL_CONTRACT_VERSION,
+      kind: "host-consumed-allow-once-cas" as const,
+      receiptId,
+      ticketId: entry.control.ticketId,
+      actionDigest: entry.control.action.actionDigest,
+      invocationDigest: entry.control.invocationDigest,
+      consumedAt: now,
+      ticket,
+    }, "HostConsumedAllowOnceReceipt") as HostConsumedAllowOnceReceipt;
+    validateHostConsumedAllowOnceReceipt(receipt, entry.control, ticket, now);
+
+    const committed = this.#commitSnapshot(
+      entry,
+      ticket,
+      "reviewer-authorize-once",
+      now,
+      "reviewer-authorized-once-consumed",
+      receipt.receiptId,
+      {
+        sessionId: entry.sessionId,
+        expiresAt: entry.control.anchor.expiresAt,
+        receipt,
+      },
+    );
+    if (committed.ticket.state !== "allowed_once") {
+      throw new Error("reviewer-authorize-once CAS failed to commit terminal state");
     }
     return receipt;
   }
@@ -607,6 +674,7 @@ export class InProcessRationaleTicketStore {
     operation: Extract<
       RationaleTicketStoreAuditOperation,
       "transitioned" | "retired" | "allow-once-consumed"
+        | "reviewer-authorized-once-consumed"
     >,
     receiptId: string | null,
     receiptEntry?: AuthenticReceiptEntry,

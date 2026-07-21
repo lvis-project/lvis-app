@@ -20,7 +20,6 @@ function makeSettingsService(overrides: {
     get: vi.fn((key: string) => {
       if (key !== "llm") throw new Error(`unexpected settings key: ${key}`);
       return {
-        authMode: "manual",
         provider,
         vendors: {
           [provider]: {
@@ -546,7 +545,6 @@ describe("LLM model list sync", () => {
       get: vi.fn((key: string) => {
         if (key === "llm") {
           return {
-            authMode: "manual",
             provider: "openai-compatible",
             marketplaceProviderPresetId: "future-router",
             vendors: {
@@ -609,7 +607,6 @@ describe("LLM model list sync", () => {
       get: vi.fn((key: string) => {
         if (key === "llm") {
           return {
-            authMode: "manual",
             provider: "openai-compatible",
             marketplaceProviderPresetId: "local-router",
             vendors: {
@@ -691,7 +688,6 @@ describe("LLM model list sync", () => {
       get: vi.fn((key: string) => {
         if (key === "llm") {
           return {
-            authMode: "manual",
             provider: "openai-compatible",
             marketplaceProviderPresetId: "router-b",
             vendors: {
@@ -756,7 +752,6 @@ describe("LLM model list sync", () => {
       get: vi.fn((key: string) => {
         if (key === "llm") {
           return {
-            authMode: "manual",
             provider: "openai-compatible",
             marketplaceProviderPresetId: "future-router",
             vendors: {
@@ -812,7 +807,6 @@ describe("LLM model list sync", () => {
         if (key === "marketplace") return { installedProviderPresets: [] };
         if (key === "llm") {
           return {
-            authMode: "manual",
             provider: "openai-compatible",
             vendors: {
               "openai-compatible": {

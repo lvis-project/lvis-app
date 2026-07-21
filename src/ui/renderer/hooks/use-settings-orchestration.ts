@@ -27,8 +27,7 @@ export interface SettingsOrchestrationState {
   /**
    * Manual-mode host-resolver map text (/etc/hosts-style, one "IP host" per
    * line). Changes to this field require a relaunch — the UI calls
-   * `api.applyHostMap()` which persists + restarts. Only editable when
-   * `authMode === "manual"`.
+   * `api.applyHostMap()` which persists + restarts.
    */
   hostResolverMap: string;
   setHostResolverMap: (v: string) => void;
@@ -39,16 +38,6 @@ export interface SettingsOrchestrationState {
    * disabled so an Apply click can never trigger a needless relaunch.
    */
   loadedHostResolverMap: string;
-  /**
-   * #893 — Top-level auth mode, persisted in `llm.authMode`. ①안 — the
-   * settings Model tab is manual-only now (the login/demo toggle was removed);
-   * this value is hydrated from settings and drives only the LlmTab Account
-   * badge. `setAuthMode` is still used by hydration + the host-managed login
-   * IPC (LoginModal in AppDialogs / onboarding chain); an LLM save with a
-   * manual key persists `"manual"` (see `save()` → `effectiveAuthMode`).
-   */
-  authMode: "manual" | "login";
-  setAuthMode: (mode: "manual" | "login") => void;
   autoCompact: boolean;
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
   enableThinking: boolean;
@@ -120,7 +109,6 @@ export interface SettingsOrchestrationState {
    * entered the host-managed login flow. Used to stop stale manual-mode
    * payloads from landing after login owns provider/model/key state.
    */
-  invalidateLlmDraftSaves: () => void;
 
 
 
@@ -145,8 +133,6 @@ export function useSettingsOrchestration(
   const [loadedHostResolverMap, setLoadedHostResolverMap] = useState("");
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
-  // #893 — Top-level auth mode. Hydrated from `settings.llm.authMode`.
-  const [authMode, setAuthModeState] = useState<"manual" | "login">("manual");
   const [autoCompact, setAutoCompact] = useState(true);
   const [enableThinking, setEnableThinking] = useState(true);
   const [thinkingBudget, setThinkingBudget] = useState(10_000);
@@ -175,22 +161,6 @@ export function useSettingsOrchestration(
   const [settingsSnapshot, setSettingsSnapshot] = useState<AppSettings | null>(null);
   const hydratedVendorRef = useRef<string | null>(null);
   const hydratedWebProviderRef = useRef<string | null>(null);
-  const authModeRef = useRef<"manual" | "login">("manual");
-  const llmDraftGenerationRef = useRef(0);
-
-  const invalidateLlmDraftSaves = useCallback(() => {
-    llmDraftGenerationRef.current += 1;
-  }, []);
-
-  const setAuthMode = useCallback((mode: "manual" | "login") => {
-    authModeRef.current = mode;
-    if (mode === "login") {
-      invalidateLlmDraftSaves();
-      setKeyInput("");
-    }
-    setAuthModeState(mode);
-  }, [invalidateLlmDraftSaves]);
-
   const vendorInfo = getVendorOption(vendor);
 
   const activeCredentialProviderId =
@@ -226,11 +196,6 @@ export function useSettingsOrchestration(
       setVendor(provider);
       setMarketplaceProviderPresetId(providerPresetId);
       setMarketplaceProviderPresets(s.marketplace?.installedProviderPresets ?? []);
-      // #893 — top-level authMode hydration. Legacy installs (per-vendor
-      // authMode) were migrated up in the settings store at load time, so
-      // by the time the renderer reads `s.llm.authMode` the field is
-      // authoritative.
-      setAuthMode(s.llm.authMode === "login" ? "login" : "manual");
       hydrateVendorBlock(block);
       setStreamSmoothing(s.llm.streamSmoothing);
       setAutoCompact(s.chat.autoCompact ?? true);
@@ -249,7 +214,7 @@ export function useSettingsOrchestration(
       setSettingsLoaded(true);
     })();
     return () => { cancelled = true; };
-  }, [api, setAuthMode]);
+  }, [api]);
 
   // Stay in sync with cross-window settings broadcasts. Updating the snapshot
   // refreshes the cached source that the vendor-switch effect consults; the
@@ -268,17 +233,8 @@ export function useSettingsOrchestration(
           ? next.llm.marketplaceProviderPresetId ?? ""
           : "",
       );
-      if (next.llm.authMode === "login") {
-        const nextVendor = nextProvider;
-        const block = getLlmVendorSettings(next.llm.vendors, nextVendor);
-        hydratedVendorRef.current = nextVendor;
-        setVendor(nextVendor);
-        setAuthMode("login");
-        hydrateVendorBlock(block);
-        void api.hasApiKey(nextVendor).then((k) => setHasKey(k));
-      }
     });
-  }, [api, setAuthMode]);
+  }, [api]);
 
   // Re-hydrate every vendor-specific field when the active vendor changes.
   useEffect(() => {
@@ -304,9 +260,6 @@ export function useSettingsOrchestration(
     setVertexLocation(block.vertexLocation ?? "");
     setEnableThinking(block.enableThinking);
     setThinkingBudget(block.thinkingBudgetTokens);
-    // #893 — authMode is no longer per-vendor; the top-level value is set by
-    // the open-time snapshot read (see effect above) and survives vendor
-    // switches.
   }
 
   function hydrateLlmFromSettings(next: AppSettings): void {
@@ -322,7 +275,6 @@ export function useSettingsOrchestration(
     setVendor(nextVendor);
     setMarketplaceProviderPresetId(providerPresetId);
     setMarketplaceProviderPresets(next.marketplace?.installedProviderPresets ?? []);
-    setAuthMode(next.llm.authMode === "login" ? "login" : "manual");
     hydrateVendorBlock(block);
     setStreamSmoothing(next.llm.streamSmoothing);
     setFallbackChain(next.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
@@ -399,27 +351,14 @@ export function useSettingsOrchestration(
       return false;
     }
     const isLlmSave = tab === "llm";
-    const llmDraftGeneration = llmDraftGenerationRef.current;
     savingRef.current = true;
     setSaving(true);
     let ok = false;
     try {
       if (tab !== "permissions") {
         const secretUpdates: Array<Promise<unknown>> = [];
-        const latestAuthMode = authModeRef.current;
         const trimmedKeyInput = keyInput.trim();
-        // ①안 — the settings Model tab is manual-only now (the login/demo auth
-        // toggle was removed). Saving the LLM tab WITH a manual key commits
-        // manual mode, transitioning a former demo user (authMode="login") to
-        // their own key. Keyless LLM saves and non-LLM saves preserve the
-        // persisted authMode so a demo user who only tweaks an immediate-apply
-        // control (vendor / thinking) keeps their trial endpoint resolution.
-        const effectiveAuthMode: "manual" | "login" =
-          isLlmSave && trimmedKeyInput.length > 0 ? "manual" : latestAuthMode;
-        const shouldPersistLlmKey =
-          isLlmSave &&
-          effectiveAuthMode !== "login" &&
-          trimmedKeyInput.length > 0;
+        const shouldPersistLlmKey = isLlmSave && trimmedKeyInput.length > 0;
         if (webKeyInput.trim()) {
           secretUpdates.push(
             api.setWebApiKey(webProvider, webKeyInput.trim()).then(() => {
@@ -437,9 +376,6 @@ export function useSettingsOrchestration(
           );
         }
         await Promise.all(secretUpdates);
-        if (isLlmSave && llmDraftGeneration !== llmDraftGenerationRef.current) {
-          return false;
-        }
         const selectedMarketplaceProviderPreset =
           vendor === "openai-compatible" && marketplaceProviderPresetId
             ? marketplaceProviderPresets.find((preset) => preset.providerId === marketplaceProviderPresetId)
@@ -456,21 +392,13 @@ export function useSettingsOrchestration(
           thinkingBudgetTokens: thinkingBudget,
         };
         const llmPatch: DeepPartial<AppSettings["llm"]> = {
-          // #893 — top-level authMode persisted alongside provider. ①안 — an
-          // LLM save with a manual key commits manual mode (see effectiveAuthMode).
-          authMode: effectiveAuthMode,
           provider: vendor,
           marketplaceProviderPresetId:
             vendor === "openai-compatible" ? marketplaceProviderPresetId : "",
           streamSmoothing,
           fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider, model: e.model })),
         };
-        if (effectiveAuthMode !== "login") {
-          // In login mode, provider-specific fields are host-managed by the
-          // login IPC. Persisting the hidden manual draft here can race the
-          // login response and overwrite demo/model/baseUrl with stale values.
-          llmPatch.vendors = { [vendor]: activeBlock };
-        }
+        llmPatch.vendors = { [vendor]: activeBlock };
         const updateResult = await api.updateSettings({
           llm: llmPatch,
           webSearch: { provider: webProvider },
@@ -485,9 +413,6 @@ export function useSettingsOrchestration(
           throw new Error(formatIpcError(updateResult.error, updateResult.message));
         }
         if (shouldPersistLlmKey) {
-          if (llmDraftGeneration !== llmDraftGenerationRef.current) {
-            return false;
-          }
           await api.setApiKey(activeCredentialProviderId, trimmedKeyInput);
           setKeyInput("");
           setHasKey(true);
@@ -559,12 +484,10 @@ export function useSettingsOrchestration(
     lastSaveError,
     clearLastSaveError,
     hydrateLlmFromSettings,
-    invalidateLlmDraftSaves,
     vendor, setVendor,
     keyInput, setKeyInput,
     model, setModel,
     hasKey, setHasKey,
-    authMode, setAuthMode,
     hostResolverMap, setHostResolverMap,
     loadedHostResolverMap,
     autoCompact, setAutoCompact,

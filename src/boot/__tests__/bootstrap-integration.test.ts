@@ -333,20 +333,6 @@ vi.mock("../../main/notification-service.js", () => ({
   },
 }));
 vi.mock("../../main/safe-llm-fetch.js", () => ({ createSafeLlmFetch: vi.fn(() => vi.fn()) }));
-vi.mock("../../main/demo-credentials.js", () => ({
-  getDemoActiveVendor: vi.fn(() => "none"),
-  getDemoHostMap: vi.fn(() => ({})),
-  getDemoHostSubnet: vi.fn(() => undefined),
-  getDemoVendorConfig: vi.fn(() => null),
-}));
-vi.mock("../../main/plugin-network-fetch.js", () => ({
-  createPluginNetworkFetch: vi.fn(() => vi.fn()),
-}));
-vi.mock("../../main/demo-host-resolver.js", () => ({
-  demoFoundryHostMapFingerprint: vi.fn(() => null),
-  demoHostMapContainsHost: vi.fn(() => false),
-  getAppliedDemoHostResolverFingerprint: vi.fn(() => null),
-}));
 vi.mock("../../main/skill-store.js", () => ({
   SkillStore: class {
     listCatalogSync = vi.fn(() => []);

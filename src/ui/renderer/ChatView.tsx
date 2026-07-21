@@ -169,9 +169,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     [entries, viewMode],
   );
   // Empty-state centered composer applies once the boot key/readiness probe has
-  // resolved, including the no-key state. That keeps the new-session project
-  // selector and composer lift consistent while the no-key card remains in the
-  // transcript flow instead of an absolute overlay.
+  // resolved, including the no-key state. The no-key recovery affordance lives
+  // in the composer's utility strip and adds no layout height, so the centered
+  // composer keeps the same lift with or without a configured provider.
   const emptyComposerCentered =
     appMode === "work" &&
     hasAskQuestions === false &&

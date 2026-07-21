@@ -74,7 +74,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-path": "formatIpcError.invalidPath",
   "cannot-remove-default": "formatIpcError.cannotRemoveDefaultRoot",
   "not-an-additional-root": "formatIpcError.notAnAdditionalRoot",
-  "lifecycle-failed": "formatIpcError.persistFailed",
+  "persist-failed": "formatIpcError.writeFailed",
+  "lifecycle-failed": "formatIpcError.writeFailed",
 
   // ── Args / canonicalization ──
   "args-not-object": "formatIpcError.argsNotObject",
@@ -162,42 +163,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "no-reporter": "formatIpcError.noReporter",
   "no-starred-store": "formatIpcError.noStarredStore",
   "no-session-todo-store": "formatIpcError.noSessionTodoStore",
-  // ── #893 Auth mockup login ──
-  "invalid-credentials": "formatIpcError.invalidCredentials",
-  "invalid-vendor": "formatIpcError.invalidVendor",
   "provider-not-installed": "formatIpcError.providerNotInstalled",
   "unknown-provider": "formatIpcError.unknownProvider",
-  "no-demo-key": "formatIpcError.noDemoKey",
   "reviewer-rewire-failed": "formatIpcError.reviewerRewireFailed",
-  // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch surfaces this
-  // when setSecret / patch fails (disk full, Keychain locked, etc.).
-
-
-  "llm-key-issuing-failed": "formatIpcError.llmKeyIssuingFailed",
-  // ── Demo activation (lvis:demo:activate — 2026-05-19) ──
-  // The LoginModal carries its own activationErrorMessage() that prefers
-
-  // mappings exist for callers that surface IPC errors generically via
-  // formatIpcError() (e.g. inline error toasts).
-  "invalid-code": "formatIpcError.invalidCode",
-  "no-vendor": "formatIpcError.noVendor",
-  "missing-foundry-endpoint": "formatIpcError.missingFoundryEndpoint",
-  "persist-failed": "formatIpcError.persistFailed",
-  "not-armed": "formatIpcError.notArmed",
-  // Build-embedded activation key absent (lvis:demo:activate-embedded).
-  "no-embedded-code": "formatIpcError.noEmbeddedCode",
-  // #1498 — Azure Foundry endpoint unreachable (network-boundary failure
-  // during loginMockup's sandbox-preparing step) and local Ollama fallback
-  // (lvis:demo:activate-ollama) — the server that answered the login
-  // modal's probe is no longer reachable.
-  "endpoint-unreachable": "formatIpcError.endpointUnreachable",
-  "no-ollama": "formatIpcError.noOllama",
-
-  "clear-failed": "formatIpcError.clearFailed",
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
   "invalid-scenario-id": "formatIpcError.invalidScenarioId",
   "write-failed": "formatIpcError.writeFailed",
-  // ── Audit demo throttle (pre-existing in audit.ts) ──
+  // ── Audit sample throttle (pre-existing in audit.ts) ──
   "rate-limited": "formatIpcError.rateLimited",
 
   // ── MCP Apps — the card's own IPCs (mcp.callTool / mcp.uiMessage) ──
@@ -220,7 +192,6 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-foundry-endpoint": "formatIpcError.invalidFoundryEndpoint",
   "invalid-host-map": "formatIpcError.invalidHostMap",
   "host-map-requires-apply-host-map": "formatIpcError.hostMapRequiresApplyHostMap",
-  "auth-mode-not-manual": "formatIpcError.authModeNotManual",
   "open-failed": "formatIpcError.openFailed",
   "checkpoint-not-found": "formatIpcError.checkpointNotFound",
   "session-mismatch": "formatIpcError.sessionMismatch",

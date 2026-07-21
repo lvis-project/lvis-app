@@ -69,7 +69,7 @@ function makeServices() {
     pluginMarketplace: {
       // Marketplace list drives resolveMarketplaceActionTarget → installed:false
       // so the uninstall path shows the "not installed" info dialog and returns.
-      list: vi.fn(async () => [{ id: "demo-plugin", slug: "demo-plugin", name: "Demo", installed: false }]),
+      list: vi.fn(async () => [{ id: "test-plugin", slug: "test-plugin", name: "Test", installed: false }]),
     },
     mcpManager: { getConfigs: vi.fn(async () => []) },
   };
@@ -86,7 +86,7 @@ describe("handleLvisUri surfaces a hidden window (MAJOR-1)", () => {
     getServices.mockReturnValue(makeServices());
 
     const { handleLvisUri } = await import("../lvis-deep-link.js");
-    await handleLvisUri("lvis://uninstall/demo-plugin");
+    await handleLvisUri("lvis://uninstall/test-plugin");
 
     expect(showMainWindow).toHaveBeenCalledWith(win);
     // Existing live window → must NOT recreate one.
@@ -99,7 +99,7 @@ describe("handleLvisUri surfaces a hidden window (MAJOR-1)", () => {
     getServices.mockReturnValue(makeServices());
 
     const { handleLvisUri } = await import("../lvis-deep-link.js");
-    await handleLvisUri("lvis://mcp-login/demo-plugin");
+    await handleLvisUri("lvis://mcp-login/test-plugin");
 
     expect(showMainWindow).toHaveBeenCalledWith(win);
     expect(createWindow).not.toHaveBeenCalled();

@@ -83,9 +83,7 @@ vi.mock("electron", () => {
 
 import * as attach from "../domains/attach.js";
 import * as audit from "../domains/audit.js";
-import * as auth from "../domains/auth.js";
 import * as chat from "../domains/chat.js";
-import * as demo from "../domains/demo.js";
 import * as dev from "../domains/dev.js";
 import * as misc from "../domains/misc.js";
 import * as permissions from "../domains/permissions.js";
@@ -105,9 +103,7 @@ describe("IPC domain runtime named-export lock", () => {
     const exportsByDomain = {
       attach: keys(attach),
       audit: keys(audit),
-      auth: keys(auth),
       chat: keys(chat),
-      demo: keys(demo),
       dev: keys(dev),
       misc: keys(misc),
       permissions: keys(permissions),
@@ -128,18 +124,8 @@ describe("IPC domain runtime named-export lock", () => {
         "audit": [
           "registerAuditHandlers",
         ],
-        "auth": [
-          "demoKeyEnvVar",
-          "registerAuthHandlers",
-        ],
         "chat": [
           "registerChatHandlers",
-        ],
-        "demo": [
-          "AUTH_LOGOUT_RESET_CHANNEL",
-          "AUTH_REACTIVATE_DEMO_CHANNEL",
-          "injectDemoEnv",
-          "registerDemoHandlers",
         ],
         "dev": [
           "registerDevHandlers",

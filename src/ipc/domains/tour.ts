@@ -3,11 +3,6 @@
 
 
 import { ipcMain } from "electron";
-import { join } from "node:path";
-import {
-  openFeatureNamespace,
-  writeFileAtomicAtPath,
-} from "../../main/storage/feature-namespace.js";
 import { fanOutToAllWindows } from "../broadcast-helpers.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
@@ -21,15 +16,7 @@ import {
 } from "../../main/tour-state-store.js";
 import type { IpcDeps } from "../types.js";
 
-
-
-
-const ONBOARDING_CONTEXT_MAX_BYTES = 4 * 1024;
-
 const log = createLogger("tour-ipc");
-
-/** `~/.lvis/onboarding/` namespace — owns onboarding-context.md. */
-const onboardingNs = openFeatureNamespace("onboarding");
 
 export const TOUR_START_CHANNEL = CHANNELS.tour.start;
 
@@ -189,68 +176,4 @@ export function registerTourHandlers(deps: IpcDeps): void {
     },
   );
 
-  // Tutorial-X4 — write the renderer-synthesized onboarding context to
-  // `~/.lvis/onboarding/onboarding-context.md`. The system prompt builder
-  // (boot/conversation.ts) reads this file each turn and injects it as
-  // section id=9.86 "User Onboarding Context" when non-empty. Renderer
-  // calls this once after MemorySeedDialog dismissal with a brief markdown
-
-  // treated as "clear" (write empty string) — keeps the file present so a
-  // future read short-circuits cleanly.
-  ipcMain.handle(
-    CHANNELS.onboarding.contextSet,
-    async (
-      e,
-      payload: { content?: unknown },
-    ): Promise<
-      | { ok: true }
-      | { ok: false; error: string; message: string }
-    > => {
-      if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, CHANNELS.onboarding.contextSet, e);
-        return {
-          ok: false,
-          error: UNAUTHORIZED_FRAME.error,
-          message: "sender frame is not authorized",
-        };
-      }
-      const content = payload?.content;
-      if (typeof content !== "string") {
-        return {
-          ok: false,
-          error: "invalid-content",
-          message: "content must be a string",
-        };
-      }
-      if (Buffer.byteLength(content, "utf-8") > ONBOARDING_CONTEXT_MAX_BYTES) {
-        return {
-          ok: false,
-          error: "content-too-large",
-          message: `content exceeds ${ONBOARDING_CONTEXT_MAX_BYTES} bytes`,
-        };
-      }
-      try {
-        // Raw markdown (not JSON) lives in the `~/.lvis/onboarding/`
-        // namespace alongside tour-state.json. writeFileAtomicAtPath
-        // materializes the 0o700 directory and atomically writes the file
-        // 0o600 via the shared SOT helper, so the mode contract is never
-        // re-derived inline.
-        await writeFileAtomicAtPath(
-          join(onboardingNs.dir, "onboarding-context.md"),
-          content,
-        );
-        return { ok: true };
-      } catch (err) {
-        log.error(
-          { err: err instanceof Error ? err.message : String(err) },
-          "onboarding-context write failed",
-        );
-        return {
-          ok: false,
-          error: "write-failed",
-          message: err instanceof Error ? err.message : "unknown write failure",
-        };
-      }
-    },
-  );
 }
