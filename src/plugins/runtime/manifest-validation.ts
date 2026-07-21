@@ -163,11 +163,11 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
  * single load-time materializer now that no other consumer needs it.
  */
 function materializeManifest(manifest: PluginManifest): PluginManifest {
-  const DUAL: Array<"model" | "app"> = ["model", "app"];
+  const DUAL = ["model", "app"] as const;
   const tools = manifest.tools.map((t): Tool => {
     const vis = t._meta?.ui?.visibility;
     if (vis === undefined) {
-      return { ...t, _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: DUAL } } };
+      return { ...t, _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: [...DUAL] } } };
     }
     if (vis.length === 0) {
       throw new Error(
