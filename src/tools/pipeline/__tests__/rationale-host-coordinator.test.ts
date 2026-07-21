@@ -173,13 +173,17 @@ function setup(options: SetupOptions = {}) {
     readonly at: number;
   }> = [];
   const approvalRequests: Array<Omit<ApprovalRequest, "requireExplicit">> = [];
+  // Default reviewer is intentionally NOT auto-approve-eligible (scope
+  // "unclear"), so the many modal-path assertions below are unaffected by the
+  // reviewer auto-approve terminal. The auto-approve tests pass an explicit
+  // aligned reviewer via options.reviewer.
   const reviewer = options.reviewer ?? {
     async reevaluate(input) {
       return createReviewerScopeReevaluation({
         control: input.control,
         outcome: "fresh",
-        scopeAlignment: "aligned",
-        scopeReasons: ["the sealed target matches the direct request"],
+        scopeAlignment: "unclear",
+        scopeReasons: ["the sealed target scope could not be fully confirmed"],
         reevaluatedVerdict: {
           level: "medium",
           reason: "bounded destructive action remains medium",
@@ -1050,5 +1054,169 @@ describe("RationaleHostCoordinator", () => {
     )).toEqual([]);
     await expect(pending).resolves.toBeNull();
     expect(approvalGate.cancelPendingRationale).toHaveBeenCalledTimes(2);
+  });
+
+  function reviewerReturning(
+    scopeAlignment: "aligned" | "unclear" | "outside",
+    level: "low" | "medium" | "high",
+  ): RationaleScopeReviewer {
+    return {
+      async reevaluate(input) {
+        return createReviewerScopeReevaluation({
+          control: input.control,
+          outcome: "fresh",
+          scopeAlignment,
+          scopeReasons: ["scope re-evaluation reason"],
+          reevaluatedVerdict: { level, reason: "reviewer re-evaluated verdict" },
+          now: input.now,
+        });
+      },
+    } satisfies RationaleScopeReviewer;
+  }
+
+  async function runReadyRound(
+    state: ReturnType<typeof setup>,
+    materialized: ReturnType<typeof materialize>,
+  ) {
+    return state.coordinator.handleRationaleRoundResult({
+      ticketId: materialized.control.ticketId,
+      result: {
+        kind: "calls",
+        calls: [{
+          id: "rationale-call-1",
+          name: "permission_rationale",
+          input: responseFor(materialized.control),
+        }],
+      },
+      now: NOW + 1,
+    });
+  }
+
+  it("auto-approves an aligned non-high reviewer terminal without a modal", async () => {
+    const state = setup({ reviewer: reviewerReturning("aligned", "medium") });
+    const materialized = materialize(state);
+    const round = await runReadyRound(state, materialized);
+
+    expect(round).toMatchObject({
+      status: "ready",
+      generationOutcome: "accepted-rationale",
+      autoApproved: true,
+      reevaluation: { outcome: "fresh", scopeAlignment: "aligned" },
+      projection: {
+        rationaleStatus: "ready",
+        reevaluationOutcome: "fresh",
+        scopeAlignment: "aligned",
+        modalFallbackRequired: false,
+        terminalReason: "allowed-once",
+        autoApproved: true,
+      },
+    });
+    // No user modal was ever opened.
+    expect(state.approvalGate.requestAndWait).not.toHaveBeenCalled();
+    // Exactly one terminal projection audit, distinctly marked reviewer-auto.
+    expect(state.projectionAudits.map(({ projection }) => [
+      projection.terminalReason,
+      projection.autoApproved,
+    ])).toEqual([["allowed-once", true]]);
+    // The ticket is already terminal, so there is nothing left to prompt.
+    expect(state.ticketStore.get({
+      sessionId: materialized.control.anchor.sessionId,
+      ticketId: materialized.control.ticketId,
+      now: NOW + 1,
+    })).toBeNull();
+    expect(await state.coordinator.promptForApproval(
+      materialized.control.ticketId,
+      { now: NOW + 2 },
+    )).toBeNull();
+    expect(state.approvalGate.requestAndWait).not.toHaveBeenCalled();
+
+    // Execution still requires the host-minted one-shot receipt: the sealed
+    // resume is produced from the reviewer-authorized receipt, single-use.
+    const sealed = await state.coordinator.createSealedResume({
+      ticketId: materialized.control.ticketId,
+      currentEligibilityContext: eligibilityContext,
+      now: NOW + 3,
+    });
+    expect(sealed?.resumeRequest).toMatchObject({
+      kind: "sealed-rationale-resume",
+      actionDigest: materialized.action.actionDigest,
+      executionEntryPoint: "tool-executor-security-suffix",
+      directToolExecute: "forbidden",
+    });
+    expect(state.ticketStore.isAuthenticConsumedAllowOnceReceipt(
+      sealed!.hostConsumedAllowOnceReceipt,
+      NOW + 3,
+    )).toBe(true);
+    expect(await state.coordinator.createSealedResume({
+      ticketId: materialized.control.ticketId,
+      currentEligibilityContext: eligibilityContext,
+      now: NOW + 3,
+    })).toBeNull();
+  });
+
+  it.each(["low", "medium"] as const)(
+    "auto-approves aligned+%s and never opens the gate",
+    async (level) => {
+      const state = setup({ reviewer: reviewerReturning("aligned", level) });
+      const materialized = materialize(state);
+      const round = await runReadyRound(state, materialized);
+      expect(round?.autoApproved).toBe(true);
+      expect(state.approvalGate.requestAndWait).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["aligned", "high"],
+    ["outside", "medium"],
+    ["unclear", "medium"],
+  ] as const)(
+    "routes %s+%s to the user modal instead of auto-approving",
+    async (scopeAlignment, level) => {
+      const state = setup({ reviewer: reviewerReturning(scopeAlignment, level) });
+      const materialized = materialize(state);
+      const round = await runReadyRound(state, materialized);
+
+      expect(round).toMatchObject({
+        status: "ready",
+        autoApproved: false,
+        ticket: { ticket: { state: "user_pending" } },
+        projection: { autoApproved: false, terminalReason: null },
+      });
+      expect(state.approvalGate.requestAndWait).not.toHaveBeenCalled();
+
+      const approval = await state.coordinator.promptForApproval(
+        materialized.control.ticketId,
+        { now: NOW + 2 },
+      );
+      expect(approval).toMatchObject({
+        outcome: "allowed-once",
+        ticket: { state: "allowed_once", terminalReason: "allowed-once" },
+      });
+      expect(state.approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+      // The user allow-once terminal is provenance-distinct from reviewer-auto.
+      expect(state.projectionAudits.map(({ projection }) => [
+        projection.terminalReason,
+        projection.autoApproved,
+      ])).toEqual([[null, false], ["allowed-once", false]]);
+    },
+  );
+
+  it("fails closed and exposes no receipt when the auto-approve audit cannot commit", async () => {
+    const state = setup({
+      reviewer: reviewerReturning("aligned", "medium"),
+      onProjectionAudit: () => {
+        throw new Error("auto-approve projection audit unavailable");
+      },
+    });
+    const materialized = materialize(state);
+
+    await expect(runReadyRound(state, materialized))
+      .rejects.toThrow(/auto-approve projection audit unavailable/);
+    expect(state.approvalGate.requestAndWait).not.toHaveBeenCalled();
+    expect(await state.coordinator.createSealedResume({
+      ticketId: materialized.control.ticketId,
+      currentEligibilityContext: eligibilityContext,
+      now: NOW + 3,
+    })).toBeNull();
   });
 });
