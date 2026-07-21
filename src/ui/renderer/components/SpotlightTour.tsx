@@ -528,7 +528,7 @@ export function SpotlightTour({
         data-testid="spotlight-tour:card"
         data-step-index={stepIndex}
         // Y2 — slide-up + fade entrance keyframe smooths the hand-off
-        // from MemorySeedDialog → SpotlightTour so the
+        // into the SpotlightTour so the
         // tour card doesn't pop into place. The shared `lvis-anim-slide-up`
         // utility collapses to opacity-only fade under
         // prefers-reduced-motion (styles.css §290).

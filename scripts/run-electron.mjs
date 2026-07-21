@@ -34,13 +34,8 @@ if (!env.LVIS_DEV_CONSOLE) {
 // so a packaged binary that inherits LVIS_WIN_NO_SANDBOX=1 still keeps
 // Chromium sandboxing.
 //
-// The shared helper also auto-loads `.env.demo` from the repo root when present
-// and forces UTF-8 subprocess defaults. Dev and start launchers intentionally
-// use the same helper/order so `.env.demo` cannot affect Electron flags
-// differently across validation paths.
-prepareElectronLaunchEnv(env, {
-  demoEnvRoot: repoRoot,
-});
+// The shared helper applies platform launch flags and UTF-8 subprocess defaults.
+prepareElectronLaunchEnv(env);
 
 // Windows corp PCs often run Electron under EDR/AV sandboxing + restricted
 // GPU drivers (Hyper-V isolation / VDI / locked-down ANGLE). Under those

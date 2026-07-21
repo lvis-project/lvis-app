@@ -399,10 +399,8 @@ export function isMarketplaceEligibleLLMVendor(
  * default elsewhere without updating the narrower would otherwise drift
  * silently.
  *
- * Fresh installs stay on the default-visible provider surface. Internal demo
- * builds still use `LVIS_DEMO_VENDOR` via `getDemoActiveVendor()` in
- * `demo-credentials.ts`; that env override should not force marketplace-only
- * providers into every user's first-run settings file.
+ * Fresh installs stay on the default-visible provider surface so optional
+ * marketplace providers are not materialized until selected or installed.
  */
 export const DEFAULT_LLM_VENDOR: LLMVendor = "openai";
 
@@ -499,11 +497,6 @@ export function canUseLlmVendorWithoutApiKey(
  *   or ignore these sampling/decoding params. Vendor SDK defaults are used.
  *   Persisted values for these keys are silently dropped on next write.
  *
- * CHANGELOG (#893 top-level authMode promotion):
- *   Removed `authMode` — login now wraps vendor selection itself (one switch
- *   for the whole app, not per-vendor). The top-level `LLMSettings.authMode`
- *   is the new source of truth. Legacy per-vendor `authMode` keys on disk
- *   are migrated up in `loadSettings()` and dropped on next write.
  */
 export interface LLMVendorSettings {
   model: string;

@@ -94,7 +94,7 @@ const MAX_PROMPT_LEN = 4096;
  * `dedupeKey` (or rotates it per call) is otherwise unbounded and could
  * stage N concurrent overlay prompts. Token bucket capped at 6 calls / 60
  * seconds per plugin (sustained), with
- * burst of 3 — picked so the demo scenarios (one-meeting-mail, one-task-
+ * burst of 3 — picked so the sample scenarios (one-meeting-mail, one-task-
  * deadline) do not throttle but a tight loop adversary is stopped early.
  */
 export const TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS = 60_000;
