@@ -769,6 +769,7 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
       expect.objectContaining({
         method: "POST",
         body: "{}",
+        allowPrivateNetworks: false,
         allowLoopback: false,
         maxRedirects: 0,
         fetchImpl: expect.any(Function),
