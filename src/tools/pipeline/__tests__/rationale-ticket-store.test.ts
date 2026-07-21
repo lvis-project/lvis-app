@@ -300,6 +300,74 @@ describe("InProcessRationaleTicketStore", () => {
     });
   });
 
+  it("issues exactly one reviewer-authorized-once receipt straight from rationale_ready", () => {
+    const audit: RationaleTicketStoreAuditEvent[] = [];
+    const store = new InProcessRationaleTicketStore({
+      onAudit: (event) => audit.push(event),
+    });
+    const control = fixture("session-reviewer-auto", "reviewer-auto");
+    const requested = required(store.requestRationale(
+      createRationaleTicketCasExpectation(createStored(store, control)),
+      NOW + 1,
+    ));
+    const ready = required(store.markRationaleReady(
+      createRationaleTicketCasExpectation(requested),
+      { generationOutcome: "accepted-rationale", reevaluationOutcome: "fresh" },
+      NOW + 2,
+    ));
+
+    // The one-shot terminal cannot be driven through the generic transition API.
+    expect(() => store.transition({
+      expectation: createRationaleTicketCasExpectation(ready),
+      event: "reviewer-authorize-once" as never,
+      now: NOW + 3,
+    })).toThrow(/one-shot receipt/);
+
+    const expectation = createRationaleTicketCasExpectation(ready);
+    const receipt = store.consumeReviewerAuthorizedOnce(expectation, NOW + 3);
+    expect(receipt).not.toBeNull();
+    validateHostConsumedAllowOnceReceipt(
+      receipt as HostConsumedAllowOnceReceipt,
+      control,
+      (receipt as HostConsumedAllowOnceReceipt).ticket,
+      NOW + 3,
+    );
+    expect(receipt).toMatchObject({
+      kind: "host-consumed-allow-once-cas",
+      ticketId: control.ticketId,
+      actionDigest: control.action.actionDigest,
+      invocationDigest: control.invocationDigest,
+      ticket: {
+        state: "allowed_once",
+        terminalReason: "allowed-once",
+        rationaleStatus: "ready",
+      },
+    });
+    expect(store.isAuthenticConsumedAllowOnceReceipt(
+      receipt as HostConsumedAllowOnceReceipt,
+      NOW + 3,
+    )).toBe(true);
+    expect(store.get({
+      sessionId: "session-reviewer-auto",
+      ticketId: control.ticketId,
+      now: NOW + 3,
+    })).toBeNull();
+
+    // Single-use: a second consume fails CAS (the ticket is already terminal).
+    expect(store.consumeReviewerAuthorizedOnce(expectation, NOW + 4)).toBeNull();
+    expect(audit.filter((event) =>
+      event.operation === "reviewer-authorized-once-consumed"))
+      .toHaveLength(1);
+    expect(audit.some((event) =>
+      event.operation === "reviewer-authorized-once-consumed" &&
+      event.event === "reviewer-authorize-once")).toBe(true);
+    expect(audit.at(-1)).toMatchObject({
+      operation: "replay-rejected",
+      event: "stale-replay",
+    });
+    expectAuditPayloadsAreSafe(audit);
+  });
+
   it("handles failed rationale, deny, cancel, and expiry as terminal cleanup", () => {
     const store = new InProcessRationaleTicketStore({ onAudit: () => {} });
 

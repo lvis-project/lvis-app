@@ -122,7 +122,7 @@ function equal(left: unknown, right: unknown): boolean {
 
 export type RationaleTicketEventName =
   | "request-rationale" | "rationale-ready" | "rationale-failed" | "prompt-user"
-  | "allow-once" | "deny" | "cancel" | "modal-timeout" | "abort"
+  | "allow-once" | "reviewer-authorize-once" | "deny" | "cancel" | "modal-timeout" | "abort"
   | "session-close" | "identity-mismatch" | "stale-replay" | "expire";
 
 export interface RationaleTicketEvent {
@@ -149,8 +149,8 @@ const TERMINAL_STATES: readonly RationaleTicketState[] = [
 
 const EVENT_NAMES: readonly RationaleTicketEventName[] = [
   "request-rationale", "rationale-ready", "rationale-failed", "prompt-user",
-  "allow-once", "deny", "cancel", "modal-timeout", "abort", "session-close",
-  "identity-mismatch", "stale-replay", "expire",
+  "allow-once", "reviewer-authorize-once", "deny", "cancel", "modal-timeout",
+  "abort", "session-close", "identity-mismatch", "stale-replay", "expire",
 ];
 
 export function createRationaleReviewRequiredRecord(
@@ -400,6 +400,13 @@ export function transitionRationaleTicket(
       return next(record, "user_pending", record.rationaleStatus,
         record.generationOutcome, record.reevaluationOutcome, null);
     case "user_pending:allow-once":
+      return next(record, "allowed_once", record.rationaleStatus,
+        record.generationOutcome, record.reevaluationOutcome, "allowed-once");
+    case "rationale_ready:reviewer-authorize-once":
+      // The reviewer auto-approve terminal skips user_pending entirely: it
+      // moves a fresh, aligned, non-high rationale straight to the same
+      // one-shot allowed_once terminal that a user allow-once produces, so the
+      // sealed-resume/allow-once receipt path downstream is unchanged.
       return next(record, "allowed_once", record.rationaleStatus,
         record.generationOutcome, record.reevaluationOutcome, "allowed-once");
     case "user_pending:deny":

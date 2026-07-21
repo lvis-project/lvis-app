@@ -18,6 +18,7 @@ import {
   createRationaleOnlyRoundContract,
   createReviewerScopeReevaluation,
   evaluateRationaleOnlyBatch,
+  isReviewerAutoApproveEligible,
   validateRationaleOnlyBatchDecision,
   validateReviewerScopeReevaluation,
 } from "../rationale-pr1-contract.js";
@@ -431,6 +432,64 @@ describe("reviewer-owned scope reevaluation", () => {
   });
 });
 
+describe("isReviewerAutoApproveEligible", () => {
+  const fresh = (
+    scopeAlignment: "aligned" | "unclear" | "outside",
+    level: "low" | "medium" | "high",
+  ) => createReviewerScopeReevaluation({
+    control: fixture(), outcome: "fresh", scopeAlignment,
+    scopeReasons: ["scope reason"],
+    reevaluatedVerdict: { level, reason: "reviewer verdict" }, now: NOW,
+  });
+
+  it.each([
+    ["aligned", "low", true],
+    ["aligned", "medium", true],
+    ["aligned", "high", false],
+    ["unclear", "low", false],
+    ["unclear", "medium", false],
+    ["unclear", "high", false],
+    ["outside", "low", false],
+    ["outside", "medium", false],
+    ["outside", "high", false],
+  ] as const)(
+    "fresh %s + %s reevaluated verdict → %s",
+    (scopeAlignment, level, expected) => {
+      expect(isReviewerAutoApproveEligible(fresh(scopeAlignment, level)))
+        .toBe(expected);
+    },
+  );
+
+  it.each([
+    "unavailable", "error", "timeout", "malformed", "sandbox-state-changed",
+  ] as const)("non-fresh reviewer failure %s → false", (outcome) => {
+    const reevaluation = createReviewerScopeReevaluation({
+      control: fixture(), outcome, now: NOW,
+    });
+    // Failure outcomes force scopeAlignment "unknown" and re-carry the initial
+    // verdict; the predicate never auto-approves them (fail-closed → modal).
+    expect(reevaluation.scopeAlignment).toBe("unknown");
+    expect(isReviewerAutoApproveEligible(reevaluation)).toBe(false);
+  });
+
+  it("gates on reevaluatedVerdict, not effectiveVerdict", () => {
+    // effectiveVerdict = max(initial, reevaluated). Construct a case where they
+    // diverge (reevaluated below the sealed effectiveVerdict) and confirm the
+    // predicate follows reevaluatedVerdict, never the composed effectiveVerdict.
+    const control = fixture();
+    const reevaluation = createReviewerScopeReevaluation({
+      control, outcome: "fresh", scopeAlignment: "aligned",
+      scopeReasons: ["in scope"],
+      reevaluatedVerdict: { level: "low", reason: "narrower than initial" },
+      now: NOW,
+    });
+    expect(reevaluation.reevaluatedVerdict.level).toBe("low");
+    expect(reevaluation.effectiveVerdict.level).toBe("medium");
+    expect(reevaluation.effectiveVerdict).not.toEqual(reevaluation.reevaluatedVerdict);
+    expect(isReviewerAutoApproveEligible(reevaluation)).toBe(true);
+  });
+});
+
 describe("ticket/action-bound lifecycle truth table", () => {
   it("covers every state × event pair and preserves failed→user_pending", () => {
     const control = fixture();
@@ -453,16 +512,18 @@ describe("ticket/action-bound lifecycle truth table", () => {
     };
     const events: readonly RationaleTicketEventName[] = [
       "request-rationale", "rationale-ready", "rationale-failed", "prompt-user",
-      "allow-once", "deny", "cancel", "modal-timeout", "abort", "session-close",
-      "identity-mismatch", "stale-replay", "expire",
+      "allow-once", "reviewer-authorize-once", "deny", "cancel", "modal-timeout",
+      "abort", "session-close", "identity-mismatch", "stale-replay", "expire",
     ];
     const universal = new Set<RationaleTicketEventName>([
       "abort", "session-close", "identity-mismatch", "stale-replay", "expire",
     ]);
+    // The reviewer auto-approve terminal moves rationale_ready straight to
+    // allowed_once, so reviewer-authorize-once is legal only from that state.
     const specific: Record<string, readonly RationaleTicketEventName[]> = {
       review_required: ["request-rationale"],
       rationale_requested: ["rationale-ready", "rationale-failed"],
-      rationale_ready: ["prompt-user"],
+      rationale_ready: ["prompt-user", "reviewer-authorize-once"],
       rationale_failed: ["prompt-user"],
       user_pending: ["allow-once", "deny", "cancel", "modal-timeout"],
       allowed_once: [], denied: [], cancelled: [], expired: [], rejected: [],
