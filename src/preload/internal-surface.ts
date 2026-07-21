@@ -291,97 +291,6 @@ export function buildInternalApiSurface() {
   // This can trigger a provider-backed LLM call, so it is intentionally kept
   // out of the externally-parity-safe public surface and local API allowlist.
   getUsageDailySummary: async (input: unknown) => ipcRenderer.invoke(CHANNELS.usage.dailySummary, input),
-  // #893 — top-level mockup credential login. Hard-coded `demo`/`demo123`
-  // (env override via `LVIS_DEMO_USER` / `LVIS_DEMO_PASS`). Vendor is no
-  // longer sent by the renderer; the backend picks via `LVIS_DEMO_VENDOR`
-  // (default `"openai"`) and reports it back on success along with the
-  // applied baseUrl/model/vertex config.
-  loginMockup: async (payload: { username: string; password: string }) =>
-    ipcRenderer.invoke(CHANNELS.auth.loginMockup, payload) as Promise<
-      | {
-          ok: true;
-          vendor: string;
-          model?: string;
-          baseUrl?: string;
-          vertexProject?: string;
-          vertexLocation?: string;
-          fieldsApplied: string[];
-        }
-      | { ok: false; error: string }
-    >,
-  // Tutorial-X1 — Auth progress IPC. The host emits `lvis:auth:progress`
-  // events at each real step of `loginMockup` (credentials-validating →
-  // llm-key-issuing → sandbox-preparing → complete) so the LoginModal
-  // checklist animates against actual main-process work instead of a
-  // renderer `setTimeout` illusion. Channel is one-way (main → renderer);
-  // each event payload is `{ step, status, vendor?, error? }` where
-  // `step`/`status` are kebab-case English (CLAUDE.md error-language).
-  auth: {
-    onProgress: (
-      handler: (event: {
-        step: "credentials-validating" | "llm-key-issuing" | "sandbox-preparing" | "complete";
-        status: "running" | "done" | "failed";
-        vendor?: string;
-        error?: string;
-      }) => void,
-    ) => {
-      const validSteps = new Set([
-        "credentials-validating",
-        "llm-key-issuing",
-        "sandbox-preparing",
-        "complete",
-      ]);
-      const validStatuses = new Set(["running", "done", "failed"]);
-      const listener = (
-        _event: unknown,
-        payload: {
-          step?: unknown;
-          status?: unknown;
-          vendor?: unknown;
-          error?: unknown;
-        },
-      ) => {
-        const step = payload?.step;
-        const status = payload?.status;
-        if (typeof step !== "string" || !validSteps.has(step)) return;
-        if (typeof status !== "string" || !validStatuses.has(status)) return;
-        handler({
-          step: step as
-            | "credentials-validating"
-            | "llm-key-issuing"
-            | "sandbox-preparing"
-            | "complete",
-          status: status as "running" | "done" | "failed",
-          ...(typeof payload?.vendor === "string" ? { vendor: payload.vendor } : {}),
-          ...(typeof payload?.error === "string" ? { error: payload.error } : {}),
-        });
-      };
-      ipcRenderer.on(CHANNELS.auth.progress, listener);
-      return () => ipcRenderer.removeListener(CHANNELS.auth.progress, listener);
-    },
-
-
-    broadcastLogoutReset: async () =>
-      ipcRenderer.invoke(CHANNELS.auth.logoutBroadcast) as Promise<
-        | { ok: true }
-        | { ok: false; error: "unauthorized-frame" }
-      >,
-    broadcastReactivateDemo: async () =>
-      ipcRenderer.invoke(CHANNELS.auth.reactivateBroadcast) as Promise<
-        | { ok: true }
-        | { ok: false; error: "unauthorized-frame" }
-      >,
-    onLogoutReset: (handler: () => void) => {
-      const listener = () => handler();
-      ipcRenderer.on(CHANNELS.auth.logoutReset, listener);
-      return () => ipcRenderer.removeListener(CHANNELS.auth.logoutReset, listener);
-    },
-    onReactivateDemo: (handler: () => void) => {
-      const listener = () => handler();
-      ipcRenderer.on(CHANNELS.auth.reactivateDemo, listener);
-      return () => ipcRenderer.removeListener(CHANNELS.auth.reactivateDemo, listener);
-    },
-  },
   // ─── Interactive PTY terminal (#1444) ────────────────
   // Host-renderer-only surface. spawn/input/resize/kill are invokes; onData /
   // onExit subscribe to main→renderer events and return an unsubscribe fn (the
@@ -471,80 +380,6 @@ export function buildInternalApiSurface() {
       return () => ipcRenderer.removeListener(CHANNELS.sidechat.fallback, listener);
     },
   },
-  /**
-   * Demo activation bridge. `status` reads main's captured demo state after
-   * packaged env scrub. `activate` receives a pasted `LVIS-DEMO:v1:<...>`
-   * activation string, decrypts it back into the original `.env.demo`
-   * payload, persists it under `~/.lvis/secrets/.env.demo` (0o600), and
-   * re-runs the demo-credentials capture. First activation then relaunches;
-   * a later chip 1 click sees `status.activated=true` and invokes
-   * `loginMockup`.
-   *
-   * Error codes (kebab-case English per CLAUDE.md):
-   *   - `invalid-code`     bad prefix, corrupt base64, auth-tag mismatch,
-   *                        or empty input.
-   *   - `no-vendor`        decrypted payload missing `LVIS_DEMO_VENDOR`.
-   *   - `invalid-vendor`   decrypted payload has an unknown `LVIS_DEMO_VENDOR`.
-   *   - `no-demo-key`      decrypted payload missing the active vendor key.
-   *   - `missing-foundry-endpoint` Azure Foundry endpoint missing.
-   *   - `invalid-foundry-endpoint` Azure Foundry endpoint rejected by the
-   *                        shared endpoint validator.
-   *   - `missing-foundry-host-map` Azure Foundry private endpoint host map missing.
-   *   - `foundry-host-map-mismatch` Azure Foundry endpoint host not mapped.
-   *   - `invalid-foundry-host-map-target` host map target outside approved subnet.
-   *   - `persist-failed`   filesystem write failure (permission/disk).
-   *   - `unauthorized-frame` rejected sender frame (shared with gated IPC).
-   * The renderer translates each into the Korean user-facing message.
-   */
-  demo: {
-    status: async () =>
-      ipcRenderer.invoke(CHANNELS.demo.status) as Promise<
-        | {
-            ok: true;
-            activated: boolean;
-            vendor: string | null;
-            autoActivatable: boolean;
-            ollamaAvailable: boolean;
-          }
-        | { ok: false; error: "unauthorized-frame" }
-      >,
-    activate: async (code: string) =>
-      ipcRenderer.invoke(CHANNELS.demo.activate, { code }) as Promise<
-        | { ok: true; vendor: string; requiresRelaunch?: boolean }
-        | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
-      >,
-    // Embedded activation — same decrypt→validate→persist chain as
-    // `activate`, but the code string is the build-time embedded key
-    // (`status.autoActivatable === true` advertises it). `no-embedded-code`
-    // routes the renderer back to the manual paste input.
-    activateEmbedded: async () =>
-      ipcRenderer.invoke(CHANNELS.demo.activateEmbedded) as Promise<
-        | { ok: true; vendor: string; requiresRelaunch?: boolean }
-        | { ok: false; error: "no-embedded-code" | "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
-      >,
-    // #1498 — local Ollama fallback. `status.ollamaAvailable === true`
-    // advertises a reachable local server; this re-probes before
-    // configuring the vendor so a server stopped between the status check
-    // and the click fails closed with `no-ollama` instead of silently
-    // switching to a dead endpoint.
-    activateOllama: async () =>
-      ipcRenderer.invoke(CHANNELS.demo.activateOllama) as Promise<
-        | { ok: true; vendor: "ollama" }
-        | { ok: false; error: "no-ollama" | "unauthorized-frame" }
-      >,
-    relaunchAfterActivation: async () =>
-      ipcRenderer.invoke(CHANNELS.demo.relaunchAfterActivation) as Promise<
-        | { ok: true }
-        | { ok: false; error: "not-armed" | "unauthorized-frame" }
-      >,
-
-
-    clearDemo: async () =>
-      ipcRenderer.invoke(CHANNELS.demo.clear) as Promise<
-        | { ok: true }
-        | { ok: false; error: "clear-failed" | "unauthorized-frame" }
-      >,
-  },
   // Tutorial-C — SpotlightTour state bridge. Host stores tour completion
   // under `~/.lvis/onboarding/tour-state.json`; `tour.start` broadcasts a
   // `lvis:tour:start` event to every open window so detached panes also
@@ -606,42 +441,6 @@ export function buildInternalApiSurface() {
       return () => ipcRenderer.removeListener(CHANNELS.tour.start, listener);
     },
   },
-  // Memory Seed plugin install bridge.
-  // Delegates to the canonical `lvis:plugins:install` IPC (same handler
-  // the marketplace UI uses); the renderer wraps the response so onboarding
-  // dialogs can react to success/failure without depending on the marketplace
-  // `PluginMarketplaceActionResult` schema. Errors come back as kebab-case
-  // English (CLAUDE.md).
-  tutorialInstallPlugin: async (pluginId: string) => {
-    const raw = (await ipcRenderer.invoke(
-      CHANNELS.plugins.install,
-      pluginId,
-    )) as {
-      ok?: boolean;
-      pluginId?: string;
-      error?: string;
-      message?: string;
-    } | null;
-    if (raw && raw.ok === true && typeof raw.pluginId === "string") {
-      return { ok: true as const, pluginId: raw.pluginId };
-    }
-    return {
-      ok: false as const,
-      error: typeof raw?.error === "string" ? raw.error : "install-failed",
-      message: typeof raw?.message === "string" ? raw.message : "plugin install failed",
-    };
-  },
-  // Tutorial-X4 — Onboarding Context writer. Called once by the renderer
-  // after the Memory Seed wizard dismisses with a short markdown block
-
-  // under `~/.lvis/onboarding/onboarding-context.md`; the SystemPromptBuilder
-  // then injects it as section id=9.86 "User Onboarding Context" on each
-  // subsequent turn until the user clears it.
-  onboardingContextSet: async (content: string) =>
-    ipcRenderer.invoke(CHANNELS.onboarding.contextSet, { content }) as Promise<
-      | { ok: true }
-      | { ok: false; error: string; message: string }
-    >,
   // Settings no longer detaches to its own BrowserWindow — this IPC now routes
   // the main process to the INLINE settings panel (view:activate → settings).
   // Kept as a bridge for defence-in-depth; no window id is produced anymore.
@@ -1944,12 +1743,6 @@ export function buildLvisNamespaceExtras() {
     debugStream:
       process.env.VITE_DEBUG_STREAM === "1" ||
       process.env.LVIS_DEBUG_STREAM === "1",
-    /**
-     * Legacy dev/debug surface only. Demo activation decisions now use
-     * `api.demo.status()` because packaged builds scrub `LVIS_DEMO_*`
-     * before preload inherits env.
-     */
-    demoVendor: typeof process.env.LVIS_DEMO_VENDOR === "string" ? process.env.LVIS_DEMO_VENDOR : null,
   },
   attach: {
     openFile: () => ipcRenderer.invoke(CHANNELS.attach.openFile),

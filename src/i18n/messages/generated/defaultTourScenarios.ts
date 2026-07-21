@@ -1,8 +1,8 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/onboarding/default-tour-scenarios.ts. Do not edit by hand.
 export const en = {
   "defaultTourScenarios.firstBootTitle": "LVIS Getting Started Guide",
-  "defaultTourScenarios.firstBootStep1Title": "Step 1 · Type freely in Korean",
-  "defaultTourScenarios.firstBootStep1Body": "This text box is where your conversation with LVIS begins. Type freely in Korean and LVIS will respond. To stop an in-progress answer, press ⌘+Enter. Try typing a line now — the tour will advance automatically once input is detected.",
+  "defaultTourScenarios.firstBootStep1Title": "Step 1 · Start a conversation",
+  "defaultTourScenarios.firstBootStep1Body": "This text box is where your conversation with LVIS begins. Write in the language you prefer. To stop an in-progress answer, press ⌘+Enter. Try typing a line now — the tour will advance automatically once input is detected.",
   "defaultTourScenarios.firstBootStep2Title": "Step 2 · Tools always require your approval",
   "defaultTourScenarios.firstBootStep2Body": "Whenever LVIS reads a file or runs a command, an approval card appears in this area. Once you allow or deny an action, that decision is remembered for the current session so the same tool won't ask again.",
   "defaultTourScenarios.firstBootStep3Title": "Step 3 · ⌘+K Command Palette",
@@ -64,7 +64,7 @@ export const en = {
   "defaultTourScenarios.indexerWalkthroughStep2Title": "Indexing progress status",
   "defaultTourScenarios.indexerWalkthroughStep2Body": "You can check the file count, PII masking results, and the last sync timestamp.",
   "defaultTourScenarios.indexerWalkthroughStep3Title": "Natural language search",
-  "defaultTourScenarios.indexerWalkthroughStep3Body": "Enter natural language like \"Q2 security policy\" and Korean RRF finds the most relevant paragraphs.",
+  "defaultTourScenarios.indexerWalkthroughStep3Body": "Enter natural language like \"Q2 security policy\" and relevance ranking finds the most relevant paragraphs.",
   "defaultTourScenarios.indexerWalkthroughStep4Title": "Use together with chat",
   "defaultTourScenarios.indexerWalkthroughStep4Body": "You can also say 'search the documents' directly in chat and the indexer will be incorporated into the response.",
   "defaultTourScenarios.workAssistantWalkthroughTitle": "Work Assistant Walkthrough",
@@ -79,8 +79,8 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "defaultTourScenarios.firstBootTitle": "LVIS 첫 사용 안내",
-  "defaultTourScenarios.firstBootStep1Title": "1단계 · 한국어로 자유롭게 입력",
-  "defaultTourScenarios.firstBootStep1Body": "이 텍스트 박스가 LVIS 와 대화하는 시작점입니다. 한국어로 자유롭게 입력하면 LVIS 가 답하고, 진행 중인 답을 멈추려면 ⌘+Enter 를 누르세요. 지금 한 줄 적어보세요 — 입력이 감지되면 다음 단계로 자동 이동합니다.",
+  "defaultTourScenarios.firstBootStep1Title": "1단계 · 대화 시작",
+  "defaultTourScenarios.firstBootStep1Body": "이 텍스트 박스에서 LVIS와 대화를 시작합니다. 편한 언어로 입력하세요. 진행 중인 답을 멈추려면 ⌘+Enter를 누르세요. 지금 한 줄 적어보세요 — 입력이 감지되면 다음 단계로 자동 이동합니다.",
   "defaultTourScenarios.firstBootStep2Title": "2단계 · 도구는 항상 사용자 승인",
   "defaultTourScenarios.firstBootStep2Body": "LVIS 가 파일을 읽거나 명령을 실행할 때마다 승인 카드가 이 영역에 표시됩니다. 한 번 허용/거부하면 그 결정이 현재 세션에 기억되어 같은 도구는 다시 묻지 않습니다.",
   "defaultTourScenarios.firstBootStep3Title": "3단계 · ⌘+K 명령 팔레트",
@@ -142,7 +142,7 @@ export const ko: Record<keyof typeof en, string> = {
   "defaultTourScenarios.indexerWalkthroughStep2Title": "인덱싱 진행 상태",
   "defaultTourScenarios.indexerWalkthroughStep2Body": "파일 수, PII 마스킹 결과, 마지막 동기화 시각을 확인할 수 있어요.",
   "defaultTourScenarios.indexerWalkthroughStep3Title": "자연어 검색",
-  "defaultTourScenarios.indexerWalkthroughStep3Body": "\"Q2 보안 정책\" 같은 자연어를 입력하면 한국어 RRF 가 가장 관련성 높은 문단을 찾아옵니다.",
+  "defaultTourScenarios.indexerWalkthroughStep3Body": "\"Q2 보안 정책\" 같은 자연어를 입력하면 관련성 순위가 가장 적합한 문단을 찾아옵니다.",
   "defaultTourScenarios.indexerWalkthroughStep4Title": "채팅과 함께 사용",
   "defaultTourScenarios.indexerWalkthroughStep4Body": "채팅에서 직접 '문서 검색해줘' 라고 말해도 인덱서가 답변에 결합됩니다.",
   "defaultTourScenarios.workAssistantWalkthroughTitle": "업무 도우미 둘러보기",

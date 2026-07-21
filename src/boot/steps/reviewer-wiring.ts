@@ -274,8 +274,7 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     //     un-sandboxed writes/network), so the catch never makes the system
     //     more permissive than the user's intent.
     //   - Self-healing IS the deprecation path: there is no lingering shim.
-    //     The moment a provider/key is configured, the auth login flow
-    //     (ipc/domains/auth.ts) and settings:update both re-fire
+    //     The moment a provider/key is configured, settings updates re-fire
     //     `rewireReviewerAgent()`, this branch instantiates the adapter
     //     successfully, and `runtimeMode` returns to "llm". No removal date is
     //     needed because the degrade has no persisted footprint.

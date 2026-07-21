@@ -8,15 +8,6 @@ export type ElectronNetFetch = (
   init?: RequestInit & { bypassCustomProtocolHandlers?: boolean },
 ) => Promise<Response>;
 
-type PrivateEndpointFetch = {
-  fetch: ElectronNetFetch;
-  isMappedUrl: (url: URL) => boolean;
-};
-
-export type SafeLlmFetchOptions = {
-  privateEndpoint?: PrivateEndpointFetch;
-};
-
 function requestUrl(input: Parameters<typeof fetch>[0]): URL {
   if (typeof input === "string" || input instanceof URL) {
     return new URL(input.toString());
@@ -44,13 +35,11 @@ export function isAllowedLlmFetchUrl(url: URL): boolean {
 }
 
 /**
- * Electron's network stack is required for demo/private-endpoint Azure Foundry
- * calls because Chromium owns the host-resolver rules. Keep that power scoped
- * to the only current LLM path that needs it.
+ * Electron's network stack owns host resolution for Azure Foundry calls. Keep
+ * that power scoped to the only current LLM path that needs it.
  */
 export function createSafeLlmFetch(
   netFetch: ElectronNetFetch,
-  options: SafeLlmFetchOptions = {},
 ): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = requestUrl(input);
@@ -61,10 +50,7 @@ export function createSafeLlmFetch(
     }
 
     const normalizedInput = input instanceof URL ? input.toString() : input;
-    const privateEndpoint = options.privateEndpoint;
-    const usePrivateEndpoint = privateEndpoint?.isMappedUrl(url) === true;
-    const fetchImpl = usePrivateEndpoint ? privateEndpoint.fetch : netFetch;
-    return fetchImpl(normalizedInput as string | Request, {
+    return netFetch(normalizedInput as string | Request, {
       ...(init ?? {}),
       redirect: "error",
       bypassCustomProtocolHandlers: true,
