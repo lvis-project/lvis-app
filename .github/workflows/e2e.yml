@@ -22,6 +22,10 @@ on:
     # 02:00 KST (17:00 UTC) daily — off-peak; runs against the default branch.
     - cron: '0 17 * * *'
 
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e:
     # workflow_dispatch (manual), nightly schedule, OR same-repo PR labeled
