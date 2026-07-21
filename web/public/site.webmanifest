@@ -1,0 +1,9 @@
+{
+  "name": "LVIS AI",
+  "short_name": "LVIS AI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafafb",
+  "theme_color": "#fafafb",
+  "icons": [{ "src": "/favicon.svg", "sizes": "64x64", "type": "image/svg+xml" }]
+}
