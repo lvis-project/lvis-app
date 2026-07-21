@@ -36,4 +36,25 @@ describe("guarded model-provider fetch", () => {
     expect(isGuardedInsecureCredentialedModelProviderFetch(baseUrl, selfHostedFetch)).toBe(true);
     expect(isGuardedInsecureCredentialedModelProviderFetch(baseUrl, marketplaceFetch)).toBe(false);
   });
+
+  it("rejects every request and registers no trust policy when the baseUrl is unparseable", async () => {
+    // `originFor("not a url")` hits the URL-constructor catch and returns null,
+    // so `configuredOrigin` is null: no request can equal an absent origin, and
+    // the `if (configuredOrigin)` policy-registration guard is skipped.
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const providerFetch = createGuardedModelProviderFetch("not a url", fetchImpl);
+
+    await expect(
+      providerFetch("http://10.0.0.5:8000/v1/models", {
+        headers: { Authorization: "Bearer internal-key" },
+      }),
+    ).rejects.toThrow("configured origin");
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    // No policy was recorded for the unparseable baseUrl, so credentialed-HTTP
+    // trust cannot be claimed for it.
+    expect(
+      isGuardedInsecureCredentialedModelProviderFetch("not a url", providerFetch),
+    ).toBe(false);
+  });
 });
