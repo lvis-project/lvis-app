@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.5.6 — 2026-07-22
+
+Adds self-hosted model discovery, completes the reviewer negotiation flow, and trims the Windows installer. Public tags remain unsigned.
+
+### Models
+
+- **Sync models from a saved self-hosted OpenAI-compatible endpoint.** A saved Custom (OpenAI-compatible) private HTTP endpoint can now sync its model list with credentials, locked to the configured origin. Commercial providers and Marketplace presets are never relaxed to private HTTP; keyless Marketplace loopback discovery is unchanged.
+
+### Permissions and approval review
+
+- **Reviewer negotiation can auto-approve aligned escalations.** When the audit reviewer re-evaluates a main-model privilege-escalation request and finds it in scope for the original user request and not intrinsically high-risk, the action proceeds with a full audit record instead of a modal. Every other outcome still routes to the approval dialog (fail-closed).
+
+### UI
+
+- **Left sidebar collapse/expand now animates**, matching the right side panel.
+
+### Downloads and packaging
+
+- **Smaller Windows installer (~27 MB).** Removed the unused WebGPU DirectX shader compilers (`dxcompiler.dll`, `dxil.dll`) from the Windows package — the app disables hardware acceleration and renders without them.
+- **Versioned release assets only.** Assets are published as `LVIS-<version>-*`; the download site resolves the latest version dynamically instead of via static `LVIS-latest-*` aliases.
+
+### Build
+
+- Faster CI and local builds — incremental typecheck, CI dependency caching + run cancellation, matched esbuild target — with no change to the shipped app.
+
 ## v0.5.5 — 2026-07-19
 
 Hardening release for marketplace recovery, permission review, Windows shell safety, and A2A interoperability. Windows OS sandboxing remains opt-in.
