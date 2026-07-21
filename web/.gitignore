@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+*.log
+.DS_Store
+.env*.local
+
+# Local-only assets (not deployed; kept on author machine)
+preview-*.png
+
+# OMC runtime state — never commit
+.omc/
+
+# TS build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo
