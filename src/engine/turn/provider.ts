@@ -17,7 +17,7 @@ import {
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
-import { createGuardedMarketplaceProviderFetch } from "../llm/marketplace-provider-fetch.js";
+import { selectProviderRuntimeFetch } from "../llm/marketplace-provider-fetch.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { t } from "../../i18n/index.js";
@@ -70,32 +70,21 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
       return null;
     }
 
-    // Part C — never attach a bearer token to a non-https (local) endpoint: it
-    // would leak the key in plaintext AND trip the adapter's credentialed-baseUrl
-    // https guard. Keyless-capable providers (ollama / lmstudio / openai-
-    // compatible / litellm, or keyless marketplace presets) run without a key
-    // over http, so drop any stored/placeholder key for http endpoints.
-    const baseUrlIsHttp = effectiveBaseUrl
-      ? !/^https:/i.test(effectiveBaseUrl.trim())
-      : false;
-    const providerApiKey = baseUrlIsHttp && canUseWithoutApiKey ? "" : (apiKey ?? "");
+    const providerApiKey = apiKey ?? "";
 
     try {
-      const createLoopProvider = (config: ProviderConfig): LLMProvider =>
-        createProvider({
-          ...config,
-          ...(config.providerMetadata && config.baseUrl
-            ? {
-                fetch: createGuardedMarketplaceProviderFetch(
-                  config.baseUrl,
-                  config.providerMetadata,
-                ),
-              }
-            : {}),
-          ...(config.vendor === "azure-foundry" && deps.llmFetch
-            ? { fetch: deps.llmFetch }
-            : {}),
+      const createLoopProvider = (config: ProviderConfig): LLMProvider => {
+        const providerFetch = selectProviderRuntimeFetch({
+          vendor: config.vendor,
+          baseUrl: config.baseUrl,
+          providerMetadata: config.providerMetadata,
+          llmFetch: deps.llmFetch,
         });
+        return createProvider({
+          ...config,
+          ...(providerFetch ? { fetch: providerFetch } : {}),
+        });
+      };
 
       const primary = createLoopProvider({
         vendor,

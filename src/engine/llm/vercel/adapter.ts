@@ -32,6 +32,7 @@ import {
 } from "../../../shared/tool-name-aliases.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../tools/registry.js";
 import type { MarketplaceInstalledProviderPreset } from "../../../shared/marketplace-package-assets.js";
+import { isGuardedInsecureCredentialedModelProviderFetch } from "../marketplace-provider-fetch.js";
 
 /** Vendor slot recognised by VercelUnifiedProvider. */
 export type VercelVendor = LLMVendor;
@@ -151,6 +152,7 @@ function assertCredentialedBaseUrlUsesHttps(
   vendor: VercelVendor,
   baseUrl: string | undefined,
   apiKey: string,
+  customFetch: typeof fetch | undefined,
 ): void {
   if (!baseUrl || !apiKey) return;
   let parsed: URL;
@@ -159,7 +161,10 @@ function assertCredentialedBaseUrlUsesHttps(
   } catch {
     return;
   }
-  if (parsed.protocol !== "https:") {
+  if (
+    parsed.protocol !== "https:" &&
+    !isGuardedInsecureCredentialedModelProviderFetch(baseUrl, customFetch)
+  ) {
     throw new Error(
       `VercelUnifiedProvider(${vendor}): credentialed baseUrl must use https`,
     );
@@ -417,6 +422,7 @@ export class VercelUnifiedProvider implements LLMProvider {
       slot,
       this.providerMetadata?.baseUrl ?? this.baseUrl,
       this.apiKey,
+      this.customFetch,
     );
 
     if (slot === "claude") {
