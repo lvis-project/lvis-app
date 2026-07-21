@@ -1,0 +1,187 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Pure-white canvas (antigravity) — structure from hairlines and whitespace, not tint. */
+    --background: 0 0% 100%;
+    --foreground: 230 18% 10%; /* #14161d ink */
+    --card: 0 0% 100%;
+    --card-foreground: 230 18% 10%;
+    --primary: 230 18% 10%; /* ink — primary buttons / active */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%; /* #f3f4f6 subtle fill */
+    --secondary-foreground: 230 18% 10%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 222 8% 43%; /* #676b76 */
+    --accent: 226 30% 93%; /* soft periwinkle — subtle hover surface */
+    --accent-foreground: 230 18% 10%;
+    --destructive: 8 72% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 228 14% 91%; /* #e6e7ec hairline */
+    --input: 228 14% 91%;
+    --ring: 230 14% 28%; /* ink-soft focus ring */
+    --radius: 0.625rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv11" 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: #dfe3ef; /* soft periwinkle */
+    color: #14161d;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Element defaults wrapped in :where() → zero specificity, so any page/component
+     utility class (heading sizes, button text color, etc.) always wins. This is the
+     same technique @tailwindcss/typography uses; it keeps bespoke pages (the landing
+     hero, cards, buttons) authoritative while unstyled prose still gets sane defaults. */
+  .prose-doc {
+    @apply max-w-none text-[15.5px] leading-[1.78] text-foreground;
+  }
+  .prose-doc :where(h1) {
+    @apply mt-0 mb-3 text-[32px] font-semibold tracking-[-0.02em] text-ink sm:text-4xl;
+  }
+  .prose-doc :where(h2) {
+    @apply mt-12 mb-3 scroll-mt-24 text-2xl font-semibold tracking-[-0.015em] text-ink;
+  }
+  .prose-doc :where(h3) {
+    @apply mt-8 mb-2 scroll-mt-24 text-lg font-semibold tracking-[-0.01em] text-ink;
+  }
+  .prose-doc :where(p) {
+    @apply my-3 text-muted-foreground;
+  }
+  /* Only links inside real text blocks get prose link styling — never buttons/cards. */
+  .prose-doc :where(p, li, td, th, blockquote) :where(a) {
+    @apply font-medium text-ink underline-offset-4 transition-colors hover:underline;
+  }
+  .prose-doc :where(ul) {
+    @apply my-3 list-disc pl-6 text-muted-foreground;
+  }
+  .prose-doc :where(ol) {
+    @apply my-3 list-decimal pl-6 text-muted-foreground;
+  }
+  .prose-doc :where(li) {
+    @apply my-1.5;
+  }
+  .prose-doc :where(code) {
+    @apply rounded-sm bg-secondary px-1.5 py-0.5 font-mono text-[13.5px] text-ink;
+  }
+  .prose-doc :where(strong) {
+    @apply font-semibold text-ink;
+  }
+  .prose-doc :where(blockquote) {
+    @apply my-4 border-l-2 border-border bg-secondary/60 px-4 py-3 text-ink-soft;
+  }
+}
+
+/* Frosted surface for the sticky header. */
+.glass-card {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsl(var(--border));
+}
+
+/* Whisper-faint ink grid — hero ambient texture only. */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(20, 22, 29, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 22, 29, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Circular monochrome icon chip — antigravity motif. */
+.icon-chip {
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  background: rgba(183, 191, 217, 0.09);
+  border: 1px solid rgba(33, 34, 38, 0.06);
+  color: #3a3d47;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   v2 — Motion & immersive layout
+   ────────────────────────────────────────────────────────────── */
+
+/* Scroll-reveal: elements rise + fade as they enter the viewport.
+   Default is the hidden state; JS adds .reveal-in when observed. */
+.reveal {
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 0.4s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+}
+.reveal-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Ambient hero backdrop — soft drifting periwinkle/lavender glows. */
+.hero-glow {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(64px);
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+/* Fine moving grid used behind the hero. */
+.hero-grid {
+  background-image:
+    linear-gradient(rgba(20, 22, 29, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 22, 29, 0.035) 1px, transparent 1px);
+  background-size: 34px 34px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, #000 40%, transparent 100%);
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, #000 40%, transparent 100%);
+}
+
+/* Hover-reveal heading anchors in prose. */
+.prose-doc :where(h2, h3) {
+  position: relative;
+}
+.heading-anchor {
+  position: absolute;
+  left: -1.15em;
+  top: 0;
+  opacity: 0;
+  color: hsl(var(--muted-foreground));
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.prose-doc :where(h2, h3):hover .heading-anchor,
+.heading-anchor:focus-visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
