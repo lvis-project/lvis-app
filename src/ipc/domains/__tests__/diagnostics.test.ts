@@ -57,7 +57,7 @@ function makeDeps(overrides?: { includeCrashDumps?: boolean }): IpcDeps {
     auditLogger,
     settingsService: {
       getAll: () => ({
-        llm: { authMode: "manual", provider: "anthropic", streamSmoothing: "none", fallbackChain: [], vendors: {} },
+        llm: { provider: "anthropic", streamSmoothing: "none", fallbackChain: [], vendors: {} },
         chat: { autoCompact: true },
         telemetry: { enabled: false },
         diagnostics,

@@ -579,19 +579,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (typeof hostResolverMap !== "string") {
       return { ok: false, error: "invalid-host-map", message: "hostResolverMap must be a string" };
     }
-    // The host map is only honoured in manual auth mode (demo/login uses
-    // LVIS_DEMO_HOST_MAP). Login-mode disables the field in the renderer, but
-    // re-check here so a crafted IPC call cannot persist a map that the boot
-    // path would ignore anyway — and cannot trigger an unwanted relaunch.
-    if (settingsService.get("llm").authMode !== "manual") {
-      return { ok: false, error: "auth-mode-not-manual", message: "host map is only editable in manual auth mode" };
-    }
     // Persist the new map before relaunch so the next boot reads it.
     await settingsService.patch({ llm: { hostResolverMap } });
     await broadcastSettingsSnapshot(deps);
     // Arm and execute the relaunch. `app.relaunch()` queues the new process
-    // then `app.exit(0)` terminates the current one — same pattern used by
-    // the demo activation path in demo.ts.
+    // then `app.exit(0)` terminates the current one.
     app.relaunch();
     app.exit(0);
     return { ok: true };

@@ -124,7 +124,7 @@ export const scenarios: Record<string, ScenarioEntry> = {
   'chat-tool-thinking': {
     topic: 'chat',
     skip:
-      'Requires an in-flight LLM tool call with streaming thinking tokens. No demo/mock ' +
+      'Requires an in-flight LLM tool call with streaming thinking tokens. No fixture/mock ' +
       'provider path in this repo drives that render state deterministically without a ' +
       'real model turn.',
   },
@@ -334,7 +334,7 @@ export const scenarios: Record<string, ScenarioEntry> = {
   // notificationEvents + decision/*-detector.ts). Firing a detector needs real
   // external signals (ms-graph email.new / calendar.event.conflict.detected /
   // meeting.summary.created events) — the work-assistant src has NO dev/test
-  // trigger tool to synthesize them (verified: no demo/mock/seed IPC path in
+  // trigger tool to synthesize them (verified: no fixture/mock/seed IPC path in
   // lvis-plugin-work-assistant/src). The plugin's own detector-toggle PANEL does
   // render with the real bundle and is captured under chat-plugin-panel; these
   // card states remain unreachable without a live upstream event source.

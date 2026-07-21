@@ -13,15 +13,8 @@ describe("boot LLM fetch wiring regression guards", () => {
     // path-agnostic: the createSafeLlmFetch wiring moved into a boot/steps module
     // (deeper relative path) during the C18 BootContext split.
     expect(bootSource).toMatch(/import \{ createSafeLlmFetch \} from "[^"]*safe-llm-fetch\.js";/);
-    expect(bootSource).toContain("demoFoundryHostMapFingerprint,");
-    expect(bootSource).toContain("getAppliedDemoHostResolverFingerprint,");
     expect(bootSource).toContain("const electronNetFetch = net.fetch.bind(net);");
-    expect(bootSource).toContain('session.fromPartition("lvis-private-endpoint-fetch")');
-    expect(bootSource).toContain('await privateEndpointSession.setProxy({ mode: "direct" });');
-    expect(bootSource).toContain("const llmFetch = createSafeLlmFetch(electronNetFetch, {");
-    expect(bootSource).toContain("fetch: electronDirectFetch,");
-    expect(bootSource).toContain("isMappedUrl: isDemoPrivateEndpointUrl,");
-    expect(bootSource).toContain("appliedDemoHostMapFingerprint === getAppliedDemoHostResolverFingerprint()");
+    expect(bootSource).toContain("const llmFetch = createSafeLlmFetch(electronNetFetch);");
     expect(bootSource).not.toContain("net.fetch.bind(net) as typeof fetch");
   });
 
@@ -47,16 +40,11 @@ describe("boot LLM fetch wiring regression guards", () => {
     expect(bootSource).toMatch(/parentDeps: \{[\s\S]*?llmFetch,/);
   });
 
-  it("routes builtin mapped web_fetch URLs through the direct private endpoint session", async () => {
+  it("keeps builtin web_fetch on the injected Electron network fetch", async () => {
     const bootSource = await readBootWiring();
     const toolsSource = await readSource("../boot/tools.ts");
 
-    expect(bootSource).toMatch(/const privateNetworkFetch = createElectronFetch\(electronDirectFetch\);/);
-    expect(bootSource).toMatch(/const workflowDeps: WorkflowToolDeps = \{[\s\S]*?privateNetworkFetch,/);
-    expect(bootSource).toMatch(/const workflowDeps: WorkflowToolDeps = \{[\s\S]*?demoHostMapApplied: isAppliedDemoHostMap,/);
-    expect(toolsSource).toContain("privateNetworkFetch?: typeof fetch;");
-    expect(toolsSource).toContain("demoHostMapApplied?: boolean;");
     expect(toolsSource).toContain("webFetchFetchImpl(rawInput, workflowDeps, networkFetch)");
-    expect(toolsSource).toContain("isDemoHostResolverMappedFetchInput(fetchInput, deps)");
+    expect(toolsSource).toContain("return networkFetch;");
   });
 });

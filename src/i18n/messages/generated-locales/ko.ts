@@ -102,7 +102,6 @@ import { ko as ko_htmlPreview } from "../generated/htmlPreview.js";
 import { ko as ko_inputActionBar } from "../generated/inputActionBar.js";
 import { ko as ko_lazyCalendar } from "../generated/lazyCalendar.js";
 import { ko as ko_llmTab } from "../generated/llmTab.js";
-import { ko as ko_loginModalConversational } from "../generated/loginModalConversational.js";
 import { ko as ko_mainToolbar } from "../generated/mainToolbar.js";
 import { ko as ko_marketplaceAnnouncementBanner } from "../generated/marketplaceAnnouncementBanner.js";
 import { ko as ko_marketplaceTab } from "../generated/marketplaceTab.js";
@@ -111,7 +110,6 @@ import { ko as ko_mcpAppPipPanel } from "../generated/mcpAppPipPanel.js";
 import { ko as ko_mcpAppView } from "../generated/mcpAppView.js";
 import { ko as ko_mcpTab } from "../generated/mcpTab.js";
 import { ko as ko_memorySearchPanel } from "../generated/memorySearchPanel.js";
-import { ko as ko_memorySeedDialog } from "../generated/memorySeedDialog.js";
 import { ko as ko_messageQueuePanel } from "../generated/messageQueuePanel.js";
 import { ko as ko_messageQueueStore } from "../generated/messageQueueStore.js";
 import { ko as ko_midnight } from "../generated/midnight.js";
@@ -124,15 +122,12 @@ import { ko as ko_permissionEvaluationContextPanel } from "../generated/permissi
 import { ko as ko_permissionModeBadge } from "../generated/permissionModeBadge.js";
 import { ko as ko_permissionReviewStatusCard } from "../generated/permissionReviewStatusCard.js";
 import { ko as ko_permissionsTab } from "../generated/permissionsTab.js";
-import { ko as ko_personalizedWelcome } from "../generated/personalizedWelcome.js";
 import { ko as ko_pluginAuthSection } from "../generated/pluginAuthSection.js";
 import { ko as ko_pluginConfigSchemaForm } from "../generated/pluginConfigSchemaForm.js";
 import { ko as ko_pluginConfigTab } from "../generated/pluginConfigTab.js";
 import { ko as ko_pluginGridButton } from "../generated/pluginGridButton.js";
 import { ko as ko_pluginInstallDialog } from "../generated/pluginInstallDialog.js";
 import { ko as ko_pluginPerfTab } from "../generated/pluginPerfTab.js";
-import { ko as ko_pluginRecommendationMatrix } from "../generated/pluginRecommendationMatrix.js";
-import { ko as ko_pluginShowcase } from "../generated/pluginShowcase.js";
 import { ko as ko_pluginUninstallDialog } from "../generated/pluginUninstallDialog.js";
 import { ko as ko_postTourFirstTask } from "../generated/postTourFirstTask.js";
 import { ko as ko_privacyTab } from "../generated/privacyTab.js";
@@ -142,7 +137,6 @@ import { ko as ko_rolesTab } from "../generated/rolesTab.js";
 import { ko as ko_rosePine } from "../generated/rosePine.js";
 import { ko as ko_routinePanel } from "../generated/routinePanel.js";
 import { ko as ko_savedToast } from "../generated/savedToast.js";
-import { ko as ko_scenarioShowcase } from "../generated/scenarioShowcase.js";
 import { ko as ko_sessionResumeDivider } from "../generated/sessionResumeDivider.js";
 import { ko as ko_sessionTodoPanel } from "../generated/sessionTodoPanel.js";
 import { ko as ko_settingsContent } from "../generated/settingsContent.js";
@@ -289,7 +283,6 @@ export const koMessages: Record<string, string> = {
   ...ko_inputActionBar,
   ...ko_lazyCalendar,
   ...ko_llmTab,
-  ...ko_loginModalConversational,
   ...ko_mainToolbar,
   ...ko_marketplaceAnnouncementBanner,
   ...ko_marketplaceTab,
@@ -298,7 +291,6 @@ export const koMessages: Record<string, string> = {
   ...ko_mcpAppView,
   ...ko_mcpTab,
   ...ko_memorySearchPanel,
-  ...ko_memorySeedDialog,
   ...ko_messageQueuePanel,
   ...ko_messageQueueStore,
   ...ko_midnight,
@@ -311,15 +303,12 @@ export const koMessages: Record<string, string> = {
   ...ko_permissionModeBadge,
   ...ko_permissionReviewStatusCard,
   ...ko_permissionsTab,
-  ...ko_personalizedWelcome,
   ...ko_pluginAuthSection,
   ...ko_pluginConfigSchemaForm,
   ...ko_pluginConfigTab,
   ...ko_pluginGridButton,
   ...ko_pluginInstallDialog,
   ...ko_pluginPerfTab,
-  ...ko_pluginRecommendationMatrix,
-  ...ko_pluginShowcase,
   ...ko_pluginUninstallDialog,
   ...ko_postTourFirstTask,
   ...ko_privacyTab,
@@ -329,7 +318,6 @@ export const koMessages: Record<string, string> = {
   ...ko_rosePine,
   ...ko_routinePanel,
   ...ko_savedToast,
-  ...ko_scenarioShowcase,
   ...ko_sessionResumeDivider,
   ...ko_sessionTodoPanel,
   ...ko_settingsContent,

@@ -8,7 +8,6 @@ import { marketplaceProviderPresetSecretId } from "../../../../shared/marketplac
 function makeSettings(): AppSettings {
   return {
     llm: {
-      authMode: "manual",
       provider: "openai",
       vendors: {
         openai: {
@@ -261,71 +260,6 @@ describe("useSettingsOrchestration", () => {
       .not.toBe("https://future.example/v1");
   });
 
-  // ①안 — the settings Model tab is manual-only now. Saving the LLM tab WITH a
-  // manual key transitions a former demo user (authMode="login") to manual and
-  // persists their own key + vendor draft (previously blocked by login mode).
-  it("transitions a demo user (authMode='login') to manual when they save an LLM key", async () => {
-    const settings = makeSettings();
-    settings.llm.authMode = "login";
-    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
-    Object.assign(api, {
-      updateSettings: vi.fn(async () => ({ ok: true })),
-      hasWebApiKey: vi.fn(async () => false),
-      hasMarketplaceApiKey: vi.fn(async () => false),
-      setApiKey: vi.fn(async () => ({ ok: true })),
-    });
-    const onSaved = vi.fn();
-    const { result } = renderHook(() =>
-      useSettingsOrchestration(api as unknown as LvisApi, onSaved)
-    );
-    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
-    await waitFor(() => expect(result.current.authMode).toBe("login"));
-
-    act(() => {
-      result.current.setKeyInput("sk-my-own-key");
-    });
-    await waitFor(() => expect(result.current.keyInput).toBe("sk-my-own-key"));
-
-    await act(async () => {
-      await result.current.save("llm");
-    });
-
-    const payload = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
-    expect(payload.llm.authMode).toBe("manual");
-    // The manual vendor draft is now persisted (login mode no longer skips it).
-    expect(payload.llm.vendors).toBeDefined();
-    // The user's own key is persisted for the active vendor.
-    expect(api.setApiKey).toHaveBeenCalledWith("openai", "sk-my-own-key");
-  });
-
-  // ①안 (guard) — a keyless LLM save must NOT force-rewrite authMode: a demo
-  // user who only tweaks an immediate-apply control keeps their trial endpoint.
-  it("keeps a demo user on authMode='login' for a keyless LLM save", async () => {
-    const settings = makeSettings();
-    settings.llm.authMode = "login";
-    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
-    Object.assign(api, {
-      updateSettings: vi.fn(async () => ({ ok: true })),
-      hasWebApiKey: vi.fn(async () => false),
-      hasMarketplaceApiKey: vi.fn(async () => false),
-      setApiKey: vi.fn(async () => ({ ok: true })),
-    });
-    const { result } = renderHook(() =>
-      useSettingsOrchestration(api as unknown as LvisApi, vi.fn())
-    );
-    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
-    await waitFor(() => expect(result.current.authMode).toBe("login"));
-
-    await act(async () => {
-      await result.current.save("llm");
-    });
-
-    const payload = (api.updateSettings as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
-    expect(payload.llm.authMode).toBe("login");
-    // Host-managed fields are left untouched and no key is persisted.
-    expect(payload.llm.vendors).toBeUndefined();
-    expect(api.setApiKey).not.toHaveBeenCalled();
-  });
   it("defaults autonomous sub-agent wake off and persists an opt-in immediately", async () => {
     const settings = makeSettings();
     const updated: AppSettings = {

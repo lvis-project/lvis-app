@@ -129,7 +129,6 @@ export function pickRedactedSettings(settings: AppSettings): Record<string, unkn
       };
     }
     out.llm = {
-      authMode: llm.authMode,
       provider: llm.provider,
       streamSmoothing: llm.streamSmoothing,
       fallbackChain: llm.fallbackChain,

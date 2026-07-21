@@ -29,7 +29,7 @@
  *   `"openai" | "azure-openai" | "vertex" | "anthropic"`; the host's
  *   internal vendor union (`src/shared/llm-vendor-defaults.ts`) uses
  *   `"openai" | "azure-foundry" | "vertex-ai" | "claude"`. Map the SDK
- *   names to host names at the entry so a Claude-default user + a demo
+ *   names to host names at the entry so a Claude-default user and an
  *   plugin that asks for `vendor:"anthropic"` doesn't silently fall into
  *   `not-whitelisted` for a non-existent `llm.apiKey.anthropic` key.
  *
@@ -130,7 +130,7 @@ export interface ResolveApiKeyDeps {
  * Only the three aliases that *differ* between the two surfaces are
  * mapped; `"openai"` passes through unchanged. Adding a new SDK alias
  * needs an entry here AND an `llm.apiKey.<host-vendor>` key wired into
- * the manifest allowlist + demo whitelist.
+ * the manifest allowlist and host whitelist.
  */
 const VENDOR_ALIAS_MAP: Record<string, string> = {
   anthropic: "claude",
