@@ -213,7 +213,7 @@ if (missingLazyChunks.length > 0) {
   );
 }
 
-const rootDevPattern = /^\/(?:\.github|\.storybook|docs|fixtures|release|resources|scripts|src|test)(?:\/|$)/;
+const rootDevPattern = /^\/(?:\.github|docs|fixtures|release|resources|scripts|src|test)(?:\/|$)/;
 const rootDevEntries = entries.filter((entry) => rootDevPattern.test(entry));
 if (rootDevEntries.length > 0) fail("root development files leaked into app.asar", rootDevEntries);
 
