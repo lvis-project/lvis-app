@@ -25,6 +25,13 @@ const WIN_WEBGL_FALLBACK_FILES = [
   "libEGL.dll",
   "vulkan-1.dll",
   "vk_swiftshader_icd.json",
+  // WebGPU (Dawn D3D12) HLSL shader compiler + its DXIL companion (~27 MB). The
+  // app disables hardware acceleration (early-boot-env.ts) and never renders via
+  // WebGPU/WebGL. These are loaded only for WebGPU capability probing; the
+  // packaged app starts and renders the main window with them absent (verified),
+  // so they are dead weight on the shipped installer.
+  "dxcompiler.dll",
+  "dxil.dll",
 ];
 
 function electronResourcesDir(context) {
