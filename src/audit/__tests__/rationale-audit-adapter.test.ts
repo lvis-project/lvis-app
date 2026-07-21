@@ -109,6 +109,7 @@ function uiProjection(): RationaleUiAuditProjection {
     terminalReason: null,
     suggestion: "Apply the exact sealed write.",
     modalFallbackRequired: false,
+    autoApproved: false,
   };
 }
 

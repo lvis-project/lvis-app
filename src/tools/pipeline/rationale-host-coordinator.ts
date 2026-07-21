@@ -38,6 +38,7 @@ import {
   createRationaleExecutorControlOutcome,
   createReviewerScopeReevaluation,
   evaluateRationaleOnlyBatch,
+  isReviewerAutoApproveEligible,
   validateRationaleOnlyBatchDecision,
   validateReviewerScopeReevaluation,
   type RationaleGenerationOutcome,
@@ -213,6 +214,13 @@ export interface RationaleRoundResolution {
   readonly batchDecision: RationaleOnlyBatchDecision | null;
   readonly ticket: HostRationaleTicketSnapshot;
   readonly projection: RationaleUiAuditProjection;
+  /**
+   * True only on the reviewer auto-approve-on-aligned terminal: the ticket is
+   * already authorized (one-shot receipt minted) and the caller must SKIP the
+   * user modal and go straight to `createSealedResume`. False on every path
+   * that still requires the modal.
+   */
+  readonly autoApproved: boolean;
 }
 
 export type RationaleApprovalResolution =
@@ -751,6 +759,57 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
       this.#contexts.delete(input.ticketId);
       return null;
     }
+
+    // Reviewer auto-approve-on-aligned terminal. Only a fresh + aligned +
+    // non-high reviewer re-evaluation qualifies; every other outcome falls
+    // through to the modal below. This mints the same one-shot allow-once
+    // receipt a user allow-once would, skipping user_pending and the modal, so
+    // the sealed-resume execution chokepoint downstream is unchanged.
+    if (ready && reevaluation !== null &&
+        isReviewerAutoApproveEligible(reevaluation)) {
+      const receipt = this.#ticketStore.consumeReviewerAuthorizedOnce(
+        createRationaleTicketCasExpectation(resolved),
+        settledAt,
+      );
+      if (
+        !receipt ||
+        !this.#ticketStore.isAuthenticConsumedAllowOnceReceipt(receipt, settledAt)
+      ) {
+        this.#contexts.delete(input.ticketId);
+        return null;
+      }
+      const autoResponse = generatedResponse;
+      const autoProjection = createRationaleUiAuditProjection({
+        control: context.control,
+        response: autoResponse,
+        reevaluation,
+        ticket: receipt.ticket,
+        now: settledAt,
+        autoApproved: true,
+      });
+      // A failing projection audit fails closed exactly like the modal path:
+      // the exception propagates before `context.receipt` is published, so the
+      // minted receipt is unreachable and no resume can be sealed.
+      this.#commitProjectionAudit(context.sessionId, autoProjection, settledAt);
+      context.snapshot = resolved;
+      context.response = autoResponse;
+      context.reevaluation = reevaluation;
+      context.receipt = receipt;
+      context.terminalTicket = receipt.ticket;
+      context.projection = autoProjection;
+      context.projectionAuditCommitted = true;
+      return {
+        status: "ready",
+        generationOutcome,
+        response: autoResponse,
+        reevaluation,
+        batchDecision,
+        ticket: resolved,
+        projection: autoProjection,
+        autoApproved: true,
+      };
+    }
+
     const pending = this.#ticketStore.promptUser(
       createRationaleTicketCasExpectation(resolved),
       settledAt,
@@ -799,6 +858,7 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
       batchDecision,
       ticket: pending,
       projection,
+      autoApproved: false,
     };
   }
 

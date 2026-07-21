@@ -85,6 +85,14 @@ export interface RationaleUiAuditProjection {
   terminalReason: RationaleTerminalReason | null;
   suggestion: string | null;
   modalFallbackRequired: boolean;
+  /**
+   * Reviewer auto-approve provenance. `true` only on the fresh + aligned +
+   * non-high reviewer terminal that skips the user modal; `false` for every
+   * user-driven allow-once and every modal-fallback projection. Forensics use
+   * this (with scopeAlignment/initialVerdict/reevaluatedVerdict, already
+   * carried above) to distinguish reviewer-auto from user-allow.
+   */
+  autoApproved: boolean;
 }
 
 const PROJECTION_GENERATION_OUTCOMES: readonly RationaleGenerationOutcome[] = [
@@ -185,6 +193,7 @@ export function validateRationaleUiAuditProjection(
       "generationOutcome", "reevaluationOutcome", "initialVerdict",
       "reevaluatedVerdict", "effectiveVerdict", "scopeAlignment", "scopeReasons",
       "rationaleStatus", "terminalReason", "suggestion", "modalFallbackRequired",
+      "autoApproved",
     ], "RationaleUiAuditProjection");
     if (
       value.contractVersion !== RATIONALE_CONTROL_CONTRACT_VERSION ||
@@ -219,7 +228,8 @@ export function validateRationaleUiAuditProjection(
         !PROJECTION_TERMINAL_REASONS.includes(
           value.terminalReason as RationaleTerminalReason,
         )) ||
-      typeof value.modalFallbackRequired !== "boolean"
+      typeof value.modalFallbackRequired !== "boolean" ||
+      typeof value.autoApproved !== "boolean"
     ) {
       return false;
     }
@@ -250,11 +260,22 @@ export function validateRationaleUiAuditProjection(
     if (!equal(effective, expectedEffective)) return false;
 
     if (value.rationaleStatus === "ready") {
-      return value.generationOutcome === "accepted-rationale" &&
+      const readyOk = value.generationOutcome === "accepted-rationale" &&
         value.reevaluationOutcome === "fresh" &&
         value.scopeAlignment !== "unknown" &&
         value.modalFallbackRequired === false &&
         isSanitizedProjectionText(value.suggestion, 500);
+      if (!readyOk) return false;
+      // autoApproved=true is a POSITIVE terminal: it requires the reviewer to
+      // have judged the sealed action in-scope (aligned) and not intrinsically
+      // dangerous (reevaluatedVerdict <= medium), and the ticket to have reached
+      // the one-shot allowed_once terminal. Everything else is autoApproved=false.
+      if (value.autoApproved) {
+        return value.scopeAlignment === "aligned" &&
+          value.terminalReason === "allowed-once" &&
+          reevaluated.level !== "high";
+      }
+      return true;
     }
 
     const acceptedThenReviewerFailed =
@@ -268,6 +289,7 @@ export function validateRationaleUiAuditProjection(
       value.scopeAlignment === "unknown" &&
       value.modalFallbackRequired === true &&
       value.suggestion === null &&
+      value.autoApproved === false &&
       equal(reevaluated, initial) &&
       equal(effective, initial);
   } catch {
@@ -305,6 +327,8 @@ export function createRationaleUiAuditProjection(input: {
   reevaluation: ReviewerScopeReevaluation | null;
   ticket: RationaleTicketStateRecord;
   now?: number;
+  /** Reviewer auto-approve provenance; defaults to false (user/modal path). */
+  autoApproved?: boolean;
 }): RationaleUiAuditProjection {
   const now = input.now ?? Date.now();
   if (!verifyRationaleRequiredControl(input.control, { now }) ||
@@ -313,6 +337,20 @@ export function createRationaleUiAuditProjection(input: {
     throw new Error("invalid rationale UI/audit binding");
   }
   validateRationaleTicketRecord(input.ticket);
+  const autoApproved = input.autoApproved ?? false;
+  if (autoApproved && (
+    input.ticket.rationaleStatus !== "ready" ||
+    input.ticket.state !== "allowed_once" ||
+    input.ticket.terminalReason !== "allowed-once" ||
+    input.reevaluation === null ||
+    input.reevaluation.outcome !== "fresh" ||
+    input.reevaluation.scopeAlignment !== "aligned" ||
+    input.reevaluation.reevaluatedVerdict.level === "high"
+  )) {
+    throw new Error(
+      "auto-approved projection requires an aligned non-high reviewer allow-once terminal",
+    );
+  }
   const generationOutcome = input.ticket.generationOutcome;
   if (input.ticket.ticketId !== input.control.ticketId ||
       input.ticket.actionDigest !== input.control.action.actionDigest ||
@@ -402,7 +440,7 @@ export function createRationaleUiAuditProjection(input: {
     scopeAlignment,
     scopeReasons: projectUiList(scopeReasons, 160, "scopeReasons"),
     rationaleStatus: input.ticket.rationaleStatus, terminalReason: input.ticket.terminalReason,
-    suggestion, modalFallbackRequired,
+    suggestion, modalFallbackRequired, autoApproved,
   }, "RationaleUiAuditProjection");
 }
 
