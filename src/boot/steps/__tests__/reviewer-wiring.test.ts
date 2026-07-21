@@ -769,11 +769,150 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
       expect.objectContaining({
         method: "POST",
         body: "{}",
+        allowPrivateNetworks: false,
         allowLoopback: false,
         maxRedirects: 0,
         fetchImpl: expect.any(Function),
       }),
     );
+
+    vi.doUnmock("electron");
+    vi.doUnmock("../../../engine/llm/provider-factory.js");
+    vi.doUnmock("../reviewer-wiring.js");
+    vi.doUnmock("../../../ipc/domains/permissions.js");
+    vi.resetModules();
+  });
+});
+
+describe("wireReviewerAndPermissions self-hosted direct endpoint binding", () => {
+  it("builds the reviewer provider with a guarded model-provider fetch for a saved self-hosted endpoint", async () => {
+    vi.resetModules();
+    const networkGuard = await import("../../../core/network-guard.js");
+    const fetchPublicHttpResponse = vi
+      .spyOn(networkGuard, "fetchPublicHttpResponse")
+      .mockResolvedValue(new Response("ok"));
+    const provider = stubProvider([]);
+    const createProvider = vi.fn(() => provider);
+    const initialRationaleScopeReviewer = { reevaluate: vi.fn() };
+    const rewiredRationaleScopeReviewer = { reevaluate: vi.fn() };
+    const wireReviewerAgentMock = vi
+      .fn()
+      .mockReturnValueOnce({ rationaleScopeReviewer: initialRationaleScopeReviewer })
+      .mockReturnValue({ rationaleScopeReviewer: rewiredRationaleScopeReviewer });
+    vi.doMock("electron", () => ({
+      BrowserWindow: { getAllWindows: () => [] },
+    }));
+    vi.doMock("../../../engine/llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    vi.doMock("../reviewer-wiring.js", () => ({
+      wireReviewerAgent: wireReviewerAgentMock,
+    }));
+    vi.doMock("../../../ipc/domains/permissions.js", () => ({
+      broadcastPermissionConfigChanged: vi.fn(),
+    }));
+
+    const { wireReviewerAndPermissions } = await import("../reviewer-permission-wiring.js");
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") {
+          // A saved self-hosted openai-compatible endpoint with NO marketplace
+          // preset — the isSelfHostedDirectEndpoint branch of the fetch ladder.
+          return {
+            provider: "openai-compatible",
+            vendors: {
+              "openai-compatible": {
+                model: "Qwen3.6-35B",
+                baseUrl: "http://10.0.0.9:8000/v1",
+              },
+            },
+            fallbackChain: [],
+          };
+        }
+        if (key === "marketplace") {
+          return { installedProviderPresets: [] };
+        }
+        if (key === "permissions") {
+          return {
+            reviewer: {
+              mode: "llm",
+              provider: "active",
+              model: "ignored",
+              fallbackOnError: "rule",
+              interactive: { autoApprove: "off" },
+            },
+          };
+        }
+        return {};
+      }),
+      getSecret: vi.fn((key: string) =>
+        key === "llm.apiKey.openai-compatible" ? "internal-key" : null,
+      ),
+    };
+    const permissionManager = new PermissionManager(
+      join(tmpDir, "boot-permissions-selfhosted.json"),
+    );
+
+    const bootContext = {
+      toolRegistry: { setDenyRules: vi.fn() },
+      permissionManager,
+      settingsService,
+      llmFetch: vi.fn(),
+      getMainWindow: () => null,
+      bootAuditLogger: { log: vi.fn() },
+    };
+    wireReviewerAndPermissions(bootContext as never);
+
+    const options = wireReviewerAgentMock.mock.calls[0]?.[0] as {
+      readActiveLlm: () => { baseUrl?: string };
+      streamProviderFor: (vendor: string) => LLMProvider | null;
+    };
+    expect(options.readActiveLlm()).toMatchObject({
+      provider: "openai-compatible",
+      baseUrl: "http://10.0.0.9:8000/v1",
+    });
+    // No marketplace preset → selectProviderRuntimeFetch takes the
+    // isSelfHostedDirect branch and builds a guarded model-provider fetch.
+    expect(options.streamProviderFor("openai-compatible")).toBe(provider);
+    expect(createProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendor: "openai-compatible",
+        apiKey: "internal-key",
+        model: "Qwen3.6-35B",
+        baseUrl: "http://10.0.0.9:8000/v1",
+        fetch: expect.any(Function),
+      }),
+    );
+    // The self-hosted-direct branch attaches no marketplace providerMetadata.
+    expect(createProvider.mock.calls[0]?.[0]).not.toHaveProperty("providerMetadata");
+
+    const providerConfig = createProvider.mock.calls[0]?.[0];
+    // A same-origin request is origin-locked and forwarded with same-origin
+    // private + loopback access predicates (private/loopback allowed for the
+    // exact configured origin).
+    await providerConfig?.fetch?.("http://10.0.0.9:8000/v1/chat/completions", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(fetchPublicHttpResponse).toHaveBeenCalledWith(
+      "http://10.0.0.9:8000/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        body: "{}",
+        allowPrivateNetworks: expect.any(Function),
+        allowLoopback: expect.any(Function),
+        maxRedirects: 0,
+        fetchImpl: expect.any(Function),
+      }),
+    );
+    // A cross-origin request is rejected before it can reach the network guard.
+    await expect(
+      providerConfig?.fetch?.("http://evil.example/v1/chat/completions", {
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toThrow("configured origin");
 
     vi.doUnmock("electron");
     vi.doUnmock("../../../engine/llm/provider-factory.js");
