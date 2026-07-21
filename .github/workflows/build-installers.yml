@@ -305,41 +305,6 @@ jobs:
           merge-multiple: true
       - name: List downloaded assets
         run: ls -la release-staging/
-      - name: Create stable latest download aliases
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          version="${GITHUB_REF_NAME#v}"
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Expected a vX.Y.Z tag, got: $GITHUB_REF_NAME" >&2
-            exit 1
-          fi
-
-          alias_asset() {
-            local source="$1"
-            local target="$2"
-
-            if [ ! -f "release-staging/$source" ]; then
-              echo "Missing release asset for latest alias: $source" >&2
-              exit 1
-            fi
-
-            ln "release-staging/$source" "release-staging/$target"
-          }
-
-          alias_asset "LVIS-${version}-linux-amd64.deb" "LVIS-latest-linux-amd64.deb"
-          alias_asset "LVIS-${version}-linux-x86_64.AppImage" "LVIS-latest-linux-x86_64.AppImage"
-          alias_asset "LVIS-${version}-linux-x86_64.rpm" "LVIS-latest-linux-x86_64.rpm"
-          alias_asset "LVIS-${version}-mac-arm64.dmg" "LVIS-latest-mac-arm64.dmg"
-          alias_asset "LVIS-${version}-mac-arm64.dmg.blockmap" "LVIS-latest-mac-arm64.dmg.blockmap"
-          alias_asset "LVIS-${version}-mac-arm64.zip" "LVIS-latest-mac-arm64.zip"
-          alias_asset "LVIS-${version}-mac-arm64.zip.blockmap" "LVIS-latest-mac-arm64.zip.blockmap"
-          alias_asset "LVIS-${version}-win-x64.zip" "LVIS-latest-win-x64.zip"
-          alias_asset "LVIS-${version}-windows-x64-setup.exe" "LVIS-latest-windows-x64-setup.exe"
-          alias_asset "LVIS-${version}-windows-x64-setup.exe.blockmap" "LVIS-latest-windows-x64-setup.exe.blockmap"
-
-          ls -la release-staging/LVIS-latest-*
       - name: Attach assets to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
