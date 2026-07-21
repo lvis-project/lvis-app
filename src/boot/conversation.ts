@@ -22,6 +22,7 @@ import { ApprovalGate } from "../permissions/approval-gate.js";
 import { loadPolicy } from "../permissions/policy-store.js";
 import { registerStandardCategories } from "../permissions/category-registry.js";
 import { ConversationLoop } from "../engine/conversation-loop.js";
+import type { RationaleCoordinatorFactory } from "../engine/turn/rationale-conversation-orchestration.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
@@ -186,6 +187,13 @@ export interface ConversationDeps {
   keywordEngine: KeywordEngine;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
+  /**
+   * Boot-published factory for the guarded rationale path. Query-loop owns
+   * activation and retains the legacy flow when no concrete factory is ready.
+   */
+  rationaleCoordinatorFactory?: RationaleCoordinatorFactory;
+  /** Invalidates host rationale authority before a session is discarded. */
+  closeRationaleSession?: (sessionId: string) => void;
   /** Host-owned capability; defaults false when omitted. */
   supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;
@@ -376,6 +384,8 @@ export type SideChatConversationLoopDeps = Pick<
   | "bashAstValidator"
   | "pluginRuntime"
   | "llmFetch"
+  | "rationaleCoordinatorFactory"
+  | "closeRationaleSession"
   | "auditLogger"
 > & {
   /** Isolated MemoryManager rooted at `~/.lvis/side-chat/`. */
@@ -424,6 +434,12 @@ export function createSideChatConversationLoop(
     pluginRuntime: deps.pluginRuntime,
     postTurnHookChain,
     auditLogger: deps.auditLogger,
+    ...(deps.rationaleCoordinatorFactory
+      ? { rationaleCoordinatorFactory: deps.rationaleCoordinatorFactory }
+      : {}),
+    ...(deps.closeRationaleSession
+      ? { closeRationaleSession: deps.closeRationaleSession }
+      : {}),
     llmFetch: deps.llmFetch,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
@@ -444,6 +460,12 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     supportsA2AParentDelivery: deps.supportsA2AParentDelivery === true,
+    ...(deps.rationaleCoordinatorFactory
+      ? { rationaleCoordinatorFactory: deps.rationaleCoordinatorFactory }
+      : {}),
+    ...(deps.closeRationaleSession
+      ? { closeRationaleSession: deps.closeRationaleSession }
+      : {}),
     memoryManager: deps.memoryManager,
     permissionManager: deps.permissionManager,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,

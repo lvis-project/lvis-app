@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { writeUtf8FileAtomicSync } from "../atomic-file.js";
+import {
+  replaceUtf8FileAtomicSyncIf,
+  writeUtf8FileAtomicSync,
+} from "../atomic-file.js";
 
 let dir: string;
 
@@ -46,6 +49,21 @@ describe("writeUtf8FileAtomicSync", () => {
     if (process.platform !== "win32") {
       expect(statSync(target).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it("keeps the destination intact when a final replacement precondition fails", () => {
+    const target = join(dir, "AGENTS.md");
+    writeFileSync(target, "user edit", "utf8");
+
+    const replaced = replaceUtf8FileAtomicSyncIf(
+      target,
+      "packaged update",
+      () => false,
+    );
+
+    expect(replaced).toBe(false);
+    expect(readFileSync(target, "utf8")).toBe("user edit");
+    expect(readdirSync(dir)).toEqual(["AGENTS.md"]);
   });
 
   it("cleans its unique temporary file when the final rename fails", () => {

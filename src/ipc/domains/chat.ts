@@ -50,6 +50,7 @@ import {
 } from "../handlers/chat.js";
 import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
+import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 const log = createLogger("chat");
 const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
 const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
@@ -716,7 +717,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       if (current.length > 0) {
         await memoryManager.saveSession(conversationLoop.getSessionId(), current);
       }
-      const newId = crypto.randomUUID();
+      const newId = createDlpSafeUuid();
       const sourceSessionId = conversationLoop.getSessionId();
       const forkSlice = memoryManager.rehydrateToolResultArtifacts(sourceSessionId, slice) as GenericMessage[];
       await memoryManager.saveSession(newId, forkSlice);
@@ -892,7 +893,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   // #1500 (E3) — reverse of chat.export. INTERNAL (mutating; not in
   // PUBLIC_CHANNELS — same classification as chat.new/chat.fork above).
-  // ALWAYS creates a brand-new session (crypto.randomUUID()) — importing
+  // ALWAYS creates a brand-new DLP-safe UUID session — importing
   // NEVER overwrites an existing session, matching chat.fork's pattern.
   ipcMain.handle(CHANNELS.chat.import, async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.import, e); return UNAUTHORIZED_FRAME; }
@@ -945,7 +946,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       return { ok: false, error: validated.error ?? "invalid-file-shape" };
     }
 
-    const newSessionId = crypto.randomUUID();
+    const newSessionId = createDlpSafeUuid();
     await memoryManager.saveImportedSession(newSessionId, validated.messages);
     auditLogger.log({
       timestamp: new Date().toISOString(),

@@ -44,6 +44,7 @@ import { registerWorkspaceHandlers } from "./domains/workspace.js";
 import { registerUiHandlers } from "./domains/ui.js";
 import { registerTerminalHandlers } from "./domains/terminal.js";
 import { registerDevHandlers } from "./domains/dev.js";
+import { registerRemoteA2AHandlers } from "./domains/remote-a2a.js";
 import type { IpcDeps } from "./types.js";
 import type { AppServices } from "../boot/types.js";
 import type { BrowserWindow } from "electron";
@@ -86,6 +87,7 @@ export function registerIpcHandlers(
   registerWorkspaceHandlers(deps);
   registerUiHandlers(deps);
   registerTerminalHandlers(deps);
+  registerRemoteA2AHandlers(deps);
   // Dev IPC is *not* registered in packaged builds — the channels never
   // exist on `ipcMain`, so a compromised renderer/preload cannot probe them.
   if (!getIsPackaged()) {

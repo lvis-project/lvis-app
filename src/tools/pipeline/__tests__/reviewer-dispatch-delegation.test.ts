@@ -19,9 +19,14 @@ import {
   dispatchReviewerForHeadless,
   dispatchReviewerForInteractiveAuto,
 } from "../reviewer-dispatch.js";
-import type { PermissionManager, PermissionCheckResult, ReviewerLane } from "../../../permissions/permission-manager.js";
+import type {
+  PermissionManager,
+  PermissionCheckResult,
+  ReviewerDispatchOutcome,
+  ReviewerLane,
+} from "../../../permissions/permission-manager.js";
 import type { RiskVerdict } from "../../../permissions/reviewer/risk-classifier.js";
-import type { ToolPermissionContext, ToolCallMeta } from "../../executor.js";
+import type { ToolPermissionContext, ToolCallMeta, ToolExecutorCallbacks } from "../../executor.js";
 import type { PermissionEvaluationContext } from "../../../permissions/evaluation-context.js";
 
 const evaluationContext = {} as PermissionEvaluationContext;
@@ -39,6 +44,8 @@ function makeStub(opts: {
   deferredId?: string;
   mode?: string;
   interactiveAutoApprove?: "off" | "low" | "medium";
+  outcome?: ReviewerDispatchOutcome;
+  onDispatch?: () => void;
 }): {
   pm: PermissionManager;
   resolveSpy: ReturnType<typeof vi.fn>;
@@ -59,13 +66,22 @@ function makeStub(opts: {
     getMode: () => opts.mode ?? "auto",
     getInteractiveAutoApprove: () => opts.interactiveAutoApprove ?? "low",
     hasReviewer: () => true,
-    dispatchReviewer: vi.fn(async () => ({ verdict: opts.verdict, deferredId: opts.deferredId })),
+    dispatchReviewer: vi.fn(async () => {
+      opts.onDispatch?.();
+      return { verdict: opts.verdict, deferredId: opts.deferredId, outcome: opts.outcome ?? "fresh" };
+    }),
     resolveReviewerDecision: resolveSpy,
   } as unknown as PermissionManager;
   return { pm, resolveSpy };
 }
 
-function dispatch(pm: PermissionManager, kind: ReviewerLane, category: "write" = "write") {
+function dispatch(
+  pm: PermissionManager,
+  kind: ReviewerLane,
+  category: "write" = "write",
+  callbacks?: ToolExecutorCallbacks,
+  abortSignal?: AbortSignal,
+) {
   const args = [
     pm,
     "some_tool",
@@ -79,9 +95,11 @@ function dispatch(pm: PermissionManager, kind: ReviewerLane, category: "write" =
     context,
     evaluationContext,
     {} as { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
-    undefined,
+    callbacks,
     meta,
     undefined,
+    undefined,
+    abortSignal,
   ] as const;
   return kind === "headless"
     ? dispatchReviewerForHeadless(...(args as Parameters<typeof dispatchReviewerForHeadless>))
@@ -95,7 +113,8 @@ describe("reviewer-dispatch delegates verdict→decision to PermissionManager (V
     const result = await dispatch(pm, "headless");
     expect(resolveSpy).toHaveBeenCalledWith(verdict, "headless");
     expect(result.allowed).toBe(true);
-    expect(result.permissionResult).toEqual(resolveSpy.mock.results[0]!.value);
+    expect(result.permissionResult).toMatchObject(resolveSpy.mock.results[0]!.value);
+    expect(result.permissionResult.reviewer?.outcome).toBe("fresh");
   });
 
   it("headless: non-allow decision is wired with deferred metadata layered on", async () => {
@@ -118,6 +137,109 @@ describe("reviewer-dispatch delegates verdict→decision to PermissionManager (V
     const { pm, resolveSpy } = makeStub({ verdict });
     const result = await dispatch(pm, "foreground-auto");
     expect(resolveSpy).toHaveBeenCalledWith(verdict, "foreground-auto");
-    expect(result).toEqual(resolveSpy.mock.results[0]!.value);
+    expect(result).toMatchObject(resolveSpy.mock.results[0]!.value);
+    expect(result?.reviewer?.outcome).toBe("fresh");
+  });
+
+  it.each([
+    "unavailable",
+    "error",
+    "timeout",
+    "malformed",
+    "sandbox-state-changed",
+  ] satisfies ReviewerDispatchOutcome[])(
+    "foreground-auto: %s fallback verdict never auto-decides and forces the modal",
+    async (outcome) => {
+      for (const level of ["low", "medium"] as const) {
+        const verdict: RiskVerdict = { level, reason: "rule fallback" };
+        const { pm, resolveSpy } = makeStub({ verdict, outcome });
+        const result = await dispatch(pm, "foreground-auto");
+
+        expect(resolveSpy).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          decision: "ask",
+          layer: 5,
+          forceModal: true,
+          reviewer: { route: "foreground-auto", verdict, outcome },
+        });
+      }
+    },
+  );
+
+  it.each([
+    "unavailable",
+    "error",
+    "timeout",
+    "malformed",
+    "sandbox-state-changed",
+  ] satisfies ReviewerDispatchOutcome[])(
+    "headless: %s fallback verdict always denies",
+    async (outcome) => {
+      for (const level of ["low", "medium"] as const) {
+        const verdict: RiskVerdict = { level, reason: "rule fallback" };
+        const { pm, resolveSpy } = makeStub({ verdict, outcome });
+        const result = await dispatch(pm, "headless");
+
+        expect(resolveSpy).not.toHaveBeenCalled();
+        expect(result.allowed).toBe(false);
+        expect(result.permissionResult).toMatchObject({
+          decision: "deny",
+          layer: 5,
+          reviewer: { route: "headless", verdict, outcome },
+        });
+      }
+    },
+  );
+
+
+  it.each([
+    "fresh", "cache", "approval-memory", "unavailable",
+    "error", "timeout", "malformed", "sandbox-state-changed",
+  ] satisfies ReviewerDispatchOutcome[])(
+    "%s has an explicit foreground and headless dispatcher decision",
+    async (outcome) => {
+      const successful = ["fresh", "cache", "approval-memory"].includes(outcome);
+      const verdict: RiskVerdict = { level: "low", reason: "matrix" };
+
+      const foregroundStub = makeStub({ verdict, outcome });
+      const foreground = await dispatch(
+        foregroundStub.pm, "foreground-auto",
+      ) as PermissionCheckResult;
+      expect(foregroundStub.resolveSpy).toHaveBeenCalledTimes(successful ? 1 : 0);
+      expect(foreground.decision).toBe(successful ? "allow" : "ask");
+      expect(foreground.reviewer?.outcome).toBe(outcome);
+      expect(foreground.forceModal === true).toBe(!successful);
+
+      const headlessStub = makeStub({ verdict, outcome });
+      const headless = await dispatch(headlessStub.pm, "headless") as {
+        allowed: boolean;
+        permissionResult: PermissionCheckResult;
+      };
+      expect(headlessStub.resolveSpy).toHaveBeenCalledTimes(successful ? 1 : 0);
+      expect(headless.allowed).toBe(successful);
+      expect(headless.permissionResult.decision).toBe(successful ? "allow" : "deny");
+      expect(headless.permissionResult.reviewer?.outcome).toBe(outcome);
+    },
+  );
+  it("treats caller abort after a valid fresh result as terminal and non-recordable", async () => {
+    const abortController = new AbortController();
+    const statuses: string[] = [];
+    const { pm, resolveSpy } = makeStub({
+      verdict: { level: "low", reason: "valid fresh result" },
+      outcome: "fresh",
+      onDispatch: () => abortController.abort(),
+    });
+    const result = await dispatch(pm, "foreground-auto", "write", {
+      onPermissionReview: (event) => statuses.push(event.status),
+    }, abortController.signal);
+
+    expect(resolveSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      decision: "deny",
+      reason: "foreground reviewer cancelled by caller",
+      layer: 5,
+    });
+    expect(result?.reviewer).toBeUndefined();
+    expect(statuses).toEqual(["reviewing", "failed"]);
   });
 });

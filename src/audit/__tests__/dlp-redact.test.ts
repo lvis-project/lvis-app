@@ -5,7 +5,13 @@
 import { describe, it, expect } from "vitest";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
-import { redactForLLM, redactFsPath, redactAuditPayload, scrubSecretsForLLM } from "../dlp-filter.js";
+import {
+  redactAuditPayload,
+  redactForLLM,
+  redactFsPath,
+  redactHomePathsInText,
+  scrubSecretsForLLM,
+} from "../dlp-filter.js";
 import { fixtureSecret } from "./secret-fixtures.js";
 
 describe("redactForLLM", () => {
@@ -227,6 +233,28 @@ describe("redactFsPath", () => {
     // match — this test is mainly a contract test for when running on Windows.
     // Just assert no throw and the result is a string.
     expect(typeof result).toBe("string");
+  });
+});
+
+describe("redactHomePathsInText", () => {
+  it("redacts embedded Windows, macOS, Linux, and file URL home paths", () => {
+    const input = [
+      "Windows C:\\Users\\alice\\private\\output",
+      "macOS /Users/alice/private/output",
+      "Linux /home/alice/private/output",
+      "Windows URL file:///C:/Users/alice/private/output",
+      "macOS URL file:///Users/alice/private/output",
+      "Linux URL file:///home/alice/private/output",
+    ].join(" | ");
+    const redacted = redactHomePathsInText(input);
+
+    expect(redacted).not.toContain("C:\\Users\\alice");
+    expect(redacted).not.toContain("/Users/alice");
+    expect(redacted).not.toContain("/home/alice");
+    expect(redacted.match(/\[home\]/gu)).toHaveLength(6);
+    expect(redactHomePathsInText("/srv/workspace/output")).toBe(
+      "/srv/workspace/output",
+    );
   });
 });
 

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { ToolResult } from "./types.js";
 import type { A2APart } from "../shared/a2a.js";
@@ -12,6 +11,7 @@ import {
   type A2AAgentSendResult,
 } from "../engine/a2a-agent-message-envelope.js";
 import { GUIDE_MAX_CHARS } from "../engine/turn/guidance-limits.js";
+import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 
 export const A2A_INPUT_REQUIRED_CONTROL_KIND = "a2a-input-required" as const;
 export const A2A_INPUT_REQUIRED_CONTROL_VERSION = 1 as const;
@@ -144,7 +144,7 @@ export function createAgentSendTool(deps: AgentSendToolDeps): Tool {
       const senderChildSessionId = typeof ctx.metadata?.sessionId === "string"
         ? ctx.metadata.sessionId
         : "";
-      const messageId = randomUUID();
+      const messageId = createDlpSafeUuid();
       const rawRecipient = isRecord(rawInput) && typeof rawInput.to === "string"
         ? rawInput.to.trim()
         : "invalid";

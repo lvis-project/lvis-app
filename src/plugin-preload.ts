@@ -198,7 +198,7 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
   // each key maps to `<pluginDataDir>/ui-storage/<key>.json`. Path traversal
   // is rejected before the storage layer ever sees the key. Plugins should
   // use this for UI-side state that must survive a webview reload — anything
-  // that needs cross-plugin coordination still goes through callTool/emitEvent.
+  // that needs cross-plugin coordination goes through the event bus.
   storage: {
     get: async <T = unknown>(key: string): Promise<T | undefined> => {
       const reply = (await ipcRenderer.invoke("lvis:plugin:storage:get", key)) as

@@ -22,6 +22,8 @@ import { scrubPackagedProcessEnv } from "./packaged-env-scrub.js";
 import { resolveAppIconPath } from "./app-icon.js";
 
 const log = createLogger("lvis");
+export const WINDOWS_TOAST_ACTIVATOR_CLSID =
+  "{62FD3EFB-B3D2-4235-9402-6979F52C0286}";
 
 export function applyRuntimeAppIcon() {
   const iconPath = resolveAppIconPath();
@@ -66,6 +68,13 @@ export function runEarlyBootEnv(): void {
   // generic "Electron" identity. Issue #260 NotificationService relies on this.
   // Safe to call on all platforms; non-Windows treats it as a no-op.
   app.setAppUserModelId("xyz.lvisai.app");
+  // Electron 43 otherwise creates a fresh random toast activator CLSID when
+  // the current-user notification shortcut is absent. Pin a product-owned ID
+  // before any Notification presenter can initialize so reinstall/repair does
+  // not accumulate orphaned HKCU CLSID registrations.
+  if (process.platform === "win32") {
+    app.setToastActivatorCLSID(WINDOWS_TOAST_ACTIVATOR_CLSID);
+  }
 
   // Trust-hardening — strip dev/test-only LVIS flags from process.env in packaged
   // builds before any preload, renderer, or worker inherits it. Without this

@@ -5,7 +5,7 @@
  * calls in this file so future package updates usually touch one adapter plus
  * its drift tests, not every IPC/UI caller.
  *
- * Current target: @anthropic-ai/sandbox-runtime 0.0.64
+ * Current target: @anthropic-ai/sandbox-runtime 0.0.66
  * - dedicated `srt-sandbox` user provisioning
  * - WFP keyed to the sandbox user SID
  * - filesystem rules applied by ASRT's Windows ACL backend
@@ -277,7 +277,7 @@ export async function resolveAsrtWindowsReady(
   if (isAsrtWindowsReady(userState, wfpState)) return true;
   if (userState !== "ready" || wfpState !== "cannot-read") return false;
 
-  // ASRT 0.0.64 reports `cannot-read` when BFE enumeration is admin-gated.
+  // ASRT 0.0.66 reports `cannot-read` when BFE enumeration is admin-gated.
   // The non-elevated readiness proof is behavioral WFP egress verification.
   try {
     await verifyWindowsWfpEgress({
@@ -329,7 +329,7 @@ export async function installAsrtWindowsSandbox(
   const { installWindowsSandbox, verifyWindowsWfpEgress } = dependencies.loadRuntime
     ? await dependencies.loadRuntime()
     : await import("@anthropic-ai/sandbox-runtime");
-  // ASRT 0.0.64 installWindowsSandbox is synchronous and may show a UAC prompt.
+  // ASRT 0.0.66 installWindowsSandbox is synchronous and may show a UAC prompt.
   // Keep that visible; only the follow-up WFP verification below is awaited.
   const result = installWindowsSandbox({
     proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE,

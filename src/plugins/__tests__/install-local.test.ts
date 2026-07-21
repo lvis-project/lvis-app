@@ -96,12 +96,14 @@ describe("PluginMarketplaceService.installLocal", () => {
   });
 
   it("skips node_modules/electron, .git, and nested node_modules/electron during cp", async () => {
-    // Mimic the failure repro: source plugin repo with node_modules/electron
-    // containing an .asar archive. Without the filter, Electron's patched
-    // fs intercepts default_app.asar and aborts cp with "Invalid package".
+    // Keep this fixture inert because the canonical test runner itself uses
+    // Electron's patched fs. The contract here is excluding the Electron tree,
+    // not asking the runner to parse an intentionally corrupt ASAR archive.
     const electronDir = join(sourceDir, "node_modules", "electron", "dist", "Electron.app", "Contents", "Resources");
     await mkdir(electronDir, { recursive: true });
-    await writeFile(join(electronDir, "default_app.asar"), Buffer.from([0, 1, 2, 3]));
+    const electronFixture = join(electronDir, "electron-fixture.bin");
+    await writeFile(electronFixture, Buffer.from([0, 1, 2, 3]));
+    expect(existsSync(electronFixture)).toBe(true);
     // Sibling dep that SHOULD be copied (plugin runtime needs it).
     await mkdir(join(sourceDir, "node_modules", "node-ical"), { recursive: true });
     await writeFile(
@@ -287,12 +289,12 @@ describe("PluginMarketplaceService.installLocal", () => {
   });
 
   it("mirrors manifest.pluginAccess into registry approvedPluginAccess (parity with marketplace install)", async () => {
-    // Without this, assertPluginEventAccess / assertPluginToolAccess find no
-    // grant for a dev-sideloaded plugin and any cross-plugin event subscribe
+    // Without this, assertPluginEventAccess finds no grant for a
+    // dev-sideloaded plugin and any cross-plugin event subscribe
     // (e.g. work-assistant listening to ms-graph email.new) throws at startup.
     const accessSpec = {
       plugins: [
-        { pluginId: "ms-graph", events: ["email.new", "calendar.event.upcoming"], tools: ["msgraph_calendar_today"] },
+        { pluginId: "ms-graph", events: ["email.new", "calendar.event.upcoming"] },
       ],
     };
     await writeFile(

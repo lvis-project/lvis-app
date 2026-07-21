@@ -131,11 +131,11 @@ export async function dispatchAppOnlyRuntimeInvocation(
     context.userAction !== true
   ) {
     // #1556 — A nested `ctx.callTool` reaches here with `context.origin ===
-    // "plugin"` (HostApi.callTool builds the inner context with `origin:
-    // "plugin"` and never forwards `userAction`), even though the UI-rooted
+    // "plugin"` (the nested `ctx.callTool` dispatch builds the inner context
+    // with `origin: "plugin"` and never forwards `userAction`), even though the UI-rooted
     // chain's *effective* origin is "ui". Such a call can NEVER satisfy the
     // user-activation requirement for an app-only-visibility non-status method,
-    // and forwarding userAction through HostApi.callTool is intentionally out of
+    // and forwarding userAction through that nested dispatch is intentionally out of
     // scope (that would be building the nested mechanism, which no shipped
     // first-party plugin uses). Throw an error that names the real manifest
     // constraint instead of the generic activation error, which misleads the

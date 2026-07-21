@@ -42,7 +42,7 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 |---|---|---|
 | `PluginManifest` (id/name/version/entry/tools[]/description) (`src/plugins/types.ts:175`) | `DiscoverResult` { supportedVersions, serverInfo:Implementation, capabilities, instructions? } | Manifest is a static file; MCP needs a live `server/discover` handler. Add manifest→`DiscoverResult` projection. `entry` becomes the server process (stdio) or loopback module. |
 | `toolSchemas[name]` (inputSchema **draft-07** + category/pathFields/writesToOwnSandbox/version/deprecatedSince/replacedBy) (`src/plugins/types.ts:268-306`) | `Tool` { name, title?, description?, inputSchema(**2020-12**, type:object), outputSchema?, annotations?, icons?, _meta? } via `tools/list`; `tools/call`→`CallToolResult{content[],structuredContent?,isError?}` | (a) dialect draft-07 → 2020-12. (b) category/pathFields/writesToOwnSandbox/version/deprecatedSince/replacedBy → `_meta["lvisai/*"]` (vendor prefix; second label MUST NOT be `mcp`/`modelcontextprotocol`). (c) project category → `ToolAnnotations` hints (interop only). |
-| `PluginHostApi` (generic surface: storage/config/callLlm/resolveApiKey/agentApproval/openAuthWindow/triggerConversation/showOverlay/events/registerKeywords/getInstalledPluginIds/callTool/getSecret) (`src/plugins/types.ts:757-1105`) | **Split** (no single equivalent; **no host server** — §0) | See §3.5. callLlm→**sampling**; agentApproval/asks→**elicitation**; openAuthWindow/secrets→**authorization** (OAuth) + url-elicitation; showOverlay→**Apps**; storage/config/triggerConversation/events→**host-internal**. |
+| `PluginHostApi` (generic surface: storage/config/callLlm/resolveApiKey/agentApproval/openAuthWindow/triggerConversation/showOverlay/events/registerKeywords/getInstalledPluginIds/getSecret) | **Split** (no single equivalent; **no host server** — §0) | See §3.5. callLlm→**sampling**; agentApproval/asks→**elicitation**; openAuthWindow/secrets→**authorization** (OAuth) + url-elicitation; showOverlay→**Apps**; storage/config/triggerConversation/events→**host-internal**. |
 | Plugin domain events `${id}.verb.noun` + `pluginAccess.plugins[].events` grants + `assertPluginEventAccess`/`EmitAccess` (`src/plugins/runtime/index.ts:1723-1749`) | **No MCP equivalent** (MCP notifications are server→host list-change/resource-update only; no plugin↔plugin pub/sub) | **Keep host-internal** (§0 hybrid). Surface only `tools`/`resources` list-change via MCP `notifications/*/list_changed`. |
 | Permission categories `read\|write\|shell\|network` (authoritative SOT) (`src/plugins/types.ts:18`) | `ToolAnnotations` (hints, explicitly **untrusted**) + host obtains explicit consent before any `tools/call` | Category stays the authoritative `_meta` SOT; **host policy MUST NOT trust inbound annotations** for permission decisions (matches MCP's own "annotations untrusted unless trusted server"). |
 | Hooks (Layer-6 shell pre/post/perm, deny-only, TOFU lockfile) (`src/hooks/*`, fire points `src/tools/executor.ts:1736/1833/1991`) | **No equivalent** (MCP has no host-side tool-call veto) | Remain a pure host policy layer; re-anchor fire points to the host's `tools/call` boundary (§4). |
@@ -104,7 +104,7 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 | `openAuthWindow`, `getSecret` | **MCP authorization** (OAuth 2.1 + PKCE + RFC 8707) for HTTP plugins; env-injected creds for stdio plugins; `url`-mode elicitation drives interactive consent |
 | `showOverlay`, UI | **MCP Apps** (`_meta.ui.resourceUri`→`ui://` resource) |
 | `storage`, `config` | **host-internal** (MCP is stateless — no config/storage RPC). Storage stays the sandboxed per-plugin data dir via `createPluginStorage(pluginId, pluginDataDir)` rooted at `<pluginsRoot>/<pluginId>/data/` (`src/plugins/runtime/sandbox.ts`); this is the plugin path, distinct from `openFeatureNamespace`'s single-segment `~/.lvis/<featureId>/` host namespaces. |
-| `triggerConversation`, `registerKeywords`, `getInstalledPluginIds`, `onPluginsChanged`, `callTool`, event bus | **host-internal** platform surfaces (no MCP primitive); `logEvent` ≈ `notifications/message` |
+| `triggerConversation`, `registerKeywords`, `getInstalledPluginIds`, `onPluginsChanged`, event bus | **host-internal** platform surfaces (no MCP primitive); `logEvent` ≈ `notifications/message` |
 
 The host, as MCP host, advertises `sampling`/`elicitation` as per-request `clientCapabilities` — **that is the standard path** for a plugin-server to "call back" to the host. No bespoke server.
 
@@ -169,7 +169,7 @@ sampling → host LLM — host surfaces, wired at the live-resolver step). No re
 ⇒ fail closed (No-Fallback). The plugin host's `input_required` stays a typed
 not-yet (LVIS plugin servers don't elicit yet).
 
-Built + tested (one module each, all green under `vitest run src/mcp/`):
+Built + tested (one module each, all green under `bun run test:vitest -- run src/mcp/`):
 - `plugin-server-projection.ts` — manifest/`toolSchemas` → `server/discover` +
   `tools/list` (dialect → 2020-12; authority under `lvisai/*` `_meta`).
 - `plugin-mcp-server.ts` — the RC server methods (`server/discover`/`tools/list`/
@@ -429,7 +429,7 @@ RequestMetaObject {
 
 ### Key file refs
 - `src/mcp/mcp-client.ts` (handshake, `MCP_PROTOCOL_VERSION:116`, `McpInitializeResult:80`, `McpToolCallResult._meta.ui:97`), `src/mcp/mcp-tool-adapter.ts` (`mcpToolToTool`), `src/mcp/types.ts` (`McpServerApproval.allowedCapabilities:27-97`)
-- `src/plugins/types.ts` (`PluginManifest:175`, `toolSchemas:268-306`, `PluginHostApi:757-1105`, `PluginToolCategory:18`)
+- `src/plugins/types.ts` (`PluginManifest`, `toolSchemas`, `PluginHostApi`, `PluginToolCategory`)
 - `src/plugins/runtime/index.ts` (`assertPluginEventAccess:1723`, `assertPluginEventEmitAccess:1738`, `inferEventOwner`)
 - `src/hooks/script-hook-types.ts` (`ScriptHookStdin`, `ScriptHookStdout`, `modify` forbidden), `src/tools/executor.ts` (hook fire points `1736/1833/1991`)
 - `docs/architecture/hook-runtime-expansion-design.md` (#811)

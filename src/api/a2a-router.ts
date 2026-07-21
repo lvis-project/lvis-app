@@ -23,6 +23,8 @@ import {
   type A2ARouterErrorDefinition,
   type StandardJsonRpcErrorDefinition as StandardErrorDefinition,
 } from "../shared/a2a-wire.js";
+import { parseA2AStrictJson } from "./a2a-strict-json.js";
+import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -48,6 +50,38 @@ export interface A2ARequestHandler {
   id: string;
   card: A2AAgentCardTemplate;
   handle(method: A2ADirectJsonRpcMethod, params: A2AJsonObject): Promise<A2ADirectJsonRpcResult>;
+  /**
+   * Optional raw-wire path for profiles whose contract binds exact HTTP body
+   * bytes or response headers. The ph3 loopback handlers intentionally omit
+   * this seam and continue through {@link handle} unchanged.
+   */
+  handleWire?(
+    request: Readonly<A2AJsonRpcRequest>,
+    context: Readonly<A2AWireRequestContext>,
+  ): Promise<A2AWireHandlerResult>;
+}
+
+export interface A2AWireRequestContext {
+  rawBody: Uint8Array;
+  authorization?: string;
+  extensions?: string | readonly string[];
+}
+
+export interface A2AWireHandlerResult {
+  result: A2ADirectJsonRpcResult;
+  headers?: Readonly<Record<string, string>>;
+}
+
+/** A complete handler-owned wire failure; values are emitted without logging. */
+export class A2AWireResponseError extends Error {
+  constructor(
+    readonly status: number,
+    readonly error: Readonly<{ code: number; message: string; data?: A2AJsonValue }>,
+    readonly headers: Readonly<Record<string, string>> = {},
+  ) {
+    super(error.message);
+    this.name = "A2AWireResponseError";
+  }
 }
 
 export interface A2AHttpRouterAuditEvent {
@@ -58,6 +92,8 @@ export interface A2AHttpRouterAuditEvent {
 }
 
 export interface A2AHttpRouter {
+  /** Stable, sorted handler ids exposed by this immutable boot snapshot. */
+  readonly handlerIds: readonly string[];
   isPublicAgentCardRequest(path: string, method: string): boolean;
   tryHandle(
     req: IncomingMessage,
@@ -69,12 +105,22 @@ export interface A2AHttpRouter {
 
 export interface CreateA2AHttpRouterOptions {
   handlers: readonly A2ARequestHandler[];
+  /** Fixed host-owned public origin; request Host/forwarded headers are ignored. */
+  advertisedOrigin?: string;
   audit?: (event: A2AHttpRouterAuditEvent) => void;
   log?: (message: string) => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const CORE_A2A_RESPONSE_HEADERS = new Set(["content-type", "a2a-version"]);
+
+function hasCoreA2AResponseHeader(headers: Readonly<Record<string, string>> | undefined): boolean {
+  return headers !== undefined && Object.keys(headers).some(
+    (name) => CORE_A2A_RESPONSE_HEADERS.has(name.toLowerCase()),
+  );
 }
 
 function sendJson(
@@ -84,14 +130,14 @@ function sendJson(
   headers: Record<string, string> = {},
 ): void {
   res.writeHead(status, {
+    ...headers,
     "content-type": JSON_CONTENT_TYPE,
     "a2a-version": A2A_PROTOCOL_VERSION,
-    ...headers,
   });
   res.end(JSON.stringify(body));
 }
 
-function readBody(req: IncomingMessage): Promise<string | null> {
+function readBody(req: IncomingMessage): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
@@ -101,13 +147,14 @@ function readBody(req: IncomingMessage): Promise<string | null> {
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
         overCap = true;
+        req.pause();
         resolve(null);
         return;
       }
       chunks.push(chunk);
     });
     req.on("end", () => {
-      if (!overCap) resolve(Buffer.concat(chunks).toString("utf8"));
+      if (!overCap) resolve(Buffer.concat(chunks));
     });
     req.on("error", reject);
   });
@@ -125,8 +172,22 @@ function sendSuccess(
   res: ServerResponse,
   id: A2AJsonRpcId,
   result: A2ADirectJsonRpcResult,
+  headers: Record<string, string> = {},
 ): void {
-  sendJson(res, 200, { jsonrpc: A2A_JSONRPC_VERSION, id, result });
+  sendJson(res, 200, { jsonrpc: A2A_JSONRPC_VERSION, id, result }, headers);
+}
+
+function sendWireFailure(
+  res: ServerResponse,
+  id: A2AJsonRpcId,
+  failure: A2AWireResponseError,
+): void {
+  sendJson(
+    res,
+    failure.status,
+    { jsonrpc: A2A_JSONRPC_VERSION, id, error: failure.error },
+    { ...failure.headers },
+  );
 }
 
 function sendFailure(
@@ -160,13 +221,13 @@ function sendFailure(
   });
 }
 
-function parseRequest(raw: string): {
+function parseRequest(raw: Uint8Array): {
   request?: A2AJsonRpcRequest;
   error?: StandardErrorDefinition;
 } {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = parseA2AStrictJson(raw, { maxBytes: MAX_BODY_BYTES });
   } catch {
     return { error: StandardJsonRpcErrorDefinition.PARSE_ERROR };
   }
@@ -190,16 +251,21 @@ function parseRequest(raw: string): {
   };
 }
 
-function interfaceUrl(req: IncomingMessage, handlerId: string): string {
-  return "http://127.0.0.1:" + String(req.socket.localPort) + "/a2a/" + handlerId;
+function interfaceUrl(req: IncomingMessage, handlerId: string, advertisedOrigin?: string): string {
+  return advertisedOrigin
+    ? advertisedOrigin.slice(0, -1) + "/a2a/" + handlerId
+    : "http://127.0.0.1:" + String(req.socket.localPort) + "/a2a/" + handlerId;
 }
 
-function buildCard(req: IncomingMessage, handler: A2ARequestHandler): A2AAgentCard {
+export function buildA2AAgentCard(
+  handler: A2ARequestHandler,
+  advertisedInterfaceUrl: string,
+): A2AAgentCard {
   return {
     ...handler.card,
     supportedInterfaces: [
       {
-        url: interfaceUrl(req, handler.id),
+        url: advertisedInterfaceUrl,
         protocolBinding: "JSONRPC",
         protocolVersion: A2A_PROTOCOL_VERSION,
       },
@@ -207,8 +273,8 @@ function buildCard(req: IncomingMessage, handler: A2ARequestHandler): A2AAgentCa
   };
 }
 
-function sendCard(req: IncomingMessage, res: ServerResponse, handler: A2ARequestHandler): void {
-  const card = buildCard(req, handler);
+function sendCard(req: IncomingMessage, res: ServerResponse, handler: A2ARequestHandler, advertisedOrigin?: string): void {
+  const card = buildA2AAgentCard(handler, interfaceUrl(req, handler.id, advertisedOrigin));
   const payload = JSON.stringify(card);
   const etag = '"' + createHash("sha256").update(payload).digest("hex") + '"';
   res.writeHead(200, {
@@ -238,6 +304,11 @@ function includesInlinePushConfig(params: A2AJsonObject): boolean {
 }
 
 export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHttpRouter {
+  if (options.advertisedOrigin !== undefined) {
+    if (!isCanonicalA2APublicHttpsOrigin(options.advertisedOrigin)) {
+      throw new Error("a2a-advertised-origin-invalid");
+    }
+  }
   const handlers = new Map<string, A2ARequestHandler>();
   for (const handler of options.handlers) {
     if (!HANDLER_ID_PATTERN.test(handler.id)) {
@@ -256,7 +327,10 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
     handlers.set(handler.id, handler);
   }
 
-  return {
+  const handlerIds = Object.freeze([...handlers.keys()].sort());
+
+  const router: A2AHttpRouter = {
+    handlerIds,
     isPublicAgentCardRequest(path, method) {
       return method === "GET" && A2A_CARD_PATTERN.test(path);
     },
@@ -280,7 +354,7 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
           sendJson(res, 405, { ok: false, error: "method-not-allowed" });
           return true;
         }
-        sendCard(req, res, handler);
+        sendCard(req, res, handler, options.advertisedOrigin);
         return true;
       }
 
@@ -295,7 +369,10 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
 
       const raw = await readBody(req);
       if (raw === null) {
-        sendJson(res, 413, { ok: false, error: "payload-too-large" });
+        res.once("finish", () => {
+          if (!req.destroyed) req.destroy();
+        });
+        sendJson(res, 413, { ok: false, error: "payload-too-large" }, { connection: "close" });
         return true;
       }
       const parsed = parseRequest(raw);
@@ -342,12 +419,41 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
       }
 
       try {
-        const result = await handler.handle(
-          request.method as A2ADirectJsonRpcMethod,
-          params,
-        );
-        sendSuccess(res, request.id, result);
+        if (handler.handleWire) {
+          const authorization = req.headers.authorization;
+          const extensions = req.headers["a2a-extensions"];
+          const reply = await handler.handleWire(request, Object.freeze({
+            rawBody: raw,
+            ...(typeof authorization === "string" ? { authorization } : {}),
+            ...((typeof extensions === "string" || Array.isArray(extensions)) ? { extensions } : {}),
+          }));
+          if (hasCoreA2AResponseHeader(reply.headers)) {
+            throw new Error("a2a-wire-core-response-header-reserved");
+          }
+          sendSuccess(res, request.id, reply.result, reply.headers === undefined ? {} : { ...reply.headers });
+        } else {
+          const result = await handler.handle(
+            request.method as A2ADirectJsonRpcMethod,
+            params,
+          );
+          sendSuccess(res, request.id, result);
+        }
       } catch (error) {
+        if (error instanceof A2AWireResponseError) {
+          if (hasCoreA2AResponseHeader(error.headers)) {
+            options.audit?.({
+              type: "a2a-wire-drop",
+              reason: "handler-error",
+              handlerId,
+              method: request.method,
+            });
+            options.log?.("A2A handler " + handlerId + " failed");
+            sendFailure(res, request.id, StandardJsonRpcErrorDefinition.INTERNAL_ERROR);
+            return true;
+          }
+          sendWireFailure(res, request.id, error);
+          return true;
+        }
         if (error instanceof A2AHandlerError) {
           sendFailure(res, request.id, error.definition);
           return true;
@@ -364,4 +470,5 @@ export function createA2AHttpRouter(options: CreateA2AHttpRouterOptions): A2AHtt
       return true;
     },
   };
+  return Object.freeze(router);
 }

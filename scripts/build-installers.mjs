@@ -58,7 +58,7 @@ function usage() {
     "Options:",
     "  --publish <mode> Publish mode for electron-builder (default: never)",
     "  --skip-build     Package the existing dist/ output",
-    "  --skip-code-sign Produce an unsigned internal build",
+    "  --skip-code-sign Produce an unsigned build",
     "  --skip-native-rebuild",
     "                   Trust already-rebuilt native deps and pass npmRebuild=false",
     "  --dir            Build unpacked app directories instead of installers",

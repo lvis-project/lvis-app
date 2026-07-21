@@ -177,15 +177,35 @@ describe("check-test-coverage", () => {
     const packageJson = JSON.parse(fs.readFileSync(path.resolve("package.json"), "utf8"));
     const vitestConfig = fs.readFileSync(path.resolve("vitest.config.ts"), "utf8");
     const coverageGateScript = fs.readFileSync(path.resolve("scripts/run-test-coverage-gate.mjs"), "utf8");
+    const vitestRunner = fs.readFileSync(
+      path.resolve("scripts/run-vitest-under-electron.mjs"),
+      "utf8",
+    );
+    const runtimeNormalizer = fs.readFileSync(
+      path.resolve("scripts/normalize-electron-node-runtime.mjs"),
+      "utf8",
+    );
+    const ciWorkflow = fs.readFileSync(path.resolve(".github/workflows/ci.yml"), "utf8");
+    const marketplaceWorkflow = fs.readFileSync(
+      path.resolve(".github/workflows/marketplace-e2e.yml"),
+      "utf8",
+    );
     const vitestVersion = packageJson.devDependencies.vitest.replace(/^[^\d]*/, "");
     const coverageVersion = packageJson.devDependencies["@vitest/coverage-v8"].replace(/^[^\d]*/, "");
 
     expect(packageJson.scripts["test:prepare"]).toBe("bun run build:icons");
-    expect(packageJson.scripts.test).toBe("bun run test:prepare && vitest run");
-    expect(packageJson.scripts["test:coverage"]).toBe(
-      "bun run test:prepare && vitest run --coverage",
+    expect(packageJson.scripts["test:vitest"]).toBe(
+      "node scripts/run-vitest-under-electron.mjs",
     );
-    expect(packageJson.scripts["test:watch"]).toBe("bun run test:prepare && vitest");
+    expect(packageJson.scripts.test).toBe(
+      "bun run test:prepare && bun run test:vitest -- run",
+    );
+    expect(packageJson.scripts["test:coverage"]).toBe(
+      "bun run test:prepare && bun run test:vitest -- run --coverage",
+    );
+    expect(packageJson.scripts["test:watch"]).toBe(
+      "bun run test:prepare && bun run test:vitest",
+    );
     expect(packageJson.scripts["check:test-coverage"]).toContain("scripts/run-test-coverage-gate.mjs");
     expect(packageJson.scripts["check:test-quality"]).toContain("check:test-duplicates");
     expect(coverageVersion).toBe(vitestVersion);
@@ -194,8 +214,18 @@ describe("check-test-coverage", () => {
     expect(vitestConfig).toContain('"json-summary"');
     expect(coverageGateScript).toContain('process.platform === "win32" ? "bun.exe" : "bun"');
     expect(coverageGateScript).toContain('["run", "test:prepare"]');
+    expect(coverageGateScript).toContain('join("scripts", "run-vitest-under-electron.mjs")');
     expect(coverageGateScript).not.toContain("shell: true");
     expect(coverageGateScript).toContain("rmSync(reportsDir");
+    expect(vitestRunner).toContain('ELECTRON_RUN_AS_NODE: "1"');
+    expect(vitestRunner).toContain("NODE_OPTIONS: nodeOptions");
+    expect(vitestRunner).toContain("normalize-electron-node-runtime.mjs");
+    expect(runtimeNormalizer).toContain("[electron-node-normalization-failed]");
+    expect(runtimeNormalizer).toContain('removeRuntimeMarker(target.versions, "electron")');
+    expect(runtimeNormalizer).toContain('removeRuntimeMarker(target, "resourcesPath")');
+    expect(ciWorkflow).not.toContain("npm rebuild better-sqlite3");
+    expect(ciWorkflow).not.toContain("prebuild-install -r node");
+    expect(marketplaceWorkflow).toContain("bun run test:vitest -- run");
   });
 
   it("surfaces the highest uncovered files for actionable failures", () => {

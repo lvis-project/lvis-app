@@ -1,7 +1,11 @@
 {
   "name": "lvis-app",
-  "version": "0.5.2",
+  "version": "0.5.5",
   "private": true,
+  "lvisRelease": {
+    "tagDistribution": "public",
+    "signing": "unsigned"
+  },
   "type": "module",
   "imports": {
     "#components/*": "./src/components/*.tsx",
@@ -50,17 +54,25 @@
     "plugins:disable": "tsx scripts/plugins-cli.ts disable",
     "cli": "tsx scripts/lvis-cli.ts",
     "test:prepare": "bun run build:icons",
-    "test": "bun run test:prepare && vitest run",
+    "test:vitest": "node scripts/run-vitest-under-electron.mjs",
+    "test": "bun run test:prepare && bun run test:vitest -- run",
     "test:a2a-tck": "bun scripts/run-a2a-tck.ts",
+    "test:a2a-external": "bun scripts/run-a2a-external-smoke.ts",
     "check:i18n-catalog": "node --import tsx scripts/i18n-validate-catalog.ts",
     "check:sunset-inventory": "node scripts/check-sunset-inventory.mjs",
+    "check:a2a-p4-5-contract": "node scripts/check-a2a-p4-5-contract.mjs",
+    "test:a2a-p4-5:deterministic": "node scripts/run-a2a-p4-5-deterministic.mjs",
+    "test:a2a-p4-5:wire": "node scripts/run-a2a-p4-5-wire.mjs",
+    "test:a2a-p4-5:evidence": "node --test scripts/a2a-p4-5-live/__tests__/evidence.test.mjs",
+    "check:a2a-p4-5:evidence": "bun run test:a2a-p4-5:evidence && bun run check:a2a-p4-5-contract",
+    "test:a2a-p4-5:packaged-live": "node scripts/run-a2a-p4-5-packaged-live.mjs",
     "check:no-inline-channels": "node scripts/check-no-inline-channels.mjs",
     "check:knip": "bunx knip --config knip.jsonc --reporter compact",
     "check:test-duplicates": "node scripts/check-test-duplicates.mjs",
-    "test:coverage": "bun run test:prepare && vitest run --coverage",
+    "test:coverage": "bun run test:prepare && bun run test:vitest -- run --coverage",
     "check:test-coverage": "node scripts/run-test-coverage-gate.mjs",
     "check:test-quality": "bun run check:test-duplicates -- --fail-on-duplicates && bun run check:test-coverage",
-    "test:watch": "bun run test:prepare && vitest",
+    "test:watch": "bun run test:prepare && bun run test:vitest",
     "test:ui-e2e": "playwright test",
     "test:electron-smoke": "node scripts/run-electron.mjs --version",
     "test:packaged-smoke": "node scripts/smoke-packaged-app.mjs --target current",
@@ -85,10 +97,10 @@
     "@ai-sdk/google-vertex": "^5.0.0",
     "@ai-sdk/openai": "^4.0.0",
     "@ai-sdk/openai-compatible": "~3.0.0",
-    "@anthropic-ai/sandbox-runtime": "0.0.65",
+    "@anthropic-ai/sandbox-runtime": "0.0.66",
     "@modelcontextprotocol/ext-apps": "1.7.4",
     "@modelcontextprotocol/sdk": "1.29.0",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "ai": "~7.0.2",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
@@ -269,6 +281,10 @@
         "to": "AGENTS.md"
       },
       {
+        "from": "resources/AGENTS.md.replaceable-sha256",
+        "to": "AGENTS.md.replaceable-sha256"
+      },
+      {
         "from": "resources/agents",
         "to": "agents",
         "filter": [
@@ -303,7 +319,7 @@
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "window": {
         "width": 540,
-        "height": 420
+        "height": 280
       },
       "contents": [
         {
@@ -316,24 +332,6 @@
           "y": 130,
           "type": "link",
           "path": "/Applications"
-        },
-        {
-          "x": 140,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/setup.command"
-        },
-        {
-          "x": 270,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/uninstall.command"
-        },
-        {
-          "x": 400,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/README.txt"
         }
       ]
     },
@@ -366,7 +364,7 @@
       "differentialPackage": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": true,
+      "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh",
       "installerIcon": "build/installerIcon.ico",
       "installerHeaderIcon": "build/installerHeaderIcon.ico",

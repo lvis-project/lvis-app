@@ -56,6 +56,11 @@ import {
 } from "../../permissions/permission-settings-store.js";
 import type { LLMProvider, LLMVendor } from "../../engine/llm/types.js";
 import { createLogger } from "../../lib/logger.js";
+import {
+  LlmRationaleScopeReviewer,
+  UnavailableRationaleScopeReviewer,
+  type RationaleScopeReviewer,
+} from "../../permissions/reviewer/rationale-scope-reviewer.js";
 
 const log = createLogger("reviewer-wiring");
 
@@ -191,6 +196,7 @@ export type RuntimeReviewerMode =
 
 export interface WireReviewerResult {
   classifier: RiskClassifier;
+  rationaleScopeReviewer: RationaleScopeReviewer;
   cache: VerdictCache;
   deferredQueue: DeferredQueue;
   /** Persisted reviewer block actually loaded (post-normalisation). */
@@ -245,6 +251,8 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   );
 
   let classifier: RiskClassifier;
+  let rationaleScopeReviewer: RationaleScopeReviewer =
+    new UnavailableRationaleScopeReviewer();
   // Runtime classifier discriminant — diverges from persisted mode only on
   // the llm-degraded-to-rule path below.
   let runtimeMode: RuntimeReviewerMode = settings.mode;
@@ -307,6 +315,10 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
         fallbackOnError: settings.fallbackOnError,
       };
       classifier = createRiskClassifier(reviewerSettings);
+      rationaleScopeReviewer = new LlmRationaleScopeReviewer(
+        adapter,
+        effectiveSettings.model,
+      );
       log.info(
         "boot: reviewer wired (mode=llm provider=%s model=%s fallback=%s)",
         effectiveSettings.provider,
@@ -374,6 +386,7 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   }
   return {
     classifier,
+    rationaleScopeReviewer,
     cache,
     deferredQueue,
     appliedSettings: settings,

@@ -28,6 +28,8 @@ export function assembleAppServices(ctx: BootContext): AppServices {
     pluginRuntime: ctx.pluginRuntime,
     pluginMarketplace: ctx.pluginMarketplace,
     settingsService: ctx.settingsService,
+    a2aRemoteRuntime: ctx.a2aRemoteRuntime,
+    remoteA2AActionController: ctx.remoteA2AActionController,
     memoryManager: ctx.memoryManager,
     keywordEngine: ctx.keywordEngine,
     routeEngine: ctx.routeEngine,
@@ -91,19 +93,48 @@ export function assembleAppServices(ctx: BootContext): AppServices {
     shutdown: () => {
       if (shutdownPromise) return shutdownPromise;
       shutdownPromise = (async () => {
-        ctx.disposePluginNotifications();
-        ctx.disposePluginEventBridge();
-        ctx.autoUpdaterStop?.();
-        ctx.telemetry?.stop();
-        ctx.pluginTelemetry?.stop();
-        ctx.preferenceRefreshService.stop();
-        ctx.idleScheduler?.stop();
-        ctx.routinesScheduler.stop();
-        if (ctx.dueSoonTimer) clearInterval(ctx.dueSoonTimer);
-        ctx.askUserQuestionGate.disposeAll();
-        ctx.mcpGovernance.stopPolicyRefresh();
-        await ctx.mcpManager.disconnectAll();
-        await ctx.auditService.stop();
+        const errors: unknown[] = [];
+        const attempt = (operation: () => void): void => {
+          try {
+            operation();
+          } catch (error) {
+            errors.push(error);
+          }
+        };
+        const attemptAsync = async (
+          operation: () => Promise<void>,
+        ): Promise<void> => {
+          try {
+            await operation();
+          } catch (error) {
+            errors.push(error);
+          }
+        };
+
+        attempt(() => ctx.disposePluginNotifications());
+        attempt(() => ctx.disposePluginEventBridge());
+        attempt(() => ctx.autoUpdaterStop?.());
+        attempt(() => ctx.telemetry?.stop());
+        attempt(() => ctx.pluginTelemetry?.stop());
+        attempt(() => ctx.preferenceRefreshService.stop());
+        attempt(() => ctx.idleScheduler?.stop());
+        attempt(() => ctx.a2aRemoteRuntime?.dispose());
+        attempt(() => ctx.routinesScheduler.stop());
+        if (ctx.dueSoonTimer) attempt(() => clearInterval(ctx.dueSoonTimer));
+
+        attempt(() => ctx.conversationLoop.abortCurrentTurn(new Error("application shutdown")));
+        attempt(() => ctx.sideChatConversationLoop.abortCurrentTurn(new Error("application shutdown")));
+        attempt(() => ctx.rationaleHostService?.shutdown());
+
+        attempt(() => ctx.approvalGate.disposeAll());
+        attempt(() => ctx.askUserQuestionGate.disposeAll());
+        attempt(() => ctx.mcpGovernance.stopPolicyRefresh());
+        await attemptAsync(() => ctx.mcpManager.disconnectAll());
+        await attemptAsync(() => ctx.auditService.stop());
+
+        if (errors.length > 0) {
+          throw new AggregateError(errors, "application service shutdown failed");
+        }
       })();
       return shutdownPromise;
     },

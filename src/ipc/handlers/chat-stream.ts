@@ -68,6 +68,8 @@ export async function runStreamedTurn(
   options: {
     attachments?: UserContentPart[];
     inputOrigin: ChatInputOrigin;
+    /** DLP-before-send keyboard text used only to mint a host RequestAnchor. */
+    requestAnchorRawIntent?: string;
     rolePrompt?: ActiveRolePrompt;
     initialGuidance?: string;
     approvalReasonPrefix?: string;
@@ -148,6 +150,9 @@ export async function runStreamedTurn(
           toolCategory: meta.category,
           pluginId: meta.pluginId,
           mcpServerId: meta.mcpServerId,
+          ...(meta.executionPlan !== undefined
+            ? { executionPlan: meta.executionPlan }
+            : {}),
           ...(uiPayload && { uiPayload }),
           durationMs,
         }),
@@ -203,6 +208,9 @@ export async function runStreamedTurn(
         ? { attachments: options.attachments }
         : {}),
       inputOrigin: options.inputOrigin,
+      ...(options.requestAnchorRawIntent !== undefined
+        ? { requestAnchorRawIntent: options.requestAnchorRawIntent }
+        : {}),
       ...(options.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
       ...(options.initialGuidance ? { initialGuidance: options.initialGuidance } : {}),
       ...(options.approvalReasonPrefix

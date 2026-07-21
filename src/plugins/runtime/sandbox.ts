@@ -126,9 +126,6 @@ export function createNoopHostApi(
     getInstalledPluginIds: () => [],
     onPluginsChanged: () => () => {},
     getSecret: () => null,
-    callTool: async () => {
-      throw new Error("Plugin tool invocation not available in noop context");
-    },
     callLlm: async () => { throw new Error("LLM not available in noop context"); },
     logEvent: () => {},
     onShutdown: () => {},

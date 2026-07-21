@@ -25,6 +25,7 @@ import { AuditLogger } from "../audit/audit-logger.js";
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import type { AiProviderPingResult } from "../shared/ai-provider-ping.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
+import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { t } from "../i18n/index.js";
 import { buildProvider, generateText, pingProvider, resolveVendorName, AI_PROVIDER_PING_TIMEOUT_MS } from "./turn/provider.js";
@@ -94,7 +95,7 @@ export class ConversationLoop {
   readonly toolExecutor: ToolExecutor;
   readonly auditLogger: AuditLogger;
   provider: LLMProvider | null = null;
-  sessionId: string = crypto.randomUUID();
+  sessionId: string = createDlpSafeUuid();
   sessionKind: SessionKind = "main";
   sessionRoutineId: string | null = null;
   sessionRoutineTitle: string | null = null;
@@ -501,6 +502,7 @@ export class ConversationLoop {
    * routine-fire path where the loop is discarded without a resetSession.
    */
   cleanupSession(): void {
+    this.deps.closeRationaleSession?.(this.sessionId);
     this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
   }
 
@@ -792,6 +794,8 @@ export class ConversationLoop {
       /** Host-owned causal hop inherited from durable A2A guidance. */
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
+      /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
+      requestAnchorRawIntent?: string;
       rolePrompt?: ActiveRolePrompt;
     },
   ): Promise<TurnResult> {

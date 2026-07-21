@@ -373,6 +373,36 @@ export type UsageDailySummaryResult =
   | { ok: true; summary: string; generatedAt: string }
   | { ok: false; error: string };
 
+export type RemoteA2AActionStatus = {
+  state: "idle" | "awaiting-approval" | "sent" | "failed";
+  operationId?: string;
+  taskHandle?: string;
+  recoveryEligible?: boolean;
+  taskAvailable?: boolean;
+  taskState?:
+    | "TASK_STATE_SUBMITTED"
+    | "TASK_STATE_WORKING"
+    | "TASK_STATE_COMPLETED"
+    | "TASK_STATE_FAILED"
+    | "TASK_STATE_CANCELED"
+    | "TASK_STATE_INPUT_REQUIRED"
+    | "TASK_STATE_REJECTED"
+    | "TASK_STATE_AUTH_REQUIRED";
+  targetAgentId?: number;
+  targetLabel?: string;
+  outcome?: string;
+  updatedAt: string;
+};
+
+type RemoteA2AStatusResult =
+  | { ok: true; status: RemoteA2AActionStatus }
+  | { ok: false; error: string };
+
+type RemoteA2AActionCall = {
+  (action: "resume", taskHandle: string, userIntent: string): Promise<RemoteA2AStatusResult>;
+  (action: "cancel" | "replay", taskHandle: string): Promise<RemoteA2AStatusResult>;
+};
+
 export type ProjectQueryOptions = {
   projectRoot?: string;
   projectName?: string;
@@ -405,6 +435,16 @@ export type LvisApi = {
   policy: LvisPolicyApi;
   mcp: LvisMcpApi;
   attach: LvisAttachApi;
+  remoteA2a: {
+    targets: () => Promise<
+      | { ok: true; targets: Array<{ targetAgentId: number; label: string }> }
+      | { ok: false; error: string }
+    >;
+    status: () => Promise<RemoteA2AStatusResult>;
+    send: (targetAgentId: number, userIntent: string) => Promise<RemoteA2AStatusResult>;
+    task: (taskHandle: string) => Promise<RemoteA2AStatusResult>;
+    action: RemoteA2AActionCall;
+  };
   /**
    * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same
    * stability guarantee as `pluginPreloadUrl` — read directly from the host
@@ -1138,13 +1178,39 @@ export type ApprovalChoice = "allow-once" | "allow-session" | "allow-always" | "
  * Permission policy — discriminated approval kinds. Renderer routes on this to
  * pick the right card. Default `"tool"` is the standard approval dialog.
  */
-export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action";
+export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action" | "rationale";
+/**
+ * Renderer-safe view of the host-sealed substrate selected for a builtin shell
+ * invocation. It intentionally omits command, CWD, directories, the permit or
+ * receipt, nonce, HMAC, and the free-form capability reason.
+ */
+export type HostShellExecutionPlanAuditProjection = {
+  version: "host-shell-execution-plan/v2";
+  identity: string;
+  platform: NodeJS.Platform;
+  requestedSandbox: boolean;
+  mode: "asrt" | "plain" | "blocked";
+  fallbackReason:
+    | "none"
+    | "windows-partial-shell-acl-unsafe"
+    | "requested-sandbox-unavailable"
+    | "active-sandbox-not-shell-contained";
+  requiresExplicitUserApproval: boolean;
+  capability: {
+    kind: "none" | "asrt" | "partial" | "fs-only";
+    confidence: "verified" | "assumed" | "policy-best-effort";
+    platform: NodeJS.Platform;
+    confines?: SandboxConfinement;
+  };
+};
 
 export type ApprovalRequest = {
   id: string;
   category: "tool" | "agent-action";
   /** Permission policy — discriminator (defaults to "tool" when absent). */
   kind?: ApprovalKind;
+  /** Choices the host will accept for this request. */
+  allowedChoices?: readonly ApprovalChoice[];
   toolName: string;
   /** Permission policy category for the invocation shown in the UI. */
   toolCategory?: "read" | "write" | "shell" | "network" | "meta";
@@ -1190,6 +1256,12 @@ export type ApprovalRequest = {
    * ensuring record/lookup key symmetry in user-approval-store.
    */
   approvalCacheKey?: string;
+  /**
+   * Host-issued execution-plan projection for canonical builtin shell calls.
+   * It is display-only and never contains the private one-shot permit binding
+   * or action input.
+   */
+  executionPlan?: HostShellExecutionPlanAuditProjection;
   /**
    * Issue #691 — OS-level execution sandbox capability captured at
    * request build time. Renderer surfaces this in the approval card so

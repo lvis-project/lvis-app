@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 182
+ * Fragments: 183
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
@@ -145,6 +145,7 @@ import { en as en_pluginUninstallDialog } from "./pluginUninstallDialog.js";
 import { en as en_postTourFirstTask } from "./postTourFirstTask.js";
 import { en as en_privacyTab } from "./privacyTab.js";
 import { en as en_reasoningCard } from "./reasoningCard.js";
+import { en as en_remoteA2aActionButton } from "./remoteA2aActionButton.js";
 import { en as en_rolesTab } from "./rolesTab.js";
 import { en as en_rosePine } from "./rosePine.js";
 import { en as en_routinePanel } from "./routinePanel.js";
@@ -329,6 +330,7 @@ export const generatedEn: Record<string, string> = {
   ...en_postTourFirstTask,
   ...en_privacyTab,
   ...en_reasoningCard,
+  ...en_remoteA2aActionButton,
   ...en_rolesTab,
   ...en_rosePine,
   ...en_routinePanel,

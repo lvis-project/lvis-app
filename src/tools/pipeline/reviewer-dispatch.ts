@@ -12,6 +12,8 @@ import type {
   PermissionCheckResult,
 } from "../../permissions/permission-manager.js";
 import type { PermissionEvaluationContext } from "../../permissions/evaluation-context.js";
+import type { HostShellExecutionPlan } from "../../permissions/host-shell-execution-plan.js";
+import { isReviewerAutoDecisionOutcome } from "../../permissions/permission-manager.js";
 import type { RiskVerdict } from "../../permissions/reviewer/risk-classifier.js";
 import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
 import { t } from "../../i18n/index.js";
@@ -38,6 +40,7 @@ export async function dispatchReviewerForHeadless(
   callbacks: ToolExecutorCallbacks | undefined,
   meta: ToolCallMeta,
   approvalPurpose: ApprovalPurposeSuggestion | undefined,
+  hostShellExecutionPlan?: HostShellExecutionPlan,
   abortSignal?: AbortSignal,
 ): Promise<
   | { allowed: true; permissionResult: PermissionCheckResult }
@@ -111,6 +114,9 @@ export async function dispatchReviewerForHeadless(
       ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
       ...(meta.pluginId !== undefined ? { pluginId: meta.pluginId } : {}),
       ...(meta.workerId !== undefined ? { workerId: meta.workerId } : {}),
+      ...(hostShellExecutionPlan === undefined
+        ? {}
+        : { hostShellExecutionPlan }),
     },
     {
       allowedPluginIds: context.allowedPluginIds
@@ -124,15 +130,28 @@ export async function dispatchReviewerForHeadless(
   // only wires the human-facing message + deferred-queue metadata around it.
   // The review-status telemetry is derived from the resolved decision so the
   // auto-approve disclosure and the audit decision share one source.
-  const decision = permissionManager.resolveReviewerDecision(reviewer.verdict, "headless");
+  const autoDecisionOutcome = isReviewerAutoDecisionOutcome(reviewer.outcome);
+  const resolved = autoDecisionOutcome
+    ? permissionManager.resolveReviewerDecision(reviewer.verdict, "headless")
+    : {
+        decision: "deny" as const,
+        reason: `headless reviewer ${reviewer.outcome} — execution blocked`,
+        layer: 5,
+      };
+  const decision: PermissionCheckResult = {
+    ...resolved,
+    reviewer: { route: "headless", verdict: reviewer.verdict, outcome: reviewer.outcome },
+  };
   emitPermissionReview(callbacks, {
-    status: decision.decision === "allow" ? "auto_approved" : "needs_approval",
+    status: !autoDecisionOutcome
+      ? "failed"
+      : decision.decision === "allow" ? "auto_approved" : "needs_approval",
     toolName,
     toolCategory: category,
     source,
     ...meta,
     verdictLevel: reviewer.verdict.level,
-    reason: reviewer.verdict.reason,
+    reason: decision.reason,
     ...(approvalPurpose ? { approvalPurpose } : {}),
   });
   if (decision.decision !== "allow") {
@@ -171,6 +190,7 @@ export async function dispatchReviewerForInteractiveAuto(
   callbacks: ToolExecutorCallbacks | undefined,
   meta: ToolCallMeta,
   approvalPurpose: ApprovalPurposeSuggestion | undefined,
+  hostShellExecutionPlan?: HostShellExecutionPlan,
   abortSignal?: AbortSignal,
 ): Promise<PermissionCheckResult | null> {
   if (context.headless === true) return null;
@@ -218,6 +238,9 @@ export async function dispatchReviewerForInteractiveAuto(
         ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
         ...(meta.pluginId !== undefined ? { pluginId: meta.pluginId } : {}),
         ...(meta.workerId !== undefined ? { workerId: meta.workerId } : {}),
+        ...(hostShellExecutionPlan === undefined
+          ? {}
+          : { hostShellExecutionPlan }),
       },
       {
         allowedPluginIds: context.allowedPluginIds
@@ -239,11 +262,42 @@ export async function dispatchReviewerForInteractiveAuto(
     });
     throw err;
   }
+  if (abortSignal?.aborted) {
+    emitPermissionReview(callbacks, {
+      status: "failed",
+      toolName,
+      toolCategory: category,
+      source,
+      ...meta,
+      reason: "foreground reviewer cancelled by caller",
+      ...(approvalPurpose ? { approvalPurpose } : {}),
+    });
+    // Cancellation is terminal. Deliberately omit reviewer metadata so this
+    // result can never be recorded as a fresh/cache text-authorization grant.
+    return {
+      decision: "deny",
+      reason: "foreground reviewer cancelled by caller",
+      layer: 5,
+    };
+  }
+
 
   // V3 SOT — PermissionManager owns the verdict→decision mapping.
   // Verdicts through the configured inclusive threshold allow; higher verdicts
   // ask the user. HIGH still requires explicit approval with justification.
-  const decision = mgr.resolveReviewerDecision(reviewer.verdict, "foreground-auto");
+  const autoDecisionOutcome = isReviewerAutoDecisionOutcome(reviewer.outcome);
+  const resolved = autoDecisionOutcome
+    ? mgr.resolveReviewerDecision(reviewer.verdict, "foreground-auto")
+    : {
+        decision: "ask" as const,
+        reason: `foreground reviewer ${reviewer.outcome} — explicit approval required`,
+        layer: 5,
+        forceModal: true,
+      };
+  const decision: PermissionCheckResult = {
+    ...resolved,
+    reviewer: { route: "foreground-auto", verdict: reviewer.verdict, outcome: reviewer.outcome },
+  };
   // Review-status telemetry derived from the resolved decision so the
   // auto-approve disclosure and the audit decision share one source.
   emitPermissionReview(callbacks, {

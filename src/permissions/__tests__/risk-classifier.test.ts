@@ -14,6 +14,7 @@ import {
   DisabledRiskClassifier,
   RuleBasedRiskClassifier,
   LlmRiskClassifier,
+  ReviewerDispatchError,
   createRiskClassifier,
   dlpRedactInputForPrompt,
   maxVerdict,
@@ -415,6 +416,55 @@ describe("LlmRiskClassifier — fallbackOnError", () => {
     const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/a" } }));
     expect(v.level).toBe("low");
   });
+  it.each([
+    { outcome: "malformed" as const, level: "low" as const },
+    { outcome: "malformed" as const, level: "medium" as const },
+    { outcome: "error" as const, level: "low" as const },
+    { outcome: "error" as const, level: "medium" as const },
+    { outcome: "timeout" as const, level: "low" as const },
+    { outcome: "timeout" as const, level: "medium" as const },
+  ])(
+    "fallbackOnError='rule' preserves $level while reporting $outcome",
+    async ({ outcome, level }) => {
+      const complete = vi.fn(async () => {
+        if (outcome === "malformed") {
+          return {
+            text: "not-json",
+            tokensIn: 1,
+            tokensOut: 1,
+            costUsd: 0,
+          };
+        }
+        if (outcome === "timeout") {
+          throw new ReviewerDispatchError("timeout", "provider timed out");
+        }
+        throw new Error("provider unavailable");
+      });
+      const classifier = new LlmRiskClassifier(
+        { complete },
+        "gpt-4o-mini",
+        "rule",
+        {},
+        { maxAttempts: 1, baseDelayMs: 0, jitterPct: 0 },
+      );
+      const input = level === "low"
+        ? ctx({
+            category: "read",
+            finalInput: { path: "/Users/ken/work/a" },
+          })
+        : ctx({
+            category: "shell",
+            finalInput: { command: "make build" },
+          });
+
+      const trace = await classifier.classifyWithTrace(input);
+
+      expect(trace.outcome).toBe(outcome);
+      expect(trace.finalVerdict.level).toBe(level);
+      expect(trace.llmVerdict).toBeNull();
+    },
+  );
+
 
   it("provider throws + fallbackOnError='deny' → returns HIGH with err msg", async () => {
     const provider: LlmReviewerProvider = {

@@ -22,7 +22,7 @@ import { unlink, stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { createGzip } from "node:zlib";
-import { pipeline } from "node:stream/promises";
+import { finished, pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
 import {
   computeLineHmac,
@@ -120,6 +120,15 @@ export interface AuditEntry {
     source?: string;
     trust?: string;
     executionTimeMs?: number;
+    /** Host tool-use correlation, when an execution pipeline supplied one. */
+    toolUseId?: string;
+    /**
+     * Public-safe host shell substrate selected for the invocation. This
+     * deliberately excludes tool arguments, paths, permits, and approval
+     * integrity material.
+     */
+    executionPlan?: import("../permissions/host-shell-execution-plan.js").HostShellExecutionPlanAuditProjection;
+
     permissionDecision?: string;
     permissionReason?: string;
     rateLimitRemaining?: number;
@@ -686,17 +695,20 @@ export class AuditLogger {
   }
 
   /** Read all lines from a JSONL file asynchronously. */
-  private _readLines(filePath: string): Promise<string[]> {
-    return new Promise((resolve, reject) => {
-      const lines: string[] = [];
-      const rl = createInterface({
-        input: createReadStream(filePath, { encoding: "utf-8" }),
-        crlfDelay: Infinity,
-      });
-      rl.on("line", (l) => lines.push(l));
-      rl.on("close", () => resolve(lines));
-      rl.on("error", reject);
-    });
+  private async _readLines(filePath: string): Promise<string[]> {
+    const lines: string[] = [];
+    const input = createReadStream(filePath, { encoding: "utf-8" });
+    const rl = createInterface({ input, crlfDelay: Infinity });
+    try {
+      for await (const line of rl) {
+        lines.push(line);
+      }
+    } finally {
+      rl.close();
+      input.destroy();
+      await finished(input, { cleanup: true }).catch(() => undefined);
+    }
+    return lines;
   }
 
   logTurn(params: {

@@ -173,7 +173,7 @@ The first-pass census enumerated the projection/gate/runtime-method readers but 
   so a4 must read `.map(t => t.name)`. **Security decision — MODEL-ONLY** (`filter(isModelVisible).map(name)`):
   this map feeds `resolveToolOwner` (`:1523` — `methodMap.get(m)?.pluginId ?? knownToolOwners.get(m)`, so it
   is only the pre-runtime `??` fallback; `methodMap` carries ALL names incl. UI-only and is authoritative at
-  runtime) → `assertPluginToolAccess` (plugin-to-plugin access control) and `throwIfToolOwnerNotReady`
+  runtime) and `throwIfToolOwnerNotReady`
   (`:2012`, which already early-returns for a UI-only method today). Today's `tools`(string[]) is model-facing
   only, so a naive all-names `.map` would silently add the app-only auth trio to the ownership map — an
   access-control widening. Model-only reproduces today's EXACT set (byte-for-byte behavior-preserving) and
@@ -260,7 +260,7 @@ grep -rn "toolSchemas\|uiActions\|PluginUiActionSpec\|declaredUiInvokableMethods
   src/ ../lvis-plugin-sdk/src ../lvis-plugin-*/plugin.json ../lvis-plugin-template ../lvis-marketplace \
   | grep -v "__tests__\|CHANGELOG"
 ```
-Plus `bunx tsc --noEmit` rc=0 (ground-truth over LSP ghosts) + `bunx vitest run` + `bun run build`.
+Plus `bunx tsc --noEmit` rc=0 (ground-truth over LSP ghosts) + `bun run test:vitest -- run` + `bun run build`.
 Deleting the `tools` union type statically proves no fallback branch survives.
 
 ## 4. Axis (b) — MCP isolation parity

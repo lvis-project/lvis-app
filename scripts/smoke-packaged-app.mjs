@@ -7,7 +7,7 @@
  * such as ERR_MODULE_NOT_FOUND before installers are uploaded.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,10 @@ import {
   prepareElectronLaunchArgs,
   prepareElectronLaunchEnv,
 } from "./lib/electron-launch-options.mjs";
+import {
+  linuxExecutablePreferenceSuffixes,
+  pickBestByExactSuffix,
+} from "./lib/packaged-executable-selection.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -22,6 +26,57 @@ const DEFAULT_TIMEOUT_MS = 12_000;
 const MAX_OUTPUT_CHARS = 64_000;
 const MODULE_LOAD_FAILURE =
   /(ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|Cannot find package|Cannot find module)/i;
+
+const WINDOWS_NSIS_PER_MACHINE_MARKER_FILENAME =
+  ".lvis-nsis-per-machine-v1";
+const WINDOWS_PROTOCOL_CLEANUP_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  "$rootPath = 'Software\\Classes\\lvis'",
+  "$commandPath = 'Software\\Classes\\lvis\\shell\\open\\command'",
+  "function Remove-RegistryValueIfEquals([string]$path, [string]$name, [string]$expected, [System.StringComparison]$comparison) {",
+  "  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path, $true)",
+  "  if ($null -eq $key) { return }",
+  "  try {",
+  "    if (-not (@($key.GetValueNames()) -contains $name)) { return }",
+  "    if ($key.GetValueKind($name) -ne [Microsoft.Win32.RegistryValueKind]::String) { return }",
+  "    $value = [string]$key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)",
+  "    if ([string]::Equals($value, $expected, $comparison)) { $key.DeleteValue($name, $false) }",
+  "  } finally { $key.Dispose() }",
+  "}",
+  "function Remove-EmptyRegistryKey([string]$path) {",
+  "  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path, $false)",
+  "  if ($null -eq $key) { return }",
+  "  $empty = $false",
+  "  try {",
+  "    $empty = @($key.GetValueNames()).Count -eq 0 -and @($key.GetSubKeyNames()).Count -eq 0",
+  "  } finally { $key.Dispose() }",
+  "  if ($empty) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKey($path, $false) }",
+  "}",
+  "$rootKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($rootPath, $false)",
+  "if ($null -eq $rootKey) { throw 'expected win-unpacked HKCU lvis protocol root is missing' }",
+  "$rootKey.Dispose()",
+  "$commandKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($commandPath, $false)",
+  "if ($null -eq $commandKey) { throw 'lvis protocol root exists without an owned command' }",
+  "try {",
+  "  $commandKind = $commandKey.GetValueKind('')",
+  "  $command = [string]$commandKey.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)",
+  "} finally { $commandKey.Dispose() }",
+  "if ($commandKind -ne [Microsoft.Win32.RegistryValueKind]::String) { throw 'refusing to remove a non-owned lvis protocol command kind' }",
+  "$expectedCommand = '\"' + $env:LVIS_PROTOCOL_OWNER_EXE + '\" \"%1\"'",
+  "if (-not [string]::Equals($command, $expectedCommand, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'refusing to remove a non-owned lvis protocol command' }",
+  "$expectedIcon = '\"' + $env:LVIS_PROTOCOL_OWNER_EXE + '\",0'",
+  "Remove-RegistryValueIfEquals $commandPath '' $expectedCommand ([System.StringComparison]::OrdinalIgnoreCase)",
+  "Remove-RegistryValueIfEquals 'Software\\Classes\\lvis\\DefaultIcon' '' $expectedIcon ([System.StringComparison]::OrdinalIgnoreCase)",
+  "Remove-RegistryValueIfEquals $rootPath 'URL Protocol' '' ([System.StringComparison]::Ordinal)",
+  "Remove-RegistryValueIfEquals $rootPath '' 'URL:lvis' ([System.StringComparison]::Ordinal)",
+  "foreach ($path in @(",
+  "  $commandPath,",
+  "  'Software\\Classes\\lvis\\shell\\open',",
+  "  'Software\\Classes\\lvis\\shell',",
+  "  'Software\\Classes\\lvis\\DefaultIcon',",
+  "  $rootPath",
+  ")) { Remove-EmptyRegistryKey $path }",
+].join("\n");
 
 const TARGET_PLATFORM = {
   mac: "darwin",
@@ -154,11 +209,14 @@ function findPackagedExecutable(target, releaseDir) {
   if (target === "linux") {
     const executableNames = new Set(["LVIS", "lvis", "lvis-app"]);
     const matches = files.filter((file) =>
-      file.includes(`linux-unpacked${sep}`) &&
+      file.split(sep).some((part) => part === "linux-unpacked" || /^linux-.+-unpacked$/u.test(part)) &&
       executableNames.has(basename(file)) &&
       canExecute(file)
     );
-    return pickBest(matches, [`linux-unpacked${sep}LVIS`, `linux-unpacked${sep}lvis-app`]);
+    return pickBestByExactSuffix(
+      matches,
+      linuxExecutablePreferenceSuffixes(process.arch, sep),
+    );
   }
 
   const matches = files.filter((file) =>
@@ -373,7 +431,58 @@ async function runPackagedAppOnce(executable, timeoutMs, env, label) {
   });
 }
 
+function assertWindowsPerMachineMarkerAbsent(executable) {
+  if (process.platform !== "win32") return;
+
+  const markerPath = join(
+    dirname(executable),
+    WINDOWS_NSIS_PER_MACHINE_MARKER_FILENAME,
+  );
+  const marker = lstatSync(markerPath, { throwIfNoEntry: false });
+  if (marker !== undefined) {
+    throw new Error(
+      "win-unpacked must not contain the NSIS per-machine marker before launch",
+    );
+  }
+}
+
+function cleanupOwnedWindowsProtocolHandler(executable) {
+  if (process.platform !== "win32") return;
+
+  const result = spawnSync(
+    "powershell.exe",
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      WINDOWS_PROTOCOL_CLEANUP_SCRIPT,
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        LVIS_PROTOCOL_OWNER_EXE: executable,
+      },
+      timeout: 30_000,
+      windowsHide: true,
+    },
+  );
+  if (result.error) {
+    throw new Error(
+      `packaged Windows protocol cleanup failed to start: ${result.error.message}`,
+    );
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `packaged Windows protocol cleanup failed with status ${result.status}: ${result.stderr.trim()}`,
+    );
+  }
+}
 async function launchSmoke(executable, timeoutMs) {
+  assertWindowsPerMachineMarkerAbsent(executable);
   const userDataDir = mkdtempSync(join(tmpdir(), "lvis-packaged-smoke-"));
   const lvisHomeDir = mkdtempSync(join(tmpdir(), "lvis-packaged-home-"));
   const env = prepareElectronLaunchEnv({
@@ -396,6 +505,7 @@ async function launchSmoke(executable, timeoutMs) {
   } finally {
     removeTempDirBestEffort(userDataDir);
     removeTempDirBestEffort(lvisHomeDir);
+    cleanupOwnedWindowsProtocolHandler(executable);
   }
 }
 
@@ -438,10 +548,10 @@ async function main() {
   }
 
   assertPackagedFootprint(target, executable);
-  await launchSmoke(executable, timeoutMs);
   if (target === "win") {
     await runWindowsInstallerSmoke(releaseDir, timeoutMs);
   }
+  await launchSmoke(executable, timeoutMs);
 }
 
 main().catch((err) => {

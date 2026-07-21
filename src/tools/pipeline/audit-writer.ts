@@ -17,7 +17,7 @@ import type { ToolRegistry } from "../registry.js";
 import type { ToolSource, ToolCategory, TrustLevel } from "../types.js";
 import type { PermissionCheckResult } from "../../permissions/permission-manager.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
-import type { PermissionAuditEntryInput, HookResult } from "../../audit/audit-schema.js";
+import type { PermissionAuditEntryInput, HookResult, ToolExecutionAuditMetadata } from "../../audit/audit-schema.js";
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import type {
   ScriptHookManager,
@@ -87,6 +87,7 @@ export class AuditWriter {
     directory: string;
     grantLifetime: "turn" | "session" | "always" | "degraded-to-turn";
     permissionContext?: ToolPermissionContext;
+    audit?: ToolExecutionAuditMetadata;
   }): Promise<void> {
     if (!this.auditLogger.isPermissionAuditChainReady()) {
       if (this.requirePermissionAuditChain) {
@@ -105,6 +106,8 @@ export class AuditWriter {
       directoryAllowed: true,
       grantLifetime: args.grantLifetime,
       layer: 1,
+      ...(args.audit?.toolUseId !== undefined ? { toolUseId: args.audit.toolUseId } : {}),
+      ...(args.audit?.executionPlan !== undefined ? { executionPlan: args.audit.executionPlan } : {}),
       trustOrigin: auditTrustOrigin(args.permissionContext),
     };
     try {
@@ -131,6 +134,7 @@ export class AuditWriter {
     cwd: string,
     permissionContext?: ToolPermissionContext,
     auditDirectory?: string,
+    audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
     const tool = this.toolRegistry.findByName(toolName);
     const entry = permissionAuditAskEntryFromToolCall({
@@ -143,6 +147,7 @@ export class AuditWriter {
       trustOrigin: auditTrustOrigin(permissionContext),
       cwd,
       auditDirectory,
+      audit,
     });
     if (!this.auditLogger.isPermissionAuditChainReady()) {
       if (this.requirePermissionAuditChain) {
@@ -181,6 +186,7 @@ export class AuditWriter {
     auditDirectory?: string,
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error",
     hookChain?: HookResult[],
+    audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
     // ── #811 m2: PermissionDenied (NON-BLOCKING) ──
     // `auditToolCall` is the single chokepoint every tool-deny path funnels
@@ -221,6 +227,8 @@ export class AuditWriter {
           source,
           trust,
           executionTimeMs: Date.now() - startTime,
+          ...(audit?.toolUseId !== undefined ? { toolUseId: audit.toolUseId } : {}),
+          ...(audit?.executionPlan !== undefined ? { executionPlan: audit.executionPlan } : {}),
           permissionDecision: permission?.deferred ? "deferred" : permission?.decision ?? "allow",
           permissionReason: permission?.reason,
           rateLimitRemaining,
@@ -250,6 +258,7 @@ export class AuditWriter {
       cwd,
       auditDirectory,
       ...(hookChain ? { hookChain } : {}),
+      audit,
     });
     if (!this.auditLogger.isPermissionAuditChainReady()) {
       if (this.requirePermissionAuditChain) {

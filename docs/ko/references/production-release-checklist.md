@@ -8,15 +8,15 @@ below are the manual operator steps.
 
 Set the following environment variables before running the release script:
 
-| Variable | Purpose | Required |
-|----------|---------|----------|
-| `CSC_LINK` / `CSC_KEY_PASSWORD` | macOS code-signing cert (p12) | macOS builds |
-| `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | macOS notarization | macOS builds |
-| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows code-signing cert | Windows builds |
-| `GH_TOKEN` | GitHub Releases upload token (`repo` scope) | Publish |
-| `LVIS_PUBLISHER_PRIVATE_KEY_PATH` | Plugin manifest signing key (Ed25519 PEM) | Plugin signing |
-| `LVIS_SENTRY_DSN` | Forward crashes to Sentry (optional) | Optional |
-| `LVIS_RELEASE_VERSION` | Explicit version (otherwise patch-bump) | Optional |
+| Variable                                                     | Purpose                                     | Required       |
+| ------------------------------------------------------------ | ------------------------------------------- | -------------- |
+| `CSC_LINK` / `CSC_KEY_PASSWORD`                              | macOS code-signing cert (p12)               | macOS builds   |
+| `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | macOS notarization                          | macOS builds   |
+| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`                      | Windows code-signing cert                   | Windows builds |
+| `GH_TOKEN`                                                   | GitHub Releases upload token (`repo` scope) | Publish        |
+| `LVIS_PUBLISHER_PRIVATE_KEY_PATH`                            | Plugin manifest signing key (Ed25519 PEM)   | Plugin signing |
+| `LVIS_SENTRY_DSN`                                            | Forward crashes to Sentry (optional)        | Optional       |
+| `LVIS_RELEASE_VERSION`                                       | Explicit version (otherwise patch-bump)     | Optional       |
 
 None of these are checked in. They come from the release operator.
 
@@ -63,13 +63,13 @@ compression.
 
 Measured on 2026-05-15 for `lvis-app` 0.1.3 on macOS arm64:
 
-| Command | Time | Artifact size |
-| --- | ---: | ---: |
-| `bun run build` | 2.61s | n/a |
-| `build-installers --mac --skip-build --skip-code-sign --dir` | 8.67s | unpacked only |
-| same with `-c.npmRebuild=false` | 6.12s | unpacked only |
-| normal `--mac --skip-build --skip-code-sign` | 45.73s | DMG 106M / ZIP 103M |
-| fast preview equivalent | 16.99s | DMG 227M / ZIP 226M |
+| Command                                                      |   Time |       Artifact size |
+| ------------------------------------------------------------ | -----: | ------------------: |
+| `bun run build`                                              |  2.61s |                 n/a |
+| `build-installers --mac --skip-build --skip-code-sign --dir` |  8.67s |       unpacked only |
+| same with `-c.npmRebuild=false`                              |  6.12s |       unpacked only |
+| normal `--mac --skip-build --skip-code-sign`                 | 45.73s | DMG 106M / ZIP 103M |
+| fast preview equivalent                                      | 16.99s | DMG 227M / ZIP 226M |
 
 Use `--skip-native-rebuild` only immediately after `bun install` or another
 known-good native dependency rebuild. It avoids the duplicate
@@ -86,9 +86,56 @@ links; do not publish a release that only has versioned `LVIS-X.Y.Z-*` assets.
 ## Windows Installer Path
 
 Windows release path는 전체 payload를 포함한 오프라인 NSIS installer입니다.
-`oneClick`, per-user install, differential package metadata, `runAfterFinish`
-는 유지합니다. Installer는 `bun run build:icons`가 생성하는 LVIS-branded
-`build/installerIcon.ico`와 `build/installerHeaderIcon.ico`를 사용해야 합니다.
+`oneClick`, `perMachine: true` Program Files install, differential package
+metadata, `runAfterFinish`를 유지합니다. Installer는 `bun run build:icons`가
+생성하는 LVIS-branded `build/installerIcon.ico`와
+`build/installerHeaderIcon.ico`를 사용해야 합니다.
+
+Windows **Build Installers** job은 silent installer path의 자동 release
+gate입니다. Windows tag를 게시하기 전에 NSIS smoke가 다음을 입증해야 합니다.
+
+- setup과 직접 실행한 uninstaller가 모두 `/allusers`를 사용합니다.
+- Apps & Features 항목은 HKLM 32/64-bit view 전체에서 정확히 하나이고,
+  Program Files, machine shortcut, `lvis://` handler가 같은 executable을
+  가리킵니다.
+- HKCU 등록과 `%LOCALAPPDATA%\\Programs\\lvis-app` install residue는
+  없어야 합니다.
+- genuine `/KEEP_APP_DATA`와 DELETE pass 모두 uninstall 전에 ASRT sandbox
+  user/group/credential, WFP filter, packaged backend group RX, 실제 holder
+  ACL을 확인하고, uninstall 뒤 machine/ASRT state가 제거되며 userData
+  보존 여부만 달라지는지 확인합니다.
+
+ASRT precondition을 읽을 수 없거나 확인하지 못한 경우 성공/skip으로
+처리하지 말고 candidate를 명시적인 manual release gate로 전환합니다.
+Hosted CI는 interactive UAC와 계정 간 desktop 경계를 입증할 수 없습니다.
+
+다음 Windows 수동 gate는 release-blocking입니다. 하나라도 실패하면 release를
+중단하고 SID/profile handoff를 수정한 뒤 전체 gate를 다시 수행합니다.
+
+- [ ] Clean VM에서 signed candidate SHA, Windows build, evidence URL,
+      시작 standard user와 별도 administrator의 `whoami /user` SID를 모두
+      기록합니다. 화면 녹화와 installer/ASRT log로 installer UAC는 정확히
+      1회이고 내부 `srt-win` UAC는 0회임을 입증합니다.
+- [ ] Install-to-launch ownership: 별도 administrator가 elevation과 install을
+      승인한 뒤 실행된 LVIS process owner와 모든 resolved app/userData path가
+      시작 standard user 소유임을 입증합니다. Administrator profile에 새 LVIS
+      data가 생기지 않았음을 확인하고 두 계정 SID, process owner, resolved
+      path와 evidence URL을 기록합니다.
+- [ ] Genuine KEEP: 시작 사용자의 resolved `%USERPROFILE%\.lvis`, Roaming
+      `LVIS`/`lvis-app`, Local `LVIS`/`lvis-app` path에 고정 내용 sentinel을
+      만들고 별도 administrator로 승인한 뒤 genuine `/KEEP_APP_DATA` uninstall을
+      수행합니다. Resolved path를 기록하고 원래 사용자의 모든 sentinel/profile이
+      그대로이며 administrator profile의 LVIS path는 없거나 byte 단위로
+      변경되지 않았음을 입증합니다.
+- [ ] Genuine DELETE → guided reinstall: KEEP pass 뒤 fresh signed-candidate
+      install에서 같은 원래 사용자 sentinel을 만들고 별도 administrator로
+      승인하여 genuine DELETE uninstall을 수행합니다. 먼저 원래 사용자의 모든
+      LVIS sentinel/profile path가 제거되었음을 입증합니다. 그 다음 시작
+      standard user에게 signed candidate 재설치를 명시적으로 안내하고, 그 원래
+      사용자로 first launch를 완료합니다. 두 계정 SID, candidate SHA, Windows
+      build, resolved path와 evidence URL을 기록하고, 실행 process owner와
+      재생성된 모든 app/userData path가 원래 사용자 소유이며 별도 administrator
+      profile의 LVIS path는 없거나 byte 단위로 변경되지 않았음을 입증합니다.
 
 제품 전략이 명시적으로 바뀌기 전에는 NSIS path에 online web bootstrapper를
 추가하지 않습니다. 압축된 `uv` payload 같은 runtime asset은 release build

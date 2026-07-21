@@ -37,6 +37,7 @@ import type { ChatSendContext } from "../ipc/handlers/chat.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
 import { createLocalApi, type ExternalMutationApprover } from "../api/local-api.js";
 import type { A2AHttpRouter } from "../api/a2a-router.js";
+import { A2A_PROTOCOL_VERSION } from "../shared/a2a-wire.js";
 import {
   startLocalApiHttpServer,
   type LocalApiHttpServer,
@@ -44,7 +45,10 @@ import {
 } from "../api/http-server.js";
 import { createStreamBroadcaster } from "../api/stream-broadcaster.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
-import { buildSingleFlightAgentActionApprover } from "../permissions/agent-action-approver.js";
+import {
+  buildSingleFlightAgentActionApprover,
+  type AgentActionApprover,
+} from "../permissions/agent-action-approver.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
 
@@ -68,6 +72,11 @@ export interface LocalApiServerInfoFile {
   secret: string;
   /** The main-process pid, so a CLI can detect a stale file after a crash. */
   pid: number;
+  /** Additive A2A discovery, present only when that route family is active. */
+  a2a?: {
+    protocolVersion: string;
+    agentCardPaths: string[];
+  };
 }
 
 /**
@@ -82,16 +91,37 @@ const LOCAL_API_TOMBSTONE: LocalApiServerInfoFile = { port: 0, secret: "", pid: 
 /** Module-level handle to the running server (C17 shared-handle pattern). */
 let runningServer: LocalApiHttpServer | null = null;
 let bootRouteFamilies: Readonly<LoopbackRouteFamilies> | undefined;
-let bootA2ARouter: Promise<A2AHttpRouter | null> | undefined;
+let bootA2ARuntime: Promise<A2ARouterRuntime | null> | undefined;
+let initializedA2ARuntime: A2ARouterRuntime | null | undefined;
+let bootAgentActionApprover: AgentActionApprover | undefined;
+let bootAgentActionApproverInitialized = false;
 let bootStartPromise: Promise<{ port: number } | null> | undefined;
 let cancelBootStart: (() => void) | undefined;
 let stopPromise: Promise<void> | undefined;
 let lifecycleGeneration = 0;
 let stopped = false;
+let disposedA2ARuntimes = new WeakSet<object>();
 
 const START_CANCELLED: unique symbol = Symbol("start-cancelled");
 
-export type A2ARouterFactory = () => A2AHttpRouter | null | Promise<A2AHttpRouter | null>;
+export interface A2ARouterRuntime {
+  router: A2AHttpRouter;
+  discovery: {
+    protocolVersion: string;
+    agentCardPaths: readonly string[];
+  };
+  dispose?: () => void | Promise<void>;
+}
+
+export interface A2ARouterFactoryContext {
+  approveAgentAction: AgentActionApprover | undefined;
+}
+
+type A2ARouterFactoryResult = A2AHttpRouter | A2ARouterRuntime | null;
+
+export type A2ARouterFactory = (
+  context: A2ARouterFactoryContext,
+) => A2ARouterFactoryResult | Promise<A2ARouterFactoryResult>;
 
 export function resolveLoopbackRouteFamilies(
   settingsService: SettingsService,
@@ -141,20 +171,72 @@ function auditA2ARouteDisabled(
   }
 }
 
+function normalizeA2ARouterRuntime(result: A2ARouterFactoryResult): A2ARouterRuntime | null {
+  if (!result) return null;
+  const router = "router" in result ? result.router : result;
+  if (router.handlerIds.length === 0) return null;
+  const agentCardPaths = router.handlerIds.map(
+    (id) => `/a2a/${id}/.well-known/agent-card.json`,
+  );
+  if ("router" in result) {
+    if (
+      result.discovery.protocolVersion !== A2A_PROTOCOL_VERSION
+      || result.discovery.agentCardPaths.length !== agentCardPaths.length
+      || result.discovery.agentCardPaths.some((path, index) => path !== agentCardPaths[index])
+    ) {
+      throw new Error("a2a-runtime-discovery-mismatch");
+    }
+    return result;
+  }
+  return {
+    router,
+    discovery: {
+      protocolVersion: A2A_PROTOCOL_VERSION,
+      agentCardPaths,
+    },
+  };
+}
+
+async function disposeA2ARuntime(runtime: A2ARouterRuntime | null): Promise<void> {
+  if (!runtime || disposedA2ARuntimes.has(runtime)) return;
+  disposedA2ARuntimes.add(runtime);
+  try {
+    await runtime.dispose?.();
+  } catch {
+    // Auxiliary runtime cleanup failure must not block app shutdown.
+  }
+}
+
+async function invalidateA2ARuntime(runtime: A2ARouterRuntime | null): Promise<void> {
+  if (!runtime) return;
+  await disposeA2ARuntime(runtime);
+  if (initializedA2ARuntime === runtime) initializedA2ARuntime = undefined;
+  bootA2ARuntime = undefined;
+}
+
 async function initializeA2ARouter(
   factory: A2ARouterFactory | undefined,
   services: AppServices,
   emit: (message: string) => void,
-): Promise<A2AHttpRouter | null> {
-  bootA2ARouter ??= (async () => {
+  approveAgentAction: AgentActionApprover | undefined,
+): Promise<A2ARouterRuntime | null> {
+  bootA2ARuntime ??= (async () => {
     if (!factory) {
       auditA2ARouteDisabled(services, "no-routable-handler");
       emit("[a2a] no routable handlers; route family disabled for this boot");
       return null;
     }
     try {
-      const router = await factory();
-      if (router) return router;
+      const produced = await factory({ approveAgentAction });
+      let runtime: A2ARouterRuntime | null;
+      try {
+        runtime = normalizeA2ARouterRuntime(produced);
+      } catch (error) {
+        if (produced && "router" in produced) await disposeA2ARuntime(produced);
+        throw error;
+      }
+      if (runtime) return runtime;
+      if (produced && "router" in produced) await disposeA2ARuntime(produced);
       auditA2ARouteDisabled(services, "no-routable-handler");
       emit("[a2a] no routable handlers; route family disabled for this boot");
       return null;
@@ -164,7 +246,9 @@ async function initializeA2ARouter(
       return null;
     }
   })();
-  return await bootA2ARouter;
+  const runtime = await bootA2ARuntime;
+  initializedA2ARuntime = runtime;
+  return runtime;
 }
 
 /**
@@ -228,7 +312,15 @@ export function buildExternalMutationApprover(
   approvalGate: ApprovalGate | undefined,
   emit: (message: string) => void,
 ): ExternalMutationApprover | undefined {
-  const approve = buildSingleFlightAgentActionApprover(approvalGate, {
+  const approve = buildLoopbackAgentActionApprover(approvalGate, emit);
+  return buildExternalMutationApproverFromAgentAction(approve);
+}
+
+function buildLoopbackAgentActionApprover(
+  approvalGate: ApprovalGate | undefined,
+  emit: (message: string) => void,
+): AgentActionApprover | undefined {
+  return buildSingleFlightAgentActionApprover(approvalGate, {
     onConcurrent: ({ toolName, trustOrigin }) => {
       emit(
         `[local-api] external mutation approval already pending — denying concurrent request channel=${toolName} origin=${trustOrigin}`,
@@ -240,14 +332,30 @@ export function buildExternalMutationApprover(
       );
     },
   });
+}
+
+function getBootAgentActionApprover(
+  approvalGate: ApprovalGate | undefined,
+  emit: (message: string) => void,
+): AgentActionApprover | undefined {
+  if (!bootAgentActionApproverInitialized) {
+    bootAgentActionApprover = buildLoopbackAgentActionApprover(approvalGate, emit);
+    bootAgentActionApproverInitialized = true;
+  }
+  return bootAgentActionApprover;
+}
+
+function buildExternalMutationApproverFromAgentAction(
+  approve: AgentActionApprover | undefined,
+): ExternalMutationApprover | undefined {
   if (!approve) return undefined;
 
-  return async ({ channel, args, origin }) => await approve({
+  return async ({ channel, args, origin }) => Boolean(await approve({
     toolName: channel,
     args,
     reason: "An external CLI/API requested a permission-mode change. Do you want to allow it?",
     trustOrigin: origin,
-  });
+  }));
 }
 
 /**
@@ -277,53 +385,69 @@ async function startLocalApiServerForBoot(
   if (!bootRouteFamilies.localApi && !bootRouteFamilies.a2a) {
     return null;
   }
-  const a2aRouter = bootRouteFamilies.a2a
+  const approveAgentAction = getBootAgentActionApprover(services.approvalGate, emit);
+  const a2aRuntime = bootRouteFamilies.a2a
     ? await Promise.race([
-      initializeA2ARouter(input.createA2ARouter, services, emit),
+      initializeA2ARouter(input.createA2ARouter, services, emit, approveAgentAction),
       cancellation.then((): typeof START_CANCELLED => START_CANCELLED),
     ])
     : null;
-  if (a2aRouter === START_CANCELLED) return null;
-  if (generation !== lifecycleGeneration) return null;
+  if (a2aRuntime === START_CANCELLED) return null;
+  if (generation !== lifecycleGeneration) {
+    await invalidateA2ARuntime(a2aRuntime);
+    return null;
+  }
   const activeRouteFamilies = Object.freeze({
     localApi: bootRouteFamilies.localApi,
-    a2a: a2aRouter !== null,
+    a2a: a2aRuntime !== null,
   });
   if (!activeRouteFamilies.localApi && !activeRouteFamilies.a2a) {
     return null;
   }
 
-  // Same DI bag the IPC registrars receive (see registerIpcHandlers).
-  const ipc: IpcDeps = { ...services, getMainWindow, getAppWindows };
+  let server: LocalApiHttpServer;
+  let secret = "";
+  try {
+    // Same DI bag the IPC registrars receive (see registerIpcHandlers).
+    const ipc: IpcDeps = { ...services, getMainWindow, getAppWindows };
 
-  // Server-owned stream plumbing: the broadcaster's sink fans `chat send`
-  // frames out to every SSE subscriber (byte-identical to the renderer's).
-  const broadcaster = createStreamBroadcaster();
-  const chatSendContext = buildChatSendContext(broadcaster.sink);
+    // Server-owned stream plumbing: the broadcaster's sink fans `chat send`
+    // frames out to every SSE subscriber (byte-identical to the renderer's).
+    const broadcaster = createStreamBroadcaster();
+    const chatSendContext = buildChatSendContext(broadcaster.sink);
 
-  // #1409 approval-mediated external-mutation gate. Undefined when no
-  // ApprovalGate is available → the dispatcher keeps its fail-closed default.
-  const externalMutationApprover = buildExternalMutationApprover(services.approvalGate, emit);
+    // #1409 approval-mediated external-mutation gate. Undefined when no
+    // ApprovalGate is available → the dispatcher keeps its fail-closed default.
+    const externalMutationApprover = buildExternalMutationApproverFromAgentAction(
+      approveAgentAction,
+    );
+    const api = createLocalApi({ ipc, chatSendContext, externalMutationApprover });
 
-  const api = createLocalApi({ ipc, chatSendContext, externalMutationApprover });
+    // Fresh per-boot bearer secret (64 hex chars). Never logged.
+    secret = randomBytes(32).toString("hex");
 
-  // Fresh per-boot bearer secret (64 hex chars). Never logged.
-  const secret = randomBytes(32).toString("hex");
-
-  // Port 0 → OS-assigned ephemeral loopback port; the actual value is read back.
-  const server = await startLocalApiHttpServer({
-    api,
-    secret,
-    broadcaster,
-    a2aRouter: a2aRouter ?? undefined,
-    routeFamilies: activeRouteFamilies,
-    // Do NOT forward the secret into the transport log — startLocalApiHttpServer
-    // is documented to never receive it, and this callback only sees benign
-    // dispatch/routing diagnostics.
-    log: (message: string) => emit(`[local-api] ${message}`),
-  });
+    // Port 0 → OS-assigned ephemeral loopback port; the actual value is read back.
+    server = await startLocalApiHttpServer({
+      api,
+      secret,
+      broadcaster,
+      a2aRouter: a2aRuntime?.router,
+      routeFamilies: activeRouteFamilies,
+      // Do NOT forward the secret into the transport log — startLocalApiHttpServer
+      // is documented to never receive it, and this callback only sees benign
+      // dispatch/routing diagnostics.
+      log: (message: string) => emit(`[local-api] ${message}`),
+    });
+  } catch (error) {
+    await invalidateA2ARuntime(a2aRuntime);
+    throw error;
+  }
   if (generation !== lifecycleGeneration) {
-    await server.close();
+    try {
+      await server.close();
+    } finally {
+      await invalidateA2ARuntime(a2aRuntime);
+    }
     return null;
   }
   runningServer = server;
@@ -331,12 +455,28 @@ async function startLocalApiServerForBoot(
   // Persist discovery info AFTER listen succeeds so the file never points at a
   // dead port for this boot. 0o600 file mode (via openFeatureNamespace) is the
   // protection model for this capability token — same as an SSH key.
-  const info: LocalApiServerInfoFile = { port: server.port, secret, pid: process.pid };
+  const info: LocalApiServerInfoFile = {
+    port: server.port,
+    secret,
+    pid: process.pid,
+    ...(a2aRuntime
+      ? {
+          a2a: {
+            protocolVersion: a2aRuntime.discovery.protocolVersion,
+            agentCardPaths: [...a2aRuntime.discovery.agentCardPaths],
+          },
+        }
+      : {}),
+  };
   try {
     await openFeatureNamespace(LOCAL_API_FEATURE).writeJson(LOCAL_API_INFO_FILE, info);
   } catch (err) {
     if (runningServer === server) runningServer = null;
-    await server.close();
+    try {
+      await server.close();
+    } finally {
+      await invalidateA2ARuntime(a2aRuntime);
+    }
     await tombstoneDiscoveryFile();
     throw err;
   }
@@ -344,7 +484,13 @@ async function startLocalApiServerForBoot(
   if (generation !== lifecycleGeneration) {
     if (runningServer === server) {
       runningServer = null;
-      await server.close();
+      try {
+        await server.close();
+      } finally {
+        await invalidateA2ARuntime(a2aRuntime);
+      }
+    } else {
+      await invalidateA2ARuntime(a2aRuntime);
     }
     await tombstoneDiscoveryFile();
     return null;
@@ -412,16 +558,21 @@ async function stopLocalApiServerForShutdown(): Promise<void> {
   cancelBootStart?.();
   const server = runningServer;
   runningServer = null;
-  if (server) {
-    await closeAndTombstone(server);
-  }
-  if (pending) {
-    await pending.catch(() => undefined);
-  }
-  const lateServer = runningServer;
-  if (lateServer) {
-    runningServer = null;
-    await closeAndTombstone(lateServer);
+  try {
+    if (server) {
+      await closeAndTombstone(server);
+    }
+    if (pending) {
+      await pending.catch(() => undefined);
+    }
+    const lateServer = runningServer;
+    if (lateServer) {
+      runningServer = null;
+      await closeAndTombstone(lateServer);
+    }
+  } finally {
+    await disposeA2ARuntime(initializedA2ARuntime ?? null);
+    void bootA2ARuntime?.then(disposeA2ARuntime, () => undefined);
   }
 }
 
@@ -444,7 +595,11 @@ export function resetLocalApiServerForTests(): void {
     throw new Error("local-api-server-test-reset-while-active");
   }
   bootRouteFamilies = undefined;
-  bootA2ARouter = undefined;
+  bootA2ARuntime = undefined;
+  initializedA2ARuntime = undefined;
+  bootAgentActionApprover = undefined;
+  bootAgentActionApproverInitialized = false;
+  disposedA2ARuntimes = new WeakSet<object>();
   lifecycleGeneration += 1;
   stopped = false;
 }

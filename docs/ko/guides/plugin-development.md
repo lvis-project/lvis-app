@@ -639,7 +639,9 @@ OS 네이티브 알림으로 승격할 이벤트를 선언합니다.
 
 ### UI 모듈에서의 도구 호출
 
-Renderer 에 마운트되는 UI 모듈은 전달받은 `hostApi.callTool(...)` 을 씁니다. 이 `hostApi` 는 플러그인 팩토리 context 의 `hostApi` 와 **별개** (UI 전용 얕은 래퍼)입니다.
+Renderer 에 마운트되는 UI 모듈은 전달받은 UI bridge의 `hostApi.callTool(...)` 을 씁니다. 이 `hostApi` 는 플러그인 팩토리 context 의 `hostApi` 와 **별개** (UI 전용 얕은 래퍼)입니다.
+
+UI bridge의 `callTool`은 현재 플러그인 자신이 manifest에 선언한 app-visible tool만 호출합니다. 플러그인 팩토리의 `PluginHostApi`에는 `callTool`이 없으며, 다른 플러그인과의 통신은 `emitEvent` / `onEvent` 이벤트 계약을 사용합니다.
 
 ```javascript
 // ✅ 올바름
@@ -671,7 +673,7 @@ interface PluginUiExtension {
 }
 ```
 
-(Vanilla / React 예제는 이전 버전과 동일하게 유지되며, 핵심은 `hostApi.callTool(...)` 을 통해서만 도구를 호출하는 것입니다. 자세한 예제는 각 내장 플러그인 저장소를 참고하세요.)
+(Vanilla / React 예제는 이전 버전과 동일하게 유지되며, 핵심은 UI bridge의 `hostApi.callTool(...)`로 **자신의** 도구만 호출하는 것입니다. 자세한 예제는 각 내장 플러그인 저장소를 참고하세요.)
 
 ---
 

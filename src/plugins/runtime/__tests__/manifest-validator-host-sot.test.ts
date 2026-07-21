@@ -92,6 +92,38 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     );
   });
 
+  it("REJECTS retired pluginAccess.plugins[].tools grants (fail-closed)", async () => {
+    const validator = await buildManifestValidator();
+    const result = validator({
+      id: "retired-plugin-access-tool-grant",
+      name: "Retired Plugin Access Tool Grant",
+      version: "1.0.0",
+      description: "A manifest carrying the removed cross-plugin tool grant.",
+      publisher: "LVIS",
+      entry: "dist/index.js",
+      tools: [],
+      pluginAccess: {
+        plugins: [
+          {
+            pluginId: "ms-graph",
+            events: ["ms-graph.snapshot.ready"],
+            tools: ["msgraph_email_list"],
+          },
+        ],
+      },
+    });
+
+    expect(result).toBe(false);
+    expect(validator.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          keyword: "additionalProperties",
+          params: expect.objectContaining({ additionalProperty: "tools" }),
+        }),
+      ]),
+    );
+  });
+
   it("accepts networkAccess.allowPrivateNetworks", async () => {
     const validator = await buildManifestValidator();
     expect(
@@ -492,6 +524,46 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       // Auth trio materialized as app-only (never model-visible).
       const status = parsed.tools.find((t) => t.name === "ff_status");
       expect(status?._meta?.ui?.visibility).toEqual(["app"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("materializes omitted Tool visibility into independent arrays", async () => {
+    const validator = await buildManifestValidator();
+    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-default-visibility-"));
+    try {
+      const file = join(dir, "plugin.json");
+      await writeFile(
+        file,
+        JSON.stringify({
+          id: "default-visibility-plugin",
+          name: "Default Visibility Plugin",
+          version: "1.0.0",
+          description: "Exercises default Tool visibility materialization.",
+          publisher: "LVIS",
+          entry: "dist/index.js",
+          tools: [
+            { name: "first_default", inputSchema: { type: "object", properties: {} } },
+            { name: "second_default", inputSchema: { type: "object", properties: {} } },
+          ],
+        }),
+        "utf-8",
+      );
+
+      const parsed = await parsePluginJson(file, validator);
+      const first = parsed.tools[0]?._meta?.ui?.visibility;
+      const second = parsed.tools[1]?._meta?.ui?.visibility;
+      if (!first || !second) {
+        throw new Error("Expected omitted Tool visibility to be materialized");
+      }
+
+      expect(first).toEqual(["model", "app"]);
+      expect(second).toEqual(["model", "app"]);
+      expect(first).not.toBe(second);
+
+      first.pop();
+      expect(second).toEqual(["model", "app"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

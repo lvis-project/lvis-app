@@ -1,11 +1,43 @@
 # Changelog
 
-## Unreleased
+## v0.5.5 — 2026-07-19
 
-### Windows OS sandbox (ASRT srt-win) — provisioned at app-install time, default-on (#1608)
+Hardening release for marketplace recovery, permission review, Windows shell safety, and A2A interoperability. Windows OS sandboxing remains opt-in.
+
+> **Public distribution safety:** release tags build as `public` and never receive an embedded internal demo activation key. This release is intentionally unsigned.
+
+### Security
+
+- Updated `adm-zip` to `0.6.0` to remediate GHSA-xcpc-8h2w-3j85 / CVE-2026-39244 (crafted ZIP memory-exhaustion denial of service).
+
+### Plugin Doctor and Marketplace
+
+- **Doctor now reports the real runtime outcome.** A completed diagnostic is shown as success only after the refreshed plugin is loaded and callable; an unresolved failed/not-runnable plugin remains a warning with its actionable failure state.
+- **Marketplace grants now fail closed.** The host verifies that an artifact's network and runtime capability grants exactly match the catalog-approved grant instead of silently widening authority.
+
+> **Marketplace publisher note:** a catalog/artifact grant mismatch cannot be repaired on the device. Publish a matching artifact first; then have affected users remove and reinstall the plugin.
+
+### Permissions and approval review (#17)
+
+- **One medium-risk rule across foreground actions.** When **Auto-approve medium risk** is selected, the same policy now applies uniformly to sub-agent spawning, file writes, shell, network, and metadata actions. High-risk actions still require confirmation.
+- **Explainable foreground review.** The guarded rationale flow presents host-sealed scope, effects, resources, authority, and risk context in the approval UI, preserves provenance in audit records, and safely falls back to the normal approval dialog when a rationale cannot be trusted or produced.
+
+### Windows OS sandbox and shell safety (#19)
+
+- **ASRT updated to 0.0.66.** Windows NSIS installs provision the `srt-win` sandbox at install time under the existing per-machine elevation flow; repair/re-provision remains available from Permissions when a machine is not ready.
+- **Honest handling of Windows partial sandboxing.** A partial Windows ASRT state is not shell containment. LVIS identifies the host-shell fallback and requires a single-use confirmation bound to the exact command and execution context; it never retries an ASRT failure as an unreviewed plain shell command.
+- **Windows stays opt-in.** `OS Tool Sandbox` remains off by default on Windows because srt-win does not provide process isolation.
+
+### A2A messaging and interoperability
+
+- **Sub-agent communication uses A2A-compatible task and message semantics.** Background results can reach the parent, eligible sub-agents can communicate through the host, and resumable work is shown as `waiting` rather than incorrectly completed.
+- **Optional A2A endpoints and direct-agent routing** provide Agent Cards, durable task operations, exact-send replay, and a direct-agent action UI; route policy and credentials remain host-controlled.
+- **Delegation authority is unchanged.** A2A messages stay DLP-filtered, tool actions still pass the receiving agent's approval gate, and sub-agent creation remains capped at depth one.
+
+### Windows OS sandbox (ASRT srt-win) — installer provisioned, Windows opt-in (#1608)
 
 - **The Windows OS execution sandbox is now provisioned by the NSIS installer instead of a runtime "Install now" button.** A bundled `srt-win.exe` being present is not the same as the OS sandbox being provisioned — provisioning creates a hidden `srt-sandbox` Windows user + user-SID-keyed WFP network-filter rules + filesystem ACLs, which needs a one-time admin elevation. A new `customInstall` macro in `build/installer.nsh` runs `srt-win.exe install --proxy-port-range 60080-60089` after the app files are extracted, so ASRT is ready at first launch. Provisioning is **non-fatal in every branch** (exit 0 = ok; 13 = already provisioned with a different config, left as-is with no auto `--force`; 10/12/14/other = logged warning) — it never aborts the app install, matching the existing non-bricking sandbox posture. The uninstaller's `customUnInstall` now runs `srt-win.exe uninstall` on a genuine uninstall (skipped on upgrade via the existing `isUpdated`/`KEEP_APP_DATA`/`--updated` guards) to remove the `srt-sandbox` user + WFP rules before the app files are deleted.
-- **`osToolSandbox` stays OFF (opt-in) on `win32`** (`src/data/settings-store.ts`); default remains ON on `darwin` only. Default-on win32 is **deferred**: Windows srt-win is only partially confined (filesystem + network, no process isolation), and the shell-containment gate (`bash.ts`/`powershell.ts`) refuses to run bash/powershell under the active partial sandbox — so default-on would break Windows shell tooling on boxes where the sandbox activates. Install-time provisioning + the ACL grant make opt-in work; the default flip waits until the shell tools handle the Windows partial case (run unsandboxed + pre-exec ask, not error). If a host with the sandbox opted-on reaches first launch without a working sandbox, win32-not-ready still does not hard-throw — the boot gate degrades gracefully and the runtime panel is the repair fallback.
+- **`osToolSandbox` stays OFF (opt-in) on `win32`** (`src/data/settings-store.ts`); default remains ON on `darwin` only. Default-on win32 is **deferred**: Windows srt-win is only partially confined (filesystem + network, no process isolation), so it cannot relax shell risk. Canonical Bash/PowerShell now follows the sealed Plan B host-shell path: it is reported as `plain`/`kind=none` and runs only after an exact one-time user approval; it never claims partial shell isolation. If a host with the sandbox opted-on reaches first launch without a working sandbox, win32-not-ready still does not hard-throw — the boot gate degrades gracefully and the runtime panel is the repair fallback.
 - **The Settings → 권한 Windows panel is reframed from first-time "install" to "re-provision / repair"** — since provisioning happens at install time, the panel now only appears as a fallback when the sandbox is somehow not ready. The button ("지금 설치" → "재설정") stays wired to the same `sandboxWindowsInstall` IPC (manual repair path); no handler was removed.
 - **Port-range drift guard** — a new vitest (`src/permissions/__tests__/installer-nsh-proxy-port-drift.test.ts`) parses `--proxy-port-range` out of `build/installer.nsh` and pins it to both the host SOT constant and ASRT's real `DEFAULT_WINDOWS_PROXY_PORT_RANGE`, so an upstream range change fails CI instead of silently desyncing the install-time WFP permit from the runtime proxy bind.
 - **The NSIS target ships `oneClick:true` + `perMachine:true`** — an all-users Program Files install that self-elevates once, so the `srt-win.exe` provisioning runs in the already-elevated context (no separate UAC), and because Program Files grants Users read+execute by default, `srt-sandbox` can reach the packaged `srt-win.exe`.
@@ -16,6 +48,7 @@
 
 - **Removed the legacy dual-read AND the schema property (fail-closed, never fail-open).** The `_meta` vendor-namespace rename (`xyz.lvis/* → lvisai/*`, #1601) shipped a transitional dual-read + `observeLegacyMetaKey` telemetry so the removal could be timed by evidence. Both are now deleted: the three read fallbacks (`plugin-server-projection.ts` forward `xyz.lvis/pathFields`, `plugin-tool-from-mcp.ts` reverse `xyz.lvis/pathFields`, `plugin-mcp-host.ts` `xyz.lvis/rawResult`), the `legacy-meta-telemetry.ts` module, and the schema's `xyz.lvis/pathFields` property. Because tool `_meta` is `additionalProperties:false`, dropping the property makes an installed pre-rename manifest **fail schema validation** — it is rejected loudly, NOT silently accepted with its security-bearing `pathFields` ignored (that would be fail-open: the permission gate would stop seeing the plugin's filesystem effects). `xyz.lvis/pathFields` drives host-side filesystem-path extraction for the permission gate, so the terminal state must be broken-until-repaired, never silently-ungated.
 - **Recovery is update-first via the existing Plugin Doctor / managed bootstrap.** A legacy-manifest rejection classifies as the reinstall-fixable `manifest-validation-error` kind. The only plugin that ever used the legacy key — `local-indexer` — is `installPolicy:"admin"` (managed), so the boot-time managed bootstrap (`ensureManagedInstalled` → `restartAll`) proactively auto-updates it to the migrated marketplace version (v0.5.24, `lvisai/pathFields`) within the same boot, with no user click and no broken window. The host install path is a clean artifact replace, so "update in place" and "uninstall + reinstall" are the same operation; the sole terminal fallback (when a plugin cannot be auto-migrated) is the surfaced Doctor remove-recommendation on the failed plugin card.
+- **A Doctor banner is only green for a usable runtime.** A finished diagnostic with an unresolved catalog-grant mismatch or another non-runnable state remains failed/not-runnable instead of presenting a false success.
 - **`local-indexer` was republished as v0.5.24 first** (with `lvisai/pathFields`), verified published to the marketplace, so the Doctor/managed-bootstrap reinstall target exists before this removal ships.
 - **Companion PRs required** (orchestrator): the `@lvis/plugin-sdk` mirror + the marketplace schema still carry the legacy alias and must drop it separately.
 

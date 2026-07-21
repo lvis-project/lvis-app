@@ -7,6 +7,8 @@ import { statSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
 import type { Tool } from "./base.js";
 import { isModelExposedTool } from "./base.js";
+import { isCanonicalBashTool } from "./bash.js";
+import { isCanonicalPowerShellTool } from "./powershell.js";
 import type { ToolRegistry } from "./registry.js";
 // Effective invocation-origin SoT (AsyncLocalStorage). The plugin-surface executor
 // enters a `runWithInvocationOrigin` frame for every card/panel/plugin call, so this
@@ -31,7 +33,11 @@ import {
 } from "../engine/a2a-agent-message-envelope.js";
 import { runWithCeiling } from "./executor-ceiling.js";
 import { PermissionManager, requiredTier, type PermissionCheckResult } from "../permissions/permission-manager.js";
-import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
+import type {
+  ApprovalDecision,
+  ApprovalGate,
+  ApprovalMode,
+} from "../permissions/approval-gate.js";
 import {
   buildPermissionEvaluationContext,
   type PermissionEvaluationContext,
@@ -52,7 +58,7 @@ import { HookRunner } from "../hooks/hook-runner.js";
 import type { ScriptHookManager, HookDispatchResult } from "../hooks/script-hook-manager.js";
 import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
 import { AuditLogger } from "../audit/audit-logger.js";
-import type { HookResult } from "../audit/audit-schema.js";
+import type { HookResult, ToolExecutionAuditMetadata } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
@@ -63,7 +69,21 @@ import {
 } from "./execution-context.js";
 import { runWithEffectGateContext } from "../permissions/effect-enforcement.js";
 import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
-import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
+import {
+  getHostShellExecutionPlan,
+  resolveReviewerSandboxCapability,
+} from "../permissions/sandbox-capability.js";
+import {
+  getHostShellExecutionPlanAuditProjection,
+  requiresExplicitHostShellFallbackApproval,
+  type HostShellExecutionPlan,
+  type HostShellExecutionPlanAuditProjection,
+} from "../permissions/host-shell-execution-plan.js";
+import {
+  mintHostShellExecutionPermit,
+  buildHostShellExecutionPermitBinding,
+  type HostShellExecutionPermitBinding,
+} from "../permissions/host-shell-execution-permit.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type {
   ApprovalPurposeSuggestion,
@@ -94,7 +114,6 @@ import {
   summarizeInputForDeferred,
 } from "./pipeline/display-mask.js";
 import { RateLimiter } from "./pipeline/rate-limiter.js";
-import { ReviewerAuthorizationStore } from "./pipeline/reviewer-authorization-store.js";
 import { resolveEnforcedCategory as resolveEnforcedCategoryImpl } from "./pipeline/risk-classification.js";
 import { tryUserApprovalMemorySkip as tryUserApprovalMemorySkipImpl } from "./pipeline/approval-memory-skip.js";
 import {
@@ -108,6 +127,24 @@ import { AuditWriter } from "./pipeline/audit-writer.js";
 // mutable locals stay INLINE in executeOne (byte-identical). See
 // ./pipeline/invocation-context.ts for what was deliberately left inline.
 import { createInvocationContext, returnUserAbort } from "./pipeline/invocation-context.js";
+import {
+  maybeMaterializeRationaleControl,
+  type RationaleHostRuntime,
+} from "./pipeline/rationale-orchestrator.js";
+import type { RationaleExecutorControlOutcome } from "./pipeline/rationale-pr1-contract.js";
+import { canonicalStringify } from "../permissions/user-approval-store.js";
+import type { SealedRationaleResumeRequest } from "./pipeline/rationale-resume-contract.js";
+import {
+  authorizeRationaleResume,
+  extractSealedRationaleExecutionTarget,
+  finishRationaleResume,
+  prepareRationaleResume,
+  startRationaleResume,
+  type AuthorizedRationaleResume,
+  type PreparedRationaleResume,
+  type RationaleResumeHostRuntime,
+  type StartedRationaleResume,
+} from "./pipeline/rationale-resume-runner.js";
 const log = createLogger("executor");
 /**
  * One-time guard for the shadow-sink construction warning. Process-wide so the
@@ -126,7 +163,15 @@ export interface ToolCallMeta {
   pluginId?: string;
   workerId?: string;
   mcpServerId?: string;
+  /**
+   * Host-issued, renderer-safe shell substrate projection. This is never the
+   * raw capability, command/CWD, or private one-shot permit binding.
+   */
+  executionPlan?: HostShellExecutionPlanAuditProjection;
 }
+
+type AuditToolCallArgs = Parameters<AuditWriter["auditToolCall"]>;
+type AuditPermissionAskArgs = Parameters<AuditWriter["auditPermissionAsk"]>;
 
 function resolveInvocationCategory(
   tool: import("./base.js").Tool,
@@ -149,6 +194,11 @@ export interface ToolResult {
   uiPayload?: import("../mcp/types.js").McpUiPayload;
   /** Host-internal raw tool result for non-LLM plugin invocation surfaces. */
   rawResult?: unknown;
+  /**
+   * Host-issued, renderer-safe shell substrate projection. It intentionally
+   * omits raw capability reasons, action input, CWD, and approval permits.
+   */
+  executionPlan?: HostShellExecutionPlanAuditProjection;
   /**
    * Wall-clock time spent inside this tool's handler (Step 6) plus any
    * pipeline overhead measured from Step 1's start. Surfaced on every
@@ -228,15 +278,6 @@ export interface ToolPermissionContext {
    * should leave this absent.
    */
   userIntent?: string;
-  /**
-   * User-keyboard-only approval phrase for the conversational reviewer retry
-   * path. Unlike `userIntent`, this is never populated for queue/headless/plugin
-   * origins; executor still requires a matching pending reviewer-blocked exact
-   * action before it can authorize anything.
-   */
-  explicitAuthorizationIntent?: string;
-
-
 
   onTurnDirectoryGrant?: (approvedDirectory: string) => void;
 
@@ -288,6 +329,62 @@ export interface ConversationExecuteOptions extends ExecuteOptions {
   executionCwd: string;
 }
 
+export type InterceptedMetaToolHandler = (
+  toolUse: ToolUseBlock,
+) => Promise<ToolResult | null>;
+
+export interface ConversationBatchExecuteOptions extends ConversationExecuteOptions {
+  rationaleRuntime?: RationaleHostRuntime;
+  interceptedMetaToolHandler?: InterceptedMetaToolHandler;
+}
+
+export interface RationaleResumeExecuteOptions extends ConversationExecuteOptions {
+  rationaleResumeRuntime?: RationaleResumeHostRuntime;
+}
+
+export type ConversationBatchExecutionOutcome =
+  | {
+      outcome: "completed";
+      results: ToolResult[];
+    }
+  | {
+      outcome: "rationale-required";
+      completedResults: ToolResult[];
+      control: RationaleExecutorControlOutcome;
+    };
+
+interface RationaleBatchExecutionContext {
+  runtime: RationaleHostRuntime;
+  batchId: string;
+  originalToolUseIds: readonly string[];
+  completedToolUseIds: readonly string[];
+}
+
+interface RationaleRequiredExecuteOneOutcome {
+  outcome: "rationale-required";
+  control: RationaleExecutorControlOutcome;
+}
+
+export const RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT =
+  "Rationale-authorized action ran, but its terminal audit could not be committed. " +
+  "The execution outcome is unknown; the action will not be retried automatically.";
+
+interface RationaleResumeExecutionContext {
+  request: SealedRationaleResumeRequest;
+  runtime?: RationaleResumeHostRuntime;
+  prepared?: PreparedRationaleResume;
+  authorized?: AuthorizedRationaleResume;
+  started?: StartedRationaleResume;
+  terminalizationAttempted?: boolean;
+  terminalized?: boolean;
+}
+
+function isRationaleRequiredExecuteOneOutcome(
+  value: ToolResult | RationaleRequiredExecuteOneOutcome,
+): value is RationaleRequiredExecuteOneOutcome {
+  return "outcome" in value && value.outcome === "rationale-required";
+}
+
 // ─── Executor ──────────────────────────────────────
 
 export class ToolExecutor {
@@ -326,7 +423,6 @@ export class ToolExecutor {
    * directory approval fails closed instead of mutating settings alone.
    */
   private readonly workspaceRootLifecycleProvider: () => PermissionDirectoryLifecycle | undefined;
-  private readonly reviewerAuthorizations = new ReviewerAuthorizationStore();
   private readonly auditWriter: AuditWriter;
 
   constructor(
@@ -407,27 +503,6 @@ export class ToolExecutor {
     if (pm === "strict") return "ask_all";
     if (pm === "auto" || pm === "allow") return "full_auto";
     return "default";
-  }
-
-  private recordPendingReviewerAuthorization(input: {
-    sessionId: string | undefined;
-    toolName: string;
-    source: ToolSource;
-    finalInput: Record<string, unknown>;
-    context: ToolPermissionContext;
-    verdict: RiskVerdict;
-  }): void {
-    this.reviewerAuthorizations.record(input);
-  }
-
-  private consumePendingReviewerAuthorization(input: {
-    sessionId: string | undefined;
-    toolName: string;
-    source: ToolSource;
-    finalInput: Record<string, unknown>;
-    context: ToolPermissionContext;
-  }): PermissionCheckResult | null {
-    return this.reviewerAuthorizations.consume(input);
   }
 
   getHookRunner(): HookRunner {
@@ -533,6 +608,7 @@ export class ToolExecutor {
     callbacks: ToolExecutorCallbacks | undefined,
     meta: ToolCallMeta,
     approvalPurpose: ApprovalPurposeSuggestion | undefined,
+    hostShellExecutionPlan?: HostShellExecutionPlan,
     abortSignal?: AbortSignal,
   ): Promise<
     | { allowed: true; permissionResult: PermissionCheckResult }
@@ -554,6 +630,7 @@ export class ToolExecutor {
       callbacks,
       meta,
       approvalPurpose,
+      hostShellExecutionPlan,
       abortSignal,
     );
   }
@@ -573,6 +650,7 @@ export class ToolExecutor {
     callbacks: ToolExecutorCallbacks | undefined,
     meta: ToolCallMeta,
     approvalPurpose: ApprovalPurposeSuggestion | undefined,
+    hostShellExecutionPlan?: HostShellExecutionPlan,
     abortSignal?: AbortSignal,
   ): Promise<PermissionCheckResult | null> {
     return dispatchReviewerForInteractiveAutoImpl(
@@ -591,6 +669,7 @@ export class ToolExecutor {
       callbacks,
       meta,
       approvalPurpose,
+      hostShellExecutionPlan,
       abortSignal,
     );
   }
@@ -610,6 +689,7 @@ export class ToolExecutor {
     mcpServerId?: string,
     workerId?: string,
     pluginId?: string,
+    hostShellExecutionPlan?: HostShellExecutionPlan,
   ): Promise<PermissionCheckResult | null> {
     return tryUserApprovalMemorySkipImpl(
       toolName,
@@ -625,6 +705,7 @@ export class ToolExecutor {
       mcpServerId,
       workerId,
       pluginId,
+      hostShellExecutionPlan,
     );
   }
 
@@ -668,6 +749,124 @@ export class ToolExecutor {
     return this.executeAll(toolUses, opts);
   }
 
+  async executeConversationBatch(
+    toolUses: ToolUseBlock[],
+    opts: ConversationBatchExecuteOptions,
+  ): Promise<ConversationBatchExecutionOutcome> {
+    const runtime = opts.rationaleRuntime;
+    if (!runtime?.requestAnchor && !opts.interceptedMetaToolHandler) {
+      return {
+        outcome: "completed",
+        results: await this.executeAll(toolUses, opts),
+      };
+    }
+
+    const batchId = randomUUID();
+    const originalToolUseIds = toolUses.map((toolUse) => toolUse.id);
+    const completedResults: ToolResult[] = [];
+    for (let displayOrder = 0; displayOrder < toolUses.length; displayOrder += 1) {
+      const toolUse = toolUses[displayOrder];
+      const registeredTool = this.toolRegistry.findByName(toolUse.name);
+      const interceptedMetaToolHandler = opts.interceptedMetaToolHandler;
+      const shouldInterceptMetaTool =
+        interceptedMetaToolHandler !== undefined &&
+        registeredTool?.source === "builtin" &&
+        (toolUse.name === "request_plugin" ||
+          toolUse.name === "tool_search");
+      let result: ToolResult | RationaleRequiredExecuteOneOutcome;
+      if (shouldInterceptMetaTool && interceptedMetaToolHandler) {
+        try {
+          const intercepted = await interceptedMetaToolHandler(toolUse);
+          result = intercepted?.tool_use_id === toolUse.id
+            ? intercepted
+            : {
+                tool_use_id: toolUse.id,
+                content: "Intercepted meta-tool handling failed closed",
+                is_error: true,
+                durationMs: 0,
+              };
+        } catch {
+          result = {
+            tool_use_id: toolUse.id,
+            content: "Intercepted meta-tool handling failed closed",
+            is_error: true,
+            durationMs: 0,
+          };
+        }
+      } else if (runtime?.requestAnchor) {
+        result = await this.executeOne(
+          toolUse,
+          batchId,
+          displayOrder,
+          opts,
+          {
+            runtime,
+            batchId,
+            originalToolUseIds,
+            completedToolUseIds: completedResults.map((item) => item.tool_use_id),
+          },
+        );
+      } else {
+        result = await this.executeOne(toolUse, batchId, displayOrder, opts);
+      }
+      if (isRationaleRequiredExecuteOneOutcome(result)) {
+        return {
+          outcome: "rationale-required",
+          completedResults,
+          control: result.control,
+        };
+      }
+      completedResults.push(result);
+    }
+
+    return { outcome: "completed", results: completedResults };
+  }
+
+  async executeSealedRationaleResume(
+    request: SealedRationaleResumeRequest,
+    opts: RationaleResumeExecuteOptions,
+  ): Promise<ToolResult> {
+    const target = extractSealedRationaleExecutionTarget(request);
+    if (!target) {
+      return {
+        tool_use_id: "rationale-resume",
+        content: "Rationale resume blocked: invalid or expired sealed resume request",
+        is_error: true,
+        durationMs: 0,
+      };
+    }
+    const toolUse: ToolUseBlock = {
+      id: target.control.sealedAction.toolUseId,
+      name: target.control.sealedAction.toolName,
+      input: target.control.sealedAction.originalInput,
+    };
+    const rationaleResumeContext: RationaleResumeExecutionContext = {
+      request: target.request,
+      runtime: opts.rationaleResumeRuntime,
+    };
+    try {
+      return await this.executeOne(
+        toolUse,
+        randomUUID(),
+        0,
+        opts,
+        undefined,
+        rationaleResumeContext,
+      );
+    } finally {
+      // Once the host start CAS has committed, every exit path must close the
+      // invocation. The ordinary success/error paths finalize below; this
+      // guard covers callback, hook, and audit exceptions after start.
+      if (rationaleResumeContext.started && !rationaleResumeContext.terminalizationAttempted) {
+        rationaleResumeContext.terminalizationAttempted = true;
+        rationaleResumeContext.terminalized = await finishRationaleResume(
+          rationaleResumeContext.started,
+          false,
+        );
+      }
+    }
+  }
+
   private isParallelSafeToolUse(toolUse: ToolUseBlock): boolean {
     const tool = this.toolRegistry.findByName(toolUse.name);
     return tool?.parallelSafe === true;
@@ -678,8 +877,31 @@ export class ToolExecutor {
     toolUse: ToolUseBlock,
     groupId: string,
     displayOrder: number,
+    opts?: ExecuteOptions,
+  ): Promise<ToolResult>;
+  private async executeOne(
+    toolUse: ToolUseBlock,
+    groupId: string,
+    displayOrder: number,
+    opts: ExecuteOptions,
+    rationaleBatchContext: RationaleBatchExecutionContext,
+  ): Promise<ToolResult | RationaleRequiredExecuteOneOutcome>;
+  private async executeOne(
+    toolUse: ToolUseBlock,
+    groupId: string,
+    displayOrder: number,
+    opts: ExecuteOptions,
+    rationaleBatchContext: undefined,
+    rationaleResumeContext: RationaleResumeExecutionContext,
+  ): Promise<ToolResult>;
+  private async executeOne(
+    toolUse: ToolUseBlock,
+    groupId: string,
+    displayOrder: number,
     opts: ExecuteOptions = {},
-  ): Promise<ToolResult> {
+    rationaleBatchContext?: RationaleBatchExecutionContext,
+    rationaleResumeContext?: RationaleResumeExecutionContext,
+  ): Promise<ToolResult | RationaleRequiredExecuteOneOutcome> {
     const {
       callbacks,
       sessionId,
@@ -700,14 +922,35 @@ export class ToolExecutor {
     let permissionResult: PermissionCheckResult | undefined;
     let source: ToolSource = "builtin";
     let trust: TrustLevel = "high";
+    let hostShellExecutionPlanAudit: HostShellExecutionPlanAuditProjection | undefined;
+    const withHostShellExecutionPlan = (result: ToolResult): ToolResult =>
+      hostShellExecutionPlanAudit === undefined
+        ? result
+        : { ...result, executionPlan: hostShellExecutionPlanAudit };
+    const currentAuditMetadata = (): ToolExecutionAuditMetadata => ({
+      toolUseId: toolUse.id,
+      ...(hostShellExecutionPlanAudit !== undefined
+        ? { executionPlan: hostShellExecutionPlanAudit }
+        : {}),
+    });
+    const auditCurrentToolCall = (...args: AuditToolCallArgs): Promise<void> => {
+      args[16] = currentAuditMetadata();
+      return this.auditToolCall(...args);
+    };
+    const auditCurrentPermissionAsk = (
+      ...args: AuditPermissionAskArgs
+    ): Promise<void> => {
+      args[8] = currentAuditMetadata();
+      return this.auditPermissionAsk(...args);
+    };
 
 
     const tool = this.toolRegistry.findByName(toolUse.name);
     if (!tool) {
       const durationMs = Date.now() - startTime;
-      await this.auditToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, t("be_executor.toolNotFoundAudit"), true, startTime, { decision: "deny", reason: t("be_executor.toolNotFoundAudit"), layer: 0 }, Infinity, permissionContext);
+      await auditCurrentToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, t("be_executor.toolNotFoundAudit"), true, startTime, { decision: "deny", reason: t("be_executor.toolNotFoundAudit"), layer: 0 }, Infinity, permissionContext);
       callbacks?.onToolEnd?.(toolUse.name, t("be_executor.toolNotFound", { name: toolUse.name }), true, meta, undefined, durationMs);
-      return { tool_use_id: toolUse.id, content: t("be_executor.toolNotFound", { name: toolUse.name }), is_error: true, durationMs };
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: t("be_executor.toolNotFound", { name: toolUse.name }), is_error: true, durationMs });
     }
     source = tool.source;
     trust = trustFromSource(source);
@@ -717,6 +960,40 @@ export class ToolExecutor {
     if (tool.pluginId) meta.pluginId = tool.pluginId;
     if (tool.workerId) meta.workerId = tool.workerId;
     if (tool.mcpServerId) meta.mcpServerId = tool.mcpServerId;
+
+    const returnRationaleResumeBlock = async (
+      reason: string,
+      input: Record<string, unknown>,
+      blockedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason,
+        layer: 0,
+      },
+      hookChain?: HookResult[],
+    ): Promise<ToolResult> => {
+      const content = "Rationale resume blocked: " + reason;
+      const durationMs = Date.now() - startTime;
+      callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        input,
+        content,
+        true,
+        startTime,
+        { ...blockedPermission, decision: "deny", reason },
+        Infinity,
+        permissionContext,
+        invocationCategory,
+        executionCwd,
+        undefined,
+        undefined,
+        hookChain,
+      );
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
+    };
 
     // ── MAJOR-1 (cluster review) — the model MUST NOT execute a tool hidden from it ──
     // `findByName` deliberately does NOT filter `modelVisible` (an app-only tool is a
@@ -747,9 +1024,9 @@ export class ToolExecutor {
           reason: `model-hidden tool '${toolUse.name}' is not model-callable (origin: ${invocationOrigin ?? "model"})`,
           layer: 0,
         };
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, deny.reason, true, startTime, deny, Infinity, permissionContext, invocationCategory, executionCwd);
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, toolUse.input, deny.reason, true, startTime, deny, Infinity, permissionContext, invocationCategory, executionCwd);
         callbacks?.onToolEnd?.(toolUse.name, modelFacing, true, meta, undefined, durationMs);
-        return { tool_use_id: toolUse.id, content: modelFacing, is_error: true, durationMs };
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: modelFacing, is_error: true, durationMs });
       }
     }
 
@@ -770,10 +1047,11 @@ export class ToolExecutor {
       executionCwd,
       startTime,
       auditWriter: this.auditWriter,
+      audit: currentAuditMetadata(),
     });
 
     if (abortSignal?.aborted) {
-      return returnUserAbort(abortDeps(toolUse.input));
+      return withHostShellExecutionPlan(await returnUserAbort(abortDeps(toolUse.input)));
     }
 
     const foldedExecutionCwd = caseFoldForMatch(canonicalizePathForMatch(executionCwd));
@@ -787,8 +1065,8 @@ export class ToolExecutor {
       };
       emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
-      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
 
     if (!permissionContext?.trustOrigin) {
@@ -801,8 +1079,8 @@ export class ToolExecutor {
       };
       emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
-      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
 
     // ── Step 2: PreToolUse Hook ─────────────────────
@@ -812,30 +1090,51 @@ export class ToolExecutor {
     });
 
     if (preResult.action === "deny") {
+      if (rationaleResumeContext) {
+        return returnRationaleResumeBlock(
+          "argument PreToolUse hook denied the sealed action: " +
+            (preResult.reason ?? "no reason"),
+          toolUse.input,
+        );
+      }
       const msg = t("be_executor.hookBlockPre", { reason: preResult.reason ?? t("be_executor.hookBlockPreDefaultReason") });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity, permissionContext, invocationCategory, executionCwd);
-      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity, permissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
 
     const finalInput = preResult.action === "modify" && preResult.updatedInput
       ? preResult.updatedInput
       : toolUse.input;
+    if (rationaleResumeContext) {
+      let inputsMatch = false;
+      try {
+        inputsMatch =
+          canonicalStringify(toolUse.input) === canonicalStringify(
+            rationaleResumeContext.request.control.sealedAction.originalInput,
+          ) &&
+          canonicalStringify(finalInput) === canonicalStringify(
+            rationaleResumeContext.request.control.sealedAction.finalInput,
+          );
+      } catch {
+        inputsMatch = false;
+      }
+      if (!inputsMatch) {
+        return returnRationaleResumeBlock(
+          "sealed original/final input changed after argument PreToolUse hooks",
+          finalInput,
+        );
+      }
+    }
     if (finalInput !== toolUse.input) {
       invocationCategory = resolveInvocationCategory(tool, finalInput);
       meta.category = invocationCategory;
     }
-    const approvalCacheKey = approvalCacheKeyFor(tool, finalInput, executionCwd);
-    const invocationPermissionContext: ToolPermissionContext = {
-      ...permissionContext,
-      ...(approvalCacheKey ? { approvalCacheKey } : {}),
-    };
-    const approvalPurpose = buildApprovalPurposeSuggestion(finalInput, invocationPermissionContext);
-    const reviewerInput = maskToolInputForDisplay(finalInput);
+
     if (abortSignal?.aborted) {
-      return returnUserAbort(abortDeps(finalInput));
+      return withHostShellExecutionPlan(await returnUserAbort(abortDeps(finalInput)));
     }
     // ── C8: initial per-invocation state (see ./pipeline/invocation-context.ts).
     // The factory builds the Layer-1 allowed scope + runtime allowed dirs + the
@@ -845,7 +1144,7 @@ export class ToolExecutor {
     // LOCALS here (not context fields): applyApprovedDirectory reassigns them and
     // the sandbox-relaxation blocks below read them inline — boxing them would
     // force edits inside those byte-identical trust-boundary blocks.
-    const initialState = createInvocationContext(invocationPermissionContext, executionCwd);
+    const initialState = createInvocationContext(permissionContext, executionCwd);
     const baseAdditionalDirectories = initialState.baseAdditionalDirectories;
     let invocationAllowedScope = initialState.allowedScope;
     let invocationRuntimeAllowedDirectories = initialState.runtimeAllowedDirectories;
@@ -868,6 +1167,51 @@ export class ToolExecutor {
       effectLedger.correlationId,
     );
     meta.category = invocationCategory;
+    // Freeze the shell substrate before any reviewer, memory, or approval path.
+    // Only these host-owned builtin tools may consume the plan.
+    const hostShellToolName =
+      invocationCategory !== "shell" || toolUse.name !== tool.name
+        ? undefined
+        : isCanonicalBashTool(tool)
+          ? "bash"
+          : isCanonicalPowerShellTool(tool)
+            ? "powershell"
+            : undefined;
+    const hostShellExecutionPlan =
+      hostShellToolName !== undefined
+        ? getHostShellExecutionPlan()
+        : undefined;
+    const hostShellRequiresExplicitApproval =
+      hostShellExecutionPlan !== undefined &&
+      requiresExplicitHostShellFallbackApproval(hostShellExecutionPlan);
+    hostShellExecutionPlanAudit = hostShellExecutionPlan === undefined
+      ? undefined
+      : getHostShellExecutionPlanAuditProjection(hostShellExecutionPlan);
+    if (hostShellExecutionPlanAudit !== undefined) {
+      // Reuse the exact immutable safe projection for tool lifecycle events.
+      meta.executionPlan = hostShellExecutionPlanAudit;
+    }
+    // The cache key is an authority boundary too: derive it only after the
+    // canonical host shell substrate is sealed, then reuse its exact public
+    // projection through reviewer, modal, rationale, result, and audit paths.
+    const approvalCacheKey = approvalCacheKeyFor(
+      tool,
+      finalInput,
+      executionCwd,
+      hostShellExecutionPlanAudit,
+    );
+    const invocationPermissionContext: ToolPermissionContext = {
+      ...permissionContext,
+      ...(approvalCacheKey ? { approvalCacheKey } : {}),
+    };
+    const approvalPurpose = buildApprovalPurposeSuggestion(finalInput, invocationPermissionContext);
+    const reviewerInput = maskToolInputForDisplay(finalInput);
+    // The Plan-B binding is created only after every Layer-1 directory grant
+    // has finalized the effective validator scope. It remains host-only.
+    let hostShellExecutionPermitBinding:
+      | HostShellExecutionPermitBinding
+      | undefined;
+    let hostShellApprovalDecision: ApprovalDecision | undefined;
     const makeEvaluationContext = (input: {
       pathFields: readonly string[];
       targetFilePaths?: readonly string[];
@@ -902,8 +1246,8 @@ export class ToolExecutor {
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-        return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
       }
       // Detect whether the request path itself is a directory (e.g.
       // `list_files /Users/ken`) so the auto-suggest goes to the path
@@ -941,20 +1285,19 @@ export class ToolExecutor {
           isReadOnly: invocationCategory === "read",
           mode: this.currentApprovalMode(),
           sensitivePathPattern: requestSensitivePathPattern,
-          // Issue #691 round-1 user request — sandbox capability surfaced
-          // to the dialog so the user can see whether the tool will run
-          // under OS isolation or with no protection. Substrate-aware so a
-          // plugin/MCP or in-process builtin call honestly shows "none" rather
-          // than the process-global "asrt" that only the host-shell path earns
-          // — and the GENUINE asrt for an ASRT-wrapped external MCP worker
-          // keyed on its specific server id.
-          sandboxCapability: resolveReviewerSandboxCapability(
-            source,
-            toolUse.name,
-            tool.mcpServerId,
-            tool.workerId,
-            tool.pluginId,
-          ),
+          // Canonical host shells carry the sealed renderer-safe projection;
+          // every other execution route retains the existing capability display.
+          ...(hostShellExecutionPlanAudit === undefined
+            ? {
+                sandboxCapability: resolveReviewerSandboxCapability(
+                  source,
+                  toolUse.name,
+                  tool.mcpServerId,
+                  tool.workerId,
+                  tool.pluginId,
+                ),
+              }
+            : { executionPlan: hostShellExecutionPlanAudit }),
           evaluationContext: makeEvaluationContext({
             pathFields: reviewerPathFields,
             targetFilePaths: [outOfAllowedTarget.filePath],
@@ -974,7 +1317,7 @@ export class ToolExecutor {
 
         let decision;
         try {
-          await this.auditPermissionAsk(
+          await auditCurrentPermissionAsk(
             toolUse.name,
             source,
             invocationCategory,
@@ -990,8 +1333,8 @@ export class ToolExecutor {
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, dirLayerResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-          return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, dirLayerResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
         }
 
         if (decision.choice.startsWith("deny")) {
@@ -999,8 +1342,8 @@ export class ToolExecutor {
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-          return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
         }
         const approvedDirectory = decision.choice === "allow-always"
           ? (typeof decision.rememberPattern === "string" && decision.rememberPattern.length > 0
@@ -1027,8 +1370,8 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+            await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
           }
           return { allowed: true, approvedDirectory, scope: "always" };
         }
@@ -1054,8 +1397,8 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+            await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
           }
           return { allowed: true, approvedDirectory: sessionScopePath, scope: "session" };
         }
@@ -1097,8 +1440,8 @@ export class ToolExecutor {
         log.warn(msg);
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-        return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
       }
 
       const msg = t("be_executor.approvalGateMissingLayer1", { name: toolUse.name, source });
@@ -1106,8 +1449,8 @@ export class ToolExecutor {
       log.error(msg);
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-      return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...dirLayerResult, decision: "deny" }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+      return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
     };
 
     const applyApprovedDirectory = (approvedDirectory: string): void => {
@@ -1147,6 +1490,7 @@ export class ToolExecutor {
           directory: approvedDirectory,
           grantLifetime: lifetime,
           permissionContext: invocationPermissionContext,
+          audit: currentAuditMetadata(),
         });
       };
       if (scope === "turn") {
@@ -1228,8 +1572,8 @@ export class ToolExecutor {
         };
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
       }
     }
 
@@ -1245,8 +1589,8 @@ export class ToolExecutor {
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
       }
       if (bashResult.decision === "warn") {
         log.warn(`${bashResult.reason}`);
@@ -1286,8 +1630,8 @@ export class ToolExecutor {
         };
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
       }
     }
 
@@ -1304,8 +1648,8 @@ export class ToolExecutor {
       };
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
 
     // ── Step 2.6: Layer 1 — Allowed Directories ─────
@@ -1341,6 +1685,13 @@ export class ToolExecutor {
             },
           ],
         };
+        if (rationaleResumeContext) {
+          return returnRationaleResumeBlock(
+            "current allowed-directory scope no longer covers the sealed action",
+            finalInput,
+            dirLayerResult,
+          );
+        }
         const resolution = await requestOutOfAllowedDirectoryAccess(
           outOfAllowedTarget,
           dirLayerResult,
@@ -1355,6 +1706,20 @@ export class ToolExecutor {
         // (full Layer 3 check still runs; Layer 1 is necessary, not
         // sufficient).
       }
+    }
+    if (
+      hostShellExecutionPlan !== undefined &&
+      hostShellToolName !== undefined &&
+      hostShellRequiresExplicitApproval
+    ) {
+      hostShellExecutionPermitBinding = buildHostShellExecutionPermitBinding({
+        plan: hostShellExecutionPlan,
+        toolName: hostShellToolName,
+        toolUseId: toolUse.id,
+        rawInput: finalInput,
+        executionCwd,
+        extraAllowedDirectories: invocationRuntimeAllowedDirectories,
+      });
     }
     const evaluationContext = makeEvaluationContext({
       pathFields: tool.pathFields ?? [],
@@ -1396,6 +1761,7 @@ export class ToolExecutor {
     if (
       (this.permissionManager && !isAlwaysAllowMeta)
       || approvalReasonPrefix !== undefined
+      || hostShellRequiresExplicitApproval
     ) {
       // Permission policy V1 SOT — PermissionManager re-elevates
       // `decisionOverride="ask"` and selects either the common foreground
@@ -1418,6 +1784,29 @@ export class ToolExecutor {
             layer: 3,
             forceModal: true,
           };
+      // Every requested-sandbox plain-shell fallback is a host-owned hard gate.
+      // It runs before reviewer and approval-memory paths: a plain child has no
+      // OS isolation, so neither an auto reviewer nor any durable approval may
+      // silently authorize it. Existing deny decisions still win unchanged.
+      if (
+        hostShellRequiresExplicitApproval &&
+        permissionResult.decision !== "deny"
+      ) {
+        const fallbackReason = hostShellExecutionPlan?.fallbackReason ?? "requested-sandbox-unavailable";
+        permissionResult = invocationPermissionContext.headless === true
+          ? {
+              decision: "deny",
+              reason: `${fallbackReason}: headless invocation blocked because interactive approval is unavailable`,
+              layer: permissionResult.layer,
+            }
+          : {
+              decision: "ask",
+              reason: `${fallbackReason}: this shell will run without OS isolation and requires an exact allow-once approval`,
+              layer: permissionResult.layer,
+              forceModal: true,
+            };
+      }
+
       // ── Plugin-read auto-allow ↔ sandbox-fs-containment coupling ──────────
       //
       // The merged read-relaxation coupling (the block immediately below) only
@@ -1596,6 +1985,7 @@ export class ToolExecutor {
       //      cost the flag deliberately buys; documented so the default-flip
       //      decision weighs it.
       if (
+        rationaleResumeContext === undefined &&
         this.hostClassifiesRiskProvider() &&
         this.sandboxFsContainedProvider(tool) &&
         source === "plugin" &&
@@ -1622,8 +2012,8 @@ export class ToolExecutor {
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: relaxedPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", relaxedPermHook));
-          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: relaxedPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", relaxedPermHook));
+          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
         }
         permissionResult = {
           decision: "allow",
@@ -1633,6 +2023,7 @@ export class ToolExecutor {
         };
       }
       if (
+        rationaleResumeContext === undefined &&
         source === "plugin" &&
         invocationPermissionContext.pluginPanelUserAction === true &&
         invocationPermissionContext.headless !== true &&
@@ -1656,8 +2047,8 @@ export class ToolExecutor {
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: panelPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", panelPermHook));
-          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: panelPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", panelPermHook));
+          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
         }
         permissionResult = {
           decision: "allow",
@@ -1676,6 +2067,7 @@ export class ToolExecutor {
       let foregroundMemorySkipChecked = false;
       if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
         if (
+          rationaleResumeContext === undefined &&
           permissionResult.layer >= 3 &&
           permissionResult.forceModal !== true &&
           invocationPermissionContext.headless !== true
@@ -1695,22 +2087,11 @@ export class ToolExecutor {
             tool.mcpServerId,
             tool.workerId,
             tool.pluginId,
+            hostShellExecutionPlan,
           );
           if (memorySkip) {
             permissionResult = memorySkip;
           }
-        }
-      }
-      if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
-        const explicitAuthorization = this.consumePendingReviewerAuthorization({
-          sessionId,
-          toolName: toolUse.name,
-          source,
-          finalInput,
-          context: invocationPermissionContext,
-        });
-        if (explicitAuthorization) {
-          permissionResult = explicitAuthorization;
         }
       }
       if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
@@ -1733,25 +2114,139 @@ export class ToolExecutor {
           callbacks,
           meta,
           approvalPurpose,
+          hostShellExecutionPlan,
           abortSignal,
         );
+        if (abortSignal?.aborted) {
+          return withHostShellExecutionPlan(await returnUserAbort(abortDeps(finalInput)));
+        }
         if (reviewerResult) {
           permissionResult = reviewerResult;
         }
       }
-      if (
-        permissionResult.decision === "deny" &&
-        permissionResult.reviewer?.route === "foreground-auto" &&
-        permissionResult.reviewer.verdict
-      ) {
-        this.recordPendingReviewerAuthorization({
-          sessionId,
-          toolName: toolUse.name,
-          source,
-          finalInput,
-          context: invocationPermissionContext,
-          verdict: permissionResult.reviewer.verdict,
-        });
+      const needsRationaleSecurityContext =
+        rationaleBatchContext !== undefined || rationaleResumeContext !== undefined;
+      const sandboxCapability = needsRationaleSecurityContext
+        ? hostShellExecutionPlan?.capability ??
+          resolveReviewerSandboxCapability(
+            source,
+            toolUse.name,
+            tool.mcpServerId,
+            tool.workerId,
+            tool.pluginId,
+          )
+        : undefined;
+      const sandboxExecutionPlan: Record<string, unknown> | undefined =
+        sandboxCapability === undefined
+          ? undefined
+          : {
+              // v2 adds the exact sealed host-shell plan to the canonical action
+              // identity. A stale v1 rationale ticket therefore fails closed on
+              // resume instead of authorizing a changed execution substrate.
+              version: hostShellExecutionPlanAudit === undefined
+                ? "rationale-sandbox-execution-plan/v1"
+                : "rationale-sandbox-execution-plan/v2",
+              executionCwd,
+              allowedDirectories: [...invocationAllowedScope.directories],
+              capability: {
+                kind: sandboxCapability.kind,
+                confidence: sandboxCapability.confidence,
+                platform: sandboxCapability.platform,
+                reason: sandboxCapability.reason,
+                ...(sandboxCapability.confines === undefined
+                  ? {}
+                  : {
+                      confines: {
+                        filesystem: sandboxCapability.confines.filesystem,
+                        process: sandboxCapability.confines.process,
+                        network: sandboxCapability.confines.network,
+                      },
+                    }),
+              },
+              ...(hostShellExecutionPlanAudit === undefined
+                ? {}
+                : { hostShellExecutionPlan: hostShellExecutionPlanAudit }),
+            };
+      if (rationaleBatchContext && sandboxCapability && sandboxExecutionPlan) {
+        const rationaleControl = await maybeMaterializeRationaleControl(
+          rationaleBatchContext.runtime,
+          {
+            batchId: rationaleBatchContext.batchId,
+            originalToolUseIds: rationaleBatchContext.originalToolUseIds,
+            completedToolUseIds: rationaleBatchContext.completedToolUseIds,
+            toolUseId: toolUse.id,
+            originalInput: toolUse.input,
+            finalInput,
+            toolName: toolUse.name,
+            toolVersion: tool.version,
+            source,
+            category: invocationCategory,
+            ...(tool.pluginId === undefined ? {} : { pluginId: tool.pluginId }),
+            ...(tool.mcpServerId === undefined ? {} : { mcpServerId: tool.mcpServerId }),
+            ...(tool.workerId === undefined ? {} : { workerId: tool.workerId }),
+            invocationTrustOrigin: invocationPermissionContext.trustOrigin,
+            targetFilePaths,
+            canonicalTargets: canonicalTargets.map((target) => target.canonicalPath),
+            allowedDirectories: invocationAllowedScope.directories,
+            ...(approvalCacheKey === undefined ? {} : { approvalCacheKey }),
+            sandboxCapability,
+            sandboxExecutionPlan,
+            permission: permissionResult,
+            permissionEvaluationContext: evaluationContext,
+            eligibilityContext: {
+              headless: invocationPermissionContext.headless === true,
+              forceModal: permissionResult.forceModal === true,
+              approvalReasonPrefix: approvalReasonPrefix ?? null,
+            },
+          },
+        );
+        if (rationaleControl) {
+          return { outcome: "rationale-required", control: rationaleControl };
+        }
+      }
+      if (rationaleResumeContext) {
+        if (!sandboxCapability || !sandboxExecutionPlan) {
+          return returnRationaleResumeBlock(
+            "current sandbox capability could not be resolved",
+            finalInput,
+            permissionResult,
+          );
+        }
+        const prepared = await prepareRationaleResume(
+          rationaleResumeContext.request,
+          {
+            finalInput,
+            toolName: toolUse.name,
+            toolVersion: tool.version,
+            source,
+            category: invocationCategory,
+            ...(tool.pluginId === undefined ? {} : { pluginId: tool.pluginId }),
+            ...(tool.mcpServerId === undefined ? {} : { mcpServerId: tool.mcpServerId }),
+            ...(tool.workerId === undefined ? {} : { workerId: tool.workerId }),
+            invocationTrustOrigin: invocationPermissionContext.trustOrigin,
+            canonicalTargets: canonicalTargets.map((target) => target.canonicalPath),
+            allowedDirectories: invocationAllowedScope.directories,
+            ...(approvalCacheKey === undefined ? {} : { approvalCacheKey }),
+            sandboxCapability,
+            sandboxExecutionPlan,
+            permission: permissionResult,
+            permissionEvaluationContext: evaluationContext,
+            eligibilityContext: {
+              headless: invocationPermissionContext.headless === true,
+              forceModal: permissionResult.forceModal === true,
+              approvalReasonPrefix: approvalReasonPrefix ?? null,
+            },
+          },
+          rationaleResumeContext.runtime,
+        );
+        if (!prepared.ok) {
+          return returnRationaleResumeBlock(
+            prepared.reason,
+            finalInput,
+            permissionResult,
+          );
+        }
+        rationaleResumeContext.prepared = prepared.value;
       }
       if (permissionResult.decision === "deny") {
         const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason: permissionResult.reason });
@@ -1760,8 +2255,8 @@ export class ToolExecutor {
         // pre-hook args for a hook-modified invocation.
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
       }
       if (permissionResult.decision === "ask") {
         if (invocationPermissionContext.headless === true) {
@@ -1778,8 +2273,8 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, headlessDeny, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+            await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, headlessDeny, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
           }
           const reviewerResult = await this.dispatchReviewerForHeadless(
             toolUse.name,
@@ -1798,8 +2293,12 @@ export class ToolExecutor {
             callbacks,
             meta,
             approvalPurpose,
+            hostShellExecutionPlan,
             abortSignal,
           );
+          if (abortSignal?.aborted) {
+            return withHostShellExecutionPlan(await returnUserAbort(abortDeps(finalInput)));
+          }
           if (reviewerResult.allowed) {
             permissionResult = reviewerResult.permissionResult;
           } else {
@@ -1807,8 +2306,8 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+            await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
           }
         }
       }
@@ -1847,6 +2346,7 @@ export class ToolExecutor {
         };
       }
       if (
+        rationaleResumeContext === undefined &&
         permissionResult.decision === "ask" &&
         permissionResult.layer >= 3 &&
         // Only an explicit forceModal marker is a per-invocation hard gate;
@@ -1869,18 +2369,95 @@ export class ToolExecutor {
           tool.mcpServerId,
           tool.workerId,
           tool.pluginId,
+          hostShellExecutionPlan,
         );
         if (memorySkip) {
           permissionResult = memorySkip;
         }
       }
       if (permissionResult.decision === "ask") {
-        if (this.approvalGate) {
+        if (rationaleResumeContext?.prepared) {
+          const permHook = await this.runScriptHook(
+            "perm",
+            toolUse.name,
+            source,
+            invocationCategory,
+            finalInput,
+            sessionId,
+            invocationPermissionContext,
+            tool.mcpServerId,
+            tool.pluginId,
+          );
+          if (permHook.decision === "deny") {
+            return returnRationaleResumeBlock(
+              "permission-request hook denied the sealed action: " + permHook.reason,
+              finalInput,
+              { ...permissionResult, decision: "deny", reason: permHook.reason },
+              hookChainFromDispatch("perm", permHook),
+            );
+          }
+          try {
+            await auditCurrentPermissionAsk(
+              toolUse.name,
+              source,
+              invocationCategory,
+              finalInput,
+              permissionResult,
+              executionCwd,
+              invocationPermissionContext,
+              targetFilePath,
+            );
+          } catch (error) {
+            return returnRationaleResumeBlock(
+              "permission ask audit failed: " +
+                (error instanceof Error ? error.message : String(error)),
+              finalInput,
+              permissionResult,
+            );
+          }
+          if (abortSignal?.aborted) {
+            return returnRationaleResumeBlock(
+              "resume was aborted before allow-once receipt consumption",
+              finalInput,
+              permissionResult,
+            );
+          }
+          const authorized = await authorizeRationaleResume(
+            rationaleResumeContext.prepared,
+          );
+          if (!authorized.ok) {
+            return returnRationaleResumeBlock(
+              authorized.reason,
+              finalInput,
+              permissionResult,
+            );
+          }
+          rationaleResumeContext.authorized = authorized.value;
+          permissionResult = {
+            decision: "allow",
+            reason: "host-authentic rationale allow-once receipt consumed",
+            layer: permissionResult.layer,
+          };
+        } else if (this.approvalGate) {
           // Layer 3: wire target.filePath + isReadOnly + mode so the
           // approval gate can apply sensitive-path and read-only checks to
           // the exact invocation shown to the user.
           const approvalRequest = {
             id: randomUUID(),
+            ...(hostShellRequiresExplicitApproval
+              ? {
+                  // This route intentionally has no durable approval record:
+                  // its substrate is an honest plain host child for this call only.
+                  allowedChoices: ["allow-once", "deny-once"] as const,
+                  forceExplicit: true as const,
+                  ...(hostShellExecutionPermitBinding === undefined
+                    ? {}
+                    : { hostShellExecutionPermitBinding }),
+                }
+              : {}),
+            ...(hostShellExecutionPlanAudit === undefined
+              ? {}
+              : { executionPlan: hostShellExecutionPlanAudit }),
             category: "tool" as const,
             toolName: toolUse.name,
             toolCategory: invocationCategory,
@@ -1900,18 +2477,19 @@ export class ToolExecutor {
             // Propagate approvalCacheKey so renderer record key
             // matches dispatchReviewer lookup key — end-to-end symmetry.
             ...(approvalCacheKey ? { approvalCacheKey } : {}),
-            // Issue #691 round-1 — sandbox capability for the dialog.
-            // Substrate-aware: plugin/MCP + in-process builtins show "none"
-            // (their effects are not ASRT-wrapped); only bash/powershell may
-            // show the active "asrt" when the gate is ON — plus a genuinely
-            // ASRT-wrapped external MCP worker, keyed on id.
-            sandboxCapability: resolveReviewerSandboxCapability(
-              source,
-              toolUse.name,
-              tool.mcpServerId,
-              tool.workerId,
-              tool.pluginId,
-            ),
+            // Canonical host shells expose only their sealed safe projection;
+            // non-host-shell routes retain their existing capability display.
+            ...(hostShellExecutionPlanAudit === undefined
+              ? {
+                  sandboxCapability: resolveReviewerSandboxCapability(
+                    source,
+                    toolUse.name,
+                    tool.mcpServerId,
+                    tool.workerId,
+                    tool.pluginId,
+                  ),
+                }
+              : {}),
             evaluationContext,
           };
 
@@ -1931,14 +2509,14 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", permHook));
-            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+            await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", permHook));
+            return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
           }
 
           // §F3: requestAndWait 실패 시 감사 로그 보장 후 deny-once 처리
           let decision;
           try {
-            await this.auditPermissionAsk(
+            await auditCurrentPermissionAsk(
               toolUse.name,
               source,
               invocationCategory,
@@ -1948,7 +2526,13 @@ export class ToolExecutor {
               invocationPermissionContext,
               targetFilePath,
             );
+            if (abortSignal?.aborted) {
+              return withHostShellExecutionPlan(await returnUserAbort(abortDeps(finalInput)));
+            }
             decision = await this.approvalGate.requestAndWait(approvalRequest);
+            if (hostShellExecutionPermitBinding !== undefined) {
+              hostShellApprovalDecision = decision;
+            }
           } catch (approvalErr) {
             const msg = t("be_executor.approvalGateError", { name: toolUse.name, error: approvalErr instanceof Error ? approvalErr.message : String(approvalErr) });
             const durationMs = Date.now() - startTime;
@@ -1956,12 +2540,12 @@ export class ToolExecutor {
             // approval gate (which already uses finalInput in approvalRequest).
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
+            await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
               ...permissionResult,
               decision: "deny",
               reason: `approval gate error: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`,
             }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+            return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
           }
 
           if (decision.choice.startsWith("deny")) {
@@ -1976,12 +2560,12 @@ export class ToolExecutor {
             // approvalRequest — never log stale pre-hook input here.
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
+            await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
               ...permissionResult,
               decision: "deny",
               reason: "user denied approval request",
             }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+            return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
           }
 
           // allow-always: 영구 허용 규칙 추가
@@ -2012,14 +2596,22 @@ export class ToolExecutor {
           // unavailable.
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
             ...permissionResult,
             decision: "deny",
             reason: `approval gate missing: ${permissionResult.reason}`,
           }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
         }
       }
+    }
+
+    if (rationaleResumeContext && !rationaleResumeContext.authorized) {
+      return returnRationaleResumeBlock(
+        "current permission path did not produce an eligible sealed resume authorization",
+        finalInput,
+        permissionResult,
+      );
     }
 
     const scriptPre = await this.runScriptHook(
@@ -2034,29 +2626,52 @@ export class ToolExecutor {
       tool.pluginId,
     );
     if (scriptPre.decision === "deny") {
+      if (rationaleResumeContext) {
+        return returnRationaleResumeBlock(
+          "script PreToolUse hook denied the sealed action: " + scriptPre.reason,
+          finalInput,
+          { decision: "deny", reason: scriptPre.reason, layer: 6 },
+          hookChainFromDispatch("pre", scriptPre),
+        );
+      }
       const msg = t("be_executor.hookBlockScript", { reason: scriptPre.reason });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: scriptPre.reason, layer: 6 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("pre", scriptPre));
-      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: scriptPre.reason, layer: 6 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("pre", scriptPre));
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
 
     // ── Step 5: Rate Limit (trust별) ────────────────
     const rateResult = this.rateLimiter.check(toolUse.name, trust);
     if (!rateResult.allowed) {
+      if (rationaleResumeContext) {
+        return returnRationaleResumeBlock(
+          "rate limit denied the sealed action",
+          finalInput,
+          permissionResult,
+        );
+      }
       const msg = t("be_executor.rateLimitExceeded", { name: toolUse.name, trust });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0, invocationPermissionContext, invocationCategory, executionCwd);
-      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0, invocationPermissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
 
     if (this.requirePermissionAuditChain) {
       try {
         this.auditLogger.assertPermissionAuditWritable();
       } catch (err) {
+        if (rationaleResumeContext) {
+          return returnRationaleResumeBlock(
+            "permission audit chain is not writable: " +
+              (err instanceof Error ? err.message : String(err)),
+            finalInput,
+            permissionResult,
+          );
+        }
         const msg = t("be_executor.auditChainBlock", { name: toolUse.name, error: err instanceof Error ? err.message : String(err) });
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -2073,13 +2688,33 @@ export class ToolExecutor {
             source,
             trust,
             executionTimeMs: durationMs,
+            ...currentAuditMetadata(),
             permissionDecision: "deny",
             permissionReason: "permission audit chain unavailable before execution",
             rateLimitRemaining: rateResult.remaining,
           }],
         });
-        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
       }
+    }
+
+    if (rationaleResumeContext) {
+      if (!rationaleResumeContext.authorized) {
+        return returnRationaleResumeBlock(
+          "rationale resume authorization was lost before invocation start",
+          finalInput,
+          permissionResult,
+        );
+      }
+      const started = await startRationaleResume(rationaleResumeContext.authorized);
+      if (!started.ok) {
+        return returnRationaleResumeBlock(
+          started.reason,
+          finalInput,
+          permissionResult,
+        );
+      }
+      rationaleResumeContext.started = started.value;
     }
 
     emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -2089,6 +2724,51 @@ export class ToolExecutor {
     let isError = false;
     let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
     let rawResult: unknown;
+    // Mint only after all permission, hook, rate-limit, and audit gates passed.
+    // The permit is private host state, binds this exact final shell action,
+    // and is consumed once by the plain requested-sandbox fallback spawn path.
+    const hostShellExecutionPermit =
+      hostShellExecutionPlan !== undefined &&
+      hostShellExecutionPermitBinding !== undefined
+        ? mintHostShellExecutionPermit({
+            plan: hostShellExecutionPlan,
+            approvalDecision: hostShellApprovalDecision,
+            binding: hostShellExecutionPermitBinding,
+          })
+        : undefined;
+    if (
+      hostShellRequiresExplicitApproval &&
+      hostShellExecutionPermit === undefined
+    ) {
+      const msg =
+        "Requested-sandbox shell execution blocked: no host-verified allow-once receipt was available for this action.";
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        finalInput,
+        msg,
+        true,
+        startTime,
+        permissionResult
+          ? {
+              ...permissionResult,
+              decision: "deny",
+              reason: msg,
+              layer: permissionResult.layer ?? 6,
+            }
+          : { decision: "deny", reason: msg, layer: 6 },
+        rateResult.remaining,
+        invocationPermissionContext,
+        invocationCategory,
+        executionCwd,
+      );
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+    }
 
     const executionContext: ToolExecutionContext = {
       cwd: executionCwd,
@@ -2099,6 +2779,8 @@ export class ToolExecutor {
       ...(tool.pluginId
         ? { ownerPluginSandboxRoot: pathResolve(lvisHome(), "plugins", tool.pluginId) }
         : {}),
+      ...(hostShellExecutionPlan ? { hostShellExecutionPlan } : {}),
+      ...(hostShellExecutionPermit ? { hostShellExecutionPermit } : {}),
       metadata: {
         sessionId: sessionId ?? "unknown",
         // C3(b): spawn depth visible to tools — `agent_spawn` reads this
@@ -2231,8 +2913,10 @@ export class ToolExecutor {
 
     if (terminationReason === "user-abort") {
       const durationMs = Date.now() - startTime;
-      callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
-      await this.auditToolCall(
+      if (!rationaleResumeContext?.started) {
+        callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      }
+      await auditCurrentToolCall(
         sessionId,
         toolUse.name,
         source,
@@ -2249,7 +2933,20 @@ export class ToolExecutor {
         targetFilePath,
         terminationReason,
       );
-      return { tool_use_id: toolUse.id, content, is_error: true, durationMs };
+      if (rationaleResumeContext?.started) {
+        rationaleResumeContext.terminalizationAttempted = true;
+        const terminalCommitted = await finishRationaleResume(
+          rationaleResumeContext.started,
+          false,
+        );
+        rationaleResumeContext.terminalized = terminalCommitted;
+        if (!terminalCommitted) {
+          callbacks?.onToolEnd?.(toolUse.name, RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, true, meta, undefined, durationMs);
+          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs });
+        }
+        callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      }
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
     }
 
     // ── Step 7: PostHook + Feedback Merge ───────────
@@ -2324,6 +3021,7 @@ export class ToolExecutor {
           source,
           trust,
           executionTimeMs: Date.now() - startTime,
+          ...currentAuditMetadata(),
           permissionDecision: "dlp_masked",
             permissionReason: `Detected patterns: ${dlpResult.detections.join(", ")}`,
         }],
@@ -2332,7 +3030,9 @@ export class ToolExecutor {
 
     // ── Step 8: Audit + Result (항상 실행) ──────────
     const durationMs = Date.now() - startTime;
-    callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
+    if (!rationaleResumeContext?.started) {
+      callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
+    }
     // Redact the user's freeText answer before it lands in the audit
     // log. The DLP filter at Step 7b only catches structured patterns
     // (emails, IDs); a free-form answer ("내 비밀번호는 …") wouldn't match
@@ -2356,16 +3056,32 @@ export class ToolExecutor {
       hookChainFromDispatch("pre", scriptPre),
       hookChainFromDispatch("post", scriptPost),
     );
-    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason, successHookChain);
+    await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason, successHookChain);
+    if (rationaleResumeContext?.started) {
+      rationaleResumeContext.terminalizationAttempted = true;
+      const terminalCommitted = await finishRationaleResume(
+        rationaleResumeContext.started,
+        !isError && terminationReason === "ok",
+      );
+      rationaleResumeContext.terminalized = terminalCommitted;
+      if (!terminalCommitted) {
+        log.error("Rationale resume invocation terminal audit CAS failed");
+        callbacks?.onToolEnd?.(toolUse.name, RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, true, meta, undefined, durationMs);
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs });
+      }
+    }
+    if (rationaleResumeContext?.started) {
+      callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
+    }
 
-    return {
+    return withHostShellExecutionPlan({
       tool_use_id: toolUse.id,
       content,
       ...(isError && { is_error: true }),
       ...(uiPayload && { uiPayload }),
       ...(rawResult !== undefined && { rawResult }),
       durationMs,
-    };
+    });
   }
 
   // ─── Audit (불변 — 항상 실행) — chokepoint owned by AuditWriter ────
@@ -2377,6 +3093,7 @@ export class ToolExecutor {
     directory: string;
     grantLifetime: "turn" | "session" | "always" | "degraded-to-turn";
     permissionContext?: ToolPermissionContext;
+    audit?: ToolExecutionAuditMetadata;
   }): Promise<void> {
     return this.auditWriter.auditPermissionGrant(args);
   }
@@ -2390,6 +3107,7 @@ export class ToolExecutor {
     cwd: string,
     permissionContext?: ToolPermissionContext,
     auditDirectory?: string,
+    audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
     return this.auditWriter.auditPermissionAsk(
       toolName,
@@ -2400,6 +3118,7 @@ export class ToolExecutor {
       cwd,
       permissionContext,
       auditDirectory,
+      audit,
     );
   }
 
@@ -2420,6 +3139,7 @@ export class ToolExecutor {
     auditDirectory?: string,
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error",
     hookChain?: HookResult[],
+    audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
     return this.auditWriter.auditToolCall(
       sessionId,
@@ -2438,6 +3158,7 @@ export class ToolExecutor {
       auditDirectory,
       terminationReason,
       hookChain,
+      audit,
     );
   }
 }

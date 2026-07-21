@@ -42,6 +42,7 @@ import {
   type EffectLedger,
 } from "../../permissions/effect-ledger.js";
 import type { PermissionCheckResult } from "../../permissions/permission-manager.js";
+import type { ToolExecutionAuditMetadata } from "../../audit/audit-schema.js";
 import { t } from "../../i18n/index.js";
 import type { ToolSource, TrustLevel, ToolCategory } from "../types.js";
 import type {
@@ -183,6 +184,7 @@ export interface UserAbortDeps {
   executionCwd: string;
   startTime: number;
   auditWriter: AuditWriter;
+  audit?: ToolExecutionAuditMetadata;
 }
 
 /**
@@ -206,6 +208,7 @@ export async function returnUserAbort(deps: UserAbortDeps): Promise<ToolResult> 
     executionCwd,
     startTime,
     auditWriter,
+    audit,
   } = deps;
   const msg = t("be_executor.toolExecutionCancelled");
   const durationMs = Date.now() - startTime;
@@ -232,6 +235,8 @@ export async function returnUserAbort(deps: UserAbortDeps): Promise<ToolResult> 
     executionCwd,
     undefined,
     "user-abort",
+    undefined,
+    audit,
   );
   return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
 }

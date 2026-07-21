@@ -164,7 +164,7 @@ export function verifyAllAuditFiles(
     let sealMatch: boolean | null = null;
     const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})\.permission-audit\.jsonl$/);
     if (sealStore && dateMatch && lines.length > 0) {
-      const stored = sealStore.read(sealKeyName(dateMatch[1]));
+      const stored = sealStore.read(sealKeyName(dateMatch[1]), 4 * 1024);
       if (stored) {
         const computed = computeDailySeal(secret, lines[lines.length - 1]);
         sealMatch = stored === computed;

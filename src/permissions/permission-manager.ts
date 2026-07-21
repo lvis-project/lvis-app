@@ -22,6 +22,10 @@ import {
   resolveReviewerSandboxCacheState,
   type ReviewerSandboxCacheState,
 } from "./sandbox-capability.js";
+import {
+  getHostShellExecutionPlanAuditProjection,
+  type HostShellExecutionPlan,
+} from "./host-shell-execution-plan.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
@@ -100,6 +104,45 @@ export interface PermissionRule {
  */
 export type ReviewerLane = "foreground-auto" | "headless";
 
+export type ReviewerDispatchOutcome =
+  | "fresh"
+  | "cache"
+  | "approval-memory"
+  | "unavailable"
+  | "error"
+  | "timeout"
+  | "malformed"
+  | "sandbox-state-changed";
+
+export type ReviewerAutoDecisionOutcome = Extract<
+  ReviewerDispatchOutcome,
+  "fresh" | "cache" | "approval-memory"
+>;
+
+/** Exhaustive fail-closed SOT for reviewer outcomes that may auto-decide. */
+export function isReviewerAutoDecisionOutcome(
+  outcome: ReviewerDispatchOutcome | undefined,
+): outcome is ReviewerAutoDecisionOutcome {
+  if (outcome === undefined) return false;
+  switch (outcome) {
+    case "fresh":
+    case "cache":
+    case "approval-memory":
+      return true;
+    case "unavailable":
+    case "error":
+    case "timeout":
+    case "malformed":
+    case "sandbox-state-changed":
+      return false;
+    default: {
+      const exhaustive: never = outcome;
+      void exhaustive;
+      return false;
+    }
+  }
+}
+
 export interface PermissionCheckResult {
   decision: PermissionDecision;
   reason: string;
@@ -112,6 +155,7 @@ export interface PermissionCheckResult {
   reviewer?: {
     route: ReviewerLane;
     verdict?: RiskVerdict;
+    outcome?: ReviewerDispatchOutcome;
   };
   /**
    * Per-invocation hard-ask marker. When `true`, this `ask` decision MUST be
@@ -234,6 +278,8 @@ export interface ReviewerDispatchInput {
    */
   pluginId?: string;
   workerId?: string;
+  /** Executor-sealed substrate for canonical builtin shell invocations only. */
+  hostShellExecutionPlan?: HostShellExecutionPlan;
 }
 
 /**
@@ -244,6 +290,7 @@ export interface ReviewerDispatchInput {
  */
 export interface ReviewerDispatchResult {
   verdict: RiskVerdict;
+  outcome: ReviewerDispatchOutcome;
   /**
    * "hit" / "miss-stale" / "miss-expired" / "miss-not-found" — surfaces
    * the audit-trail "from cache" hint (m1 architect MAJOR-5 cache
@@ -280,7 +327,9 @@ function sameReviewerSandboxCacheState(
     ac.platform === bc.platform &&
     ac.confines?.filesystem === bc.confines?.filesystem &&
     ac.confines?.process === bc.confines?.process &&
-    ac.confines?.network === bc.confines?.network
+    ac.confines?.network === bc.confines?.network &&
+    canonicalStringify(a.hostShellExecutionPlan ?? null) ===
+      canonicalStringify(b.hostShellExecutionPlan ?? null)
   );
 }
 // LLM caller retry wiring lives in conversation-loop.ts scope.
@@ -322,6 +371,7 @@ export class PermissionManager {
    * decide whether to set `reviewer.route='foreground-auto'`.
    */
   private interactiveAutoApprove: ReviewerInteractiveAutoApprove = "off";
+  private policyGeneration = 0;
   /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
   private broadcastUserApprovalHit: ((payload: UserApprovalHitPayload) => void) | null = null;
   /**
@@ -379,6 +429,7 @@ export class PermissionManager {
     this.deferredQueue = deps.deferredQueue;
     this.reviewerCacheScope = deps.cacheScope ?? {};
     this.reviewerDegradedToRule = deps.degradedToRule ?? false;
+    this.policyGeneration += 1;
   }
 
   /**
@@ -516,6 +567,7 @@ export class PermissionManager {
    * does not have to re-read the file on every tool call.
    */
   setInteractiveAutoApprove(autoApprove: ReviewerInteractiveAutoApprove): void {
+    if (this.interactiveAutoApprove !== autoApprove) this.policyGeneration += 1;
     this.interactiveAutoApprove = autoApprove;
   }
 
@@ -612,6 +664,7 @@ export class PermissionManager {
   // ─── Settings ─────────────────────────────────────
 
   setMode(mode: ExecutionMode): void {
+    if (this.mode !== mode) this.policyGeneration += 1;
     this.mode = mode;
   }
 
@@ -619,20 +672,27 @@ export class PermissionManager {
     return this.mode;
   }
 
+  /** Monotonic host policy identity for sealed rationale revalidation. */
+  getPolicyEpoch(): string {
+    return `${this.policyGeneration}:${this.mode}:${this.interactiveAutoApprove}`;
+  }
+
   setRules(rules: PermissionRule[]): void {
     this.rules = [...rules];
+    this.policyGeneration += 1;
   }
 
   setToolModeOverride(toolName: string, mode: ExecutionMode): void {
     if (mode === "default") {
-      this.toolModeOverrides.delete(toolName);
+      if (this.toolModeOverrides.delete(toolName)) this.policyGeneration += 1;
       return;
     }
+    if (this.toolModeOverrides.get(toolName) !== mode) this.policyGeneration += 1;
     this.toolModeOverrides.set(toolName, mode);
   }
 
   clearToolModeOverride(toolName: string): void {
-    this.toolModeOverrides.delete(toolName);
+    if (this.toolModeOverrides.delete(toolName)) this.policyGeneration += 1;
   }
 
   getVisibilityDenyRules(): DenyRule[] {
@@ -673,6 +733,7 @@ export class PermissionManager {
     // In-memory cache is updated only after the durable write succeeds.
     // maxTier keeps the invariant that the Map holds the highest granted tier.
     this.alwaysAllowed.set(pattern, maxTier(this.alwaysAllowed.get(pattern), tier));
+    this.policyGeneration += 1;
     this.broadcastConfigChanged?.();
     // Cluster review M1 — rule change aborts outstanding bearers so plugins
     // re-resolve their keys under the new policy. An allow rule going wider
@@ -701,6 +762,7 @@ export class PermissionManager {
         file.rules.unshift({ pattern, action: "deny" });
       }
     });
+    this.policyGeneration += 1;
     this.broadcastConfigChanged?.();
     // Cluster review M1 — deny added → outstanding bearers MUST be aborted
     // so a plugin that held a bearer captured in a closure can't continue
@@ -717,6 +779,7 @@ export class PermissionManager {
       (r) => !(r.pattern === pattern && r.action === action && !r.source),
     );
     if (action === "allow") this.alwaysAllowed.delete(pattern);
+    this.policyGeneration += 1;
     // Persistent file.
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       file.rules = file.rules.filter(
@@ -850,6 +913,7 @@ export class PermissionManager {
       if (isUnderRoot(pattern)) this.alwaysAllowed.delete(pattern);
     }
 
+    this.policyGeneration += 1;
     this.broadcastConfigChanged?.();
     // A revoke narrows policy — outstanding bearers must re-resolve under it.
     this.revokeAllPluginAccess(`root-removed-prune:${root}`);
@@ -911,6 +975,7 @@ export class PermissionManager {
         if (surviving) surviving.tier = merged;
       }
     }
+    this.policyGeneration += 1;
   }
 
   /**
@@ -931,6 +996,7 @@ export class PermissionManager {
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
       file.mode = mode;
     });
+    if (this.mode !== mode) this.policyGeneration += 1;
     this.mode = mode;
   }
 
@@ -961,6 +1027,26 @@ export class PermissionManager {
     overlayTriggerOrigin?: string | null,
     context: PermissionCheckContext = {},
   ): PermissionCheckResult {
+    if (category === "meta") {
+      const invalidExternalMeta = source !== "builtin";
+      const missingBuiltinOverride = source === "builtin" &&
+        context.decisionOverride !== "ask" &&
+        context.decisionOverride !== "always-allow-with-audit";
+      if (invalidExternalMeta || missingBuiltinOverride) {
+        return {
+          decision: "deny",
+          reason: t("be_permissionManager.policyDenyReason", { category }),
+          layer: 0,
+          denyReasons: [{
+            layer: 0,
+            reason: invalidExternalMeta
+              ? "external-meta-forbidden"
+              : "builtin-meta-missing-decision-override",
+            source: "host-tool-governance",
+          }],
+        };
+      }
+    }
     const trust = this.resolveTrust(toolName, source);
     // Strict patterns (shared with the rest of the staged-origin flow — see
     // shared/overlay-trigger-source.ts + shared/mcp-app-message-source.ts). Loose
@@ -1123,12 +1209,16 @@ export class PermissionManager {
       return {
         verdict: { level: "high", reason: "reviewer not wired — fail-safe defer" },
         cacheReason: "miss-not-found",
+        outcome: "unavailable",
       };
     }
     const classifier = this.reviewerClassifier!;
     const cache = this.verdictCache!;
     const queue = this.deferredQueue!;
     const cacheIdentityInput = input.cacheIdentityInput ?? input.finalInput;
+    const hostShellExecutionPlanAudit = input.hostShellExecutionPlan === undefined
+      ? undefined
+      : getHostShellExecutionPlanAuditProjection(input.hostShellExecutionPlan);
 
     const lookupKey = {
       toolName,
@@ -1147,6 +1237,7 @@ export class PermissionManager {
       mcpServerId: input.mcpServerId,
       pluginId: input.pluginId,
       workerId: input.workerId,
+      hostShellExecutionPlan: hostShellExecutionPlanAudit,
     };
     // ── User-approval memory hit ──────────────────────────────────────────
     // Check the user-approval store before consulting the LLM classifier.
@@ -1170,6 +1261,7 @@ export class PermissionManager {
         input.mcpServerId,
         input.workerId,
         input.pluginId,
+        input.hostShellExecutionPlan,
       );
     const buildCacheContext = (sandboxCacheState: ReviewerSandboxCacheState) => {
       const sandboxScope = sandboxCacheState.capability;
@@ -1178,8 +1270,10 @@ export class PermissionManager {
         scope: {
           ...(routineScope ?? {}),
           reviewer: this.reviewerCacheScope,
+          reviewerOutcomeContractVersion: 1,
           sandboxKind: sandboxScope.kind,
           sandboxConfidence: sandboxScope.confidence,
+          hostShellExecutionPlan: sandboxCacheState.hostShellExecutionPlan ?? null,
         },
         sandboxWrapState: sandboxCacheState,
       };
@@ -1201,6 +1295,7 @@ export class PermissionManager {
       nlJustification: string | null;
       verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
+    let outcome: ReviewerDispatchOutcome = "fresh";
     let sandboxStateForAudit = sandboxCacheState;
     const buildReviewerContext = (
       reviewerSandboxState: ReviewerSandboxCacheState = sandboxCacheState,
@@ -1270,6 +1365,7 @@ export class PermissionManager {
         nlJustification: userApproval.nlJustification,
         verdictAtApproval: userApproval.verdictAtApproval,
       };
+      outcome = "approval-memory";
       // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log
       console.info(`[permission] memory-hit auto-approve: ${toolName} (scope=${userApproval.scope}, verdict=${userApproval.verdictAtApproval})`);
       try {
@@ -1289,6 +1385,7 @@ export class PermissionManager {
       const ruleClassifier = new RuleBasedRiskClassifier();
       ruleVerdictForAudit = ruleClassifier.classify(buildReviewerContext()).level;
       verdict = cacheResult.verdict;
+      outcome = "cache";
     } else {
       const ctx = buildReviewerContext();
       try {
@@ -1299,6 +1396,7 @@ export class PermissionManager {
         if (classifier instanceof LlmRiskClassifier) {
           const trace = await classifier.classifyWithTrace(ctx, { abortSignal: options?.abortSignal });
           verdict = trace.finalVerdict;
+          outcome = trace.outcome;
           ruleVerdictForAudit = trace.ruleVerdict.level;
           llmVerdictForAudit = trace.llmVerdict?.level ?? null;
         } else {
@@ -1308,7 +1406,11 @@ export class PermissionManager {
           llmVerdictForAudit = null;
         }
         const postReviewSandboxState = readSandboxCacheState();
-        if (!sameReviewerSandboxCacheState(sandboxCacheState, postReviewSandboxState)) {
+        if (options?.abortSignal?.aborted === true) {
+          // Dispatcher/executor own the terminal abort result. Internally mark
+          // this non-success so an aborted fresh verdict cannot seed the cache.
+          outcome = "error";
+        } else if (!sameReviewerSandboxCacheState(sandboxCacheState, postReviewSandboxState)) {
           sandboxStateForAudit = postReviewSandboxState;
           const freshRuleVerdict = new RuleBasedRiskClassifier().classify(
             buildReviewerContext(postReviewSandboxState),
@@ -1318,15 +1420,20 @@ export class PermissionManager {
             level: "high",
             reason: "reviewer sandbox state changed during classification — fail-safe re-review required",
           };
+          outcome = "sandbox-state-changed";
         } else {
-          // Persist for next time (HIGH cached too — re-deny is fast). The
-          // verdict is stored only if the live wrap state still matches the
-          // reviewer context that produced it.
-          await cache.store(lookupKey, cacheCtx, verdict);
+          // Only a successful fresh classification may become a base-cache
+          // entry. malformed/error/timeout fallback verdicts remain fail-safe
+          // for this invocation and can never reappear as an eligible "cache"
+          // rationale outcome on the next call.
+          if (outcome === "fresh") {
+            await cache.store(lookupKey, cacheCtx, verdict);
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         verdict = { level: "high", reason: `reviewer error — ${message}` };
+        outcome = "error";
         ruleVerdictForAudit = new RuleBasedRiskClassifier().classify(ctx).level;
         llmVerdictForAudit = classifier instanceof LlmRiskClassifier ? "high" : null;
       }
@@ -1378,11 +1485,14 @@ export class PermissionManager {
 
     const deferPolicy = options?.defer ?? "high";
     const shouldDefer =
-      deferPolicy === "medium-high"
-        ? verdict.level !== "low"
-        : deferPolicy === "high"
-          ? verdict.level === "high"
-          : false;
+      options?.abortSignal?.aborted !== true &&
+      (
+        deferPolicy === "medium-high"
+          ? verdict.level !== "low"
+          : deferPolicy === "high"
+            ? verdict.level === "high"
+            : false
+      );
 
     if (shouldDefer) {
       const deferredId = await queue.append({
@@ -1393,9 +1503,9 @@ export class PermissionManager {
         ...(input.evaluationContext ? { evaluationContext: input.evaluationContext } : {}),
         verdict,
       });
-      return { verdict, cacheReason: cacheResult.reason, deferredId };
+      return { verdict, outcome, cacheReason: cacheResult.reason, deferredId };
     }
-    return { verdict, cacheReason: cacheResult.reason };
+    return { verdict, outcome, cacheReason: cacheResult.reason };
   }
 
   // ─── Private ─────────────────────────────────────
@@ -1534,7 +1644,9 @@ export class PermissionManager {
           reviewer: { route: "headless" },
         };
       case "override":
-        // meta category — returns `allow` (the registry override sentinel).
+        // A valid host builtin meta category returns `allow` (the registry
+        // override sentinel). Forged external or incomplete builtin meta
+        // shapes were immutably denied before every user/mode rule above.
         // The per-invocation `decisionOverride="ask"` re-elevation is handled
         // by the post-computation guard at the bottom of `checkDetailed`, which
         // is layer-agnostic (covers layer-3 allow-rule and layer-5 alwaysAllowed

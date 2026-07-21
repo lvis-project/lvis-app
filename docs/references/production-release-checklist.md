@@ -8,15 +8,15 @@ below are the manual operator steps.
 
 Set the following environment variables before running the release script:
 
-| Variable | Purpose | Required |
-|----------|---------|----------|
-| `CSC_LINK` / `CSC_KEY_PASSWORD` | macOS code-signing cert (p12) | macOS builds |
-| `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | macOS notarization | macOS builds |
-| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows code-signing cert | Windows builds |
-| `GH_TOKEN` | GitHub Releases upload token (`repo` scope) | Publish |
-| `LVIS_PUBLISHER_PRIVATE_KEY_PATH` | Plugin manifest signing key (Ed25519 PEM) | Plugin signing |
-| `LVIS_SENTRY_DSN` | Forward crashes to Sentry (optional) | Optional |
-| `LVIS_RELEASE_VERSION` | Explicit version (otherwise patch-bump) | Optional |
+| Variable                                                     | Purpose                                     | Required       |
+| ------------------------------------------------------------ | ------------------------------------------- | -------------- |
+| `CSC_LINK` / `CSC_KEY_PASSWORD`                              | macOS code-signing cert (p12)               | macOS builds   |
+| `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | macOS notarization                          | macOS builds   |
+| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`                      | Windows code-signing cert                   | Windows builds |
+| `GH_TOKEN`                                                   | GitHub Releases upload token (`repo` scope) | Publish        |
+| `LVIS_PUBLISHER_PRIVATE_KEY_PATH`                            | Plugin manifest signing key (Ed25519 PEM)   | Plugin signing |
+| `LVIS_SENTRY_DSN`                                            | Forward crashes to Sentry (optional)        | Optional       |
+| `LVIS_RELEASE_VERSION`                                       | Explicit version (otherwise patch-bump)     | Optional       |
 
 None of these are checked in. They come from the release operator.
 
@@ -63,13 +63,13 @@ compression.
 
 Measured on 2026-05-15 for `lvis-app` 0.1.3 on macOS arm64:
 
-| Command | Time | Artifact size |
-| --- | ---: | ---: |
-| `bun run build` | 2.61s | n/a |
-| `build-installers --mac --skip-build --skip-code-sign --dir` | 8.67s | unpacked only |
-| same with `-c.npmRebuild=false` | 6.12s | unpacked only |
-| normal `--mac --skip-build --skip-code-sign` | 45.73s | DMG 106M / ZIP 103M |
-| fast preview equivalent | 16.99s | DMG 227M / ZIP 226M |
+| Command                                                      |   Time |       Artifact size |
+| ------------------------------------------------------------ | -----: | ------------------: |
+| `bun run build`                                              |  2.61s |                 n/a |
+| `build-installers --mac --skip-build --skip-code-sign --dir` |  8.67s |       unpacked only |
+| same with `-c.npmRebuild=false`                              |  6.12s |       unpacked only |
+| normal `--mac --skip-build --skip-code-sign`                 | 45.73s | DMG 106M / ZIP 103M |
+| fast preview equivalent                                      | 16.99s | DMG 227M / ZIP 226M |
 
 Use `--skip-native-rebuild` only immediately after `bun install` or another
 known-good native dependency rebuild. It avoids the duplicate
@@ -83,12 +83,97 @@ on the target OS instead of relying on cross-platform packaging. The publish
 job also attaches `LVIS-latest-*` stable alias assets for the website download
 links; do not publish a release that only has versioned `LVIS-X.Y.Z-*` assets.
 
+## Explicit Unsigned Public Release Exception
+
+Signing and notarization remain the desired future production path, but the
+current public tag workflow intentionally supports only an explicit,
+operator-approved unsigned release while developer registration or signing
+identities are unavailable. It is not a signed candidate and must never be
+represented as having satisfied the signed Windows evidence gates below.
+
+Before publishing an unsigned draft, the release operator must verify all of
+the following:
+
+- the tagged `package.json#lvisRelease` is exactly `tagDistribution: public`
+  with `signing: unsigned`, and the profile check ran from the immutable event
+  SHA;
+- all installer and publisher checkouts report `HEAD == github.sha`;
+- an active `v*` tag ruleset restricts creation, updates, and deletions to
+  designated release operators, and the publisher's final annotated-tag
+  peeled-SHA check still equals `github.sha`;
+- the tag pipeline uses the secret-free `--skip-code-sign` profile; and
+- all three platform builds complete;
+- the draft has all versioned assets, every `LVIS-latest-*` alias, and update
+  metadata; and
+- the public release body prominently states that it is unsigned/not notarized,
+  calls out Windows SmartScreen/Unknown publisher and macOS Gatekeeper, directs
+  users to the official GitHub Release, and gives Linux checksum guidance.
+
+The generated unsigned body starts with two `PENDING` operator records. Before
+manually publishing, replace both with the actual approval and deferred
+signed-candidate evidence reference; the operator must treat an unfilled record
+as a publication blocker. A future signed release must add its own reviewed
+workflow and positive platform signature/notarization evidence before it can
+make signed claims.
+
 ## Windows Installer Path
 
 The Windows release path is a full offline NSIS installer. Keep `oneClick`,
-per-user install, differential package metadata, and `runAfterFinish` enabled.
-The installer must use the LVIS-branded `build/installerIcon.ico` and
-`build/installerHeaderIcon.ico` assets generated by `bun run build:icons`.
+the `perMachine: true` Program Files install, differential package metadata,
+and `runAfterFinish` enabled. The installer must use the LVIS-branded
+`build/installerIcon.ico` and `build/installerHeaderIcon.ico` assets
+generated by `bun run build:icons`.
+
+The Windows **Build Installers** job is the automated release gate for the
+silent installer path. Its NSIS smoke must prove all of the following before a
+Windows tag is published:
+
+- setup and direct uninstaller both use `/allusers`;
+- the single Apps & Features entry is discovered from HKLM's 32/64-bit views,
+  and Program Files, machine shortcuts, and the `lvis://` handler agree on the
+  installed executable;
+- HKCU registration and `%LOCALAPPDATA%\\Programs\\lvis-app` install residue
+  are absent;
+- both genuine `/KEEP_APP_DATA` and DELETE passes first prove the ASRT sandbox
+  user/group/credential, WFP filters, packaged-backend group RX, and a real
+  holder ACL, then prove uninstall removed all machine/ASRT state while only
+  userData preservation differs.
+
+Do not treat a missing/non-readable ASRT precondition as a successful skip.
+Move that candidate to a documented manual release gate instead. Hosted CI
+cannot prove interactive UAC and cross-account desktop boundaries.
+
+The following manual Windows gates are release-blocking for a signed release.
+For an explicit unsigned exception, record them as deferred in the public
+release body; any later signed release must complete them before it can claim
+signed Windows deployment evidence. Any failure then blocks the signed release
+and requires a SID/profile handoff fix before the full gate is rerun.
+
+- [ ] On a clean VM, record the signed candidate SHA, Windows build, evidence
+      URL, and `whoami /user` SID for both the initiating standard user and the
+      distinct administrator. Attach a recording and installer/ASRT logs proving
+      exactly one installer UAC consent and zero nested `srt-win` UAC prompts.
+- [ ] Install-to-launch ownership: after the distinct administrator approves
+      elevation and install, prove the launched LVIS process owner and every
+      resolved app/userData path belong to the initiating standard user. Prove
+      the administrator profile gained no LVIS data, and record both account
+      SIDs, process owner, resolved paths, and evidence URL.
+- [ ] Genuine KEEP: seed fixed-content sentinels in the initiating user's
+      resolved `%USERPROFILE%\.lvis`, Roaming `LVIS`/`lvis-app`, and Local
+      `LVIS`/`lvis-app` paths; approve with the distinct administrator and run
+      genuine `/KEEP_APP_DATA` uninstall. Record the resolved paths and prove
+      every original-user sentinel/profile is unchanged while the administrator
+      profile's LVIS paths remain absent or byte-for-byte unchanged.
+- [ ] Genuine DELETE → guided reinstall: start from a fresh signed-candidate
+      install after the KEEP pass, seed the same original-user sentinels, approve
+      with the distinct administrator, and run genuine DELETE uninstall. First
+      prove every original-user LVIS sentinel/profile path is removed. Then
+      explicitly guide the initiating standard user to reinstall the signed
+      candidate and complete first launch as that original user. Record both
+      SIDs, candidate SHA, Windows build, resolved paths, and evidence URL; prove
+      the launched process owner and every recreated app/userData path belong to
+      the original user while the distinct administrator profile's LVIS paths remain absent
+      or byte-for-byte unchanged.
 
 Do not add an online web bootstrapper to the NSIS path unless the product
 explicitly changes distribution strategy. Runtime assets such as the compressed
@@ -128,14 +213,10 @@ Perform on each platform artifact before uploading:
 - Plugin native deps (for example `better-sqlite3`): rerun electron-rebuild; `bun install` handles this in postinstall.
 - Python runtime: pin shared envs by host-managed Python plugin lockfile content plus OS/arch. For every release, review the active plugin lockfile diff and packaged asset boundary (include uv, exclude venv/wheelhouse/model cache).
 
-## Publish (Later — NOT part of scaffolding)
+## Direct local publishing (not the public release path)
 
-When users have completed cert/DSN setup, publish with:
-
-```bash
-npx electron-builder --publish=always
-```
-
-This pushes artifacts + `latest.yml` to GitHub Releases, where electron-updater
-will discover them via the default GitHub provider declared in
-`package.json → build.publish`.
+Do not use `npx electron-builder --publish=always` for a public release. It
+bypasses the three-OS workflow, SHA pinning, atomic asset assembly, unsigned
+operator record, and draft verification. Public releases use the tag-triggered
+**Build Installers** workflow and are published only after its draft has passed
+the checks above.

@@ -127,7 +127,7 @@ Post-merge checks observed on July 7, 2026:
 Local verification on the merged mainlines:
 
 - App targeted tests:
-  `bunx vitest run src/shared/__tests__/llm-vendor-defaults.test.ts src/shared/__tests__/marketplace-package-assets.test.ts src/ui/renderer/__tests__/marketplace-asset-registry.test.ts src/ui/renderer/tabs/__tests__/MarketplaceTab.test.tsx src/ui/renderer/theme/bundles/__tests__/bundles.test.ts src/i18n/__tests__/i18n.test.ts`
+  `bun run test:vitest -- run src/shared/__tests__/llm-vendor-defaults.test.ts src/shared/__tests__/marketplace-package-assets.test.ts src/ui/renderer/__tests__/marketplace-asset-registry.test.ts src/ui/renderer/tabs/__tests__/MarketplaceTab.test.tsx src/ui/renderer/theme/bundles/__tests__/bundles.test.ts src/i18n/__tests__/i18n.test.ts`
   passed: 6 files, 162 tests.
 - Marketplace targeted tests:
   `uv run pytest --no-cov tests/test_catalog.py tests/test_publisher.py tests/test_bootstrap.py tests/test_migrations.py`

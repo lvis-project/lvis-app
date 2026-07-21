@@ -5,6 +5,7 @@ import {
   A2ATaskState,
   canTransitionA2ATaskState,
   isA2AProjectedTaskState,
+  isA2ATaskState,
   isA2ATerminalTaskState,
   type A2AMessage,
   type A2APart,
@@ -48,6 +49,8 @@ const PART_KEYS = new Set([
   "mediaType",
 ]);
 const TASK_KEYS = new Set(["id", "contextId", "status", "history"]);
+const REMOTE_TASK_KEYS = new Set(["id", "contextId", "status", "artifacts", "history", "metadata"]);
+const ARTIFACT_KEYS = new Set(["artifactId", "name", "description", "parts", "metadata", "extensions"]);
 const RECORD_KEYS = new Set([
   "handlerId",
   "childSessionId",
@@ -181,6 +184,107 @@ function normalizeStoredMessage(value: unknown): A2AMessage | null {
   }
 }
 
+/**
+ * Canonical, DLP-masked validator for an untrusted remote Task result. This is
+ * intentionally colocated with the local task-store validator so both stores
+ * share the same message/part/timestamp limits and lifecycle state SOT. The
+ * local sub-agent projection remains stricter and still excludes AUTH_REQUIRED.
+ */
+export function canonicalizeA2ARemoteTask(
+  value: unknown,
+  maxHistoryMessages = GUIDE_MAX_ENTRIES,
+): A2ATask | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, REMOTE_TASK_KEYS)) return null;
+  if (!isSafeStructuralId(value.id) || !isSafeStructuralId(value.contextId)) return null;
+  if (!isRecord(value.status) || !hasOnlyKeys(value.status, new Set(["state", "message", "timestamp"]))) return null;
+  if (!isA2ATaskState(value.status.state) || value.status.state === A2ATaskState.UNSPECIFIED) return null;
+  if (value.status.timestamp !== undefined && !isA2ARfc3339Timestamp(value.status.timestamp)) return null;
+  const statusMessage = value.status.message === undefined
+    ? undefined
+    : normalizeStoredMessage(value.status.message);
+  if (value.status.message !== undefined && !statusMessage) return null;
+  if (value.status.state === A2ATaskState.AUTH_REQUIRED && !statusMessage) return null;
+  if (statusMessage && (statusMessage.taskId !== value.id || statusMessage.contextId !== value.contextId)) return null;
+
+  if (value.history !== undefined && (!Array.isArray(value.history) || value.history.length > maxHistoryMessages)) return null;
+  const history: A2AMessage[] = [];
+  for (const entry of value.history ?? []) {
+    const message = normalizeStoredMessage(entry);
+    if (!message || message.taskId !== value.id || message.contextId !== value.contextId) return null;
+    history.push(message);
+  }
+  if (new Set(history.map((message) => message.messageId)).size !== history.length) return null;
+
+  if (value.artifacts !== undefined && (!Array.isArray(value.artifacts) || value.artifacts.length > GUIDE_MAX_ENTRIES)) return null;
+  const artifacts = [];
+  for (const entry of value.artifacts ?? []) {
+    if (!isRecord(entry) || !hasOnlyKeys(entry, ARTIFACT_KEYS) || !isSafeStructuralId(entry.artifactId)) return null;
+    if ((entry.name !== undefined && (typeof entry.name !== "string" || entry.name.length > GUIDE_MAX_CHARS))
+      || (entry.description !== undefined && (typeof entry.description !== "string" || entry.description.length > GUIDE_MAX_CHARS))
+      || !Array.isArray(entry.parts) || entry.parts.length === 0 || entry.parts.length > GUIDE_MAX_ENTRIES
+      || !entry.parts.every(isValidPart)
+      || (entry.extensions !== undefined && (!isStringArray(entry.extensions) || entry.extensions.length > GUIDE_MAX_ENTRIES))
+      || (entry.metadata !== undefined && (!isRecord(entry.metadata) || !isJsonLike(entry.metadata)))) return null;
+    let masked;
+    try {
+      masked = maskA2AMessage({
+        messageId: entry.artifactId,
+        taskId: value.id,
+        contextId: value.contextId,
+        role: A2ARole.AGENT,
+        parts: entry.parts,
+        ...(entry.metadata ? { metadata: entry.metadata } : {}),
+      } as unknown as A2AMessage).message;
+    } catch {
+      return null;
+    }
+    artifacts.push({
+      artifactId: entry.artifactId,
+      ...(entry.name !== undefined ? { name: entry.name } : {}),
+      ...(entry.description !== undefined ? { description: entry.description } : {}),
+      parts: masked.parts,
+      ...(masked.metadata ? { metadata: masked.metadata } : {}),
+      ...(entry.extensions ? { extensions: [...entry.extensions] } : {}),
+    });
+  }
+  if (new Set(artifacts.map((artifact) => artifact.artifactId)).size !== artifacts.length) return null;
+
+  let metadata;
+  if (value.metadata !== undefined) {
+    if (!isRecord(value.metadata) || !isJsonLike(value.metadata)) return null;
+    try {
+      metadata = maskA2AMessage({
+        messageId: value.id,
+        taskId: value.id,
+        contextId: value.contextId,
+        role: A2ARole.AGENT,
+        parts: [{ text: "remote-task-metadata" }],
+        metadata: value.metadata,
+      } as unknown as A2AMessage).message.metadata;
+    } catch {
+      return null;
+    }
+  }
+  const task: A2ATask = {
+    id: value.id,
+    contextId: value.contextId,
+    status: {
+      state: value.status.state,
+      ...(value.status.timestamp ? { timestamp: value.status.timestamp } : {}),
+      ...(statusMessage ? { message: statusMessage } : {}),
+    },
+    ...(artifacts.length > 0 ? { artifacts } : {}),
+    ...(history.length > 0 ? { history } : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+  try {
+    if (JSON.stringify(task).length > GUIDE_MAX_CHARS * 4) return null;
+  } catch {
+    return null;
+  }
+  return task;
+}
+
 function normalizeTask(
   value: unknown,
   childSessionId: string,
@@ -305,14 +409,18 @@ function hasExactInitialStoredMessage(record: A2ATaskRecord, message: A2AMessage
 
 export interface A2ATaskStoreAuditEvent {
   type: "a2a-task-store-drop";
-  reason: "invalid-record" | "duplicate-record";
+  reason: "invalid-record" | "duplicate-record" | "inactive-handler";
   count: number;
 }
 
 export interface CreateA2ATaskStoreOptions {
   namespace: Pick<FeatureNamespaceHandle, "readJson" | "writeJson">;
   maxTasks: number;
+  /** Optional fair-share ceiling used when multiple handlers share one store. */
+  maxTasksPerHandler?: number;
   maxHistoryMessages: number;
+  /** Optional immutable boot snapshot; persisted records for removed handlers are ignored. */
+  activeHandlerIds?: ReadonlySet<string>;
   fileName?: string;
   now?: () => string;
   audit?: (event: A2ATaskStoreAuditEvent) => void;
@@ -403,6 +511,12 @@ export class A2ATaskStore {
     if (!Number.isInteger(options.maxTasks) || options.maxTasks < 1) {
       throw new Error("A2A task store maxTasks must be a positive integer");
     }
+    if (
+      options.maxTasksPerHandler !== undefined
+      && (!Number.isInteger(options.maxTasksPerHandler) || options.maxTasksPerHandler < 1)
+    ) {
+      throw new Error("A2A task store maxTasksPerHandler must be a positive integer");
+    }
     if (!Number.isInteger(options.maxHistoryMessages) || options.maxHistoryMessages < 1) {
       throw new Error("A2A task store maxHistoryMessages must be a positive integer");
     }
@@ -430,15 +544,27 @@ export class A2ATaskStore {
       && Array.isArray(raw.records)
       ? raw.records
       : [];
-    const candidates = values
+    const normalized = values
       .map((value) => normalizeRecord(value, this.options.maxHistoryMessages))
       .filter((value): value is A2ATaskRecord => value !== null);
-    const invalidCount = values.length - candidates.length;
+    const invalidCount = values.length - normalized.length;
     if (invalidCount > 0) {
       this.options.audit?.({
         type: "a2a-task-store-drop",
         reason: "invalid-record",
         count: invalidCount,
+      });
+    }
+
+    const candidates = this.options.activeHandlerIds
+      ? normalized.filter((record) => this.options.activeHandlerIds!.has(record.handlerId))
+      : normalized;
+    const inactiveCount = normalized.length - candidates.length;
+    if (inactiveCount > 0) {
+      this.options.audit?.({
+        type: "a2a-task-store-drop",
+        reason: "inactive-handler",
+        count: inactiveCount,
       });
     }
 
@@ -489,6 +615,14 @@ export class A2ATaskStore {
   private findMessageRecord(handlerId: string, messageId: string): A2ATaskRecord | undefined {
     return this.records.find((record) =>
       record.handlerId === handlerId && recordMessageIds(record).includes(messageId));
+  }
+
+  private removalCountForAdmission(handlerId: string): number {
+    const totalOverflow = this.records.length - this.options.maxTasks + 1;
+    const perHandlerLimit = this.options.maxTasksPerHandler ?? this.options.maxTasks;
+    const handlerCount = this.records.filter((record) => record.handlerId === handlerId).length;
+    const handlerOverflow = handlerCount - perHandlerLimit + 1;
+    return Math.max(0, totalOverflow, handlerOverflow);
   }
 
   private inspectContinuationUnlocked(input: {
@@ -634,7 +768,7 @@ export class A2ATaskStore {
         return { ok: false, reason: "admission-busy" };
       }
 
-      const removeCount = this.records.length - this.options.maxTasks + 1;
+      const removeCount = this.removalCountForAdmission(input.handlerId);
       if (removeCount > 0) {
         const terminalCount = this.records.filter((record) =>
           record.handlerId === input.handlerId
@@ -740,7 +874,7 @@ export class A2ATaskStore {
         return { ok: true, created: false, record: cloneRecord(existing) };
       }
 
-      const removeCount = this.records.length - this.options.maxTasks + 1;
+      const removeCount = this.removalCountForAdmission(input.handlerId);
       let removable = new Set<string>();
       if (removeCount > 0) {
         const terminal = this.records

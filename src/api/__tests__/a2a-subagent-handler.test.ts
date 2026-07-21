@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   A2ARole,
   A2ATaskState,
@@ -14,8 +14,14 @@ import type {
   A2AWireHostBinding,
   SubAgentSpawnResult,
 } from "../../engine/subagent-runner.js";
+import { GUIDE_MAX_CHARS } from "../../engine/turn/guidance-limits.js";
+import { maskSensitiveData } from "../../shared/dlp.js";
+import { createInMemoryFeatureNamespace } from "../../__tests__/test-helpers.js";
 import {
+  A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS,
+  A2A_INPUT_REQUIRED_TTL_MS,
   A2ASubAgentHandler,
+  createA2AContextId,
   type A2AMutationAuthorizer,
   type A2ASubAgentLifecycleRunner,
 } from "../a2a-subagent-handler.js";
@@ -23,17 +29,8 @@ import { A2ATaskStore } from "../a2a-task-store.js";
 
 const HANDLER_ID = "profile-a";
 const TASK_ID = "sub-wire-task-1";
-
-function memoryNamespace() {
-  let value: unknown;
-  return {
-    readJson: async <T>(_name: string, fallback: T): Promise<T> =>
-      (value === undefined ? structuredClone(fallback) : structuredClone(value)) as T,
-    writeJson: async <T>(_name: string, next: T): Promise<void> => {
-      value = structuredClone(next);
-    },
-  };
-}
+const UUID_V4_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function clock() {
   let tick = 0;
@@ -128,13 +125,14 @@ function makeHarness(
     omitAuthorizeMutation?: boolean;
     maxTasks?: number;
     maxHistoryMessages?: number;
+    now?: () => string;
   } = {},
 ) {
   const store = new A2ATaskStore({
-    namespace: memoryNamespace(),
+    namespace: createInMemoryFeatureNamespace().handle,
     maxTasks: options.maxTasks ?? 10,
     maxHistoryMessages: options.maxHistoryMessages ?? 16,
-    now: clock(),
+    now: options.now ?? clock(),
   });
   const audit = vi.fn();
   const runner = {
@@ -171,6 +169,10 @@ function makeHarness(
   const handler = new A2ASubAgentHandler(handlerOptions);
   return { store, runner, audit, authorizeMutation, handler };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function taskFrom(result: unknown): A2ATask {
   return (result as { task: A2ATask }).task;
@@ -231,6 +233,31 @@ async function seedInputRequiredTask(
 }
 
 describe("A2ASubAgentHandler", () => {
+  it("generates unique DLP-safe UUID-compatible default context and status ids", async () => {
+    const ids = Array.from({ length: 64 }, () => createA2AContextId());
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) {
+      expect(id).toMatch(UUID_V4_PATTERN);
+      expect(maskSensitiveData(id).detections).toEqual([]);
+    }
+
+    const { store, runner, audit, authorizeMutation } = makeHarness();
+    const handler = new A2ASubAgentHandler({
+      id: HANDLER_ID,
+      card: card(),
+      binding: binding(HANDLER_ID),
+      runner: runner as unknown as A2ASubAgentLifecycleRunner,
+      store,
+      authorizeMutation,
+      audit,
+    });
+    const task = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("default-generated-status"),
+    }));
+    expect(task.status.message?.messageId).toMatch(UUID_V4_PATTERN);
+    expect(maskSensitiveData(task.status.message?.messageId ?? "").detections).toEqual([]);
+  });
+
   it("fails closed before the initial runner/store mutation when consent is denied", async () => {
     const authorizeMutation = vi.fn(async () => false);
     const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
@@ -416,6 +443,40 @@ describe("A2ASubAgentHandler", () => {
       { resumeId: TASK_ID, messageText: "continue" },
       { handlerId: HANDLER_ID },
     );
+  });
+
+  it("masks and bounds a suspension prompt without copying it into metadata", async () => {
+    const { handler, runner } = makeHarness();
+    const rawToken = "sk-abcdefgh12345678";
+    const rawPrompt = `Continue ${rawToken} ${"\u0000".repeat(GUIDE_MAX_CHARS)}`;
+    runner.spawnFromA2AWire.mockImplementation(async (_request, _binding, callbacks) => {
+      await callbacks.onDurablyLinked({ childSessionId: TASK_ID });
+      const result = waitingResult();
+      result.suspension = { ...result.suspension!, prompt: rawPrompt };
+      return result;
+    });
+
+    const first = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("wire-sensitive-suspension"),
+    }));
+    const statusMessage = first.status.message!;
+    const text = (statusMessage.parts[0] as { text: string }).text;
+    const suspension = (statusMessage.metadata as {
+      suspension: { reason: string; resumeId: string; prompt?: string };
+    }).suspension;
+
+    expect(text).not.toContain(rawToken);
+    expect(text).toContain("[REDACTED:TOKEN]");
+    expect(JSON.stringify(statusMessage).length).toBeLessThanOrEqual(GUIDE_MAX_CHARS);
+    expect(suspension).toEqual({ reason: "budget", resumeId: TASK_ID });
+    expect(JSON.stringify(first)).not.toContain(rawToken);
+
+    const replay = await handler.handle(
+      A2AJsonRpcMethod.GET_TASK,
+      { id: TASK_ID },
+    ) as A2ATask;
+    expect(replay.status.message).toEqual(statusMessage);
+    expect(JSON.stringify(replay)).not.toContain(rawToken);
   });
 
   it("reconciles detached cancellation before accepting a continuation", async () => {
@@ -1199,6 +1260,26 @@ describe("A2ASubAgentHandler", () => {
     expect(runner.cancelA2AWireRun).toHaveBeenCalledOnce();
   });
 
+  it("cancels a full-history wait through the message-less terminal fallback", async () => {
+    const taskId = "sub-full-history-cancel";
+    const { handler, runner, store } = makeHarness(HANDLER_ID, {
+      maxHistoryMessages: 2,
+    });
+    await seedInputRequiredTask(
+      store,
+      taskId,
+      "context-full-history-cancel",
+      "message-full-history-cancel",
+    );
+
+    const canceled = await handler.handle(A2AJsonRpcMethod.CANCEL_TASK, {
+      id: taskId,
+    }) as A2ATask;
+    expect(canceled.status.state).toBe(A2ATaskState.CANCELED);
+    expect(canceled.history).toHaveLength(2);
+    expect(runner.cancelA2AWireRun).toHaveBeenCalledOnce();
+  });
+
   it("revalidates cancel after approval before the runner mutation", async () => {
     const approval = deferred<boolean>();
     const authorizeMutation = vi.fn(async () => await approval.promise);
@@ -1686,5 +1767,264 @@ describe("A2ASubAgentHandler", () => {
     await expect(store.get(HANDLER_ID, TASK_ID)).resolves.toMatchObject({
       task: { status: { state: A2ATaskState.COMPLETED } },
     });
+  });
+
+  it.each(["budget", "question"] as const)(
+    "expires a full-history %s suspension at exactly seven days",
+    async (reason) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
+      const taskId = `sub-expiry-${reason}`;
+      const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
+        maxHistoryMessages: 2,
+        now: () => new Date(Date.now()).toISOString(),
+      });
+      await seedWorkingTask(
+        store,
+        HANDLER_ID,
+        taskId,
+        `context-expiry-${reason}`,
+        `message-expiry-${reason}-start`,
+      );
+      await store.transition({
+        handlerId: HANDLER_ID,
+        taskId,
+        state: A2ATaskState.INPUT_REQUIRED,
+        message: userMessage(`message-expiry-${reason}-waiting`, {
+          role: A2ARole.AGENT,
+          parts: [{ text: "continue" }],
+          metadata: {
+            taskState: A2ATaskState.INPUT_REQUIRED,
+            suspension: { reason, resumeId: taskId },
+          },
+        }),
+      });
+
+      await handler.startInputRequiredExpiry();
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(A2A_INPUT_REQUIRED_TTL_MS - 1);
+      expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runner.cancelA2AWireRun).toHaveBeenCalledTimes(1);
+      await expect(store.get(HANDLER_ID, taskId)).resolves.toMatchObject({
+        task: {
+          status: { state: A2ATaskState.CANCELED },
+          history: [{}, {}],
+        },
+      });
+      expect(audit).toHaveBeenCalledWith({
+        type: "a2a-task-lifecycle",
+        outcome: "canceled",
+        reason: "task-expired",
+        handlerId: HANDLER_ID,
+        taskId,
+      });
+      await handler.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("resets expiry only after a new authoritative INPUT_REQUIRED episode", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
+    const taskId = "sub-expiry-reset";
+    const contextId = "context-expiry-reset";
+    const { handler, runner, store } = makeHarness(HANDLER_ID, {
+      now: () => new Date(Date.now()).toISOString(),
+    });
+    await seedInputRequiredTask(
+      store,
+      taskId,
+      contextId,
+      "message-expiry-reset",
+    );
+    await handler.startInputRequiredExpiry();
+
+    await vi.advanceTimersByTimeAsync(6 * 24 * 60 * 60 * 1_000);
+    runner.resumeFromA2AWire.mockResolvedValueOnce(waitingResult(taskId));
+    const resumed = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("message-expiry-reset-resume", {
+        taskId,
+        contextId,
+      }),
+    }));
+    expect(resumed.status.state).toBe(A2ATaskState.INPUT_REQUIRED);
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+    expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(6 * 24 * 60 * 60 * 1_000);
+    expect(runner.cancelA2AWireRun).toHaveBeenCalledTimes(1);
+    await expect(store.get(HANDLER_ID, taskId)).resolves.toMatchObject({
+      task: { status: { state: A2ATaskState.CANCELED } },
+    });
+    await handler.dispose();
+  });
+
+  it("reconciles nonterminal restart records before applying expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-07T00:00:00.000Z"));
+    const taskId = "sub-expiry-restart";
+    const { handler, runner, store } = makeHarness(HANDLER_ID, {
+      now: () => new Date(Date.now()).toISOString(),
+    });
+    await seedInputRequiredTask(
+      store,
+      taskId,
+      "context-expiry-restart",
+      "message-expiry-restart",
+    );
+    vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
+    runner.getA2AWireRunSnapshot.mockReturnValue({
+      childSessionId: taskId,
+      title: "wire profile",
+      taskState: A2ATaskState.COMPLETED,
+      summary: "restart winner",
+    });
+
+    await handler.startInputRequiredExpiry();
+    await expect(store.get(HANDLER_ID, taskId)).resolves.toMatchObject({
+      task: { status: { state: A2ATaskState.COMPLETED } },
+    });
+    expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    await handler.dispose();
+  });
+
+  it("preserves an expired wait and retries after a runner cancellation failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
+    const taskId = "sub-expiry-retry";
+    const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
+      now: () => new Date(Date.now()).toISOString(),
+    });
+    await seedInputRequiredTask(
+      store,
+      taskId,
+      "context-expiry-retry",
+      "message-expiry-retry",
+    );
+    runner.cancelA2AWireRun
+      .mockResolvedValueOnce({ ok: false, reason: "storage-failed" })
+      .mockResolvedValueOnce({
+        ok: true,
+        run: {
+          childSessionId: taskId,
+          title: "wire profile",
+          taskState: A2ATaskState.CANCELED,
+        },
+      });
+    await handler.startInputRequiredExpiry();
+
+    await vi.advanceTimersByTimeAsync(A2A_INPUT_REQUIRED_TTL_MS);
+    expect(runner.cancelA2AWireRun).toHaveBeenCalledTimes(1);
+    await expect(store.get(HANDLER_ID, taskId)).resolves.toMatchObject({
+      task: { status: { state: A2ATaskState.INPUT_REQUIRED } },
+    });
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "dropped",
+      reason: "storage-failed",
+      taskId,
+    }));
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
+      message: userMessage("message-expiry-unrelated-transition"),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runner.cancelA2AWireRun).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(A2A_INPUT_REQUIRED_EXPIRY_RETRY_MS - 1_001);
+    expect(runner.cancelA2AWireRun).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(runner.cancelA2AWireRun).toHaveBeenCalledTimes(2);
+    await expect(store.get(HANDLER_ID, taskId)).resolves.toMatchObject({
+      task: { status: { state: A2ATaskState.CANCELED } },
+    });
+    await handler.dispose();
+  });
+
+  it("keeps one nearest-deadline timer and clears it on dispose", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
+    const { handler, runner, store } = makeHarness(HANDLER_ID, {
+      now: () => new Date(Date.now()).toISOString(),
+    });
+    await seedInputRequiredTask(
+      store,
+      "sub-expiry-nearest-a",
+      "context-expiry-nearest-a",
+      "message-expiry-nearest-a",
+    );
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+    await seedInputRequiredTask(
+      store,
+      "sub-expiry-nearest-b",
+      "context-expiry-nearest-b",
+      "message-expiry-nearest-b",
+    );
+
+    await handler.startInputRequiredExpiry();
+    expect(vi.getTimerCount()).toBe(1);
+    await handler.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(A2A_INPUT_REQUIRED_TTL_MS);
+    expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
+  });
+
+  it("makes concurrent disposal callers await an in-flight expiry sweep", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
+    const taskId = "sub-expiry-dispose";
+    const { handler, runner, store } = makeHarness(HANDLER_ID, {
+      now: () => new Date(Date.now()).toISOString(),
+    });
+    await seedInputRequiredTask(
+      store,
+      taskId,
+      "context-expiry-dispose",
+      "message-expiry-dispose",
+    );
+    const cancellation = deferred<{
+      ok: true;
+      run: {
+        childSessionId: string;
+        title: string;
+        taskState: A2ATaskState.CANCELED;
+      };
+    }>();
+    let signalCancellationStarted!: () => void;
+    const cancellationStarted = new Promise<void>((resolve) => {
+      signalCancellationStarted = resolve;
+    });
+    runner.cancelA2AWireRun.mockImplementationOnce(async () => {
+      signalCancellationStarted();
+      return await cancellation.promise;
+    });
+    await handler.startInputRequiredExpiry();
+
+    vi.advanceTimersByTime(A2A_INPUT_REQUIRED_TTL_MS);
+    await cancellationStarted;
+    expect(runner.cancelA2AWireRun).toHaveBeenCalledOnce();
+
+    let secondSettled = false;
+    const first = handler.dispose();
+    const second = handler.dispose().then(() => {
+      secondSettled = true;
+    });
+    await Promise.resolve();
+    expect(secondSettled).toBe(false);
+    cancellation.resolve({
+      ok: true,
+      run: {
+        childSessionId: taskId,
+        title: "wire profile",
+        taskState: A2ATaskState.CANCELED,
+      },
+    });
+    await Promise.all([first, second]);
+    expect(secondSettled).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

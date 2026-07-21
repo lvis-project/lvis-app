@@ -27,6 +27,7 @@ import {
   stopLocalApiServer,
   buildExternalMutationApprover,
   LOCAL_API_INFO_FILE,
+  type A2ARouterRuntime,
   type LocalApiServerInfoFile,
 } from "../local-api-server.js";
 import { makeDeepProxy } from "../../testing/deep-proxy.js";
@@ -114,6 +115,7 @@ const TEST_AGENT_CARD_PATH = "/a2a/test/.well-known/agent-card.json";
 
 function stubA2ARouter(): A2AHttpRouter {
   return {
+    handlerIds: ["test"],
     isPublicAgentCardRequest: (path, method) =>
       path === TEST_AGENT_CARD_PATH && method === "GET",
     tryHandle: async (_req, res, path, method) => {
@@ -240,9 +242,10 @@ describe("local-api-server", () => {
 
     it("invalidates a pending start during shutdown without resurrecting a listener", async () => {
       process.env.LVIS_A2A = "1";
-      let resolveRouter: ((router: A2AHttpRouter) => void) | undefined;
-      const factory = vi.fn(() => new Promise<A2AHttpRouter>((resolve) => {
-        resolveRouter = resolve;
+      let resolveRuntime: ((runtime: A2ARouterRuntime) => void) | undefined;
+      const dispose = vi.fn(async () => {});
+      const factory = vi.fn(() => new Promise<A2ARouterRuntime>((resolve) => {
+        resolveRuntime = resolve;
       }));
       const start = maybeStartLocalApiServer({
         services: makeServices({}),
@@ -258,8 +261,12 @@ describe("local-api-server", () => {
 
       // Release the detached factory after shutdown; its stale generation must
       // not continue into bind/discovery work.
-      resolveRouter!(stubA2ARouter());
-      await Promise.resolve();
+      resolveRuntime!({
+        router: stubA2ARouter(),
+        discovery: { protocolVersion: "1.0", agentCardPaths: [TEST_AGENT_CARD_PATH] },
+        dispose,
+      });
+      await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
     });
 
     it("starts A2A-only on the shared listener and hides /v1 before auth", async () => {
@@ -270,6 +277,10 @@ describe("local-api-server", () => {
         ...START_ARGS,
       });
       expect(result).not.toBeNull();
+      expect(readInfo(home).a2a).toEqual({
+        protocolVersion: "1.0",
+        agentCardPaths: [TEST_AGENT_CARD_PATH],
+      });
 
       const localResponse = await fetch(`http://127.0.0.1:${result!.port}/v1/health`);
       expect(localResponse.status).toBe(404);
@@ -280,6 +291,24 @@ describe("local-api-server", () => {
       );
       expect(cardResponse.status).toBe(200);
       expect(await cardResponse.json()).toEqual({ name: "Test A2A handler" });
+    });
+
+    it("disposes one active A2A runtime exactly once across repeated stop calls", async () => {
+      process.env.LVIS_A2A = "1";
+      const dispose = vi.fn(async () => {});
+      await maybeStartLocalApiServer({
+        services: makeServices({}),
+        createA2ARouter: () => ({
+          router: stubA2ARouter(),
+          discovery: { protocolVersion: "1.0", agentCardPaths: [TEST_AGENT_CARD_PATH] },
+          dispose,
+        }),
+        ...START_ARGS,
+      });
+
+      await stopLocalApiServer();
+      await stopLocalApiServer();
+      expect(dispose).toHaveBeenCalledOnce();
     });
 
     it("starts both route families on one port", async () => {
@@ -299,6 +328,51 @@ describe("local-api-server", () => {
       expect(health.status).toBe(200);
       expect(card.status).toBe(200);
       expect(info.port).toBe(result!.port);
+      expect(info.a2a).toEqual({
+        protocolVersion: "1.0",
+        agentCardPaths: [TEST_AGENT_CARD_PATH],
+      });
+    });
+
+    it("shares one single-flight consent coordinator across /v1 and A2A", async () => {
+      process.env.LVIS_LOCAL_API = "1";
+      process.env.LVIS_A2A = "1";
+      let releaseGate!: (value: { requestId: string; choice: "allow-once" }) => void;
+      const gateResult = new Promise<{ requestId: string; choice: "allow-once" }>((resolve) => {
+        releaseGate = resolve;
+      });
+      const requestAndWait = vi.fn(async () => await gateResult);
+      let approveA2A: Parameters<NonNullable<Parameters<typeof maybeStartLocalApiServer>[0]["createA2ARouter"]>>[0]["approveAgentAction"];
+      const result = await maybeStartLocalApiServer({
+        services: makeServices({}, "plan", { requestAndWait }),
+        createA2ARouter: ({ approveAgentAction }) => {
+          approveA2A = approveAgentAction;
+          return stubA2ARouter();
+        },
+        ...START_ARGS,
+      });
+      const info = readInfo(home);
+
+      const pendingA2A = approveA2A!({
+        toolName: "a2a-send-message",
+        args: { operation: "send-message", handlerId: "test" },
+        reason: "Allow an external A2A mutation?",
+        trustOrigin: "a2a-loopback",
+      });
+      await vi.waitFor(() => expect(requestAndWait).toHaveBeenCalledOnce());
+      const localMutation = await fetch(`http://127.0.0.1:${result!.port}/v1/dispatch`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${info.secret}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ channel: PERMISSIONS.setMode, args: { mode: "auto" } }),
+      });
+
+      expect(localMutation.status).toBe(403);
+      expect(requestAndWait).toHaveBeenCalledOnce();
+      releaseGate({ requestId: "shared-consent", choice: "allow-once" });
+      await expect(pendingA2A).resolves.toMatchObject({ decisionId: "shared-consent" });
     });
 
     it("isolates A2A initialization failure while keeping /v1 available", async () => {
@@ -320,6 +394,7 @@ describe("local-api-server", () => {
         headers: { authorization: `Bearer ${info.secret}` },
       });
       expect(health.status).toBe(200);
+      expect(info.a2a).toBeUndefined();
       expect(emitted).toHaveBeenCalledWith(
         "[a2a] initialization failed; route family disabled for this boot",
       );
@@ -328,6 +403,26 @@ describe("local-api-server", () => {
         type: "warn",
         input: "a2a:loopback:initialization-failed",
       }));
+    });
+
+    it("rejects mismatched runtime discovery, disposes it, and keeps /v1 available", async () => {
+      process.env.LVIS_LOCAL_API = "1";
+      process.env.LVIS_A2A = "1";
+      const dispose = vi.fn(async () => {});
+      const result = await maybeStartLocalApiServer({
+        services: makeServices({}),
+        createA2ARouter: () => ({
+          router: stubA2ARouter(),
+          discovery: { protocolVersion: "1.0", agentCardPaths: ["/a2a/wrong/card"] },
+          dispose,
+        }),
+        ...START_ARGS,
+      });
+      const info = readInfo(home);
+
+      expect(result).not.toBeNull();
+      expect(info.a2a).toBeUndefined();
+      expect(dispose).toHaveBeenCalledOnce();
     });
 
     it("retains no empty listener and does not retry when A2A has no handler", async () => {
@@ -361,6 +456,7 @@ describe("local-api-server", () => {
       expect(info.port).toBe(result!.port);
       expect(info.secret).toMatch(/^[0-9a-f]{64}$/);
       expect(info.pid).toBe(process.pid);
+      expect(info.a2a).toBeUndefined();
 
       // A real fetch to /v1/health with the persisted secret → 200.
       const res = await fetch(`http://127.0.0.1:${info.port}/v1/health`, {
