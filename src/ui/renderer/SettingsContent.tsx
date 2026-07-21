@@ -516,7 +516,6 @@ export function SettingsContent({
               setHasKey={s.setHasKey}
               keyInput={s.keyInput}
               setKeyInput={s.setKeyInput}
-              authMode={s.authMode}
               marketplaceProviderPresetId={s.marketplaceProviderPresetId}
               marketplaceProviderPresets={s.marketplaceProviderPresets}
               onSelectMarketplaceProviderPreset={s.selectMarketplaceProviderPreset}
@@ -543,9 +542,6 @@ export function SettingsContent({
               }}
               saving={s.saving}
               settingsLoaded={s.settingsLoaded}
-              onLogout={() => {
-                void api.auth.broadcastLogoutReset?.();
-              }}
             />
           </TabsContent>
 

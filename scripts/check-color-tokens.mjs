@@ -5,8 +5,8 @@
  * Sibling to check-opacity-tokens.mjs. Flags RAW color literals in the
  * renderer source tree:
  *   - `hsl(<digit> …)` — a hand-written HSL triple instead of a theme token
- *     (`hsl(var(--token))`). This is exactly how SpotlightTour / FileEditDiff /
- *     ScenarioShowcase accumulated a hardcoded dark palette that broke the
+ *     (`hsl(var(--token))`). This is exactly how older onboarding cards and
+ *     FileEditDiff accumulated a hardcoded dark palette that broke the
  *     light / high-contrast bundles.
  *   - quoted `white` / `black` in a color position (`color: "white"`).
  *   - `#rrggbb` / `#rgb` hex literals in a style value.
@@ -48,11 +48,6 @@ const PATTERNS = [
 // Files that still carry pre-existing, not-yet-migrated literals. Stored as
 // posix-relative paths from the repo root. Do NOT extend without a migration
 // reason — the point of the gate is that the list shrinks, never grows.
-//
-//   - onboarding/ScenarioShowcase.tsx: the inline scripted-demo transcript
-//     (tool-call chip, DEMO badge) still uses literal accents pending a
-//     follow-up migration; the brand gradient + user bubble are already on
-//     tokens.
 //   - theme/plugin-token-map.ts: `hsl(217, 91%, 60%)` appears only inside
 //     JSDoc examples documenting the host→plugin tint contract — genuinely
 //     theme-independent prose, not a render literal.
@@ -60,7 +55,6 @@ const PATTERNS = [
 //     are the fixed LVIS mark and must NOT shift with the theme bundle — a
 //     genuinely theme-independent case.
 const GRANDFATHERED_FILES = new Set([
-  "src/ui/renderer/onboarding/ScenarioShowcase.tsx",
   "src/ui/renderer/theme/plugin-token-map.ts",
   "src/ui/renderer/components/LvisLogo.tsx",
 ]);

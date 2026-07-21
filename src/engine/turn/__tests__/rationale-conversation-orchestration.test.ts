@@ -201,6 +201,33 @@ describe("executeRationaleAwareConversationBatch", () => {
     expect(JSON.stringify(outcome.results)).not.toContain("rationale-required");
   });
 
+  it("skips the user modal on the reviewer auto-approve terminal and resumes directly", async () => {
+    const coordinator = makeCoordinator({
+      handleRationaleRoundResult: vi.fn(async () => ({
+        status: "ready",
+        autoApproved: true,
+      })),
+    });
+    const fixture = invoke({ coordinator });
+    const outcome = await fixture.promise;
+
+    expect(outcome.results.map((item) => item.tool_use_id)).toEqual([
+      "prefix",
+      "trigger",
+      "sibling",
+    ]);
+    expect(outcome.results.map((item) => item.content)).toEqual([
+      "prefix-ok",
+      "trigger-ok",
+      RATIONALE_SIBLING_CANCELLED_RESULT,
+    ]);
+    // The reviewer already authorized; the user modal is never opened.
+    expect(coordinator.promptForApproval).not.toHaveBeenCalled();
+    // Execution still flows through the shared sealed-resume chokepoint.
+    expect(coordinator.createSealedResume).toHaveBeenCalledTimes(1);
+    expect(fixture.executor.executeSealedRationaleResume).toHaveBeenCalledTimes(1);
+  });
+
   it("uses one deny decision as the trigger terminal result and never resumes", async () => {
     const coordinator = makeCoordinator({
       promptForApproval: vi.fn(async () => ({ outcome: "denied" as const })),

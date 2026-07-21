@@ -23,8 +23,8 @@
  *   - Pre-seeding the composer (instead of dispatching a hidden tool
  *     call) keeps the user in control and matches LVIS's tool-approval
  *     contract. The user sees the prompt that will run.
- *   - The catalog is plugin-keyed so Memory Seed chip clicks and direct
- *     marketplace installs converge on the same proposal.
+ *   - The catalog is plugin-keyed so marketplace installs converge on the
+ *     same proposal.
  */
 
 import { t } from "../../../i18n/runtime.js";

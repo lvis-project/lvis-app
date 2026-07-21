@@ -60,28 +60,17 @@ describe("isLLMVendor", () => {
   });
 });
 
-describe("LLMVendorSettings — #893 top-level authMode promotion", () => {
-  it("no vendor's default block carries an `authMode` field (promoted top-level)", () => {
-    for (const v of LLM_VENDORS) {
-      expect("authMode" in LLM_VENDOR_DEFAULTS[v]).toBe(false);
-    }
-  });
-
-  it("freshVendorBlocks() returns default-visible mutable copies without authMode", () => {
+describe("LLMVendorSettings", () => {
+  it("freshVendorBlocks() returns default-visible mutable copies", () => {
     const blocks = freshVendorBlocks();
     expect(Object.keys(blocks).sort()).toEqual(
       [...DEFAULT_VISIBLE_LLM_VENDOR_IDS].sort(),
     );
-    for (const v of DEFAULT_VISIBLE_LLM_VENDOR_IDS) {
-      expect("authMode" in blocks[v]).toBe(false);
-    }
   });
 
   it("freshAllVendorBlocks() remains available for exhaustive fixtures", () => {
     const blocks = freshAllVendorBlocks();
-    for (const v of LLM_VENDORS) {
-      expect("authMode" in blocks[v]).toBe(false);
-    }
+    expect(Object.keys(blocks)).toHaveLength(LLM_VENDORS.length);
   });
 });
 

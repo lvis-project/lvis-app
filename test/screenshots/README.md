@@ -41,17 +41,6 @@ bunx playwright test --config test/screenshots/playwright.config.ts
 bunx playwright test --config test/screenshots/playwright.config.ts --grep chat-app-update
 ```
 
-### Environment variables
-
-| Var | Purpose | Default |
-|---|---|---|
-| `LVIS_DEMO_ACTIVATION_CODE` | Passed through to the Electron launch env for scenarios that need a demo-gated vendor login. **Never hardcode a real code here or in the harness** — export it in your shell before running if a scenario you add needs it. | unset |
-
-No scenario in the current matrix actually requires this (the matrix's
-capturable entries only need a seeded LLM API key, which the harness already
-seeds via `buildE2eSecrets()` — the same "plain:sk-e2e-\<vendor\>" placeholder
-key the E2E suite uses, not a real key).
-
 ## How keys map
 
 `test/screenshots/matrix.ts` exports `scenarios: Record<string, ScenarioEntry>`,

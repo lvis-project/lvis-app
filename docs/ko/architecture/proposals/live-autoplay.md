@@ -1,11 +1,11 @@
 # Live Auto-play — LVIS 가 스스로 1턴 시연
 
-> **Status**: SUPERSEDED — the scripted demo-autoplay layer was removed once the
-> onboarding login scenario became the canonical first-boot flow. The
-> `ScenarioShowcase` grid + login CTA remain; the inline scripted-turn replay,
-> the `demoAutoplayEnabled` flag, and the `engine/demo-autoplay/` engine were
-> deleted. This document is kept as a historical record of the original
-> proposal only.
+> **Status**: SUPERSEDED — the scripted demo-autoplay layer and the former
+> login/showcase onboarding flow were removed. The current first-boot help is
+> an optional `SpotlightTour`; it never blocks access to the workspace. The
+> inline scripted-turn replay, the `demoAutoplayEnabled` flag, and the
+> `engine/demo-autoplay/` engine are deleted. This document is a historical
+> record only.
 > **Status (original)**: proposal (minimal viable + architectural SOT)
 > **Owner**: Onboarding / Tutorial track
 > **Mockup SOT**: `/tmp/login-lvis/index.html` O-X1 (innovation onboarding cluster)
@@ -17,8 +17,8 @@
 > It describes a design that has since been REMOVED (the scripted-autoplay engine,
 > the `demoAutoplayEnabled` flag, and the inline replay no longer exist). Read it as a
 > record of the original intent, NOT as a description of current behaviour. The
-> canonical first-boot flow is now the onboarding login scenario (`ScenarioShowcase`
-> grid + login CTA).
+> current first-boot help is the optional `SpotlightTour`; it is not a login
+> or showcase flow and it leaves the workspace immediately usable.
 
 ## 1. Motivation
 
@@ -43,7 +43,6 @@
 │ Onboarding decision (App.tsx)                                   │
 │ - settings.features.demoAutoplayEnabled = true                  │
 │ - settings.features.onboardingCompleted = false                 │
-│ - LVIS_DEMO_VENDOR set                                          │
 │         ↓                                                       │
 │  ChatView mounts in `demo-autoplay` mode                        │
 └─────────────────────────────────────────────────────────────────┘
@@ -205,7 +204,7 @@ ChatView mode = "normal"
 | ID | Risk | Severity | Mitigation |
 |----|------|----------|------------|
 | R1 | 사용자가 fake 결과를 real 로 오인 | HIGH | REC indicator + "데모" 라벨 + "자동 승인 (데모)" 명시. fake sandbox 의 결과는 항상 "데모: " prefix 표시 (UI 레벨). |
-| R2 | demo-autoplay 가 production 에서 활성화 | HIGH | feature flag `features.demoAutoplayEnabled` default `false`. 추가 gate: `LVIS_DEMO_VENDOR` env 가 set + first-run 인 경우만 activate. packaged build 에서 env 없으면 dead code. |
+| R2 | demo-autoplay 가 production 에서 활성화 | HIGH | feature flag `features.demoAutoplayEnabled` default `false`와 명시적 사용자 opt-in을 함께 요구. |
 | R3 | scripted turn 의 한국어 텍스트 outdated → 시연 실패 | MEDIUM | `docs/onboarding/autoplay-scripts.json` SoT + 분기별 review checklist (architecture.md §X.Y 추가 예정). |
 | R4 | 후속 LLM 호출이 fake context 를 신뢰 | HIGH | scripted-turn 의 모든 entry 는 ChatView view-only (kind: `"demo-autoplay-*"`). `ConversationLoop.history` 에 commit 되지 않음 → LLM context 에 절대 들어가지 않음. 코드 invariant 로 enforce. |
 | R5 | fake sandbox 가 실제 IPC handler 와 이름 충돌 → tool 호출 우회 | LOW | FakeSandbox 는 main process 의 tool dispatcher 와 분리된 module. `tool-registry.ts` 에 등록되지 않음. 우회 경로 없음. |
@@ -221,12 +220,11 @@ ChatView mode = "normal"
 활성화 조건 (AND):
 
 1. `settings.features.demoAutoplayEnabled === true` *또는* `settings.features.onboardingCompleted !== true` (first-run)
-2. `process.env.LVIS_DEMO_VENDOR` 가 set
-3. user 가 명시적으로 disabled 하지 않음 (`features.demoAutoplayEnabled === false` 이면 우선)
+2. user 가 명시적으로 enabled 했음
 
-→ "first-run + LVIS_DEMO_VENDOR" 시 자동 시작; "explicit opt-in" 시도도 enable.
+→ first-run 자동 시작은 하지 않으며 explicit opt-in으로만 enable.
 
-**packaged production**: `LVIS_DEMO_VENDOR` 가 unset 이면 dead path. shipped binary 에서 autoplay 가 silent 하게 활성화되는 사고 방지.
+**packaged production**: shipped binary 에서 autoplay가 자동으로 활성화되지 않음.
 
 ---
 
@@ -285,7 +283,7 @@ grep -F '"[demo-autoplay]"' ~/.lvis/audit/*.jsonl
 
 - `src/engine/demo-autoplay/__tests__/scripted-turn-engine.test.ts` — vitest: start → tool call sequence → abort idempotency → memory invariant
 - `src/engine/demo-autoplay/__tests__/fake-sandbox.test.ts` — vitest: resolve known tool → unknown tool throws → no external surface touched
-- `test/e2e/ui/demo-autoplay.spec.ts` — playwright: first-run + LVIS_DEMO_VENDOR → autoplay starts → user types → REC banner disappears → demo entries cleared from view → normal chat resumes
+- `test/e2e/ui/demo-autoplay.spec.ts` — playwright: explicit opt-in → autoplay starts → user types → REC banner disappears → demo entries cleared from view → normal chat resumes
 
 ---
 

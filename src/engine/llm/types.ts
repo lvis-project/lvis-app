@@ -361,8 +361,8 @@ export interface ProviderConfig {
   /**
    * Optional fetch implementation for SDK-backed providers that need the
    * Electron main-process network stack. Production boot currently wires this
-   * only for Azure Foundry private-endpoint/demo host mappings.
-  */
+   * only for Azure Foundry private-endpoint host mappings.
+   */
   fetch?: typeof fetch;
   /** Vertex AI — GCP project ID (required for vendor="vertex-ai"). */
   vertexProject?: string;

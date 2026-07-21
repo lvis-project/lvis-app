@@ -1185,7 +1185,7 @@ lvis-app/src/
 │   ├── state/                   # chat-scroll-store (module scroll singletons)
 │   ├── hooks/                   # domain hooks — 14 original + extracted App/ChatView hooks
 │   │                            #  (use-app-mode, use-routine-overlay, use-send-message,
-│   │                            #   use-plugin-view-routing, use-onboarding-chain-controller,
+│   │                            #   use-plugin-view-routing, use-onboarding-tour-controller,
 │   │                            #   use-chat-scroll, use-message-queue, use-attachment-picker,
 │   │                            #   use-permission-toasts, use-checkpoint-view,
 │   │                            #   use-transcript-entries, use-plugin-lifecycle-refresh, …)

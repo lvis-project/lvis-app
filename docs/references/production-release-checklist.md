@@ -101,10 +101,9 @@ the following:
 - an active `v*` tag ruleset restricts creation, updates, and deletions to
   designated release operators, and the publisher's final annotated-tag
   peeled-SHA check still equals `github.sha`;
-- the tag pipeline fixes `LVIS_DISTRIBUTION_CHANNEL=public`, provides no
-  embedded demo activation or signing secrets, and forces `--skip-code-sign`;
-- all three platform builds complete and the build logs report that the embedded
-  activation key is absent;
+- the tag pipeline uses the immutable event source, receives no signing
+  credentials, and forces `--skip-code-sign`; and
+- all three platform builds complete;
 - the draft has all versioned assets, every `LVIS-latest-*` alias, and update
   metadata; and
 - the public release body prominently states that it is unsigned/not notarized,

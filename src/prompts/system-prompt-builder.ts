@@ -121,21 +121,6 @@ export interface SystemPromptBuilderDeps {
    */
   getActiveSkillsSection?: (sessionId: string) => string;
   /**
-   * Tutorial-X4 — onboarding context provider. Returns a short markdown
-   * block describing the user's onboarding state (호칭 + 자기소개 from
-   * Memory Seed wizard + installed plugin ids + last completed
-   * walkthrough), or "" when the user is past first-boot. When non-empty
-   * the builder emits id=9.86 "User Onboarding Context" so the model
-   * tailors its first turn to the just-completed onboarding flow
-   * (greeting by 호칭, suggesting plugin-specific tasks, etc.). Returning
-   * "" makes the section drop out entirely so non-first-boot turns are
-   * unaffected.
-   *
-   * Implementation lives outside the builder so memory-manager owns the
-   * file IO and the builder remains a pure assembler.
-   */
-  getOnboardingContext?: () => string;
-  /**
    * MCP-app model context (`ui/update-model-context`) — returns the rendered
    * `<mcp-app-context>` section for the ACTIVE session's cards, or "" when no card has
    * pushed any. Decoupled through this callback exactly like `getActiveSkillsSection`:
@@ -895,35 +880,6 @@ export class SystemPromptBuilder {
       refresh: "static",
       build: () => t("be_systemPromptBuilder.suggestedRepliesInstruction"),
     });
-
-    // Tutorial-X4 — User Onboarding Context.
-    //
-    // When the host's `getOnboardingContext` callback returns a non-empty
-    // markdown block (호칭 + 자기소개 from the Memory Seed wizard +
-    // installed plugin ids + last completed walkthrough), this section
-    // injects it so the LLM's first turn can greet the user by 호칭, tailor
-    // suggestions to installed plugins, and reference the just-completed
-    // tour. Once the user is past first-boot the callback returns "" and
-    // the section drops out — there is no compaction cost on steady-state
-    // turns.
-    //
-    // The id is between 9.85 (Suggested Replies) and 9.9 (Conversation
-    // Continuity Guard) so the onboarding hint lands close to the model's
-    // last-read content but does not displace the continuity-guard rules
-    // that fence stream output.
-    const { getOnboardingContext } = deps;
-    if (getOnboardingContext) {
-      this.sources.push({
-        id: 9.86,
-        name: "User Onboarding Context",
-        refresh: "per-turn",
-        build: () => {
-          const ctx = getOnboardingContext();
-          if (!ctx || !ctx.trim()) return "";
-          return `## ${t("be_systemPromptBuilder.userOnboardingContextHeading")}\n\n${ctx.trim()}`;
-        },
-      });
-    }
 
     // Active Session Context — 서버 인프라 의존
     // Feature Flags — 서버 인프라 의존
