@@ -243,12 +243,15 @@ describe("foreground rationale real-stack integration", () => {
     const scopeReviewer = new LlmRationaleScopeReviewer({
       complete: async (input) => {
         scopeReviewerPrompts.push(input.userPrompt);
+        // Deliberately NOT auto-approve-eligible: the reviewer leaves scope
+        // "unclear", so this exercises the full user-modal path even though the
+        // risk stays medium.
         return {
           text: JSON.stringify({
             level: "medium",
             reason: "The exact sealed write remains bounded.",
-            scopeAlignment: "aligned",
-            scopeReasons: ["The target and effect are unchanged."],
+            scopeAlignment: "unclear",
+            scopeReasons: ["The sealed target scope could not be fully confirmed."],
           }),
           tokensIn: 3,
           tokensOut: 2,
@@ -415,6 +418,178 @@ describe("foreground rationale real-stack integration", () => {
       });
       expect(protectedSurfaces).not.toContain(RAW_ANCHOR_SECRET);
       expect(auditSink.assertWritable).toHaveBeenCalledTimes(1);
+    } finally {
+      hostService.shutdown();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("auto-approves an aligned non-high reviewer terminal with no modal and a sealed resume", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lvis-rationale-auto-approve-"));
+    const registry = new ToolRegistry();
+    const write = vi.fn(async () => "write-complete");
+    registry.register(createDynamicTool({
+      name: "write_fixture",
+      description: "Apply one bounded workspace write.",
+      source: "builtin",
+      category: "write",
+      version: "1",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+        required: ["payload"],
+      },
+      isReadOnly: () => false,
+      execute: async (input) => ({
+        output: await write(input),
+        isError: false,
+      }),
+    }));
+
+    const modalRequests: ApprovalRequest[] = [];
+    const rationaleLifecycleOrder: string[] = [];
+    const projectionRecords: Array<Parameters<
+      RationaleAuditSink["appendProjection"]
+    >[1]> = [];
+    let approvalGate!: ApprovalGate;
+    const webContents = {
+      isDestroyed: () => false,
+      // The reviewer auto-approve terminal must never reach the renderer modal.
+      send: (channel: string, request: ApprovalRequest) => {
+        expect(channel).toBe(IPC_APPROVAL_REQUEST);
+        rationaleLifecycleOrder.push("modal");
+        modalRequests.push(request);
+      },
+    };
+    const auditLogger = new AuditLogger(join(directory, "audit"));
+    approvalGate = new ApprovalGate(
+      webContents as never,
+      undefined,
+      5_000,
+      auditLogger,
+    );
+    const requestAndWait = vi.spyOn(approvalGate, "requestAndWait");
+
+    const invocationRecords: InvocationAuditRecord[] = [];
+    const auditSink = {
+      assertWritable: vi.fn(),
+      appendTicket: vi.fn((event) => {
+        rationaleLifecycleOrder.push("ticket:" + event.operation);
+        return event as never;
+      }),
+      appendInvocation: vi.fn((_sessionId, record) => {
+        rationaleLifecycleOrder.push("invocation:" + record.state);
+        invocationRecords.push(record);
+        return record as never;
+      }),
+      appendProjection: vi.fn((_sessionId, projection) => {
+        rationaleLifecycleOrder.push(
+          projection.terminalReason === null
+            ? "projection:user-pending"
+            : "projection:" + projection.terminalReason,
+        );
+        projectionRecords.push(projection);
+        return projection as never;
+      }),
+    } satisfies RationaleAuditSink;
+
+    const scopeReviewer = new LlmRationaleScopeReviewer({
+      complete: async () => ({
+        // Fresh + aligned + non-high → auto-approve eligible.
+        text: JSON.stringify({
+          level: "medium",
+          reason: "The exact sealed write is in-scope and bounded.",
+          scopeAlignment: "aligned",
+          scopeReasons: ["The sealed target matches the direct request."],
+        }),
+        tokensIn: 3,
+        tokensOut: 2,
+        costUsd: 0,
+      }),
+    }, "scope-review-model");
+    const invocationStartCas = new DurableHostInvocationStartCasStore({
+      filePath: join(directory, "invocation-journal.json"),
+      auditSecret: "rationale-auto-approve-journal-secret-v1",
+      sealStore: new MemorySecretStore(),
+    });
+    const hostService = new RationaleHostService({
+      approvalGate,
+      getRationaleScopeReviewer: () => scopeReviewer,
+      getRegistryGeneration: () => registry.getGeneration(),
+      getSandboxGeneration: () => "sandbox-generation-test",
+      invocationStartCas,
+      auditSink,
+    });
+
+    let loop!: ConversationLoop;
+    const coordinatorFactory = hostService.createCoordinatorFactory({
+      getRationalePolicyEpoch: () => "policy-epoch-test",
+      isSessionCurrent: (sessionId) => loop.sessionId === sessionId,
+    });
+    const provider = new ScriptedProvider();
+    loop = new ConversationLoop(({
+      settingsService: {
+        get: () => fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: {
+        build: () => "system",
+        setToolScope: vi.fn(),
+      },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry: registry }),
+      toolRegistry: registry,
+      permissionManager: createPermissionManager(directory),
+      approvalGate,
+      auditLogger,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+      rationaleCoordinatorFactory: coordinatorFactory,
+      enableDormantRationaleForTesting: true,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    try {
+      const result = await loop.runTurn(
+        "perform the approved action",
+        undefined,
+        undefined,
+        {
+          inputOrigin: "user-keyboard",
+          requestAnchorRawIntent:
+            "perform the approved action for " + RAW_ANCHOR_SECRET,
+        },
+      );
+
+      // The tool executed end-to-end through the sealed resume.
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(result.toolCalls.map((call) => call.result)).toEqual([
+        "write-complete",
+        RATIONALE_SIBLING_CANCELLED_RESULT,
+      ]);
+
+      // ZERO modal: neither the ApprovalGate nor the renderer was engaged.
+      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(modalRequests).toHaveLength(0);
+      expect(rationaleLifecycleOrder).not.toContain("modal");
+
+      // Still audited: authorized → started → completed, and a single terminal
+      // projection distinctly marked reviewer-auto.
+      expect(invocationRecords.map((record) => record.state)).toEqual([
+        "authorized",
+        "started",
+        "completed",
+      ]);
+      expect(projectionRecords).toHaveLength(1);
+      expect(projectionRecords[0]).toMatchObject({
+        terminalReason: "allowed-once",
+        scopeAlignment: "aligned",
+        rationaleStatus: "ready",
+        modalFallbackRequired: false,
+        autoApproved: true,
+      });
+      const protectedSurfaces = JSON.stringify({ projectionRecords, invocationRecords });
+      expect(protectedSurfaces).not.toContain(RAW_ANCHOR_SECRET);
     } finally {
       hostService.shutdown();
       rmSync(directory, { recursive: true, force: true });
