@@ -1,0 +1,8 @@
+name = "lvisai-xyz-router"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+routes = [
+  { pattern = "lvisai.xyz/*", zone_name = "lvisai.xyz" },
+  { pattern = "www.lvisai.xyz/*", zone_name = "lvisai.xyz" },
+]

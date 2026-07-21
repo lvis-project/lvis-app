@@ -1,0 +1,94 @@
+name: Naming Gate (process-metadata leak)
+
+# 식별자/파일명에 process-derived 메타데이터(H1/H2, Phase-N, real-/fake- prefix,
+# Tier-as-process audit key, version-suffix, PR-number fixture path)가 새로
+# 추가되지 못하도록 차단한다. SOT: `feedback_naming_process_metadata.md`.
+#
+# Diff-based: PR 의 변경분만 검사한다. 기존 위반은 grandfather; sweep PR 으로
+# 별도 제거. 이 gate 는 *새 callsite 차단* 이 목적.
+
+on:
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  naming-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute diff vs base
+        id: diff
+        run: |
+          base_sha=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          git diff --name-only "$base_sha"...HEAD \
+            | grep -Ev '^(docs/blueprints/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)' \
+            | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' > /tmp/changed.txt || true
+          echo "changed files:"
+          cat /tmp/changed.txt
+
+      - name: Grep diff for prohibited identifiers
+        run: |
+          base_sha="${{ steps.diff.outputs.base_sha }}"
+          violations=0
+
+          if [ ! -s /tmp/changed.txt ]; then
+            echo "no production-path file changes — skipping."
+            exit 0
+          fi
+
+          patterns=(
+            '\bH[1-9][0-9]?\b'
+            '\b[pP]hase[0-9]+[a-z]?\b'
+            '\b[rR]ound[0-9]+\b'
+            '\b[tT]ier[0-9]+-(bypass|skip|excluded|ignored)'
+            '\bpr[0-9]{3,}\b'
+            '^\+.*\b(real|mock|fake|stub)[A-Z][a-zA-Z]+\b'
+          )
+
+          for pattern in "${patterns[@]}"; do
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              [ ! -f "$file" ] && continue
+              if git diff "$base_sha"...HEAD -- "$file" | grep -E "^\+" | grep -Pn "$pattern" > /tmp/hits.txt; then
+                if [ -s /tmp/hits.txt ]; then
+                  echo "::error file=$file::process-metadata pattern '$pattern' added"
+                  cat /tmp/hits.txt
+                  violations=$((violations + $(wc -l < /tmp/hits.txt)))
+                fi
+              fi
+            done < /tmp/changed.txt
+          done
+
+          # filename-level checks (new files only)
+          while IFS= read -r file; do
+            base=$(basename "$file")
+            if echo "$base" | grep -qE '^(real|mock|fake|stub)-'; then
+              # Skip domain-exception files: `fake-sandbox.ts` is OK (see feedback memory).
+              # New `real-/mock-/fake-/stub-` prefixed files in production paths require
+              # a "Why <prefix>:" header comment justifying the domain semantics.
+              if ! head -30 "$file" 2>/dev/null | grep -qE 'Why (real|mock|fake|stub):'; then
+                echo "::error file=$file::new $base prefix in production path without 'Why <prefix>:' header justification"
+                violations=$((violations + 1))
+              fi
+            fi
+            if echo "$base" | grep -qE '\-v[0-9]+\.(ts|tsx|py|md)$'; then
+              echo "::error file=$file::version-suffix filename in production path — use behavior-based suffix"
+              violations=$((violations + 1))
+            fi
+          done < /tmp/changed.txt
+
+          if [ "$violations" -gt 0 ]; then
+            echo ""
+            echo "::error::naming-gate found $violations process-metadata violation(s)."
+            echo "See feedback_naming_process_metadata.md for the rule + conversion guide."
+            exit 1
+          fi
+
+          echo "naming-gate: clean."
