@@ -4,6 +4,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-and-test:
     # All runs use ephemeral GitHub-hosted ARM64 runners. Ephemeral VMs
@@ -64,6 +67,11 @@ jobs:
             fi
           done
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
+          restore-keys: ${{ runner.os }}-ci-bun-
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
       # Postinstall leaves native modules on Electron's ABI. The shared Vitest
@@ -96,6 +104,11 @@ jobs:
         with:
           path: lvis-app
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
+          restore-keys: ${{ runner.os }}-ci-bun-
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
       - name: Run Windows permission regressions
@@ -125,6 +138,11 @@ jobs:
         with:
           path: lvis-app
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
+          restore-keys: ${{ runner.os }}-ci-bun-
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
       - name: Run macOS permission regressions

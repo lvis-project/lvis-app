@@ -8,6 +8,8 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "skipLibCheck": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./.cache/tsc/typecheck.tsbuildinfo",
     "jsx": "react-jsx",
     "lib": [
       "ES2022",
@@ -25,6 +27,7 @@
   ],
   "exclude": [
     "src/**/__tests__/**",
+    "src/**/__probes__/**",
     "src/**/*.stories.ts",
     "src/**/*.stories.tsx",
     "src/preload.ts",
