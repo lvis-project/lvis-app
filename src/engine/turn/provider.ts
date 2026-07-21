@@ -14,10 +14,14 @@ import {
   canUseLlmVendorWithoutApiKey,
   getLlmVendorSettings,
   isOpenAICompatibleVendor,
+  isSelfHostedVllmVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
-import { createGuardedMarketplaceProviderFetch } from "../llm/marketplace-provider-fetch.js";
+import {
+  createGuardedMarketplaceProviderFetch,
+  createGuardedModelProviderFetch,
+} from "../llm/marketplace-provider-fetch.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { t } from "../../i18n/index.js";
@@ -70,32 +74,26 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
       return null;
     }
 
-    // Part C — never attach a bearer token to a non-https (local) endpoint: it
-    // would leak the key in plaintext AND trip the adapter's credentialed-baseUrl
-    // https guard. Keyless-capable providers (ollama / lmstudio / openai-
-    // compatible / litellm, or keyless marketplace presets) run without a key
-    // over http, so drop any stored/placeholder key for http endpoints.
-    const baseUrlIsHttp = effectiveBaseUrl
-      ? !/^https:/i.test(effectiveBaseUrl.trim())
-      : false;
-    const providerApiKey = baseUrlIsHttp && canUseWithoutApiKey ? "" : (apiKey ?? "");
+    const providerApiKey = apiKey ?? "";
 
     try {
-      const createLoopProvider = (config: ProviderConfig): LLMProvider =>
-        createProvider({
+      const createLoopProvider = (config: ProviderConfig): LLMProvider => {
+        const isSelfHostedDirectEndpoint =
+          isSelfHostedVllmVendor(config.vendor) &&
+          !config.providerMetadata &&
+          Boolean(config.baseUrl?.trim());
+        const providerFetch = config.providerMetadata && config.baseUrl
+          ? createGuardedMarketplaceProviderFetch(config.baseUrl, config.providerMetadata)
+          : isSelfHostedDirectEndpoint && config.baseUrl
+            ? createGuardedModelProviderFetch(config.baseUrl)
+            : config.vendor === "azure-foundry" && deps.llmFetch
+              ? deps.llmFetch
+              : undefined;
+        return createProvider({
           ...config,
-          ...(config.providerMetadata && config.baseUrl
-            ? {
-                fetch: createGuardedMarketplaceProviderFetch(
-                  config.baseUrl,
-                  config.providerMetadata,
-                ),
-              }
-            : {}),
-          ...(config.vendor === "azure-foundry" && deps.llmFetch
-            ? { fetch: deps.llmFetch }
-            : {}),
+          ...(providerFetch ? { fetch: providerFetch } : {}),
         });
+      };
 
       const primary = createLoopProvider({
         vendor,

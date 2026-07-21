@@ -8,6 +8,7 @@ import type {
 import {
   getLlmVendorSettings,
   isLLMVendor,
+  isSelfHostedVllmVendor,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import {
@@ -21,6 +22,10 @@ import {
   fetchPublicHttpResponse,
   NetworkGuardError,
 } from "../../core/network-guard.js";
+import {
+  configuredModelProviderLoopbackAccess,
+  configuredModelProviderNetworkAccess,
+} from "./marketplace-provider-fetch.js";
 import { secretKeyFor } from "./provider-factory.js";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -78,23 +83,6 @@ function configuredModelListBaseUrl(
 function sameModelListEndpoint(a: string, b: string): boolean {
   try {
     return modelListEndpointFromBaseUrl(a) === modelListEndpointFromBaseUrl(b);
-  } catch {
-    return false;
-  }
-}
-
-function usesHttpsEndpoint(value: string): boolean {
-  try {
-    return new URL(value).protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function sameOriginScopeFor(value: string): false | ((url: URL) => boolean) {
-  try {
-    const origin = new URL(value).origin;
-    return (candidate) => candidate.origin === origin;
   } catch {
     return false;
   }
@@ -226,25 +214,57 @@ function validateModelListCredentialScope(
   return null;
 }
 
-function privateNetworkScopeForKeylessModelList(
+function isSavedSelfHostedModelListEndpoint(
+  settingsService: SettingsService,
+  vendor: LLMVendor,
+  resolved: ResolvedModelListBaseUrl,
+  credentialScope?: string,
+): boolean {
+  if (
+    resolved.isDraftEndpoint ||
+    !resolved.baseUrl ||
+    !isSelfHostedVllmVendor(vendor)
+  ) {
+    return false;
+  }
+  if (vendor !== "openai-compatible") return true;
+  if (isMarketplaceProviderPresetId(credentialScope)) return false;
+  const llm = settingsService.get("llm");
+  return !(
+    llm.provider === "openai-compatible" &&
+    Boolean(llm.marketplaceProviderPresetId)
+  );
+}
+
+function keylessMarketplaceModelListNetworkAccess(
   settingsService: SettingsService,
   vendor: LLMVendor,
   resolved: ResolvedModelListBaseUrl,
   apiKey: string,
   credentialScope?: string,
-): false | ((url: URL) => boolean) {
-  if (apiKey || vendor !== "openai-compatible" || !resolved.baseUrl) return false;
+): {
+  allowPrivateNetworks: false | ((url: URL) => boolean);
+  allowLoopback: false | ((url: URL) => boolean);
+} {
+  if (apiKey || vendor !== "openai-compatible" || !resolved.baseUrl) {
+    return { allowPrivateNetworks: false, allowLoopback: false };
+  }
   const llm = settingsService.get("llm");
-  const providerPresetId = isMarketplaceProviderPresetId(credentialScope)
+  const presetId = isMarketplaceProviderPresetId(credentialScope)
     ? credentialScope
     : llm.provider === "openai-compatible"
       ? llm.marketplaceProviderPresetId
       : undefined;
-  if (!providerPresetId) return false;
-  const preset = installedProviderPresetForScope(settingsService, providerPresetId);
-  if (!preset || preset.requiresApiKey !== false) return false;
-  if (!sameModelListEndpoint(resolved.baseUrl, preset.baseUrl)) return false;
-  return sameOriginScopeFor(resolved.baseUrl);
+  if (!presetId) return { allowPrivateNetworks: false, allowLoopback: false };
+  const preset = installedProviderPresetForScope(settingsService, presetId);
+  if (
+    !preset ||
+    preset.requiresApiKey !== false ||
+    !sameModelListEndpoint(resolved.baseUrl, preset.baseUrl)
+  ) {
+    return { allowPrivateNetworks: false, allowLoopback: false };
+  }
+  return configuredModelProviderLoopbackAccess(resolved.baseUrl);
 }
 
 export function modelListEndpointFromBaseUrl(baseUrl: string): string {
@@ -599,7 +619,26 @@ export async function listLlmModelsFromSettings(
     resolved,
     request.credentialScope,
   );
-  if (apiKey && !usesHttpsEndpoint(endpoint)) {
+  // A persisted self-hosted provider is a user-owned trust boundary. Private
+  // and credentialed HTTP access never applies to commercial vendors, drafts,
+  // or marketplace presets. Keyless marketplace presets retain loopback-only
+  // discovery through their existing explicit policy.
+  const isSavedSelfHostedEndpoint = isSavedSelfHostedModelListEndpoint(
+    settingsService,
+    request.vendor,
+    resolved,
+    request.credentialScope,
+  );
+  const networkAccess = isSavedSelfHostedEndpoint && resolved.baseUrl
+    ? configuredModelProviderNetworkAccess(resolved.baseUrl)
+    : keylessMarketplaceModelListNetworkAccess(
+      settingsService,
+      request.vendor,
+      resolved,
+      apiKey,
+      request.credentialScope,
+    );
+  if (apiKey && endpoint.startsWith("http:") && !isSavedSelfHostedEndpoint) {
     return {
       ok: false,
       error: "invalid-model-list-endpoint",
@@ -609,13 +648,6 @@ export async function listLlmModelsFromSettings(
   }
   const headers: Record<string, string> = { Accept: "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  const privateNetworkScope = privateNetworkScopeForKeylessModelList(
-    settingsService,
-    request.vendor,
-    resolved,
-    apiKey,
-    request.credentialScope,
-  );
 
   let requestEndpoint = endpoint;
   try {
@@ -625,7 +657,7 @@ export async function listLlmModelsFromSettings(
     requestEndpoint = (await (options.ensurePublicUrl ?? ensurePublicHttpUrl)(
       endpoint,
       {
-        allowLoopback: privateNetworkScope,
+        ...networkAccess,
       },
     )).toString();
     const response = await (
@@ -636,7 +668,7 @@ export async function listLlmModelsFromSettings(
       fetchImpl: options.fetchImpl,
       maxRedirects: 0,
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      allowLoopback: privateNetworkScope,
+      ...networkAccess,
     });
     if (!response.ok) {
       return {
