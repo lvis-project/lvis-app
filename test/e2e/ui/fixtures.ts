@@ -27,7 +27,7 @@ const E2E_PLUGIN_REPOS = [
   'lvis-plugin-work-assistant',
 ] as const;
 
-const E2E_RESOLVE_DEMO_KEY_TOOL = 'meeting_resolve_demo_key';
+const E2E_RESOLVE_CREDENTIAL_PROBE_TOOL = 'meeting_resolve_credential_probe';
 const E2E_PLUGIN_UI_STUB_SOURCE =
   'export function mount({ root }) { root.textContent = "E2E Plugin UI"; }\nexport default { mount };\n';
 
@@ -56,10 +56,10 @@ function manifestIdentitySha256FromPluginJson(pluginJsonPath: string): string {
   return createHash('sha256').update(canonicalJSON(manifest)).digest('hex');
 }
 
-function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean): E2eManifest {
+function prepareE2eManifest(manifest: E2eManifest, enableCredentialProbe: boolean): E2eManifest {
   const base = { ...manifest };
   delete base.python;
-  if (!enableDemoKeyProbe || base.id !== 'meeting') return base;
+  if (!enableCredentialProbe || base.id !== 'meeting') return base;
 
   const declaredHostKeyNames = Array.isArray(base.hostSecrets?.read)
     ? base.hostSecrets.read.filter((item): item is string => typeof item === 'string')
@@ -70,11 +70,11 @@ function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean):
   return {
     ...base,
     hostSecrets: { read: hostSecretReads },
-    tools: addUniqueString(base.tools, E2E_RESOLVE_DEMO_KEY_TOOL),
-    uiActions: addUniqueString(base.uiActions, E2E_RESOLVE_DEMO_KEY_TOOL),
+    tools: addUniqueString(base.tools, E2E_RESOLVE_CREDENTIAL_PROBE_TOOL),
+    uiActions: addUniqueString(base.uiActions, E2E_RESOLVE_CREDENTIAL_PROBE_TOOL),
     toolSchemas: {
       ...(base.toolSchemas ?? {}),
-      [E2E_RESOLVE_DEMO_KEY_TOOL]: {
+      [E2E_RESOLVE_CREDENTIAL_PROBE_TOOL]: {
         description: 'E2E-only probe that resolves the host-managed OpenAI key through hostApi.resolveApiKey.',
         category: 'read',
         inputSchema: {
@@ -87,15 +87,15 @@ function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean):
   };
 }
 
-function buildHostPluginStub(manifestId: string, enableDemoKeyProbe: boolean): string {
-  if (!enableDemoKeyProbe || manifestId !== 'meeting') {
+function buildHostPluginStub(manifestId: string, enableCredentialProbe: boolean): string {
+  if (!enableCredentialProbe || manifestId !== 'meeting') {
     return `export default function createPlugin() { return { handlers: {}, start() {}, stop() {} }; }\n`;
   }
 
   return `export default function createPlugin(context) {
   return {
     handlers: {
-      ${E2E_RESOLVE_DEMO_KEY_TOOL}: async () => {
+      ${E2E_RESOLVE_CREDENTIAL_PROBE_TOOL}: async () => {
         const resolver = context.hostApi && context.hostApi.resolveApiKey;
         if (typeof resolver !== "function") {
           return { ok: false, reason: "missing-resolveApiKey" };
@@ -151,7 +151,7 @@ function buildSignedWhitelistEnv(
       },
     ],
   };
-  const whitelistPath = path.join(lvisHomeForTest, 'e2e-marketplace-whitelist.demo.json');
+  const whitelistPath = path.join(lvisHomeForTest, 'e2e-marketplace-whitelist.fixture.json');
   fs.writeFileSync(whitelistPath, body, 'utf-8');
   fs.writeFileSync(`${whitelistPath}.sig`, JSON.stringify(envelope), 'utf-8');
   return {
@@ -203,7 +203,7 @@ function resolveE2ePluginSourceRoot(repoRoot: string): string {
 async function seedE2ePlugins(
   repoRoot: string,
   lvisHomeForTest: string,
-  enableDemoKeyProbe: boolean,
+  enableCredentialProbe: boolean,
   seedTogglePlugin: boolean,
   seedRepositoryPlugins: boolean,
 ): Promise<LaunchEnv> {
@@ -290,7 +290,7 @@ async function seedE2ePlugins(
       const sourceManifestText = fs.readFileSync(sourceManifest, 'utf-8');
       const manifest = prepareE2eManifest(
         JSON.parse(sourceManifestText) as E2eManifest,
-        enableDemoKeyProbe,
+        enableCredentialProbe,
       );
       if (typeof manifest.id !== 'string' || typeof manifest.version !== 'string') {
         throw new Error(`[e2e] invalid plugin manifest: ${sourceManifest}`);
@@ -319,7 +319,7 @@ async function seedE2ePlugins(
       fs.mkdirSync(targetDist, { recursive: true, mode: 0o700 });
       fs.writeFileSync(
         path.join(targetDist, 'hostPlugin.js'),
-        buildHostPluginStub(manifest.id, enableDemoKeyProbe),
+        buildHostPluginStub(manifest.id, enableCredentialProbe),
         'utf-8',
       );
       for (const ui of uiEntries) {
@@ -452,7 +452,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     const e2eWhitelistEnv = await seedE2ePlugins(
       repoRoot,
       lvisHomeForTest,
-      launchEnv.LVIS_E2E_RESOLVE_DEMO_KEY_PROBE === '1',
+      launchEnv.LVIS_E2E_RESOLVE_CREDENTIAL_PROBE === '1',
       seedTogglePlugin,
       seedRepositoryPlugins,
     );

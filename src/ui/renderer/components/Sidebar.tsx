@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
 import {
   CalendarDays,
@@ -1038,6 +1038,25 @@ export function Sidebar({
   // this node's style (rAF-coalesced) so dragging never re-renders the whole
   // Sidebar tree, mirroring ChatSidePanel's drag-perf pattern.
   const cardRef = useRef<HTMLDivElement | null>(null);
+  // Collapse/expand animates the card width; an active resize drag must not. The
+  // drag writes width live to `cardRef` below, so a width tween would lag the
+  // pointer — `isResizing` (true only between a drag's first move and its commit)
+  // is the single gate that suppresses the transition for the drag path alone.
+  const [isResizing, setIsResizing] = useState(false);
+  const handleWidthChange = useCallback(
+    (px: number) => {
+      setIsResizing(true);
+      onWidthChange?.(px);
+    },
+    [onWidthChange],
+  );
+  const handleWidthCommit = useCallback(
+    (px: number) => {
+      setIsResizing(false);
+      onWidthCommit?.(px);
+    },
+    [onWidthCommit],
+  );
 
   // The collapsed rail shows icons only; `compact` mirrors `collapsed`. There is
   // no hover-expand — the card is a consistent floating panel in every mode.
@@ -1092,10 +1111,14 @@ export function Sidebar({
         data-surface={collapsed ? "bare" : "card"}
         className={[
           "flex min-h-0 flex-col motion-reduce:transition-none",
-          // While resizable the width is driven by inline style (drag-live), so
-          // suppress the width tween — it would lag the pointer. Collapse/expand
-          // still animates the width.
-          resizable ? "" : "transition-[width] duration-[var(--motion-base)] ease-[var(--motion-ease-out)]",
+          // Collapse/expand animates the card width. The two states differ in
+          // width kind — expanded is `${width}px` (inline), collapsed is content
+          // `auto` (`w-auto`) — so `interpolate-size: allow-keywords` is what lets
+          // the px⇄auto tween run. An active resize drag suppresses the tween
+          // (isResizing) because the drag writes width live to `cardRef`.
+          isResizing
+            ? ""
+            : "transition-[width] duration-[var(--motion-base)] ease-[var(--motion-ease-out)] [interpolate-size:allow-keywords]",
           collapsed
             ? // Bare region: width hugs its widest child (the cluster strip,
               // ≈144px); no surface tokens — transparent, on the band. `items-start`
@@ -1126,8 +1149,8 @@ export function Sidebar({
             width={width}
             edge="end"
             variant="inset"
-            onWidthChange={onWidthChange!}
-            onWidthCommit={onWidthCommit!}
+            onWidthChange={handleWidthChange}
+            onWidthCommit={handleWidthCommit}
             min={SIDEBAR_MIN_WIDTH}
             max={SIDEBAR_MAX_WIDTH}
             resetWidth={SIDEBAR_DEFAULT_WIDTH}

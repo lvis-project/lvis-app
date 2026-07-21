@@ -100,7 +100,6 @@ describe("dev-flags tamper snapshot", () => {
     expect(isPackagedForbiddenEnvVar("LVIS_PLUGINS_DIR")).toBe(true);
     expect(isPackagedForbiddenEnvVar("LVIS_WHITELIST_OFFLINE")).toBe(true);
 
-    expect(isPackagedForbiddenEnvVar("LVIS_DEMO_VENDOR")).toBe(false);
     expect(isPackagedForbiddenEnvVar("LVIS_HOME")).toBe(false);
     expect(isPackagedForbiddenEnvVar("NODE_ENV")).toBe(false);
   });

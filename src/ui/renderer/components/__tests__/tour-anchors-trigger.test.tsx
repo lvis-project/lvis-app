@@ -111,7 +111,7 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
   });
 
   it("first-boot-essentials scenario selectors match live anchors", () => {
-    // Mounts every host component the Z onboarding chain (2026-05-19)
+    // Mounts every host component the first-boot tour (2026-05-19)
     // expanded tour references in one tree so the SpotlightTour
     // selectors can be evaluated against the same DOM production ships.
     // Regression gate for the original dead-state critic + the Z chain
