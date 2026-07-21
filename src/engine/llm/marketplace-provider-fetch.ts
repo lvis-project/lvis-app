@@ -1,5 +1,9 @@
 import { fetchPublicHttpResponse } from "../../core/network-guard.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
+import {
+  isSelfHostedTrustedNetworkVendor,
+  type LLMVendor,
+} from "../../shared/llm-vendor-defaults.js";
 
 type GuardedProviderFetchPolicy = {
   origin: string;
@@ -165,4 +169,42 @@ export function createGuardedMarketplaceProviderFetch(
     false,
     fetchImpl,
   );
+}
+
+/**
+ * Single selection ladder for the runtime `fetch` a provider config is built
+ * with. Hoisted out of `createLoopProvider` (engine/turn/provider.ts) and
+ * `reviewerStreamProviderFor` (boot/steps/reviewer-permission-wiring.ts), which
+ * carried byte-identical copies of this 4-way ladder.
+ *
+ * Precedence:
+ *   1. A marketplace preset with a baseUrl → origin-locked marketplace fetch
+ *      (its own keyless-loopback / no-private policy).
+ *   2. A saved self-hosted trusted-network vendor (no preset, non-empty baseUrl)
+ *      → origin-locked model-provider fetch (private/loopback + insecure
+ *      credentialed HTTP for that exact origin).
+ *   3. azure-foundry → the Electron main-process `llmFetch` (may be undefined).
+ *   4. Otherwise → undefined (SDK default fetch).
+ *
+ * The azure branch returns `llmFetch` directly rather than
+ * `llmFetch ? llmFetch : undefined`: `fetch` is always truthy, so the only
+ * falsy value `llmFetch` can hold is `undefined`, which the ternary would also
+ * yield — the two forms are equivalent.
+ */
+export function selectProviderRuntimeFetch(args: {
+  vendor: LLMVendor;
+  baseUrl: string | undefined;
+  providerMetadata: MarketplaceInstalledProviderPreset | undefined;
+  llmFetch: typeof fetch | undefined;
+}): typeof fetch | undefined {
+  const { vendor, baseUrl, providerMetadata, llmFetch } = args;
+  const isSelfHostedDirect =
+    isSelfHostedTrustedNetworkVendor(vendor) && !providerMetadata && Boolean(baseUrl?.trim());
+  return providerMetadata && baseUrl
+    ? createGuardedMarketplaceProviderFetch(baseUrl, providerMetadata)
+    : isSelfHostedDirect && baseUrl
+      ? createGuardedModelProviderFetch(baseUrl)
+      : vendor === "azure-foundry"
+        ? llmFetch
+        : undefined;
 }

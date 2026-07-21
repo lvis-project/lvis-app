@@ -266,6 +266,189 @@ describe("LLM model list sync", () => {
     );
   });
 
+  it("syncs a saved self-hosted non-openai-compatible endpoint (ollama) over private HTTP", async () => {
+    // Covers isSavedSelfHostedModelListEndpoint's `vendor !== "openai-compatible"
+    // → return true` branch: a saved self-hosted trusted-network vendor other
+    // than openai-compatible is treated as a saved self-hosted endpoint, so it
+    // gets same-origin private + loopback access and credentialed HTTP.
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "llama3.3" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const ensurePublicUrl = vi.fn(async (
+      url: string,
+      options?: {
+        allowPrivateNetworks?: (url: URL) => boolean;
+        allowLoopback?: (url: URL) => boolean;
+      },
+    ) => {
+      expect(options?.allowPrivateNetworks?.(new URL(url))).toBe(true);
+      expect(options?.allowLoopback?.(new URL(url))).toBe(true);
+      return new URL(url);
+    });
+    const fetchPublicHttpResponseImpl = vi.fn(async (
+      url: string,
+      init?: {
+        allowPrivateNetworks?: (url: URL) => boolean;
+        allowLoopback?: (url: URL) => boolean;
+        fetchImpl?: typeof fetch;
+      },
+    ) => {
+      expect(init?.allowPrivateNetworks?.(new URL(url))).toBe(true);
+      expect(init?.allowLoopback?.(new URL(url))).toBe(true);
+      return (init?.fetchImpl ?? fetch)(url, init);
+    }) as unknown as typeof import("../../../core/network-guard.js").fetchPublicHttpResponse;
+
+    const result = await listLlmModelsFromSettings(
+      makeSettingsService({
+        provider: "ollama",
+        baseUrl: "http://10.10.0.5:11434/v1",
+        secret: "ollama-key",
+      }) as never,
+      { vendor: "ollama" },
+      { fetchImpl, ensurePublicUrl, fetchPublicHttpResponseImpl },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      endpoint: "http://10.10.0.5:11434/v1/models",
+      models: ["llama3.3"],
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://10.10.0.5:11434/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer ollama-key" }),
+      }),
+    );
+  });
+
+  it("denies private access for a keyless openai-compatible draft endpoint with no preset", async () => {
+    // Covers keylessMarketplaceModelListNetworkAccess's `!presetId` branch: a
+    // keyless openai-compatible DRAFT endpoint (differs from the saved baseUrl,
+    // so not a saved self-hosted endpoint) with no active marketplace preset id
+    // resolves to no private/loopback access.
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "draft/model" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const ensurePublicUrl = vi.fn(async (
+      _url: string,
+      options?: {
+        allowPrivateNetworks?: false | ((url: URL) => boolean);
+        allowLoopback?: false | ((url: URL) => boolean);
+      },
+    ) => {
+      expect(options?.allowPrivateNetworks).toBe(false);
+      expect(options?.allowLoopback).toBe(false);
+      return new URL(_url);
+    });
+    const fetchPublicHttpResponseImpl = vi.fn(async (
+      url: string,
+      init?: {
+        allowPrivateNetworks?: false | ((url: URL) => boolean);
+        allowLoopback?: false | ((url: URL) => boolean);
+        fetchImpl?: typeof fetch;
+      },
+    ) => {
+      expect(init?.allowPrivateNetworks).toBe(false);
+      expect(init?.allowLoopback).toBe(false);
+      return (init?.fetchImpl ?? fetch)(url, init);
+    }) as unknown as typeof import("../../../core/network-guard.js").fetchPublicHttpResponse;
+
+    const result = await listLlmModelsFromSettings(
+      makeSettingsService({
+        provider: "openai-compatible",
+        baseUrl: "http://saved.example/v1",
+      }) as never,
+      { vendor: "openai-compatible", baseUrl: "http://draft.example/v1" },
+      { fetchImpl, ensurePublicUrl, fetchPublicHttpResponseImpl },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      endpoint: "http://draft.example/v1/models",
+      models: ["draft/model"],
+    });
+    // Keyless draft → no Authorization header forwarded.
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://draft.example/v1/models",
+      expect.objectContaining({ headers: { Accept: "application/json" } }),
+    );
+  });
+
+  it("denies private access for a keyless openai-compatible endpoint whose active preset is not installed", async () => {
+    // Covers keylessMarketplaceModelListNetworkAccess's non-matching-preset
+    // branch (`!preset`): the active provider is openai-compatible with a
+    // marketplaceProviderPresetId that is not installed, keyless, so the preset
+    // lookup misses and no private/loopback access is granted.
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") {
+          return {
+            authMode: "manual",
+            provider: "openai-compatible",
+            marketplaceProviderPresetId: "ghost-router",
+            vendors: {
+              "openai-compatible": {
+                model: "ghost/model",
+                baseUrl: "https://ghost.example/v1",
+              },
+            },
+            streamSmoothing: "none",
+            fallbackChain: [],
+            modelListCache: {},
+          };
+        }
+        if (key === "marketplace") return { installedProviderPresets: [] };
+        throw new Error(`unexpected settings key: ${key}`);
+      }),
+      getSecret: vi.fn(() => null),
+    };
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "ghost/model" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const ensurePublicUrl = vi.fn(async (
+      url: string,
+      options?: {
+        allowPrivateNetworks?: false | ((url: URL) => boolean);
+        allowLoopback?: false | ((url: URL) => boolean);
+      },
+    ) => {
+      expect(options?.allowPrivateNetworks).toBe(false);
+      expect(options?.allowLoopback).toBe(false);
+      return new URL(url);
+    });
+    const fetchPublicHttpResponseImpl = vi.fn(async (
+      url: string,
+      init?: {
+        allowPrivateNetworks?: false | ((url: URL) => boolean);
+        allowLoopback?: false | ((url: URL) => boolean);
+        fetchImpl?: typeof fetch;
+      },
+    ) => {
+      expect(init?.allowPrivateNetworks).toBe(false);
+      expect(init?.allowLoopback).toBe(false);
+      return (init?.fetchImpl ?? fetch)(url, init);
+    }) as unknown as typeof import("../../../core/network-guard.js").fetchPublicHttpResponse;
+
+    const result = await listLlmModelsFromSettings(
+      settingsService as never,
+      { vendor: "openai-compatible" },
+      { fetchImpl, ensurePublicUrl, fetchPublicHttpResponseImpl },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      endpoint: "https://ghost.example/v1/models",
+      models: ["ghost/model"],
+    });
+    expect(ensurePublicUrl).toHaveBeenCalledOnce();
+  });
+
   it("keeps unsaved private model-list endpoints blocked", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ data: [{ id: "local/model" }] }), {

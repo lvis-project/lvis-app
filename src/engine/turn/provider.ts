@@ -14,14 +14,10 @@ import {
   canUseLlmVendorWithoutApiKey,
   getLlmVendorSettings,
   isOpenAICompatibleVendor,
-  isSelfHostedVllmVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import type { AiProviderPingResult } from "../../shared/ai-provider-ping.js";
-import {
-  createGuardedMarketplaceProviderFetch,
-  createGuardedModelProviderFetch,
-} from "../llm/marketplace-provider-fetch.js";
+import { selectProviderRuntimeFetch } from "../llm/marketplace-provider-fetch.js";
 import type { ConversationLoopDeps } from "./types.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { t } from "../../i18n/index.js";
@@ -78,17 +74,12 @@ export function buildProvider(deps: ConversationLoopDeps): LLMProvider | null {
 
     try {
       const createLoopProvider = (config: ProviderConfig): LLMProvider => {
-        const isSelfHostedDirectEndpoint =
-          isSelfHostedVllmVendor(config.vendor) &&
-          !config.providerMetadata &&
-          Boolean(config.baseUrl?.trim());
-        const providerFetch = config.providerMetadata && config.baseUrl
-          ? createGuardedMarketplaceProviderFetch(config.baseUrl, config.providerMetadata)
-          : isSelfHostedDirectEndpoint && config.baseUrl
-            ? createGuardedModelProviderFetch(config.baseUrl)
-            : config.vendor === "azure-foundry" && deps.llmFetch
-              ? deps.llmFetch
-              : undefined;
+        const providerFetch = selectProviderRuntimeFetch({
+          vendor: config.vendor,
+          baseUrl: config.baseUrl,
+          providerMetadata: config.providerMetadata,
+          llmFetch: deps.llmFetch,
+        });
         return createProvider({
           ...config,
           ...(providerFetch ? { fetch: providerFetch } : {}),
