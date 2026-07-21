@@ -45,7 +45,7 @@ export interface RationaleConversationCoordinator extends
     readonly result: RationaleOnlyRoundResult;
     readonly abortSignal?: AbortSignal;
     readonly now?: number;
-  }): Promise<unknown | null>;
+  }): Promise<{ readonly autoApproved?: boolean } | null>;
   promptForApproval(
     ticketId: string,
     input?: { readonly abortSignal?: AbortSignal; readonly now?: number },
@@ -311,19 +311,24 @@ export async function executeRationaleAwareConversationBatch(
       );
     }
 
-    // Exactly one host ApprovalGate request is made for this ticket.
-    const approval = await runtime.promptForApproval(ticketId, {
-      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-    });
-    if (approval?.outcome !== "allowed-once") {
-      if (approval === null) abortSafely(runtime, ticketId);
-      return terminal(
-        approval?.outcome === "denied"
-          ? RATIONALE_TRIGGER_DENIED_RESULT
-          : approval?.outcome === "timed-out"
-            ? RATIONALE_TRIGGER_TIMED_OUT_RESULT
-            : RATIONALE_TRIGGER_CANCELLED_RESULT,
-      );
+    // The reviewer auto-approve-on-aligned terminal already minted the one-shot
+    // authorization; it must SKIP the user modal and go straight to the shared,
+    // unchanged sealed-resume execution chokepoint. Every other outcome still
+    // opens exactly one host ApprovalGate request for this ticket.
+    if (!roundResolution.autoApproved) {
+      const approval = await runtime.promptForApproval(ticketId, {
+        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+      });
+      if (approval?.outcome !== "allowed-once") {
+        if (approval === null) abortSafely(runtime, ticketId);
+        return terminal(
+          approval?.outcome === "denied"
+            ? RATIONALE_TRIGGER_DENIED_RESULT
+            : approval?.outcome === "timed-out"
+              ? RATIONALE_TRIGGER_TIMED_OUT_RESULT
+              : RATIONALE_TRIGGER_CANCELLED_RESULT,
+        );
+      }
     }
 
     if (input.abortSignal?.aborted) {
