@@ -43,6 +43,37 @@ function artifactDir(): string {
 }
 
 describe("MemoryManager file-backed tool_result artifacts", () => {
+  it("strips a view_image image sibling from the persisted jsonl but keeps the text row", async () => {
+    const base64 = "QUJD".repeat(4000); // ~16k-char unique marker for the payload
+    const msg = {
+      role: "tool_result" as const,
+      toolUseId: "toolu_view_image_1",
+      toolName: "view_image",
+      content: "[image loaded]",
+      isError: false,
+      image: { data: base64, mimeType: "image/png", bytes: 12 },
+    };
+    await mm.saveSession(SESSION_ID, [msg]);
+
+    const jsonl = readFileSync(join(dir, "sessions", `${SESSION_ID}.jsonl`), "utf-8");
+    expect(jsonl).not.toContain(base64); // no base64 payload on disk
+    expect(jsonl).not.toContain('"image"'); // no image key
+    expect(jsonl).toContain("[image loaded]"); // placeholder text retained
+    expect(jsonl).toContain("toolu_view_image_1");
+
+    const loaded = mm.loadSession(SESSION_ID);
+    expect(loaded?.[0]).toMatchObject({
+      role: "tool_result",
+      toolUseId: "toolu_view_image_1",
+      toolName: "view_image",
+      content: "[image loaded]",
+    });
+    expect((loaded?.[0] as Record<string, unknown>).image).toBeUndefined();
+
+    // The caller's live in-memory object must NOT be mutated (image still there).
+    expect(msg.image.data).toBe(base64);
+  });
+
   it("saves oversized tool_result content as a JSONL stub plus artifact", async () => {
     const raw = Array.from({ length: 150 }, (_, i) => `row ${i}: ${"x".repeat(80)}`).join("\n");
 
