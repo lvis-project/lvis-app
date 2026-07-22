@@ -1132,7 +1132,10 @@ export class MemoryManager {
     const content = extractSearchableContent(messages);
     if (!content) return null;
     const metadata = this.loadSessionMetadata(sessionId);
-    const summary = this.readSessionSummary(sessionId);
+    // Derive the title from the in-memory messages the indexer already holds —
+    // no redundant JSONL re-read+parse (B1). Same result as the disk path:
+    // title/preview come only from string-content turns.
+    const summary = this.deriveSessionSummary(sessionId, messages);
     const mtimeMs = this.getFileMtimeMs(join(this.sessionsDir, `${sessionId}.jsonl`));
     const timestamp = mtimeMs >= 0 ? new Date(mtimeMs).toISOString() : new Date().toISOString();
     return {
@@ -2419,8 +2422,17 @@ export class MemoryManager {
     return buf.subarray(0, 25 * 1024).toString("utf-8");
   }
 
-  private readSessionSummary(sessionId: string): { title: string; preview: string } {
-    const messages = this.loadSession(sessionId);
+  /**
+   * Derive {title, preview} from a session's messages. Pure — opens nothing.
+   * Only string-content user/assistant turns feed the title/preview (tool-result
+   * records are skipped), so an in-memory array and the on-disk JSONL derive the
+   * same result — `prepareSessionMessagesForDisk` only rewrites tool-result
+   * artifacts, never string content.
+   */
+  private deriveSessionSummary(
+    sessionId: string,
+    messages: unknown[] | null,
+  ): { title: string; preview: string } {
     if (!Array.isArray(messages)) {
       return {
         title: t("be_memoryManager.sessionTitleShort", { id: sessionId.slice(0, 8) }),
@@ -2443,6 +2455,13 @@ export class MemoryManager {
       title: (lastUser || lastContent || t("be_memoryManager.sessionTitleShort", { id: sessionId.slice(0, 8) })).slice(0, 80),
       preview: (lastContent || lastUser || t("be_memoryManager.sessionPreviewEmpty")).slice(0, 200),
     };
+  }
+
+  // Disk-loading wrapper for callers without the messages in hand (listSessions).
+  // The indexer passes its in-memory array to deriveSessionSummary directly,
+  // avoiding a redundant JSONL re-read + parse on every saveSession.
+  private readSessionSummary(sessionId: string): { title: string; preview: string } {
+    return this.deriveSessionSummary(sessionId, this.loadSession(sessionId));
   }
 
   private slugify(title: string): string {
