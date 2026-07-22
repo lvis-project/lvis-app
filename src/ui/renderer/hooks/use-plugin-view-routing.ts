@@ -51,16 +51,18 @@ export interface UsePluginViewRoutingResult {
  * Plugin/built-in view routing + the host-managed plugin auth lifecycle,
  * extracted verbatim from App.tsx as ONE unit (guarded by AppPluginAuth.test).
  *
- * Owns the four plugin-auth gate refs (pendingDetached/pendingInline pending-open
- * maps, the loginTool in-flight guard, the failed-open set) PLUS the action
- * in-flight guard and the `pluginAuthErrors` map. `handleViewSelect` is the sole
- * mutator; the two drain effects (auth-transition → open deferred panel;
- * authed → clear stale error) plus the uninstalled-plugin fallback effect
- * consume that state. Moving the refs and the drain effects together preserves
- * the login-first / open-on-authed contract (architecture.md §9.4a).
+ * Owns the plugin-auth gate refs (the inline pending-open map, the loginTool
+ * in-flight guard, the failed-open set) PLUS the action in-flight guard and the
+ * `pluginAuthErrors` map. `handleViewSelect` is the sole mutator; the two drain
+ * effects (auth-transition → open deferred panel; authed → clear stale error)
+ * plus the uninstalled-plugin fallback effect consume that state. Moving the
+ * refs and the drain effects together preserves the login-first / open-on-authed
+ * contract (architecture.md §9.4a).
  *
- * appMode is the SOLE authority for inline-vs-detached; this hook never changes
- * it, only reads it.
+ * Plugin views always open INLINE regardless of appMode (a selected plugin
+ * panel stays in the chat panel, never a separate window). appMode still drives
+ * detachment for the app's own built-in tabs (work-board/routines/…), which this
+ * hook reads but never changes.
  */
 export function usePluginViewRouting({
   api,
@@ -81,7 +83,6 @@ export function usePluginViewRouting({
   // handleViewSelect when a detached auth plugin is selected while unauthed
   // (the host fires loginTool to open the SSO window, NOT the panel); drained
   // by the auth-transition effect below. See architecture.md §9.4a.
-  const pendingDetachedAuthOpenRef = useRef<Map<string, string>>(new Map());
   const pendingInlineAuthOpenRef = useRef<Map<string, string>>(new Map());
   const pluginAuthLoginInflightRef = useRef<Set<string>>(new Set());
   const failedPluginAuthOpenRef = useRef<Set<string>>(new Set());
@@ -90,24 +91,6 @@ export function usePluginViewRouting({
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const activePluginAuthError = activePluginView ? pluginAuthErrors.get(activePluginView.pluginId) ?? null : null;
-
-  const openDetachedPluginView = useCallback(
-    async (viewKey: string): Promise<boolean> => {
-      const openDetached = api.window?.openDetached;
-      if (!openDetached) {
-        setErrorWithThought(t("app.errorCannotOpenPluginWindow"));
-        return false;
-      }
-      const result = await openDetached(viewKey);
-      if (!result.ok) {
-        console.warn(`[plugin-ui] detached plugin view ${viewKey} did not open`, result.error);
-        setErrorWithThought(t("app.errorCannotOpenPluginWindowDetail", { error: result.error }));
-        return false;
-      }
-      return true;
-    },
-    [api, setErrorWithThought],
-  );
 
   const openDetachedBuiltInView = useCallback(
     async (viewKey: "work-board" | "routines" | "memory" | "starred" | "insights"): Promise<boolean> => {
@@ -150,10 +133,13 @@ export function usePluginViewRouting({
     [t],
   );
 
-  // In chat mode (appMode === "chat"), selecting a plugin view opens a
-  // separate magnetic-snap BrowserWindow instead of switching the main
-  // window's active view. The app's mode is the sole authority for this;
-  // plugins do not get a say.
+  // Plugin views ALWAYS render inline in the chat panel — selecting one
+  // switches the main window's active view in every appMode (the meeting panel
+  // and every other plugin view stay alongside the conversation instead of
+  // popping into a separate window). This is the default and only behavior for
+  // plugin views; there is no per-view detach declaration. (Built-in detachable
+  // views like work-board still detach in chat mode — see below — because they
+  // are the app's own KakaoTalk-style tabs, not plugins.)
   //
   // Auth is a HOST-managed lifecycle (architecture.md §9.4a): the agent never
   // calls login/logout, and auth plugin view selection is login-first and
@@ -174,15 +160,10 @@ export function usePluginViewRouting({
         const loginTool = card?.auth?.loginTool;
         const authState = pluginAuthStatuses.get(view.pluginId)?.kind;
         const openPluginView = () => {
-          if (appMode === "chat") {
-            void openDetachedPluginView(key);
-          } else {
-            setActiveView(key);
-          }
+          // Always inline, regardless of appMode.
+          setActiveView(key);
         };
 
-        // appMode is the SOLE authority for inline-vs-detached. Work keeps
-        // plugin views inline; chat pops plugin views into detached windows.
         if (!loginTool || authState === "authed") {
           clearPluginAuthError(view.pluginId);
           failedPluginAuthOpenRef.current.delete(view.pluginId);
@@ -190,11 +171,7 @@ export function usePluginViewRouting({
           return;
         }
 
-        const pendingMap =
-          appMode === "chat"
-            ? pendingDetachedAuthOpenRef.current
-            : pendingInlineAuthOpenRef.current;
-        pendingMap.set(view.pluginId, key);
+        pendingInlineAuthOpenRef.current.set(view.pluginId, key);
         clearPluginAuthError(view.pluginId);
         failedPluginAuthOpenRef.current.delete(view.pluginId);
 
@@ -214,7 +191,7 @@ export function usePluginViewRouting({
               `[plugin-auth] ${view.pluginId} loginTool '${loginTool}' failed`,
               err,
             );
-            pendingMap.delete(view.pluginId);
+            pendingInlineAuthOpenRef.current.delete(view.pluginId);
             failedPluginAuthOpenRef.current.add(view.pluginId);
             const message = formatPluginAuthLoginError(err);
             setPluginAuthErrors((prev) => {
@@ -250,7 +227,6 @@ export function usePluginViewRouting({
       pluginViews,
       pluginCards,
       pluginAuthStatuses,
-      openDetachedPluginView,
       openDetachedBuiltInView,
       setErrorWithThought,
       refreshPluginAuthStatus,
@@ -266,23 +242,7 @@ export function usePluginViewRouting({
   // deferred. Only authed opens; an `error` status clears the pending entry
   // without silently navigating.
   useEffect(() => {
-    if (
-      pendingDetachedAuthOpenRef.current.size === 0 &&
-      pendingInlineAuthOpenRef.current.size === 0
-    ) return;
-    for (const [pluginId, viewKey] of [...pendingDetachedAuthOpenRef.current]) {
-      if (failedPluginAuthOpenRef.current.has(pluginId)) {
-        pendingDetachedAuthOpenRef.current.delete(pluginId);
-        continue;
-      }
-      const kind = pluginAuthStatuses.get(pluginId)?.kind;
-      if (kind === "authed") {
-        pendingDetachedAuthOpenRef.current.delete(pluginId);
-        void openDetachedPluginView(viewKey);
-      } else if (kind === "error") {
-        pendingDetachedAuthOpenRef.current.delete(pluginId);
-      }
-    }
+    if (pendingInlineAuthOpenRef.current.size === 0) return;
     for (const [pluginId, viewKey] of [...pendingInlineAuthOpenRef.current]) {
       if (failedPluginAuthOpenRef.current.has(pluginId)) {
         pendingInlineAuthOpenRef.current.delete(pluginId);
@@ -296,7 +256,7 @@ export function usePluginViewRouting({
         pendingInlineAuthOpenRef.current.delete(pluginId);
       }
     }
-  }, [pluginAuthStatuses, openDetachedPluginView, setActiveView]);
+  }, [pluginAuthStatuses, setActiveView]);
 
   useEffect(() => {
     setPluginAuthErrors((prev) => {
