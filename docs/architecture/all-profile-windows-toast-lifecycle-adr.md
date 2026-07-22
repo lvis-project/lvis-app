@@ -218,24 +218,24 @@ Rationale tied to constraints:
 
 Phasing:
 
-1. Phase 0 (this ADR): record the decision. Keep #1628's invoking-user cleanup
+1. Step 0 (this ADR): record the decision. Keep #1628's invoking-user cleanup
    as the shipped behavior; the second user's residue is a known, documented gap
    (cosmetic: an orphaned Start Menu shortcut + inert HKCU CLSID, not a security
    or data-loss issue).
-2. Phase 1 (upstream): file/track an Electron feature request for an
+2. Step 1 (upstream): file/track an Electron feature request for an
    opt-out/redirect so a Win32 app can suppress per-user shortcut+CLSID creation
    in favor of a machine-registered activator. Pin the Electron version that
    carries it. This is the true unblock for constraint-1-safe all-profile
    cleanup.
-3. Phase 2 (adopt): once upstream lands, have the installer own the all-users
+3. Step 2 (adopt): once upstream lands, have the installer own the all-users
    shortcut + HKLM CLSID, switch `early-boot-env.ts` to the opt-out API, and
    extend the perMachine uninstaller's fail-closed machine-state teardown to
    that single artifact set (reusing the `lvisDeleteExactEmptyRegistryKey` /
    exact-match discipline at `build/installer.nsh:113-148`).
-4. Land the two-Windows-user acceptance test (below) with Phase 2. #1643 stays
+4. Land the two-Windows-user acceptance test (below) with Step 2. #1643 stays
    OPEN until that test is green.
 
-Interim stance while Phase 1 is pending: do not attempt cross-profile deletion.
+Interim stance while Step 1 is pending: do not attempt cross-profile deletion.
 If a low-risk, constraint-compliant improvement is wanted before upstream lands,
 the only safe candidate is opportunistic self-cleanup - each user's own next app
 launch (or its own uninstall) already owns its HKCU hive and Programs folder, so
@@ -244,7 +244,7 @@ touching a foreign hive. This is optional and not required to select the design.
 
 ## Migration and rollback outline
 
-Migration (applies when Phase 2 is implemented, not now):
+Migration (applies when Step 2 is implemented, not now):
 
 - Forward: new installs write the machine-owned registration; the app uses the
   Electron opt-out so no per-user pair is created. Existing installs that already
@@ -270,7 +270,7 @@ Rollback:
 ## Acceptance mapping (what keeps #1643 open)
 
 - [x] Item 1: reviewed machine-lifecycle design selected (this ADR).
-- [ ] Item 2: implementation (Phase 2, pending upstream Electron support).
+- [ ] Item 2: implementation (Step 2, pending upstream Electron support).
 - [ ] Item 3: two-Windows-user test - install per-machine, run the app as user A
       and user B (materializing both pairs), perform a genuine DELETE uninstall
       as one user (including the alternate-admin-cred case), and assert NO
