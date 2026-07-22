@@ -1535,6 +1535,7 @@ export async function queryLoop(
           toolName: toolUsesForExecutor.find((tu) => tu.id === tr.tool_use_id)?.name,
           content: tr.content,
           ...(tr.is_error && { isError: true }),
+          ...("image" in tr && tr.image ? { image: tr.image } : {}),
           ...(toolDisplay ? { meta: { toolDisplay } } : {}),
         });
       }
