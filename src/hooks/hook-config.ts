@@ -98,6 +98,10 @@ const EVENT_KEY_TO_TYPE: Readonly<Record<string, HookEvent>> = {
   Stop: "Stop",
   PreCompact: "PreCompact",
   PostCompact: "PostCompact",
+  // Subagent (agent_spawn) lifecycle — observe-only; fired by subagent-runner
+  // around the child ConversationLoop's spawn run. Canonical parity (#811).
+  SubagentStart: "SubagentStart",
+  SubagentStop: "SubagentStop",
   // The ONE blocking, fail-closed lifecycle event (config-only; #811 m2,
   // design §5): a `deny` REFUSES the turn before queryLoop runs.
   UserPromptSubmit: "UserPromptSubmit",

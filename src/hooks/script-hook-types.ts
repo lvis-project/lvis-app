@@ -77,6 +77,8 @@ export type LifecycleHookEvent =
   | "Stop"
   | "PreCompact"
   | "PostCompact"
+  | "SubagentStart"
+  | "SubagentStop"
   | "UserPromptSubmit";
 
 /**
