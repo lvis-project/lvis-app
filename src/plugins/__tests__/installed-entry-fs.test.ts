@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, mkdtemp, open, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,11 +63,13 @@ describe("tombstoneAndDeferredRemove", () => {
     });
     expect(tombstone).not.toBeNull();
 
-    // Wait briefly for the fire-and-forget rm to complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    const remainingInTombstones = await readdir(join(pluginsRoot, TOMBSTONE_SUBDIR));
-    expect(remainingInTombstones).toEqual([]);
+    await vi.waitFor(
+      async () => {
+        const remainingInTombstones = await readdir(join(pluginsRoot, TOMBSTONE_SUBDIR));
+        expect(remainingInTombstones).toEqual([]);
+      },
+      { timeout: 2_000, interval: 25 },
+    );
   });
 
   it("does not throw when the deferred rm callback is omitted", async () => {
