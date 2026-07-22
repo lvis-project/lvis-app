@@ -4,6 +4,7 @@
 
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor } from "../tools/executor.js";
+import { backgroundShellManager } from "../tools/background-shell-manager.js";
 import { isActiveSandboxFilesystemContainedForPluginEffects } from "../permissions/sandbox-capability.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
@@ -504,6 +505,9 @@ export class ConversationLoop {
   cleanupSession(): void {
     this.deps.closeRationaleSession?.(this.sessionId);
     this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
+    // Kill + drop any background shells this session started (bash
+    // run_in_background) so they do not outlive the session.
+    backgroundShellManager.disposeSession(this.sessionId);
   }
 
   readToolResultForChunk(toolUseId: string): ReadableToolResult | null {

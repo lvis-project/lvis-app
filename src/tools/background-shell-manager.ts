@@ -103,6 +103,23 @@ function createManager(): BackgroundShellManager {
 
   return {
     register({ sessionId, command, child, startedAt }): string {
+      // Keep the registry lean within a long-lived session: drop this session's
+      // already-finished shells whose output has been fully read before adding a
+      // new one. Never-read terminal shells are preserved (the model may still
+      // fetch their final output); everything else is reaped at session end via
+      // disposeSession(). This bounds in-session growth without surprising an
+      // active poller.
+      for (const e of [...shells.values()]) {
+        if (
+          e.sessionId === sessionId &&
+          e.status !== "running" &&
+          e.readCursor > 0 &&
+          e.readCursor >= e.output.length
+        ) {
+          e.stopTracking();
+          shells.delete(e.shellId);
+        }
+      }
       const shellId = randomUUID();
       const entry: BackgroundShellEntry = {
         shellId,
