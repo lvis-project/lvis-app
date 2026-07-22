@@ -31,6 +31,24 @@ export interface FileLockOptions {
 }
 
 /**
+ * The protected callback completed, but proper-lockfile could not confirm
+ * release. Callers that durably committed inside the callback may reconcile
+ * their exact output before deciding whether the operation succeeded.
+ */
+export class FileLockReleaseError<T> extends Error {
+  readonly callbackCompleted = true;
+
+  constructor(
+    readonly result: T,
+    readonly releaseError: unknown,
+  ) {
+    super(`file lock callback completed but release failed: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`);
+    this.name = "FileLockReleaseError";
+    this.cause = releaseError;
+  }
+}
+
+/**
  * Acquire a cross-process file lock on `targetPath`, execute `fn`, then
  * release the lock.  The target file is created as an empty file if it
  * does not yet exist so that proper-lockfile can stat() it.
@@ -60,9 +78,25 @@ export async function withFileLock<T>(
     realpath: false,
   });
 
+  let result: T;
   try {
-    return await fn();
-  } finally {
-    await release();
+    result = await fn();
+  } catch (callbackError) {
+    try {
+      await release();
+    } catch (releaseError) {
+      throw new AggregateError(
+        [callbackError, releaseError],
+        "file lock callback and release both failed",
+      );
+    }
+    throw callbackError;
   }
+
+  try {
+    await release();
+  } catch (releaseError) {
+    throw new FileLockReleaseError(result, releaseError);
+  }
+  return result;
 }

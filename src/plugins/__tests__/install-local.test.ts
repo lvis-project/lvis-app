@@ -232,7 +232,13 @@ describe("PluginMarketplaceService.installLocal", () => {
     const store = (service as unknown as {
       artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
     }).artifactStore;
-    vi.spyOn(store, "writeInstallReceipt").mockRejectedValueOnce(new Error("receipt write failed"));
+    vi.spyOn(store, "writeInstallReceipt").mockImplementationOnce(async () => {
+      const registryDuringReceipt = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: Array<{ id: string }>;
+      };
+      expect(registryDuringReceipt.plugins.some((entry) => entry.id === "test-plugin")).toBe(false);
+      throw new Error("receipt write failed");
+    });
 
     await expect(service.installLocal(sourceDir)).rejects.toThrow("receipt write failed");
 
@@ -241,6 +247,46 @@ describe("PluginMarketplaceService.installLocal", () => {
 
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(reg.plugins).toHaveLength(0);
+  });
+
+  it("hides an existing entry until its replacement receipt is durable", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const oldReceipt = await readFile(
+      join(cacheRoot, "test-plugin", "install-receipt.json"),
+      "utf-8",
+    );
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "fixture v2",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+      "utf-8",
+    );
+    const store = (service as unknown as {
+      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+    }).artifactStore;
+    vi.spyOn(store, "writeInstallReceipt").mockImplementationOnce(async () => {
+      const registryDuringReceipt = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: Array<{ id: string }>;
+      };
+      expect(registryDuringReceipt.plugins.some((entry) => entry.id === "test-plugin")).toBe(false);
+      throw new Error("replacement receipt write failed");
+    });
+
+    await expect(service.installLocal(sourceDir)).rejects.toThrow("replacement receipt write failed");
+
+    const restoredRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string }>;
+    };
+    expect(restoredRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(true);
+    expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"))
+      .toBe(oldReceipt);
   });
 
   it("rollbackLocalInstall restores the previous install receipt with disk and registry state", async () => {

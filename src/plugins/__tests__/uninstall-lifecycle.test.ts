@@ -21,6 +21,7 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
           },
         },
       })),
+      addPlugin: vi.fn(async () => "started" as const),
       removePlugin: vi.fn(async () => undefined),
     },
     settingsService: {
@@ -110,6 +111,42 @@ describe("uninstallPluginWithLifecycle", () => {
       const removeOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
       const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
       expect(removeOrder).toBeLessThan(uninstallOrder);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("restores runtime before surfacing a durable uninstall failure", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-restore-"));
+    try {
+      const failure = Object.assign(new Error("locked by Windows handle"), { code: "EACCES" });
+      const deps = makeDeps("agent-hub", join(root, ".cache"), failure);
+
+      await expect(uninstallPluginWithLifecycle("agent-hub", deps)).rejects.toBe(failure);
+
+      expect(deps.pluginRuntime.addPlugin).toHaveBeenCalledWith("agent-hub");
+      expect(deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0])
+        .toBeLessThan(deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0]);
+      expect(deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0])
+        .toBeLessThan(deps.pluginRuntime.addPlugin.mock.invocationCallOrder[0]);
+      expect(deps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
+      expect(deps.emitHostEvent).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves uninstall and runtime restore failures", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-restore-fail-"));
+    try {
+      const uninstallFailure = new Error("uninstall failed");
+      const restoreFailure = new Error("runtime restore failed");
+      const deps = makeDeps("agent-hub", join(root, ".cache"), uninstallFailure);
+      deps.pluginRuntime.addPlugin.mockRejectedValueOnce(restoreFailure);
+
+      const error = await uninstallPluginWithLifecycle("agent-hub", deps).catch((caught) => caught);
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toEqual([uninstallFailure, restoreFailure]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
