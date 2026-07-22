@@ -293,6 +293,95 @@ describe("PluginMarketplaceService install()", () => {
     expect(existsSync(join(installedDir, "email", "plugin.json"))).toBe(true);
   }, 20_000);
 
+  it("serializes a standard install behind a managed retry paused during artifact promotion", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "managed-plugin",
+      slug: "managed-plugin",
+      name: "Managed Plugin",
+      description: "managed retry fixture",
+      version: "2.0.0",
+      packageSpec: "@lvis/managed-plugin@2.0.0",
+      packageName: "@lvis/managed-plugin",
+      installPolicy: "admin",
+      tools: [],
+    };
+    const manifest = {
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+      installPolicy: "admin",
+    };
+    const zipBuffer = makePluginZip(manifest);
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact,
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    const store = (service as unknown as {
+      artifactStore: {
+        extractZipWithCommit: (
+          slug: string,
+          zip: Buffer,
+          commit: (installDir: string, files: string[]) => Promise<unknown>,
+        ) => Promise<{ files: string[]; result: unknown }>;
+      };
+    }).artifactStore;
+    const originalExtract = store.extractZipWithCommit.bind(store);
+    let releasePromotion!: () => void;
+    const promotionGate = new Promise<void>((resolveGate) => { releasePromotion = resolveGate; });
+    let promotionStarted!: () => void;
+    const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
+    let pauseOnce = true;
+    vi.spyOn(store, "extractZipWithCommit").mockImplementation(async (slug, zip, commit) =>
+      originalExtract(slug, zip, async (installDir, files) => {
+        if (pauseOnce) {
+          pauseOnce = false;
+          promotionStarted();
+          await promotionGate;
+        }
+        return commit(installDir, files);
+      }),
+    );
+
+    const managedRetry = service.ensureManagedInstalled();
+    await promotionStartedPromise;
+    const standardInstall = service.install(plugin.id);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+
+    releasePromotion();
+    await expect(managedRetry).resolves.toEqual({
+      installed: [plugin.id],
+      updated: [],
+      failed: [],
+    });
+    await expect(standardInstall).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; installSource: string }>;
+    };
+    expect(registry.plugins).toEqual([
+      expect.objectContaining({ id: plugin.id, installSource: "admin" }),
+    ]);
+    expect(JSON.parse(await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8")))
+      .toMatchObject({ id: plugin.id, version: "2.0.0" });
+  }, 20_000);
+
   it("cleans a fresh extracted marketplace install when receipt finalization fails", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
@@ -345,6 +434,118 @@ describe("PluginMarketplaceService install()", () => {
     expect(existsSync(join(cacheRoot, "test-plugin", "install-receipt.json"))).toBe(false);
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins).toHaveLength(0);
+  });
+
+  it("rolls back fresh artifact and receipt when registry commit fails before publication", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/test-plugin@1.2.3",
+      packageName: "@lvis/test-plugin",
+      tools: ["ping"],
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const originalRegistry = await readFile(registryPath, "utf-8");
+    const { service } = makeService(fetcher);
+    vi.spyOn(
+      service as unknown as { commitMarketplaceRegistryEntry: (...args: unknown[]) => Promise<void> },
+      "commitMarketplaceRegistryEntry",
+    ).mockRejectedValueOnce(new Error("injected registry precommit failure"));
+
+    await expect(service.install(plugin.id)).rejects.toThrow("injected registry precommit failure");
+
+    expect(await readFile(registryPath, "utf-8")).toBe(originalRegistry);
+    expect(existsSync(join(installedDir, plugin.id))).toBe(false);
+    expect(existsSync(join(cacheRoot, plugin.id, "install-receipt.json"))).toBe(false);
+  });
+
+  it("restores replacement bytes and receipt when registry commit fails before publication", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.0.0",
+      packageSpec: "@lvis/test-plugin@1.0.0",
+      packageName: "@lvis/test-plugin",
+      tools: ["ping"],
+    };
+    let zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    const originalRegistry = await readFile(registryPath, "utf-8");
+    const originalManifest = await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8");
+    const originalReceipt = await readFile(
+      join(cacheRoot, plugin.id, "install-receipt.json"),
+      "utf-8",
+    );
+
+    plugin.version = "2.0.0";
+    zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    vi.spyOn(
+      service as unknown as { commitMarketplaceRegistryEntry: (...args: unknown[]) => Promise<void> },
+      "commitMarketplaceRegistryEntry",
+    ).mockRejectedValueOnce(new Error("injected replacement registry failure"));
+
+    await expect(service.install(plugin.id)).rejects.toThrow("injected replacement registry failure");
+
+    expect(await readFile(registryPath, "utf-8")).toBe(originalRegistry);
+    expect(await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8")).toBe(originalManifest);
+    expect(await readFile(join(cacheRoot, plugin.id, "install-receipt.json"), "utf-8"))
+      .toBe(originalReceipt);
   });
 
   it("reinstalls the same marketplace version when the install receipt is missing", async () => {
