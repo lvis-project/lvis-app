@@ -2,10 +2,9 @@ import { access } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   readPluginRegistry,
-  writePluginRegistry,
+  updatePluginRegistry,
 } from "../src/plugins/registry.js";
 import { resolvePluginPaths } from "../src/plugins/plugin-paths.js";
-import type { PluginRegistry } from "../src/plugins/types.js";
 
 // Round-3: env-tier override removed. Use the explicit `--plugins-root <path>`
 // flag for portable installs / CI sandbox isolation. Default is
@@ -61,22 +60,12 @@ function usage(): never {
   );
 }
 
-async function loadRegistry(): Promise<PluginRegistry> {
-  return readPluginRegistry(registryPath);
-}
-
-async function saveRegistry(registry: PluginRegistry): Promise<void> {
-  registry.plugins.sort((a, b) => a.id.localeCompare(b.id));
-  await writePluginRegistry(registryPath, registry);
-}
-
 async function run() {
   const command = cliArgs[0];
   if (!command) usage();
 
-  const registry = await loadRegistry();
-
   if (command === "list") {
+    const registry = await readPluginRegistry(registryPath);
     const rows = registry.plugins.map((plugin) => ({
       id: plugin.id,
       enabled: plugin.enabled !== false,
@@ -90,14 +79,14 @@ async function run() {
     const id = cliArgs[1];
     const manifestPath = cliArgs[2];
     if (!id || !manifestPath) usage();
-    if (registry.plugins.some((plugin) => plugin.id === id)) {
-      throw new Error(`Plugin already exists: ${id}`);
-    }
-
     const absoluteManifestPath = resolve(dirname(registryPath), manifestPath);
     await access(absoluteManifestPath);
-    registry.plugins.push({ id, manifestPath, enabled: true });
-    await saveRegistry(registry);
+    await updatePluginRegistry(registryPath, (registry) => {
+      if (registry.plugins.some((plugin) => plugin.id === id)) {
+        throw new Error(`Plugin already exists: ${id}`);
+      }
+      registry.plugins.push({ id, manifestPath, enabled: true });
+    });
     console.log(`Added plugin '${id}' -> ${manifestPath}`);
     return;
   }
@@ -105,12 +94,13 @@ async function run() {
   if (command === "remove") {
     const id = cliArgs[1];
     if (!id) usage();
-    const before = registry.plugins.length;
-    registry.plugins = registry.plugins.filter((plugin) => plugin.id !== id);
-    if (registry.plugins.length === before) {
-      throw new Error(`Plugin not found: ${id}`);
-    }
-    await saveRegistry(registry);
+    await updatePluginRegistry(registryPath, (registry) => {
+      const before = registry.plugins.length;
+      registry.plugins = registry.plugins.filter((plugin) => plugin.id !== id);
+      if (registry.plugins.length === before) {
+        throw new Error(`Plugin not found: ${id}`);
+      }
+    });
     console.log(`Removed plugin '${id}'`);
     return;
   }
@@ -118,12 +108,13 @@ async function run() {
   if (command === "enable" || command === "disable") {
     const id = cliArgs[1];
     if (!id) usage();
-    const target = registry.plugins.find((plugin) => plugin.id === id);
-    if (!target) {
-      throw new Error(`Plugin not found: ${id}`);
-    }
-    target.enabled = command === "enable";
-    await saveRegistry(registry);
+    await updatePluginRegistry(registryPath, (registry) => {
+      const target = registry.plugins.find((plugin) => plugin.id === id);
+      if (!target) {
+        throw new Error(`Plugin not found: ${id}`);
+      }
+      target.enabled = command === "enable";
+    });
     console.log(`${command === "enable" ? "Enabled" : "Disabled"} plugin '${id}'`);
     return;
   }
@@ -135,4 +126,3 @@ run().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
-

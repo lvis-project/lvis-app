@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 
 export interface InstallReceiptFile {
   path: string;
@@ -66,8 +67,7 @@ export async function writeInstallReceipt(
   receipt: PluginInstallReceipt,
 ): Promise<void> {
   const path = installReceiptPath(cacheRoot, receipt.pluginId);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(receipt, null, 2)}\n`, "utf-8");
+  writeUtf8FileAtomicSync(path, `${JSON.stringify(receipt, null, 2)}\n`, 0o600);
 }
 
 export async function verifyInstallReceipt(
