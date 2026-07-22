@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cleanupPendingPluginUpdateBackup,
@@ -12,7 +12,8 @@ import {
 } from "../marketplace-update-recovery.js";
 import { installReceiptPath } from "../plugin-install-receipt.js";
 import { preparePluginRegistryForBoot } from "../plugin-boot-recovery.js";
-import { readPluginRegistry } from "../registry.js";
+import { createRemovalTransaction, stageRemovalTransaction } from "../plugin-removal-transaction.js";
+import { readPluginRegistry, updatePluginRegistry } from "../registry.js";
 import { sweepOrphanUninstallDirs } from "../orphan-uninstall-sweeper.js";
 import type { PluginPaths } from "../plugin-paths.js";
 
@@ -92,12 +93,67 @@ describe("marketplace pending-update recovery", () => {
       }],
     }));
 
-    await expect(preparePluginRegistryForBoot(paths)).resolves.toEqual({ recovered: [], unresolved: [] });
+    await expect(preparePluginRegistryForBoot(paths)).resolves.toEqual({
+      recovered: [],
+      unresolved: [],
+      removals: { restored: [], cleaned: [], unresolved: [] },
+      pendingRecoverySkipped: false,
+    });
     const persisted = JSON.parse(await readFile(paths.registryPath, "utf-8")) as {
       plugins: Array<Record<string, unknown>>;
     };
     expect(persisted.plugins[0]).toEqual(expect.objectContaining({ installSource: "user" }));
     expect(persisted.plugins[0]).not.toHaveProperty("installedBy");
+  });
+
+  it("blocks pending cleanup while removal restore is unresolved, then restores before cleanup on retry", async () => {
+    const cleanupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await mkdir(cleanupDir);
+    await updatePluginRegistry(paths.registryPath, (registry) => {
+      registry.plugins[0]!.pendingCleanup = [{ kind: "obsolete-artifact", path: cleanupDir }];
+    });
+    const before = (await readPluginRegistry(paths.registryPath)).plugins;
+    const journal = await createRemovalTransaction(paths, {
+      kind: "uninstall",
+      pluginIds: [pluginId],
+      registryBefore: before,
+      registryAfter: [],
+      originals: [{ pluginId, path: join(paths.pluginsRoot, pluginId) }],
+    });
+    await stageRemovalTransaction(paths, journal);
+    const registryBytesBeforeBoot = await readFile(paths.registryPath, "utf-8");
+    const renamePath = vi.fn(async () => {
+      throw Object.assign(new Error("injected reverse rename failure"), { code: "EACCES" });
+    });
+
+    await expect(preparePluginRegistryForBoot(paths, {
+      removalReconcile: { renamePath, retry: { attempts: 1, sleep: async () => undefined } },
+    })).resolves.toEqual({
+      recovered: [],
+      unresolved: [],
+      removals: {
+        restored: [],
+        cleaned: [],
+        unresolved: [{
+          transactionId: journal.transactionId,
+          reason: "injected reverse rename failure",
+        }],
+      },
+      pendingRecoverySkipped: true,
+    });
+    expect(await readFile(paths.registryPath, "utf-8")).toBe(registryBytesBeforeBoot);
+    expect(existsSync(cleanupDir)).toBe(true);
+    expect(existsSync(journal.mappings[0]!.stagedPath)).toBe(true);
+
+    await expect(preparePluginRegistryForBoot(paths)).resolves.toEqual({
+      recovered: [pluginId],
+      unresolved: [],
+      removals: { restored: [journal.transactionId], cleaned: [], unresolved: [] },
+      pendingRecoverySkipped: false,
+    });
+    expect(existsSync(join(paths.pluginsRoot, pluginId, "plugin.json"))).toBe(true);
+    expect(existsSync(cleanupDir)).toBe(false);
+    expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingCleanup).toBeUndefined();
   });
 
   it("restores a retained old directory and receipt after a post-promotion crash", async () => {
@@ -217,6 +273,29 @@ describe("marketplace pending-update recovery", () => {
     expect(await readFile(unrelated, "utf-8")).toBe("keep");
     expect(existsSync(backupDir)).toBe(true);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "refuses predecessor recovery when the retained payload contains an unlisted executable symlink",
+    async () => {
+      const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+      const backupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+      await preparePendingPluginUpdate(paths, entry, {
+        kind: "marketplace",
+        recoveryBackupDir: backupDir,
+        recoveryBackupMode: "rename",
+      });
+      await rename(join(paths.pluginsRoot, pluginId), backupDir);
+      const outsideExecutable = join(root, "outside-executable");
+      await writeFile(outsideExecutable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      await symlink(outsideExecutable, join(backupDir, "dist", "injected-tool"));
+      await mkdir(join(paths.pluginsRoot, pluginId), { recursive: true });
+      await writeFile(join(paths.pluginsRoot, pluginId, "plugin.json"), "new payload");
+
+      expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [], unresolved: [pluginId] });
+      expect(existsSync(backupDir)).toBe(true);
+      expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingUpdate).toBeDefined();
+    },
+  );
 
   it("refuses recovery from a corrupted durable receipt snapshot", async () => {
     const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;

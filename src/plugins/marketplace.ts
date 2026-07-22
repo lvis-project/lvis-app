@@ -1527,7 +1527,7 @@ export class PluginMarketplaceService {
       originals: originals.filter((item) => existsSync(item.path)),
     });
     try {
-      await stageRemovalTransaction(journal);
+      await stageRemovalTransaction(this.paths, journal);
       await commitRegistry();
     } catch (error) {
       try {
@@ -1539,7 +1539,7 @@ export class PluginMarketplaceService {
     }
 
     try {
-      markRemovalTransactionRegistryCommitted(this.paths, journal);
+      await markRemovalTransactionRegistryCommitted(this.paths, journal);
       await finishRemovalTransaction(this.paths, journal);
     } catch (error) {
       log.warn(

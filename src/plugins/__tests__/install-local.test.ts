@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
@@ -225,6 +225,21 @@ describe("PluginMarketplaceService.installLocal", () => {
     const installDir = join(pluginsDir, "test-plugin");
     const result = await verifyInstallReceipt(cacheRoot, "test-plugin", installDir);
     expect(result.ok).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32")("rejects an unlisted executable symlink in the installed payload", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const outsideExecutable = join(testDir, "outside-executable");
+    await writeFile(outsideExecutable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const installDir = join(pluginsDir, "test-plugin");
+    await symlink(outsideExecutable, join(installDir, "dist", "injected-tool"));
+
+    const { verifyInstallReceipt } = await import("../plugin-install-receipt.js");
+    await expect(verifyInstallReceipt(cacheRoot, "test-plugin", installDir)).resolves.toEqual({
+      ok: false,
+      reason: expect.stringContaining("installed payload contains symbolic link: dist/injected-tool"),
+    });
   });
 
   it("cleans fresh local install dir, registry, and receipt when finalization fails", async () => {
