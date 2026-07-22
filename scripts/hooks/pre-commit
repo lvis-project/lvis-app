@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+# App-owned pre-commit hook (installed by scripts/hooks/install.mjs). Delegates
+# to the lvis-app-owned runner. Bypass once: git commit --no-verify, or
+# LVIS_HOOKS_SKIP=1.
+set -eu
+
+if [ "${LVIS_HOOKS_SKIP:-}" = "1" ] || [ "${SKIP_LVIS_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+RUNNER="$REPO_ROOT/scripts/hooks/run-local-checks.mjs"
+
+if command -v node >/dev/null 2>&1; then
+  exec node "$RUNNER" --stage pre-commit --repo "$REPO_ROOT"
+fi
+
+if command -v bun >/dev/null 2>&1; then
+  exec bun "$RUNNER" --stage pre-commit --repo "$REPO_ROOT"
+fi
+
+echo "[hooks] node or bun is required to run LVIS pre-commit checks." >&2
+exit 1
