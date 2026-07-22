@@ -35,7 +35,7 @@
   },
   "main": "dist/src/main/main.js",
   "scripts": {
-    "postinstall": "electron-rebuild --only better-sqlite3,node-pty && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs && node scripts/hooks/install.mjs",
+    "postinstall": "electron-rebuild --force --only better-sqlite3,node-pty && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs && node scripts/hooks/install.mjs",
     "build:main": "node scripts/build-main-esbuild.mjs",
     "build:webpack": "webpack --config webpack.config.cjs",
     "build:renderer": "webpack --config webpack.config.cjs --config-name renderer",
