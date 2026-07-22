@@ -11,6 +11,7 @@ import {
   recoverPendingPluginUpdates,
 } from "../marketplace-update-recovery.js";
 import { installReceiptPath } from "../plugin-install-receipt.js";
+import { preparePluginRegistryForBoot } from "../plugin-boot-recovery.js";
 import { readPluginRegistry } from "../registry.js";
 import { sweepOrphanUninstallDirs } from "../orphan-uninstall-sweeper.js";
 import type { PluginPaths } from "../plugin-paths.js";
@@ -79,6 +80,24 @@ describe("marketplace pending-update recovery", () => {
 
     expect(restarted).toEqual({ recovered: [pluginId], unresolved: [] });
     expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingUpdate).toBeUndefined();
+  });
+
+  it("persists legacy registry migration before boot recovery", async () => {
+    await writeFile(paths.registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: pluginId,
+        manifestPath: `${pluginId}/plugin.json`,
+        installedBy: "user",
+      }],
+    }));
+
+    await expect(preparePluginRegistryForBoot(paths)).resolves.toEqual({ recovered: [], unresolved: [] });
+    const persisted = JSON.parse(await readFile(paths.registryPath, "utf-8")) as {
+      plugins: Array<Record<string, unknown>>;
+    };
+    expect(persisted.plugins[0]).toEqual(expect.objectContaining({ installSource: "user" }));
+    expect(persisted.plugins[0]).not.toHaveProperty("installedBy");
   });
 
   it("restores a retained old directory and receipt after a post-promotion crash", async () => {
@@ -234,5 +253,68 @@ describe("marketplace pending-update recovery", () => {
     expect(await readFile(join(paths.pluginsRoot, pluginId, "plugin.json"), "utf-8")).toBe(oldManifest);
     expect(await readFile(join(paths.pluginsRoot, pluginId, "dist", "index.js"), "utf-8")).toBe(oldDist);
     expect((await readPluginRegistry(paths.registryPath)).plugins[0]?.pendingUpdate).toBeDefined();
+  });
+
+  it("keeps the original predecessor and grants across a crash during a superseding retry", async () => {
+    const originalBackup = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    const retryBackup = join(paths.pluginsRoot, `.${pluginId}.old-00000000-0000-4000-8000-000000000002`);
+    const original = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    original.approvedPluginAccess = { plugins: [{ pluginId: "trusted-peer", events: ["old.event"] }] };
+    await writeFile(paths.registryPath, JSON.stringify({ version: 1, plugins: [original] }));
+    await preparePendingPluginUpdate(paths, original, {
+      kind: "marketplace",
+      recoveryBackupDir: originalBackup,
+      recoveryBackupMode: "rename",
+    });
+    await rename(join(paths.pluginsRoot, pluginId), originalBackup);
+    await mkdir(join(paths.pluginsRoot, pluginId, "dist"), { recursive: true });
+    await writeFile(join(paths.pluginsRoot, pluginId, "plugin.json"), JSON.stringify({ id: pluginId, version: "2.0.0" }));
+    await writeFile(join(paths.pluginsRoot, pluginId, "dist", "index.js"), "unresolved v2");
+
+    const pendingBeforeRetry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    const originalPending = pendingBeforeRetry.pendingUpdate;
+    await preparePendingPluginUpdate(paths, pendingBeforeRetry, {
+      kind: "marketplace",
+      recoveryBackupDir: retryBackup,
+      recoveryBackupMode: "rename",
+    });
+    await rename(join(paths.pluginsRoot, pluginId), retryBackup);
+    await mkdir(join(paths.pluginsRoot, pluginId, "dist"), { recursive: true });
+    await writeFile(join(paths.pluginsRoot, pluginId, "plugin.json"), JSON.stringify({ id: pluginId, version: "3.0.0" }));
+    await writeFile(join(paths.pluginsRoot, pluginId, "dist", "index.js"), "unpublished v3");
+
+    const crashState = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    expect(crashState.pendingUpdate).toEqual(originalPending);
+    expect(crashState.pendingCleanup).toEqual([
+      { kind: "obsolete-artifact", path: retryBackup },
+    ]);
+    expect(crashState.approvedPluginAccess).toEqual(original.approvedPluginAccess);
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [pluginId], unresolved: [] });
+    const recovered = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    expect(await readFile(join(paths.pluginsRoot, pluginId, "plugin.json"), "utf-8")).toBe(oldManifest);
+    expect(recovered.approvedPluginAccess).toEqual(original.approvedPluginAccess);
+    expect(recovered.pendingUpdate).toBeUndefined();
+    expect(recovered.pendingCleanup).toBeUndefined();
+    expect(existsSync(retryBackup)).toBe(false);
+  });
+
+  it("reports unresolved when cleanup succeeds but pending recovery remains unresolved", async () => {
+    const entry = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    await preparePendingPluginUpdate(paths, entry, { kind: "marketplace" });
+    await writeFile(join(paths.pluginsRoot, pluginId, "dist", "index.js"), "corrupted");
+    const cleanupDir = join(paths.pluginsRoot, `.${pluginId}.old-${backupSuffix}`);
+    await mkdir(cleanupDir);
+    const registry = JSON.parse(await readFile(paths.registryPath, "utf-8")) as {
+      plugins: Array<{ pendingCleanup?: unknown }>;
+    };
+    registry.plugins[0]!.pendingCleanup = [{ kind: "obsolete-artifact", path: cleanupDir }];
+    await writeFile(paths.registryPath, JSON.stringify(registry));
+
+    expect(await recoverPendingPluginUpdates(paths)).toEqual({ recovered: [], unresolved: [pluginId] });
+    const unresolved = (await readPluginRegistry(paths.registryPath)).plugins[0]!;
+    expect(unresolved.pendingUpdate).toBeDefined();
+    expect(unresolved.pendingCleanup).toBeUndefined();
+    expect(existsSync(cleanupDir)).toBe(false);
   });
 });

@@ -424,12 +424,12 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       plugins: [{
         id: "calendar",
         manifestPath: "calendar/plugin.json",
-        pendingCleanup: { kind: "obsolete-artifact", path: join(tmpDir, ".calendar.old-backup") },
+        pendingCleanup: [{ kind: "obsolete-artifact", path: join(tmpDir, ".calendar.old-backup") }],
       }],
     }));
     await expect(readPluginRegistry(registryPath)).resolves.toEqual(expect.objectContaining({
       plugins: [expect.objectContaining({
-        pendingCleanup: expect.objectContaining({ kind: "obsolete-artifact" }),
+        pendingCleanup: [expect.objectContaining({ kind: "obsolete-artifact" })],
       })],
     }));
 
@@ -438,7 +438,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       plugins: [{
         id: "calendar",
         manifestPath: "calendar/plugin.json",
-        pendingCleanup: { kind: "rollback", path: "unsafe", restore: true },
+        pendingCleanup: [{ kind: "rollback", path: "unsafe", restore: true }],
       }],
     }));
     await expect(readPluginRegistry(registryPath)).rejects.toThrow(/pending cleanup/);

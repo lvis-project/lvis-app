@@ -120,19 +120,43 @@ export async function verifyInstallReceiptRaw(
   pluginId: string,
   pluginRoot: string,
 ): Promise<{ ok: true; receipt: PluginInstallReceipt } | { ok: false; reason: string }> {
-  let parsed: PluginInstallReceiptV1 | PluginInstallReceipt;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw) as PluginInstallReceiptV1 | PluginInstallReceipt;
+    parsed = JSON.parse(raw) as unknown;
   } catch (err) {
     return { ok: false, reason: `install receipt unreadable: ${(err as Error).message}` };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, reason: "install receipt must be a JSON object" };
+  }
+  const candidate = parsed as Record<string, unknown>;
+  if (typeof candidate.pluginId !== "string"
+    || typeof candidate.version !== "string"
+    || candidate.version.length === 0
+    || typeof candidate.installedAt !== "string"
+    || !Array.isArray(candidate.files)
+    || candidate.files.length === 0) {
+    return { ok: false, reason: "install receipt has invalid required fields" };
+  }
+  for (const file of candidate.files) {
+    if (!file || typeof file !== "object" || Array.isArray(file)
+      || typeof (file as Record<string, unknown>).path !== "string"
+      || typeof (file as Record<string, unknown>).sha256 !== "string"
+      || !/^[a-f0-9]{64}$/.test((file as Record<string, unknown>).sha256 as string)) {
+      return { ok: false, reason: "install receipt has invalid file hash entries" };
+    }
   }
 
   // Normalise v1 → v2.
   // v1 receipts with signerKeyId starting with "dev:" were written by the
   // old installLocal sentinel — treat them as local-dev installs.
   let receipt: PluginInstallReceipt;
-  if (parsed.schemaVersion === 1) {
-    const v1 = parsed as PluginInstallReceiptV1;
+  if (candidate.schemaVersion === 1) {
+    const v1 = candidate as unknown as PluginInstallReceiptV1;
+    if (typeof v1.artifactSha256 !== "string") {
+      return { ok: false, reason: "legacy install receipt has invalid artifactSha256" };
+    }
     // Guard against corrupted receipts where signerKeyId is missing at runtime.
     const rawSigner = (v1 as { signerKeyId?: unknown }).signerKeyId;
     const installSource: "marketplace" | "local-dev" =
@@ -147,15 +171,15 @@ export async function verifyInstallReceiptRaw(
       installedAt: v1.installedAt,
       files: v1.files,
     };
-  } else if (parsed.schemaVersion === 2) {
-    const v2 = parsed as PluginInstallReceipt;
+  } else if (candidate.schemaVersion === 2) {
+    const v2 = candidate as unknown as PluginInstallReceipt;
     // Runtime enum validation — JSON.parse+as-cast cannot enforce union literals.
     if (v2.installSource !== "marketplace" && v2.installSource !== "local-dev") {
       return { ok: false, reason: `invalid receipt installSource: ${String(v2.installSource)}` };
     }
     receipt = v2;
   } else {
-    return { ok: false, reason: `unsupported install receipt schema: ${String((parsed as { schemaVersion?: unknown }).schemaVersion)}` };
+    return { ok: false, reason: `unsupported install receipt schema: ${String(candidate.schemaVersion)}` };
   }
 
   if (receipt.pluginId !== pluginId) {

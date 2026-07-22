@@ -42,7 +42,7 @@ import { app, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { resolve } from "node:path";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
-import { recoverPendingPluginUpdates } from "./plugins/marketplace-update-recovery.js";
+import { preparePluginRegistryForBoot } from "./plugins/plugin-boot-recovery.js";
 import { purgeStaleSessionDiffDirs, clearSessionDiffCache } from "./tools/write-diff-cache.js";
 import { resolvePluginPaths } from "./plugins/plugin-paths.js";
 import { StarredStore } from "./data/starred-store.js";
@@ -231,7 +231,7 @@ export async function bootstrap(
   // pending row is visible to bundle planners but hidden from runtime loading;
   // recovery clears it only after exact prior bytes + receipt are proven or
   // restored from its durable backup metadata.
-  await recoverPendingPluginUpdates(sweeperPluginPaths)
+  await preparePluginRegistryForBoot(sweeperPluginPaths)
     .then(({ recovered, unresolved }) => {
       if (recovered.length > 0 || unresolved.length > 0) {
         log.info(
@@ -251,7 +251,7 @@ export async function bootstrap(
       }
     })
     .catch((err) => {
-      log.warn("boot: plugin-update-recovery failed (pending rows remain hidden): %s", (err as Error).message);
+      log.warn("boot: plugin migration/recovery failed (pending rows remain hidden): %s", (err as Error).message);
     });
   void sweepOrphanUninstallDirs(sweeperPluginPaths.pluginsRoot, {
     auditFailures: (failures) => {
