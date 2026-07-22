@@ -888,18 +888,18 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     };
     expect(registry.plugins).toEqual([
       {
-        id: "meeting",
-        manifestPath: "installed/meeting/plugin.json",
-        enabled: true,
-        installSource: "user",
-        bundleRefs: ["other-bundle"],
-      },
-      {
         id: "calendar",
         manifestPath: "installed/calendar/plugin.json",
         enabled: true,
         installSource: "admin",
         bundleRefs: [],
+      },
+      {
+        id: "meeting",
+        manifestPath: "installed/meeting/plugin.json",
+        enabled: true,
+        installSource: "user",
+        bundleRefs: ["other-bundle"],
       },
     ]);
   });
