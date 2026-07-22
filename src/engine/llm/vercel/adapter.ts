@@ -66,6 +66,12 @@ const OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE: Readonly<Record<string, string>>
     ]),
   );
 /** Detect OpenAI reasoning-model families (Responses API + reasoning_effort support). */
+// Idle ceiling for a streamed response: if no delta arrives within this window
+// the provider stream is treated as stalled and aborted (a hung proxy / dropped
+// upstream would otherwise block the turn forever). Re-armed on every delta, so
+// only a genuine stall — not slow first-token reasoning — trips it.
+const STREAM_IDLE_CEILING_MS = 300_000;
+
 export function isOpenAIReasoningModel(model: string): boolean {
   const m = model.toLowerCase();
   return (
@@ -90,6 +96,21 @@ export function mapReasoningEffort(
   if (budget <= 3000) return "low";
   if (budget > 8000) return "high";
   return "medium";
+}
+
+/**
+ * Whether a model accepts `reasoning_effort: "none"`. Only GPT-5.2+ (and later
+ * GPT majors) support it; o-series (o1/o3/o4) and GPT-5.0/5.1 reject it with a
+ * 400. `mapReasoningEffort` can emit "none" for tiny budgets, so callers must
+ * clamp it to "low" for models without the capability.
+ */
+export function supportsReasoningEffortNone(model: string): boolean {
+  const m = model.toLowerCase();
+  const gpt5 = m.match(/gpt-5(?:\.(\d+))?/);
+  if (gpt5) return Number(gpt5[1] ?? "0") >= 2;
+  const gptMajor = m.match(/gpt-(\d+)/);
+  if (gptMajor) return Number(gptMajor[1]) >= 6;
+  return false;
 }
 
 /**
@@ -228,7 +249,13 @@ export class VercelUnifiedProvider implements LLMProvider {
       // Reasoning effort (OpenAI family). Only passed through providerOptions
       // when the model actually supports it.
       const budget = params.thinkingBudgetTokens ?? 10_000;
-      const reasoningEffort = mapReasoningEffort(budget);
+      const rawReasoningEffort = mapReasoningEffort(budget);
+      // "none" is GPT-5.2+ only; clamp to "low" for o-series / GPT-5.0-5.1,
+      // which return 400 when sent reasoning_effort: "none".
+      const reasoningEffort =
+        rawReasoningEffort === "none" && !supportsReasoningEffortNone(params.model)
+          ? "low"
+          : rawReasoningEffort;
       const isOpenAIReasoning =
         (slot === "openai" || slot === "copilot" || slot === "azure-foundry") &&
         isOpenAIReasoningModel(params.model);
@@ -355,6 +382,23 @@ export class VercelUnifiedProvider implements LLMProvider {
             ? smoothStream({ chunking: /./u })
             : undefined;
 
+      // Idle ceiling: compose the caller's abortSignal with an idle-deadline
+      // controller so a stalled provider stream (no deltas) aborts instead of
+      // hanging the turn forever. resetIdleTimer() re-arms on every delta below.
+      const idleController = new AbortController();
+      const abortSignal = params.abortSignal
+        ? AbortSignal.any([params.abortSignal, idleController.signal])
+        : idleController.signal;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const resetIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          idleController.abort(
+            new DOMException("provider stream idle ceiling exceeded", "TimeoutError"),
+          );
+        }, STREAM_IDLE_CEILING_MS);
+      };
+
       // Wrap streamText() in try/catch to also capture synchronous construction
       // errors (e.g. APICallError thrown pre-stream), not just mid-stream errors.
       let fullStream: AsyncIterable<Record<string, unknown> & { type: string }>;
@@ -371,7 +415,7 @@ export class VercelUnifiedProvider implements LLMProvider {
           messages,
           ...(tools ? { tools } : {}),
           ...(transform ? { experimental_transform: transform } : {}),
-          ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+          abortSignal,
           ...(providerOptions
             ? {
                 providerOptions: providerOptions as Parameters<
@@ -402,8 +446,14 @@ export class VercelUnifiedProvider implements LLMProvider {
       const restoredEvents = useOpenAIResponsesAliases
         ? restoreStreamEventsFromOpenAIResponses(streamEvents)
         : streamEvents;
-      for await (const event of restoredEvents) {
-        yield event;
+      resetIdleTimer();
+      try {
+        for await (const event of restoredEvents) {
+          resetIdleTimer();
+          yield event;
+        }
+      } finally {
+        if (idleTimer) clearTimeout(idleTimer);
       }
     } catch (err) {
       const mapped = mapAiSdkErrorToLvis(err);
