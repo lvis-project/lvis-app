@@ -4,3 +4,8 @@ build/**/*.txt text eol=lf
 build/*.svg text eol=lf
 build/*.ico binary
 resources/AGENTS.md* text eol=lf
+
+# App-owned git hook shims must stay LF (sh chokes on CRLF shebangs)
+scripts/hooks/pre-commit text eol=lf
+scripts/hooks/pre-push text eol=lf
+scripts/hooks/*.mjs text eol=lf
