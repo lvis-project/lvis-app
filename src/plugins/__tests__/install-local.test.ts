@@ -236,7 +236,7 @@ describe("PluginMarketplaceService.installLocal", () => {
       const registryDuringReceipt = JSON.parse(await readFile(registryPath, "utf-8")) as {
         plugins: Array<{ id: string }>;
       };
-      expect(registryDuringReceipt.plugins.some((entry) => entry.id === "test-plugin")).toBe(false);
+      expect(registryDuringReceipt.plugins).toEqual([]);
       throw new Error("receipt write failed");
     });
 
@@ -273,9 +273,14 @@ describe("PluginMarketplaceService.installLocal", () => {
     }).artifactStore;
     vi.spyOn(store, "writeInstallReceipt").mockImplementationOnce(async () => {
       const registryDuringReceipt = JSON.parse(await readFile(registryPath, "utf-8")) as {
-        plugins: Array<{ id: string }>;
+        plugins: Array<{ id: string; pendingUpdate?: { kind: string } }>;
       };
-      expect(registryDuringReceipt.plugins.some((entry) => entry.id === "test-plugin")).toBe(false);
+      expect(registryDuringReceipt.plugins).toEqual([
+        expect.objectContaining({
+          id: "test-plugin",
+          pendingUpdate: expect.objectContaining({ kind: "local-dev" }),
+        }),
+      ]);
       throw new Error("replacement receipt write failed");
     });
 
@@ -328,9 +333,14 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(retained?.backupDir).toBeTruthy();
     expect(existsSync(retained!.backupDir!)).toBe(true);
     const hiddenRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ id: string }>;
+      plugins: Array<{ id: string; pendingUpdate?: { kind: string } }>;
     };
-    expect(hiddenRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(false);
+    expect(hiddenRegistry.plugins).toEqual([
+      expect.objectContaining({
+        id: "test-plugin",
+        pendingUpdate: expect.objectContaining({ kind: "local-dev" }),
+      }),
+    ]);
 
     await expect(service.rollbackLocalInstall("test-plugin")).resolves.toEqual({
       pluginId: "test-plugin",
@@ -450,6 +460,7 @@ describe("PluginMarketplaceService.installLocal", () => {
               manifestPath: "test-plugin/plugin.json",
               enabled: true,
               installSource: "local-dev",
+              bundleRefs: ["work-assistant"],
             },
           ],
         },
@@ -483,5 +494,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     const entry = reg.plugins.find((p: { id: string }) => p.id === "test-plugin");
     expect(entry.approvedPluginAccess).toEqual(accessSpec);
     expect(entry.installSource).toBe("local-dev");
+    expect(entry.bundleRefs).toEqual(["work-assistant"]);
+    expect(entry.pendingUpdate).toBeUndefined();
   });
 });

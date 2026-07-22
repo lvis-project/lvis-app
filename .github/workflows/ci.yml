@@ -153,6 +153,7 @@ jobs:
           src/plugins/__tests__/registry-atomicity.test.ts
           src/plugins/__tests__/registry-migration.test.ts
           src/plugins/__tests__/installed-entry-fs.test.ts
+          src/plugins/__tests__/plugin-artifact-store-windows-lock.test.ts
           src/plugins/__tests__/marketplace-managed-bootstrap.test.ts
           src/plugins/__tests__/trust-boundary.test.ts
 
