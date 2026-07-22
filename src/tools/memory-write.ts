@@ -20,6 +20,24 @@ export const MEMORY_WRITE_MAX_CONTENT_CHARS = 8_000;
  */
 export const MEMORY_WRITE_RESERVED_MARKER_PATTERN = /<!--\s*lvis:/i;
 
+/**
+ * True if `title` contains a C0 control character (code point below 0x20) or
+ * DEL (0x7F). The store embeds the RAW title into the persisted markdown heading
+ * (`# ${title}`), so a newline in the title would let it open a fresh line — the
+ * precondition for splitting a reserved marker across the title/content seam,
+ * where the store's join and the parser's whitespace-tolerance reassemble it on
+ * re-read. A memory title is a single-line label, so control characters are
+ * always illegitimate here; forbidding them removes that line-injection vector
+ * (checked with code points to avoid a control-character regex literal).
+ */
+export function memoryWriteTitleHasControlChar(title: string): boolean {
+  for (const char of title) {
+    const code = char.codePointAt(0);
+    if (code !== undefined && (code < 0x20 || code === 0x7f)) return true;
+  }
+  return false;
+}
+
 /** Narrow slice of MemoryManager the tool needs — keeps the dep surface minimal. */
 export type MemoryWriteStore = Pick<MemoryManager, "saveMemory">;
 
@@ -94,6 +112,21 @@ export function createMemoryWriteTool(deps: MemoryWriteToolDeps): Tool {
           isError: true,
         };
       }
+      // A title is a single-line label. Reject control characters (esp.
+      // newlines) so the raw title cannot open a new line in the stored file and
+      // supply a line-start `<!--` that the reserved-marker parser would then
+      // bridge to a `lvis:` prefix at the start of content (cross-field split).
+      if (memoryWriteTitleHasControlChar(title)) {
+        return {
+          output:
+            "memory_write: title must be a single-line label without control characters or line breaks.",
+          isError: true,
+        };
+      }
+      // With title newlines forbidden, the store parser can only ever see a
+      // line-start marker that lies wholly inside `content`; this whitespace-
+      // tolerant, case-insensitive check (a superset of the store's own parser)
+      // rejects any such marker in either field.
       if (
         MEMORY_WRITE_RESERVED_MARKER_PATTERN.test(title) ||
         MEMORY_WRITE_RESERVED_MARKER_PATTERN.test(content)
