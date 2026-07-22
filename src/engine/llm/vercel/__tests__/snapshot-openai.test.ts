@@ -14,7 +14,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { collectStreamEvents as collect } from "./test-helpers.js";
 import type { StreamEvent } from "../../types.js";
-import { mapReasoningEffort, isOpenAIReasoningModel } from "../adapter.js";
+import {
+  mapReasoningEffort,
+  isOpenAIReasoningModel,
+  supportsReasoningEffortNone,
+} from "../adapter.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../../tools/registry.js";
 
 
@@ -39,6 +43,143 @@ describe("VercelUnifiedProvider openai — reasoning_effort mapping", () => {
     expect(isOpenAIReasoningModel("o4-mini")).toBe(true);
     expect(isOpenAIReasoningModel("gpt-4.1")).toBe(false);
     expect(isOpenAIReasoningModel("gpt-4o")).toBe(false);
+  });
+
+  it("gates reasoning_effort 'none' to GPT-5.2+ only", () => {
+    // supported: gpt-5.2 and later minors, and future GPT majors
+    expect(supportsReasoningEffortNone("gpt-5.2")).toBe(true);
+    expect(supportsReasoningEffortNone("gpt-5.4-mini")).toBe(true);
+    expect(supportsReasoningEffortNone("gpt-6")).toBe(true);
+    // unsupported: gpt-5.0/5.1, bare gpt-5, and every o-series → they 400 on "none"
+    expect(supportsReasoningEffortNone("gpt-5")).toBe(false);
+    expect(supportsReasoningEffortNone("gpt-5.1")).toBe(false);
+    expect(supportsReasoningEffortNone("o1")).toBe(false);
+    expect(supportsReasoningEffortNone("o3-mini")).toBe(false);
+    expect(supportsReasoningEffortNone("o4-mini")).toBe(false);
+  });
+});
+
+describe("VercelUnifiedProvider — reasoning_effort 'none' clamp (#1574)", () => {
+  const captureProviderOptions = async (
+    model: string,
+    thinkingBudgetTokens: number,
+  ): Promise<Record<string, unknown> | undefined> => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      stream: (async function* () {
+        yield { type: "text-delta", id: "t1", text: "ok" };
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai", () => ({
+      createOpenAI: () => ({
+        responses: vi.fn(() => ({ __mock: "responses" })),
+        chat: vi.fn(() => ({ __mock: "chat" })),
+      }),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    // Copilot (Chat Completions, non-tool) passes reasoning_effort through.
+    const provider = new VercelUnifiedProvider("copilot", "test-key");
+    await collect(
+      provider.streamTurn({
+        model,
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+        enableThinking: true,
+        thinkingBudgetTokens,
+      }),
+    );
+    const callArg = streamTextSpy.mock.calls[0]![0] as {
+      providerOptions?: { openai?: { reasoningEffort?: string } };
+    };
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai");
+    return callArg.providerOptions?.openai;
+  };
+
+  it("clamps a tiny budget from 'none' to 'low' for models without the capability", async () => {
+    // budget 100 → mapReasoningEffort "none"; gpt-5-mini can't take it → "low"
+    const openai = await captureProviderOptions("gpt-5-mini", 100);
+    expect(openai?.reasoningEffort).toBe("low");
+  });
+
+  it("keeps 'none' for GPT-5.2+ which supports it", async () => {
+    const openai = await captureProviderOptions("gpt-5.2-mini", 100);
+    expect(openai?.reasoningEffort).toBe("none");
+  });
+});
+
+describe("VercelUnifiedProvider — stream idle ceiling (#1574)", () => {
+  it("aborts a stalled provider stream after the idle ceiling", async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return {
+        ...actual,
+        streamText: vi.fn(
+          (opts: { abortSignal?: AbortSignal }) => ({
+            stream: (async function* () {
+              yield { type: "text-delta", id: "t1", text: "partial" };
+              // Stall until the composed abortSignal (idle ceiling) fires.
+              await new Promise((_resolve, reject) => {
+                const s = opts.abortSignal;
+                if (s?.aborted) {
+                  reject(s.reason ?? new Error("aborted"));
+                  return;
+                }
+                s?.addEventListener(
+                  "abort",
+                  () => reject(s.reason ?? new Error("aborted")),
+                  { once: true },
+                );
+              });
+            })(),
+          }),
+        ),
+      };
+    });
+    vi.doMock("@ai-sdk/openai", () => ({
+      createOpenAI: () => ({
+        responses: vi.fn(() => ({ __mock: "responses" })),
+        chat: vi.fn(() => ({ __mock: "chat" })),
+      }),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider("openai", "test-key");
+
+    const events: StreamEvent[] = [];
+    const drain = (async () => {
+      for await (const event of provider.streamTurn({
+        model: "gpt-5.4-mini",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        events.push(event);
+      }
+    })();
+
+    // Flush the first delta (arms the idle timer), then jump past the ceiling.
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(300_001);
+    await drain;
+    vi.useRealTimers();
+
+    expect(events.some((e) => e.type === "text_delta")).toBe(true);
+    expect(events.at(-1)?.type).toBe("error");
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai");
   });
 });
 
