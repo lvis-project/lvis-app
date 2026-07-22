@@ -143,6 +143,16 @@ function writeUtf8FileAtomicSyncInternal(
     fsyncSync(fd);
     closeSync(fd);
     fd = undefined;
+    // Accepted residual (#1640): precondition() and renameSync() are adjacent
+    // synchronous syscalls, not a filesystem-wide compare-and-swap — a same-user
+    // external editor could replace `filePath` in the gap. We deliberately do
+    // NOT add an advisory-lock layer: no portable macOS/Windows/Linux CAS
+    // primitive exists, and a lockfile would contradict the single-chokepoint
+    // design (one fail-closed staging path, not stacked defenses). Severity is
+    // Minor — the window only yields whole-file last-writer-wins, never a
+    // partial/corrupt file or an outside-path write, and precondition mismatches
+    // still fail closed above. Pinned by the residual-window test in
+    // atomic-file.test.ts.
     if (precondition && !precondition()) return false;
     renameSync(tempPath, filePath);
     committed = true;
