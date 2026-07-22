@@ -2279,6 +2279,14 @@ export class SubAgentRunner {
     let assistantRounds = 0;
 
     try {
+      // Subagent lifecycle parity (#811): fire SubagentStart on the child loop
+      // before its spawn run and SubagentStop in the finally. Observe-only and
+      // fail-soft (runLifecycleEvent swallows-and-continues), so a hook can
+      // never wedge or fail the spawn.
+      await child.fireLifecycleEvent("SubagentStart", {
+        agentId: input.spawnId,
+        agentType: input.profileMode,
+      });
       // C3(a): pass `maxRounds` so queryLoop terminates cleanly between
       // rounds — the previous abortCurrentTurn() approach only halted the
       // next streaming response, leaving in-flight tool calls to run.
@@ -2353,6 +2361,12 @@ export class SubAgentRunner {
       }
     } finally {
       unregisterSpawnChild();
+      // SubagentStop — fires once whether the run completed, errored, or
+      // aborted (the subagent has stopped either way). Observe-only/fail-soft.
+      await child.fireLifecycleEvent("SubagentStop", {
+        agentId: input.spawnId,
+        agentType: input.profileMode,
+      });
     }
 
     if (cancellation.signal.aborted) {

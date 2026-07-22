@@ -148,6 +148,8 @@ describe("parseHookConfig — lifecycle event keys recognized (#811 m2)", () => 
     ["Stop"],
     ["PreCompact"],
     ["PostCompact"],
+    ["SubagentStart"],
+    ["SubagentStop"],
   ])("maps lifecycle event %s to itself with no warning", (eventKey) => {
     const r = parseHookConfig({
       hooks: {
