@@ -43,9 +43,8 @@ function canUseSettingsWithoutApiKey(
  * LLM settings cache hook.
  *
  * Centralises the chat-input-bar's read-through cache of LLM provider/model/
- * thinking toggle, plus the context-overflow provider/model snapshot loaded
- * once at mount. Exposes a `refresh` callback invoked after SettingsContent
- * saves so the chat bar reflects changes without a restart.
+ * thinking state. Settings broadcasts are authoritative so provider changes
+ * from detached windows and marketplace installs take effect without a restart.
  */
 export interface UseSettingsResult {
   /** Cached provider — narrowed to the LLMVendor union. */
@@ -56,8 +55,6 @@ export interface UseSettingsResult {
   enableThinkingChat: boolean;
   /** True when the active vendor can run with no stored API key. */
   llmReadyWithoutApiKey: boolean;
-  /** One-shot snapshot of {provider, model} used for context overflow %. */
-  currentLlmSettings: { provider: LLMVendor; model: string } | null;
   /** Re-read settings from disk (call after SettingsContent save). */
   refresh: () => Promise<void>;
   /** Persist + optimistically update the thinking toggle. */
@@ -69,54 +66,59 @@ export function useSettings(api: LvisApi): UseSettingsResult {
   const [llmModel, setLlmModel] = useState<string>("");
   const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
   const [llmReadyWithoutApiKey, setLlmReadyWithoutApiKey] = useState(false);
-  const [currentLlmSettings, setCurrentLlmSettings] = useState<
-    { provider: LLMVendor; model: string } | null
-  >(null);
-
   // Guard late callbacks firing after unmount (matches pattern in renderer.tsx
-  // where setCurrentLlmSettings used isMountedRef before this extraction).
+  // where this state lived before the hook extraction).
   const isMountedRef = useRef(true);
+  const snapshotRevisionRef = useRef(0);
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
   }, []);
 
-  // External-boundary validation lives in the module-scope `narrowVendor`
-  // helper above. Each call site below applies it to the IPC-loaded
-  // `s.llm.provider` so the renderer never holds a vendor outside the
-  // LLMVendor union.
-  const refresh = useCallback(async () => {
-    try {
-      const s = await api.getSettings();
+  const applySettingsSnapshot = useCallback(
+    (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
       if (!isMountedRef.current) return;
-      const provider = narrowVendor(s.llm.provider);
-      const block = getLlmVendorSettings(s.llm.vendors, provider);
+      const provider = narrowVendor(settings.llm.provider);
+      const block = getLlmVendorSettings(settings.llm.vendors, provider);
       setLlmVendor(provider);
       setLlmModel(block.model);
       setEnableThinkingChat(block.enableThinking);
-      setLlmReadyWithoutApiKey(canUseSettingsWithoutApiKey(s, provider));
+      setLlmReadyWithoutApiKey(canUseSettingsWithoutApiKey(settings, provider));
+    },
+    [],
+  );
+
+  const refresh = useCallback(async () => {
+    const revisionAtReadStart = snapshotRevisionRef.current;
+    try {
+      const settings = await api.getSettings();
+      if (revisionAtReadStart !== snapshotRevisionRef.current) return;
+      applySettingsSnapshot(settings);
     } catch {
       /* ignore */
     }
-  }, [api]);
+  }, [api, applySettingsSnapshot]);
 
-  // Mount: load vendor/model/thinking cache + context overflow snapshot in one call.
+  // Subscribe before the initial read so a cross-window update cannot be missed
+  // between getSettings() and listener registration. The revision guard prevents
+  // a slow initial read from overwriting a newer broadcast snapshot.
   useEffect(() => {
+    const unsubscribe = api.onSettingsUpdated((settings) => {
+      snapshotRevisionRef.current += 1;
+      applySettingsSnapshot(settings);
+    });
+    const revisionAtReadStart = snapshotRevisionRef.current;
     void api
       .getSettings()
-      .then((s) => {
-        if (!isMountedRef.current) return;
-        const provider = narrowVendor(s.llm.provider);
-        const block = getLlmVendorSettings(s.llm.vendors, provider);
-        setLlmVendor(provider);
-        setLlmModel(block.model);
-        setEnableThinkingChat(block.enableThinking);
-        setLlmReadyWithoutApiKey(canUseSettingsWithoutApiKey(s, provider));
-        setCurrentLlmSettings({ provider, model: block.model });
+      .then((settings) => {
+        if (revisionAtReadStart !== snapshotRevisionRef.current) return;
+        applySettingsSnapshot(settings);
       })
       .catch(() => {});
-  }, [api]);
+    return unsubscribe;
+  }, [api, applySettingsSnapshot]);
 
   const toggleThinking = useCallback(
     async (next: boolean) => {
@@ -146,7 +148,6 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     llmModel,
     enableThinkingChat,
     llmReadyWithoutApiKey,
-    currentLlmSettings,
     refresh,
     toggleThinking,
   };
