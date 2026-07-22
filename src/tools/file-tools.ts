@@ -209,6 +209,89 @@ export class ReadFileTool extends FileTool<typeof ReadFileInputSchema> {
   }
 }
 
+/** Per-image byte ceiling — Anthropic rejects images larger than 5 MB. */
+const VIEW_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Sniff a supported raster image type by magic bytes (the Anthropic-accepted
+ * set). Returns the IANA media type or null when the bytes are not one of them —
+ * we never trust the file extension for a payload the model will see.
+ */
+function detectImageMime(buf: Buffer): string | null {
+  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return "image/png";
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (buf.length >= 4 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) {
+    return "image/gif";
+  }
+  if (
+    buf.length >= 12 &&
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return null;
+}
+
+export const ViewImageInputSchema = FilePathSchema;
+
+/**
+ * `view_image` — load a local image file into the model's context so it can see
+ * it. Reuses the same path-scope security as read_file (resolvePath +
+ * ensureAllowed). The image rides {@link ToolResult.image}; the text `output` is
+ * a placeholder, and the message mapper turns the image into a visible block on
+ * Claude (dropped to the placeholder on vendors whose tool results are text-only).
+ */
+export class ViewImageTool extends FileTool<typeof ViewImageInputSchema> {
+  readonly name = "view_image";
+  readonly description =
+    "Load a local image file (png, jpeg, gif, or webp, max 5 MB) into your context so you can see " +
+    "it. Give the file path; the image is returned to you visually. Use this when you need to look " +
+    "at a screenshot, diagram, or picture on disk.";
+  readonly inputSchema = ViewImageInputSchema;
+  override readonly category: ToolCategory = "read";
+
+  override isReadOnly(): boolean {
+    return true;
+  }
+
+  protected async executeTyped(
+    input: z.infer<typeof ViewImageInputSchema>,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolResult> {
+    const target = this.resolvePath(input.path, ctx);
+    const blocked = this.ensureAllowed(target, ctx);
+    if (blocked) return blocked;
+
+    const fileStat = await statFile(target);
+    if (!fileStat.ok) return fileStat.error;
+    if (!fileStat.value.isFile()) {
+      return toolError(`view_image requires a regular file: ${target}`);
+    }
+    if (fileStat.value.size > VIEW_IMAGE_MAX_BYTES) {
+      return toolError(
+        `view_image: image is ${fileStat.value.size} bytes, over the ${VIEW_IMAGE_MAX_BYTES}-byte (5 MB) limit: ${target}`,
+      );
+    }
+
+    const buf = await readFile(target);
+    const mimeType = detectImageMime(buf);
+    if (mimeType === null) {
+      return toolError(`view_image: not a supported image (png, jpeg, gif, webp): ${target}`);
+    }
+
+    return {
+      output: JSON.stringify({ path: target, mimeType, bytes: buf.length, loaded: true }),
+      isError: false,
+      image: { data: buf.toString("base64"), mimeType, bytes: buf.length },
+    };
+  }
+}
+
 export class ListFilesTool extends FileTool<typeof ListFilesInputSchema> {
   readonly name = "list_files";
   readonly description =
@@ -617,6 +700,7 @@ export class DeleteFileTool extends FileTool<typeof DeleteFileInputSchema> {
 export function createFileTools(): Tool[] {
   return [
     new ReadFileTool(),
+    new ViewImageTool(),
     new ListFilesTool(),
     new GlobFilesTool(),
     new GrepFilesTool(),
