@@ -22,6 +22,7 @@ import { setCachedCatalog } from "../offline-cache.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
+import * as installedEntryFs from "../installed-entry-fs.js";
 
 function makePluginZip(manifest: Record<string, unknown>): Buffer {
   const zip = new AdmZip();
@@ -190,6 +191,107 @@ describe("PluginMarketplaceService install()", () => {
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
   });
+
+  it("serializes a standard member install behind bundle uninstall staging", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const member: PluginMarketplaceItem = {
+      id: "email",
+      slug: "email-alias",
+      name: "Email",
+      description: "replacement fixture",
+      version: "2.0.0",
+      packageSpec: "@lvis/email@2.0.0",
+      packageName: "@lvis/email",
+      tools: [],
+    };
+    const replacementManifest = {
+      id: member.id,
+      name: member.name,
+      version: member.version,
+      entry: "./dist/hostPlugin.js",
+      tools: member.tools,
+    };
+    const zipBuffer = makePluginZip(replacementManifest);
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
+    let catalogRead!: () => void;
+    const catalogReadPromise = new Promise<void>((resolveCatalog) => { catalogRead = resolveCatalog; });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => {
+        catalogRead();
+        return [member];
+      },
+      getPluginDetail: async () => member,
+      downloadVersion: async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      },
+      downloadArtifact,
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+
+    for (const pluginId of ["work-assistant", "email"]) {
+      const pluginDir = join(installedDir, pluginId);
+      await mkdir(join(pluginDir, "dist"), { recursive: true });
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify({
+        id: pluginId,
+        name: pluginId,
+        version: "1.0.0",
+        entry: "./dist/hostPlugin.js",
+        tools: [],
+      }), "utf-8");
+      await writeFile(join(pluginDir, "dist", "hostPlugin.js"), "export default {};\n", "utf-8");
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: "work-assistant", manifestPath: "work-assistant/plugin.json", enabled: true, installSource: "user" },
+        { id: "email", manifestPath: "email/plugin.json", enabled: true, installSource: "user", bundleRefs: ["work-assistant"] },
+      ],
+    }), "utf-8");
+
+    let resumeStaging!: () => void;
+    const stagingGate = new Promise<void>((resolveGate) => { resumeStaging = resolveGate; });
+    let stagingStarted!: () => void;
+    const stagingStartedPromise = new Promise<void>((resolveStarted) => { stagingStarted = resolveStarted; });
+    const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
+    let paused = false;
+    vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(async (...args) => {
+      if (!paused) {
+        paused = true;
+        stagingStarted();
+        await stagingGate;
+      }
+      return originalTombstone(...args);
+    });
+
+    const { service } = makeService(fetcher);
+    const uninstall = service.uninstall("work-assistant", { removeBundleMembers: true });
+    await stagingStartedPromise;
+    const install = service.install("email-alias");
+    await catalogReadPromise;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+    expect(downloadArtifact).not.toHaveBeenCalled();
+
+    resumeStaging();
+    await expect(uninstall).resolves.toEqual({ pluginId: "work-assistant", uninstalled: true });
+    await expect(install).resolves.toEqual({ pluginId: "email", installed: true });
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; manifestPath: string }>;
+    };
+    expect(registry.plugins).toEqual([
+      expect.objectContaining({ id: "email", manifestPath: "email/plugin.json" }),
+    ]);
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(installedDir, "email", "plugin.json"))).toBe(true);
+  }, 20_000);
 
   it("cleans a fresh extracted marketplace install when receipt finalization fails", async () => {
     const signingKey = freshEd25519();
