@@ -11,6 +11,7 @@ import type { SessionKind } from "../../memory/memory-manager.js";
 import type { GenericMessage } from "../llm/types.js";
 import type { WorkspaceRootRevocationOptions } from "./types.js";
 import { normalizeToolPairInvariant } from "../conversation-history.js";
+import { backgroundShellManager } from "../../tools/background-shell-manager.js";
 import { createTracer } from "../../observability/conversation-trace.js";
 import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
@@ -193,6 +194,8 @@ export function newConversation(
       });
     }
     self.deps.closeRationaleSession?.(self.sessionId);
+    // Kill + drop the OLD session's background shells (bash run_in_background).
+    backgroundShellManager.disposeSession(self.sessionId);
     // C2(c): drop the previous session's loaded skills so a fresh chat
     // starts with a clean overlay. Tests / stubs without overlay omit self.
     self.deps.skillOverlay?.clear(self.sessionId);
@@ -261,6 +264,8 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
       });
     }
     self.deps.closeRationaleSession?.(self.sessionId);
+    // Kill + drop the OLD session's background shells (bash run_in_background).
+    backgroundShellManager.disposeSession(self.sessionId);
 
     // Clear the OLD session's on-demand plugin activations BEFORE reassigning
     // sessionId. Clearing after the reassignment would key on the NEW id and

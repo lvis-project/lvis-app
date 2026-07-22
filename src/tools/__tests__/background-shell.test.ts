@@ -121,6 +121,28 @@ describe("backgroundShellManager", () => {
     expect(b.kill).not.toHaveBeenCalled();
     expect(backgroundShellManager._size()).toBe(1);
   });
+
+  it("evicts a session's fully-read finished shell when a new one is registered", () => {
+    const a = fakeChild();
+    const idA = backgroundShellManager.register({ sessionId: "s1", command: "a", child: a.child, startedAt: "t" });
+    a.stdout.emit("data", Buffer.from("done"));
+    a.emitClose(0);
+    expect(backgroundShellManager.read("s1", idA)?.output).toBe("done"); // fully consumed
+    const b = fakeChild();
+    backgroundShellManager.register({ sessionId: "s1", command: "b", child: b.child, startedAt: "t" });
+    expect(backgroundShellManager.read("s1", idA)).toBeUndefined(); // reaped
+    expect(backgroundShellManager._size()).toBe(1);
+  });
+
+  it("preserves a finished shell whose output was never read", () => {
+    const a = fakeChild();
+    const idA = backgroundShellManager.register({ sessionId: "s1", command: "a", child: a.child, startedAt: "t" });
+    a.stdout.emit("data", Buffer.from("unread"));
+    a.emitClose(0);
+    const b = fakeChild();
+    backgroundShellManager.register({ sessionId: "s1", command: "b", child: b.child, startedAt: "t" });
+    expect(backgroundShellManager.read("s1", idA)?.output).toBe("unread"); // still fetchable
+  });
 });
 
 describe("bash_output / bash_kill tools", () => {

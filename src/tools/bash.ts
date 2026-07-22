@@ -271,9 +271,10 @@ function sessionIdFromContext(ctx: ToolExecutionContext): string {
 
 /**
  * Flag a synchronous result that was produced because backgrounding was
- * requested but unavailable on the active execution path (ASRT sandbox, blocked,
- * or a requested-sandbox approval fallback). The command still ran; the caller
- * just did not get a background handle.
+ * requested but unavailable on the active execution path (the ASRT sandbox or a
+ * requested-sandbox approval fallback). The command still ran; the caller just
+ * did not get a background handle. (The `blocked` plan returns its error before
+ * this wrap, so it never carries the flag — nothing ran to background.)
  */
 function withBackgroundUnavailable(result: SpawnResult, requested: boolean): SpawnResult {
   if (!requested) return result;
