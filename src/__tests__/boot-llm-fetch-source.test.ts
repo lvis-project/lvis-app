@@ -54,10 +54,16 @@ describe("boot LLM fetch wiring regression guards", () => {
   });
 
   it("keeps builtin web_fetch on the injected Electron network fetch", async () => {
-    const bootSource = await readBootWiring();
-    const toolsSource = await readSource("../boot/tools.ts");
+    const bootToolsSource = await readSource("../boot/tools.ts");
+    const webFetchSource = await readSource("../tools/web-fetch.ts");
 
-    expect(toolsSource).toContain("webFetchFetchImpl(rawInput, workflowDeps, networkFetch)");
-    expect(toolsSource).toContain("return networkFetch;");
+    // Boot injects the Electron network-stack fetch into the tool factory…
+    expect(bootToolsSource).toContain("createWebFetchTool(networkFetch)");
+    // …and the tool threads it straight into the SSRF guard rather than the
+    // global fetch, so host-resolver-rules stay honored.
+    expect(webFetchSource).toContain(
+      "export function createWebFetchTool(networkFetch: typeof fetch)",
+    );
+    expect(webFetchSource).toContain("fetchImpl: networkFetch,");
   });
 });
