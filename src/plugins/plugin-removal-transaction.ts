@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { lstat, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
+import { constants, existsSync } from "node:fs";
+import { lstat, mkdir, open, readdir, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
@@ -39,9 +39,20 @@ export interface RemovalTransactionJournal {
   mappings: RemovalTransactionMapping[];
 }
 
-interface ReconcileOptions {
+export interface ReconcileOptions {
   renamePath?: typeof rename;
   retry?: Parameters<typeof retryOnTransientFsLock>[1];
+}
+
+export interface RemovalTransactionFailure {
+  transactionId: string;
+  reason: string;
+}
+
+export interface RemovalTransactionReconciliationResult {
+  restored: string[];
+  cleaned: string[];
+  unresolved: RemovalTransactionFailure[];
 }
 
 function transactionRoot(paths: PluginPaths): string {
@@ -56,27 +67,75 @@ function journalPath(paths: PluginPaths, transactionId: string): string {
   return resolve(transactionDir(paths, transactionId), JOURNAL_FILE);
 }
 
-async function assertRealDirectory(path: string, label: string): Promise<void> {
+async function assertRealDirectory(path: string, expectedCanonicalPath: string, label: string): Promise<void> {
   const info = await lstat(path);
-  if (!info.isDirectory() || info.isSymbolicLink()) {
+  if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== expectedCanonicalPath) {
     throw new Error(`Unsafe removal transaction ${label}`);
   }
 }
 
-async function assertOwnedTransactionDirectory(paths: PluginPaths, transactionId: string): Promise<void> {
+async function canonicalPluginsRoot(paths: PluginPaths): Promise<string> {
+  const info = await lstat(paths.pluginsRoot);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error("Unsafe removal transaction plugins root");
+  }
+  return realpath(paths.pluginsRoot);
+}
+
+async function assertOwnedTransactionRoot(paths: PluginPaths): Promise<string> {
+  const canonicalRoot = await canonicalPluginsRoot(paths);
+  const namespaceDir = resolve(paths.pluginsRoot, TRANSACTION_ROOT);
   const root = transactionRoot(paths);
+  await assertRealDirectory(namespaceDir, resolve(canonicalRoot, TRANSACTION_ROOT), "namespace");
+  await assertRealDirectory(root, resolve(canonicalRoot, TRANSACTION_ROOT, REMOVAL_SUBDIR), "root");
+  return canonicalRoot;
+}
+
+async function ensureOwnedDirectory(path: string, expectedCanonicalPath: string, label: string): Promise<void> {
+  try {
+    await mkdir(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  await assertRealDirectory(path, expectedCanonicalPath, label);
+}
+
+async function createOwnedTransactionDirectory(paths: PluginPaths, transactionId: string): Promise<void> {
+  const canonicalRoot = await canonicalPluginsRoot(paths);
+  const namespaceDir = resolve(paths.pluginsRoot, TRANSACTION_ROOT);
+  const removalsDir = transactionRoot(paths);
+  const txDir = transactionDir(paths, transactionId);
+  await ensureOwnedDirectory(namespaceDir, resolve(canonicalRoot, TRANSACTION_ROOT), "namespace");
+  await assertRealDirectory(namespaceDir, resolve(canonicalRoot, TRANSACTION_ROOT), "namespace");
+  await ensureOwnedDirectory(removalsDir, resolve(canonicalRoot, TRANSACTION_ROOT, REMOVAL_SUBDIR), "root");
+  await assertOwnedTransactionRoot(paths);
+  await ensureOwnedDirectory(txDir, resolve(canonicalRoot, TRANSACTION_ROOT, REMOVAL_SUBDIR, transactionId), "directory");
+  await assertRealDirectory(
+    txDir,
+    resolve(canonicalRoot, TRANSACTION_ROOT, REMOVAL_SUBDIR, transactionId),
+    "directory",
+  );
+  await ensureOwnedDirectory(
+    resolve(txDir, "staged"),
+    resolve(canonicalRoot, TRANSACTION_ROOT, REMOVAL_SUBDIR, transactionId, "staged"),
+    "staged directory",
+  );
+}
+
+async function assertOwnedTransactionDirectory(paths: PluginPaths, transactionId: string): Promise<void> {
+  const canonicalRoot = await assertOwnedTransactionRoot(paths);
   const txDir = transactionDir(paths, transactionId);
   const stagedDir = resolve(txDir, "staged");
-  await assertRealDirectory(root, "root");
-  await assertRealDirectory(txDir, "directory");
-  await assertRealDirectory(stagedDir, "staged directory");
-  const realRoot = await realpath(root);
-  const realTxDir = await realpath(txDir);
-  const realStagedDir = await realpath(stagedDir);
-  if (realTxDir !== resolve(realRoot, transactionId)
-    || realStagedDir !== resolve(realTxDir, "staged")) {
-    throw new Error("Unsafe removal transaction directory ownership");
-  }
+  await assertRealDirectory(
+    txDir,
+    resolve(canonicalRoot, TRANSACTION_ROOT, REMOVAL_SUBDIR, transactionId),
+    "directory",
+  );
+  await assertRealDirectory(
+    stagedDir,
+    resolve(canonicalRoot, TRANSACTION_ROOT, REMOVAL_SUBDIR, transactionId, "staged"),
+    "staged directory",
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,6 +145,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function assertOnlyKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
   const allowed = new Set(expected);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error(`Invalid ${label} keys`);
+}
+
+function errorReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function cloneEntry(entry: PluginRegistryEntry): PluginRegistryEntry {
@@ -198,9 +261,11 @@ function assertJournal(paths: PluginPaths, value: unknown, expectedTransactionId
   };
 }
 
-function persistJournal(paths: PluginPaths, journal: RemovalTransactionJournal): void {
+async function persistJournal(paths: PluginPaths, journal: RemovalTransactionJournal): Promise<void> {
+  await assertOwnedTransactionDirectory(paths, journal.transactionId);
   const checked = assertJournal(paths, journal, journal.transactionId);
   writeUtf8FileAtomicSync(journalPath(paths, checked.transactionId), `${JSON.stringify(checked, null, 2)}\n`, 0o600);
+  await assertOwnedTransactionDirectory(paths, journal.transactionId);
 }
 
 export async function readRemovalTransactionJournal(
@@ -212,13 +277,30 @@ export async function readRemovalTransactionJournal(
   }
   await assertOwnedTransactionDirectory(paths, transactionId);
   const path = journalPath(paths, transactionId);
-  const stat = await lstat(path);
-  const realTxDir = await realpath(transactionDir(paths, transactionId));
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_JOURNAL_BYTES
-    || await realpath(path) !== resolve(realTxDir, JOURNAL_FILE)) {
-    throw new Error("Invalid removal transaction journal size or ownership");
+  const noFollow = process.platform !== "win32" && typeof constants.O_NOFOLLOW === "number"
+    ? constants.O_NOFOLLOW
+    : 0;
+  const handle = await open(path, constants.O_RDONLY | noFollow);
+  try {
+    const opened = await handle.stat();
+    const linked = await lstat(path);
+    if (!opened.isFile() || opened.size > MAX_JOURNAL_BYTES
+      || !linked.isFile() || linked.isSymbolicLink()
+      || linked.dev !== opened.dev || linked.ino !== opened.ino) {
+      throw new Error("Invalid removal transaction journal size or ownership");
+    }
+    const raw = await handle.readFile({ encoding: "utf-8" });
+    const afterRead = await handle.stat();
+    if (afterRead.dev !== opened.dev || afterRead.ino !== opened.ino
+      || afterRead.size !== opened.size || afterRead.mtimeMs !== opened.mtimeMs
+      || Buffer.byteLength(raw, "utf-8") !== opened.size) {
+      throw new Error("Removal transaction journal changed while reading");
+    }
+    await assertOwnedTransactionDirectory(paths, transactionId);
+    return assertJournal(paths, JSON.parse(raw) as unknown, transactionId);
+  } finally {
+    await handle.close();
   }
-  return assertJournal(paths, JSON.parse(await readFile(path, "utf-8")) as unknown, transactionId);
 }
 
 export async function createRemovalTransaction(
@@ -233,7 +315,7 @@ export async function createRemovalTransaction(
 ): Promise<RemovalTransactionJournal> {
   const transactionId = randomUUID();
   const txDir = transactionDir(paths, transactionId);
-  await mkdir(resolve(txDir, "staged"), { recursive: true, mode: 0o700 });
+  await createOwnedTransactionDirectory(paths, transactionId);
   await assertOwnedTransactionDirectory(paths, transactionId);
   const journal: RemovalTransactionJournal = {
     schemaVersion: 1,
@@ -249,24 +331,31 @@ export async function createRemovalTransaction(
       stagedPath: resolve(txDir, "staged", `${index}-${item.pluginId}`),
     })),
   };
-  persistJournal(paths, journal);
+  await persistJournal(paths, journal);
   return journal;
 }
 
-export async function stageRemovalTransaction(journal: RemovalTransactionJournal): Promise<void> {
+export async function stageRemovalTransaction(paths: PluginPaths, journal: RemovalTransactionJournal): Promise<void> {
+  await assertOwnedTransactionDirectory(paths, journal.transactionId);
   for (const mapping of journal.mappings) {
     if (!existsSync(mapping.originalPath)) continue;
+    await assertOwnedTransactionDirectory(paths, journal.transactionId);
     await retryOnTransientFsLock(() => rename(mapping.originalPath, mapping.stagedPath));
   }
 }
 
-export function markRemovalTransactionRegistryCommitted(paths: PluginPaths, journal: RemovalTransactionJournal): void {
+export async function markRemovalTransactionRegistryCommitted(
+  paths: PluginPaths,
+  journal: RemovalTransactionJournal,
+): Promise<void> {
   journal.phase = "registry-committed";
-  persistJournal(paths, journal);
+  await persistJournal(paths, journal);
 }
 
 async function removeTransactionStaged(paths: PluginPaths, journal: RemovalTransactionJournal): Promise<void> {
+  await assertOwnedTransactionDirectory(paths, journal.transactionId);
   for (const mapping of journal.mappings) {
+    await assertOwnedTransactionDirectory(paths, journal.transactionId);
     await retryOnTransientFsLock(() => rm(mapping.stagedPath, { recursive: true, force: true }));
   }
   await rm(transactionDir(paths, journal.transactionId), { recursive: true, force: true });
@@ -277,11 +366,13 @@ async function restoreTransactionStaged(
   journal: RemovalTransactionJournal,
   options: ReconcileOptions = {},
 ): Promise<void> {
+  await assertOwnedTransactionDirectory(paths, journal.transactionId);
   for (const mapping of [...journal.mappings].reverse()) {
     const originalExists = existsSync(mapping.originalPath);
     const stagedExists = existsSync(mapping.stagedPath);
     if (originalExists && !stagedExists) continue;
     if (originalExists === stagedExists) throw new Error(`Ambiguous removal transaction path state: ${mapping.pluginId}`);
+    await assertOwnedTransactionDirectory(paths, journal.transactionId);
     await retryOnTransientFsLock(
       () => (options.renamePath ?? rename)(mapping.stagedPath, mapping.originalPath),
       options.retry,
@@ -319,25 +410,34 @@ export async function reconcileRemovalTransaction(
   return "unresolved";
 }
 
-export async function reconcileRemovalTransactions(paths: PluginPaths): Promise<{
+export async function reconcileRemovalTransactions(paths: PluginPaths, options: ReconcileOptions = {}): Promise<{
   restored: string[];
   cleaned: string[];
-  unresolved: string[];
+  unresolved: RemovalTransactionFailure[];
 }> {
-  const result = { restored: [] as string[], cleaned: [] as string[], unresolved: [] as string[] };
+  const result: RemovalTransactionReconciliationResult = { restored: [], cleaned: [], unresolved: [] };
   let ids: string[];
   try {
+    await assertOwnedTransactionRoot(paths);
     ids = await readdir(transactionRoot(paths));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return result;
-    throw error;
+    result.unresolved.push({ transactionId: "<removal-root>", reason: errorReason(error) });
+    return result;
   }
   for (const id of ids) {
     try {
-      const outcome = await reconcileRemovalTransaction(paths, id);
-      result[outcome].push(id);
-    } catch {
-      result.unresolved.push(id);
+      const outcome = await reconcileRemovalTransaction(paths, id, options);
+      if (outcome === "unresolved") {
+        result.unresolved.push({
+          transactionId: id,
+          reason: "registry projection matches neither recorded state",
+        });
+      } else {
+        result[outcome].push(id);
+      }
+    } catch (error) {
+      result.unresolved.push({ transactionId: id, reason: errorReason(error) });
     }
   }
   return result;

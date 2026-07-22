@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
@@ -245,10 +245,16 @@ export async function listFilesRecursive(root: string): Promise<string[]> {
   async function walk(dir: string): Promise<void> {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const abs = resolve(dir, entry.name as string);
-      if (entry.isDirectory()) {
+      const info = await lstat(abs);
+      if (info.isSymbolicLink()) {
+        throw new Error(`installed payload contains symbolic link: ${relative(root, abs).split(sep).join("/")}`);
+      }
+      if (info.isDirectory()) {
         await walk(abs);
-      } else if (entry.isFile()) {
+      } else if (info.isFile()) {
         out.push(relative(root, abs).split(sep).join("/"));
+      } else {
+        throw new Error(`installed payload contains unsupported entry: ${relative(root, abs).split(sep).join("/")}`);
       }
     }
   }
