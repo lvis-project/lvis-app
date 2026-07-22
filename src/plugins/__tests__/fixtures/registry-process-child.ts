@@ -28,7 +28,7 @@ if (mode === "hold-lock") {
     }) as typeof fs.renameSync;
     syncBuiltinESMExports();
   }
-  if (mode === "committed-sync-error" || mode === "receipt-committed-sync-error") {
+  if (mode === "committed-sync-error" || mode === "receipt-committed-sync-error" || mode === "raw-receipt-committed-sync-error") {
     const realFsyncSync = fs.fsyncSync;
     let fsyncCalls = 0;
     fs.fsyncSync = ((fd: number) => {
@@ -37,6 +37,13 @@ if (mode === "hold-lock") {
       return realFsyncSync(fd);
     }) as typeof fs.fsyncSync;
     syncBuiltinESMExports();
+  }
+  if (mode === "raw-receipt-committed-sync-error") {
+    if (!pluginId) throw new Error("plugin id is required");
+    const { restoreInstallReceiptRaw } = await import("../../plugin-install-receipt.js");
+    await restoreInstallReceiptRaw(registryPath, pluginId, "restored receipt bytes\n");
+    process.disconnect?.();
+    process.exit(0);
   }
   if (mode === "receipt-committed-sync-error" || mode === "receipt-fail-rename") {
     if (!pluginId) throw new Error("plugin id is required");

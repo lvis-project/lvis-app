@@ -6,8 +6,8 @@
 //
 // Env:
 //   LVIS_DEV=1 (forced)
-//   Plugins must already be installed into ~/.lvis/plugins/ via the marketplace
-//   server (`lvis-cli install file://...`) — no host-side sideload bootstrap.
+//   Plugins must already be installed via the marketplace, or installed from a
+//   build folder through Settings > Plugin Config > Developer tools.
 //
 // Behavior:
 //   - tsc --watch for main (src -> dist/src)

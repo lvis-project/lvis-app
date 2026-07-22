@@ -71,6 +71,23 @@ export async function writeInstallReceipt(
 ): Promise<void> {
   const path = installReceiptPath(cacheRoot, receipt.pluginId);
   const content = `${JSON.stringify(receipt, null, 2)}\n`;
+  await writeInstallReceiptContent(path, receipt.pluginId, content);
+}
+
+/** Restore an already-validated receipt snapshot without changing its bytes. */
+export async function restoreInstallReceiptRaw(
+  cacheRoot: string,
+  pluginId: string,
+  content: string,
+): Promise<void> {
+  await writeInstallReceiptContent(installReceiptPath(cacheRoot, pluginId), pluginId, content);
+}
+
+async function writeInstallReceiptContent(
+  path: string,
+  pluginId: string,
+  content: string,
+): Promise<void> {
   try {
     writeUtf8FileAtomicSync(path, content, 0o600);
   } catch (error) {
@@ -78,7 +95,7 @@ export async function writeInstallReceipt(
     const persisted = await readFile(path, "utf-8");
     if (persisted !== content) throw error;
     log.warn(
-      `install receipt atomic rename committed for '${receipt.pluginId}'; exact bytes verified after parent directory sync failure`,
+      `install receipt atomic rename committed for '${pluginId}'; exact bytes verified after parent directory sync failure`,
     );
   }
 }

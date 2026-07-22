@@ -17,8 +17,9 @@ Bun 은 macOS/Windows/Linux 동일하게 동작 — Windows 별 우회 스크립
 
 ## 1. 저장소 clone
 
-LVIS app 은 sibling plugin repo 경로에 의존하지 않는다. 플러그인은 marketplace
-또는 `lvis-cli install file://.../dist.zip` 경로로 설치한다.
+LVIS app 은 sibling plugin repo 경로에 의존하지 않는다. 플러그인은 marketplace로
+설치한다. 로컬 개발 빌드는 앱의 **Settings → Plugin Config → 개발자 도구 → 로컬
+폴더에서 설치**에서 `plugin.json`이 포함된 빌드 폴더를 선택한다.
 
 ```powershell
 mkdir lvis-project

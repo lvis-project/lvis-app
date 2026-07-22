@@ -4,7 +4,8 @@ import { mkdir, readFile, readdir, rm, utimes, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import lockfile from "proper-lockfile";
 import { readPluginRegistry, updatePluginRegistry } from "../registry.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -47,6 +48,7 @@ describe("plugin registry transaction atomicity", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -90,6 +92,33 @@ describe("plugin registry transaction atomicity", () => {
       expect(await readFile(registryPath, "utf-8")).toBe(original);
     },
   );
+
+  it("keeps local-install guidance on the host-owned Settings flow", async () => {
+    const activeReferences = [
+      "README.md",
+      "docs/ko/app-readme.md",
+      "docs/ko/guides/local-plugin-development.md",
+      "docs/ko/guides/windows-setup.md",
+      "scripts/plugins-cli.ts",
+      "scripts/run-electron-dev.mjs",
+      "src/plugins/registry.ts",
+    ];
+    for (const relativePath of activeReferences) {
+      const content = await readFile(resolve(repoRoot, relativePath), "utf-8");
+      expect(content, relativePath).not.toMatch(/lvis-cli install|bun run cli(?: --)? install|install file:\/\//i);
+    }
+
+    const usage = await waitForExit(spawnNode([
+      resolve(repoRoot, "scripts/plugins-cli.ts"),
+      "--plugins-root",
+      root,
+      "install",
+    ]));
+    expect(usage.code).not.toBe(0);
+    const cliSource = await readFile(resolve(repoRoot, "scripts/plugins-cli.ts"), "utf-8");
+    expect(cliSource).toContain("Settings > Plugin Config > Developer tools");
+    expect(cliSource).toContain("build folder containing plugin.json");
+  });
 
   it.each(["remove", "enable", "disable", "install"])(
     "serializes child-process %s contention and preserves unrelated entries",
@@ -209,6 +238,27 @@ describe("plugin registry transaction atomicity", () => {
     expect((await readPluginRegistry(registryPath)).plugins.map((entry) => entry.id)).toEqual(["committed"]);
   });
 
+  it("converges a committed registry mutation when lock release fails", async () => {
+    const realLock = lockfile.lock.bind(lockfile);
+    let releaseFailureInjected = false;
+    vi.spyOn(lockfile, "lock").mockImplementationOnce(async (...args) => {
+      const release = await realLock(...args);
+      return async () => {
+        await release();
+        releaseFailureInjected = true;
+        throw new Error("injected lock release failure");
+      };
+    });
+    const result = await updatePluginRegistry(registryPath, (registry) => {
+      registry.plugins.push({ id: "committed", manifestPath: "committed/plugin.json" });
+      return "committed-result";
+    });
+
+    expect(releaseFailureInjected).toBe(true);
+    expect(result).toBe("committed-result");
+    expect((await readPluginRegistry(registryPath)).plugins.map((entry) => entry.id)).toEqual(["committed"]);
+  });
+
   it("converges an existing receipt replacement after failed directory sync", async () => {
     const receiptPath = join(root, "receipt-plugin", "install-receipt.json");
     await mkdir(dirname(receiptPath), { recursive: true });
@@ -218,6 +268,16 @@ describe("plugin registry transaction atomicity", () => {
     expect(result.code).toBe(0);
     const receipt = JSON.parse(await readFile(receiptPath, "utf-8")) as { schemaVersion: number; version: string };
     expect(receipt).toMatchObject({ schemaVersion: 2, version: "2.0.0" });
+  });
+
+  it("converges an exact raw receipt restore after failed directory sync", async () => {
+    const receiptPath = join(root, "receipt-plugin", "install-receipt.json");
+    await mkdir(dirname(receiptPath), { recursive: true });
+    await writeFile(receiptPath, "new receipt bytes\n", "utf-8");
+    const child = spawnNode([childFixture, "raw-receipt-committed-sync-error", root, "receipt-plugin"]);
+    const result = await waitForExit(child);
+    expect(result.code).toBe(0);
+    expect(await readFile(receiptPath, "utf-8")).toBe("restored receipt bytes\n");
   });
 
   it("preserves an existing receipt when replacement fails before rename", async () => {
