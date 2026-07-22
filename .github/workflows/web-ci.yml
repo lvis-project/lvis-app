@@ -1,0 +1,85 @@
+name: Web CI
+
+# CI for the monorepo landing site under web/ (Next.js static export → Cloudflare
+# Pages). Runs only when web/ changes so it stays independent of the app CI.
+#   - PR / push touching web/**  → build gate (validates the static export)
+#   - push to main touching web/** → deploy to Cloudflare Pages IF the
+#     CLOUDFLARE_API_TOKEN secret is set (otherwise it warns and skips; the site
+#     still deploys via the manual `wrangler pages deploy` in web/DEPLOY.md).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: web-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  build:
+    name: Build (static export)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        run: bun install --frozen-lockfile
+      # `next build` runs type-checking + lint + the static export, so it is the
+      # whole gate — a broken page, type error, or bad import fails here.
+      - name: Build
+        run: bun run build
+      - name: Upload static export
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-out
+          path: web/out
+          if-no-files-found: error
+          retention-days: 3
+
+  deploy:
+    name: Deploy (Cloudflare Pages)
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check for Cloudflare token
+        id: cf
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CF_TOKEN" ]; then
+            echo "have_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CLOUDFLARE_API_TOKEN secret is not set — skipping auto-deploy. Deploy manually per web/DEPLOY.md, or add the secret (Cloudflare Pages: Edit) to enable this."
+          fi
+      - uses: oven-sh/setup-bun@v2
+        if: steps.cf.outputs.have_token == 'true'
+      - name: Install
+        if: steps.cf.outputs.have_token == 'true'
+        run: bun install --frozen-lockfile
+      - name: Build
+        if: steps.cf.outputs.have_token == 'true'
+        run: bun run build
+      # out/ + functions/ (+ public/_routes.json copied into out/) deploy together;
+      # wrangler picks up ./functions relative to the working directory.
+      - name: Deploy to Cloudflare Pages
+        if: steps.cf.outputs.have_token == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 77a8f0e860cd23f37141248fd4e6935f
+        run: bunx wrangler pages deploy out --project-name=lvisai-xyz --branch=main --commit-dirty=true
