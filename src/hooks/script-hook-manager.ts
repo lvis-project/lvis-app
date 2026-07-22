@@ -112,6 +112,10 @@ export interface LifecycleEventPayload {
   /** PostCompact — token estimates before/after compaction. */
   tokensBefore?: number;
   tokensAfter?: number;
+  /** SubagentStart / SubagentStop — the child run id (agent_spawn spawnId). */
+  agentId?: string;
+  /** SubagentStart / SubagentStop — the child agent mode/persona. */
+  agentType?: string;
 }
 
 /**
