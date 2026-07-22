@@ -184,8 +184,8 @@ export function createHostApiFactory(
       // Effect-boundary ENFORCEMENT wraps the recorder as the OUTER layer: a
       // host-classified WRITE awaits a user approval AT THE EFFECT (foreground) /
       // fails closed (headless) before the mutation runs, but ONLY when
-      // `hostClassifiesRisk` is ON — flag OFF (default) is a byte-for-byte
-      // pass-through. OUTER (not inner) so the pure recorder is untouched and a
+      // `hostClassifiesRisk` is ON (the shipped default) — flag OFF (only when
+      // disabled/unset) is a byte-for-byte pass-through. OUTER (not inner) so the pure recorder is untouched and a
       // DENIED effect is never recorded as a host-observed mutation. The lone
       // verb-derived chokepoint (hostFetch) is gated INLINE in its closure from
       // the single verb snapshot; the wrapper skips it.
@@ -672,7 +672,8 @@ export function createHostApiFactory(
         // happen can prompt. Origin-only target (no path/query that can carry tokens).
         //
         // Flag-OFF short-circuit BEFORE the await: when `hostClassifiesRisk` is
-        // OFF (default) the gate is skipped entirely — not even an awaited
+        // OFF (disabled/unset; the shipped default is ON) the gate is skipped
+        // entirely — not even an awaited
         // already-resolved Promise (one microtask tick) — so the flag-OFF egress
         // path is byte-for-byte today's behaviour with ZERO extra work.
         if (hostClassifiesRiskEnabled()) {
