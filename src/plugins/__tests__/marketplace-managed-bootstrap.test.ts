@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
+import * as installedEntryFs from "../installed-entry-fs.js";
 
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
@@ -902,5 +903,24 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         bundleRefs: ["other-bundle"],
       },
     ]);
+  });
+
+  it("preserves the exact durable registry when tombstone staging fails", async () => {
+    const original = `${JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: "target", manifestPath: "target/plugin.json", enabled: true, installSource: "user" },
+        { id: "unrelated", manifestPath: "unrelated/plugin.json", enabled: true, bundleRefs: ["target"] },
+      ],
+    }, null, 2)}\n`;
+    await writeFile(registryPath, original, "utf-8");
+    await mkdir(join(pluginsDir, "target"), { recursive: true });
+    vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockRejectedValueOnce(
+      Object.assign(new Error("locked by Windows handle"), { code: "EACCES" }),
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    await expect(service.uninstall("target")).rejects.toThrow("locked by Windows handle");
+    expect(await readFile(registryPath, "utf-8")).toBe(original);
   });
 });

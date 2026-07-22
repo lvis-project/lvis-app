@@ -142,16 +142,12 @@ bun run build
 
 Type checking is intentionally separate. Run `bun run typecheck` before relying on a build for release readiness.
 
-## Plugin Registry CLI
+## Plugin Registry Inspection CLI
 
-The registry CLI manages installed plugin registry entries. Installation itself is handled by marketplace cards, `lvis://install/<slug>` deep links, or `lvis-cli install file://<path-to-dist.zip>`.
+The registry CLI is read-only so it cannot make durable state diverge from a running host. Installation and mutations are handled by marketplace cards, host settings, `lvis://install/<slug>` deep links, or `lvis-cli install file://<path-to-dist.zip>`.
 
 ```bash
 bun run plugins:list
-bun run plugins:add -- <plugin-id> <manifest-path>
-bun run plugins:remove -- <plugin-id>
-bun run plugins:enable -- <plugin-id>
-bun run plugins:disable -- <plugin-id>
 ```
 
 If an installed plugin provides a `ui` extension in `plugin.json`, the host can mount that UI in the app. `ui.displayName` is preferred for labels, with `title` as fallback. `kind: "embedded-module"` UI extensions are dynamically imported from plugin package assets and rendered by the LVIS host.

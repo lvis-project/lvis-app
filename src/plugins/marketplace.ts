@@ -1,6 +1,6 @@
 import { cp, mkdir, readFile, rename, rm, stat as statAsync } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
+import { deferTombstoneRemoval, tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
@@ -956,32 +956,80 @@ export class PluginMarketplaceService {
       }
     }
 
-    const removedEntries = await updatePluginRegistry(this.registryPath, (registry) => {
-      const target = registry.plugins.find((x) => x.id === pluginId);
-      if (!target) {
-        throw new Error(`Plugin not installed: ${pluginId}`);
-      }
-      const idsToRemove = new Set<string>([pluginId]);
-      for (const entry of registry.plugins) {
-        if (entry.id === pluginId) continue;
-        const withoutRoot = (entry.bundleRefs ?? []).filter((bundleId) => bundleId !== pluginId);
-        const referencedByRoot = withoutRoot.length !== (entry.bundleRefs ?? []).length;
-        if (!referencedByRoot) continue;
-        if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installSource !== "admin") {
-          idsToRemove.add(entry.id);
-          continue;
+    return this.withPluginLock(pluginId, async () => {
+      const buildPlan = (entries: PluginRegistryEntry[]) => {
+        const target = entries.find((entry) => entry.id === pluginId);
+        if (!target) throw new Error(`Plugin not installed: ${pluginId}`);
+        const idsToRemove = new Set<string>([pluginId]);
+        const nextBundleRefs = new Map<string, string[]>();
+        for (const entry of entries) {
+          if (entry.id === pluginId) continue;
+          const withoutRoot = (entry.bundleRefs ?? []).filter((bundleId) => bundleId !== pluginId);
+          if (withoutRoot.length === (entry.bundleRefs ?? []).length) continue;
+          if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installSource !== "admin") {
+            idsToRemove.add(entry.id);
+          } else {
+            nextBundleRefs.set(entry.id, withoutRoot);
+          }
         }
-        entry.bundleRefs = withoutRoot;
+        const removed = entries
+          .filter((entry) => idsToRemove.has(entry.id))
+          .map((entry) => this.cloneRegistryEntry(entry));
+        const signature = JSON.stringify({
+          removed: removed.map((entry) => [entry.id, entry.manifestPath]).sort(),
+          refs: [...nextBundleRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
+        });
+        return { idsToRemove, nextBundleRefs, removed, signature };
+      };
+
+      const snapshot = await readPluginRegistry(this.registryPath);
+      const planned = buildPlan(snapshot.plugins);
+      const staged: Array<{ original: string; tombstone: string }> = [];
+      const restoreStaged = async (): Promise<void> => {
+        const errors: unknown[] = [];
+        for (const item of [...staged].reverse()) {
+          try { await rename(item.tombstone, item.original); } catch (error) { errors.push(error); }
+        }
+        if (errors.length > 0) throw new AggregateError(errors, "failed to restore staged plugin uninstall");
+      };
+
+      try {
+        for (const entry of planned.removed) {
+          const installedDir = this.installedDirectoryForEntry(entry);
+          if (!installedDir) continue;
+          const tombstone = await tombstoneAndDeferredRemove(installedDir, this.pluginsRoot, {
+            deferRemoval: false,
+          });
+          if (tombstone) staged.push({ original: installedDir, tombstone });
+        }
+
+        await updatePluginRegistry(this.registryPath, (registry) => {
+          const fresh = buildPlan(registry.plugins);
+          if (fresh.signature !== planned.signature) {
+            throw new Error(`Plugin registry changed during uninstall: ${pluginId}`);
+          }
+          for (const [id, refs] of fresh.nextBundleRefs) {
+            const entry = registry.plugins.find((candidate) => candidate.id === id);
+            if (entry) entry.bundleRefs = refs;
+          }
+          registry.plugins = registry.plugins.filter((entry) => !fresh.idsToRemove.has(entry.id));
+        });
+      } catch (error) {
+        try {
+          await restoreStaged();
+        } catch (restoreError) {
+          throw new AggregateError([error, restoreError], `plugin uninstall and restore both failed: ${pluginId}`);
+        }
+        throw error;
       }
 
-      const removed = registry.plugins
-        .filter((entry) => idsToRemove.has(entry.id))
-        .map((entry) => this.cloneRegistryEntry(entry));
-      registry.plugins = registry.plugins.filter((entry) => !idsToRemove.has(entry.id));
-      return removed;
+      for (const item of staged) {
+        deferTombstoneRemoval(item.tombstone, (tombstone, err) => {
+          log.warn(`removeInstalledEntry: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`);
+        });
+      }
+      return { pluginId, uninstalled: true as const };
     });
-    for (const entry of removedEntries) await this.removeInstalledEntry(entry, []);
-    return { pluginId, uninstalled: true as const };
   }
 
   private async canUserRemoveOrphanedAdminInstall(
@@ -1405,11 +1453,8 @@ export class PluginMarketplaceService {
     // so uninstall is a recursive rm of the plugin's directory. The
     // former npm-uninstall branch (`isZipInstalled === false`) is
     // gone with the install-side npm path.
-    const manifestPath = isAbsolute(entry.manifestPath)
-      ? entry.manifestPath
-      : resolve(dirname(this.registryPath), entry.manifestPath);
-    const installedManifestDir = dirname(manifestPath);
-    if (!this.isWithin(this.pluginsRoot, installedManifestDir)) return;
+    const installedManifestDir = this.installedDirectoryForEntry(entry);
+    if (!installedManifestDir) return;
 
     // Windows-atomic uninstall: rename to a tombstone under +tombstones+/
     // (collision-free namespace; `+` not in plugin id allowed chars), then
@@ -1431,6 +1476,14 @@ export class PluginMarketplaceService {
         );
       },
     });
+  }
+
+  private installedDirectoryForEntry(entry: PluginRegistryEntry): string | null {
+    const manifestPath = isAbsolute(entry.manifestPath)
+      ? entry.manifestPath
+      : resolve(dirname(this.registryPath), entry.manifestPath);
+    const installedManifestDir = dirname(manifestPath);
+    return this.isWithin(this.pluginsRoot, installedManifestDir) ? installedManifestDir : null;
   }
 
   private isWithin(basePath: string, targetPath: string): boolean {

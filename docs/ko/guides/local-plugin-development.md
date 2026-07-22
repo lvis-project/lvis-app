@@ -107,7 +107,7 @@ submodule 누락 시: `git submodule update --init --recursive`.
 
 > ⚠️ **`LVIS_USER_DATA_DIR` 는 플러그인 루트가 아닙니다.** `run-electron.mjs:82` 의 `ensureWindowsUserDataDir` 는 Windows 전용이며, Electron 의 **앱 프로필 디렉토리** (`--user-data-dir`) 만 변경합니다. 플러그인 루트는 이와 무관하게 항상 `~/.lvis/plugins/` 입니다.
 
-### 3-3. 절차 — `bun run plugins:add` 사용
+### 3-3. 절차 — 호스트 설치 경로 사용
 
 ```bash
 # 1) 플러그인 빌드
@@ -115,34 +115,17 @@ cd lvis-plugin-<yourname>
 bun install
 bun run build
 
-# 2) ~/.lvis/plugins/<id>/ 안에 복사
-#    예: id="myplugin" (모든 OS 동일 경로)
-mkdir -p "$HOME/.lvis/plugins/myplugin"
-cp -R plugin.json dist/ "$HOME/.lvis/plugins/myplugin/"
-
-# 3) lvis-app 의 CLI 로 registry 에 등록
+# 2) 배포 zip을 호스트 설치 경로로 등록
 cd /path/to/lvis-app
-bun run plugins:add -- myplugin myplugin/plugin.json
-# manifest 경로는 ~/.lvis/plugins/ 기준 상대경로
-bun run plugins:list      # 등록 확인 — registryPath 가 ~/.lvis/plugins/ 안에 있어야 정상
+bun run cli -- install file:///absolute/path/to/plugin-dist.zip
+bun run plugins:list
 ```
 
-CLI 는 manifest 가 실제로 존재하는지 (`access`) 만 확인하고 trust-root 검사는 하지 않습니다 — 그건 호스트(Electron 시작 시) 가 합니다. 따라서 외부 워크스페이스의 `plugin.json` 을 그대로 등록하지 말고, 먼저 `~/.lvis/plugins/<id>/` 아래로 물리 복사한 뒤 registry-relative path(`myplugin/plugin.json`) 를 등록해야 합니다. `LVIS_PLUGINS_DIR` 로 이 제약을 우회하는 dev 경로는 더 이상 사용하지 않습니다.
+`plugins:list` 는 조회 전용입니다. add/remove/enable/disable 직접 registry 변경은 실행 중인 호스트와 상태가 어긋날 수 있어 지원하지 않습니다.
 
-### 3-4. 직접 registry 편집 (대안)
+### 3-4. 직접 registry 편집 금지
 
-`~/.lvis/plugins/registry.json` 을 직접 편집하는 것이 가장 명확합니다:
-
-```json
-{
-  "version": 1,
-  "plugins": [
-    { "id": "myplugin", "manifestPath": "myplugin/plugin.json", "enabled": true }
-  ]
-}
-```
-
-`manifestPath` 는 `dirname(registryPath)` (= `~/.lvis/plugins/`) 기준 상대경로 또는 절대경로. 단 절대경로도 trust-root (`~/.lvis/plugins/`) 안에 있어야 합니다.
+`~/.lvis/plugins/registry.json` 은 호스트가 소유하는 durable state입니다. 직접 편집하지 말고 위 설치 경로나 앱 설정을 사용합니다.
 
 ### 3-5. 실행
 
@@ -235,7 +218,6 @@ watch 빌드가 `dist/*.js` 를 갱신하면 호스트 watcher 가 디바운스 
 | `bun run plugins:list` 결과가 기대와 다름 | CLI 와 Electron 모두 `~/.lvis/plugins/` 를 플러그인 루트로 사용합니다. 오래된 `.lvis-dev` 잔재나 직접 편집한 registry 를 확인하고 `lvis-cli install file://<dist.zip>` 으로 재설치하세요. |
 | `[manifest:<id>] schema validation failed (<jsonpath>): ...` | AJV 검증 실패. `plugin.json` 의 해당 필드 확인. SDK 빌드시 `bun run validate:hostapi` 로 미리 잡힘. |
 | `plugin signature required` 또는 `plugin signature verification failed` (packaged 빌드에서) | §4 참고 — packaged 빌드는 dev skip flag 무시. 정식 publish 또는 사용자 토글 필요. |
-| `Plugin already exists: <id>` (`plugins:add`) | 같은 id 가 registry 에 이미 있음. `bun run plugins:remove -- <id>` 후 재등록. |
 | Hot-reload 가 안 됨 | (a) `LVIS_DEV_RELOAD=1` 누락 (`bun run start` 는 자동 세팅 X — `bun run dev` 거나 직접 export). (b) `dist/` 가 watch 가능 위치인지 확인 (네트워크 드라이브 등에서는 fs.watch 부정확). (c) plugin.json 자체를 바꿨다면 호스트 재시작 필수. |
 | 한글 깨짐 (cp949) | PowerShell 에서 `chcp 65001` 후 `bun run start`. 또는 Windows Terminal (UTF-8 default) 사용. |
 

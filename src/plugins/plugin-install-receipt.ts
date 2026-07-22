@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { createLogger } from "../lib/logger.js";
+
+const log = createLogger("plugin-install-receipt");
 
 export interface InstallReceiptFile {
   path: string;
@@ -67,7 +70,17 @@ export async function writeInstallReceipt(
   receipt: PluginInstallReceipt,
 ): Promise<void> {
   const path = installReceiptPath(cacheRoot, receipt.pluginId);
-  writeUtf8FileAtomicSync(path, `${JSON.stringify(receipt, null, 2)}\n`, 0o600);
+  const content = `${JSON.stringify(receipt, null, 2)}\n`;
+  try {
+    writeUtf8FileAtomicSync(path, content, 0o600);
+  } catch (error) {
+    if (!(error instanceof Error) || (error as { committed?: unknown }).committed !== true) throw error;
+    const persisted = await readFile(path, "utf-8");
+    if (persisted !== content) throw error;
+    log.warn(
+      `install receipt atomic rename committed for '${receipt.pluginId}'; exact bytes verified after parent directory sync failure`,
+    );
+  }
 }
 
 export async function verifyInstallReceipt(
