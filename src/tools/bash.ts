@@ -55,6 +55,7 @@ import {
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import { backgroundShellManager } from "./background-shell-manager.js";
 
 export const BashToolInputSchema = z.object({
   command: z.string().min(1).describe("Shell command to execute"),
@@ -65,6 +66,16 @@ export const BashToolInputSchema = z.object({
     .min(1)
     .max(TOOL_TIMEOUT_POLICY.shellMaxMs / 1000)
     .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000),
+  run_in_background: z
+    .boolean()
+    .optional()
+    .describe(
+      "Run the command in the background and return a shellId immediately instead of waiting. " +
+        "Read incremental output with bash_output and stop it with bash_kill. `timeoutSeconds` " +
+        "does not apply to a background shell. Only available on the plain host-shell path: under " +
+        "the OS sandbox (ASRT) the command runs synchronously and the result is flagged " +
+        "backgroundUnavailable, because the sandbox cannot safely run concurrent commands.",
+    ),
 });
 
 const OUTPUT_CAP = 12_000;
@@ -213,21 +224,94 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
           : {}),
         allowedDirectories: [resolvedCwd, ...ctx.extraAllowedDirectories],
       });
-      return await spawnWithSandbox(input.command, resolvedCwd, writePaths, input.timeoutSeconds);
+      const sandboxResult = await spawnWithSandbox(
+        input.command,
+        resolvedCwd,
+        writePaths,
+        input.timeoutSeconds,
+      );
+      return withBackgroundUnavailable(sandboxResult, input.run_in_background === true);
+    }
+
+    // Clean plain host-shell path — the ONLY path that may background. The ASRT
+    // sandbox is a process-global singleton (cleanupAfterCommand), so a
+    // backgrounded ASRT command running concurrently with the next tool would
+    // corrupt the shared sandbox state; background execution is therefore
+    // confined to the unsandboxed plain path, and the requested-sandbox
+    // approval-fallback (requiresExplicitUserApproval) is excluded so a
+    // one-shot-approved command cannot outlive its approval.
+    if (input.run_in_background === true && !hostShellPlan.requiresExplicitUserApproval) {
+      return spawnBackground(input.command, resolvedCwd, sessionIdFromContext(ctx));
     }
 
     const plainResult = await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds);
-    if (!hostShellPlan.requiresExplicitUserApproval) return plainResult;
-    return {
-      ...plainResult,
-      metadata: {
-        ...plainResult.metadata,
-        sandboxed: false,
-        isolation: "none",
-        sandboxExecutionPlan: getHostShellExecutionPlanAuditProjection(hostShellPlan),
+    if (!hostShellPlan.requiresExplicitUserApproval) {
+      return withBackgroundUnavailable(plainResult, input.run_in_background === true);
+    }
+    return withBackgroundUnavailable(
+      {
+        ...plainResult,
+        metadata: {
+          ...plainResult.metadata,
+          sandboxed: false,
+          isolation: "none",
+          sandboxExecutionPlan: getHostShellExecutionPlanAuditProjection(hostShellPlan),
+        },
       },
-    };
+      input.run_in_background === true,
+    );
   }
+}
+
+/** Session id threaded by the executor in ctx.metadata; used to scope background shells. */
+function sessionIdFromContext(ctx: ToolExecutionContext): string {
+  const raw = ctx.metadata["sessionId"];
+  return typeof raw === "string" && raw !== "" ? raw : "unknown";
+}
+
+/**
+ * Flag a synchronous result that was produced because backgrounding was
+ * requested but unavailable on the active execution path (the ASRT sandbox or a
+ * requested-sandbox approval fallback). The command still ran; the caller just
+ * did not get a background handle. (The `blocked` plan returns its error before
+ * this wrap, so it never carries the flag — nothing ran to background.)
+ */
+function withBackgroundUnavailable(result: SpawnResult, requested: boolean): SpawnResult {
+  if (!requested) return result;
+  return { ...result, metadata: { ...result.metadata, backgroundUnavailable: true } };
+}
+
+/**
+ * Spawn a plain host-shell child that outlives this call and hand it to the
+ * background-shell manager (which tracks it for quit-kill and owns its output
+ * buffer). Returns immediately with the shell id. Uses the same secret-stripped
+ * environment as {@link spawnWithTimeout}; `timeoutSeconds` does not apply — a
+ * background shell runs until it exits, bash_kill, session end, or app quit.
+ */
+function spawnBackground(command: string, cwd: string, sessionId: string): SpawnResult {
+  const shell = resolveShell();
+  const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: shellEnvForChild(shell, buildSafeChildEnv()),
+    shell: false,
+  });
+  const shellId = backgroundShellManager.register({
+    sessionId,
+    command,
+    child,
+    startedAt: new Date().toISOString(),
+  });
+  return {
+    output: JSON.stringify({
+      backgrounded: true,
+      shellId,
+      status: "running",
+      hint: "Read output with bash_output({ shellId }); stop it with bash_kill({ shellId }).",
+    }),
+    isError: false,
+    metadata: { backgrounded: true, shellId },
+  };
 }
 
 function preflightInteractiveCommand(command: string): string | null {
