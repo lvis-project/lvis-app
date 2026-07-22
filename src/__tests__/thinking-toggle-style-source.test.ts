@@ -22,9 +22,10 @@ describe("chat Thinking toggle styles", () => {
     expect(component).not.toContain("thinking-toggle-box");
     expect(component).not.toContain("checked:appearance-auto");
     expect(component).not.toContain("bg-muted checked:");
-    // shadcn v4 Checkbox uses rounded-[4px] + data-checked:* state attrs.
+    // Radix exposes selection through data-state="checked".
     expect(checkbox).toContain("rounded-[4px]");
-    expect(checkbox).toContain("data-checked:bg-primary");
+    expect(checkbox).toContain("data-[state=checked]:bg-primary");
+    expect(checkbox).not.toContain("data-checked");
 
     expect(styles).not.toContain(".thinking-toggle-input");
     expect(styles).not.toContain(".thinking-toggle-box");
