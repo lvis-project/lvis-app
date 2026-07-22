@@ -1,7 +1,7 @@
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdmZip from "adm-zip";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -74,10 +74,7 @@ describe("PluginMarketplaceService install()", () => {
     // Phase 2b-1: one test exercises the file:-spec dev branch.
     // Round-3: LVIS_DEV=1 subsumes the deprecated LVIS_ALLOW_LINKED_PLUGIN_ENTRY.
     process.env.LVIS_DEV = "1";
-    testDir = join(
-      tmpdir(),
-      `lvis-marketplace-install-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    testDir = await mkdtemp(join(tmpdir(), "lvis-marketplace-install-"));
     appRoot = testDir;
     // Phase 2a: registry + installed plugins live under pluginsRoot
     // (testDir/plugins). The legacy `installed/` subdir is gone.
