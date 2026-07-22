@@ -19,6 +19,8 @@ interface ParentDirectorySyncRuntime {
   open(parentDir: string): number;
   fsync(fd: number): void;
   close(fd: number): void;
+  rename?(from: string, to: string): void;
+  wait?(milliseconds: number): void;
 }
 
 const DEFAULT_PARENT_DIRECTORY_SYNC_RUNTIME: ParentDirectorySyncRuntime = {
@@ -27,6 +29,30 @@ const DEFAULT_PARENT_DIRECTORY_SYNC_RUNTIME: ParentDirectorySyncRuntime = {
   fsync: fsyncSync,
   close: closeSync,
 };
+
+function replaceStagedFile(
+  from: string,
+  to: string,
+  runtime: ParentDirectorySyncRuntime,
+): void {
+  const rename = runtime.rename ?? renameSync;
+  const wait = runtime.wait ?? ((milliseconds: number) => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+  });
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const retryable = runtime.platform === "win32"
+        && (code === "EPERM" || code === "EACCES" || code === "EBUSY")
+        && attempt < 3;
+      if (!retryable) throw error;
+      wait(10 * (attempt + 1));
+    }
+  }
+}
 
 function isMissingPathError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
@@ -154,7 +180,7 @@ function writeUtf8FileAtomicSyncInternal(
     // still fail closed above. Pinned by the residual-window test in
     // atomic-file.test.ts.
     if (precondition && !precondition()) return false;
-    renameSync(tempPath, filePath);
+    replaceStagedFile(tempPath, filePath, directorySyncRuntime);
     committed = true;
     syncParentDirectoryAfterRename(parentDir, directorySyncRuntime);
     return true;

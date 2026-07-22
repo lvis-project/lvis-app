@@ -148,6 +148,17 @@ jobs:
           src/audit/__tests__/rationale-audit-adapter.test.ts
           src/boot/__tests__/plugin-surface-permissions.test.ts
           src/permissions/__tests__/windows-sandbox-logic.test.ts
+          src/lib/__tests__/atomic-file.test.ts
+          src/lib/__tests__/with-file-lock.test.ts
+          src/plugins/__tests__/registry-atomicity.test.ts
+          src/plugins/__tests__/registry-migration.test.ts
+          src/plugins/__tests__/installed-entry-fs.test.ts
+          src/plugins/__tests__/plugin-artifact-store-windows-lock.test.ts
+          src/plugins/__tests__/marketplace-managed-bootstrap.test.ts
+          src/plugins/__tests__/marketplace-update-recovery.test.ts
+          src/plugins/__tests__/marketplace-dispatcher.test.ts
+          src/plugins/__tests__/install-local.test.ts
+          src/plugins/__tests__/trust-boundary.test.ts
 
   macos-permission-tests:
     name: macOS permission path tests

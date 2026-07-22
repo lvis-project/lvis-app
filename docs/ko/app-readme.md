@@ -66,16 +66,12 @@ bun run build
 bun run dist
 ```
 
-## 플러그인 Registry CLI
+## 플러그인 Registry 조회 CLI
 
-설치는 마켓플레이스 카드, `lvis://install/<slug>` 딥링크, 또는 `lvis-cli install file://<path-to-dist.zip>` 사이드로드가 담당합니다. Registry CLI는 활성 manifest entry를 관리합니다.
+Registry CLI는 실행 중인 호스트의 live state와 durable state가 어긋나지 않도록 조회 전용입니다. 설치와 상태 변경은 마켓플레이스 카드, `lvis://install/<slug>` 딥링크, 또는 호스트 설정을 사용합니다. 로컬 개발에서는 unpackaged 앱을 실행하고 **Settings → Plugin Config → 개발자 도구 → 로컬 폴더에서 설치**에서 `plugin.json`이 포함된 빌드 폴더를 선택합니다.
 
 ```bash
 bun run plugins:list
-bun run plugins:add -- <plugin-id> <manifest-path>
-bun run plugins:remove -- <plugin-id>
-bun run plugins:enable -- <plugin-id>
-bun run plugins:disable -- <plugin-id>
 ```
 
 ## Windows 개발 메모

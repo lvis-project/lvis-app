@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
@@ -227,12 +227,33 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(result.ok).toBe(true);
   });
 
+  it.skipIf(process.platform === "win32")("rejects an unlisted executable symlink in the installed payload", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const outsideExecutable = join(testDir, "outside-executable");
+    await writeFile(outsideExecutable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const installDir = join(pluginsDir, "test-plugin");
+    await symlink(outsideExecutable, join(installDir, "dist", "injected-tool"));
+
+    const { verifyInstallReceipt } = await import("../plugin-install-receipt.js");
+    await expect(verifyInstallReceipt(cacheRoot, "test-plugin", installDir)).resolves.toEqual({
+      ok: false,
+      reason: expect.stringContaining("installed payload contains symbolic link: dist/injected-tool"),
+    });
+  });
+
   it("cleans fresh local install dir, registry, and receipt when finalization fails", async () => {
     const service = makeService();
     const store = (service as unknown as {
       artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
     }).artifactStore;
-    vi.spyOn(store, "writeInstallReceipt").mockRejectedValueOnce(new Error("receipt write failed"));
+    vi.spyOn(store, "writeInstallReceipt").mockImplementationOnce(async () => {
+      const registryDuringReceipt = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: Array<{ id: string }>;
+      };
+      expect(registryDuringReceipt.plugins).toEqual([]);
+      throw new Error("receipt write failed");
+    });
 
     await expect(service.installLocal(sourceDir)).rejects.toThrow("receipt write failed");
 
@@ -241,6 +262,210 @@ describe("PluginMarketplaceService.installLocal", () => {
 
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(reg.plugins).toHaveLength(0);
+  });
+
+  it("hides an existing entry until its replacement receipt is durable", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const oldReceipt = await readFile(
+      join(cacheRoot, "test-plugin", "install-receipt.json"),
+      "utf-8",
+    );
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "fixture v2",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+      "utf-8",
+    );
+    const store = (service as unknown as {
+      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+    }).artifactStore;
+    vi.spyOn(store, "writeInstallReceipt").mockImplementationOnce(async () => {
+      const registryDuringReceipt = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: Array<{ id: string; pendingUpdate?: { kind: string } }>;
+      };
+      expect(registryDuringReceipt.plugins).toEqual([
+        expect.objectContaining({
+          id: "test-plugin",
+          pendingUpdate: expect.objectContaining({ kind: "local-dev" }),
+        }),
+      ]);
+      throw new Error("replacement receipt write failed");
+    });
+
+    await expect(service.installLocal(sourceDir)).rejects.toThrow("replacement receipt write failed");
+
+    const restoredRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string }>;
+    };
+    expect(restoredRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(true);
+    expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"))
+      .toBe(oldReceipt);
+  });
+
+  it("retains a replacement backup when a transient restore fault requires retry", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const oldReceipt = await readFile(
+      join(cacheRoot, "test-plugin", "install-receipt.json"),
+      "utf-8",
+    );
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "fixture v2",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+      "utf-8",
+    );
+
+    const internals = service as unknown as {
+      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+      restoreLocalInstallSnapshot: (...args: unknown[]) => Promise<void>;
+      localInstallRollbackSnapshots: Map<string, { backupDir?: string }>;
+    };
+    vi.spyOn(internals.artifactStore, "writeInstallReceipt").mockRejectedValueOnce(
+      new Error("replacement receipt write failed"),
+    );
+    vi.spyOn(internals, "restoreLocalInstallSnapshot").mockRejectedValueOnce(
+      Object.assign(new Error("transient Windows restore lock"), { code: "EACCES" }),
+    );
+
+    const error = await service.installLocal(sourceDir).catch((caught) => caught);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors[1]).toMatchObject({ code: "EACCES" });
+    const retained = internals.localInstallRollbackSnapshots.get("test-plugin");
+    expect(retained?.backupDir).toBeTruthy();
+    expect(existsSync(retained!.backupDir!)).toBe(true);
+    const hiddenRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; pendingUpdate?: { kind: string } }>;
+    };
+    expect(hiddenRegistry.plugins).toEqual([
+      expect.objectContaining({
+        id: "test-plugin",
+        pendingUpdate: expect.objectContaining({ kind: "local-dev" }),
+      }),
+    ]);
+
+    await expect(service.rollbackLocalInstall("test-plugin")).resolves.toEqual({
+      pluginId: "test-plugin",
+      rolledBack: true,
+    });
+    expect(existsSync(retained!.backupDir!)).toBe(false);
+    expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"))
+      .toBe(oldReceipt);
+    const restoredManifest = JSON.parse(
+      await readFile(join(pluginsDir, "test-plugin", "plugin.json"), "utf-8"),
+    ) as { version: string };
+    expect(restoredManifest.version).toBe("1.2.3");
+    const restoredRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string }>;
+    };
+    expect(restoredRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(true);
+  });
+
+  it("supersedes a cleaned unresolved pending row with a verified local reinstall", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const manifestRaw = await readFile(join(pluginsDir, "test-plugin", "plugin.json"), "utf-8");
+    const receiptRaw = await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<Record<string, unknown>>;
+    };
+    Object.assign(registry.plugins[0]!, {
+      bundleRefs: ["bundle-root"],
+      pendingUpdate: {
+        kind: "local-dev",
+        previousManifestFileSha256: createHash("sha256").update(manifestRaw).digest("hex"),
+        previousReceiptRaw: receiptRaw,
+      },
+    });
+    await writeFile(registryPath, JSON.stringify(registry));
+    await writeFile(join(pluginsDir, "test-plugin", "dist", "hostPlugin.js"), "corrupted");
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "verified retry",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+    );
+
+    await expect(service.installLocal(sourceDir)).resolves.toEqual({ pluginId: "test-plugin", installed: true });
+
+    const repaired = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ bundleRefs?: string[]; pendingUpdate?: unknown; pendingCleanup?: unknown }>;
+    };
+    expect(repaired.plugins[0]?.bundleRefs).toEqual(["bundle-root"]);
+    expect(repaired.plugins[0]?.pendingUpdate).toBeUndefined();
+    expect(repaired.plugins[0]?.pendingCleanup).toBeUndefined();
+
+    await expect(service.rollbackLocalInstall("test-plugin")).rejects.toThrow(
+      "Pending local rollback predecessor remains unresolved",
+    );
+    const hidden = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ pendingUpdate?: unknown }>;
+    };
+    expect(hidden.plugins[0]?.pendingUpdate).toEqual(expect.objectContaining({ kind: "local-dev" }));
+  });
+
+  it("restores the original pending predecessor when verified local retry activation fails", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const installDir = join(pluginsDir, "test-plugin");
+    const oldManifestRaw = await readFile(join(installDir, "plugin.json"), "utf-8");
+    const oldReceiptRaw = await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8");
+    const backupDir = join(pluginsDir, ".cache", "local-install-rollback", "test-plugin-123-456");
+    await mkdir(join(pluginsDir, ".cache", "local-install-rollback"), { recursive: true });
+    await cp(installDir, backupDir, { recursive: true });
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<Record<string, unknown>>;
+    };
+    Object.assign(registry.plugins[0]!, {
+      pendingUpdate: {
+        kind: "local-dev",
+        previousManifestFileSha256: createHash("sha256").update(oldManifestRaw).digest("hex"),
+        previousReceiptRaw: oldReceiptRaw,
+        recoveryBackupDir: backupDir,
+        recoveryBackupMode: "copy",
+      },
+    });
+    await writeFile(registryPath, JSON.stringify(registry));
+    await writeFile(join(installDir, "dist", "hostPlugin.js"), "unresolved retry bytes");
+    await writeFile(join(sourceDir, "plugin.json"), JSON.stringify({
+      id: "test-plugin",
+      name: "Test Plugin",
+      version: "2.0.0",
+      description: "verified retry",
+      publisher: "tests",
+      entry: "dist/hostPlugin.js",
+    }));
+
+    await service.installLocal(sourceDir);
+    await expect(service.rollbackLocalInstall("test-plugin")).resolves.toEqual({
+      pluginId: "test-plugin",
+      rolledBack: true,
+    });
+
+    expect(await readFile(join(installDir, "plugin.json"), "utf-8")).toBe(oldManifestRaw);
+    expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8")).toBe(oldReceiptRaw);
+    const restored = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ pendingUpdate?: unknown }>;
+    };
+    expect(restored.plugins[0]?.pendingUpdate).toBeUndefined();
   });
 
   it("rollbackLocalInstall restores the previous install receipt with disk and registry state", async () => {
@@ -344,6 +569,7 @@ describe("PluginMarketplaceService.installLocal", () => {
               manifestPath: "test-plugin/plugin.json",
               enabled: true,
               installSource: "local-dev",
+              bundleRefs: ["work-assistant"],
             },
           ],
         },
@@ -377,5 +603,22 @@ describe("PluginMarketplaceService.installLocal", () => {
     const entry = reg.plugins.find((p: { id: string }) => p.id === "test-plugin");
     expect(entry.approvedPluginAccess).toEqual(accessSpec);
     expect(entry.installSource).toBe("local-dev");
+    expect(entry.bundleRefs).toEqual(["work-assistant"]);
+    expect(entry.pendingUpdate).toBeUndefined();
+  });
+
+  it.each([
+    null,
+    {},
+    { schemaVersion: 2, pluginId: "test-plugin", version: "1", installedAt: "now", files: [null] },
+    { schemaVersion: 2, pluginId: "test-plugin", version: "1", installedAt: "now", files: [{ path: 7, sha256: "a".repeat(64) }] },
+    { schemaVersion: 2, pluginId: "test-plugin", version: "1", installedAt: "now", files: [{ path: "plugin.json", sha256: 7 }] },
+  ])("fails closed for structurally malformed valid receipt JSON %#", async (receipt) => {
+    const { verifyInstallReceiptRaw } = await import("../plugin-install-receipt.js");
+    await expect(verifyInstallReceiptRaw(
+      JSON.stringify(receipt),
+      "test-plugin",
+      sourceDir,
+    )).resolves.toEqual(expect.objectContaining({ ok: false }));
   });
 });

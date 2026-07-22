@@ -16,11 +16,13 @@
  * class with no direct coverage.
  */
 import AdmZip from "adm-zip";
-import { describe, expect, it } from "vitest";
-import { rmSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { describe, expect, it, vi } from "vitest";
+import { existsSync, rmSync } from "node:fs";
+import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { assertSafeArtifactSlug } from "../plugin-artifact-store.js";
+import { ArtifactRollbackError, assertSafeArtifactSlug } from "../plugin-artifact-store.js";
+import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
+import * as installedEntryFs from "../installed-entry-fs.js";
 import { makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
 
 describe("PluginArtifactStore — history journal", () => {
@@ -212,6 +214,74 @@ describe("PluginArtifactStore — extractZip", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it.runIf(process.platform !== "win32")(
+    "surfaces persistent promoted-directory cleanup failure and retains the old backup",
+    async () => {
+      const tmp = makeTmpDir();
+      const installRoot = resolve(tmp, "installed");
+      try {
+        const store = makeStore(tmp);
+        const installDir = store.installDirFor("acme");
+        await mkdir(installDir, { recursive: true });
+        await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+        const zip = new AdmZip();
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+        const commitError = new Error("registry publication failed");
+
+        const error = await store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
+          await chmod(installRoot, 0o500);
+          throw commitError;
+        }).catch((caught) => caught);
+        await chmod(installRoot, 0o700);
+
+        expect(error).toBeInstanceOf(ArtifactRollbackError);
+        expect((error as ArtifactRollbackError).errors[0]).toBe(commitError);
+        expect((error as ArtifactRollbackError).errors[1]).toMatchObject({ code: expect.stringMatching(/EACCES|EPERM/) });
+        expect((error as ArtifactRollbackError).backupDir).toBeTruthy();
+        expect(existsSync((error as ArtifactRollbackError).backupDir!)).toBe(true);
+        expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8")).version).toBe("new");
+      } finally {
+        await chmod(installRoot, 0o700).catch(() => undefined);
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+    10_000,
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "routes a committed old directory through the tombstone lifecycle when bounded cleanup fails",
+    async () => {
+      const tmp = makeTmpDir();
+      const installRoot = resolve(tmp, "installed");
+      try {
+        const store = makeStore(tmp);
+        vi.spyOn(
+          store as unknown as { removeCommittedBackup: (path: string) => Promise<void> },
+          "removeCommittedBackup",
+        ).mockRejectedValue(Object.assign(new Error("persistent cleanup lock"), { code: "EACCES" }));
+        const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
+        vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(
+          (path, root, options) => originalTombstone(path, root, { ...options, deferRemoval: false }),
+        );
+        const installDir = store.installDirFor("acme");
+        await mkdir(installDir, { recursive: true });
+        await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+        const zip = new AdmZip();
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+
+        await store.extractZipWithCommit("acme", zip.toBuffer(), async () => undefined);
+
+        const tombstoneDir = resolve(installRoot, TOMBSTONE_SUBDIR);
+        const tombstones = await readdir(tombstoneDir);
+        expect(tombstones).toHaveLength(1);
+        expect(tombstones[0]).toMatch(/^\.acme\.old-/);
+      } finally {
+        await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      }
+    },
+    10_000,
+  );
 });
 
 describe("assertSafeArtifactSlug", () => {

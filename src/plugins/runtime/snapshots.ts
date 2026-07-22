@@ -66,6 +66,10 @@ export async function resolveManifestLoadPlan(opts: {
   const registry = await readPluginRegistry(opts.registryPath);
   plans.push(
     ...registry.plugins.flatMap((entry) => {
+      if (entry.pendingUpdate) {
+        log.warn(`skipping pending-update registry entry for ${entry.id}`);
+        return [];
+      }
       const manifestPath = isAbsolute(entry.manifestPath)
         ? entry.manifestPath
         : resolve(dirname(opts.registryPath!), entry.manifestPath);

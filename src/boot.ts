@@ -42,6 +42,7 @@ import { app, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { resolve } from "node:path";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
+import { preparePluginRegistryForBoot } from "./plugins/plugin-boot-recovery.js";
 import { purgeStaleSessionDiffDirs, clearSessionDiffCache } from "./tools/write-diff-cache.js";
 import { resolvePluginPaths } from "./plugins/plugin-paths.js";
 import { StarredStore } from "./data/starred-store.js";
@@ -226,6 +227,57 @@ export async function bootstrap(
   // pointing at a per-test temp dir, masking real bugs.
   // Fire-and-forget — sweep failure must not block boot.
   const sweeperPluginPaths = resolvePluginPaths();
+  // Recover crash-interrupted replacement rows before runtime discovery. A
+  // pending row is visible to bundle planners but hidden from runtime loading;
+  // recovery clears it only after exact prior bytes + receipt are proven or
+  // restored from its durable backup metadata.
+  await preparePluginRegistryForBoot(sweeperPluginPaths)
+    .then(({ recovered, unresolved, removals, pendingRecoverySkipped }) => {
+      if (removals.restored.length > 0 || removals.cleaned.length > 0 || removals.unresolved.length > 0) {
+        log.info(
+          "boot: plugin-removal-recovery restored=%d cleaned=%d unresolved=%d",
+          removals.restored.length,
+          removals.cleaned.length,
+          removals.unresolved.length,
+        );
+        ctx.bootAuditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "boot",
+          type: removals.unresolved.length > 0 ? "warn" : "info",
+          input: "plugin-removal-recovery",
+          output: JSON.stringify(removals),
+        });
+      }
+      if (pendingRecoverySkipped) {
+        log.warn("boot: pending plugin recovery skipped because removal recovery is unresolved");
+      }
+      if (recovered.length > 0 || unresolved.length > 0) {
+        log.info(
+          "boot: plugin-update-recovery recovered=%d unresolved=%d",
+          recovered.length,
+          unresolved.length,
+        );
+      }
+      if (unresolved.length > 0) {
+        ctx.bootAuditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "boot",
+          type: "warn",
+          input: "plugin-update-recovery-unresolved",
+          output: JSON.stringify(unresolved),
+        });
+      }
+    })
+    .catch((err) => {
+      log.warn("boot: plugin migration/recovery failed (pending rows remain hidden): %s", (err as Error).message);
+      ctx.bootAuditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "boot",
+        type: "warn",
+        input: "plugin-migration-recovery-failed",
+        output: (err as Error).message,
+      });
+    });
   void sweepOrphanUninstallDirs(sweeperPluginPaths.pluginsRoot, {
     auditFailures: (failures) => {
       // Surface persistent rm failures (typically antivirus / corp endpoint

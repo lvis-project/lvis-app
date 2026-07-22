@@ -1,7 +1,11 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, isAbsolute, resolve } from "node:path";
 import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
+import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
+import { assertSafeArtifactSlug } from "./plugin-id.js";
 
 /**
  * Pre-PR #430 registry shape — `installedBy` ("admin"|"user") and
@@ -9,9 +13,9 @@ import { plog, PluginPhase } from "./lifecycle-log.js";
  * orthogonal fields. PR #430 collapsed both into the single
  * `installSource` enum. {@link migrateLegacyEntry} maps the legacy
  * shape onto the new enum and strips the deprecated fields, and
- * {@link readPluginRegistry} persists the migrated form back to disk
- * the first time it sees a legacy entry — making the migration
- * one-shot and idempotent.
+ * {@link readPluginRegistry} migrates the legacy form in memory. Persistence
+ * is explicit through {@link migratePluginRegistry}, which uses the same
+ * transaction as every other registry mutation.
  *
  * Post-2026-05 dev-link removal: the `"dev-link"` value (whether stored
  * directly in `installSource` or implied by the legacy `_devLinked: true`
@@ -124,6 +128,10 @@ function migrateLegacyEntry(
   if (entry.bundleRefs !== undefined) migrated.bundleRefs = entry.bundleRefs;
   if (cleanedAccess.access !== undefined) migrated.approvedPluginAccess = cleanedAccess.access;
   if (installSource !== undefined) migrated.installSource = installSource;
+  if (entry.pendingUpdate !== undefined) migrated.pendingUpdate = entry.pendingUpdate;
+  if (entry.pendingCleanup !== undefined) {
+    migrated.pendingCleanup = entry.pendingCleanup.map((item) => ({ ...item }));
+  }
   return migrated;
 }
 
@@ -143,23 +151,25 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     }
     throw err;
   }
-  let parsed: { version?: number; plugins?: LegacyRegistryEntry[] };
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw) as { version?: number; plugins?: LegacyRegistryEntry[] };
+    parsed = JSON.parse(raw) as unknown;
   } catch (err) {
     plog("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, err, reason: "invalid_json", registryPath }, "registry parse failed");
     throw err;
   }
-  if (!Array.isArray(parsed.plugins)) {
+  if (!isRecord(parsed) || !Array.isArray(parsed.plugins)) {
     plog("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, reason: "invalid_format", registryPath }, "registry malformed");
     throw new Error(`Invalid plugin registry: ${registryPath}`);
   }
-  // Apply legacy → installSource migration on read. We persist the
-  // migrated form back to disk in one shot so subsequent reads are
-  // no-ops. This is idempotent: an already-migrated entry returns
-  // `null` from migrateLegacyEntry and is left alone.
+  if (parsed.version !== undefined && typeof parsed.version !== "number") {
+    throw new Error(`Invalid plugin registry version: ${registryPath}`);
+  }
+  // Apply legacy → installSource migration in memory. Persistence is an
+  // explicit transaction so a read can never overwrite a concurrent writer.
   let migratedCount = 0;
   const out = { devLinkRewritten: false, legacyToolGrantsRemoved: false };
+  validateRawPluginRegistry(parsed, registryPath);
   const plugins: PluginRegistryEntry[] = parsed.plugins.map((entry) => {
     const migrated = migrateLegacyEntry(entry, out);
     if (migrated !== null) {
@@ -172,6 +182,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     version: parsed.version ?? 1,
     plugins,
   };
+  validatePluginRegistry(registry, registryPath);
   if (out.devLinkRewritten) {
     // Loud one-shot audit warning. Existing dev-link entries cannot load
     // any longer (receipt verification now applies unconditionally) so
@@ -186,7 +197,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
       },
       `registry contained dev-link entries — rewritten to installSource:"local-dev". `
         + `These plugins will fail to load until reinstalled via the marketplace `
-        + `or 'lvis-cli install file://<path-to-dist.zip>'.`,
+        + `or the development-only Settings > Plugin Config > Install from local folder flow.`,
     );
   }
   if (migratedCount > 0) {
@@ -215,29 +226,181 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
       `registry migrated ${migratedCount} legacy entries`,
     );
   }
-  if (migratedCount > 0) {
-    try {
-      await writePluginRegistry(registryPath, registry);
-    } catch (err) {
-      plog(
-        "warn",
-        {
-          pluginId: "<registry>",
-          phase: PluginPhase.DISCOVERY_FAIL,
-          err,
-          reason: "registry_migration_persist_failed",
-          registryPath,
-        },
-        "failed to persist migrated registry — will retry on next read",
-      );
-    }
-  }
   return registry;
 }
 
-export async function writePluginRegistry(registryPath: string, registry: PluginRegistry): Promise<void> {
-  await mkdir(dirname(registryPath), { recursive: true });
-  await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf-8");
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+const REGISTRY_ENTRY_KEYS = new Set([
+  "id", "manifestPath", "manifestSha256", "enabled", "bundleRefs",
+  "approvedPluginAccess", "installSource", "pendingUpdate",
+  "pendingCleanup",
+]);
+const LEGACY_REGISTRY_ENTRY_KEYS = new Set([...REGISTRY_ENTRY_KEYS, "installedBy", "_devLinked"]);
+
+function validateRawPluginRegistry(value: Record<string, unknown>, registryPath: string): void {
+  assertOnlyKeys(value, new Set(["version", "plugins"]), `plugin registry: ${registryPath}`);
+  if (value.version !== undefined && value.version !== 1) {
+    throw new Error(`Invalid plugin registry version: ${registryPath}`);
+  }
+  for (const entry of value.plugins as unknown[]) validateRegistryEntry(entry, registryPath, true);
+}
+
+function validateRegistryEntry(
+  value: unknown,
+  registryPath: string,
+  allowLegacy: boolean,
+): asserts value is LegacyRegistryEntry {
+  if (!isRecord(value)
+    || typeof value.id !== "string"
+    || value.id.length === 0
+    || typeof value.manifestPath !== "string"
+    || value.manifestPath.length === 0) {
+    throw new Error(`Invalid plugin registry entry: ${registryPath}`);
+  }
+  assertSafeArtifactSlug(value.id);
+  assertOnlyKeys(
+    value,
+    allowLegacy ? LEGACY_REGISTRY_ENTRY_KEYS : REGISTRY_ENTRY_KEYS,
+    `plugin registry entry '${value.id}'`,
+  );
+  if (value.manifestSha256 !== undefined && typeof value.manifestSha256 !== "string") {
+    throw new Error(`Invalid plugin registry manifest hash: ${value.id}`);
+  }
+  if (value.enabled !== undefined && typeof value.enabled !== "boolean") {
+    throw new Error(`Invalid plugin registry enabled flag: ${value.id}`);
+  }
+  if (value.bundleRefs !== undefined && !isStringArray(value.bundleRefs)) {
+    throw new Error(`Invalid plugin registry bundle references: ${value.id}`);
+  }
+  if (value.installedBy !== undefined && value.installedBy !== "admin" && value.installedBy !== "user") {
+    throw new Error(`Invalid legacy plugin registry installedBy: ${value.id}`);
+  }
+  if (value._devLinked !== undefined && typeof value._devLinked !== "boolean") {
+    throw new Error(`Invalid legacy plugin registry _devLinked: ${value.id}`);
+  }
+  const allowedInstallSources = allowLegacy
+    ? new Set(["admin", "user", "local-dev", "dev-link"])
+    : new Set(["admin", "user", "local-dev"]);
+  if (value.installSource !== undefined || Object.prototype.hasOwnProperty.call(value, "installSource")) {
+    if (typeof value.installSource !== "string" || !allowedInstallSources.has(value.installSource)) {
+      throw new Error(`Invalid plugin registry install source: ${value.id}`);
+    }
+  }
+  if (value.approvedPluginAccess !== undefined) validatePluginAccess(value.approvedPluginAccess, value.id);
+  if (value.pendingUpdate !== undefined) validatePendingUpdate(value.pendingUpdate, value.id);
+  if (value.pendingCleanup !== undefined) validatePendingCleanup(value.pendingCleanup, value.id);
+}
+
+function validatePendingCleanup(value: unknown, pluginId: string): void {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
+  }
+  const paths = new Set<string>();
+  for (const item of value) {
+    if (!isRecord(item)) throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
+    assertOnlyKeys(item, new Set(["kind", "path"]), `pending cleanup for '${pluginId}'`);
+    if ((item.kind !== "obsolete-artifact" && item.kind !== "obsolete-local-backup")
+      || typeof item.path !== "string"
+      || item.path.length === 0
+      || paths.has(item.path)) {
+      throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
+    }
+    paths.add(item.path);
+  }
+}
+
+function validatePendingUpdate(value: unknown, pluginId: string): void {
+  if (!isRecord(value)) throw new Error(`Invalid plugin registry pending update: ${pluginId}`);
+  assertOnlyKeys(
+    value,
+    new Set(["kind", "previousManifestFileSha256", "previousReceiptRaw", "recoveryBackupDir", "recoveryBackupMode"]),
+    `pending update for '${pluginId}'`,
+  );
+  if (value.kind !== "marketplace" && value.kind !== "local-dev") {
+    throw new Error(`Invalid plugin registry pending update kind: ${pluginId}`);
+  }
+  if (value.previousManifestFileSha256 !== null
+    && (typeof value.previousManifestFileSha256 !== "string"
+      || !/^[a-f0-9]{64}$/.test(value.previousManifestFileSha256))) {
+    throw new Error(`Invalid plugin registry pending manifest hash: ${pluginId}`);
+  }
+  if (value.previousReceiptRaw !== null && typeof value.previousReceiptRaw !== "string") {
+    throw new Error(`Invalid plugin registry pending receipt: ${pluginId}`);
+  }
+  if (value.recoveryBackupDir !== undefined && typeof value.recoveryBackupDir !== "string") {
+    throw new Error(`Invalid plugin registry recovery backup path: ${pluginId}`);
+  }
+  if (value.recoveryBackupMode !== undefined
+    && value.recoveryBackupMode !== "rename"
+    && value.recoveryBackupMode !== "copy") {
+    throw new Error(`Invalid plugin registry recovery backup mode: ${pluginId}`);
+  }
+  if ((value.recoveryBackupDir === undefined) !== (value.recoveryBackupMode === undefined)) {
+    throw new Error(`Incomplete plugin registry recovery backup metadata: ${pluginId}`);
+  }
+}
+
+function validatePluginAccess(value: unknown, pluginId: string): void {
+  if (!isRecord(value)) throw new Error(`Invalid plugin registry access grant: ${pluginId}`);
+  assertOnlyKeys(value, new Set(["plugins", "agentApprovalScopes"]), `plugin access for '${pluginId}'`);
+  if (!Array.isArray(value.plugins)) throw new Error(`Invalid plugin access targets: ${pluginId}`);
+  for (const target of value.plugins) {
+    // Explicitly support the historical null target and retired tools array;
+    // migration removes both without accepting arbitrary malformed objects.
+    if (target === null) continue;
+    if (!isRecord(target) || typeof target.pluginId !== "string" || target.pluginId.length === 0) {
+      throw new Error(`Invalid plugin access target: ${pluginId}`);
+    }
+    assertOnlyKeys(target, new Set(["pluginId", "events", "tools"]), `plugin access target for '${pluginId}'`);
+    if (target.events !== undefined && !isStringArray(target.events)) {
+      throw new Error(`Invalid plugin access events: ${pluginId}`);
+    }
+    if (target.tools !== undefined && !isStringArray(target.tools)) {
+      throw new Error(`Invalid legacy plugin access tools: ${pluginId}`);
+    }
+  }
+  if (value.agentApprovalScopes !== undefined && !isStringArray(value.agentApprovalScopes)) {
+    throw new Error(`Invalid plugin approval scopes: ${pluginId}`);
+  }
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function assertOnlyKeys(value: Record<string, unknown>, allowed: Set<string>, context: string): void {
+  const unsupported = Object.keys(value).find((key) => !allowed.has(key));
+  if (unsupported) throw new Error(`Unsupported ${context} field: ${unsupported}`);
+}
+
+function validatePluginRegistry(registry: PluginRegistry, registryPath: string): void {
+  if (registry.version !== 1 || !Array.isArray(registry.plugins)) {
+    throw new Error(`Invalid plugin registry: ${registryPath}`);
+  }
+  const ids = new Set<string>();
+  for (const entry of registry.plugins) {
+    validateRegistryEntry(entry, registryPath, false);
+    if (ids.has(entry.id)) throw new Error(`Duplicate plugin registry entry: ${entry.id}`);
+    ids.add(entry.id);
+  }
+}
+
+/** Validate an untrusted registry-entry projection without reading or writing registry.json. */
+export function validatePluginRegistryEntries(
+  entries: unknown[],
+  context: string,
+): asserts entries is PluginRegistryEntry[] {
+  validatePluginRegistry({ version: 1, plugins: entries as PluginRegistryEntry[] }, context);
+}
+
+function canonicalizePluginRegistry(registry: PluginRegistry): PluginRegistry {
+  return {
+    version: registry.version,
+    plugins: [...registry.plugins].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  };
 }
 
 export function resolveManifestPathsFromRegistry(
@@ -249,29 +412,98 @@ export function resolveManifestPathsFromRegistry(
   // still loaded into memory; tool exposure is gated in PluginRuntime via
   // inactivePluginIds, not by skipping the manifest path. (#1176)
   return entries
+    .filter((entry) => entry.pendingUpdate === undefined)
     .map((entry) => (isAbsolute(entry.manifestPath) ? entry.manifestPath : resolve(baseDir, entry.manifestPath)));
 }
 
 // ─── In-process async mutex ──────────────────────────────────────────
 //
-// Serialize read-modify-write cycles on registry.json to prevent TOCTOU
-// races between concurrent install / uninstall / disable paths. Keyed by
-// registryPath so tests with tmp paths do not interfere with production.
-// Scope is intentionally in-process only — cross-process locking
-// (file locks or IPC serialization) is not yet implemented.
+// Serialize in-process contenders before acquiring the cross-process lock.
+// The lock target is a stable sibling anchor: withFileLock may create its
+// target, so it must never point at registry.json (a missing registry means
+// empty state, while an empty registry file is corruption).
 
 const registryLocks = new Map<string, Promise<void>>();
+const registryMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 
-export async function withRegistryLock<T>(
+async function withRegistryTransaction<T>(
   registryPath: string,
-  fn: () => Promise<T>,
+  mutator: (registry: PluginRegistry) => T,
 ): Promise<T> {
   const key = resolve(registryPath);
   const prev = registryLocks.get(key) ?? Promise.resolve();
-  const next = prev.then(() => fn());
+  const next = prev.then(async () => {
+    try {
+      const committed = await withFileLock(
+        `${key}.lock-anchor`,
+        async () => {
+          const registry = await readPluginRegistry(key);
+          const inherited = registryMutationContext.getStore() ?? new Set<string>();
+          const result = registryMutationContext.run(
+            new Set([...inherited, key]),
+            () => mutator(registry),
+          );
+          if (result !== null
+            && (typeof result === "object" || typeof result === "function")
+            && typeof (result as { then?: unknown }).then === "function") {
+            void Promise.resolve(result).catch(() => undefined);
+            throw new Error("Plugin registry mutator must be synchronous");
+          }
+          validatePluginRegistry(registry, key);
+          const canonical = canonicalizePluginRegistry(registry);
+          const content = `${JSON.stringify(canonical, null, 2)}\n`;
+          try {
+            writeUtf8FileAtomicSync(key, content, 0o600);
+          } catch (error) {
+            if (!isCommittedAtomicWriteError(error)) throw error;
+            const persisted = await readFile(key, "utf-8");
+            if (persisted !== content) throw error;
+            plog(
+              "warn",
+              {
+                pluginId: "<registry>",
+                phase: PluginPhase.DISCOVERY_FAIL,
+                reason: "registry_atomic_commit_sync_unconfirmed",
+                registryPath: key,
+              },
+              "registry atomic rename committed; exact bytes verified after parent directory sync failure",
+            );
+          }
+          return { content, mutationResult: result };
+        },
+      );
+      return committed.mutationResult;
+    } catch (error) {
+      if (!(error instanceof FileLockReleaseError)) throw error;
+      const committed = error.result as { content: string; mutationResult: T };
+      const persisted = await readFile(key, "utf-8");
+      if (persisted !== committed.content) throw error;
+      plog(
+        "warn",
+        {
+          pluginId: "<registry>",
+          phase: PluginPhase.DISCOVERY_FAIL,
+          err: error.releaseError,
+          reason: "registry_lock_release_failed_after_commit",
+          registryPath: key,
+        },
+        "registry commit completed but lock release failed; exact bytes verified and stale-lock recovery may be required",
+      );
+      return committed.mutationResult;
+    }
+  });
   // Next acquirer chains off this turn's completion, regardless of success.
-  registryLocks.set(key, next.then(() => undefined, () => undefined));
-  return next;
+  const tail = next.then(() => undefined, () => undefined);
+  registryLocks.set(key, tail);
+  try {
+    return await next;
+  } finally {
+    if (registryLocks.get(key) === tail) registryLocks.delete(key);
+  }
+}
+
+function isCommittedAtomicWriteError(error: unknown): error is Error & { committed: true } {
+  return error instanceof Error && (error as { committed?: unknown }).committed === true;
 }
 
 /**
@@ -284,13 +516,17 @@ export async function withRegistryLock<T>(
  *     if (entry) entry.enabled = false;
  *   });
  */
-export async function updatePluginRegistry(
+export function updatePluginRegistry<T = void>(
   registryPath: string,
-  mutator: (registry: PluginRegistry) => void | Promise<void>,
-): Promise<void> {
-  await withRegistryLock(registryPath, async () => {
-    const registry = await readPluginRegistry(registryPath);
-    await mutator(registry);
-    await writePluginRegistry(registryPath, registry);
-  });
+  mutator: (registry: PluginRegistry) => T,
+): Promise<T> {
+  if ((registryMutationContext.getStore()?.size ?? 0) > 0) {
+    throw new Error("Nested plugin registry mutation is not allowed");
+  }
+  return withRegistryTransaction(registryPath, mutator);
+}
+
+/** Persist any in-memory legacy migration through the registry transaction. */
+export function migratePluginRegistry(registryPath: string): Promise<void> {
+  return updatePluginRegistry(registryPath, () => undefined);
 }
