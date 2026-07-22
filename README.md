@@ -37,13 +37,9 @@ Current managed plugin families include:
 - `@lvis/plugin-work-assistant`
 - `@lvis/plugin-agent-hub`
 
-### Marketplace And Sideloading
+### Marketplace And Local Development
 
-Plugins can be installed through marketplace cards, `lvis://install/<slug>` deep links, or side-loaded with:
-
-```bash
-bun run cli install file://<path-to-dist.zip>
-```
+Plugins can be installed through marketplace cards or `lvis://install/<slug>` deep links. In an unpackaged development build, open **Settings → Plugin Config → Developer tools → Install from local folder** and select the build folder that contains `plugin.json`. The running host owns this installation so durable registry state and live plugin state remain synchronized.
 
 On boot, managed marketplace plugins are checked and refreshed by `src/boot/managed-marketplace.ts`. Stale registry entries are repaired when the manifest is missing, the plugin runtime restarts after managed changes, and renderer boot progress is emitted through `lvis:bootstrap:status`.
 
@@ -144,7 +140,7 @@ Type checking is intentionally separate. Run `bun run typecheck` before relying 
 
 ## Plugin Registry Inspection CLI
 
-The registry CLI is read-only so it cannot make durable state diverge from a running host. Installation and mutations are handled by marketplace cards, host settings, `lvis://install/<slug>` deep links, or `lvis-cli install file://<path-to-dist.zip>`.
+The registry CLI is read-only so it cannot make durable state diverge from a running host. Installation and mutations are handled by marketplace cards, `lvis://install/<slug>` deep links, or host settings. For local development, run an unpackaged build, open **Settings → Plugin Config → Developer tools → Install from local folder**, and select the build folder containing `plugin.json`.
 
 ```bash
 bun run plugins:list
@@ -249,7 +245,7 @@ Known-good: granting `sandbox-runtime-users:(OI)(CI)(RX)` on the ASRT package di
 Example Local Indexer validation:
 
 ```bash
-# 1) Install the Local Indexer plugin through marketplace or sideloading.
+# 1) Install the Local Indexer plugin through the marketplace or the development-only Settings flow.
 # 2) Set OPENAI_API_KEY before launch.
 OPENAI_API_KEY=... bun run start
 ```

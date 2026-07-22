@@ -4,7 +4,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
-import { withFileLock } from "../lib/with-file-lock.js";
+import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
 
 /**
  * Pre-PR #430 registry shape — `installedBy` ("admin"|"user") and
@@ -192,7 +192,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
       },
       `registry contained dev-link entries — rewritten to installSource:"local-dev". `
         + `These plugins will fail to load until reinstalled via the marketplace `
-        + `or 'lvis-cli install file://<path-to-dist.zip>'.`,
+        + `or the development-only Settings > Plugin Config > Install from local folder flow.`,
     );
   }
   if (migratedCount > 0) {
@@ -365,44 +365,66 @@ async function withRegistryTransaction<T>(
 ): Promise<T> {
   const key = resolve(registryPath);
   const prev = registryLocks.get(key) ?? Promise.resolve();
-  const next = prev.then(() => withFileLock(
-    `${key}.lock-anchor`,
-    async () => {
-      const registry = await readPluginRegistry(key);
-      const inherited = registryMutationContext.getStore() ?? new Set<string>();
-      const result = registryMutationContext.run(
-        new Set([...inherited, key]),
-        () => mutator(registry),
+  const next = prev.then(async () => {
+    try {
+      const committed = await withFileLock(
+        `${key}.lock-anchor`,
+        async () => {
+          const registry = await readPluginRegistry(key);
+          const inherited = registryMutationContext.getStore() ?? new Set<string>();
+          const result = registryMutationContext.run(
+            new Set([...inherited, key]),
+            () => mutator(registry),
+          );
+          if (result !== null
+            && (typeof result === "object" || typeof result === "function")
+            && typeof (result as { then?: unknown }).then === "function") {
+            void Promise.resolve(result).catch(() => undefined);
+            throw new Error("Plugin registry mutator must be synchronous");
+          }
+          validatePluginRegistry(registry, key);
+          const canonical = canonicalizePluginRegistry(registry);
+          const content = `${JSON.stringify(canonical, null, 2)}\n`;
+          try {
+            writeUtf8FileAtomicSync(key, content, 0o600);
+          } catch (error) {
+            if (!isCommittedAtomicWriteError(error)) throw error;
+            const persisted = await readFile(key, "utf-8");
+            if (persisted !== content) throw error;
+            plog(
+              "warn",
+              {
+                pluginId: "<registry>",
+                phase: PluginPhase.DISCOVERY_FAIL,
+                reason: "registry_atomic_commit_sync_unconfirmed",
+                registryPath: key,
+              },
+              "registry atomic rename committed; exact bytes verified after parent directory sync failure",
+            );
+          }
+          return { content, mutationResult: result };
+        },
       );
-      if (result !== null
-        && (typeof result === "object" || typeof result === "function")
-        && typeof (result as { then?: unknown }).then === "function") {
-        void Promise.resolve(result).catch(() => undefined);
-        throw new Error("Plugin registry mutator must be synchronous");
-      }
-      validatePluginRegistry(registry, key);
-      const canonical = canonicalizePluginRegistry(registry);
-      const content = `${JSON.stringify(canonical, null, 2)}\n`;
-      try {
-        writeUtf8FileAtomicSync(key, content, 0o600);
-      } catch (error) {
-        if (!isCommittedAtomicWriteError(error)) throw error;
-        const persisted = await readFile(key, "utf-8");
-        if (persisted !== content) throw error;
-        plog(
-          "warn",
-          {
-            pluginId: "<registry>",
-            phase: PluginPhase.DISCOVERY_FAIL,
-            reason: "registry_atomic_commit_sync_unconfirmed",
-            registryPath: key,
-          },
-          "registry atomic rename committed; exact bytes verified after parent directory sync failure",
-        );
-      }
-      return result;
-    },
-  ));
+      return committed.mutationResult;
+    } catch (error) {
+      if (!(error instanceof FileLockReleaseError)) throw error;
+      const committed = error.result as { content: string; mutationResult: T };
+      const persisted = await readFile(key, "utf-8");
+      if (persisted !== committed.content) throw error;
+      plog(
+        "warn",
+        {
+          pluginId: "<registry>",
+          phase: PluginPhase.DISCOVERY_FAIL,
+          err: error.releaseError,
+          reason: "registry_lock_release_failed_after_commit",
+          registryPath: key,
+        },
+        "registry commit completed but lock release failed; exact bytes verified and stale-lock recovery may be required",
+      );
+      return committed.mutationResult;
+    }
+  });
   // Next acquirer chains off this turn's completion, regardless of success.
   const tail = next.then(() => undefined, () => undefined);
   registryLocks.set(key, tail);

@@ -18,7 +18,7 @@ import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./off
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
-import { installReceiptPath, listFilesRecursive, verifyInstallReceipt } from "./plugin-install-receipt.js";
+import { installReceiptPath, listFilesRecursive, restoreInstallReceiptRaw, verifyInstallReceipt } from "./plugin-install-receipt.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
 import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
@@ -26,7 +26,6 @@ import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import type { PluginInstallFailureKind } from "../shared/plugin-install-failure.js";
 import { createLogger } from "../lib/logger.js";
-import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { readAgentRegistry } from "../agents/agent-registry.js";
 import { readSkillRegistry } from "../skills/skill-registry.js";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -627,7 +626,14 @@ export class PluginMarketplaceService {
       return result;
     } catch (error) {
       if (catalogItem) this.rememberInstallFailure(catalogItem, error);
-      await this.rollbackInstallOperation(state);
+      try {
+        await this.rollbackInstallOperation(state);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          `plugin install and rollback both failed: ${pluginId}`,
+        );
+      }
       throw error;
     }
   }
@@ -905,7 +911,14 @@ export class PluginMarketplaceService {
         try {
           await this.installWithDependencies(plugin.id, "it-admin", plugins, new Set<string>(), state);
         } catch (innerErr) {
-          await this.rollbackInstallOperation(state);
+          try {
+            await this.rollbackInstallOperation(state);
+          } catch (rollbackError) {
+            throw new AggregateError(
+              [innerErr, rollbackError],
+              `managed plugin install and rollback both failed: ${plugin.id}`,
+            );
+          }
           throw innerErr;
         }
         (isUpdate ? result.updated : result.installed).push(plugin.id);
@@ -956,34 +969,43 @@ export class PluginMarketplaceService {
       }
     }
 
-    return this.withPluginLock(pluginId, async () => {
-      const buildPlan = (entries: PluginRegistryEntry[]) => {
-        const target = entries.find((entry) => entry.id === pluginId);
-        if (!target) throw new Error(`Plugin not installed: ${pluginId}`);
-        const idsToRemove = new Set<string>([pluginId]);
-        const nextBundleRefs = new Map<string, string[]>();
-        for (const entry of entries) {
-          if (entry.id === pluginId) continue;
-          const withoutRoot = (entry.bundleRefs ?? []).filter((bundleId) => bundleId !== pluginId);
-          if (withoutRoot.length === (entry.bundleRefs ?? []).length) continue;
-          if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installSource !== "admin") {
-            idsToRemove.add(entry.id);
-          } else {
-            nextBundleRefs.set(entry.id, withoutRoot);
-          }
+    const buildPlan = (entries: PluginRegistryEntry[]) => {
+      const target = entries.find((entry) => entry.id === pluginId);
+      if (!target) throw new Error(`Plugin not installed: ${pluginId}`);
+      const idsToRemove = new Set<string>([pluginId]);
+      const nextBundleRefs = new Map<string, string[]>();
+      for (const entry of entries) {
+        if (entry.id === pluginId) continue;
+        const withoutRoot = (entry.bundleRefs ?? []).filter((bundleId) => bundleId !== pluginId);
+        if (withoutRoot.length === (entry.bundleRefs ?? []).length) continue;
+        if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installSource !== "admin") {
+          idsToRemove.add(entry.id);
+        } else {
+          nextBundleRefs.set(entry.id, withoutRoot);
         }
-        const removed = entries
-          .filter((entry) => idsToRemove.has(entry.id))
-          .map((entry) => this.cloneRegistryEntry(entry));
-        const signature = JSON.stringify({
-          removed: removed.map((entry) => [entry.id, entry.manifestPath]).sort(),
-          refs: [...nextBundleRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
-        });
-        return { idsToRemove, nextBundleRefs, removed, signature };
-      };
+      }
+      const removed = entries
+        .filter((entry) => idsToRemove.has(entry.id))
+        .map((entry) => this.cloneRegistryEntry(entry));
+      const affected = entries
+        .filter((entry) => idsToRemove.has(entry.id) || nextBundleRefs.has(entry.id))
+        .map((entry) => this.cloneRegistryEntry(entry))
+        .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      const signature = canonicalJSON({
+        affected,
+        nextBundleRefs: [...nextBundleRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
+      });
+      return { idsToRemove, nextBundleRefs, removed, signature };
+    };
 
-      const snapshot = await readPluginRegistry(this.registryPath);
-      const planned = buildPlan(snapshot.plugins);
+    const snapshot = await readPluginRegistry(this.registryPath);
+    const planned = buildPlan(snapshot.plugins);
+    return this.withPluginLocks([...planned.idsToRemove], async () => {
+      const lockedSnapshot = await readPluginRegistry(this.registryPath);
+      const lockedPlan = buildPlan(lockedSnapshot.plugins);
+      if (lockedPlan.signature !== planned.signature) {
+        throw new Error(`Plugin registry changed before uninstall locks were acquired: ${pluginId}`);
+      }
       const staged: Array<{ original: string; tombstone: string }> = [];
       const restoreStaged = async (): Promise<void> => {
         const errors: unknown[] = [];
@@ -994,7 +1016,7 @@ export class PluginMarketplaceService {
       };
 
       try {
-        for (const entry of planned.removed) {
+        for (const entry of lockedPlan.removed) {
           const installedDir = this.installedDirectoryForEntry(entry);
           if (!installedDir) continue;
           const tombstone = await tombstoneAndDeferredRemove(installedDir, this.pluginsRoot, {
@@ -1005,7 +1027,7 @@ export class PluginMarketplaceService {
 
         await updatePluginRegistry(this.registryPath, (registry) => {
           const fresh = buildPlan(registry.plugins);
-          if (fresh.signature !== planned.signature) {
+          if (fresh.signature !== lockedPlan.signature) {
             throw new Error(`Plugin registry changed during uninstall: ${pluginId}`);
           }
           for (const [id, refs] of fresh.nextBundleRefs) {
@@ -1238,6 +1260,16 @@ export class PluginMarketplaceService {
     }
   }
 
+  /** Acquire all affected per-plugin operation locks in stable order. */
+  private async withPluginLocks<T>(pluginIds: Iterable<string>, fn: () => Promise<T>): Promise<T> {
+    const ids = [...new Set(pluginIds)].sort();
+    const acquire = (index: number): Promise<T> => {
+      if (index >= ids.length) return fn();
+      return this.withPluginLock(ids[index]!, () => acquire(index + 1));
+    };
+    return acquire(0);
+  }
+
   /**
    * Snapshot the currently-installed manifest into the artifact store's
    * version cache before overwrite. No-op when the plugin is not yet
@@ -1404,45 +1436,70 @@ export class PluginMarketplaceService {
     if (state.installedPluginIds.length === 0 && state.touchedEntries.size === 0) {
       return;
     }
-    const removedEntries = await updatePluginRegistry(this.registryPath, (registry) => {
-      // Round-3 §6: registry read errors must propagate; ENOENT is already
-      // resolved to the empty default inside readPluginRegistry. A corrupt
-      // registry during rollback must surface so the operator can recover
-      // manually rather than silently writing a fresh empty registry on
-      // top of partially-installed state.
-      const removed: PluginRegistryEntry[] = [];
-      for (const pluginId of [...state.installedPluginIds].reverse()) {
-        const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
-        if (!entry) continue;
-        removed.push(this.cloneRegistryEntry(entry));
-        registry.plugins = registry.plugins.filter((candidate) => candidate.id !== pluginId);
+    const affectedIds = new Set([...state.installedPluginIds, ...state.touchedEntries.keys()]);
+    const snapshot = await readPluginRegistry(this.registryPath);
+    const affectedSignature = (entries: PluginRegistryEntry[]) => canonicalJSON(
+      entries
+        .filter((entry) => affectedIds.has(entry.id))
+        .map((entry) => this.cloneRegistryEntry(entry))
+        .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+    const plannedSignature = affectedSignature(snapshot.plugins);
+    const entriesToRemove = snapshot.plugins
+      .filter((entry) => state.installedPluginIds.includes(entry.id))
+      .map((entry) => this.cloneRegistryEntry(entry));
+    const staged: Array<{ original: string; tombstone: string }> = [];
+    const restoreStaged = async (): Promise<void> => {
+      const errors: unknown[] = [];
+      for (const item of [...staged].reverse()) {
+        try { await rename(item.tombstone, item.original); } catch (error) { errors.push(error); }
       }
-      for (const [pluginId, snapshot] of state.touchedEntries) {
-        const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
-        if (!entry) continue;
-        entry.enabled = snapshot.enabled;
-        entry.bundleRefs = snapshot.bundleRefs;
-        entry.approvedPluginAccess = snapshot.approvedPluginAccess;
-        if (snapshot.manifestSha256) {
-          entry.manifestSha256 = snapshot.manifestSha256;
-        } else {
-          delete entry.manifestSha256;
-        }
-        if (snapshot.installSource) {
-          // Restore "user", "admin", or "local-dev" as-is. For "local-dev",
-          // the install receipt written by installLocal remains on disk so
-          // verifyInstallReceipt will still pass after rollback.
-          entry.installSource = snapshot.installSource;
-        } else {
-          // Snapshot had no installSource. Drop the field so the entry
-          // behaves like a fresh user install on next read; a subsequent
-          // install will re-stamp the correct value.
-          delete entry.installSource;
-        }
+      if (errors.length > 0) throw new AggregateError(errors, "failed to restore staged install rollback");
+    };
+
+    try {
+      for (const entry of entriesToRemove) {
+        const installedDir = this.installedDirectoryForEntry(entry);
+        if (!installedDir) continue;
+        const tombstone = await tombstoneAndDeferredRemove(installedDir, this.pluginsRoot, {
+          deferRemoval: false,
+        });
+        if (tombstone) staged.push({ original: installedDir, tombstone });
       }
-      return removed;
-    });
-    for (const entry of removedEntries) await this.removeInstalledEntry(entry, []);
+
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        if (affectedSignature(registry.plugins) !== plannedSignature) {
+          throw new Error("Plugin registry changed during install rollback");
+        }
+        for (const pluginId of [...state.installedPluginIds].reverse()) {
+          registry.plugins = registry.plugins.filter((candidate) => candidate.id !== pluginId);
+        }
+        for (const [pluginId, entrySnapshot] of state.touchedEntries) {
+          const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+          if (!entry) continue;
+          entry.enabled = entrySnapshot.enabled;
+          entry.bundleRefs = entrySnapshot.bundleRefs;
+          entry.approvedPluginAccess = entrySnapshot.approvedPluginAccess;
+          if (entrySnapshot.manifestSha256) entry.manifestSha256 = entrySnapshot.manifestSha256;
+          else delete entry.manifestSha256;
+          if (entrySnapshot.installSource) entry.installSource = entrySnapshot.installSource;
+          else delete entry.installSource;
+        }
+      });
+    } catch (error) {
+      try {
+        await restoreStaged();
+      } catch (restoreError) {
+        throw new AggregateError([error, restoreError], "install rollback and staged-directory restore both failed");
+      }
+      throw error;
+    }
+
+    for (const item of staged) {
+      deferTombstoneRemoval(item.tombstone, (tombstone, err) => {
+        log.warn(`rollbackInstallOperation: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`);
+      });
+    }
   }
 
   private async removeInstalledEntry(
@@ -1888,6 +1945,15 @@ export class PluginMarketplaceService {
         : null;
 
       try {
+        // Hide an existing entry before replacing its directory. Until the new
+        // receipt is durable, the old registry entry would otherwise point at
+        // new bytes covered only by a stale receipt.
+        if (existingEntry) {
+          await updatePluginRegistry(this.registryPath, (registry) => {
+            registry.plugins = registry.plugins.filter((entry) => entry.id !== pluginId);
+          });
+        }
+
         // Stage the copy under a sibling tmp dir so an interrupted install
         // never leaves the live install path half-written. The final rename
         // is atomic on the same filesystem (which ~/.lvis/plugins/ guarantees).
@@ -1934,26 +2000,6 @@ export class PluginMarketplaceService {
         // upstream, so this isn't an additional trust delegation — just brings
         // installLocal to parity with marketplace install.
         const approvedPluginAccess = (manifest as { pluginAccess?: PluginAccessSpec }).pluginAccess;
-        await updatePluginRegistry(this.registryPath, (registry) => {
-          const existing = registry.plugins.find((x) => x.id === pluginId);
-          if (existing) {
-            existing.manifestPath = registryManifestPath;
-            existing.manifestSha256 = manifestSha256;
-            existing.enabled = true;
-            existing.installSource = localInstallSource;
-            existing.approvedPluginAccess = approvedPluginAccess;
-          } else {
-            registry.plugins.push({
-              id: pluginId,
-              manifestPath: registryManifestPath,
-              manifestSha256,
-              enabled: true,
-              installSource: localInstallSource,
-              approvedPluginAccess,
-            });
-          }
-        });
-
         // Write an install receipt so the plugin runtime's integrity gate
         // (verifyInstallReceipt) accepts the entry. The receipt covers
         // `plugin.json` + every file under `dist/` — matching what
@@ -1982,6 +2028,28 @@ export class PluginMarketplaceService {
           signerKeyId: null,
           files: receiptFiles,
         });
+
+        // Publish registry visibility only after the install directory and
+        // its exact receipt are both durable.
+        await updatePluginRegistry(this.registryPath, (registry) => {
+          const existing = registry.plugins.find((x) => x.id === pluginId);
+          if (existing) {
+            existing.manifestPath = registryManifestPath;
+            existing.manifestSha256 = manifestSha256;
+            existing.enabled = true;
+            existing.installSource = localInstallSource;
+            existing.approvedPluginAccess = approvedPluginAccess;
+          } else {
+            registry.plugins.push({
+              id: pluginId,
+              manifestPath: registryManifestPath,
+              manifestSha256,
+              enabled: true,
+              installSource: localInstallSource,
+              approvedPluginAccess,
+            });
+          }
+        });
         this.clearInstallReceiptValidationForPlugin(pluginId);
 
         const previousSnapshot = this.localInstallRollbackSnapshots.get(pluginId);
@@ -1995,18 +2063,34 @@ export class PluginMarketplaceService {
         }
         return { pluginId, installed: true as const };
       } catch (err) {
+        const rollbackErrors: unknown[] = [];
         if (rollbackSnapshot) {
-          await this.restoreLocalInstallSnapshot(pluginId, rollbackSnapshot).catch((restoreErr) => {
+          try {
+            await this.restoreLocalInstallSnapshot(pluginId, rollbackSnapshot);
+          } catch (restoreErr) {
             log.warn(`installLocal rollback restore failed for ${pluginId}: ${(restoreErr as Error).message}`);
-          });
+            rollbackErrors.push(restoreErr);
+          }
         } else {
-          await this.cleanupFreshInstalledPlugin(pluginId).catch((cleanupErr) => {
+          try {
+            await this.cleanupFreshInstalledPlugin(pluginId);
+          } catch (cleanupErr) {
             log.warn(`installLocal fresh cleanup failed for ${pluginId}: ${(cleanupErr as Error).message}`);
-          });
+            rollbackErrors.push(cleanupErr);
+          }
         }
-        await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot).catch((cleanupErr) => {
+        try {
+          await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);
+        } catch (cleanupErr) {
           log.warn(`installLocal rollback snapshot cleanup failed for ${pluginId}: ${(cleanupErr as Error).message}`);
-        });
+          rollbackErrors.push(cleanupErr);
+        }
+        if (rollbackErrors.length > 0) {
+          throw new AggregateError(
+            [err, ...rollbackErrors],
+            `local plugin install and rollback both failed: ${pluginId}`,
+          );
+        }
         throw err;
       }
     });
@@ -2084,7 +2168,7 @@ export class PluginMarketplaceService {
     }
     const receiptPath = installReceiptPath(this.cacheRoot, pluginId);
     if (snapshot.receiptRaw !== undefined) {
-      writeUtf8FileAtomicSync(receiptPath, snapshot.receiptRaw, 0o600);
+      await restoreInstallReceiptRaw(this.cacheRoot, pluginId, snapshot.receiptRaw);
     } else {
       await rm(receiptPath, { force: true });
     }
