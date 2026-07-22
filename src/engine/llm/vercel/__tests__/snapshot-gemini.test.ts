@@ -335,7 +335,13 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
     const callArgs = streamTextSpy.mock.calls[0]![0] as {
       abortSignal?: AbortSignal;
     };
-    expect(callArgs.abortSignal).toBe(ac.signal);
+    // The adapter composes the caller's signal with an idle-ceiling controller
+    // (AbortSignal.any, #1574), so it is no longer the same reference — but the
+    // caller's signal must still drive it.
+    expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(callArgs.abortSignal?.aborted).toBe(false);
+    ac.abort();
+    expect(callArgs.abortSignal?.aborted).toBe(true);
 
     vi.doUnmock("ai");
     vi.doUnmock("@ai-sdk/google");
