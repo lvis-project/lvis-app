@@ -51,6 +51,8 @@ import {
   type PluginInstallReceipt,
 } from "./plugin-install-receipt.js";
 import { createLogger } from "../lib/logger.js";
+import { assertSafeArtifactSlug } from "./plugin-id.js";
+export { assertSafeArtifactSlug, SAFE_ARTIFACT_SLUG_RE } from "./plugin-id.js";
 const log = createLogger("plugin-artifact-store");
 
 /**
@@ -167,17 +169,6 @@ export interface ArtifactStoreOptions {
 
 type VerifiedMarketplaceFetcher = MarketplaceFetcher & MarketplaceHttp;
 
-export const SAFE_ARTIFACT_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-
-export function assertSafeArtifactSlug(slug: string): string {
-  if (!SAFE_ARTIFACT_SLUG_RE.test(slug)) {
-    throw new Error(
-      `invalid artifact slug "${slug}" — expected ${SAFE_ARTIFACT_SLUG_RE.source}`,
-    );
-  }
-  return slug;
-}
-
 function isVerifiedMarketplaceFetcher(fetcher: MarketplaceFetcher): fetcher is VerifiedMarketplaceFetcher {
   return (
     typeof (fetcher as Partial<VerifiedMarketplaceFetcher>).downloadArtifact === "function" &&
@@ -291,6 +282,8 @@ export class PluginArtifactStore {
     options: {
       /** Runs after verified extraction but before either live directory is renamed. */
       beforePromote?: (recoveryBackupDir: string) => Promise<void>;
+      /** Clears durable cleanup ownership after removal or tombstone staging. */
+      onCommittedBackupResolved?: (obsoleteDir: string) => Promise<void>;
     } = {},
   ): Promise<{ files: string[]; result: T }> {
     const safeSlug = assertSafeArtifactSlug(slug);
@@ -400,8 +393,10 @@ export class PluginArtifactStore {
         throw commitErr;
       }
       if (hadOldDir) {
+        let cleanupResolved = false;
         try {
           await retryOnTransientFsLock(() => this.removeCommittedBackup(oldDir));
+          cleanupResolved = true;
         } catch (cleanupErr) {
           try {
             const tombstone = await tombstoneAndDeferredRemove(oldDir, this.installRoot, {
@@ -413,12 +408,18 @@ export class PluginArtifactStore {
               { safeSlug, oldDir, tombstone, err: cleanupErr },
               "installed artifact committed; routed obsolete directory to tombstone sweeper",
             );
+            cleanupResolved = true;
           } catch (tombstoneErr) {
             log.warn(
               { safeSlug, oldDir, err: new AggregateError([cleanupErr, tombstoneErr]) },
               "installed artifact committed but obsolete directory cleanup and tombstoning failed",
             );
           }
+        }
+        if (cleanupResolved) {
+          await options.onCommittedBackupResolved?.(oldDir).catch((err) => {
+            log.warn({ safeSlug, oldDir, err }, "obsolete artifact cleanup ownership remains for boot retry");
+          });
         }
       }
       return { files, result };

@@ -400,4 +400,47 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
 
     await expect(readPluginRegistry(registryPath)).rejects.toThrow(/pending update/);
   });
+
+  it.each([".", "..", "../outside", "nested/plugin", "nested\\plugin"])(
+    "rejects unsafe canonical and legacy registry plugin id %j before migration",
+    async (id) => {
+      await writeFile(registryPath, JSON.stringify({
+        version: 1,
+        plugins: [{
+          id,
+          manifestPath: "outside/plugin.json",
+          installedBy: "user",
+        }],
+      }));
+
+      await expect(readPluginRegistry(registryPath)).rejects.toThrow(/invalid artifact slug/);
+      await expect(migratePluginRegistry(registryPath)).rejects.toThrow(/invalid artifact slug/);
+    },
+  );
+
+  it("accepts only strict non-restorable cleanup ownership metadata", async () => {
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        pendingCleanup: { kind: "obsolete-artifact", path: join(tmpDir, ".calendar.old-backup") },
+      }],
+    }));
+    await expect(readPluginRegistry(registryPath)).resolves.toEqual(expect.objectContaining({
+      plugins: [expect.objectContaining({
+        pendingCleanup: expect.objectContaining({ kind: "obsolete-artifact" }),
+      })],
+    }));
+
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        pendingCleanup: { kind: "rollback", path: "unsafe", restore: true },
+      }],
+    }));
+    await expect(readPluginRegistry(registryPath)).rejects.toThrow(/pending cleanup/);
+  });
 });

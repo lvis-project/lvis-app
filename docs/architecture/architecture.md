@@ -182,9 +182,14 @@ Key boundaries:
 - plugin replacements keep the prior registry row in a strict `pendingUpdate`
   state from the pre-promotion boundary through registry commit. Runtime and
   HostApi trust caches skip pending rows, while uninstall/bundle planners retain
-  the full row and its references. Boot clears the marker only after exact old
-  manifest/receipt proof or validated backup restoration; unresolved recovery
-  backups are never handled by the orphan tombstone sweeper.
+  the full row and its references. Boot clears the marker only after the exact
+  receipt snapshot verifies every covered file in the owned plugin directory,
+  restoring directory bytes before publishing that receipt when a validated
+  backup is required. Verified reinstalls may supersede unresolved markers.
+  Recovery backup IDs, names, and parent directories are validated exactly.
+  Obsolete post-commit directories move to non-restorable `pendingCleanup`
+  ownership until direct removal or tombstone staging succeeds; unresolved
+  recovery backups are never handled by the orphan tombstone sweeper.
 - renderer-to-plugin method calls are allowlisted by each tool's
   `_meta.ui.visibility`: only app-visible tools (visibility includes `"app"` —
   the union of app-only `["app"]` and dual `["model","app"]`) are
