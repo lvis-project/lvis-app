@@ -34,8 +34,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
-      - name: Install
-        run: bun install --frozen-lockfile
+      - name: Install (retry on transient registry flakes)
+        run: |
+          for attempt in 1 2 3; do
+            if bun install --frozen-lockfile; then exit 0; fi
+            echo "::warning::bun install attempt $attempt failed; clearing cache + retrying"
+            rm -rf ~/.bun/install/cache || true
+            sleep 10
+          done
+          echo "::error::bun install failed after 3 attempts"; exit 1
       # `next build` runs type-checking + lint + the static export, so it is the
       # whole gate — a broken page, type error, or bad import fails here.
       - name: Build
@@ -69,9 +76,16 @@ jobs:
           fi
       - uses: oven-sh/setup-bun@v2
         if: steps.cf.outputs.have_token == 'true'
-      - name: Install
+      - name: Install (retry on transient registry flakes)
         if: steps.cf.outputs.have_token == 'true'
-        run: bun install --frozen-lockfile
+        run: |
+          for attempt in 1 2 3; do
+            if bun install --frozen-lockfile; then exit 0; fi
+            echo "::warning::bun install attempt $attempt failed; clearing cache + retrying"
+            rm -rf ~/.bun/install/cache || true
+            sleep 10
+          done
+          echo "::error::bun install failed after 3 attempts"; exit 1
       - name: Build
         if: steps.cf.outputs.have_token == 'true'
         run: bun run build
