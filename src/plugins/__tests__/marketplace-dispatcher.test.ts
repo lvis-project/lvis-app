@@ -1113,6 +1113,152 @@ describe("PluginMarketplaceService install()", () => {
     expect(fetchSignatureEnvelope).toHaveBeenCalled();
   });
 
+  it("supersedes an unresolved pending row with a verified marketplace reinstall", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "pending-retry",
+      slug: "pending-retry",
+      name: "Pending Retry",
+      description: "pending retry fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/pending-retry@1.0.0",
+      packageName: "@lvis/pending-retry",
+      tools: [],
+    };
+    const zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    let downloads = 0;
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => {
+        downloads += 1;
+        return { body: zipBuffer, sha256Header: createHash("sha256").update(zipBuffer).digest("hex"), status: 200 };
+      },
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    const manifestRaw = await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8");
+    const receiptRaw = await readFile(join(cacheRoot, plugin.id, "install-receipt.json"), "utf-8");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
+    registry.plugins[0]!.bundleRefs = ["bundle-root"];
+    registry.plugins[0]!.pendingUpdate = {
+      kind: "marketplace",
+      previousManifestFileSha256: createHash("sha256").update(manifestRaw).digest("hex"),
+      previousReceiptRaw: receiptRaw,
+    };
+    await writeFile(registryPath, JSON.stringify(registry));
+    await writeFile(join(installedDir, plugin.id, "dist", "hostPlugin.js"), "corrupted");
+
+    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+
+    // The signed tarball cache may satisfy the verified reinstall without a
+    // second network fetch; the corrupted live payload must still be replaced.
+    expect(downloads).toBe(1);
+    expect(await readFile(join(installedDir, plugin.id, "dist", "hostPlugin.js"), "utf-8"))
+      .toContain("createPlugin");
+    const repaired = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
+    expect(repaired.plugins[0]).toEqual(expect.objectContaining({ bundleRefs: ["bundle-root"] }));
+    expect(repaired.plugins[0]?.pendingUpdate).toBeUndefined();
+    expect(repaired.plugins[0]?.pendingCleanup).toBeUndefined();
+  });
+
+  it("clears a pending row by idempotent touch only after exact receipt and catalog verification", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "pending-touch",
+      slug: "pending-touch",
+      name: "Pending Touch",
+      description: "pending touch fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/pending-touch@1.0.0",
+      packageName: "@lvis/pending-touch",
+      tools: [],
+    };
+    const zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    plugin.artifactSha256 = createHash("sha256").update(zipBuffer).digest("hex");
+    let downloads = 0;
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => {
+        downloads += 1;
+        return { body: zipBuffer, sha256Header: plugin.artifactSha256, status: 200 };
+      },
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    const manifestRaw = await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8");
+    const receiptRaw = await readFile(join(cacheRoot, plugin.id, "install-receipt.json"), "utf-8");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
+    registry.plugins[0]!.pendingUpdate = {
+      kind: "marketplace",
+      previousManifestFileSha256: createHash("sha256").update(manifestRaw).digest("hex"),
+      previousReceiptRaw: receiptRaw,
+    };
+    await writeFile(registryPath, JSON.stringify(registry));
+
+    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    expect(downloads).toBe(1);
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] })
+      .plugins[0]?.pendingUpdate).toBeUndefined();
+  });
+
+  it("retains durable cleanup ownership after removal and tombstone failure, then retries manually", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "cleanup-retry",
+      slug: "cleanup-retry",
+      name: "Cleanup Retry",
+      description: "cleanup ownership fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/cleanup-retry@1.0.0",
+      packageName: "@lvis/cleanup-retry",
+      tools: [],
+    };
+    let zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({ body: zipBuffer, sha256Header: createHash("sha256").update(zipBuffer).digest("hex"), status: 200 }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    plugin.version = "2.0.0";
+    zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    const store = (service as unknown as { artifactStore: PluginArtifactStore }).artifactStore;
+    const removeSpy = vi.spyOn(
+      store as unknown as { removeCommittedBackup: (path: string) => Promise<void> },
+      "removeCommittedBackup",
+    ).mockRejectedValue(Object.assign(new Error("persistent cleanup lock"), { code: "EACCES" }));
+    const tombstoneSpy = vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove")
+      .mockRejectedValue(Object.assign(new Error("tombstone staging locked"), { code: "EACCES" }));
+
+    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    const retained = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
+    const obsoleteDir = retained.plugins[0]?.pendingCleanup?.path;
+    expect(obsoleteDir).toBeTruthy();
+    expect(existsSync(obsoleteDir!)).toBe(true);
+
+    removeSpy.mockRestore();
+    tombstoneSpy.mockRestore();
+    await expect(service.cleanupObsoleteBackup(plugin.id)).resolves.toBe(true);
+    expect(existsSync(obsoleteDir!)).toBe(false);
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] })
+      .plugins[0]?.pendingCleanup).toBeUndefined();
+  });
+
   it("reinstalls the same marketplace version when the catalog artifact hash changes", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({

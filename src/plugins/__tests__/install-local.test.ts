@@ -359,6 +359,46 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(restoredRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(true);
   });
 
+  it("supersedes a cleaned unresolved pending row with a verified local reinstall", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const manifestRaw = await readFile(join(pluginsDir, "test-plugin", "plugin.json"), "utf-8");
+    const receiptRaw = await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<Record<string, unknown>>;
+    };
+    Object.assign(registry.plugins[0]!, {
+      bundleRefs: ["bundle-root"],
+      pendingUpdate: {
+        kind: "local-dev",
+        previousManifestFileSha256: createHash("sha256").update(manifestRaw).digest("hex"),
+        previousReceiptRaw: receiptRaw,
+      },
+    });
+    await writeFile(registryPath, JSON.stringify(registry));
+    await writeFile(join(pluginsDir, "test-plugin", "dist", "hostPlugin.js"), "corrupted");
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "verified retry",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+    );
+
+    await expect(service.installLocal(sourceDir)).resolves.toEqual({ pluginId: "test-plugin", installed: true });
+
+    const repaired = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ bundleRefs?: string[]; pendingUpdate?: unknown; pendingCleanup?: unknown }>;
+    };
+    expect(repaired.plugins[0]?.bundleRefs).toEqual(["bundle-root"]);
+    expect(repaired.plugins[0]?.pendingUpdate).toBeUndefined();
+    expect(repaired.plugins[0]?.pendingCleanup).toBeUndefined();
+  });
+
   it("rollbackLocalInstall restores the previous install receipt with disk and registry state", async () => {
     const service = makeService();
     await service.installLocal(sourceDir);

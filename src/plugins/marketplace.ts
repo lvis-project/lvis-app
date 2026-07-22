@@ -18,11 +18,16 @@ import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./off
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { ArtifactRollbackError, PluginArtifactStore, retryOnTransientFsLock } from "./plugin-artifact-store.js";
+import { assertSafeArtifactSlug } from "./plugin-id.js";
 import {
   cleanupPendingPluginUpdateBackup,
+  cleanupObsoletePluginBackup,
+  clearObsoletePluginBackupOwnership,
+  discardPendingUpdateBackupSnapshot,
   preparePendingPluginUpdate,
   recoverPendingPluginUpdate,
   recoverPendingPluginUpdates,
+  restoreSupersededPendingPluginUpdate,
 } from "./marketplace-update-recovery.js";
 import { installReceiptPath, listFilesRecursive, restoreInstallReceiptRaw, verifyInstallReceipt } from "./plugin-install-receipt.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
@@ -226,6 +231,8 @@ type InstallOperationState = {
       approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"];
       installSource: PluginRegistryEntryInstallSource | undefined;
       manifestSha256: string | undefined;
+      pendingUpdate: PluginRegistryEntry["pendingUpdate"];
+      pendingCleanup: PluginRegistryEntry["pendingCleanup"];
     }
   >;
 };
@@ -736,6 +743,7 @@ export class PluginMarketplaceService {
       const manifestPath = isAbsolute(existingEntry.manifestPath)
         ? existingEntry.manifestPath
         : resolve(dirname(this.registryPath), existingEntry.manifestPath);
+      if (existingEntry.pendingUpdate) this.clearInstallReceiptValidationForPlugin(canonicalPluginId);
       const receiptValidation = await this.getInstallReceiptValidation(plugin.id, manifestPath);
       const isSameArtifact = this.installedArtifactMatchesCatalog(plugin, receiptValidation);
       if (isSameVersion && receiptValidation.ok && isSameArtifact) {
@@ -744,6 +752,8 @@ export class PluginMarketplaceService {
         // is gone (issue #92), so no plugin is ever installed as a bundle
         // child of another. `mergeBundleRefs` treats `null` as no-op.
         await this.touchInstalledRegistryEntry(plugin.id, null, actor, plugin.pluginAccess, manifestSha256, state);
+        await this.discardSupersededPendingBackup(existingEntry);
+        await this.resolveObsoleteBackupOwnership(canonicalPluginId);
         return { pluginId: plugin.id, installed: true };
       }
       if (isSameVersion && !receiptValidation.ok) {
@@ -804,13 +814,14 @@ export class PluginMarketplaceService {
           existingEntry,
         );
       },
-    }).catch((err) => this.restoreMarketplaceRegistryEntryAfterFailure(pendingEntry, err));
+    }).catch((err) => this.restoreMarketplaceRegistryEntryAfterFailure(pendingEntry, existingEntry, err));
     const manifestAbsPath = isAbsolute(manifestPath)
       ? manifestPath
       : resolve(dirname(this.registryPath), manifestPath);
     await this.artifactStore.cacheVersionFromManifest(canonicalPluginId, manifestAbsPath);
     await this.appendHistoryFromManifestVersion(canonicalPluginId, manifestAbsPath);
     this.clearInstallReceiptValidationForPlugin(canonicalPluginId);
+    await this.discardSupersededPendingBackup(existingEntry);
     state.installedPluginIds.push(plugin.id);
     return { pluginId: plugin.id, installed: true };
   }
@@ -1133,7 +1144,7 @@ export class PluginMarketplaceService {
             existingEntry,
           );
         },
-      }).catch((err) => this.restoreMarketplaceRegistryEntryAfterFailure(pendingEntry, err));
+      }).catch((err) => this.restoreMarketplaceRegistryEntryAfterFailure(pendingEntry, existingEntry, err));
       const manifestAbsPath = isAbsolute(manifestPath)
         ? manifestPath
         : resolve(dirname(this.registryPath), manifestPath);
@@ -1143,6 +1154,7 @@ export class PluginMarketplaceService {
         installedAt: new Date().toISOString(),
       });
       this.clearInstallReceiptValidationForPlugin(pluginId);
+      await this.discardSupersededPendingBackup(existingEntry);
       return { pluginId: plugin.id, installed: true, version };
     });
   }
@@ -1193,6 +1205,10 @@ export class PluginMarketplaceService {
           commit: async (manifestPathRel, manifestAbsPath) => {
             const manifestSha256 = await this.readManifestSha256(manifestAbsPath);
             await updatePluginRegistry(this.registryPath, (registry) => {
+              const currentEntry = registry.plugins.find((entry) => entry.id === pluginId);
+              const obsoleteDir = currentEntry?.pendingUpdate?.recoveryBackupMode === "rename"
+                ? currentEntry.pendingUpdate.recoveryBackupDir
+                : undefined;
               const nextEntry: PluginRegistryEntry = {
                 id: pluginId,
                 manifestPath: manifestPathRel,
@@ -1201,6 +1217,9 @@ export class PluginMarketplaceService {
                 installSource: resolveRollbackInstallSource(existingEntry?.installSource, registrySnapshot?.installSource),
                 bundleRefs: existingEntry?.bundleRefs ?? registrySnapshot?.bundleRefs ?? [],
                 approvedPluginAccess: registrySnapshot?.approvedPluginAccess ?? existingEntry?.approvedPluginAccess,
+                pendingCleanup: obsoleteDir
+                  ? { kind: "obsolete-artifact", path: resolve(obsoleteDir) }
+                  : undefined,
               };
               const index = registry.plugins.findIndex((entry) => entry.id === pluginId);
               if (index >= 0) registry.plugins[index] = nextEntry;
@@ -1209,13 +1228,14 @@ export class PluginMarketplaceService {
           },
         });
       } catch (err) {
-        await this.restoreMarketplaceRegistryEntryAfterFailure(pendingEntry, err);
+        await this.restoreMarketplaceRegistryEntryAfterFailure(pendingEntry, existingEntry, err);
       }
       await this.artifactStore.appendHistory(pluginId, {
         version: priorVersion,
         installedAt: new Date().toISOString(),
       });
       this.clearInstallReceiptValidationForPlugin(pluginId);
+      await this.discardSupersededPendingBackup(existingEntry);
       return { pluginId, rolledBackTo: priorVersion };
     });
   }
@@ -1396,6 +1416,8 @@ export class PluginMarketplaceService {
           approvedPluginAccess: entry.approvedPluginAccess,
           installSource: entry.installSource,
           manifestSha256: entry.manifestSha256,
+          pendingUpdate: entry.pendingUpdate ? { ...entry.pendingUpdate } : undefined,
+          pendingCleanup: entry.pendingCleanup ? { ...entry.pendingCleanup } : undefined,
         });
       }
       entry.enabled = true;
@@ -1403,6 +1425,14 @@ export class PluginMarketplaceService {
       entry.installSource = actor === "it-admin" ? "admin" : entry.installSource ?? "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
       entry.approvedPluginAccess = approvedPluginAccess;
+      const pending = entry.pendingUpdate;
+      entry.pendingUpdate = undefined;
+      if (pending?.recoveryBackupDir && pending.recoveryBackupMode) {
+        entry.pendingCleanup = {
+          kind: pending.recoveryBackupMode === "rename" ? "obsolete-artifact" : "obsolete-local-backup",
+          path: resolve(pending.recoveryBackupDir),
+        };
+      }
     });
   }
 
@@ -1458,6 +1488,8 @@ export class PluginMarketplaceService {
           else delete entry.manifestSha256;
           if (entrySnapshot.installSource) entry.installSource = entrySnapshot.installSource;
           else delete entry.installSource;
+          entry.pendingUpdate = entrySnapshot.pendingUpdate ? { ...entrySnapshot.pendingUpdate } : undefined;
+          entry.pendingCleanup = entrySnapshot.pendingCleanup ? { ...entrySnapshot.pendingCleanup } : undefined;
         }
       });
     } catch (error) {
@@ -1647,7 +1679,11 @@ export class PluginMarketplaceService {
           await opts.commit?.(manifestPath, manifestFile);
           return manifestPath;
         },
-        { beforePromote: opts.beforePromote },
+        {
+          beforePromote: opts.beforePromote,
+          onCommittedBackupResolved: (obsoleteDir) =>
+            clearObsoletePluginBackupOwnership(this.paths, plugin.id, obsoleteDir),
+        },
       );
       return transaction.result;
     } catch (err) {
@@ -1679,6 +1715,9 @@ export class PluginMarketplaceService {
     await updatePluginRegistry(this.registryPath, (registry) => {
       const existing = registry.plugins.find((entry) => entry.id === plugin.id);
       if (existing) {
+        const obsoleteDir = existing.pendingUpdate?.recoveryBackupMode === "rename"
+          ? existing.pendingUpdate.recoveryBackupDir
+          : undefined;
         existing.manifestPath = manifestPath;
         existing.manifestSha256 = manifestSha256;
         existing.enabled = true;
@@ -1686,6 +1725,9 @@ export class PluginMarketplaceService {
         existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, null, plugin.id);
         existing.approvedPluginAccess = plugin.pluginAccess;
         existing.pendingUpdate = undefined;
+        existing.pendingCleanup = obsoleteDir
+          ? { kind: "obsolete-artifact", path: resolve(obsoleteDir) }
+          : undefined;
       } else {
         registry.plugins.push({
           id: plugin.id,
@@ -1714,15 +1756,23 @@ export class PluginMarketplaceService {
 
   private async restoreMarketplaceRegistryEntryAfterFailure(
     pendingEntry: PluginRegistryEntry | null,
+    previousEntry: PluginRegistryEntry | null,
     installError: unknown,
   ): Promise<never> {
-    if (!pendingEntry || installError instanceof ArtifactRollbackError) {
+    if (!pendingEntry) {
+      throw installError;
+    }
+    if (installError instanceof ArtifactRollbackError && !previousEntry?.pendingUpdate) {
       throw installError;
     }
     try {
-      const recovery = await recoverPendingPluginUpdate(this.paths, pendingEntry.id);
-      if (recovery !== "recovered") {
-        throw new Error(`marketplace update recovery remains unresolved: ${pendingEntry.id}`);
+      if (previousEntry?.pendingUpdate) {
+        await restoreSupersededPendingPluginUpdate(this.paths, pendingEntry, previousEntry);
+      } else {
+        const recovery = await recoverPendingPluginUpdate(this.paths, pendingEntry.id);
+        if (recovery !== "recovered") {
+          throw new Error(`marketplace update recovery remains unresolved: ${pendingEntry.id}`);
+        }
       }
     } catch (registryRestoreError) {
       throw new AggregateError(
@@ -1749,6 +1799,24 @@ export class PluginMarketplaceService {
    */
   async cleanupPendingUpdateBackup(pluginId: string): Promise<boolean> {
     return this.withPluginLock(pluginId, () => cleanupPendingPluginUpdateBackup(this.paths, pluginId));
+  }
+
+  /** Explicitly retry cleanup of an obsolete, never-restorable artifact directory. */
+  async cleanupObsoleteBackup(pluginId: string): Promise<boolean> {
+    return this.withPluginLock(pluginId, () => cleanupObsoletePluginBackup(this.paths, pluginId));
+  }
+
+  private async discardSupersededPendingBackup(entry: PluginRegistryEntry | null): Promise<void> {
+    if (!entry?.pendingUpdate?.recoveryBackupDir) return;
+    await discardPendingUpdateBackupSnapshot(this.paths, entry).catch((err) => {
+      log.warn(`superseded recovery backup retained for ${entry.id}: ${(err as Error).message}`);
+    });
+  }
+
+  private async resolveObsoleteBackupOwnership(pluginId: string): Promise<void> {
+    await cleanupObsoletePluginBackup(this.paths, pluginId).catch((err) => {
+      log.warn(`obsolete plugin backup retained for ${pluginId}: ${(err as Error).message}`);
+    });
   }
 
   private async assertInstalledManifestMatchesCatalog(
@@ -1934,7 +2002,9 @@ export class PluginMarketplaceService {
     if (!pluginId) {
       throw new Error("[installLocal] plugin.json must have a non-empty 'id' field");
     }
-    if (!/^[a-zA-Z0-9._-]+$/.test(pluginId) || pluginId.includes("..") || pluginId.includes("/")) {
+    try {
+      assertSafeArtifactSlug(pluginId);
+    } catch {
       throw new Error(
         `[installLocal] unsafe plugin id — must match ^[a-zA-Z0-9._-]+$: ${pluginId}`,
       );
@@ -1976,7 +2046,9 @@ export class PluginMarketplaceService {
     }
 
     // Validate pluginId is a safe directory name.
-    if (!/^[a-zA-Z0-9._-]+$/.test(pluginId) || pluginId.includes("..") || pluginId.includes("/")) {
+    try {
+      assertSafeArtifactSlug(pluginId);
+    } catch {
       throw new Error(
         `[installLocal] unsafe plugin id — must match ^[a-zA-Z0-9._-]+$: ${pluginId}`,
       );
@@ -2117,6 +2189,7 @@ export class PluginMarketplaceService {
           }
         });
         this.clearInstallReceiptValidationForPlugin(pluginId);
+        await this.discardSupersededPendingBackup(existingEntry ?? null);
 
         const previousSnapshot = this.localInstallRollbackSnapshots.get(pluginId);
         if (previousSnapshot) {
@@ -2233,6 +2306,7 @@ export class PluginMarketplaceService {
       bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
       approvedPluginAccess: entry.approvedPluginAccess,
       pendingUpdate: entry.pendingUpdate ? { ...entry.pendingUpdate } : undefined,
+      pendingCleanup: entry.pendingCleanup ? { ...entry.pendingCleanup } : undefined,
     };
   }
 

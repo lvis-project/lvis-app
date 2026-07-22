@@ -105,12 +105,26 @@ export async function verifyInstallReceipt(
   pluginId: string,
   pluginRoot: string,
 ): Promise<{ ok: true; receipt: PluginInstallReceipt } | { ok: false; reason: string }> {
-  let parsed: PluginInstallReceiptV1 | PluginInstallReceipt;
+  let raw: string;
   try {
-    const raw = await readFile(installReceiptPath(cacheRoot, pluginId), "utf-8");
-    parsed = JSON.parse(raw) as PluginInstallReceiptV1 | PluginInstallReceipt;
+    raw = await readFile(installReceiptPath(cacheRoot, pluginId), "utf-8");
   } catch (err) {
     return { ok: false, reason: `install receipt missing or unreadable: ${(err as Error).message}` };
+  }
+  return verifyInstallReceiptRaw(raw, pluginId, pluginRoot);
+}
+
+/** Verify an exact durable receipt snapshot against every covered payload file. */
+export async function verifyInstallReceiptRaw(
+  raw: string,
+  pluginId: string,
+  pluginRoot: string,
+): Promise<{ ok: true; receipt: PluginInstallReceipt } | { ok: false; reason: string }> {
+  let parsed: PluginInstallReceiptV1 | PluginInstallReceipt;
+  try {
+    parsed = JSON.parse(raw) as PluginInstallReceiptV1 | PluginInstallReceipt;
+  } catch (err) {
+    return { ok: false, reason: `install receipt unreadable: ${(err as Error).message}` };
   }
 
   // Normalise v1 → v2.
