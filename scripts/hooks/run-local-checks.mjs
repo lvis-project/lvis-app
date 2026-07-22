@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
+import { withElectronNativeRebuildLock } from "../lib/electron-native-modules.mjs";
 import { ensureElectronAbiBetterSqlite3 } from "./node-native-abi.mjs";
 import { spawnSyncPortable as spawnSync } from "./spawn-command.mjs";
 import {
@@ -184,27 +185,39 @@ function resolveElectronVersion(dir) {
 }
 
 function rebuildBetterSqlite3ForElectron(dir) {
-  const version = resolveElectronVersion(dir);
-  const rebuildArgs = [
-    "electron-rebuild",
-    "-f",
-    "--only",
-    "better-sqlite3",
-    ...(version ? ["-v", version] : []),
-  ];
-  const bun = available(commands.bun);
-  if (bun) {
-    run(bun, ["x", ...rebuildArgs], dir);
-    return;
-  }
-  const npx = available(commands.npx);
-  if (npx) {
-    run(npx, ["-y", ...rebuildArgs], dir);
-    return;
-  }
-  throw new Error(
-    "[electron-rebuild-unavailable] bun or npx is required to realign better-sqlite3 to the Electron ABI"
-  );
+  return withElectronNativeRebuildLock(dir, () => {
+    // A launcher or another hook may have repaired the shared checkout while
+    // this process waited. Avoid a second mutation of the same native tree.
+    try {
+      ensureElectronAbiBetterSqlite3(dir);
+      return;
+    } catch {
+      // The caller already recorded the original probe failure. Continue with
+      // the canonical hook repair and let its final probe surface any failure.
+    }
+
+    const version = resolveElectronVersion(dir);
+    const rebuildArgs = [
+      "electron-rebuild",
+      "-f",
+      "--only",
+      "better-sqlite3",
+      ...(version ? ["-v", version] : []),
+    ];
+    const bun = available(commands.bun);
+    if (bun) {
+      run(bun, ["x", ...rebuildArgs], dir);
+      return;
+    }
+    const npx = available(commands.npx);
+    if (npx) {
+      run(npx, ["-y", ...rebuildArgs], dir);
+      return;
+    }
+    throw new Error(
+      "[electron-rebuild-unavailable] bun or npx is required to realign better-sqlite3 to the Electron ABI"
+    );
+  });
 }
 
 function ensureAppTestRuntimeAbi(dir) {
