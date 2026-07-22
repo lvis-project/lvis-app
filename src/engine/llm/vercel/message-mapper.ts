@@ -137,6 +137,27 @@ export function genericToModelMessages(
     }
 
     if (msg.role === "tool_result") {
+      // Image tool results (e.g. view_image) are only representable inside a
+      // tool result on Claude, via the AI SDK `content` output variant carrying
+      // a `file` part. Every other vendor's tool role is text-only, so they fall
+      // back to the text placeholder in `msg.content` — the image is dropped
+      // rather than sent as something the provider would reject.
+      const output =
+        vendor === "claude" && msg.image
+          ? {
+              type: "content" as const,
+              value: [
+                { type: "text" as const, text: msg.content },
+                {
+                  type: "file" as const,
+                  data: { type: "data" as const, data: msg.image.data },
+                  mediaType: msg.image.mimeType,
+                },
+              ],
+            }
+          : msg.isError === true
+            ? { type: "error-text" as const, value: msg.content }
+            : { type: "text" as const, value: msg.content };
       out.push({
         role: "tool",
         content: [
@@ -144,10 +165,7 @@ export function genericToModelMessages(
             type: "tool-result",
             toolCallId: msg.toolUseId,
             toolName: msg.toolName ?? "tool",
-            output:
-              msg.isError === true
-                ? { type: "error-text", value: msg.content }
-                : { type: "text", value: msg.content },
+            output,
           },
         ],
       } as ModelMessage);
