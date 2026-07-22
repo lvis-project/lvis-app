@@ -44,6 +44,15 @@ const RECURSIVE_REMOVE_OPTIONS = {
   retryDelay: 50,
 } as const;
 
+export function deferTombstoneRemoval(
+  tombstonePath: string,
+  onError?: (tombstonePath: string, err: Error) => void,
+): void {
+  rm(tombstonePath, RECURSIVE_REMOVE_OPTIONS).catch((rmErr) => {
+    onError?.(tombstonePath, rmErr as Error);
+  });
+}
+
 /**
  * Atomic Windows-safe directory removal.
  *
@@ -73,6 +82,8 @@ export async function tombstoneAndDeferredRemove(
     randomSuffix?: () => string;
     /** Hook for the deferred rm's failure path (default: silent). */
     onDeferredRmError?: (tombstonePath: string, err: Error) => void;
+    /** Stage only; the caller commits metadata before scheduling removal. */
+    deferRemoval?: boolean;
   } = {},
 ): Promise<string | null> {
   const now = options.now ?? Date.now;
@@ -93,8 +104,8 @@ export async function tombstoneAndDeferredRemove(
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
-  rm(tombstone, RECURSIVE_REMOVE_OPTIONS).catch((rmErr) => {
-    options.onDeferredRmError?.(tombstone, rmErr as Error);
-  });
+  if (options.deferRemoval !== false) {
+    deferTombstoneRemoval(tombstone, options.onDeferredRmError);
+  }
   return tombstone;
 }
