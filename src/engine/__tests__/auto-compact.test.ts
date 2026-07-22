@@ -44,6 +44,17 @@ function synth(withLargeResults = true): GenericMessage[] {
   return msgs;
 }
 
+/** A view_image tool_result row: tiny text placeholder + a base64 image sibling. */
+function imageRow(id: string, data = "QUJD"): GenericMessage {
+  return {
+    role: "tool_result",
+    toolUseId: id,
+    toolName: "view_image",
+    content: "[image loaded]",
+    image: { data, mimeType: "image/png" },
+  };
+}
+
 describe("markStaleToolResults", () => {
   it("marks older tool_results while preserving the most recent N (memory verbatim)", () => {
     const messages = synth();
@@ -195,16 +206,6 @@ function synthN(count: number): GenericMessage[] {
 }
 
 describe("markStaleToolResults — view_image image eviction", () => {
-  function imageRow(id: string, data = "QUJD"): GenericMessage {
-    return {
-      role: "tool_result",
-      toolUseId: id,
-      toolName: "view_image",
-      content: "[image loaded]", // tiny placeholder, well under the 200-char floor
-      image: { data, mimeType: "image/png" },
-    };
-  }
-
   it("marks an aged image tool_result on the image alone and drops its base64", () => {
     const msgs: GenericMessage[] = [
       { role: "user", content: "hi" },
@@ -255,22 +256,12 @@ describe("markStaleToolResults — view_image image eviction", () => {
 });
 
 describe("evictAgedToolResultImages", () => {
-  function imgRow(id: string, data = "QUJD"): GenericMessage {
-    return {
-      role: "tool_result",
-      toolUseId: id,
-      toolName: "view_image",
-      content: "[image loaded]",
-      image: { data, mimeType: "image/png" },
-    };
-  }
-
   it("drops the image from aged image rows but keeps recent ones", () => {
     const msgs: GenericMessage[] = [
       { role: "user", content: "hi" },
-      imgRow("old", "A".repeat(100)),
+      imageRow("old", "A".repeat(100)),
       { role: "tool_result", toolUseId: "t1", toolName: "search", content: "x" },
-      imgRow("recent"),
+      imageRow("recent"),
     ];
     const { messages: out, result } = evictAgedToolResultImages(msgs, 1);
     // 3 tool_results, preserve 1 → only "recent" preserved.
@@ -287,7 +278,7 @@ describe("evictAgedToolResultImages", () => {
   it("is a no-op (same array, evicted=false) when no image is aged", () => {
     const msgs: GenericMessage[] = [
       { role: "tool_result", toolUseId: "t1", toolName: "search", content: "x" },
-      imgRow("recent"),
+      imageRow("recent"),
     ];
     const { messages: out, result } = evictAgedToolResultImages(msgs, 4);
     expect(result.evicted).toBe(false);
