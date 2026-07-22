@@ -460,6 +460,124 @@ describe("PluginMarketplaceService install()", () => {
     expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] }).plugins).toEqual([]);
   });
 
+  it("stages the live directory and every owned recovery path during direct uninstall", async () => {
+    const pluginId = "owned-direct";
+    const installDir = join(installedDir, pluginId);
+    const recoveryDir = join(installedDir, `.${pluginId}.old-00000000-0000-4000-8000-000000000011`);
+    const cleanupDir = join(installedDir, `.${pluginId}.old-00000000-0000-4000-8000-000000000012`);
+    for (const dir of [installDir, recoveryDir, cleanupDir]) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "keep.txt"), dir);
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: pluginId,
+        manifestPath: `${pluginId}/plugin.json`,
+        installSource: "user",
+        pendingUpdate: {
+          kind: "marketplace",
+          previousManifestFileSha256: null,
+          previousReceiptRaw: null,
+          recoveryBackupDir: recoveryDir,
+          recoveryBackupMode: "rename",
+        },
+        pendingCleanup: [{ kind: "obsolete-artifact", path: cleanupDir }],
+      }],
+    }));
+    const { service } = makeService({} as MarketplaceFetcher);
+
+    await expect(service.uninstall(pluginId)).resolves.toEqual({ pluginId, uninstalled: true });
+    for (const dir of [installDir, recoveryDir, cleanupDir]) expect(existsSync(dir)).toBe(false);
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] }).plugins).toEqual([]);
+  });
+
+  it("restores the live directory and every owned path when direct uninstall commit conflicts", async () => {
+    const pluginId = "owned-restore";
+    const installDir = join(installedDir, pluginId);
+    const recoveryDir = join(installedDir, `.${pluginId}.old-00000000-0000-4000-8000-000000000013`);
+    const cleanupDir = join(installedDir, `.${pluginId}.old-00000000-0000-4000-8000-000000000014`);
+    const row = {
+      id: pluginId,
+      manifestPath: `${pluginId}/plugin.json`,
+      installSource: "user",
+      pendingUpdate: {
+        kind: "marketplace",
+        previousManifestFileSha256: null,
+        previousReceiptRaw: null,
+        recoveryBackupDir: recoveryDir,
+        recoveryBackupMode: "rename",
+      },
+      pendingCleanup: [{ kind: "obsolete-artifact", path: cleanupDir }],
+    };
+    for (const dir of [installDir, recoveryDir, cleanupDir]) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "keep.txt"), dir);
+    }
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [row] }));
+    const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
+    let stagedCount = 0;
+    vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(async (...args) => {
+      const tombstone = await originalTombstone(...args);
+      stagedCount += 1;
+      if (stagedCount === 3) {
+        await writeFile(registryPath, JSON.stringify({
+          version: 1,
+          plugins: [{ ...row, enabled: false }],
+        }));
+      }
+      return tombstone;
+    });
+    const { service } = makeService({} as MarketplaceFetcher);
+
+    await expect(service.uninstall(pluginId)).rejects.toThrow(/registry changed during uninstall/);
+    for (const dir of [installDir, recoveryDir, cleanupDir]) {
+      expect(existsSync(dir)).toBe(true);
+      expect(await readFile(join(dir, "keep.txt"), "utf-8")).toBe(dir);
+    }
+  });
+
+  it("stages every member recovery path during bundle uninstall", async () => {
+    const rootId = "owned-bundle";
+    const memberId = "owned-member";
+    const rootDir = join(installedDir, rootId);
+    const memberDir = join(installedDir, memberId);
+    const memberRecovery = join(installedDir, `.${memberId}.old-00000000-0000-4000-8000-000000000021`);
+    const memberCleanup = join(installedDir, `.${memberId}.old-00000000-0000-4000-8000-000000000022`);
+    for (const dir of [rootDir, memberDir, memberRecovery, memberCleanup]) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "keep.txt"), dir);
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: rootId, manifestPath: `${rootId}/plugin.json`, installSource: "user" },
+        {
+          id: memberId,
+          manifestPath: `${memberId}/plugin.json`,
+          installSource: "user",
+          bundleRefs: [rootId],
+          pendingUpdate: {
+            kind: "marketplace",
+            previousManifestFileSha256: null,
+            previousReceiptRaw: null,
+            recoveryBackupDir: memberRecovery,
+            recoveryBackupMode: "rename",
+          },
+          pendingCleanup: [{ kind: "obsolete-artifact", path: memberCleanup }],
+        },
+      ],
+    }));
+    const { service } = makeService({} as MarketplaceFetcher);
+
+    await expect(service.uninstall(rootId, { removeBundleMembers: true })).resolves.toEqual({
+      pluginId: rootId,
+      uninstalled: true,
+    });
+    for (const dir of [rootDir, memberDir, memberRecovery, memberCleanup]) expect(existsSync(dir)).toBe(false);
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] }).plugins).toEqual([]);
+  });
+
   it("serializes a standard member install behind bundle uninstall staging", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
@@ -1152,12 +1270,17 @@ describe("PluginMarketplaceService install()", () => {
     };
     await writeFile(registryPath, JSON.stringify(registry));
     await writeFile(join(installedDir, plugin.id, "dist", "hostPlugin.js"), "corrupted");
+    const store = (service as unknown as { artifactStore: PluginArtifactStore }).artifactStore;
+    const cacheSnapshot = vi.spyOn(store, "cacheVersionFromManifest");
 
     await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
 
     // The signed tarball cache may satisfy the verified reinstall without a
     // second network fetch; the corrupted live payload must still be replaced.
     expect(downloads).toBe(1);
+    // Only the verified replacement is cached after commit. The unresolved
+    // predecessor must never become a rollback target.
+    expect(cacheSnapshot).toHaveBeenCalledTimes(1);
     expect(await readFile(join(installedDir, plugin.id, "dist", "hostPlugin.js"), "utf-8"))
       .toContain("createPlugin");
     const repaired = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
@@ -1211,7 +1334,7 @@ describe("PluginMarketplaceService install()", () => {
       .plugins[0]?.pendingUpdate).toBeUndefined();
   });
 
-  it("retains durable cleanup ownership after removal and tombstone failure, then retries manually", async () => {
+  it("retains every cleanup path across two failed post-commit cleanups, then retries manually", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
     const plugin: PluginMarketplaceItem = {
@@ -1246,15 +1369,19 @@ describe("PluginMarketplaceService install()", () => {
       .mockRejectedValue(Object.assign(new Error("tombstone staging locked"), { code: "EACCES" }));
 
     await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    plugin.version = "3.0.0";
+    zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
     const retained = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
-    const obsoleteDir = retained.plugins[0]?.pendingCleanup?.path;
-    expect(obsoleteDir).toBeTruthy();
-    expect(existsSync(obsoleteDir!)).toBe(true);
+    const obsoleteDirs = retained.plugins[0]?.pendingCleanup?.map((item) => item.path) ?? [];
+    expect(obsoleteDirs).toHaveLength(2);
+    expect(new Set(obsoleteDirs).size).toBe(2);
+    for (const obsoleteDir of obsoleteDirs) expect(existsSync(obsoleteDir)).toBe(true);
 
     removeSpy.mockRestore();
     tombstoneSpy.mockRestore();
     await expect(service.cleanupObsoleteBackup(plugin.id)).resolves.toBe(true);
-    expect(existsSync(obsoleteDir!)).toBe(false);
+    for (const obsoleteDir of obsoleteDirs) expect(existsSync(obsoleteDir)).toBe(false);
     expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] })
       .plugins[0]?.pendingCleanup).toBeUndefined();
   });

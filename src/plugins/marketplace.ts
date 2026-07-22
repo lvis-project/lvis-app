@@ -22,8 +22,9 @@ import { assertSafeArtifactSlug } from "./plugin-id.js";
 import {
   cleanupPendingPluginUpdateBackup,
   cleanupObsoletePluginBackup,
+  cleanupObsoletePluginBackupPath,
   clearObsoletePluginBackupOwnership,
-  discardPendingUpdateBackupSnapshot,
+  pendingOwnedBackupPaths,
   preparePendingPluginUpdate,
   recoverPendingPluginUpdate,
   recoverPendingPluginUpdates,
@@ -249,6 +250,21 @@ type InstallReceiptValidation = {
   reason?: string;
   receipt?: PluginInstallReceipt;
 };
+
+function cleanupJournalAfterCommit(entry: PluginRegistryEntry): PluginRegistryEntry["pendingCleanup"] {
+  const journal = (entry.pendingCleanup ?? []).map((item) => ({ ...item, path: resolve(item.path) }));
+  const pending = entry.pendingUpdate;
+  if (pending?.recoveryBackupDir && pending.recoveryBackupMode) {
+    const item = {
+      kind: pending.recoveryBackupMode === "rename"
+        ? "obsolete-artifact" as const
+        : "obsolete-local-backup" as const,
+      path: resolve(pending.recoveryBackupDir),
+    };
+    if (!journal.some((candidate) => candidate.path === item.path)) journal.push(item);
+  }
+  return journal.length > 0 ? journal : undefined;
+}
 
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
@@ -1025,12 +1041,12 @@ export class PluginMarketplaceService {
 
       try {
         for (const entry of lockedPlan.removed) {
-          const installedDir = this.installedDirectoryForEntry(entry);
-          if (!installedDir) continue;
-          const tombstone = await tombstoneAndDeferredRemove(installedDir, this.pluginsRoot, {
-            deferRemoval: false,
-          });
-          if (tombstone) staged.push({ original: installedDir, tombstone });
+          for (const ownedDir of this.ownedDirectoriesForEntry(entry)) {
+            const tombstone = await tombstoneAndDeferredRemove(ownedDir, this.pluginsRoot, {
+              deferRemoval: false,
+            });
+            if (tombstone) staged.push({ original: ownedDir, tombstone });
+          }
         }
 
         await updatePluginRegistry(this.registryPath, (registry) => {
@@ -1206,9 +1222,6 @@ export class PluginMarketplaceService {
             const manifestSha256 = await this.readManifestSha256(manifestAbsPath);
             await updatePluginRegistry(this.registryPath, (registry) => {
               const currentEntry = registry.plugins.find((entry) => entry.id === pluginId);
-              const obsoleteDir = currentEntry?.pendingUpdate?.recoveryBackupMode === "rename"
-                ? currentEntry.pendingUpdate.recoveryBackupDir
-                : undefined;
               const nextEntry: PluginRegistryEntry = {
                 id: pluginId,
                 manifestPath: manifestPathRel,
@@ -1217,9 +1230,7 @@ export class PluginMarketplaceService {
                 installSource: resolveRollbackInstallSource(existingEntry?.installSource, registrySnapshot?.installSource),
                 bundleRefs: existingEntry?.bundleRefs ?? registrySnapshot?.bundleRefs ?? [],
                 approvedPluginAccess: registrySnapshot?.approvedPluginAccess ?? existingEntry?.approvedPluginAccess,
-                pendingCleanup: obsoleteDir
-                  ? { kind: "obsolete-artifact", path: resolve(obsoleteDir) }
-                  : undefined,
+                pendingCleanup: currentEntry ? cleanupJournalAfterCommit(currentEntry) : undefined,
               };
               const index = registry.plugins.findIndex((entry) => entry.id === pluginId);
               if (index >= 0) registry.plugins[index] = nextEntry;
@@ -1293,7 +1304,7 @@ export class PluginMarketplaceService {
     // unrecoverable previous state.
     const registry = await readPluginRegistry(this.registryPath);
     const entry = registry.plugins.find((p) => p.id === pluginId);
-    if (!entry) return;
+    if (!entry || entry.pendingUpdate) return;
     const manifestAbs = isAbsolute(entry.manifestPath)
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
@@ -1417,7 +1428,7 @@ export class PluginMarketplaceService {
           installSource: entry.installSource,
           manifestSha256: entry.manifestSha256,
           pendingUpdate: entry.pendingUpdate ? { ...entry.pendingUpdate } : undefined,
-          pendingCleanup: entry.pendingCleanup ? { ...entry.pendingCleanup } : undefined,
+          pendingCleanup: entry.pendingCleanup?.map((item) => ({ ...item })),
         });
       }
       entry.enabled = true;
@@ -1425,14 +1436,9 @@ export class PluginMarketplaceService {
       entry.installSource = actor === "it-admin" ? "admin" : entry.installSource ?? "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
       entry.approvedPluginAccess = approvedPluginAccess;
-      const pending = entry.pendingUpdate;
+      const pendingCleanup = cleanupJournalAfterCommit(entry);
       entry.pendingUpdate = undefined;
-      if (pending?.recoveryBackupDir && pending.recoveryBackupMode) {
-        entry.pendingCleanup = {
-          kind: pending.recoveryBackupMode === "rename" ? "obsolete-artifact" : "obsolete-local-backup",
-          path: resolve(pending.recoveryBackupDir),
-        };
-      }
+      entry.pendingCleanup = pendingCleanup;
     });
   }
 
@@ -1463,12 +1469,12 @@ export class PluginMarketplaceService {
 
     try {
       for (const entry of entriesToRemove) {
-        const installedDir = this.installedDirectoryForEntry(entry);
-        if (!installedDir) continue;
-        const tombstone = await tombstoneAndDeferredRemove(installedDir, this.pluginsRoot, {
-          deferRemoval: false,
-        });
-        if (tombstone) staged.push({ original: installedDir, tombstone });
+        for (const ownedDir of this.ownedDirectoriesForEntry(entry)) {
+          const tombstone = await tombstoneAndDeferredRemove(ownedDir, this.pluginsRoot, {
+            deferRemoval: false,
+          });
+          if (tombstone) staged.push({ original: ownedDir, tombstone });
+        }
       }
 
       await updatePluginRegistry(this.registryPath, (registry) => {
@@ -1489,7 +1495,7 @@ export class PluginMarketplaceService {
           if (entrySnapshot.installSource) entry.installSource = entrySnapshot.installSource;
           else delete entry.installSource;
           entry.pendingUpdate = entrySnapshot.pendingUpdate ? { ...entrySnapshot.pendingUpdate } : undefined;
-          entry.pendingCleanup = entrySnapshot.pendingCleanup ? { ...entrySnapshot.pendingCleanup } : undefined;
+          entry.pendingCleanup = entrySnapshot.pendingCleanup?.map((item) => ({ ...item }));
         }
       });
     } catch (error) {
@@ -1516,8 +1522,8 @@ export class PluginMarketplaceService {
     // so uninstall is a recursive rm of the plugin's directory. The
     // former npm-uninstall branch (`isZipInstalled === false`) is
     // gone with the install-side npm path.
-    const installedManifestDir = this.installedDirectoryForEntry(entry);
-    if (!installedManifestDir) return;
+    const ownedDirs = this.ownedDirectoriesForEntry(entry);
+    if (ownedDirs.length === 0) return;
 
     // Windows-atomic uninstall: rename to a tombstone under +tombstones+/
     // (collision-free namespace; `+` not in plugin id allowed chars), then
@@ -1532,13 +1538,22 @@ export class PluginMarketplaceService {
     // NOTE: this returns BEFORE the rm completes. Callers that need
     // synchronous removal (none today) should not assume the install dir
     // is gone after this resolves.
-    await tombstoneAndDeferredRemove(installedManifestDir, this.pluginsRoot, {
-      onDeferredRmError: (tombstone, err) => {
-        log.warn(
-          `removeInstalledEntry: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`,
-        );
-      },
-    });
+    for (const ownedDir of ownedDirs) {
+      await tombstoneAndDeferredRemove(ownedDir, this.pluginsRoot, {
+        onDeferredRmError: (tombstone, err) => {
+          log.warn(
+            `removeInstalledEntry: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`,
+          );
+        },
+      });
+    }
+  }
+
+  private ownedDirectoriesForEntry(entry: PluginRegistryEntry): string[] {
+    const directories = new Set<string>(pendingOwnedBackupPaths(this.paths, entry));
+    const installedDir = this.installedDirectoryForEntry(entry);
+    if (installedDir) directories.add(installedDir);
+    return [...directories];
   }
 
   private installedDirectoryForEntry(entry: PluginRegistryEntry): string | null {
@@ -1715,9 +1730,7 @@ export class PluginMarketplaceService {
     await updatePluginRegistry(this.registryPath, (registry) => {
       const existing = registry.plugins.find((entry) => entry.id === plugin.id);
       if (existing) {
-        const obsoleteDir = existing.pendingUpdate?.recoveryBackupMode === "rename"
-          ? existing.pendingUpdate.recoveryBackupDir
-          : undefined;
+        const pendingCleanup = cleanupJournalAfterCommit(existing);
         existing.manifestPath = manifestPath;
         existing.manifestSha256 = manifestSha256;
         existing.enabled = true;
@@ -1725,9 +1738,7 @@ export class PluginMarketplaceService {
         existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, null, plugin.id);
         existing.approvedPluginAccess = plugin.pluginAccess;
         existing.pendingUpdate = undefined;
-        existing.pendingCleanup = obsoleteDir
-          ? { kind: "obsolete-artifact", path: resolve(obsoleteDir) }
-          : undefined;
+        existing.pendingCleanup = pendingCleanup;
       } else {
         registry.plugins.push({
           id: plugin.id,
@@ -1767,7 +1778,9 @@ export class PluginMarketplaceService {
     }
     try {
       if (previousEntry?.pendingUpdate) {
-        await restoreSupersededPendingPluginUpdate(this.paths, pendingEntry, previousEntry);
+        await restoreSupersededPendingPluginUpdate(this.paths, pendingEntry, previousEntry, {
+          preserveRetryCleanup: installError instanceof ArtifactRollbackError,
+        });
       } else {
         const recovery = await recoverPendingPluginUpdate(this.paths, pendingEntry.id);
         if (recovery !== "recovered") {
@@ -1808,7 +1821,7 @@ export class PluginMarketplaceService {
 
   private async discardSupersededPendingBackup(entry: PluginRegistryEntry | null): Promise<void> {
     if (!entry?.pendingUpdate?.recoveryBackupDir) return;
-    await discardPendingUpdateBackupSnapshot(this.paths, entry).catch((err) => {
+    await cleanupObsoletePluginBackupPath(this.paths, entry.id, entry.pendingUpdate.recoveryBackupDir).catch((err) => {
       log.warn(`superseded recovery backup retained for ${entry.id}: ${(err as Error).message}`);
     });
   }
@@ -2171,12 +2184,14 @@ export class PluginMarketplaceService {
         await updatePluginRegistry(this.registryPath, (registry) => {
           const existing = registry.plugins.find((x) => x.id === pluginId);
           if (existing) {
+            const pendingCleanup = cleanupJournalAfterCommit(existing);
             existing.manifestPath = registryManifestPath;
             existing.manifestSha256 = manifestSha256;
             existing.enabled = true;
             existing.installSource = localInstallSource;
             existing.approvedPluginAccess = approvedPluginAccess;
             existing.pendingUpdate = undefined;
+            existing.pendingCleanup = pendingCleanup;
           } else {
             registry.plugins.push({
               id: pluginId,
@@ -2306,7 +2321,7 @@ export class PluginMarketplaceService {
       bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
       approvedPluginAccess: entry.approvedPluginAccess,
       pendingUpdate: entry.pendingUpdate ? { ...entry.pendingUpdate } : undefined,
-      pendingCleanup: entry.pendingCleanup ? { ...entry.pendingCleanup } : undefined,
+      pendingCleanup: entry.pendingCleanup?.map((item) => ({ ...item })),
     };
   }
 
@@ -2341,6 +2356,15 @@ export class PluginMarketplaceService {
       const restoredEntry = this.cloneRegistryEntry(snapshot.registryEntry);
       const existingIndex = registry.plugins.findIndex((entry) => entry.id === pluginId);
       if (existingIndex >= 0) {
+        const currentCleanup = registry.plugins[existingIndex]?.pendingCleanup ?? [];
+        const restoredCleanup = restoredEntry.pendingCleanup ?? [];
+        const mergedCleanup = [...restoredCleanup.map((item) => ({ ...item }))];
+        for (const item of currentCleanup) {
+          if (!mergedCleanup.some((candidate) => resolve(candidate.path) === resolve(item.path))) {
+            mergedCleanup.push({ ...item });
+          }
+        }
+        restoredEntry.pendingCleanup = mergedCleanup.length > 0 ? mergedCleanup : undefined;
         registry.plugins[existingIndex] = restoredEntry;
       } else {
         registry.plugins.push(restoredEntry);
@@ -2364,6 +2388,11 @@ export class PluginMarketplaceService {
   ): Promise<void> {
     if (snapshot?.backupDir) {
       await rm(snapshot.backupDir, { recursive: true, force: true });
+      await clearObsoletePluginBackupOwnership(
+        this.paths,
+        snapshot.registryEntry.id,
+        snapshot.backupDir,
+      );
     }
   }
 
