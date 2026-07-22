@@ -274,9 +274,10 @@ export function markStaleToolResults(
 
     const origLen = msg.content.length;
     const stubLen = buildToolResultStub(msg.toolName, origLen).length;
-    // Count the base64 image chars this rebuild drops (see below) — otherwise a
+    freedCharsOnSerialize += Math.max(0, origLen - stubLen);
+    // Also count the base64 image chars this rebuild drops (see below) — a
     // content-only measure under-reports the bytes actually freed from the wire.
-    freedCharsOnSerialize += Math.max(0, origLen - stubLen) + (msg.image?.data.length ?? 0);
+    freedCharsOnSerialize += msg.image?.data.length ?? 0;
     markedCount += 1;
 
     return {
