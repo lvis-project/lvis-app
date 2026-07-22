@@ -35,6 +35,12 @@ const MAX_MODEL_ID_LENGTH = 256;
 
 const STANDARD_MODEL_LIST_BASE_URLS: Partial<Record<LLMVendor, string>> = {
   openai: "https://api.openai.com/v1",
+  // NOTE (#1574): the correct GitHub Models list endpoint is `/catalog/models`
+  // — this base yields `/inference/models`, which 404s, so copilot model-list
+  // already falls back to the seed. Left unfixed on purpose: GitHub Models is
+  // fully retired 2026-07-30, and `/catalog/models` returns a non-OpenAI shape
+  // that would need its own parser branch — not worth building for a days-away
+  // sunset.
   copilot: "https://models.github.ai/inference",
 };
 
