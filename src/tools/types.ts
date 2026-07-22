@@ -125,6 +125,22 @@ export interface ToolExecutionContext {
 }
 
 /**
+ * An image a tool returns for the model to SEE (e.g. `view_image`). Carried on
+ * a sibling field of {@link ToolResult} so `output` stays a plain-text
+ * placeholder for every string-only consumer (token estimation, persistence,
+ * renderer replay); only the Claude message mapper reads this and emits an image
+ * block. `data` is raw base64 (no `data:` URL prefix); non-Claude vendors, which
+ * cannot carry an image inside a tool result, fall back to the text placeholder.
+ */
+export interface ToolResultImage {
+  data: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+}
+
+/**
  * Canonical tool return shape. Executor Step 6 expects this triple and
  * maps it to the tool_use_id-scoped LLM response + audit entry in
  * Step 8. Tools return `isError: true` for normal failures instead of
@@ -135,6 +151,8 @@ export interface ToolResult {
   output: string;
   isError: boolean;
   metadata?: Record<string, unknown>;
+  /** Optional image for the model to see; see {@link ToolResultImage}. */
+  image?: ToolResultImage;
 }
 
 /**

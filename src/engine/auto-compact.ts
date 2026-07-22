@@ -134,6 +134,22 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
     if (msg.role === "user" && Array.isArray(msg.content)) {
       total += estimateMultimodalTokenOverhead(msg.content);
     }
+    // A view_image tool_result carries its image on a sibling field, so the
+    // wire-estimate string above counts 0 for it. Add the image overhead while
+    // it is still LIVE (not yet marked/stubbed) — gated on the same not-stubbed
+    // predicate the serializer uses, so it stops counting once the image is
+    // dropped from the wire and never double-counts against the stub content.
+    if (
+      msg.role === "tool_result" &&
+      msg.image !== undefined &&
+      msg.meta?.compactedAt === undefined &&
+      msg.meta?.truncated === undefined &&
+      msg.meta?.serializedStub !== true
+    ) {
+      total += estimateMultimodalTokenOverhead([
+        { type: "image", width: msg.image.width, height: msg.image.height },
+      ]);
+    }
   }
   return total;
 }
@@ -234,7 +250,11 @@ export function markStaleToolResults(
     const m = messages[i];
     if (m.role !== "tool_result") return false;
     if (m.meta?.compactedAt !== undefined) return false; // idempotent
-    return m.content.length >= minStub;
+    // An aged view_image tool_result carries a large base64 image on its sibling
+    // field but only a tiny text placeholder in `content`, so the char threshold
+    // never fires. Make it eligible on the image alone: once marked, the rebuild
+    // below drops `image`, so the ~MBs stop riding every wire send.
+    return m.content.length >= minStub || m.image !== undefined;
   });
   if (eligibleCandidates.length === 0) {
     return {
@@ -255,6 +275,9 @@ export function markStaleToolResults(
     const origLen = msg.content.length;
     const stubLen = buildToolResultStub(msg.toolName, origLen).length;
     freedCharsOnSerialize += Math.max(0, origLen - stubLen);
+    // Also count the base64 image chars this rebuild drops (see below) — a
+    // content-only measure under-reports the bytes actually freed from the wire.
+    freedCharsOnSerialize += msg.image?.data.length ?? 0;
     markedCount += 1;
 
     return {
