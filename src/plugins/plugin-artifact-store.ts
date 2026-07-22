@@ -123,6 +123,16 @@ export interface VerifiedArtifact {
   signerKeyId: string;
 }
 
+export class ArtifactRollbackError extends AggregateError {
+  readonly backupDir?: string;
+
+  constructor(message: string, errors: unknown[], backupDir?: string) {
+    super(errors, message);
+    this.name = "ArtifactRollbackError";
+    this.backupDir = backupDir;
+  }
+}
+
 export interface ArtifactStoreOptions {
   /**
    * Where artifacts are extracted (`{installRoot}/<slug>/...`). For
@@ -344,7 +354,15 @@ export class PluginArtifactStore {
         });
       } catch (renameErr) {
         if (hadOldDir) {
-          await retryOnTransientFsLock(() => rename(oldDir, installDir)).catch(() => undefined);
+          try {
+            await retryOnTransientFsLock(() => rename(oldDir, installDir));
+          } catch (restoreErr) {
+            throw new ArtifactRollbackError(
+              `artifact promotion and directory restore both failed: ${safeSlug}`,
+              [renameErr, restoreErr],
+              oldDir,
+            );
+          }
         }
         throw renameErr;
       }
@@ -353,14 +371,35 @@ export class PluginArtifactStore {
       try {
         result = await commit(installDir, files);
       } catch (commitErr) {
-        await rm(installDir, { recursive: true, force: true }).catch(() => undefined);
+        try {
+          await retryOnTransientFsLock(() => rm(installDir, { recursive: true, force: true }));
+        } catch (cleanupErr) {
+          throw new ArtifactRollbackError(
+            `artifact commit and promoted-directory cleanup both failed: ${safeSlug}`,
+            [commitErr, cleanupErr],
+            hadOldDir ? oldDir : undefined,
+          );
+        }
         if (hadOldDir) {
-          await retryOnTransientFsLock(() => rename(oldDir, installDir)).catch(() => undefined);
+          try {
+            await retryOnTransientFsLock(() => rename(oldDir, installDir));
+          } catch (restoreErr) {
+            throw new ArtifactRollbackError(
+              `artifact commit and directory restore both failed: ${safeSlug}`,
+              [commitErr, restoreErr],
+              oldDir,
+            );
+          }
         }
         throw commitErr;
       }
       if (hadOldDir) {
-        await rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
+        await rm(oldDir, { recursive: true, force: true }).catch((cleanupErr) => {
+          log.warn(
+            { safeSlug, oldDir, err: cleanupErr },
+            "installed artifact committed but old directory cleanup failed",
+          );
+        });
       }
       return { files, result };
     } catch (err) {
