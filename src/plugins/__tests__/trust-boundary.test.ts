@@ -10,7 +10,7 @@
  *   3. (MEDIUM §Step 3) `dev-flags.ts` helpers hard-gate on `app.isPackaged`.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import { join } from "node:path";
@@ -40,10 +40,7 @@ describe("Phase 1 — plugin trust boundary", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(
-      tmpdir(),
-      `lvis-trust-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    testDir = await mkdtemp(join(tmpdir(), "lvis-trust-"));
     hostRoot = join(testDir, "host");
     pluginsRoot = join(testDir, "userInstalled");
     cacheRoot = join(pluginsRoot, ".cache");
@@ -217,6 +214,63 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       expect(runtime.listPluginIds()).not.toContain("tb-receipt-tampered");
       expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
+    });
+
+    it("rejects a registry plugin with an unexpected executable absent from its receipt", async () => {
+      const pluginDir = join(pluginsRoot, "p-unlisted");
+      const manifestPath = await writePluginAt(pluginDir, "tb-receipt-unlisted");
+      await writeReceipt("tb-receipt-unlisted", pluginDir);
+      await writeFile(join(pluginDir, "unlisted.mjs"), "export default 'injected';\n", "utf-8");
+      await writeTestPluginRegistry({ registryPath }, [{ id: "tb-receipt-unlisted", manifestPath }]);
+
+      const auditCalls: Array<{ level: string; message: string }> = [];
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+        auditLog: (level, message) => auditCalls.push({ level, message }),
+      });
+      await runtime.load();
+
+      expect(runtime.listPluginIds()).not.toContain("tb-receipt-unlisted");
+      expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
+    });
+
+    it("rejects malformed valid receipt JSON without aborting unrelated plugin startup", async () => {
+      const malformedId = "tb-malformed-receipt";
+      const validId = "tb-valid-neighbor";
+      const malformedDir = join(pluginsRoot, malformedId);
+      const validDir = join(pluginsRoot, validId);
+      const malformedManifest = await writePluginAt(malformedDir, malformedId);
+      const validManifest = await writePluginAt(validDir, validId);
+      await mkdir(join(cacheRoot, malformedId), { recursive: true });
+      await writeFile(
+        join(cacheRoot, malformedId, "install-receipt.json"),
+        JSON.stringify({
+          schemaVersion: 2,
+          pluginId: malformedId,
+          version: "1.0.0",
+          installSource: "marketplace",
+          installedAt: new Date(0).toISOString(),
+          files: [null],
+        }),
+      );
+      await writeReceipt(validId, validDir);
+      await writeTestPluginRegistry({ registryPath }, [
+        { id: malformedId, manifestPath: malformedManifest },
+        { id: validId, manifestPath: validManifest },
+      ]);
+
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+      });
+      await expect(runtime.load()).resolves.toBeUndefined();
+      expect(runtime.listPluginIds()).not.toContain(malformedId);
+      expect(runtime.listPluginIds()).toContain(validId);
     });
 
     // Dev-link receipt-skip removed in 2026-05 dev-link purge: the legacy

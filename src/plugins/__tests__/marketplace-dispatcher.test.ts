@@ -1,7 +1,7 @@
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdmZip from "adm-zip";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -16,12 +16,15 @@ vi.mock("../publisher-keys.js", () => ({
 }));
 
 import { PluginMarketplaceService } from "../marketplace.js";
+import { ArtifactRollbackError, PluginArtifactStore } from "../plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
-import type { PluginMarketplaceItem } from "../types.js";
+import type { PluginMarketplaceItem, PluginRegistryEntry } from "../types.js";
 import { setCachedCatalog } from "../offline-cache.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
+import * as installedEntryFs from "../installed-entry-fs.js";
+import * as removalTransaction from "../plugin-removal-transaction.js";
 
 function makePluginZip(manifest: Record<string, unknown>): Buffer {
   const zip = new AdmZip();
@@ -73,10 +76,7 @@ describe("PluginMarketplaceService install()", () => {
     // Phase 2b-1: one test exercises the file:-spec dev branch.
     // Round-3: LVIS_DEV=1 subsumes the deprecated LVIS_ALLOW_LINKED_PLUGIN_ENTRY.
     process.env.LVIS_DEV = "1";
-    testDir = join(
-      tmpdir(),
-      `lvis-marketplace-install-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    testDir = await mkdtemp(join(tmpdir(), "lvis-marketplace-install-"));
     appRoot = testDir;
     // Phase 2a: registry + installed plugins live under pluginsRoot
     // (testDir/plugins). The legacy `installed/` subdir is gone.
@@ -191,6 +191,738 @@ describe("PluginMarketplaceService install()", () => {
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
   });
 
+  it("uses the canonical catalog id for alias replacement history and receipt-cache invalidation", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "canonical-email",
+      slug: "email-alias",
+      name: "Email",
+      description: "alias replacement fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/email@1.0.0",
+      packageName: "@lvis/email",
+      tools: [],
+    };
+    const makeVersionZip = (version: string) => makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      description: plugin.description,
+      version,
+      entry: "./dist/hostPlugin.js",
+      tools: [],
+    });
+    const v1Zip = makeVersionZip("1.0.0");
+    const v2Zip = makeVersionZip("2.0.0");
+    const downloadArtifact = vi.fn()
+      .mockResolvedValueOnce({ body: v1Zip, sha256Header: createHash("sha256").update(v1Zip).digest("hex"), status: 200 })
+      .mockResolvedValueOnce({ body: v2Zip, sha256Header: createHash("sha256").update(v2Zip).digest("hex"), status: 200 });
+    const fetchSignatureEnvelope = vi.fn()
+      .mockResolvedValueOnce(makeEnvelope(v1Zip, signingKey.privateKey))
+      .mockResolvedValueOnce(makeEnvelope(v2Zip, signingKey.privateKey));
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact,
+      fetchSignatureEnvelope,
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+
+    await service.install(plugin.slug);
+    plugin.version = "2.0.0";
+    plugin.packageSpec = "@lvis/email@2.0.0";
+    plugin.artifactSha256 = createHash("sha256").update(v2Zip).digest("hex");
+    await service.install(plugin.slug);
+
+    const artifactStore = (service as unknown as { artifactStore: PluginArtifactStore }).artifactStore;
+    expect(await artifactStore.findRollbackTarget(plugin.id, "2.0.0")).toBe("1.0.0");
+    const history = JSON.parse(await readFile(join(cacheRoot, plugin.id, "history.json"), "utf-8")) as {
+      entries: Array<{ version: string }>;
+    };
+    expect(history.entries.map((entry) => entry.version)).toContain("1.0.0");
+    expect(existsSync(join(cacheRoot, plugin.slug, "history.json"))).toBe(false);
+
+    await service.install(plugin.slug);
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+    expect(fetchSignatureEnvelope).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not mark the old registry row pending while a replacement is still downloading", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "download-window",
+      slug: "download-window",
+      name: "Download Window",
+      description: "pre-promotion crash fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/download-window@1.0.0",
+      packageName: "@lvis/download-window",
+      tools: [],
+    };
+    let zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    let releaseDownload: (() => void) | undefined;
+    let downloadStarted: (() => void) | undefined;
+    const downloadGate = new Promise<void>((resolveGate) => { releaseDownload = resolveGate; });
+    const downloadStartedPromise = new Promise<void>((resolveStarted) => { downloadStarted = resolveStarted; });
+    let pause = false;
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => {
+        if (pause) {
+          downloadStarted?.();
+          await downloadGate;
+        }
+        return { body: zipBuffer, sha256Header: createHash("sha256").update(zipBuffer).digest("hex"), status: 200 };
+      },
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    const originalRegistry = await readFile(registryPath, "utf-8");
+    plugin.version = "2.0.0";
+    zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    pause = true;
+
+    const replacement = service.install(plugin.id);
+    await downloadStartedPromise;
+    expect(await readFile(registryPath, "utf-8")).toBe(originalRegistry);
+    releaseDownload?.();
+    await replacement;
+  });
+
+  it("marks a raw stale-manifest row pending before promotion and preserves its bundle graph", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "stale-member",
+      slug: "stale-alias",
+      name: "Stale Member",
+      description: "stale registry row fixture",
+      version: "2.0.0",
+      packageSpec: "@lvis/stale-member@2.0.0",
+      packageName: "@lvis/stale-member",
+      tools: [],
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      description: plugin.description,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: [],
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: plugin.id,
+        manifestPath: `${plugin.id}/plugin.json`,
+        enabled: true,
+        installSource: "user",
+        bundleRefs: ["bundle-root"],
+        approvedPluginAccess: { plugins: [{ pluginId: "bundle-root", events: ["bundle.event"] }] },
+      }],
+    }));
+    const { service } = makeService(fetcher);
+    const target = service as unknown as {
+      markMarketplaceRegistryEntryPending: (
+        entry: PluginRegistryEntry | null,
+        backupDir: string,
+      ) => Promise<PluginRegistryEntry | null>;
+    };
+    const originalMark = target.markMarketplaceRegistryEntryPending.bind(service);
+    vi.spyOn(target, "markMarketplaceRegistryEntryPending").mockImplementation(async (...args) => {
+      const result = await originalMark(...args);
+      const pendingRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: Array<{ id: string; pendingUpdate?: unknown; bundleRefs?: string[]; approvedPluginAccess?: unknown }>;
+      };
+      expect(pendingRegistry.plugins).toEqual([
+        expect.objectContaining({
+          id: plugin.id,
+          pendingUpdate: expect.objectContaining({ kind: "marketplace" }),
+          bundleRefs: ["bundle-root"],
+          approvedPluginAccess: expect.any(Object),
+        }),
+      ]);
+      return result;
+    });
+
+    await service.install(plugin.slug);
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; pendingUpdate?: unknown; bundleRefs?: string[] }>;
+    };
+    expect(registry.plugins).toEqual([
+      expect.objectContaining({ id: plugin.id, bundleRefs: ["bundle-root"] }),
+    ]);
+    expect(registry.plugins[0]?.pendingUpdate).toBeUndefined();
+  });
+
+  it("keeps a pending member in the bundle plan when root uninstall starts after member replacement", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const member: PluginMarketplaceItem = {
+      id: "bundle-member",
+      slug: "member-alias",
+      name: "Bundle Member",
+      description: "pending bundle graph fixture",
+      version: "2.0.0",
+      packageSpec: "@lvis/bundle-member@2.0.0",
+      packageName: "@lvis/bundle-member",
+      tools: [],
+    };
+    const zipBuffer = makePluginZip({
+      id: member.id,
+      name: member.name,
+      description: member.description,
+      version: member.version,
+      entry: "./dist/hostPlugin.js",
+      tools: [],
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [member],
+      getPluginDetail: async () => member,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({ body: zipBuffer, sha256Header: createHash("sha256").update(zipBuffer).digest("hex"), status: 200 }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    for (const id of ["bundle-root", member.id]) {
+      await mkdir(join(installedDir, id), { recursive: true });
+      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify({
+        id,
+        name: id,
+        description: id,
+        version: "1.0.0",
+        entry: "./dist/hostPlugin.js",
+        tools: [],
+      }));
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: "bundle-root", manifestPath: "bundle-root/plugin.json", enabled: true, installSource: "user" },
+        { id: member.id, manifestPath: `${member.id}/plugin.json`, enabled: true, installSource: "user", bundleRefs: ["bundle-root"] },
+      ],
+    }));
+    const { service } = makeService(fetcher);
+    const target = service as unknown as {
+      markMarketplaceRegistryEntryPending: (entry: PluginRegistryEntry | null, backupDir: string) => Promise<PluginRegistryEntry | null>;
+    };
+    const originalMark = target.markMarketplaceRegistryEntryPending.bind(service);
+    let releasePending!: () => void;
+    const pendingGate = new Promise<void>((resolveGate) => { releasePending = resolveGate; });
+    let pendingStarted!: () => void;
+    const pendingStartedPromise = new Promise<void>((resolveStarted) => { pendingStarted = resolveStarted; });
+    vi.spyOn(target, "markMarketplaceRegistryEntryPending").mockImplementation(async (...args) => {
+      const result = await originalMark(...args);
+      pendingStarted();
+      await pendingGate;
+      return result;
+    });
+
+    const install = service.install(member.slug);
+    await pendingStartedPromise;
+    const firstUninstall = service.uninstall("bundle-root", { removeBundleMembers: true });
+    await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+    releasePending();
+    await expect(install).resolves.toEqual({ pluginId: member.id, installed: true });
+    await expect(firstUninstall).rejects.toThrow(/registry changed before uninstall locks/);
+
+    const afterConflict = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; bundleRefs?: string[]; pendingUpdate?: unknown }>;
+    };
+    expect(afterConflict.plugins.find((entry) => entry.id === member.id)).toEqual(
+      expect.objectContaining({ bundleRefs: ["bundle-root"] }),
+    );
+    expect(afterConflict.plugins.find((entry) => entry.id === member.id)?.pendingUpdate).toBeUndefined();
+
+    await expect(service.uninstall("bundle-root", { removeBundleMembers: true })).resolves.toEqual({
+      pluginId: "bundle-root",
+      uninstalled: true,
+    });
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] }).plugins).toEqual([]);
+  });
+
+  it("stages the live directory and every owned recovery path during direct uninstall", async () => {
+    const pluginId = "owned-direct";
+    const installDir = join(installedDir, pluginId);
+    const recoveryDir = join(installedDir, `.${pluginId}.old-00000000-0000-4000-8000-000000000011`);
+    const cleanupDir = join(installedDir, `.${pluginId}.old-00000000-0000-4000-8000-000000000012`);
+    for (const dir of [installDir, recoveryDir, cleanupDir]) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "keep.txt"), dir);
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: pluginId,
+        manifestPath: `${pluginId}/plugin.json`,
+        installSource: "user",
+        pendingUpdate: {
+          kind: "marketplace",
+          previousManifestFileSha256: null,
+          previousReceiptRaw: null,
+          recoveryBackupDir: recoveryDir,
+          recoveryBackupMode: "rename",
+        },
+        pendingCleanup: [{ kind: "obsolete-artifact", path: cleanupDir }],
+      }],
+    }));
+    const { service } = makeService({} as MarketplaceFetcher);
+
+    await expect(service.uninstall(pluginId)).resolves.toEqual({ pluginId, uninstalled: true });
+    for (const dir of [installDir, recoveryDir, cleanupDir]) expect(existsSync(dir)).toBe(false);
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] }).plugins).toEqual([]);
+  });
+
+  it("rejects a cross-wired registry row before it can remove another plugin directory", async () => {
+    for (const id of ["owner-a", "owner-b"]) {
+      await mkdir(join(installedDir, id), { recursive: true });
+      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify({ id }));
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: "owner-a", manifestPath: "owner-b/plugin.json", installSource: "user" }],
+    }));
+    const { service } = makeService({} as MarketplaceFetcher);
+
+    await expect(service.uninstall("owner-a")).rejects.toThrow("Registry ownership mismatch");
+    expect(existsSync(join(installedDir, "owner-a", "plugin.json"))).toBe(true);
+    expect(existsSync(join(installedDir, "owner-b", "plugin.json"))).toBe(true);
+  });
+
+  it("restores the live directory and every owned path when direct uninstall commit conflicts", async () => {
+    const pluginId = "owned-restore";
+    const installDir = join(installedDir, pluginId);
+    const recoveryDir = join(installedDir, `.${pluginId}.old-00000000-0000-4000-8000-000000000013`);
+    const cleanupDir = join(installedDir, `.${pluginId}.old-00000000-0000-4000-8000-000000000014`);
+    const row = {
+      id: pluginId,
+      manifestPath: `${pluginId}/plugin.json`,
+      installSource: "user",
+      pendingUpdate: {
+        kind: "marketplace",
+        previousManifestFileSha256: null,
+        previousReceiptRaw: null,
+        recoveryBackupDir: recoveryDir,
+        recoveryBackupMode: "rename",
+      },
+      pendingCleanup: [{ kind: "obsolete-artifact", path: cleanupDir }],
+    };
+    for (const dir of [installDir, recoveryDir, cleanupDir]) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "keep.txt"), dir);
+    }
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [row] }));
+    const originalStage = removalTransaction.stageRemovalTransaction;
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockImplementation(async (...args) => {
+      await originalStage(...args);
+      await writeFile(registryPath, JSON.stringify({
+        version: 1,
+        plugins: [{ ...row, enabled: false }],
+      }));
+    });
+    const { service } = makeService({} as MarketplaceFetcher);
+
+    await expect(service.uninstall(pluginId)).rejects.toThrow(/registry changed during uninstall/);
+    for (const dir of [installDir, recoveryDir, cleanupDir]) {
+      expect(existsSync(dir)).toBe(true);
+      expect(await readFile(join(dir, "keep.txt"), "utf-8")).toBe(dir);
+    }
+  });
+
+  it("stages every member recovery path during bundle uninstall", async () => {
+    const rootId = "owned-bundle";
+    const memberId = "owned-member";
+    const rootDir = join(installedDir, rootId);
+    const memberDir = join(installedDir, memberId);
+    const memberRecovery = join(installedDir, `.${memberId}.old-00000000-0000-4000-8000-000000000021`);
+    const memberCleanup = join(installedDir, `.${memberId}.old-00000000-0000-4000-8000-000000000022`);
+    for (const dir of [rootDir, memberDir, memberRecovery, memberCleanup]) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "keep.txt"), dir);
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: rootId, manifestPath: `${rootId}/plugin.json`, installSource: "user" },
+        {
+          id: memberId,
+          manifestPath: `${memberId}/plugin.json`,
+          installSource: "user",
+          bundleRefs: [rootId],
+          pendingUpdate: {
+            kind: "marketplace",
+            previousManifestFileSha256: null,
+            previousReceiptRaw: null,
+            recoveryBackupDir: memberRecovery,
+            recoveryBackupMode: "rename",
+          },
+          pendingCleanup: [{ kind: "obsolete-artifact", path: memberCleanup }],
+        },
+      ],
+    }));
+    const { service } = makeService({} as MarketplaceFetcher);
+
+    await expect(service.uninstall(rootId, { removeBundleMembers: true })).resolves.toEqual({
+      pluginId: rootId,
+      uninstalled: true,
+    });
+    for (const dir of [rootDir, memberDir, memberRecovery, memberCleanup]) expect(existsSync(dir)).toBe(false);
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] }).plugins).toEqual([]);
+  });
+
+  it("serializes a standard member install behind bundle uninstall staging", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const member: PluginMarketplaceItem = {
+      id: "email",
+      slug: "email-alias",
+      name: "Email",
+      description: "replacement fixture",
+      version: "2.0.0",
+      packageSpec: "@lvis/email@2.0.0",
+      packageName: "@lvis/email",
+      tools: [],
+    };
+    const replacementManifest = {
+      id: member.id,
+      name: member.name,
+      version: member.version,
+      entry: "./dist/hostPlugin.js",
+      tools: member.tools,
+    };
+    const zipBuffer = makePluginZip(replacementManifest);
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
+    let catalogRead!: () => void;
+    const catalogReadPromise = new Promise<void>((resolveCatalog) => { catalogRead = resolveCatalog; });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => {
+        catalogRead();
+        return [member];
+      },
+      getPluginDetail: async () => member,
+      downloadVersion: async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      },
+      downloadArtifact,
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+
+    for (const pluginId of ["work-assistant", "email"]) {
+      const pluginDir = join(installedDir, pluginId);
+      await mkdir(join(pluginDir, "dist"), { recursive: true });
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify({
+        id: pluginId,
+        name: pluginId,
+        version: "1.0.0",
+        entry: "./dist/hostPlugin.js",
+        tools: [],
+      }), "utf-8");
+      await writeFile(join(pluginDir, "dist", "hostPlugin.js"), "export default {};\n", "utf-8");
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: "work-assistant", manifestPath: "work-assistant/plugin.json", enabled: true, installSource: "user" },
+        { id: "email", manifestPath: "email/plugin.json", enabled: true, installSource: "user", bundleRefs: ["work-assistant"] },
+      ],
+    }), "utf-8");
+
+    let resumeStaging!: () => void;
+    const stagingGate = new Promise<void>((resolveGate) => { resumeStaging = resolveGate; });
+    let stagingStarted!: () => void;
+    const stagingStartedPromise = new Promise<void>((resolveStarted) => { stagingStarted = resolveStarted; });
+    const originalStage = removalTransaction.stageRemovalTransaction;
+    let paused = false;
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockImplementation(async (...args) => {
+      if (!paused) {
+        paused = true;
+        stagingStarted();
+        await stagingGate;
+      }
+      return originalStage(...args);
+    });
+
+    const { service } = makeService(fetcher);
+    const uninstall = service.uninstall("work-assistant", { removeBundleMembers: true });
+    await stagingStartedPromise;
+    const install = service.install("email-alias");
+    await catalogReadPromise;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+    expect(downloadArtifact).not.toHaveBeenCalled();
+
+    resumeStaging();
+    await expect(uninstall).resolves.toEqual({ pluginId: "work-assistant", uninstalled: true });
+    await expect(install).resolves.toEqual({ pluginId: "email", installed: true });
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; manifestPath: string }>;
+    };
+    expect(registry.plugins).toEqual([
+      expect.objectContaining({ id: "email", manifestPath: "email/plugin.json" }),
+    ]);
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(installedDir, "email", "plugin.json"))).toBe(true);
+  }, 20_000);
+
+  it("serializes a standard install behind a managed retry paused during artifact promotion", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "managed-plugin",
+      slug: "managed-plugin",
+      name: "Managed Plugin",
+      description: "managed retry fixture",
+      version: "2.0.0",
+      packageSpec: "@lvis/managed-plugin@2.0.0",
+      packageName: "@lvis/managed-plugin",
+      installPolicy: "admin",
+      tools: [],
+    };
+    const manifest = {
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+      installPolicy: "admin",
+    };
+    const zipBuffer = makePluginZip(manifest);
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact,
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    const store = (service as unknown as {
+      artifactStore: {
+        extractZipWithCommit: (
+          slug: string,
+          zip: Buffer,
+          commit: (installDir: string, files: string[]) => Promise<unknown>,
+        ) => Promise<{ files: string[]; result: unknown }>;
+      };
+    }).artifactStore;
+    const originalExtract = store.extractZipWithCommit.bind(store);
+    let releasePromotion!: () => void;
+    const promotionGate = new Promise<void>((resolveGate) => { releasePromotion = resolveGate; });
+    let promotionStarted!: () => void;
+    const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
+    let pauseOnce = true;
+    vi.spyOn(store, "extractZipWithCommit").mockImplementation(async (slug, zip, commit) =>
+      originalExtract(slug, zip, async (installDir, files) => {
+        if (pauseOnce) {
+          pauseOnce = false;
+          promotionStarted();
+          await promotionGate;
+        }
+        return commit(installDir, files);
+      }),
+    );
+
+    const managedRetry = service.ensureManagedInstalled();
+    await promotionStartedPromise;
+    const standardInstall = service.install(plugin.id);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+
+    releasePromotion();
+    await expect(managedRetry).resolves.toEqual({
+      installed: [plugin.id],
+      updated: [],
+      failed: [],
+    });
+    await expect(standardInstall).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; installSource: string }>;
+    };
+    expect(registry.plugins).toEqual([
+      expect.objectContaining({ id: plugin.id, installSource: "admin" }),
+    ]);
+    expect(JSON.parse(await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8")))
+      .toMatchObject({ id: plugin.id, version: "2.0.0" });
+  }, 20_000);
+
+  it("rechecks installed version under lock so an older managed retry cannot downgrade a newer install", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const makeCatalogItem = (version: string): PluginMarketplaceItem => ({
+      id: "managed-plugin",
+      slug: "managed-plugin",
+      name: "Managed Plugin",
+      description: "managed no-downgrade fixture",
+      version,
+      packageSpec: `@lvis/managed-plugin@${version}`,
+      packageName: "@lvis/managed-plugin",
+      installPolicy: "admin",
+      tools: [],
+    });
+    const newer = makeCatalogItem("3.0.0");
+    const older = makeCatalogItem("2.0.0");
+    const zips = new Map([
+      ["3.0.0", makePluginZip({ ...newer, entry: "./dist/hostPlugin.js" })],
+      ["2.0.0", makePluginZip({ ...older, entry: "./dist/hostPlugin.js" })],
+    ]);
+    let catalogReads = 0;
+    const downloadArtifact = vi.fn(async (_id: string, version: string) => {
+      const body = zips.get(version)!;
+      return {
+        body,
+        sha256Header: createHash("sha256").update(body).digest("hex"),
+        status: 200,
+      };
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [catalogReads++ === 0 ? newer : older],
+      getPluginDetail: async () => newer,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact,
+      fetchSignatureEnvelope: async (_id: string, version: string) => {
+        const body = zips.get(version)!;
+        return makeEnvelope(body, signingKey.privateKey);
+      },
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    const store = (service as unknown as {
+      artifactStore: {
+        extractZipWithCommit: (
+          slug: string,
+          zip: Buffer,
+          commit: (installDir: string, files: string[]) => Promise<unknown>,
+        ) => Promise<{ files: string[]; result: unknown }>;
+      };
+    }).artifactStore;
+    const originalExtract = store.extractZipWithCommit.bind(store);
+    let releasePromotion!: () => void;
+    const promotionGate = new Promise<void>((resolveGate) => { releasePromotion = resolveGate; });
+    let promotionStarted!: () => void;
+    const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
+    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit) =>
+      originalExtract(slug, zip, async (installDir, files) => {
+        promotionStarted();
+        await promotionGate;
+        return commit(installDir, files);
+      }),
+    );
+
+    const newerInstall = service.install(newer.id);
+    await promotionStartedPromise;
+    const olderManagedRetry = service.ensureManagedInstalled();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+
+    releasePromotion();
+    await expect(newerInstall).resolves.toEqual({ pluginId: newer.id, installed: true });
+    await expect(olderManagedRetry).resolves.toEqual({ installed: [], updated: [], failed: [] });
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(await readFile(join(installedDir, newer.id, "plugin.json"), "utf-8")))
+      .toMatchObject({ version: "3.0.0" });
+  }, 20_000);
+
+  it("serializes quarantine behind an in-flight standard install", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "quarantine-race",
+      slug: "quarantine-race",
+      name: "Quarantine Race",
+      description: "quarantine serialization fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/quarantine-race@1.0.0",
+      packageName: "@lvis/quarantine-race",
+      tools: [],
+    };
+    const zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    const store = (service as unknown as {
+      artifactStore: {
+        extractZipWithCommit: (
+          slug: string,
+          zip: Buffer,
+          commit: (installDir: string, files: string[]) => Promise<unknown>,
+        ) => Promise<{ files: string[]; result: unknown }>;
+      };
+    }).artifactStore;
+    const originalExtract = store.extractZipWithCommit.bind(store);
+    let releasePromotion!: () => void;
+    const promotionGate = new Promise<void>((resolveGate) => { releasePromotion = resolveGate; });
+    let promotionStarted!: () => void;
+    const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
+    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit) =>
+      originalExtract(slug, zip, async (installDir, files) => {
+        promotionStarted();
+        await promotionGate;
+        return commit(installDir, files);
+      }),
+    );
+
+    const install = service.install(plugin.id);
+    await promotionStartedPromise;
+    let quarantineSettled = false;
+    const quarantine = service.quarantinePlugin(plugin.id, "race fixture").finally(() => {
+      quarantineSettled = true;
+    });
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    expect(quarantineSettled).toBe(false);
+
+    releasePromotion();
+    await expect(install).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    await expect(quarantine).resolves.toEqual({ pluginId: plugin.id, quarantined: true });
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] };
+    expect(registry.plugins).toEqual([]);
+    expect(existsSync(join(installedDir, plugin.id))).toBe(false);
+  }, 20_000);
+
   it("cleans a fresh extracted marketplace install when receipt finalization fails", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
@@ -244,6 +976,206 @@ describe("PluginMarketplaceService install()", () => {
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins).toHaveLength(0);
   });
+
+  it("rolls back fresh artifact and receipt when registry commit fails before publication", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/test-plugin@1.2.3",
+      packageName: "@lvis/test-plugin",
+      tools: ["ping"],
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const originalRegistry = await readFile(registryPath, "utf-8");
+    const { service } = makeService(fetcher);
+    vi.spyOn(
+      service as unknown as { commitMarketplaceRegistryEntry: (...args: unknown[]) => Promise<void> },
+      "commitMarketplaceRegistryEntry",
+    ).mockRejectedValueOnce(new Error("injected registry precommit failure"));
+
+    await expect(service.install(plugin.id)).rejects.toThrow("injected registry precommit failure");
+
+    expect(await readFile(registryPath, "utf-8")).toBe(originalRegistry);
+    expect(existsSync(join(installedDir, plugin.id))).toBe(false);
+    expect(existsSync(join(cacheRoot, plugin.id, "install-receipt.json"))).toBe(false);
+  });
+
+  it("restores replacement bytes and receipt when registry commit fails before publication", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.0.0",
+      packageSpec: "@lvis/test-plugin@1.0.0",
+      packageName: "@lvis/test-plugin",
+      tools: ["ping"],
+    };
+    let zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    const originalRegistry = await readFile(registryPath, "utf-8");
+    const originalManifest = await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8");
+    const originalReceipt = await readFile(
+      join(cacheRoot, plugin.id, "install-receipt.json"),
+      "utf-8",
+    );
+
+    plugin.version = "2.0.0";
+    zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    vi.spyOn(
+      service as unknown as { commitMarketplaceRegistryEntry: (...args: unknown[]) => Promise<void> },
+      "commitMarketplaceRegistryEntry",
+    ).mockImplementationOnce(async () => {
+      const registryDuringPublication = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: Array<{ id: string; pendingUpdate?: { kind: string } }>;
+      };
+      expect(registryDuringPublication.plugins).toEqual([
+        expect.objectContaining({
+          id: plugin.id,
+          pendingUpdate: expect.objectContaining({ kind: "marketplace" }),
+        }),
+      ]);
+      expect(JSON.parse(await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8")))
+        .toMatchObject({ version: "2.0.0" });
+      throw new Error("injected replacement registry failure");
+    });
+
+    await expect(service.install(plugin.id)).rejects.toThrow("injected replacement registry failure");
+
+    expect(await readFile(registryPath, "utf-8")).toBe(originalRegistry);
+    expect(await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8")).toBe(originalManifest);
+    expect(await readFile(join(cacheRoot, plugin.id, "install-receipt.json"), "utf-8"))
+      .toBe(originalReceipt);
+    const store = (service as unknown as {
+      artifactStore: {
+        readHistory: (pluginId: string) => Promise<Array<{ version: string }>>;
+        findRollbackTarget: (pluginId: string, currentVersion: string) => Promise<string | null>;
+      };
+    }).artifactStore;
+    expect((await store.readHistory(plugin.id)).map((entry) => entry.version)).not.toContain("2.0.0");
+    await expect(store.findRollbackTarget(plugin.id, "1.0.0")).resolves.toBeNull();
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "keeps the registry row pending with durable recovery metadata when directory rollback cannot complete",
+    async () => {
+      const signingKey = freshEd25519();
+      mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+      const plugin: PluginMarketplaceItem = {
+        id: "rollback-fault-plugin",
+        slug: "rollback-fault-plugin",
+        name: "Rollback Fault Plugin",
+        description: "persistent rollback fault fixture",
+        version: "1.0.0",
+        packageSpec: "@lvis/rollback-fault-plugin@1.0.0",
+        packageName: "@lvis/rollback-fault-plugin",
+        tools: [],
+      };
+      let zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+      const fetcher: MarketplaceFetcher = {
+        listPlugins: async () => [plugin],
+        getPluginDetail: async () => plugin,
+        downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+        downloadArtifact: async () => ({
+          body: zipBuffer,
+          sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+          status: 200,
+        }),
+        fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+        listAnnouncements: async () => [],
+      };
+      const { service } = makeService(fetcher);
+      await service.install(plugin.id);
+      const oldReceipt = await readFile(join(cacheRoot, plugin.id, "install-receipt.json"), "utf-8");
+      plugin.version = "2.0.0";
+      zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+      vi.spyOn(
+        service as unknown as { commitMarketplaceRegistryEntry: (...args: unknown[]) => Promise<void> },
+        "commitMarketplaceRegistryEntry",
+      ).mockImplementationOnce(async () => {
+        await chmod(installedDir, 0o500);
+        throw new Error("registry publication failed");
+      });
+
+      const error = await service.install(plugin.id).catch((caught) => caught);
+      await chmod(installedDir, 0o700);
+
+      expect(error).toBeInstanceOf(ArtifactRollbackError);
+      expect((error as ArtifactRollbackError).backupDir).toBeTruthy();
+      expect(existsSync((error as ArtifactRollbackError).backupDir!)).toBe(true);
+      const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: Array<{ id: string; pendingUpdate?: { recoveryBackupDir?: string } }>;
+      };
+      expect(registry.plugins).toEqual([
+        expect.objectContaining({
+          id: plugin.id,
+          pendingUpdate: expect.objectContaining({
+            recoveryBackupDir: (error as ArtifactRollbackError).backupDir,
+          }),
+        }),
+      ]);
+      expect(JSON.parse(await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8")))
+        .toMatchObject({ version: "2.0.0" });
+      const currentReceipt = await readFile(join(cacheRoot, plugin.id, "install-receipt.json"), "utf-8");
+      expect(currentReceipt).not.toBe(oldReceipt);
+      expect(JSON.parse(currentReceipt)).toMatchObject({ version: "2.0.0" });
+    },
+    10_000,
+  );
 
   it("reinstalls the same marketplace version when the install receipt is missing", async () => {
     const signingKey = freshEd25519();
@@ -309,6 +1241,161 @@ describe("PluginMarketplaceService install()", () => {
     ).resolves.toContain("createPlugin");
     expect(downloadArtifact).toHaveBeenCalled();
     expect(fetchSignatureEnvelope).toHaveBeenCalled();
+  });
+
+  it("supersedes an unresolved pending row with a verified marketplace reinstall", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "pending-retry",
+      slug: "pending-retry",
+      name: "Pending Retry",
+      description: "pending retry fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/pending-retry@1.0.0",
+      packageName: "@lvis/pending-retry",
+      tools: [],
+    };
+    const zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    let downloads = 0;
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => {
+        downloads += 1;
+        return { body: zipBuffer, sha256Header: createHash("sha256").update(zipBuffer).digest("hex"), status: 200 };
+      },
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    const manifestRaw = await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8");
+    const receiptRaw = await readFile(join(cacheRoot, plugin.id, "install-receipt.json"), "utf-8");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
+    registry.plugins[0]!.bundleRefs = ["bundle-root"];
+    registry.plugins[0]!.pendingUpdate = {
+      kind: "marketplace",
+      previousManifestFileSha256: createHash("sha256").update(manifestRaw).digest("hex"),
+      previousReceiptRaw: receiptRaw,
+    };
+    await writeFile(registryPath, JSON.stringify(registry));
+    await writeFile(join(installedDir, plugin.id, "dist", "hostPlugin.js"), "corrupted");
+    const store = (service as unknown as { artifactStore: PluginArtifactStore }).artifactStore;
+    const cacheSnapshot = vi.spyOn(store, "cacheVersionFromManifest");
+
+    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+
+    // The signed tarball cache may satisfy the verified reinstall without a
+    // second network fetch; the corrupted live payload must still be replaced.
+    expect(downloads).toBe(1);
+    // Only the verified replacement is cached after commit. The unresolved
+    // predecessor must never become a rollback target.
+    expect(cacheSnapshot).toHaveBeenCalledTimes(1);
+    expect(await readFile(join(installedDir, plugin.id, "dist", "hostPlugin.js"), "utf-8"))
+      .toContain("createPlugin");
+    const repaired = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
+    expect(repaired.plugins[0]).toEqual(expect.objectContaining({ bundleRefs: ["bundle-root"] }));
+    expect(repaired.plugins[0]?.pendingUpdate).toBeUndefined();
+    expect(repaired.plugins[0]?.pendingCleanup).toBeUndefined();
+  });
+
+  it("clears a pending row by idempotent touch only after exact receipt and catalog verification", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "pending-touch",
+      slug: "pending-touch",
+      name: "Pending Touch",
+      description: "pending touch fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/pending-touch@1.0.0",
+      packageName: "@lvis/pending-touch",
+      tools: [],
+    };
+    const zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    plugin.artifactSha256 = createHash("sha256").update(zipBuffer).digest("hex");
+    let downloads = 0;
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => {
+        downloads += 1;
+        return { body: zipBuffer, sha256Header: plugin.artifactSha256, status: 200 };
+      },
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    const manifestRaw = await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8");
+    const receiptRaw = await readFile(join(cacheRoot, plugin.id, "install-receipt.json"), "utf-8");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
+    registry.plugins[0]!.pendingUpdate = {
+      kind: "marketplace",
+      previousManifestFileSha256: createHash("sha256").update(manifestRaw).digest("hex"),
+      previousReceiptRaw: receiptRaw,
+    };
+    await writeFile(registryPath, JSON.stringify(registry));
+
+    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    expect(downloads).toBe(1);
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] })
+      .plugins[0]?.pendingUpdate).toBeUndefined();
+  });
+
+  it("retains every cleanup path across two failed post-commit cleanups, then retries manually", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "cleanup-retry",
+      slug: "cleanup-retry",
+      name: "Cleanup Retry",
+      description: "cleanup ownership fixture",
+      version: "1.0.0",
+      packageSpec: "@lvis/cleanup-retry@1.0.0",
+      packageName: "@lvis/cleanup-retry",
+      tools: [],
+    };
+    let zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({ body: zipBuffer, sha256Header: createHash("sha256").update(zipBuffer).digest("hex"), status: 200 }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(plugin.id);
+    plugin.version = "2.0.0";
+    zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    const store = (service as unknown as { artifactStore: PluginArtifactStore }).artifactStore;
+    const removeSpy = vi.spyOn(
+      store as unknown as { removeCommittedBackup: (path: string) => Promise<void> },
+      "removeCommittedBackup",
+    ).mockRejectedValue(Object.assign(new Error("persistent cleanup lock"), { code: "EACCES" }));
+    const tombstoneSpy = vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove")
+      .mockRejectedValue(Object.assign(new Error("tombstone staging locked"), { code: "EACCES" }));
+
+    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    plugin.version = "3.0.0";
+    zipBuffer = makePluginZip({ ...plugin, entry: "./dist/hostPlugin.js" });
+    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    const retained = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] };
+    const obsoleteDirs = retained.plugins[0]?.pendingCleanup?.map((item) => item.path) ?? [];
+    expect(obsoleteDirs).toHaveLength(2);
+    expect(new Set(obsoleteDirs).size).toBe(2);
+    for (const obsoleteDir of obsoleteDirs) expect(existsSync(obsoleteDir)).toBe(true);
+
+    removeSpy.mockRestore();
+    tombstoneSpy.mockRestore();
+    await expect(service.cleanupObsoleteBackup(plugin.id)).resolves.toBe(true);
+    for (const obsoleteDir of obsoleteDirs) expect(existsSync(obsoleteDir)).toBe(false);
+    expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] })
+      .plugins[0]?.pendingCleanup).toBeUndefined();
   });
 
   it("reinstalls the same marketplace version when the catalog artifact hash changes", async () => {

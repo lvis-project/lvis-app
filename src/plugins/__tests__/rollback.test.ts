@@ -91,11 +91,17 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     // install dir and return the registry-relative path. Mirrors the
     // post-extraction state of the real signed-zip pipeline.
     vi.spyOn(svc as unknown as {
-      installArtifact: (plugin: PluginMarketplaceItem, version: string) => Promise<string>;
-    }, "installArtifact").mockImplementation(async (_plugin, version) => {
+      installArtifact: (
+        plugin: PluginMarketplaceItem,
+        version: string,
+        onProgress?: unknown,
+        opts?: { commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void> },
+      ) => Promise<string>;
+    }, "installArtifact").mockImplementation(async (_plugin, version, _onProgress, opts) => {
       await mkdir(pluginDir, { recursive: true });
       const manifestFile = join(pluginDir, "plugin.json");
       await writeFile(manifestFile, JSON.stringify(sampleManifest(version)), "utf-8");
+      await opts?.commit?.("example-sample/plugin.json", manifestFile);
       return "example-sample/plugin.json";
     });
     return svc;

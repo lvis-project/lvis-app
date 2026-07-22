@@ -39,6 +39,7 @@ export function createRegistryEntryCache(deps: {
       const registry = await readPluginRegistry(registryPath);
       registryEntryCache.clear();
       for (const entry of registry.plugins) {
+        if (entry.pendingUpdate) continue;
         if (entry.installSource !== undefined || entry.manifestSha256 !== undefined) {
           registryEntryCache.set(entry.id, {
             installSource: entry.installSource,

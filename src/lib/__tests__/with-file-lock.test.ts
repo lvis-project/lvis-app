@@ -5,11 +5,12 @@
  * - Reads during an active write see the pre-write value (lock excludes them
  *   from the critical section, not from plain reads — this is by design).
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { withFileLock } from "../with-file-lock.js";
+import lockfile from "proper-lockfile";
+import { FileLockReleaseError, withFileLock } from "../with-file-lock.js";
 
 let tmpDir: string;
 let testFile: string;
@@ -21,6 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -88,5 +90,25 @@ describe("withFileLock", () => {
       ran = true;
     });
     expect(ran).toBe(true);
+  });
+
+  it("distinguishes callback completion from a release failure", async () => {
+    const realLock = lockfile.lock.bind(lockfile);
+    vi.spyOn(lockfile, "lock").mockImplementationOnce(async (...args) => {
+      const release = await realLock(...args);
+      return async () => {
+        await release();
+        throw new Error("injected release failure");
+      };
+    });
+
+    const error = await withFileLock(testFile, async () => "committed-result").catch(
+      (caught) => caught,
+    );
+    expect(error).toBeInstanceOf(FileLockReleaseError);
+    expect((error as FileLockReleaseError<string>).result).toBe("committed-result");
+    expect((error as FileLockReleaseError<string>).releaseError).toEqual(
+      new Error("injected release failure"),
+    );
   });
 });
