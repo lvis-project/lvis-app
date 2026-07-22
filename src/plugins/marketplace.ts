@@ -616,26 +616,29 @@ export class PluginMarketplaceService {
         // Audit failure must never block install.
       }
     }
-    const state: InstallOperationState = {
-      installedPluginIds: [],
-      touchedEntries: new Map(),
-    };
-    try {
-      const result = await this.installWithDependencies(pluginId, actor, catalogSnapshot, new Set<string>(), state, onProgress);
-      this.clearInstallFailure(result.pluginId);
-      return result;
-    } catch (error) {
-      if (catalogItem) this.rememberInstallFailure(catalogItem, error);
+    const canonicalPluginId = catalogItem?.id ?? pluginId;
+    return this.withPluginLock(canonicalPluginId, async () => {
+      const state: InstallOperationState = {
+        installedPluginIds: [],
+        touchedEntries: new Map(),
+      };
       try {
-        await this.rollbackInstallOperation(state);
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          `plugin install and rollback both failed: ${pluginId}`,
-        );
+        const result = await this.installWithDependencies(pluginId, actor, catalogSnapshot, new Set<string>(), state, onProgress);
+        this.clearInstallFailure(result.pluginId);
+        return result;
+      } catch (error) {
+        if (catalogItem) this.rememberInstallFailure(catalogItem, error);
+        try {
+          await this.rollbackInstallOperation(state);
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            `plugin install and rollback both failed: ${canonicalPluginId}`,
+          );
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 
   /**
