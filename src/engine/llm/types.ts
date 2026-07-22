@@ -14,6 +14,7 @@ import {
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
+import type { ToolResultImage } from "../../tools/types.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
 export { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -198,7 +199,7 @@ export type UserContentPart =
 export type GenericMessage =
   | { role: "user"; content: string | UserContentPart[]; meta?: MessageMeta }
   | { role: "assistant"; content: string; thought?: string; thinkingBlocks?: ThinkingBlock[]; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
-  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; meta?: MessageMeta };
+  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; image?: ToolResultImage; meta?: MessageMeta };
 
 /**
  * Flatten a user-message `content` (string or multimodal parts) into a plain
