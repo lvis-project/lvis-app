@@ -356,4 +356,48 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       plugins: [{ pluginId: "ms-graph", events: ["email.new"] }],
     });
   });
+
+  it("accepts the strict pending-update recovery shape without migrating it", async () => {
+    const pendingUpdate = {
+      kind: "marketplace",
+      previousManifestFileSha256: "a".repeat(64),
+      previousReceiptRaw: null,
+      recoveryBackupDir: join(tmpDir, ".calendar.old-backup"),
+      recoveryBackupMode: "rename",
+    };
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        enabled: true,
+        bundleRefs: ["work-assistant"],
+        pendingUpdate,
+      }],
+    }));
+
+    expect((await readPluginRegistry(registryPath)).plugins[0]).toEqual(expect.objectContaining({
+      id: "calendar",
+      bundleRefs: ["work-assistant"],
+      pendingUpdate,
+    }));
+  });
+
+  it("rejects incomplete or permissive pending-update metadata", async () => {
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        pendingUpdate: {
+          kind: "unknown",
+          previousManifestFileSha256: "not-a-hash",
+          previousReceiptRaw: null,
+          recoveryBackupDir: join(tmpDir, ".calendar.old-backup"),
+        },
+      }],
+    }));
+
+    await expect(readPluginRegistry(registryPath)).rejects.toThrow(/pending update/);
+  });
 });

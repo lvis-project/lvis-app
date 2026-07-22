@@ -127,6 +127,7 @@ function migrateLegacyEntry(
   if (entry.bundleRefs !== undefined) migrated.bundleRefs = entry.bundleRefs;
   if (cleanedAccess.access !== undefined) migrated.approvedPluginAccess = cleanedAccess.access;
   if (installSource !== undefined) migrated.installSource = installSource;
+  if (entry.pendingUpdate !== undefined) migrated.pendingUpdate = entry.pendingUpdate;
   return migrated;
 }
 
@@ -230,7 +231,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const REGISTRY_ENTRY_KEYS = new Set([
   "id", "manifestPath", "manifestSha256", "enabled", "bundleRefs",
-  "approvedPluginAccess", "installSource",
+  "approvedPluginAccess", "installSource", "pendingUpdate",
 ]);
 const LEGACY_REGISTRY_ENTRY_KEYS = new Set([...REGISTRY_ENTRY_KEYS, "installedBy", "_devLinked"]);
 
@@ -283,6 +284,38 @@ function validateRegistryEntry(
     }
   }
   if (value.approvedPluginAccess !== undefined) validatePluginAccess(value.approvedPluginAccess, value.id);
+  if (value.pendingUpdate !== undefined) validatePendingUpdate(value.pendingUpdate, value.id);
+}
+
+function validatePendingUpdate(value: unknown, pluginId: string): void {
+  if (!isRecord(value)) throw new Error(`Invalid plugin registry pending update: ${pluginId}`);
+  assertOnlyKeys(
+    value,
+    new Set(["kind", "previousManifestFileSha256", "previousReceiptRaw", "recoveryBackupDir", "recoveryBackupMode"]),
+    `pending update for '${pluginId}'`,
+  );
+  if (value.kind !== "marketplace" && value.kind !== "local-dev") {
+    throw new Error(`Invalid plugin registry pending update kind: ${pluginId}`);
+  }
+  if (value.previousManifestFileSha256 !== null
+    && (typeof value.previousManifestFileSha256 !== "string"
+      || !/^[a-f0-9]{64}$/.test(value.previousManifestFileSha256))) {
+    throw new Error(`Invalid plugin registry pending manifest hash: ${pluginId}`);
+  }
+  if (value.previousReceiptRaw !== null && typeof value.previousReceiptRaw !== "string") {
+    throw new Error(`Invalid plugin registry pending receipt: ${pluginId}`);
+  }
+  if (value.recoveryBackupDir !== undefined && typeof value.recoveryBackupDir !== "string") {
+    throw new Error(`Invalid plugin registry recovery backup path: ${pluginId}`);
+  }
+  if (value.recoveryBackupMode !== undefined
+    && value.recoveryBackupMode !== "rename"
+    && value.recoveryBackupMode !== "copy") {
+    throw new Error(`Invalid plugin registry recovery backup mode: ${pluginId}`);
+  }
+  if ((value.recoveryBackupDir === undefined) !== (value.recoveryBackupMode === undefined)) {
+    throw new Error(`Incomplete plugin registry recovery backup metadata: ${pluginId}`);
+  }
 }
 
 function validatePluginAccess(value: unknown, pluginId: string): void {
@@ -346,6 +379,7 @@ export function resolveManifestPathsFromRegistry(
   // still loaded into memory; tool exposure is gated in PluginRuntime via
   // inactivePluginIds, not by skipping the manifest path. (#1176)
   return entries
+    .filter((entry) => entry.pendingUpdate === undefined)
     .map((entry) => (isAbsolute(entry.manifestPath) ? entry.manifestPath : resolve(baseDir, entry.manifestPath)));
 }
 

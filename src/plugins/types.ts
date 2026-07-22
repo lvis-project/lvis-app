@@ -462,6 +462,14 @@ export interface PluginRegistryEntry {
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
   installSource?: PluginRegistryEntryInstallSource;
+  /** Durable replacement marker; runtime discovery skips marked rows. */
+  pendingUpdate?: {
+    kind: "marketplace" | "local-dev";
+    previousManifestFileSha256: string | null;
+    previousReceiptRaw: string | null;
+    recoveryBackupDir?: string;
+    recoveryBackupMode?: "rename" | "copy";
+  };
 }
 
 export interface PluginRegistry {

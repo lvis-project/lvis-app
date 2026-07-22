@@ -44,6 +44,7 @@ import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PublicKeyInput } from "./envelope-verifier.js";
 import type { PluginAccessSpec, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
 import { stripLegacyPluginToolGrants } from "./registry.js";
+import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import {
   hashReceiptFiles,
   writeInstallReceipt,
@@ -287,6 +288,10 @@ export class PluginArtifactStore {
     slug: string,
     zipBuffer: Buffer,
     commit: (installDir: string, files: string[]) => Promise<T>,
+    options: {
+      /** Runs after verified extraction but before either live directory is renamed. */
+      beforePromote?: (recoveryBackupDir: string) => Promise<void>;
+    } = {},
   ): Promise<{ files: string[]; result: T }> {
     const safeSlug = assertSafeArtifactSlug(slug);
     const installDir = this.installDirFor(safeSlug);
@@ -334,6 +339,7 @@ export class PluginArtifactStore {
       // old instance finishes tearing down (meeting#154).
       const oldDir = resolve(this.installRoot, `.${safeSlug}.old-${randomUUID()}`);
       let hadOldDir = false;
+      await options.beforePromote?.(oldDir);
       try {
         await retryOnTransientFsLock(() => rename(installDir, oldDir), {
           onRetry: (attempt, code) =>
@@ -394,12 +400,26 @@ export class PluginArtifactStore {
         throw commitErr;
       }
       if (hadOldDir) {
-        await rm(oldDir, { recursive: true, force: true }).catch((cleanupErr) => {
-          log.warn(
-            { safeSlug, oldDir, err: cleanupErr },
-            "installed artifact committed but old directory cleanup failed",
-          );
-        });
+        try {
+          await retryOnTransientFsLock(() => this.removeCommittedBackup(oldDir));
+        } catch (cleanupErr) {
+          try {
+            const tombstone = await tombstoneAndDeferredRemove(oldDir, this.installRoot, {
+              onDeferredRmError: (path, error) => {
+                log.warn({ safeSlug, path, err: error }, "committed artifact tombstone retained for boot sweeper");
+              },
+            });
+            log.warn(
+              { safeSlug, oldDir, tombstone, err: cleanupErr },
+              "installed artifact committed; routed obsolete directory to tombstone sweeper",
+            );
+          } catch (tombstoneErr) {
+            log.warn(
+              { safeSlug, oldDir, err: new AggregateError([cleanupErr, tombstoneErr]) },
+              "installed artifact committed but obsolete directory cleanup and tombstoning failed",
+            );
+          }
+        }
       }
       return { files, result };
     } catch (err) {
@@ -579,6 +599,10 @@ export class PluginArtifactStore {
 
   private historyPath(slug: string): string {
     return resolve(this.cacheRoot, assertSafeArtifactSlug(slug), "history.json");
+  }
+
+  private async removeCommittedBackup(path: string): Promise<void> {
+    await rm(path, { recursive: true, force: true });
   }
 }
 

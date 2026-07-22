@@ -70,6 +70,7 @@ export class PluginUpdateDetector {
       const catalogById = new Map(catalogPlugins.map((p) => [p.id, p]));
 
       for (const entry of registry.plugins) {
+        if (entry.pendingUpdate) continue;
         const installedVersion = await this.readInstalledVersion(entry.manifestPath);
         if (!installedVersion) continue;
 

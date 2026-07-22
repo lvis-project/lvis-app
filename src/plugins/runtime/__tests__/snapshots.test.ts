@@ -142,6 +142,39 @@ describe("resolveManifestLoadPlan — manifestPaths only", () => {
   });
 });
 
+describe("resolveManifestLoadPlan — pending registry updates", () => {
+  it("keeps a pending replacement hidden from runtime discovery", async () => {
+    const dir = await makeTempDir();
+    try {
+      const pluginDir = join(dir, "pending-plugin");
+      const registryPath = join(dir, "registry.json");
+      await mkdir(pluginDir);
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(VALID_MANIFEST));
+      await writeFile(registryPath, JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "pending-plugin",
+          manifestPath: "pending-plugin/plugin.json",
+          enabled: true,
+          pendingUpdate: {
+            kind: "marketplace",
+            previousManifestFileSha256: "a".repeat(64),
+            previousReceiptRaw: null,
+          },
+        }],
+      }));
+
+      await expect(resolveManifestLoadPlan({
+        manifestPaths: [],
+        registryPath,
+        pluginsRoot: dir,
+      })).resolves.toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("resolveManifestLoadPlan — registry", () => {
   it("reads enabled entries from registry.json", async () => {
     const dir = await makeTempDir();

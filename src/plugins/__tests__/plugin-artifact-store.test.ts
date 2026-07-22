@@ -16,11 +16,13 @@
  * class with no direct coverage.
  */
 import AdmZip from "adm-zip";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { existsSync, rmSync } from "node:fs";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { ArtifactRollbackError, assertSafeArtifactSlug } from "../plugin-artifact-store.js";
+import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
+import * as installedEntryFs from "../installed-entry-fs.js";
 import { makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
 
 describe("PluginArtifactStore — history journal", () => {
@@ -242,6 +244,40 @@ describe("PluginArtifactStore — extractZip", () => {
       } finally {
         await chmod(installRoot, 0o700).catch(() => undefined);
         rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+    10_000,
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "routes a committed old directory through the tombstone lifecycle when bounded cleanup fails",
+    async () => {
+      const tmp = makeTmpDir();
+      const installRoot = resolve(tmp, "installed");
+      try {
+        const store = makeStore(tmp);
+        vi.spyOn(
+          store as unknown as { removeCommittedBackup: (path: string) => Promise<void> },
+          "removeCommittedBackup",
+        ).mockRejectedValue(Object.assign(new Error("persistent cleanup lock"), { code: "EACCES" }));
+        const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
+        vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(
+          (path, root, options) => originalTombstone(path, root, { ...options, deferRemoval: false }),
+        );
+        const installDir = store.installDirFor("acme");
+        await mkdir(installDir, { recursive: true });
+        await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+        const zip = new AdmZip();
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+
+        await store.extractZipWithCommit("acme", zip.toBuffer(), async () => undefined);
+
+        const tombstoneDir = resolve(installRoot, TOMBSTONE_SUBDIR);
+        const tombstones = await readdir(tombstoneDir);
+        expect(tombstones).toHaveLength(1);
+        expect(tombstones[0]).toMatch(/^\.acme\.old-/);
+      } finally {
+        await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       }
     },
     10_000,
