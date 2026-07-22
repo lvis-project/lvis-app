@@ -17,6 +17,7 @@ import { BashTool } from "../tools/bash.js";
 import { createFileTools } from "../tools/file-tools.js";
 import { PowerShellTool } from "../tools/powershell.js";
 import { createReadToolResultChunkTool } from "../tools/tool-result-chunk.js";
+import { createMemoryWriteTool } from "../tools/memory-write.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
@@ -175,6 +176,10 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   for (const tool of createFileTools()) {
     toolRegistry.register(tool);
   }
+  // memory_write: model-directed long-term memory. Not read-only + not
+  // auto-approved, so each write flows through the permission chokepoint
+  // (user / auto-mode reviewer sees title+content) before it persists.
+  toolRegistry.register(createMemoryWriteTool({ memoryManager }));
   const routeEngine = new RouteEngine({ toolRegistry });
 
   return {
