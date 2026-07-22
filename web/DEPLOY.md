@@ -1,9 +1,16 @@
-# 배포 — Cloudflare Pages (direct upload)
+# 배포 — Cloudflare Pages
 
-이 사이트는 **Cloudflare Pages direct-upload** 방식으로 배포합니다.
-git 연동 자동 빌드가 아니므로 **main 머지만으로는 배포되지 않습니다** — 아래 명령을 직접 실행해야 합니다.
+이 사이트는 **Cloudflare Pages**(프로젝트 `lvisai-xyz`)로 배포합니다.
 
-## 프로덕션 배포 (lvisai.xyz)
+## 자동 배포 (기본)
+
+`.github/workflows/web-ci.yml`이 **`web/**` 변경이 main에 머지되면 자동으로 배포**합니다
+(repo 시크릿 `CLOUDFLARE_API_TOKEN`, Cloudflare Pages: Edit 권한이 설정돼 있어야 발화 —
+없으면 워크플로가 경고 후 스킵하고 아래 수동 방식이 폴백). 이제 별도 조치 없이 머지만으로 배포됩니다.
+
+## 수동 배포 (폴백 / 로컬 검증)
+
+git 미연동 direct-upload 방식이라 수동으로도 배포할 수 있습니다:
 
 ```bash
 npm run build   # → out/
