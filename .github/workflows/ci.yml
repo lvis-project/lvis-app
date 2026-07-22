@@ -72,8 +72,23 @@ jobs:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
           restore-keys: ${{ runner.os }}-ci-bun-
+      # Cache the built node_modules (Electron dist + electron-rebuilt native
+      # modules) keyed on os+arch+lockfile. On a hit, `bun install` restores the
+      # ABI-correct binaries without re-downloading Electron or recompiling
+      # better-sqlite3/node-pty. Exact-key only — a lockfile change (which pins
+      # the Electron version) misses and rebuilds, so a stale ABI never leaks in.
+      - uses: actions/cache@v6
+        with:
+          path: lvis-app/node_modules
+          key: ${{ runner.os }}-${{ runner.arch }}-ci-nm-${{ hashFiles('lvis-app/bun.lock') }}
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
+      # uv is fetched to resources/ (outside node_modules) by the postinstall,
+      # which bun skips when node_modules is already satisfied from cache. Ensure
+      # it explicitly — fetch-uv is idempotent (no-op when already present).
+      - name: Ensure uv toolchain
+        working-directory: lvis-app
+        run: node scripts/fetch-uv.mjs
       # Postinstall leaves native modules on Electron's ABI. The shared Vitest
       # runner uses ELECTRON_RUN_AS_NODE, so tests and the desktop runtime consume
       # that same binary without an in-place Node-ABI rebuild.
@@ -109,6 +124,10 @@ jobs:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
           restore-keys: ${{ runner.os }}-ci-bun-
+      - uses: actions/cache@v6
+        with:
+          path: lvis-app/node_modules
+          key: ${{ runner.os }}-${{ runner.arch }}-ci-nm-${{ hashFiles('lvis-app/bun.lock') }}
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
       - name: Run Windows permission regressions
@@ -143,6 +162,10 @@ jobs:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
           restore-keys: ${{ runner.os }}-ci-bun-
+      - uses: actions/cache@v6
+        with:
+          path: lvis-app/node_modules
+          key: ${{ runner.os }}-${{ runner.arch }}-ci-nm-${{ hashFiles('lvis-app/bun.lock') }}
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
       - name: Run macOS permission regressions
