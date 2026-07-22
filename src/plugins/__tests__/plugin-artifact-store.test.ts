@@ -17,10 +17,10 @@
  */
 import AdmZip from "adm-zip";
 import { describe, expect, it } from "vitest";
-import { rmSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync, rmSync } from "node:fs";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { assertSafeArtifactSlug } from "../plugin-artifact-store.js";
+import { ArtifactRollbackError, assertSafeArtifactSlug } from "../plugin-artifact-store.js";
 import { makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
 
 describe("PluginArtifactStore — history journal", () => {
@@ -212,6 +212,40 @@ describe("PluginArtifactStore — extractZip", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it.runIf(process.platform !== "win32")(
+    "surfaces persistent promoted-directory cleanup failure and retains the old backup",
+    async () => {
+      const tmp = makeTmpDir();
+      const installRoot = resolve(tmp, "installed");
+      try {
+        const store = makeStore(tmp);
+        const installDir = store.installDirFor("acme");
+        await mkdir(installDir, { recursive: true });
+        await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+        const zip = new AdmZip();
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+        const commitError = new Error("registry publication failed");
+
+        const error = await store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
+          await chmod(installRoot, 0o500);
+          throw commitError;
+        }).catch((caught) => caught);
+        await chmod(installRoot, 0o700);
+
+        expect(error).toBeInstanceOf(ArtifactRollbackError);
+        expect((error as ArtifactRollbackError).errors[0]).toBe(commitError);
+        expect((error as ArtifactRollbackError).errors[1]).toMatchObject({ code: expect.stringMatching(/EACCES|EPERM/) });
+        expect((error as ArtifactRollbackError).backupDir).toBeTruthy();
+        expect(existsSync((error as ArtifactRollbackError).backupDir!)).toBe(true);
+        expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8")).version).toBe("new");
+      } finally {
+        await chmod(installRoot, 0o700).catch(() => undefined);
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+    10_000,
+  );
 });
 
 describe("assertSafeArtifactSlug", () => {
