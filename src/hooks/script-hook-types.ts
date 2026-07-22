@@ -74,6 +74,8 @@ export type LifecycleHookEvent =
   | "PostToolUseFailure"
   | "PermissionDenied"
   | "SessionStart"
+  | "SessionEnd"
+  | "Notification"
   | "Stop"
   | "PreCompact"
   | "PostCompact"

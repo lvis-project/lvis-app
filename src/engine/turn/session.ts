@@ -176,6 +176,17 @@ export function newConversation(
   kind: SessionKind = "main",
   project?: SessionProjectContext,
 ): void {
+    // SessionEnd (#811) — the outgoing session is being left for a new one.
+    // Observe-only + fire-and-forget (this is a sync path); the override pins it
+    // to the leaving session id, and the guard skips startup (no session has run
+    // a turn yet, so no symmetric SessionStart fired).
+    if (self.sessionStartFiredFor !== null) {
+      void self.fireLifecycleEvent(
+        "SessionEnd",
+        { reason: "new-conversation", sessionMeta: self.sessionMetaForLifecycle() },
+        self.sessionStartFiredFor,
+      );
+    }
     if (self.history.length > 0) {
       self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages()).catch((err: unknown) => {
         log.warn("newConversation saveSession failed: %s", (err as Error).message);
@@ -222,6 +233,16 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     }
     const messages = self.deps.memoryManager.loadSession(sessionId);
     if (!messages) return false;
+
+    // SessionEnd (#811) — load succeeded, so the outgoing session is being left
+    // for `sessionId`. Observe-only + fire-and-forget; guard + override as above.
+    if (self.sessionStartFiredFor !== null) {
+      void self.fireLifecycleEvent(
+        "SessionEnd",
+        { reason: "load-session", sessionMeta: self.sessionMetaForLifecycle() },
+        self.sessionStartFiredFor,
+      );
+    }
 
 
     if (self.history.length > 0) {
