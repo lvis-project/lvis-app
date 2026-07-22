@@ -95,6 +95,11 @@ const EVENT_KEY_TO_TYPE: Readonly<Record<string, HookEvent>> = {
   PostToolUseFailure: "PostToolUseFailure",
   PermissionDenied: "PermissionDenied",
   SessionStart: "SessionStart",
+  // SessionEnd — fired when a session is left (newConversation / loadSession),
+  // the symmetric counterpart to SessionStart. Notification — fired when the
+  // host shows a turn-end notification. Both observe-only (canonical parity).
+  SessionEnd: "SessionEnd",
+  Notification: "Notification",
   Stop: "Stop",
   PreCompact: "PreCompact",
   PostCompact: "PostCompact",
