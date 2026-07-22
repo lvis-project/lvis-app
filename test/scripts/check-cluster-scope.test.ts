@@ -3,6 +3,7 @@ import {
   createGhApiRequester,
   evaluateClusterScope,
   evaluateSensitiveRollingWindow,
+  isCommentOnlyPatch,
   pathsFromFileRecords,
   pullRequestHasSensitiveCommitBundle,
   pullRequestTouchesSensitiveFiles,
@@ -393,5 +394,79 @@ describe("cluster scope API evaluation", () => {
         {},
       ),
     ).toThrow("github-api-response-invalid");
+  });
+});
+
+describe("comment-only exclusion from sensitive-cluster detection", () => {
+  const COMMENT_PATCH =
+    "@@ -1,2 +1,2 @@\n-  // old comment\n+  // new comment\n   const x = 1;\n";
+  const JSDOC_PATCH = "@@ -1 +1 @@\n-   * old jsdoc\n+   * new jsdoc\n";
+  const CODE_PATCH = "@@ -1 +1 @@\n-  const x = 1;\n+  const x = 2;\n";
+
+  it("recognizes comment/JSDoc/blank-only patches and rejects code or missing patches", () => {
+    expect(isCommentOnlyPatch(COMMENT_PATCH)).toBe(true);
+    expect(isCommentOnlyPatch(JSDOC_PATCH)).toBe(true);
+    expect(isCommentOnlyPatch("@@ -1 +1 @@\n-\n+\n+  // added\n")).toBe(true);
+    expect(isCommentOnlyPatch(CODE_PATCH)).toBe(false);
+    expect(
+      isCommentOnlyPatch("@@ -1 +1 @@\n+  const x = 1; // trailing comment\n"),
+    ).toBe(false);
+    expect(isCommentOnlyPatch(undefined)).toBe(false);
+    expect(isCommentOnlyPatch("")).toBe(false);
+  });
+
+  it("does NOT flag a sensitive file whose change is comment-only", () => {
+    const requestPage = () => [
+      { status: "modified", filename: "src/boot/steps/x.ts", patch: COMMENT_PATCH },
+    ];
+    expect(
+      pullRequestTouchesSensitiveFiles({
+        repo: REPO,
+        number: 1,
+        expectedFileCount: 1,
+        requestPage,
+      }),
+    ).toBe(false);
+  });
+
+  it("still flags a real code change, and a sensitive file with no patch (conservative)", () => {
+    const codeChange = () => [
+      { status: "modified", filename: "src/boot/steps/x.ts", patch: CODE_PATCH },
+    ];
+    expect(
+      pullRequestTouchesSensitiveFiles({
+        repo: REPO,
+        number: 1,
+        expectedFileCount: 1,
+        requestPage: codeChange,
+      }),
+    ).toBe(true);
+
+    const noPatch = () => [
+      { status: "modified", filename: "src/permissions/x.ts" },
+    ];
+    expect(
+      pullRequestTouchesSensitiveFiles({
+        repo: REPO,
+        number: 1,
+        expectedFileCount: 1,
+        requestPage: noPatch,
+      }),
+    ).toBe(true);
+  });
+
+  it("flags when a comment-only sensitive file is mixed with a code-change sensitive file", () => {
+    const requestPage = () => [
+      { status: "modified", filename: "src/boot/a.ts", patch: COMMENT_PATCH },
+      { status: "modified", filename: "src/permissions/b.ts", patch: CODE_PATCH },
+    ];
+    expect(
+      pullRequestTouchesSensitiveFiles({
+        repo: REPO,
+        number: 1,
+        expectedFileCount: 2,
+        requestPage,
+      }),
+    ).toBe(true);
   });
 });
