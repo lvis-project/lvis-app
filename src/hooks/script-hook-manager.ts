@@ -116,6 +116,8 @@ export interface LifecycleEventPayload {
   agentId?: string;
   /** SubagentStart / SubagentStop — the child agent mode/persona. */
   agentType?: string;
+  /** Notification — the message body shown to the user. */
+  message?: string;
 }
 
 /**
