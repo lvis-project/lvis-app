@@ -185,11 +185,15 @@ Key boundaries:
   the full row and its references. Boot clears the marker only after the exact
   receipt snapshot verifies every covered file in the owned plugin directory,
   restoring directory bytes before publishing that receipt when a validated
-  backup is required. Verified reinstalls may supersede unresolved markers.
+  backup is required. A verified retry preserves the original predecessor and
+  grants until its replacement registry commit; unresolved live bytes are
+  journaled as cleanup-only ownership and never become a recovery snapshot.
   Recovery backup IDs, names, and parent directories are validated exactly.
-  Obsolete post-commit directories move to non-restorable `pendingCleanup`
-  ownership until direct removal or tombstone staging succeeds; unresolved
-  recovery backups are never handled by the orphan tombstone sweeper.
+  Every obsolete post-commit or superseded directory is retained in the
+  non-restorable `pendingCleanup` journal until direct removal or tombstone
+  staging succeeds. Direct and bundle uninstall stage the live directory plus
+  all recovery/cleanup-owned paths before deleting the row; unresolved recovery
+  backups are never handled by the orphan tombstone sweeper.
 - renderer-to-plugin method calls are allowlisted by each tool's
   `_meta.ui.visibility`: only app-visible tools (visibility includes `"app"` —
   the union of app-only `["app"]` and dual `["model","app"]`) are

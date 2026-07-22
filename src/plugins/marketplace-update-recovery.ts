@@ -31,6 +31,7 @@ import { canonicalJSON } from "./whitelist/canonical-json.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 
 type PendingUpdate = NonNullable<PluginRegistryEntry["pendingUpdate"]>;
+type PendingCleanup = NonNullable<PluginRegistryEntry["pendingCleanup"]>[number];
 
 function sha256(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
@@ -58,10 +59,14 @@ function isWithin(parent: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-function assertRecoveryBackupPath(paths: PluginPaths, pluginId: string, pending: PendingUpdate): string {
+function assertOwnedBackupPath(
+  paths: PluginPaths,
+  pluginId: string,
+  backupDir: string | undefined,
+  mode: "rename" | "copy" | undefined,
+): string {
   const safePluginId = assertSafeArtifactSlug(pluginId);
-  const backupDir = pending.recoveryBackupDir;
-  if (!backupDir || !pending.recoveryBackupMode || !isWithin(paths.pluginsRoot, backupDir)) {
+  if (!backupDir || !mode || !isWithin(paths.pluginsRoot, backupDir)) {
     throw new Error(`Invalid recovery backup metadata for plugin: ${pluginId}`);
   }
   const name = basename(backupDir);
@@ -73,13 +78,48 @@ function assertRecoveryBackupPath(paths: PluginPaths, pluginId: string, pending:
     "i",
   );
   const localName = new RegExp(`^${escapedPluginId}-[0-9]+-[0-9]+$`);
-  const validName = pending.recoveryBackupMode === "rename"
+  const validName = mode === "rename"
     ? dirname(resolvedBackupDir) === resolve(paths.pluginsRoot)
       && marketplaceName.test(name)
     : dirname(resolvedBackupDir) === localBackupRoot
       && localName.test(name);
   if (!validName) throw new Error(`Unsafe recovery backup path for plugin: ${pluginId}`);
   return resolvedBackupDir;
+}
+
+function assertRecoveryBackupPath(paths: PluginPaths, pluginId: string, pending: PendingUpdate): string {
+  return assertOwnedBackupPath(
+    paths,
+    pluginId,
+    pending.recoveryBackupDir,
+    pending.recoveryBackupMode,
+  );
+}
+
+function cleanupRecordForBackup(pending: Pick<PendingUpdate, "recoveryBackupDir" | "recoveryBackupMode">): PendingCleanup | null {
+  if (!pending.recoveryBackupDir || !pending.recoveryBackupMode) return null;
+  return {
+    kind: pending.recoveryBackupMode === "rename" ? "obsolete-artifact" : "obsolete-local-backup",
+    path: resolve(pending.recoveryBackupDir),
+  };
+}
+
+function appendPendingCleanup(entry: PluginRegistryEntry, cleanup: PendingCleanup | null): void {
+  if (!cleanup) return;
+  const existing = entry.pendingCleanup ?? [];
+  if (existing.some((item) => resolve(item.path) === cleanup.path)) return;
+  entry.pendingCleanup = [...existing.map((item) => ({ ...item })), cleanup];
+}
+
+export function pendingOwnedBackupPaths(paths: PluginPaths, entry: PluginRegistryEntry): string[] {
+  const owned = new Set<string>();
+  if (entry.pendingUpdate?.recoveryBackupDir) {
+    owned.add(assertRecoveryBackupPath(paths, entry.id, entry.pendingUpdate));
+  }
+  for (const cleanup of entry.pendingCleanup ?? []) {
+    owned.add(assertPendingCleanupPath(paths, entry.id, cleanup));
+  }
+  return [...owned];
 }
 
 async function payloadMatchesPrevious(
@@ -122,27 +162,46 @@ export async function preparePendingPluginUpdate(
   },
 ): Promise<PluginRegistryEntry> {
   assertSafeArtifactSlug(expectedEntry.id);
-  const rawManifest = await readNullable(ownedManifestPath(paths, expectedEntry.id));
-  const receiptRaw = await readNullable(installReceiptPath(paths.cacheRoot, expectedEntry.id));
-  const pendingUpdate: PendingUpdate = {
-    kind: options.kind,
-    previousManifestFileSha256: rawManifest === null ? null : sha256(rawManifest),
-    previousReceiptRaw: receiptRaw,
-    ...(options.recoveryBackupDir && options.recoveryBackupMode
-      ? {
-          recoveryBackupDir: resolve(options.recoveryBackupDir),
-          recoveryBackupMode: options.recoveryBackupMode,
-        }
-      : {}),
-  };
+  const pendingUpdate = expectedEntry.pendingUpdate
+    ? null
+    : await (async (): Promise<PendingUpdate> => {
+        const rawManifest = await readNullable(ownedManifestPath(paths, expectedEntry.id));
+        const receiptRaw = await readNullable(installReceiptPath(paths.cacheRoot, expectedEntry.id));
+        return {
+          kind: options.kind,
+          previousManifestFileSha256: rawManifest === null ? null : sha256(rawManifest),
+          previousReceiptRaw: receiptRaw,
+          ...(options.recoveryBackupDir && options.recoveryBackupMode
+            ? {
+                recoveryBackupDir: resolve(options.recoveryBackupDir),
+                recoveryBackupMode: options.recoveryBackupMode,
+              }
+            : {}),
+        };
+      })();
   return updatePluginRegistry(paths.registryPath, (registry) => {
     const entry = registry.plugins.find((candidate) => candidate.id === expectedEntry.id);
     if (!entry) throw new Error(`Plugin registry entry disappeared before update: ${expectedEntry.id}`);
     if (canonicalJSON(entry) !== canonicalJSON(expectedEntry)) {
       throw new Error(`Plugin registry entry changed before update: ${expectedEntry.id}`);
     }
-    entry.pendingUpdate = pendingUpdate;
-    return { ...entry, bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined };
+    if (entry.pendingUpdate) {
+      // A verified retry never snapshots unresolved live bytes as a predecessor.
+      // Keep the original recovery contract intact and journal the retry's
+      // immediate backup as cleanup-only ownership before promotion can occur.
+      appendPendingCleanup(entry, cleanupRecordForBackup({
+        recoveryBackupDir: options.recoveryBackupDir,
+        recoveryBackupMode: options.recoveryBackupMode,
+      }));
+    } else {
+      entry.pendingUpdate = pendingUpdate!;
+    }
+    return {
+      ...entry,
+      bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
+      pendingUpdate: entry.pendingUpdate ? { ...entry.pendingUpdate } : undefined,
+      pendingCleanup: entry.pendingCleanup?.map((item) => ({ ...item })),
+    };
   });
 }
 
@@ -206,6 +265,7 @@ export async function restoreSupersededPendingPluginUpdate(
   paths: PluginPaths,
   expectedCurrent: PluginRegistryEntry,
   previousEntry: PluginRegistryEntry,
+  options: { preserveRetryCleanup?: boolean } = {},
 ): Promise<void> {
   if (!expectedCurrent.pendingUpdate || !previousEntry.pendingUpdate || previousEntry.id !== expectedCurrent.id) {
     throw new Error(`Invalid superseded pending update restore: ${previousEntry.id}`);
@@ -218,47 +278,49 @@ export async function restoreSupersededPendingPluginUpdate(
       throw new Error(`Pending plugin update changed during reinstall rollback: ${previousEntry.id}`);
     }
     current.pendingUpdate = { ...previousEntry.pendingUpdate! };
+    if (!options.preserveRetryCleanup) {
+      current.pendingCleanup = previousEntry.pendingCleanup?.map((item) => ({ ...item }));
+    }
   });
 }
 
-export async function discardPendingUpdateBackupSnapshot(
-  paths: PluginPaths,
-  entry: PluginRegistryEntry | null,
-): Promise<boolean> {
-  const pending = entry?.pendingUpdate;
-  if (!entry || !pending?.recoveryBackupDir) return false;
-  const backupDir = assertRecoveryBackupPath(paths, entry.id, pending);
-  await retryOnTransientFsLock(() => rm(backupDir, { recursive: true, force: true }));
-  return true;
-}
-
-function assertPendingCleanupPath(paths: PluginPaths, entry: PluginRegistryEntry): string {
-  const pending = entry.pendingCleanup;
-  if (!pending) throw new Error(`Plugin has no pending cleanup: ${entry.id}`);
-  const synthetic: PendingUpdate = {
-    kind: pending.kind === "obsolete-artifact" ? "marketplace" : "local-dev",
-    previousManifestFileSha256: null,
-    previousReceiptRaw: null,
-    recoveryBackupDir: pending.path,
-    recoveryBackupMode: pending.kind === "obsolete-artifact" ? "rename" : "copy",
-  };
-  return assertRecoveryBackupPath(paths, entry.id, synthetic);
+function assertPendingCleanupPath(paths: PluginPaths, pluginId: string, pending: PendingCleanup): string {
+  return assertOwnedBackupPath(
+    paths,
+    pluginId,
+    pending.path,
+    pending.kind === "obsolete-artifact" ? "rename" : "copy",
+  );
 }
 
 export async function cleanupObsoletePluginBackup(paths: PluginPaths, pluginId: string): Promise<boolean> {
   assertSafeArtifactSlug(pluginId);
+  let cleaned = false;
+  while (true) {
+    const registry = await readPluginRegistry(paths.registryPath);
+    const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+    const expected = entry?.pendingCleanup?.[0];
+    if (!entry || !expected) return cleaned;
+    const expectedPath = assertPendingCleanupPath(paths, pluginId, expected);
+    await retryOnTransientFsLock(() => rm(expectedPath, { recursive: true, force: true }));
+    await clearObsoletePluginBackupOwnership(paths, pluginId, expectedPath);
+    cleaned = true;
+  }
+}
+
+export async function cleanupObsoletePluginBackupPath(
+  paths: PluginPaths,
+  pluginId: string,
+  obsoleteDir: string,
+): Promise<boolean> {
+  assertSafeArtifactSlug(pluginId);
   const registry = await readPluginRegistry(paths.registryPath);
   const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
-  if (!entry?.pendingCleanup) return false;
-  const expected = { ...entry.pendingCleanup };
-  await retryOnTransientFsLock(() => rm(assertPendingCleanupPath(paths, entry), { recursive: true, force: true }));
-  await updatePluginRegistry(paths.registryPath, (fresh) => {
-    const current = fresh.plugins.find((candidate) => candidate.id === pluginId);
-    if (!current?.pendingCleanup || canonicalJSON(current.pendingCleanup) !== canonicalJSON(expected)) {
-      throw new Error(`Pending plugin cleanup changed during retry: ${pluginId}`);
-    }
-    current.pendingCleanup = undefined;
-  });
+  const target = entry?.pendingCleanup?.find((item) => resolve(item.path) === resolve(obsoleteDir));
+  if (!target) return false;
+  const targetPath = assertPendingCleanupPath(paths, pluginId, target);
+  await retryOnTransientFsLock(() => rm(targetPath, { recursive: true, force: true }));
+  await clearObsoletePluginBackupOwnership(paths, pluginId, targetPath);
   return true;
 }
 
@@ -270,7 +332,9 @@ export async function clearObsoletePluginBackupOwnership(
   assertSafeArtifactSlug(pluginId);
   await updatePluginRegistry(paths.registryPath, (registry) => {
     const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
-    if (entry?.pendingCleanup?.path === resolve(obsoleteDir)) entry.pendingCleanup = undefined;
+    if (!entry?.pendingCleanup) return;
+    const remaining = entry.pendingCleanup.filter((item) => resolve(item.path) !== resolve(obsoleteDir));
+    entry.pendingCleanup = remaining.length > 0 ? remaining : undefined;
   });
 }
 
@@ -280,15 +344,15 @@ export async function recoverPendingPluginUpdates(paths: PluginPaths): Promise<{
 }> {
   const registry = await readPluginRegistry(paths.registryPath);
   const ids = registry.plugins
-    .filter((entry) => entry.pendingUpdate || entry.pendingCleanup)
+    .filter((entry) => entry.pendingUpdate || (entry.pendingCleanup?.length ?? 0) > 0)
     .map((entry) => entry.id);
   const result = { recovered: [] as string[], unresolved: [] as string[] };
   for (const id of ids) {
     try {
       const outcome = await recoverPendingPluginUpdate(paths, id);
       const cleaned = await cleanupObsoletePluginBackup(paths, id);
-      if (outcome === "recovered" || cleaned) result.recovered.push(id);
-      else if (outcome === "unresolved") result.unresolved.push(id);
+      if (outcome === "unresolved") result.unresolved.push(id);
+      else if (outcome === "recovered" || cleaned) result.recovered.push(id);
     } catch {
       result.unresolved.push(id);
     }

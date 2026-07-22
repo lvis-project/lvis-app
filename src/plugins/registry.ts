@@ -129,7 +129,9 @@ function migrateLegacyEntry(
   if (cleanedAccess.access !== undefined) migrated.approvedPluginAccess = cleanedAccess.access;
   if (installSource !== undefined) migrated.installSource = installSource;
   if (entry.pendingUpdate !== undefined) migrated.pendingUpdate = entry.pendingUpdate;
-  if (entry.pendingCleanup !== undefined) migrated.pendingCleanup = entry.pendingCleanup;
+  if (entry.pendingCleanup !== undefined) {
+    migrated.pendingCleanup = entry.pendingCleanup.map((item) => ({ ...item }));
+  }
   return migrated;
 }
 
@@ -293,12 +295,20 @@ function validateRegistryEntry(
 }
 
 function validatePendingCleanup(value: unknown, pluginId: string): void {
-  if (!isRecord(value)) throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
-  assertOnlyKeys(value, new Set(["kind", "path"]), `pending cleanup for '${pluginId}'`);
-  if ((value.kind !== "obsolete-artifact" && value.kind !== "obsolete-local-backup")
-    || typeof value.path !== "string"
-    || value.path.length === 0) {
+  if (!Array.isArray(value) || value.length === 0) {
     throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
+  }
+  const paths = new Set<string>();
+  for (const item of value) {
+    if (!isRecord(item)) throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
+    assertOnlyKeys(item, new Set(["kind", "path"]), `pending cleanup for '${pluginId}'`);
+    if ((item.kind !== "obsolete-artifact" && item.kind !== "obsolete-local-backup")
+      || typeof item.path !== "string"
+      || item.path.length === 0
+      || paths.has(item.path)) {
+      throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
+    }
+    paths.add(item.path);
   }
 }
 

@@ -219,6 +219,42 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
     });
 
+    it("rejects malformed valid receipt JSON without aborting unrelated plugin startup", async () => {
+      const malformedId = "tb-malformed-receipt";
+      const validId = "tb-valid-neighbor";
+      const malformedDir = join(pluginsRoot, malformedId);
+      const validDir = join(pluginsRoot, validId);
+      const malformedManifest = await writePluginAt(malformedDir, malformedId);
+      const validManifest = await writePluginAt(validDir, validId);
+      await mkdir(join(cacheRoot, malformedId), { recursive: true });
+      await writeFile(
+        join(cacheRoot, malformedId, "install-receipt.json"),
+        JSON.stringify({
+          schemaVersion: 2,
+          pluginId: malformedId,
+          version: "1.0.0",
+          installSource: "marketplace",
+          installedAt: new Date(0).toISOString(),
+          files: [null],
+        }),
+      );
+      await writeReceipt(validId, validDir);
+      await writeTestPluginRegistry({ registryPath }, [
+        { id: malformedId, manifestPath: malformedManifest },
+        { id: validId, manifestPath: validManifest },
+      ]);
+
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+      });
+      await expect(runtime.load()).resolves.toBeUndefined();
+      expect(runtime.listPluginIds()).not.toContain(malformedId);
+      expect(runtime.listPluginIds()).toContain(validId);
+    });
+
     // Dev-link receipt-skip removed in 2026-05 dev-link purge: the legacy
     // `_devLinked: true` registry flag now migrates to `installSource:
     // "local-dev"` on read, and receipt verification applies unconditionally.

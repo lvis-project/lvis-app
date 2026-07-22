@@ -470,11 +470,11 @@ export interface PluginRegistryEntry {
     recoveryBackupDir?: string;
     recoveryBackupMode?: "rename" | "copy";
   };
-  /** Durable ownership of an obsolete, never-restorable directory. */
-  pendingCleanup?: {
+  /** Durable ownership journal for obsolete, never-restorable directories. */
+  pendingCleanup?: Array<{
     kind: "obsolete-artifact" | "obsolete-local-backup";
     path: string;
-  };
+  }>;
 }
 
 export interface PluginRegistry {

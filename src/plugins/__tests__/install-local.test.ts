@@ -396,7 +396,9 @@ describe("PluginMarketplaceService.installLocal", () => {
     };
     expect(repaired.plugins[0]?.bundleRefs).toEqual(["bundle-root"]);
     expect(repaired.plugins[0]?.pendingUpdate).toBeUndefined();
-    expect(repaired.plugins[0]?.pendingCleanup).toBeUndefined();
+    expect(repaired.plugins[0]?.pendingCleanup).toEqual([
+      expect.objectContaining({ kind: "obsolete-local-backup" }),
+    ]);
   });
 
   it("rollbackLocalInstall restores the previous install receipt with disk and registry state", async () => {
@@ -536,5 +538,20 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(entry.installSource).toBe("local-dev");
     expect(entry.bundleRefs).toEqual(["work-assistant"]);
     expect(entry.pendingUpdate).toBeUndefined();
+  });
+
+  it.each([
+    null,
+    {},
+    { schemaVersion: 2, pluginId: "test-plugin", version: "1", installedAt: "now", files: [null] },
+    { schemaVersion: 2, pluginId: "test-plugin", version: "1", installedAt: "now", files: [{ path: 7, sha256: "a".repeat(64) }] },
+    { schemaVersion: 2, pluginId: "test-plugin", version: "1", installedAt: "now", files: [{ path: "plugin.json", sha256: 7 }] },
+  ])("fails closed for structurally malformed valid receipt JSON %#", async (receipt) => {
+    const { verifyInstallReceiptRaw } = await import("../plugin-install-receipt.js");
+    await expect(verifyInstallReceiptRaw(
+      JSON.stringify(receipt),
+      "test-plugin",
+      sourceDir,
+    )).resolves.toEqual(expect.objectContaining({ ok: false }));
   });
 });
