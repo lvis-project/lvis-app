@@ -303,6 +303,57 @@ export function markStaleToolResults(
   };
 }
 
+export interface EvictImagesResult {
+  evicted: boolean;
+  evictedCount: number;
+  /** base64 chars dropped from the wire/memory. */
+  freedChars: number;
+}
+
+/**
+ * Drop the `image` sibling from tool_result rows that have aged past the most
+ * recent `preserveRecent` tool_results, returning a new messages array (the
+ * affected rows are rebuilt without `image`; every other row is referenced
+ * as-is).
+ *
+ * Unlike {@link markStaleToolResults} this is IMAGE-ONLY and unconditional: an
+ * image is a wire-bandwidth cost (~MBs of base64 re-sent every turn), not a
+ * token cost, so it should be evicted as soon as it ages out — independent of
+ * the token-pressure floor that (correctly) gates text stubbing. Text rows and
+ * recent images are never touched. The model has already seen the image while
+ * it was inside the preserve window (the per-round tool-call cap is smaller than
+ * the window, so a produced image is sent at least once before it can age out).
+ */
+export function evictAgedToolResultImages(
+  messages: GenericMessage[],
+  preserveRecent: number,
+): { messages: GenericMessage[]; result: EvictImagesResult } {
+  const preserve = Math.max(0, preserveRecent);
+  const toolResultIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "tool_result") toolResultIndices.push(i);
+  }
+  if (toolResultIndices.length <= preserve) {
+    return { messages, result: { evicted: false, evictedCount: 0, freedChars: 0 } };
+  }
+
+  const agedIdx = new Set(toolResultIndices.slice(0, toolResultIndices.length - preserve));
+  let evictedCount = 0;
+  let freedChars = 0;
+  const out = messages.map((msg, i) => {
+    if (!agedIdx.has(i) || msg.role !== "tool_result" || msg.image === undefined) return msg;
+    freedChars += msg.image.data.length;
+    evictedCount += 1;
+    const { image: _image, ...rest } = msg;
+    return rest as GenericMessage;
+  });
+
+  return {
+    messages: out,
+    result: { evicted: evictedCount > 0, evictedCount, freedChars },
+  };
+}
+
 // ─── Reactive Recovery ──────────────────────────────
 
 /**
