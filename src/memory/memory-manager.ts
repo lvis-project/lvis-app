@@ -1979,6 +1979,19 @@ export class MemoryManager {
     const prepared = messages.map((message) => {
       if (!isToolResultRecord(message)) return message;
 
+      // A view_image tool_result carries a large base64 image on its sibling
+      // `image` field. It is never re-consumed on load/resume (the Claude mapper
+      // only reads it live; the renderer serializer omits it), so persist a
+      // clone WITHOUT it — keeps the .jsonl from re-storing ~MBs every save. The
+      // live in-memory record keeps its image untouched for the ongoing turn.
+      const base =
+        "image" in message
+          ? ((): Record<string, unknown> => {
+              const { image: _image, ...rest } = message as Record<string, unknown>;
+              return rest;
+            })()
+          : message;
+
       const meta = isRecord(message.meta) ? message.meta : {};
       let truncated = normalizeTruncatedInfo(meta.truncated);
       const compactedAt = typeof meta.compactedAt === "string" ? meta.compactedAt : undefined;
@@ -2009,7 +2022,7 @@ export class MemoryManager {
           truncated = artifact.truncated;
           if (compactedAt === undefined) {
             return {
-              ...message,
+              ...base,
               content: buildToolResultTruncatedStub(message.toolUseId, message.toolName as string | undefined, artifact.truncated),
               meta: {
                 ...meta,
@@ -2022,7 +2035,7 @@ export class MemoryManager {
         }
       }
 
-      if (!truncated && compactedAt === undefined) return message;
+      if (!truncated && compactedAt === undefined) return base;
 
       const content =
         compactedAt !== undefined
@@ -2037,7 +2050,7 @@ export class MemoryManager {
               artifactUnavailable ? { artifactUnavailable } : undefined,
             );
       return {
-        ...message,
+        ...base,
         content,
         meta: {
           ...meta,
