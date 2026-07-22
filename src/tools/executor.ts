@@ -23,6 +23,7 @@ import type {
   ToolCategory,
   ToolExecutionContext,
   ToolTrustOrigin,
+  ToolResultImage,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
@@ -194,6 +195,8 @@ export interface ToolResult {
   uiPayload?: import("../mcp/types.js").McpUiPayload;
   /** Host-internal raw tool result for non-LLM plugin invocation surfaces. */
   rawResult?: unknown;
+  /** Optional image for the model to see (e.g. view_image); mapped to an image block on Claude. */
+  image?: ToolResultImage;
   /**
    * Host-issued, renderer-safe shell substrate projection. It intentionally
    * omits raw capability reasons, action input, CWD, and approval permits.
@@ -2724,6 +2727,7 @@ export class ToolExecutor {
     let isError = false;
     let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
     let rawResult: unknown;
+    let image: ToolResultImage | undefined;
     // Mint only after all permission, hook, rate-limit, and audit gates passed.
     // The permit is private host state, binds this exact final shell action,
     // and is consumed once by the plain requested-sandbox fallback spawn path.
@@ -2859,6 +2863,12 @@ export class ToolExecutor {
       }
       if (Object.prototype.hasOwnProperty.call(result.metadata ?? {}, "rawResult")) {
         rawResult = result.metadata?.rawResult;
+      }
+      // view_image et al. — an image the model should see travels on a sibling
+      // field; the Claude mapper turns it into an image block, other vendors keep
+      // the text placeholder.
+      if (result.image) {
+        image = result.image;
       }
       if (isError) terminationReason = "error";
     } else {
@@ -3081,6 +3091,7 @@ export class ToolExecutor {
       ...(isError && { is_error: true }),
       ...(uiPayload && { uiPayload }),
       ...(rawResult !== undefined && { rawResult }),
+      ...(image && { image }),
       durationMs,
     });
   }
