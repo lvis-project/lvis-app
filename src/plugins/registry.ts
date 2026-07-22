@@ -5,6 +5,7 @@ import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEnt
 import { plog, PluginPhase } from "./lifecycle-log.js";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
+import { assertSafeArtifactSlug } from "./plugin-id.js";
 
 /**
  * Pre-PR #430 registry shape — `installedBy` ("admin"|"user") and
@@ -128,6 +129,7 @@ function migrateLegacyEntry(
   if (cleanedAccess.access !== undefined) migrated.approvedPluginAccess = cleanedAccess.access;
   if (installSource !== undefined) migrated.installSource = installSource;
   if (entry.pendingUpdate !== undefined) migrated.pendingUpdate = entry.pendingUpdate;
+  if (entry.pendingCleanup !== undefined) migrated.pendingCleanup = entry.pendingCleanup;
   return migrated;
 }
 
@@ -232,6 +234,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const REGISTRY_ENTRY_KEYS = new Set([
   "id", "manifestPath", "manifestSha256", "enabled", "bundleRefs",
   "approvedPluginAccess", "installSource", "pendingUpdate",
+  "pendingCleanup",
 ]);
 const LEGACY_REGISTRY_ENTRY_KEYS = new Set([...REGISTRY_ENTRY_KEYS, "installedBy", "_devLinked"]);
 
@@ -255,6 +258,7 @@ function validateRegistryEntry(
     || value.manifestPath.length === 0) {
     throw new Error(`Invalid plugin registry entry: ${registryPath}`);
   }
+  assertSafeArtifactSlug(value.id);
   assertOnlyKeys(
     value,
     allowLegacy ? LEGACY_REGISTRY_ENTRY_KEYS : REGISTRY_ENTRY_KEYS,
@@ -285,6 +289,17 @@ function validateRegistryEntry(
   }
   if (value.approvedPluginAccess !== undefined) validatePluginAccess(value.approvedPluginAccess, value.id);
   if (value.pendingUpdate !== undefined) validatePendingUpdate(value.pendingUpdate, value.id);
+  if (value.pendingCleanup !== undefined) validatePendingCleanup(value.pendingCleanup, value.id);
+}
+
+function validatePendingCleanup(value: unknown, pluginId: string): void {
+  if (!isRecord(value)) throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
+  assertOnlyKeys(value, new Set(["kind", "path"]), `pending cleanup for '${pluginId}'`);
+  if ((value.kind !== "obsolete-artifact" && value.kind !== "obsolete-local-backup")
+    || typeof value.path !== "string"
+    || value.path.length === 0) {
+    throw new Error(`Invalid plugin registry pending cleanup: ${pluginId}`);
+  }
 }
 
 function validatePendingUpdate(value: unknown, pluginId: string): void {
