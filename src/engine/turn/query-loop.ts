@@ -38,7 +38,7 @@ import { handleRequestPlugin, REQUEST_PLUGIN_TOOL } from "./plugin-expansion.js"
 import { handleToolSearch, TOOL_SEARCH_TOOL } from "./tool-search.js";
 import { applyKnowledgeDepthCap } from "./knowledge-cap.js";
 import { nextToolTrustOrigin, rationaleProvenanceFor } from "./trust-origin.js";
-import { markStaleToolResults, getModelPreflightThreshold, isContextLengthError } from "../auto-compact.js";
+import { markStaleToolResults, evictAgedToolResultImages, getModelPreflightThreshold, isContextLengthError } from "../auto-compact.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { GUIDE_JOINED_MAX_CHARS } from "./guidance-limits.js";
@@ -1584,6 +1584,27 @@ export async function queryLoop(
           usage: turnUsage,
           stopReason: "stream-error",
         });
+      }
+
+      // Aged view_image images are a wire-bandwidth cost (~MBs re-sent every
+      // turn), not a token cost, so evict them from history as soon as they age
+      // past the preserve window — UNCONDITIONALLY, independent of the token
+      // floor that (correctly) gates text stubbing below. The model has already
+      // seen the image while it was in-window (per-round call cap < window).
+      {
+        const { messages: afterEvict, result: ie } = evictAgedToolResultImages(
+          self.history.getMessages(),
+          INTRA_TURN_PRESERVE_RECENT_RESULTS,
+        );
+        if (ie.evicted) {
+          self.history.clear();
+          self.history.restore(afterEvict);
+          if (process.env.NODE_ENV !== "production") {
+            log.info(
+              `image-evict (intra-turn): dropped ${ie.evictedCount} aged image(s), ~${ie.freedChars} base64 chars`,
+            );
+          }
+        }
       }
 
       // provider send stubs them on the wire. Mirrors the sub-agent fallback

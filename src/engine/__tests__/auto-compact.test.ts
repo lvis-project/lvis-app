@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   markStaleToolResults,
+  evictAgedToolResultImages,
   estimateTokens,
   estimateMessagesTokens,
   countHangul,
@@ -250,6 +251,59 @@ describe("markStaleToolResults — view_image image eviction", () => {
     ];
     // Once marked, the image is not counted (gated on the not-stubbed predicate).
     expect(estimateMessagesTokens(marked)).toBeLessThan(withImage);
+  });
+});
+
+describe("evictAgedToolResultImages", () => {
+  function imgRow(id: string, data = "QUJD"): GenericMessage {
+    return {
+      role: "tool_result",
+      toolUseId: id,
+      toolName: "view_image",
+      content: "[image loaded]",
+      image: { data, mimeType: "image/png" },
+    };
+  }
+
+  it("drops the image from aged image rows but keeps recent ones", () => {
+    const msgs: GenericMessage[] = [
+      { role: "user", content: "hi" },
+      imgRow("old", "A".repeat(100)),
+      { role: "tool_result", toolUseId: "t1", toolName: "search", content: "x" },
+      imgRow("recent"),
+    ];
+    const { messages: out, result } = evictAgedToolResultImages(msgs, 1);
+    // 3 tool_results, preserve 1 → only "recent" preserved.
+    const old = out.find((m) => m.role === "tool_result" && m.toolUseId === "old");
+    const recent = out.find((m) => m.role === "tool_result" && m.toolUseId === "recent");
+    expect(old?.role === "tool_result" && old.image).toBeUndefined();
+    expect(recent?.role === "tool_result" && recent.image).toBeDefined();
+    expect(old?.role === "tool_result" && old.content).toBe("[image loaded]"); // placeholder kept
+    expect(result.evicted).toBe(true);
+    expect(result.evictedCount).toBe(1);
+    expect(result.freedChars).toBe(100);
+  });
+
+  it("is a no-op (same array, evicted=false) when no image is aged", () => {
+    const msgs: GenericMessage[] = [
+      { role: "tool_result", toolUseId: "t1", toolName: "search", content: "x" },
+      imgRow("recent"),
+    ];
+    const { messages: out, result } = evictAgedToolResultImages(msgs, 4);
+    expect(result.evicted).toBe(false);
+    expect(out).toBe(msgs); // untouched reference
+  });
+
+  it("never touches text tool_results or non-tool_result messages", () => {
+    const textRow: GenericMessage = { role: "tool_result", toolUseId: "t0", toolName: "search", content: "y".repeat(9000) };
+    const msgs: GenericMessage[] = [
+      textRow,
+      { role: "tool_result", toolUseId: "t1", toolName: "search", content: "z" },
+      { role: "tool_result", toolUseId: "t2", toolName: "search", content: "w" },
+    ];
+    const { messages: out, result } = evictAgedToolResultImages(msgs, 1);
+    expect(result.evicted).toBe(false); // no image rows → nothing evicted
+    expect(out[0]).toBe(textRow); // text row untouched
   });
 });
 
