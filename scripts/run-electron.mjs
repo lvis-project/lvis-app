@@ -5,11 +5,14 @@ import {
   prepareElectronLaunchArgs,
   prepareElectronLaunchEnv,
 } from "./lib/electron-launch-options.mjs";
+import { ensureElectronNativeModules } from "./lib/electron-native-modules.mjs";
 
 const args = process.argv.slice(2);
 const env = { ...process.env };
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 delete env.ELECTRON_RUN_AS_NODE;
+
+ensureElectronNativeModules({ repoRoot });
 
 // Ensure NODE_ENV is set so logger.ts can select pino-pretty at module load
 // time. This script handles unpackaged dev runs (`bun run start`); packaged
