@@ -153,7 +153,7 @@ following boundary; it does not reopen ph3's loopback listener contract.
   verified by an explicitly supplied active Agent Card trust key promotes it
   to `trusted`. A malformed signature, a revoked known key, or a failed
   signature from a known key fails admission before any result is produced;
-  “rejected” is a fail-closed outcome, not an `admissionTrustState`. P4-1 does
+  `rejected` is a fail-closed outcome, not an `admissionTrustState`. P4-1 does
   not read the Agent Hub identity database or implicitly treat signup keys as
   Agent Card trust anchors.
 - **No hidden I/O:** P4-1 performs no discovery fetch, `jku`/JWKS retrieval,
@@ -205,7 +205,7 @@ admission core and adds an administrator-reviewed lifecycle without adding a
 network or execution effect. The registry is a trust decision record, not a
 router: every returned card/interface projection remains `routable=false`.
 
-##### State and identity model
+##### Agent Card state and identity model
 
 P4-2 stores two independent state axes and never collapses one into the other:
 
@@ -334,7 +334,7 @@ silent aliases.
   audit record, and the successful idempotency result commit in one database
   transaction. A stale version, competing distinct mutation, illegal
   transition, or partial persistence failure fails closed with no mutation.
-- Every import, trust, reject, revoke, and trust-anchor mutation is idempotent by
+- Every import, trust, reject, revoke, and trust-anchor mutation is keyed by
   authenticated administrator actor plus `submission_id`. The stored canonical
   semantic request fingerprint is SHA-256 over JCS-canonicalized,
   operation-tagged validated request semantics:
