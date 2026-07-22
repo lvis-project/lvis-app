@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 import { existsSync, watch, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { waitForAllFirstBuilds } from "./lib/dev-watcher-gate.mjs";
 import { resolveBuildAssets } from "./lib/build-assets.mjs";
+import { ensureElectronNativeModules } from "./lib/electron-native-modules.mjs";
 import {
   extractUserDataDir,
   prepareElectronLaunchArgs,
@@ -715,6 +716,10 @@ process.on("exit", () => {
 
 async function main() {
   log("dev", "LVIS_DEV=1");
+  ensureElectronNativeModules({
+    repoRoot,
+    log: (message) => log("native", message),
+  });
   // Captured BEFORE any watcher spawns. waitForFirstBuild compares each
   // output's mtime against this baseline so we accept ONLY emits produced
   // by the current dev session (not stale incremental output left behind
