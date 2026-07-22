@@ -115,17 +115,17 @@ Declared-but-never-fired keys are dead config.
   all, or only agent-authored notifications. Scope this before building the
   plumbing.
 
-## Phased plan
+## Rollout plan
 
-1. **Phase 1 — SubagentStart / SubagentStop.** Type + config + payload additions
+1. **Step 1 — SubagentStart / SubagentStop.** Type + config + payload additions
    and the `runSpawn` wiring above, plus a test that spawns a subagent and asserts
    both events fire once with the right `agentType` / `agentId`. Self-contained;
    no new blocking surface; closes the two highest-value gaps (subagent
    observability).
-2. **Phase 2 — SessionEnd.** After pinning the single session-close owner.
-3. **Phase 3 — Notification.** After deciding scope + the main -> engine signal.
+2. **Step 2 — SessionEnd.** After pinning the single session-close owner.
+3. **Step 3 — Notification.** After deciding scope + the main -> engine signal.
 
-Each phase declares the event key only alongside its fire point. After Phase 3,
+Each step declares the event key only alongside its fire point. After the last step,
 LVIS is at 13/13 canonical parity (14 counting `PermissionDenied`), and its hook
 surface matches the common set the agent ecosystem shares.
 
