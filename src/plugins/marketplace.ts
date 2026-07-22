@@ -1,9 +1,9 @@
-import { cp, mkdir, readFile, rename, rm, stat as statAsync, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rename, rm, stat as statAsync } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "./sideload-filter.js";
-import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
+import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
@@ -26,6 +26,7 @@ import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import type { PluginInstallFailureKind } from "../shared/plugin-install-failure.js";
 import { createLogger } from "../lib/logger.js";
+import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { readAgentRegistry } from "../agents/agent-registry.js";
 import { readSkillRegistry } from "../skills/skill-registry.js";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -923,23 +924,21 @@ export class PluginMarketplaceService {
     pluginId: string,
     reason: string,
   ): Promise<{ pluginId: string; quarantined: true }> {
-    return withRegistryLock(this.registryPath, async () => {
-      const registry = await readPluginRegistry(this.registryPath);
+    const target = await updatePluginRegistry(this.registryPath, (registry) => {
       const target = registry.plugins.find((x) => x.id === pluginId);
-      if (!target) {
-        return { pluginId, quarantined: true as const };
-      }
-      const remainingEntries = registry.plugins.filter((x) => x.id !== pluginId);
+      if (!target) return undefined;
+      registry.plugins = registry.plugins.filter((x) => x.id !== pluginId);
+      return this.cloneRegistryEntry(target);
+    });
+    if (target) {
       try {
-        await this.removeInstalledEntry(target, remainingEntries);
+        await this.removeInstalledEntry(target, []);
       } catch (err) {
         log.warn(`quarantinePlugin: failed to tombstone ${pluginId}: ${(err as Error).message}`);
       }
-      registry.plugins = remainingEntries;
-      await writePluginRegistry(this.registryPath, registry);
-      log.warn(`quarantined plugin '${pluginId}' after failed install verification: ${reason}`);
-      return { pluginId, quarantined: true as const };
-    });
+    }
+    log.warn(`quarantined plugin '${pluginId}' after failed install verification: ${reason}`);
+    return { pluginId, quarantined: true as const };
   }
 
   async uninstall(
@@ -957,9 +956,7 @@ export class PluginMarketplaceService {
       }
     }
 
-    // Serialize read-remove-write through the registry lock.
-    return withRegistryLock(this.registryPath, async () => {
-      const registry = await readPluginRegistry(this.registryPath);
+    const removedEntries = await updatePluginRegistry(this.registryPath, (registry) => {
       const target = registry.plugins.find((x) => x.id === pluginId);
       if (!target) {
         throw new Error(`Plugin not installed: ${pluginId}`);
@@ -977,15 +974,14 @@ export class PluginMarketplaceService {
         entry.bundleRefs = withoutRoot;
       }
 
-      const remainingEntries = registry.plugins.filter((x) => !idsToRemove.has(x.id));
-      for (const entry of registry.plugins) {
-        if (!idsToRemove.has(entry.id)) continue;
-        await this.removeInstalledEntry(entry, remainingEntries);
-      }
-      registry.plugins = remainingEntries;
-      await writePluginRegistry(this.registryPath, registry);
-      return { pluginId, uninstalled: true as const };
+      const removed = registry.plugins
+        .filter((entry) => idsToRemove.has(entry.id))
+        .map((entry) => this.cloneRegistryEntry(entry));
+      registry.plugins = registry.plugins.filter((entry) => !idsToRemove.has(entry.id));
+      return removed;
     });
+    for (const entry of removedEntries) await this.removeInstalledEntry(entry, []);
+    return { pluginId, uninstalled: true as const };
   }
 
   private async canUserRemoveOrphanedAdminInstall(
@@ -1360,18 +1356,18 @@ export class PluginMarketplaceService {
     if (state.installedPluginIds.length === 0 && state.touchedEntries.size === 0) {
       return;
     }
-    await withRegistryLock(this.registryPath, async () => {
+    const removedEntries = await updatePluginRegistry(this.registryPath, (registry) => {
       // Round-3 §6: registry read errors must propagate; ENOENT is already
       // resolved to the empty default inside readPluginRegistry. A corrupt
       // registry during rollback must surface so the operator can recover
       // manually rather than silently writing a fresh empty registry on
       // top of partially-installed state.
-      const registry = await readPluginRegistry(this.registryPath);
+      const removed: PluginRegistryEntry[] = [];
       for (const pluginId of [...state.installedPluginIds].reverse()) {
         const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
         if (!entry) continue;
+        removed.push(this.cloneRegistryEntry(entry));
         registry.plugins = registry.plugins.filter((candidate) => candidate.id !== pluginId);
-        await this.removeInstalledEntry(entry, registry.plugins);
       }
       for (const [pluginId, snapshot] of state.touchedEntries) {
         const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
@@ -1396,8 +1392,9 @@ export class PluginMarketplaceService {
           delete entry.installSource;
         }
       }
-      await writePluginRegistry(this.registryPath, registry);
+      return removed;
     });
+    for (const entry of removedEntries) await this.removeInstalledEntry(entry, []);
   }
 
   private async removeInstalledEntry(
@@ -2027,19 +2024,18 @@ export class PluginMarketplaceService {
     snapshot: LocalInstallRollbackSnapshot | null,
   ): Promise<void> {
     if (!snapshot) return;
-    await withRegistryLock(this.registryPath, async () => {
-      const registry = await readPluginRegistry(this.registryPath);
-      await rm(snapshot.installDir, { recursive: true, force: true });
-      if (snapshot.backupDir) {
-        await rename(snapshot.backupDir, snapshot.installDir);
-      }
-      const receiptPath = installReceiptPath(this.cacheRoot, pluginId);
-      if (snapshot.receiptRaw !== undefined) {
-        await mkdir(dirname(receiptPath), { recursive: true });
-        await writeFile(receiptPath, snapshot.receiptRaw, "utf-8");
-      } else {
-        await rm(receiptPath, { force: true });
-      }
+    await readPluginRegistry(this.registryPath);
+    await rm(snapshot.installDir, { recursive: true, force: true });
+    if (snapshot.backupDir) {
+      await rename(snapshot.backupDir, snapshot.installDir);
+    }
+    const receiptPath = installReceiptPath(this.cacheRoot, pluginId);
+    if (snapshot.receiptRaw !== undefined) {
+      writeUtf8FileAtomicSync(receiptPath, snapshot.receiptRaw, 0o600);
+    } else {
+      await rm(receiptPath, { force: true });
+    }
+    await updatePluginRegistry(this.registryPath, (registry) => {
       const restoredEntry = this.cloneRegistryEntry(snapshot.registryEntry);
       const existingIndex = registry.plugins.findIndex((entry) => entry.id === pluginId);
       if (existingIndex >= 0) {
@@ -2047,17 +2043,14 @@ export class PluginMarketplaceService {
       } else {
         registry.plugins.push(restoredEntry);
       }
-      await writePluginRegistry(this.registryPath, registry);
     });
     this.clearInstallReceiptValidationForPlugin(pluginId);
   }
 
   private async cleanupFreshInstalledPlugin(pluginId: string): Promise<void> {
     const installDir = resolve(this.pluginsRoot, pluginId);
-    await withRegistryLock(this.registryPath, async () => {
-      const registry = await readPluginRegistry(this.registryPath);
+    await updatePluginRegistry(this.registryPath, (registry) => {
       registry.plugins = registry.plugins.filter((entry) => entry.id !== pluginId);
-      await writePluginRegistry(this.registryPath, registry);
     });
     await rm(installDir, { recursive: true, force: true });
     await rm(installReceiptPath(this.cacheRoot, pluginId), { force: true });
