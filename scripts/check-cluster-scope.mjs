@@ -79,6 +79,55 @@ export function pathsFromFileRecords(records) {
   return paths;
 }
 
+// Conservative "the changed lines are only comments / blank" test for a unified
+// diff patch. Returns true ONLY when every added/removed content line is clearly
+// a comment or blank. A missing/unparseable patch, or ANY non-comment changed
+// line, returns false so the file stays material — a real code change can never
+// be misread as comment-only. Worst case a comment edit is treated as code and
+// still reviewed (a safe false-positive), never the reverse.
+export function isCommentOnlyPatch(patch) {
+  if (typeof patch !== "string" || patch.length === 0) return false;
+  let sawChange = false;
+  for (const rawLine of patch.split("\n")) {
+    if (
+      rawLine.startsWith("+++") ||
+      rawLine.startsWith("---") ||
+      rawLine.startsWith("@@") ||
+      rawLine.startsWith("\\") // "\ No newline at end of file"
+    ) {
+      continue;
+    }
+    if (!rawLine.startsWith("+") && !rawLine.startsWith("-")) continue; // context
+    const body = rawLine.slice(1).trim();
+    sawChange = true;
+    if (body === "") continue; // blank line change
+    if (
+      body.startsWith("//") ||
+      body.startsWith("/*") ||
+      body.startsWith("*") || // "* jsdoc" continuation, "*/"
+      body.startsWith("#") // yaml/shell/python comments in sensitive configs
+    ) {
+      continue;
+    }
+    return false; // a non-comment, non-blank changed line → material
+  }
+  return sawChange;
+}
+
+// Paths from records that carry a real (non-comment-only) change. A comment-only
+// edit to a sensitive file is documentation, not a security decision, so it no
+// longer forces cross-cutting review. Every record is still validated (via
+// pathsFromFileRecords) before it can be excluded.
+function materialPathsFromFileRecords(records) {
+  const paths = [];
+  for (const record of records) {
+    const recordPaths = pathsFromFileRecords([record]);
+    if (isCommentOnlyPatch(record?.patch)) continue;
+    paths.push(...recordPaths);
+  }
+  return paths;
+}
+
 export function pullRequestTouchesSensitiveFiles({
   repo,
   number,
@@ -102,7 +151,7 @@ export function pullRequestTouchesSensitiveFiles({
     );
     total += records.length;
     if (total > expectedFileCount) fail("pull-request-files-overflow");
-    if (hasSensitiveClusterPath(pathsFromFileRecords(records))) return true;
+    if (hasSensitiveClusterPath(materialPathsFromFileRecords(records))) return true;
     if (total === expectedFileCount) return false;
     if (records.length < pageSize) fail("pull-request-files-incomplete");
     if (total >= maxFiles) fail("pull-request-files-saturated");
@@ -127,7 +176,7 @@ function commitTouchesSensitiveFiles({
     if (!response || typeof response !== "object") fail("commit-response-invalid");
     const records = arrayPage(response.files, pageSize, "commit-files-invalid");
     total += records.length;
-    if (hasSensitiveClusterPath(pathsFromFileRecords(records))) return true;
+    if (hasSensitiveClusterPath(materialPathsFromFileRecords(records))) return true;
     if (records.length < pageSize) return false;
     if (total >= maxFiles) fail("commit-files-saturated");
   }
