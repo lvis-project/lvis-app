@@ -193,6 +193,66 @@ function synthN(count: number): GenericMessage[] {
   return msgs;
 }
 
+describe("markStaleToolResults — view_image image eviction", () => {
+  function imageRow(id: string, data = "QUJD"): GenericMessage {
+    return {
+      role: "tool_result",
+      toolUseId: id,
+      toolName: "view_image",
+      content: "[image loaded]", // tiny placeholder, well under the 200-char floor
+      image: { data, mimeType: "image/png" },
+    };
+  }
+
+  it("marks an aged image tool_result on the image alone and drops its base64", () => {
+    const msgs: GenericMessage[] = [
+      { role: "user", content: "hi" },
+      imageRow("t0", "A".repeat(4000)),
+      { role: "tool_result", toolUseId: "t1", toolName: "search", content: "small" },
+      { role: "tool_result", toolUseId: "t2", toolName: "search", content: "recent" },
+    ];
+    const { messages: out, result } = markStaleToolResults(msgs, { preserveRecentToolResults: 1 });
+    const t0 = out.find((m) => m.role === "tool_result" && m.toolUseId === "t0");
+    expect(t0?.role).toBe("tool_result");
+    if (t0?.role === "tool_result") {
+      expect(t0.meta?.compactedAt).toMatch(/^\d{4}-/); // marked
+      expect(t0.image).toBeUndefined(); // base64 dropped from the row
+    }
+    expect(result.marked).toBe(true);
+    // freed count includes the dropped base64 chars, not just the tiny content.
+    expect(result.freedCharsOnSerialize).toBeGreaterThan(3000);
+  });
+
+  it("does NOT mark a recent image tool_result inside the preserve window", () => {
+    const msgs: GenericMessage[] = [
+      { role: "user", content: "hi" },
+      { role: "tool_result", toolUseId: "t1", toolName: "search", content: "x".repeat(5000) },
+      imageRow("t2"),
+    ];
+    const { messages: out } = markStaleToolResults(msgs, { preserveRecentToolResults: 1 });
+    const t2 = out.find((m) => m.role === "tool_result" && m.toolUseId === "t2");
+    if (t2?.role === "tool_result") {
+      expect(t2.meta?.compactedAt).toBeUndefined();
+      expect(t2.image).toBeDefined(); // still visible to the model
+    }
+  });
+
+  it("counts a live image tool_result's token overhead, and none once marked", () => {
+    const placeholderOnly: GenericMessage[] = [
+      { role: "tool_result", toolUseId: "t0", toolName: "view_image", content: "[image loaded]" },
+    ];
+    const baseline = estimateMessagesTokens(placeholderOnly);
+    const withImage = estimateMessagesTokens([imageRow("t0")]);
+    expect(withImage).toBeGreaterThan(baseline + 500); // ~765 image overhead added
+
+    const marked: GenericMessage[] = [
+      { ...imageRow("t0"), meta: { compactedAt: "2026-01-01T00:00:00.000Z" } },
+    ];
+    // Once marked, the image is not counted (gated on the not-stubbed predicate).
+    expect(estimateMessagesTokens(marked)).toBeLessThan(withImage);
+  });
+});
+
 describe("intra-turn tool-result stubbing (issue #1171)", () => {
   it("preserve=16 marks the oldest 14 of 30 and keeps the newest 16 verbatim, then wire-stubs only the 14", () => {
     const messages = synthN(30);
