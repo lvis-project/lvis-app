@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
-import * as installedEntryFs from "../installed-entry-fs.js";
+import * as removalTransaction from "../plugin-removal-transaction.js";
 
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
@@ -732,8 +732,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   });
 
   it("restores registry state during dependency rollback cleanup", async () => {
-    const calendarDir = join(testDir, "plugins", "installed", "calendar");
-    const emailDir = join(testDir, "plugins", "installed", "email");
+    const calendarDir = join(testDir, "plugins", "calendar");
+    const emailDir = join(testDir, "plugins", "email");
     await mkdir(calendarDir, { recursive: true });
     await mkdir(emailDir, { recursive: true });
     await writeFile(
@@ -767,13 +767,13 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         plugins: [
           {
             id: "calendar",
-            manifestPath: "installed/calendar/plugin.json",
+            manifestPath: "calendar/plugin.json",
             enabled: false,
             installSource: "user",
           },
           {
             id: "email",
-            manifestPath: "installed/email/plugin.json",
+            manifestPath: "email/plugin.json",
             enabled: true,
             installSource: "user",
             bundleRefs: ["work-assistant"],
@@ -817,7 +817,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(registry.plugins).toEqual([
       {
         id: "calendar",
-        manifestPath: "installed/calendar/plugin.json",
+        manifestPath: "calendar/plugin.json",
         enabled: false,
         installSource: "user",
       },
@@ -855,7 +855,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
     const installFailure = new Error("dependency install failed");
     const stagingFailure = Object.assign(new Error("rollback rename blocked"), { code: "EACCES" });
-    vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockRejectedValueOnce(stagingFailure);
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockRejectedValueOnce(stagingFailure);
     const service = makeManagedService(testDir, marketplacePath);
     vi.spyOn(
       service as unknown as {
@@ -877,7 +877,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
   it("removes bundle members only when explicitly requested and still unreferenced", async () => {
     for (const pluginId of ["work-assistant", "email", "meeting", "calendar"]) {
-      const pluginDir = join(testDir, "plugins", "installed", pluginId);
+      const pluginDir = join(testDir, "plugins", pluginId);
       await mkdir(pluginDir, { recursive: true });
       await writeFile(
         join(pluginDir, "plugin.json"),
@@ -899,27 +899,27 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         plugins: [
           {
             id: "work-assistant",
-            manifestPath: "installed/work-assistant/plugin.json",
+            manifestPath: "work-assistant/plugin.json",
             enabled: true,
             installSource: "user",
           },
           {
             id: "email",
-            manifestPath: "installed/email/plugin.json",
+            manifestPath: "email/plugin.json",
             enabled: true,
             installSource: "user",
             bundleRefs: ["work-assistant"],
           },
           {
             id: "meeting",
-            manifestPath: "installed/meeting/plugin.json",
+            manifestPath: "meeting/plugin.json",
             enabled: true,
             installSource: "user",
             bundleRefs: ["work-assistant", "other-bundle"],
           },
           {
             id: "calendar",
-            manifestPath: "installed/calendar/plugin.json",
+            manifestPath: "calendar/plugin.json",
             enabled: true,
             installSource: "admin",
             bundleRefs: ["work-assistant"],
@@ -941,14 +941,14 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(registry.plugins).toEqual([
       {
         id: "calendar",
-        manifestPath: "installed/calendar/plugin.json",
+        manifestPath: "calendar/plugin.json",
         enabled: true,
         installSource: "admin",
         bundleRefs: [],
       },
       {
         id: "meeting",
-        manifestPath: "installed/meeting/plugin.json",
+        manifestPath: "meeting/plugin.json",
         enabled: true,
         installSource: "user",
         bundleRefs: ["other-bundle"],
@@ -990,15 +990,15 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const stagingGate = new Promise<void>((resolveGate) => { resumeStaging = resolveGate; });
     let stagingStarted!: () => void;
     const stagingStartedPromise = new Promise<void>((resolveStarted) => { stagingStarted = resolveStarted; });
-    const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
+    const originalStage = removalTransaction.stageRemovalTransaction;
     let paused = false;
-    vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(async (...args) => {
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockImplementation(async (...args) => {
       if (!paused) {
         paused = true;
         stagingStarted();
         await stagingGate;
       }
-      return originalTombstone(...args);
+      return originalStage(...args);
     });
 
     const service = makeManagedService(testDir, marketplacePath);
@@ -1032,7 +1032,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     }, null, 2)}\n`;
     await writeFile(registryPath, original, "utf-8");
     await mkdir(join(pluginsDir, "target"), { recursive: true });
-    vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockRejectedValueOnce(
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockRejectedValueOnce(
       Object.assign(new Error("locked by Windows handle"), { code: "EACCES" }),
     );
 

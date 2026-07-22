@@ -388,6 +388,14 @@ function validatePluginRegistry(registry: PluginRegistry, registryPath: string):
   }
 }
 
+/** Validate an untrusted registry-entry projection without reading or writing registry.json. */
+export function validatePluginRegistryEntries(
+  entries: unknown[],
+  context: string,
+): asserts entries is PluginRegistryEntry[] {
+  validatePluginRegistry({ version: 1, plugins: entries as PluginRegistryEntry[] }, context);
+}
+
 function canonicalizePluginRegistry(registry: PluginRegistry): PluginRegistry {
   return {
     version: registry.version,

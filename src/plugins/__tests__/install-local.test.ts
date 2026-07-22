@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
@@ -396,9 +396,61 @@ describe("PluginMarketplaceService.installLocal", () => {
     };
     expect(repaired.plugins[0]?.bundleRefs).toEqual(["bundle-root"]);
     expect(repaired.plugins[0]?.pendingUpdate).toBeUndefined();
-    expect(repaired.plugins[0]?.pendingCleanup).toEqual([
-      expect.objectContaining({ kind: "obsolete-local-backup" }),
-    ]);
+    expect(repaired.plugins[0]?.pendingCleanup).toBeUndefined();
+
+    await expect(service.rollbackLocalInstall("test-plugin")).rejects.toThrow(
+      "Pending local rollback predecessor remains unresolved",
+    );
+    const hidden = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ pendingUpdate?: unknown }>;
+    };
+    expect(hidden.plugins[0]?.pendingUpdate).toEqual(expect.objectContaining({ kind: "local-dev" }));
+  });
+
+  it("restores the original pending predecessor when verified local retry activation fails", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const installDir = join(pluginsDir, "test-plugin");
+    const oldManifestRaw = await readFile(join(installDir, "plugin.json"), "utf-8");
+    const oldReceiptRaw = await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8");
+    const backupDir = join(pluginsDir, ".cache", "local-install-rollback", "test-plugin-123-456");
+    await mkdir(join(pluginsDir, ".cache", "local-install-rollback"), { recursive: true });
+    await cp(installDir, backupDir, { recursive: true });
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<Record<string, unknown>>;
+    };
+    Object.assign(registry.plugins[0]!, {
+      pendingUpdate: {
+        kind: "local-dev",
+        previousManifestFileSha256: createHash("sha256").update(oldManifestRaw).digest("hex"),
+        previousReceiptRaw: oldReceiptRaw,
+        recoveryBackupDir: backupDir,
+        recoveryBackupMode: "copy",
+      },
+    });
+    await writeFile(registryPath, JSON.stringify(registry));
+    await writeFile(join(installDir, "dist", "hostPlugin.js"), "unresolved retry bytes");
+    await writeFile(join(sourceDir, "plugin.json"), JSON.stringify({
+      id: "test-plugin",
+      name: "Test Plugin",
+      version: "2.0.0",
+      description: "verified retry",
+      publisher: "tests",
+      entry: "dist/hostPlugin.js",
+    }));
+
+    await service.installLocal(sourceDir);
+    await expect(service.rollbackLocalInstall("test-plugin")).resolves.toEqual({
+      pluginId: "test-plugin",
+      rolledBack: true,
+    });
+
+    expect(await readFile(join(installDir, "plugin.json"), "utf-8")).toBe(oldManifestRaw);
+    expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8")).toBe(oldReceiptRaw);
+    const restored = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ pendingUpdate?: unknown }>;
+    };
+    expect(restored.plugins[0]?.pendingUpdate).toBeUndefined();
   });
 
   it("rollbackLocalInstall restores the previous install receipt with disk and registry state", async () => {
