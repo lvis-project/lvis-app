@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+# App-owned pre-push hook (installed by scripts/hooks/install.mjs, which points
+# core.hooksPath at scripts/hooks). Delegates to the lvis-app-owned runner —
+# no external dev-tools checkout required. Bypass once: LVIS_HOOKS_SKIP=1.
+set -eu
+
+if [ "${LVIS_HOOKS_SKIP:-}" = "1" ] || [ "${SKIP_LVIS_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+RUNNER="$REPO_ROOT/scripts/hooks/run-local-checks.mjs"
+REMOTE_NAME=${1:-}
+REMOTE_LOCATION=${2:-}
+
+if command -v node >/dev/null 2>&1; then
+  exec node "$RUNNER" --stage pre-push --repo "$REPO_ROOT" --remote "$REMOTE_NAME" --remote-location "$REMOTE_LOCATION"
+fi
+
+if command -v bun >/dev/null 2>&1; then
+  exec bun "$RUNNER" --stage pre-push --repo "$REPO_ROOT" --remote "$REMOTE_NAME" --remote-location "$REMOTE_LOCATION"
+fi
+
+echo "[hooks] node or bun is required to run LVIS pre-push checks." >&2
+exit 1
