@@ -2830,8 +2830,9 @@ export class ToolExecutor {
         // can ask AT THE EFFECT (foreground) or fail closed (headless).
         // `headless` is the SAME signal that drives the pre-exec headless lane; the
         // fresh `onceGrants` set dedups N writes to one target within this call.
-        // When `hostClassifiesRisk` is OFF (default) the gate is a pass-through,
-        // so binding the context here is inert.
+        // When `hostClassifiesRisk` is OFF (disabled/unset; the shipped default
+        // is ON, see settings-store.ts) the gate is a pass-through, so binding
+        // the context here is inert.
         return runWithToolExecutionCwd(executionCwd, () =>
           runWithEffectLedger(effectLedger, () =>
             runWithEffectGateContext(
