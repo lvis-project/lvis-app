@@ -21,6 +21,7 @@ import {
   ListFilesTool,
   MoveFileTool,
   ReadFileTool,
+  ViewImageTool,
   WriteFileTool,
 } from "../file-tools.js";
 import type { ToolExecutionContext } from "../base.js";
@@ -53,6 +54,59 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
+});
+
+describe("view_image tool", () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
+  const GIF = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+  const WEBP = Buffer.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+
+  it("loads a PNG and returns a base64 image with the sniffed mime + placeholder text", async () => {
+    writeFileSync(join(workDir, "shot.png"), PNG);
+    const res = await new ViewImageTool().execute({ path: "shot.png" }, ctx());
+    expect(res.isError).toBe(false);
+    expect(res.image?.mimeType).toBe("image/png");
+    expect(res.image?.data).toBe(PNG.toString("base64"));
+    expect(res.image?.bytes).toBe(PNG.length);
+    expect(parse(res.output).loaded).toBe(true);
+  });
+
+  it.each([
+    ["jpeg", JPEG, "image/jpeg"],
+    ["gif", GIF, "image/gif"],
+    ["webp", WEBP, "image/webp"],
+  ])("detects %s by magic bytes", async (name, bytes, mime) => {
+    writeFileSync(join(workDir, `f.${name}`), bytes);
+    const res = await new ViewImageTool().execute({ path: `f.${name}` }, ctx());
+    expect(res.isError).toBe(false);
+    expect(res.image?.mimeType).toBe(mime);
+  });
+
+  it("rejects a non-image by magic-byte sniff (ignores a lying .png extension)", async () => {
+    writeFileSync(join(workDir, "fake.png"), "not an image", "utf8");
+    const res = await new ViewImageTool().execute({ path: "fake.png" }, ctx());
+    expect(res.isError).toBe(true);
+    expect(res.image).toBeUndefined();
+  });
+
+  it("rejects an image over the 5 MB limit before reading it into context", async () => {
+    writeFileSync(join(workDir, "big.png"), Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024)]));
+    const res = await new ViewImageTool().execute({ path: "big.png" }, ctx());
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain("5 MB");
+    expect(res.image).toBeUndefined();
+  });
+
+  it("rejects a path outside the allowed scope (same guard as read_file)", async () => {
+    const res = await new ViewImageTool().execute({ path: "../sneak.png" }, ctx());
+    expect(res.isError).toBe(true);
+    expect(res.image).toBeUndefined();
+  });
+
+  it("is registered by createFileTools", () => {
+    expect(createFileTools().map((t) => t.name)).toContain("view_image");
+  });
 });
 
 describe("file native tools", () => {
