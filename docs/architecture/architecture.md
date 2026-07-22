@@ -179,6 +179,12 @@ Key boundaries:
   invocation;
 - plugin UI can render in host slots but cannot bypass permission review;
 - marketplace metadata should not override local policy or managed-plugin rules.
+- plugin replacements keep the prior registry row in a strict `pendingUpdate`
+  state from the pre-promotion boundary through registry commit. Runtime and
+  HostApi trust caches skip pending rows, while uninstall/bundle planners retain
+  the full row and its references. Boot clears the marker only after exact old
+  manifest/receipt proof or validated backup restoration; unresolved recovery
+  backups are never handled by the orphan tombstone sweeper.
 - renderer-to-plugin method calls are allowlisted by each tool's
   `_meta.ui.visibility`: only app-visible tools (visibility includes `"app"` —
   the union of app-only `["app"]` and dual `["model","app"]`) are
