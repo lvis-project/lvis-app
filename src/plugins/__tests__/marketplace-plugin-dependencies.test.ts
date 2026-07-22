@@ -113,10 +113,15 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
     // call count to verify which plugins reached the install branch.
     installArtifactSpy = vi.spyOn(
       PluginMarketplaceService.prototype as unknown as {
-        installArtifact: (plugin: PluginMarketplaceItem) => Promise<string>;
+        installArtifact: (
+          plugin: PluginMarketplaceItem,
+          version?: string,
+          onProgress?: unknown,
+          opts?: { commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void> },
+        ) => Promise<string>;
       },
       "installArtifact",
-    ).mockImplementation(async (plugin) => {
+    ).mockImplementation(async (plugin, _version, _onProgress, opts) => {
       const manifestRelPath = `installed/${plugin.id}/plugin.json`;
       const manifestAbsPath = resolve(tmpDir, "plugins", manifestRelPath);
       await mkdir(dirname(manifestAbsPath), { recursive: true });
@@ -132,6 +137,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
           publisher: plugin.publisher,
         }),
       );
+      await opts?.commit?.(manifestRelPath, manifestAbsPath);
       return manifestRelPath;
     });
   });

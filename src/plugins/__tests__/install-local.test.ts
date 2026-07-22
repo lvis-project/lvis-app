@@ -289,6 +289,66 @@ describe("PluginMarketplaceService.installLocal", () => {
       .toBe(oldReceipt);
   });
 
+  it("retains a replacement backup when a transient restore fault requires retry", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const oldReceipt = await readFile(
+      join(cacheRoot, "test-plugin", "install-receipt.json"),
+      "utf-8",
+    );
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "fixture v2",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+      "utf-8",
+    );
+
+    const internals = service as unknown as {
+      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+      restoreLocalInstallSnapshot: (...args: unknown[]) => Promise<void>;
+      localInstallRollbackSnapshots: Map<string, { backupDir?: string }>;
+    };
+    vi.spyOn(internals.artifactStore, "writeInstallReceipt").mockRejectedValueOnce(
+      new Error("replacement receipt write failed"),
+    );
+    vi.spyOn(internals, "restoreLocalInstallSnapshot").mockRejectedValueOnce(
+      Object.assign(new Error("transient Windows restore lock"), { code: "EACCES" }),
+    );
+
+    const error = await service.installLocal(sourceDir).catch((caught) => caught);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors[1]).toMatchObject({ code: "EACCES" });
+    const retained = internals.localInstallRollbackSnapshots.get("test-plugin");
+    expect(retained?.backupDir).toBeTruthy();
+    expect(existsSync(retained!.backupDir!)).toBe(true);
+    const hiddenRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string }>;
+    };
+    expect(hiddenRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(false);
+
+    await expect(service.rollbackLocalInstall("test-plugin")).resolves.toEqual({
+      pluginId: "test-plugin",
+      rolledBack: true,
+    });
+    expect(existsSync(retained!.backupDir!)).toBe(false);
+    expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"))
+      .toBe(oldReceipt);
+    const restoredManifest = JSON.parse(
+      await readFile(join(pluginsDir, "test-plugin", "plugin.json"), "utf-8"),
+    ) as { version: string };
+    expect(restoredManifest.version).toBe("1.2.3");
+    const restoredRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string }>;
+    };
+    expect(restoredRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(true);
+  });
+
   it("rollbackLocalInstall restores the previous install receipt with disk and registry state", async () => {
     const service = makeService();
     await service.installLocal(sourceDir);
