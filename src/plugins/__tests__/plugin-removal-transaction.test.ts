@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -69,7 +69,7 @@ describe("durable plugin removal transactions", () => {
       registryAfter: [],
       originals: [{ pluginId: "alpha", path: join(paths.pluginsRoot, "alpha") }],
     });
-    await stageRemovalTransaction(journal);
+    await stageRemovalTransaction(paths, journal);
     await updatePluginRegistry(paths.registryPath, (registry) => {
       registry.plugins = [];
     });
@@ -87,11 +87,11 @@ describe("durable plugin removal transactions", () => {
       registryAfter: [],
       originals: [{ pluginId: "alpha", path: join(paths.pluginsRoot, "alpha") }],
     });
-    await stageRemovalTransaction(journal);
+    await stageRemovalTransaction(paths, journal);
     await updatePluginRegistry(paths.registryPath, (registry) => {
       registry.plugins = [];
     });
-    markRemovalTransactionRegistryCommitted(paths, journal);
+    await markRemovalTransactionRegistryCommitted(paths, journal);
 
     await expect(reconcileRemovalTransaction(paths, journal.transactionId)).resolves.toBe("cleaned");
   });
@@ -105,7 +105,7 @@ describe("durable plugin removal transactions", () => {
       registryAfter: [],
       originals: [{ pluginId: "alpha", path: join(paths.pluginsRoot, "alpha") }],
     });
-    await stageRemovalTransaction(journal);
+    await stageRemovalTransaction(paths, journal);
     const renamePath = vi.fn(async () => {
       throw Object.assign(new Error("locked"), { code: "EACCES" });
     });
@@ -128,7 +128,7 @@ describe("durable plugin removal transactions", () => {
       registryAfter: [],
       originals: [{ pluginId: "alpha", path: join(paths.pluginsRoot, "alpha") }],
     });
-    await stageRemovalTransaction(journal);
+    await stageRemovalTransaction(paths, journal);
     const outside = join(root, "outside");
     await mkdir(outside);
     await writeFile(join(outside, "keep.txt"), "keep");
@@ -138,9 +138,56 @@ describe("durable plugin removal transactions", () => {
     await writeFile(join(txDir, "journal.json"), JSON.stringify(raw));
 
     await expect(reconcileRemovalTransactions(paths)).resolves.toEqual({
-      restored: [], cleaned: [], unresolved: [journal.transactionId],
+      restored: [],
+      cleaned: [],
+      unresolved: [{
+        transactionId: journal.transactionId,
+        reason: "Unsafe or ambiguous removal transaction mapping",
+      }],
     });
     expect(await readFile(join(outside, "keep.txt"), "utf-8")).toBe("keep");
     expect(existsSync(journal.mappings[0]!.stagedPath)).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a preexisting transaction namespace symlink without writing outside the plugin root",
+    async () => {
+      const before = await seed(["alpha"]);
+      const outside = join(root, "outside-transactions");
+      await mkdir(outside);
+      await symlink(outside, join(paths.pluginsRoot, "+transactions+"), "dir");
+
+      await expect(createRemovalTransaction(paths, {
+        kind: "uninstall",
+        pluginIds: ["alpha"],
+        registryBefore: before,
+        registryAfter: [],
+        originals: [{ pluginId: "alpha", path: join(paths.pluginsRoot, "alpha") }],
+      })).rejects.toThrow("Unsafe removal transaction namespace");
+      expect(await readdir(outside)).toEqual([]);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")("rejects a journal symlink and preserves its target", async () => {
+    const before = await seed(["alpha"]);
+    const journal = await createRemovalTransaction(paths, {
+      kind: "uninstall",
+      pluginIds: ["alpha"],
+      registryBefore: before,
+      registryAfter: [],
+      originals: [{ pluginId: "alpha", path: join(paths.pluginsRoot, "alpha") }],
+    });
+    const txDir = dirname(dirname(journal.mappings[0]!.stagedPath));
+    const path = join(txDir, "journal.json");
+    const outside = join(root, "outside-journal.json");
+    await writeFile(outside, JSON.stringify(journal));
+    await rm(path);
+    await symlink(outside, path);
+
+    const result = await reconcileRemovalTransactions(paths);
+    expect(result.unresolved).toEqual([
+      expect.objectContaining({ transactionId: journal.transactionId }),
+    ]);
+    expect(await readFile(outside, "utf-8")).toBe(JSON.stringify(journal));
   });
 });
