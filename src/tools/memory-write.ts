@@ -112,10 +112,13 @@ export function createMemoryWriteTool(deps: MemoryWriteToolDeps): Tool {
           isError: true,
         };
       }
-      // A title is a single-line label. Reject control characters (esp.
-      // newlines) so the raw title cannot open a new line in the stored file and
-      // supply a line-start `<!--` that the reserved-marker parser would then
-      // bridge to a `lvis:` prefix at the start of content (cross-field split).
+      // A title is a single-line label embedded raw into the stored heading
+      // (`# ${title}`) and into the MEMORY.md index link, so C0 control chars —
+      // above all a newline — are rejected to keep it from injecting extra file
+      // or index lines. This is a file/index integrity guard; marker-injection
+      // (including any line-break trick) is the composed-artifact scan's job
+      // below, so this guard does not have to enumerate every line-break code
+      // point the regex engine honors.
       if (memoryWriteTitleHasControlChar(title)) {
         return {
           output:
@@ -123,14 +126,20 @@ export function createMemoryWriteTool(deps: MemoryWriteToolDeps): Tool {
           isError: true,
         };
       }
-      // With title newlines forbidden, the store parser can only ever see a
-      // line-start marker that lies wholly inside `content`; this whitespace-
-      // tolerant, case-insensitive check (a superset of the store's own parser)
-      // rejects any such marker in either field.
-      if (
-        MEMORY_WRITE_RESERVED_MARKER_PATTERN.test(title) ||
-        MEMORY_WRITE_RESERVED_MARKER_PATTERN.test(content)
-      ) {
+      // Marker guard runs on the COMPOSED artifact the store persists — title
+      // and content joined the way saveMemory writes them (`# ${title}\n\n
+      // ${content}`) — not each source field in isolation. Checking the joined
+      // form is what makes this robust: a reserved marker split across the
+      // title/content seam (title ends with `<!--`, content begins with
+      // `lvis:…`) is caught no matter what line-break character the title used
+      // to reach a line start (`\n`, `\r`, or the >0x7f separators U+2028/U+2029
+      // that the store parser's /m anchor also honors). The pattern's `\s*`
+      // spans the join, so this is a strict superset of what the parser
+      // (`/^<!--\s*lvis:…/m`) can ever match. Per-field checks were bypassable;
+      // scanning the artifact the parser sees is not. String.fromCharCode(10,10)
+      // is "\n\n" written escape-free.
+      const composedForMarkerScan = `${title}${String.fromCharCode(10, 10)}${content}`;
+      if (MEMORY_WRITE_RESERVED_MARKER_PATTERN.test(composedForMarkerScan)) {
         return {
           output:
             'memory_write: title/content must not contain the reserved "<!-- lvis:" marker namespace.',
