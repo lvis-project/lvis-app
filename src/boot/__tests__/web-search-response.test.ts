@@ -12,7 +12,7 @@ import {
   parseTavilyResponse,
   parseSerperResponse,
   WebSearchShapeError,
-} from "../tools.js";
+} from "../../tools/web-search.js";
 
 describe("parseTavilyResponse", () => {
   it("normalizes a well-formed Tavily response", () => {
