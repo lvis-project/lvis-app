@@ -700,6 +700,9 @@ export async function runTurn(
           body: result.text,
           contextRef: { sessionId: self.sessionId },
         });
+        // Notification lifecycle hook (#811) — observe-only; mirrors the
+        // turn-end message shown to the user so a hook can react to it.
+        await self.fireLifecycleEvent("Notification", { message: result.text });
       } catch {
         // notification failure must never block turn completion
       }

@@ -39,7 +39,7 @@ The normalized reply is a `HookResponse`: `decision` (`allow` / `deny` /
 `modify` / `context` / `ask`), `reason`, `updatedInput`, `additionalContext`,
 `updatedOutput` — with the host formatting whatever fields it can honor.
 
-## Where LVIS stands: 9 of 13 already shipped
+## Where LVIS stands: 13 of 13 (canonical parity complete)
 
 LVIS's hook runtime (`src/hooks/`) already covers 9 canonical events. Source of
 truth: `src/hooks/hook-config.ts` `EVENT_KEY_TO_TYPE` +
@@ -56,10 +56,10 @@ truth: `src/hooks/hook-config.ts` `EVENT_KEY_TO_TYPE` +
 | `PreCompact` | shipped (observe; #811 m2) | `PreCompact` |
 | `PostCompact` | shipped (observe; #811 m2) | `PostCompact` |
 | `PostToolUseFailure` | shipped (observe; #811 m2) | `PostToolUseFailure` |
-| **`SessionEnd`** | **MISSING** | — |
-| **`Notification`** | **MISSING** | — |
-| **`SubagentStart`** | **MISSING** | — |
-| **`SubagentStop`** | **MISSING** | — |
+| `SessionEnd` | shipped (observe; newConversation / loadSession) | `SessionEnd` |
+| `Notification` | shipped (observe; run-turn turn-end fire) | `Notification` |
+| `SubagentStart` | shipped (observe; subagent-runner spawn) | `SubagentStart` |
+| `SubagentStop` | shipped (observe; subagent-runner finally) | `SubagentStop` |
 
 LVIS also ships a non-canonical `PermissionDenied` observe event (a forensic
 split of a denied `PermissionRequest`) — keep it; it is a superset, not a
