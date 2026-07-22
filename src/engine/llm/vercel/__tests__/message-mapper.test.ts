@@ -97,3 +97,52 @@ describe("genericToModelMessages — multimodal user content", () => {
     expect(out[2].role).toBe("tool");
   });
 });
+
+describe("genericToModelMessages — tool_result image (view_image)", () => {
+  const imageMsg: GenericMessage = {
+    role: "tool_result",
+    toolUseId: "tu_1",
+    toolName: "view_image",
+    content: "[image loaded]",
+    image: { data: "QUJD", mimeType: "image/png", bytes: 3 },
+  };
+
+  it("emits a content output with a file part on Claude", () => {
+    const out = genericToModelMessages([imageMsg], "claude");
+    expect(out[0]).toEqual({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "tu_1",
+          toolName: "view_image",
+          output: {
+            type: "content",
+            value: [
+              { type: "text", text: "[image loaded]" },
+              { type: "file", data: { type: "data", data: "QUJD" }, mediaType: "image/png" },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it("degrades to a text placeholder on non-Claude vendors (tool results are text-only there)", () => {
+    const out = genericToModelMessages([imageMsg], "openai");
+    expect(out[0]).toMatchObject({
+      role: "tool",
+      content: [{ type: "tool-result", output: { type: "text", value: "[image loaded]" } }],
+    });
+  });
+
+  it("keeps an imageless tool_result as plain text on Claude", () => {
+    const out = genericToModelMessages(
+      [{ role: "tool_result", toolUseId: "t", content: "ok" }],
+      "claude",
+    );
+    expect(out[0]).toMatchObject({
+      content: [{ output: { type: "text", value: "ok" } }],
+    });
+  });
+});
