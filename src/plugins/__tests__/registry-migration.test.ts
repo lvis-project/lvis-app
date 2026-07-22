@@ -1,8 +1,8 @@
 /**
  * registry.json migration — pre-PR #430 entries with `installedBy` +
  * `_devLinked` are mapped onto the unified `installSource` enum on first
- * read. The migration is one-shot (persisted back to disk) and idempotent
- * (already-migrated entries are left alone).
+ * read. Reads are side-effect-free; explicit migration persists through the
+ * shared registry transaction.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
@@ -10,7 +10,7 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readPluginRegistry } from "../registry.js";
+import { migratePluginRegistry, readPluginRegistry } from "../registry.js";
 
 describe("readPluginRegistry — legacy installedBy/_devLinked migration", () => {
   let tmpDir: string;
@@ -25,7 +25,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("maps `_devLinked: true` → `installSource: \"local-dev\"` (post-purge rewrite) and persists the migration", async () => {
+  it("maps `_devLinked: true` in memory and persists only through explicit migration", async () => {
     // Post-2026-05 dev-link purge: legacy `_devLinked: true` and any
     // existing `installSource: "dev-link"` are rewritten to "local-dev"
     // (the closest still-valid sibling). Receipt verification then
@@ -56,8 +56,9 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       installSource: "local-dev",
     });
 
-    // Persisted: a fresh read should return the same shape with no
-    // legacy fields and no further migration log entry.
+    const beforeMigration = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(beforeMigration.plugins[0].installedBy).toBe("user");
+    await migratePluginRegistry(registryPath);
     const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(onDisk.plugins[0].installedBy).toBeUndefined();
     expect(onDisk.plugins[0]._devLinked).toBeUndefined();
@@ -84,6 +85,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     const registry = await readPluginRegistry(registryPath);
     expect(registry.plugins[0].installSource).toBe("user");
 
+    await migratePluginRegistry(registryPath);
     const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(onDisk.plugins[0].installedBy).toBeUndefined();
     expect(onDisk.plugins[0].installSource).toBe("user");
@@ -109,6 +111,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     const registry = await readPluginRegistry(registryPath);
     expect(registry.plugins[0].installSource).toBe("admin");
 
+    await migratePluginRegistry(registryPath);
     const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(onDisk.plugins[0].installedBy).toBeUndefined();
     expect(onDisk.plugins[0].installSource).toBe("admin");
@@ -139,6 +142,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
 
     const registry = await readPluginRegistry(registryPath);
     expect(registry.plugins[0].installSource).toBe("local-dev");
+    await migratePluginRegistry(registryPath);
   });
 
   it("rewrites pre-existing `installSource: \"dev-link\"` to `\"local-dev\"`", async () => {
@@ -162,6 +166,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
 
     const registry = await readPluginRegistry(registryPath);
     expect(registry.plugins[0].installSource).toBe("local-dev");
+    await migratePluginRegistry(registryPath);
     const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(onDisk.plugins[0].installSource).toBe("local-dev");
   });
@@ -345,9 +350,97 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       plugins: [{ pluginId: "ms-graph", events: ["email.new"] }],
     });
 
+    await migratePluginRegistry(registryPath);
     const persisted = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(persisted.plugins[0]?.approvedPluginAccess).toEqual({
       plugins: [{ pluginId: "ms-graph", events: ["email.new"] }],
     });
+  });
+
+  it("accepts the strict pending-update recovery shape without migrating it", async () => {
+    const pendingUpdate = {
+      kind: "marketplace",
+      previousManifestFileSha256: "a".repeat(64),
+      previousReceiptRaw: null,
+      recoveryBackupDir: join(tmpDir, ".calendar.old-backup"),
+      recoveryBackupMode: "rename",
+    };
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        enabled: true,
+        bundleRefs: ["work-assistant"],
+        pendingUpdate,
+      }],
+    }));
+
+    expect((await readPluginRegistry(registryPath)).plugins[0]).toEqual(expect.objectContaining({
+      id: "calendar",
+      bundleRefs: ["work-assistant"],
+      pendingUpdate,
+    }));
+  });
+
+  it("rejects incomplete or permissive pending-update metadata", async () => {
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        pendingUpdate: {
+          kind: "unknown",
+          previousManifestFileSha256: "not-a-hash",
+          previousReceiptRaw: null,
+          recoveryBackupDir: join(tmpDir, ".calendar.old-backup"),
+        },
+      }],
+    }));
+
+    await expect(readPluginRegistry(registryPath)).rejects.toThrow(/pending update/);
+  });
+
+  it.each([".", "..", "../outside", "nested/plugin", "nested\\plugin"])(
+    "rejects unsafe canonical and legacy registry plugin id %j before migration",
+    async (id) => {
+      await writeFile(registryPath, JSON.stringify({
+        version: 1,
+        plugins: [{
+          id,
+          manifestPath: "outside/plugin.json",
+          installedBy: "user",
+        }],
+      }));
+
+      await expect(readPluginRegistry(registryPath)).rejects.toThrow(/invalid artifact slug/);
+      await expect(migratePluginRegistry(registryPath)).rejects.toThrow(/invalid artifact slug/);
+    },
+  );
+
+  it("accepts only strict non-restorable cleanup ownership metadata", async () => {
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        pendingCleanup: [{ kind: "obsolete-artifact", path: join(tmpDir, ".calendar.old-backup") }],
+      }],
+    }));
+    await expect(readPluginRegistry(registryPath)).resolves.toEqual(expect.objectContaining({
+      plugins: [expect.objectContaining({
+        pendingCleanup: [expect.objectContaining({ kind: "obsolete-artifact" })],
+      })],
+    }));
+
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        pendingCleanup: [{ kind: "rollback", path: "unsafe", restore: true }],
+      }],
+    }));
+    await expect(readPluginRegistry(registryPath)).rejects.toThrow(/pending cleanup/);
   });
 });

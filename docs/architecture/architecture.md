@@ -179,6 +179,21 @@ Key boundaries:
   invocation;
 - plugin UI can render in host slots but cannot bypass permission review;
 - marketplace metadata should not override local policy or managed-plugin rules.
+- plugin replacements keep the prior registry row in a strict `pendingUpdate`
+  state from the pre-promotion boundary through registry commit. Runtime and
+  HostApi trust caches skip pending rows, while uninstall/bundle planners retain
+  the full row and its references. Boot clears the marker only after the exact
+  receipt snapshot verifies every covered file in the owned plugin directory,
+  restoring directory bytes before publishing that receipt when a validated
+  backup is required. A verified retry preserves the original predecessor and
+  grants until its replacement registry commit; unresolved live bytes are
+  journaled as cleanup-only ownership and never become a recovery snapshot.
+  Recovery backup IDs, names, and parent directories are validated exactly.
+  Every obsolete post-commit or superseded directory is retained in the
+  non-restorable `pendingCleanup` journal until direct removal or tombstone
+  staging succeeds. Direct and bundle uninstall stage the live directory plus
+  all recovery/cleanup-owned paths before deleting the row; unresolved recovery
+  backups are never handled by the orphan tombstone sweeper.
 - renderer-to-plugin method calls are allowlisted by each tool's
   `_meta.ui.visibility`: only app-visible tools (visibility includes `"app"` —
   the union of app-only `["app"]` and dual `["model","app"]`) are

@@ -11,7 +11,7 @@ type WarnLogger = { warn: (message: string, ...args: unknown[]) => void };
 
 export interface PluginUninstallLifecycleDeps {
   pluginMarketplace: Pick<PluginMarketplaceService, "uninstall">;
-  pluginRuntime: Pick<PluginRuntime, "removePlugin" | "getPluginManifest">;
+  pluginRuntime: Pick<PluginRuntime, "addPlugin" | "removePlugin" | "getPluginManifest">;
   settingsService?: Partial<Pick<SettingsService, "deletePluginConfig" | "deletePluginSecrets">>;
   pluginPaths?: Pick<PluginPaths, "cacheRoot">;
   clearAuthPartitionService?: (partition: string) => Promise<void>;
@@ -117,7 +117,17 @@ export async function uninstallPluginWithLifecycle(
       marketplaceRemoved = true;
     } catch (err) {
       const message = (err as Error).message ?? "uninstall failed";
-      if (!isMissingPluginError(message)) throw err;
+      if (!isMissingPluginError(message)) {
+        try {
+          await deps.pluginRuntime.addPlugin(pluginId);
+        } catch (restoreError) {
+          throw new AggregateError(
+            [err, restoreError],
+            `plugin uninstall and runtime restore both failed: ${pluginId}`,
+          );
+        }
+        throw err;
+      }
     }
 
     await bestEffortCleanupPluginState(pluginId, deps, {

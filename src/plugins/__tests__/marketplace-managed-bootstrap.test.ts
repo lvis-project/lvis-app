@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
+import * as removalTransaction from "../plugin-removal-transaction.js";
 
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
@@ -731,8 +732,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   });
 
   it("restores registry state during dependency rollback cleanup", async () => {
-    const calendarDir = join(testDir, "plugins", "installed", "calendar");
-    const emailDir = join(testDir, "plugins", "installed", "email");
+    const calendarDir = join(testDir, "plugins", "calendar");
+    const emailDir = join(testDir, "plugins", "email");
     await mkdir(calendarDir, { recursive: true });
     await mkdir(emailDir, { recursive: true });
     await writeFile(
@@ -766,13 +767,13 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         plugins: [
           {
             id: "calendar",
-            manifestPath: "installed/calendar/plugin.json",
+            manifestPath: "calendar/plugin.json",
             enabled: false,
             installSource: "user",
           },
           {
             id: "email",
-            manifestPath: "installed/email/plugin.json",
+            manifestPath: "email/plugin.json",
             enabled: true,
             installSource: "user",
             bundleRefs: ["work-assistant"],
@@ -816,16 +817,67 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(registry.plugins).toEqual([
       {
         id: "calendar",
-        manifestPath: "installed/calendar/plugin.json",
+        manifestPath: "calendar/plugin.json",
         enabled: false,
         installSource: "user",
       },
     ]);
   });
 
+  it("preserves registry and live files when install rollback staging fails", async () => {
+    const emailDir = join(pluginsDir, "email");
+    await mkdir(emailDir, { recursive: true });
+    await writeFile(join(emailDir, "plugin.json"), JSON.stringify({
+      id: "email",
+      name: "Email",
+      version: "1.0.0",
+      entry: "dist/index.js",
+    }), "utf-8");
+    const originalRegistry = `${JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: "email", manifestPath: "email/plugin.json", enabled: true, installSource: "user" },
+        { id: "unrelated", manifestPath: "unrelated/plugin.json", enabled: false, installSource: "user" },
+      ],
+    }, null, 2)}\n`;
+    await writeFile(registryPath, originalRegistry, "utf-8");
+    await writeFile(marketplacePath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: "email",
+        name: "Email",
+        description: "fixture",
+        packageSpec: "file:email",
+        version: "2.0.0",
+        installPolicy: "user",
+      }],
+    }), "utf-8");
+
+    const installFailure = new Error("dependency install failed");
+    const stagingFailure = Object.assign(new Error("rollback rename blocked"), { code: "EACCES" });
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockRejectedValueOnce(stagingFailure);
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<unknown>;
+      },
+      "installWithDependencies",
+    ).mockImplementationOnce(async (...args: unknown[]) => {
+      const state = args[4] as { installedPluginIds: string[] };
+      state.installedPluginIds.push("email");
+      throw installFailure;
+    });
+
+    const error = await service.install("email").catch((caught) => caught);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([installFailure, stagingFailure]);
+    expect(await readFile(registryPath, "utf-8")).toBe(originalRegistry);
+    expect(existsSync(join(emailDir, "plugin.json"))).toBe(true);
+  });
+
   it("removes bundle members only when explicitly requested and still unreferenced", async () => {
     for (const pluginId of ["work-assistant", "email", "meeting", "calendar"]) {
-      const pluginDir = join(testDir, "plugins", "installed", pluginId);
+      const pluginDir = join(testDir, "plugins", pluginId);
       await mkdir(pluginDir, { recursive: true });
       await writeFile(
         join(pluginDir, "plugin.json"),
@@ -847,27 +899,27 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         plugins: [
           {
             id: "work-assistant",
-            manifestPath: "installed/work-assistant/plugin.json",
+            manifestPath: "work-assistant/plugin.json",
             enabled: true,
             installSource: "user",
           },
           {
             id: "email",
-            manifestPath: "installed/email/plugin.json",
+            manifestPath: "email/plugin.json",
             enabled: true,
             installSource: "user",
             bundleRefs: ["work-assistant"],
           },
           {
             id: "meeting",
-            manifestPath: "installed/meeting/plugin.json",
+            manifestPath: "meeting/plugin.json",
             enabled: true,
             installSource: "user",
             bundleRefs: ["work-assistant", "other-bundle"],
           },
           {
             id: "calendar",
-            manifestPath: "installed/calendar/plugin.json",
+            manifestPath: "calendar/plugin.json",
             enabled: true,
             installSource: "admin",
             bundleRefs: ["work-assistant"],
@@ -888,19 +940,104 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     };
     expect(registry.plugins).toEqual([
       {
-        id: "meeting",
-        manifestPath: "installed/meeting/plugin.json",
-        enabled: true,
-        installSource: "user",
-        bundleRefs: ["other-bundle"],
-      },
-      {
         id: "calendar",
-        manifestPath: "installed/calendar/plugin.json",
+        manifestPath: "calendar/plugin.json",
         enabled: true,
         installSource: "admin",
         bundleRefs: [],
       },
+      {
+        id: "meeting",
+        manifestPath: "meeting/plugin.json",
+        enabled: true,
+        installSource: "user",
+        bundleRefs: ["other-bundle"],
+      },
     ]);
+  });
+
+  it("holds every bundle-member lock through staging and registry commit", async () => {
+    for (const pluginId of ["work-assistant", "email"]) {
+      const pluginDir = join(pluginsDir, pluginId);
+      await mkdir(join(pluginDir, "dist"), { recursive: true });
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify({
+        id: pluginId,
+        name: pluginId,
+        version: "1.0.0",
+        entry: "dist/index.js",
+      }), "utf-8");
+      await writeFile(join(pluginDir, "dist", "index.js"), "export default {};\n", "utf-8");
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: "work-assistant", manifestPath: "work-assistant/plugin.json", enabled: true, installSource: "user" },
+        { id: "email", manifestPath: "email/plugin.json", enabled: true, installSource: "user", bundleRefs: ["work-assistant"] },
+      ],
+    }), "utf-8");
+
+    const sourceDir = join(testDir, "email-source");
+    await mkdir(join(sourceDir, "dist"), { recursive: true });
+    await writeFile(join(sourceDir, "plugin.json"), JSON.stringify({
+      id: "email",
+      name: "email replacement",
+      version: "2.0.0",
+      entry: "dist/index.js",
+    }), "utf-8");
+    await writeFile(join(sourceDir, "dist", "index.js"), "export default { version: 2 };\n", "utf-8");
+
+    let resumeStaging!: () => void;
+    const stagingGate = new Promise<void>((resolveGate) => { resumeStaging = resolveGate; });
+    let stagingStarted!: () => void;
+    const stagingStartedPromise = new Promise<void>((resolveStarted) => { stagingStarted = resolveStarted; });
+    const originalStage = removalTransaction.stageRemovalTransaction;
+    let paused = false;
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockImplementation(async (...args) => {
+      if (!paused) {
+        paused = true;
+        stagingStarted();
+        await stagingGate;
+      }
+      return originalStage(...args);
+    });
+
+    const service = makeManagedService(testDir, marketplacePath);
+    const uninstall = service.uninstall("work-assistant", { removeBundleMembers: true });
+    await stagingStartedPromise;
+    let installSettled = false;
+    const install = service.installLocal(sourceDir).finally(() => { installSettled = true; });
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    expect(installSettled).toBe(false);
+
+    resumeStaging();
+    await expect(uninstall).resolves.toEqual({ pluginId: "work-assistant", uninstalled: true });
+    await expect(install).resolves.toEqual({ pluginId: "email", installed: true });
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; installSource?: string }>;
+    };
+    expect(registry.plugins).toEqual([
+      expect.objectContaining({ id: "email", installSource: "local-dev" }),
+    ]);
+    expect(existsSync(join(pluginsDir, "email", "plugin.json"))).toBe(true);
+  }, 20_000);
+
+  it("preserves the exact durable registry when tombstone staging fails", async () => {
+    const original = `${JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: "target", manifestPath: "target/plugin.json", enabled: true, installSource: "user" },
+        { id: "unrelated", manifestPath: "unrelated/plugin.json", enabled: true, bundleRefs: ["target"] },
+      ],
+    }, null, 2)}\n`;
+    await writeFile(registryPath, original, "utf-8");
+    await mkdir(join(pluginsDir, "target"), { recursive: true });
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockRejectedValueOnce(
+      Object.assign(new Error("locked by Windows handle"), { code: "EACCES" }),
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    await expect(service.uninstall("target")).rejects.toThrow("locked by Windows handle");
+    expect(await readFile(registryPath, "utf-8")).toBe(original);
   });
 });

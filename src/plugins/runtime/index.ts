@@ -1529,6 +1529,15 @@ export class PluginRuntime {
       throw new Error(`Plugin not loaded: ${pluginId}`);
     }
 
+    // Durable state is the source of truth. Do not tear down the live plugin
+    // until the registry transaction commits successfully.
+    if (this.registryPath) {
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        const entry = registry.plugins.find((p) => p.id === pluginId);
+        if (entry) entry.enabled = false;
+      });
+    }
+
     try {
       await plugin.instance.stop?.();
     } catch (err) {
@@ -1552,15 +1561,6 @@ export class PluginRuntime {
     this.disabledPluginIds.add(pluginId);
     this.failedPluginIds.delete(pluginId);
     this.pluginUiRevisions.delete(pluginId);
-
-    if (this.registryPath) {
-      await updatePluginRegistry(this.registryPath, (registry) => {
-        const entry = registry.plugins.find((p) => p.id === pluginId);
-        if (entry) {
-          entry.enabled = false;
-        }
-      });
-    }
 
     this.onDisable?.(pluginId);
   }

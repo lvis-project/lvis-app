@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -131,5 +132,63 @@ describe("writeUtf8FileAtomicSync", () => {
     });
     expect(readFileSync(target, "utf8")).toBe("committed");
     expect(readdirSync(dir)).toEqual(["committed.json"]);
+  });
+
+  it("retries transient Windows replacement failures and commits whole bytes", () => {
+    const target = join(dir, "windows.json");
+    writeFileSync(target, "old", "utf8");
+    let attempts = 0;
+    const waits: number[] = [];
+    const writeWithRuntime = writeUtf8FileAtomicSync as unknown as (
+      path: string,
+      content: string,
+      mode: number | undefined,
+      runtime: { platform: NodeJS.Platform; open(path: string): number; fsync(fd: number): void; close(fd: number): void; rename(from: string, to: string): void; wait(ms: number): void },
+    ) => void;
+
+    writeWithRuntime(target, "new", undefined, {
+      platform: "win32",
+      open: () => 0,
+      fsync: () => undefined,
+      close: () => undefined,
+      rename: (from, to) => {
+        attempts += 1;
+        if (attempts < 3) throw Object.assign(new Error("transient"), { code: "EACCES" });
+        renameSync(from, to);
+      },
+      wait: (ms) => waits.push(ms),
+    });
+
+    expect(attempts).toBe(3);
+    expect(waits).toEqual([10, 20]);
+    expect(readFileSync(target, "utf8")).toBe("new");
+    expect(readdirSync(dir)).toEqual(["windows.json"]);
+  });
+
+  it.each(["EPERM", "EACCES"])("preserves the Windows target after persistent %s", (code) => {
+    const target = join(dir, "windows.json");
+    writeFileSync(target, "old", "utf8");
+    let attempts = 0;
+    const writeWithRuntime = writeUtf8FileAtomicSync as unknown as (
+      path: string,
+      content: string,
+      mode: number | undefined,
+      runtime: { platform: NodeJS.Platform; open(path: string): number; fsync(fd: number): void; close(fd: number): void; rename(from: string, to: string): void; wait(ms: number): void },
+    ) => void;
+
+    expect(() => writeWithRuntime(target, "new", undefined, {
+      platform: "win32",
+      open: () => 0,
+      fsync: () => undefined,
+      close: () => undefined,
+      rename: () => {
+        attempts += 1;
+        throw Object.assign(new Error("persistent"), { code });
+      },
+      wait: () => undefined,
+    })).toThrow("persistent");
+    expect(attempts).toBe(4);
+    expect(readFileSync(target, "utf8")).toBe("old");
+    expect(readdirSync(dir)).toEqual(["windows.json"]);
   });
 });
