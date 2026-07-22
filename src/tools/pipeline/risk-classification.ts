@@ -19,7 +19,8 @@ import { emitRiskShadowLog } from "../../permissions/reviewer/risk-shadow-log.js
  * signals ({@link inspectHostRisk}) and log it against the declared category
  * so divergence can be reconciled across plugins before enforcement flips.
  *
- * Enforcement: when `hostClassifiesRisk` is `false` (the default), the DECLARED
+ * Enforcement: when `hostClassifiesRisk` is `false` (the unset/disabled
+ * fallback — the SHIPPED default is `true`, see settings-store.ts), the DECLARED
  * category is returned unchanged — behaviour is identical to before this helper
  * existed. When it is `true`, the host-derived category is returned
  * (default-strict: never below the declared level is NOT asserted here — the
