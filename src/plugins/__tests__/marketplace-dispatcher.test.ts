@@ -24,6 +24,7 @@ import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
+import * as removalTransaction from "../plugin-removal-transaction.js";
 
 function makePluginZip(manifest: Record<string, unknown>): Buffer {
   const zip = new AdmZip();
@@ -492,6 +493,22 @@ describe("PluginMarketplaceService install()", () => {
     expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] }).plugins).toEqual([]);
   });
 
+  it("rejects a cross-wired registry row before it can remove another plugin directory", async () => {
+    for (const id of ["owner-a", "owner-b"]) {
+      await mkdir(join(installedDir, id), { recursive: true });
+      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify({ id }));
+    }
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: "owner-a", manifestPath: "owner-b/plugin.json", installSource: "user" }],
+    }));
+    const { service } = makeService({} as MarketplaceFetcher);
+
+    await expect(service.uninstall("owner-a")).rejects.toThrow("Registry ownership mismatch");
+    expect(existsSync(join(installedDir, "owner-a", "plugin.json"))).toBe(true);
+    expect(existsSync(join(installedDir, "owner-b", "plugin.json"))).toBe(true);
+  });
+
   it("restores the live directory and every owned path when direct uninstall commit conflicts", async () => {
     const pluginId = "owned-restore";
     const installDir = join(installedDir, pluginId);
@@ -515,18 +532,13 @@ describe("PluginMarketplaceService install()", () => {
       await writeFile(join(dir, "keep.txt"), dir);
     }
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [row] }));
-    const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
-    let stagedCount = 0;
-    vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(async (...args) => {
-      const tombstone = await originalTombstone(...args);
-      stagedCount += 1;
-      if (stagedCount === 3) {
-        await writeFile(registryPath, JSON.stringify({
-          version: 1,
-          plugins: [{ ...row, enabled: false }],
-        }));
-      }
-      return tombstone;
+    const originalStage = removalTransaction.stageRemovalTransaction;
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockImplementation(async (...args) => {
+      await originalStage(...args);
+      await writeFile(registryPath, JSON.stringify({
+        version: 1,
+        plugins: [{ ...row, enabled: false }],
+      }));
     });
     const { service } = makeService({} as MarketplaceFetcher);
 
@@ -646,15 +658,15 @@ describe("PluginMarketplaceService install()", () => {
     const stagingGate = new Promise<void>((resolveGate) => { resumeStaging = resolveGate; });
     let stagingStarted!: () => void;
     const stagingStartedPromise = new Promise<void>((resolveStarted) => { stagingStarted = resolveStarted; });
-    const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
+    const originalStage = removalTransaction.stageRemovalTransaction;
     let paused = false;
-    vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(async (...args) => {
+    vi.spyOn(removalTransaction, "stageRemovalTransaction").mockImplementation(async (...args) => {
       if (!paused) {
         paused = true;
         stagingStarted();
         await stagingGate;
       }
-      return originalTombstone(...args);
+      return originalStage(...args);
     });
 
     const { service } = makeService(fetcher);

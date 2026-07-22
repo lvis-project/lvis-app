@@ -1,7 +1,7 @@
 import { cp, mkdir, readFile, rename, rm, stat as statAsync } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { deferTombstoneRemoval, tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
-import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
+import { dirname, isAbsolute, posix, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
@@ -32,6 +32,15 @@ import {
 } from "./marketplace-update-recovery.js";
 import { installReceiptPath, listFilesRecursive, restoreInstallReceiptRaw, verifyInstallReceipt } from "./plugin-install-receipt.js";
 import { canonicalJSON } from "./whitelist/canonical-json.js";
+import {
+  abortRemovalTransaction,
+  assertCanonicalRegistryOwnership,
+  createRemovalTransaction,
+  finishRemovalTransaction,
+  markRemovalTransactionRegistryCommitted,
+  stageRemovalTransaction,
+  type RemovalTransactionKind,
+} from "./plugin-removal-transaction.js";
 import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
@@ -239,6 +248,7 @@ type InstallOperationState = {
 };
 
 type LocalInstallRollbackSnapshot = {
+  kind: "filesystem-snapshot" | "pending-predecessor";
   installDir: string;
   backupDir?: string;
   receiptRaw?: string;
@@ -960,18 +970,25 @@ export class PluginMarketplaceService {
     reason: string,
   ): Promise<{ pluginId: string; quarantined: true }> {
     return this.withPluginLock(pluginId, async () => {
-      const target = await updatePluginRegistry(this.registryPath, (registry) => {
-        const target = registry.plugins.find((x) => x.id === pluginId);
-        if (!target) return undefined;
-        registry.plugins = registry.plugins.filter((x) => x.id !== pluginId);
-        return this.cloneRegistryEntry(target);
-      });
+      const registry = await readPluginRegistry(this.registryPath);
+      const target = registry.plugins.find((entry) => entry.id === pluginId);
       if (target) {
-        try {
-          await this.removeInstalledEntry(target, []);
-        } catch (err) {
-          log.warn(`quarantinePlugin: failed to tombstone ${pluginId}: ${(err as Error).message}`);
-        }
+        const expected = this.cloneRegistryEntry(target);
+        const originals = this.ownedDirectoriesForEntry(expected)
+          .map((path) => ({ pluginId, path }));
+        await this.executeRemovalTransaction(
+          "quarantine",
+          [expected],
+          [],
+          originals,
+          async () => updatePluginRegistry(this.registryPath, (fresh) => {
+            const current = fresh.plugins.find((entry) => entry.id === pluginId);
+            if (!current || canonicalJSON(current) !== canonicalJSON(expected)) {
+              throw new Error(`Plugin registry changed during quarantine: ${pluginId}`);
+            }
+            fresh.plugins = fresh.plugins.filter((entry) => entry.id !== pluginId);
+          }),
+        );
       }
       log.warn(`quarantined plugin '${pluginId}' after failed install verification: ${reason}`);
       return { pluginId, quarantined: true as const };
@@ -1019,7 +1036,7 @@ export class PluginMarketplaceService {
         affected,
         nextBundleRefs: [...nextBundleRefs].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
       });
-      return { idsToRemove, nextBundleRefs, removed, signature };
+      return { idsToRemove, nextBundleRefs, removed, affected, signature };
     };
 
     const snapshot = await readPluginRegistry(this.registryPath);
@@ -1030,26 +1047,22 @@ export class PluginMarketplaceService {
       if (lockedPlan.signature !== planned.signature) {
         throw new Error(`Plugin registry changed before uninstall locks were acquired: ${pluginId}`);
       }
-      const staged: Array<{ original: string; tombstone: string }> = [];
-      const restoreStaged = async (): Promise<void> => {
-        const errors: unknown[] = [];
-        for (const item of [...staged].reverse()) {
-          try { await rename(item.tombstone, item.original); } catch (error) { errors.push(error); }
-        }
-        if (errors.length > 0) throw new AggregateError(errors, "failed to restore staged plugin uninstall");
-      };
-
-      try {
-        for (const entry of lockedPlan.removed) {
-          for (const ownedDir of this.ownedDirectoriesForEntry(entry)) {
-            const tombstone = await tombstoneAndDeferredRemove(ownedDir, this.pluginsRoot, {
-              deferRemoval: false,
-            });
-            if (tombstone) staged.push({ original: ownedDir, tombstone });
-          }
-        }
-
-        await updatePluginRegistry(this.registryPath, (registry) => {
+      const affectedIds = new Set(lockedPlan.affected.map((entry) => entry.id));
+      const registryAfter = lockedSnapshot.plugins.map((entry) => this.cloneRegistryEntry(entry));
+      for (const [id, refs] of lockedPlan.nextBundleRefs) {
+        const entry = registryAfter.find((candidate) => candidate.id === id);
+        if (entry) entry.bundleRefs = refs;
+      }
+      const projectedAfter = registryAfter.filter((entry) => affectedIds.has(entry.id) && !lockedPlan.idsToRemove.has(entry.id));
+      const originals = lockedPlan.removed.flatMap((entry) =>
+        this.ownedDirectoriesForEntry(entry).map((path) => ({ pluginId: entry.id, path })),
+      );
+      await this.executeRemovalTransaction(
+        "uninstall",
+        lockedPlan.affected,
+        projectedAfter,
+        originals,
+        async () => updatePluginRegistry(this.registryPath, (registry) => {
           const fresh = buildPlan(registry.plugins);
           if (fresh.signature !== lockedPlan.signature) {
             throw new Error(`Plugin registry changed during uninstall: ${pluginId}`);
@@ -1059,21 +1072,8 @@ export class PluginMarketplaceService {
             if (entry) entry.bundleRefs = refs;
           }
           registry.plugins = registry.plugins.filter((entry) => !fresh.idsToRemove.has(entry.id));
-        });
-      } catch (error) {
-        try {
-          await restoreStaged();
-        } catch (restoreError) {
-          throw new AggregateError([error, restoreError], `plugin uninstall and restore both failed: ${pluginId}`);
-        }
-        throw error;
-      }
-
-      for (const item of staged) {
-        deferTombstoneRemoval(item.tombstone, (tombstone, err) => {
-          log.warn(`removeInstalledEntry: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`);
-        });
-      }
+        }),
+      );
       return { pluginId, uninstalled: true as const };
     });
   }
@@ -1458,26 +1458,36 @@ export class PluginMarketplaceService {
     const entriesToRemove = snapshot.plugins
       .filter((entry) => state.installedPluginIds.includes(entry.id))
       .map((entry) => this.cloneRegistryEntry(entry));
-    const staged: Array<{ original: string; tombstone: string }> = [];
-    const restoreStaged = async (): Promise<void> => {
-      const errors: unknown[] = [];
-      for (const item of [...staged].reverse()) {
-        try { await rename(item.tombstone, item.original); } catch (error) { errors.push(error); }
-      }
-      if (errors.length > 0) throw new AggregateError(errors, "failed to restore staged install rollback");
-    };
+    const registryAfter = snapshot.plugins.map((entry) => this.cloneRegistryEntry(entry));
+    for (const pluginId of [...state.installedPluginIds].reverse()) {
+      const index = registryAfter.findIndex((candidate) => candidate.id === pluginId);
+      if (index >= 0) registryAfter.splice(index, 1);
+    }
+    for (const [pluginId, entrySnapshot] of state.touchedEntries) {
+      const entry = registryAfter.find((candidate) => candidate.id === pluginId);
+      if (!entry) continue;
+      entry.enabled = entrySnapshot.enabled;
+      entry.bundleRefs = entrySnapshot.bundleRefs;
+      entry.approvedPluginAccess = entrySnapshot.approvedPluginAccess;
+      if (entrySnapshot.manifestSha256) entry.manifestSha256 = entrySnapshot.manifestSha256;
+      else delete entry.manifestSha256;
+      if (entrySnapshot.installSource) entry.installSource = entrySnapshot.installSource;
+      else delete entry.installSource;
+      entry.pendingUpdate = entrySnapshot.pendingUpdate ? { ...entrySnapshot.pendingUpdate } : undefined;
+      entry.pendingCleanup = entrySnapshot.pendingCleanup?.map((item) => ({ ...item }));
+    }
+    const registryBefore = snapshot.plugins.filter((entry) => affectedIds.has(entry.id));
+    const projectedAfter = registryAfter.filter((entry) => affectedIds.has(entry.id));
+    const originals = entriesToRemove.flatMap((entry) =>
+      this.ownedDirectoriesForEntry(entry).map((path) => ({ pluginId: entry.id, path })),
+    );
 
-    try {
-      for (const entry of entriesToRemove) {
-        for (const ownedDir of this.ownedDirectoriesForEntry(entry)) {
-          const tombstone = await tombstoneAndDeferredRemove(ownedDir, this.pluginsRoot, {
-            deferRemoval: false,
-          });
-          if (tombstone) staged.push({ original: ownedDir, tombstone });
-        }
-      }
-
-      await updatePluginRegistry(this.registryPath, (registry) => {
+    await this.executeRemovalTransaction(
+      "install-rollback",
+      registryBefore,
+      projectedAfter,
+      originals,
+      async () => updatePluginRegistry(this.registryPath, (registry) => {
         if (affectedSignature(registry.plugins) !== plannedSignature) {
           throw new Error("Plugin registry changed during install rollback");
         }
@@ -1497,76 +1507,56 @@ export class PluginMarketplaceService {
           entry.pendingUpdate = entrySnapshot.pendingUpdate ? { ...entrySnapshot.pendingUpdate } : undefined;
           entry.pendingCleanup = entrySnapshot.pendingCleanup?.map((item) => ({ ...item }));
         }
-      });
+      }),
+    );
+  }
+
+  private async executeRemovalTransaction(
+    kind: RemovalTransactionKind,
+    registryBefore: PluginRegistryEntry[],
+    registryAfter: PluginRegistryEntry[],
+    originals: Array<{ pluginId: string; path: string }>,
+    commitRegistry: () => Promise<unknown>,
+  ): Promise<void> {
+    const pluginIds = [...new Set([...registryBefore, ...registryAfter].map((entry) => entry.id))].sort();
+    const journal = await createRemovalTransaction(this.paths, {
+      kind,
+      pluginIds,
+      registryBefore,
+      registryAfter,
+      originals: originals.filter((item) => existsSync(item.path)),
+    });
+    try {
+      await stageRemovalTransaction(journal);
+      await commitRegistry();
     } catch (error) {
       try {
-        await restoreStaged();
+        await abortRemovalTransaction(this.paths, journal);
       } catch (restoreError) {
-        throw new AggregateError([error, restoreError], "install rollback and staged-directory restore both failed");
+        throw new AggregateError([error, restoreError], `${kind} and staged-directory restore both failed`);
       }
       throw error;
     }
 
-    for (const item of staged) {
-      deferTombstoneRemoval(item.tombstone, (tombstone, err) => {
-        log.warn(`rollbackInstallOperation: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`);
-      });
-    }
-  }
-
-  private async removeInstalledEntry(
-    entry: PluginRegistryEntry,
-    _remainingEntries: PluginRegistryEntry[],
-  ): Promise<void> {
-    // Every install is a zip-extract under pluginsRoot,
-    // so uninstall is a recursive rm of the plugin's directory. The
-    // former npm-uninstall branch (`isZipInstalled === false`) is
-    // gone with the install-side npm path.
-    const ownedDirs = this.ownedDirectoriesForEntry(entry);
-    if (ownedDirs.length === 0) return;
-
-    // Windows-atomic uninstall: rename to a tombstone under +tombstones+/
-    // (collision-free namespace; `+` not in plugin id allowed chars), then
-    // fire-and-forget rm. Lifecycle ordering enforced upstream
-    // (pluginRuntime.removePlugin runs before this) reduces the window where
-    // handles are still held; the tombstone-defer pattern is dual-defense
-    // for the residual ~ms gap between stop() resolving and the OS releasing
-    // the SQLite WAL/SHM file descriptors. The orphan sweeper at next boot
-    // picks up any tombstone whose deferred rm hit EBUSY. See
-    // installed-entry-fs.ts for OS-specific rationale.
-    //
-    // NOTE: this returns BEFORE the rm completes. Callers that need
-    // synchronous removal (none today) should not assume the install dir
-    // is gone after this resolves.
-    for (const ownedDir of ownedDirs) {
-      await tombstoneAndDeferredRemove(ownedDir, this.pluginsRoot, {
-        onDeferredRmError: (tombstone, err) => {
-          log.warn(
-            `removeInstalledEntry: tombstone rm deferred to orphan sweeper: ${tombstone} (${err.message})`,
-          );
-        },
-      });
+    try {
+      markRemovalTransactionRegistryCommitted(this.paths, journal);
+      await finishRemovalTransaction(this.paths, journal);
+    } catch (error) {
+      log.warn(
+        { transactionId: journal.transactionId, kind, error },
+        "committed plugin removal transaction retained for boot reconciliation",
+      );
     }
   }
 
   private ownedDirectoriesForEntry(entry: PluginRegistryEntry): string[] {
     const directories = new Set<string>(pendingOwnedBackupPaths(this.paths, entry));
-    const installedDir = this.installedDirectoryForEntry(entry);
-    if (installedDir) directories.add(installedDir);
+    directories.add(this.installedDirectoryForEntry(entry));
     return [...directories];
   }
 
-  private installedDirectoryForEntry(entry: PluginRegistryEntry): string | null {
-    const manifestPath = isAbsolute(entry.manifestPath)
-      ? entry.manifestPath
-      : resolve(dirname(this.registryPath), entry.manifestPath);
-    const installedManifestDir = dirname(manifestPath);
-    return this.isWithin(this.pluginsRoot, installedManifestDir) ? installedManifestDir : null;
-  }
-
-  private isWithin(basePath: string, targetPath: string): boolean {
-    const rel = relative(basePath, targetPath);
-    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  private installedDirectoryForEntry(entry: PluginRegistryEntry): string {
+    return assertCanonicalRegistryOwnership(this.paths, entry);
   }
 
   /**
@@ -2092,7 +2082,13 @@ export class PluginMarketplaceService {
         );
       }
       const rollbackSnapshot = existingEntry
-        ? await this.createLocalInstallRollbackSnapshot(pluginId, installDir, existingEntry)
+        ? existingEntry.pendingUpdate
+          ? {
+              kind: "pending-predecessor" as const,
+              installDir,
+              registryEntry: this.cloneRegistryEntry(existingEntry),
+            }
+          : await this.createLocalInstallRollbackSnapshot(pluginId, installDir, existingEntry)
         : null;
 
       try {
@@ -2150,27 +2146,10 @@ export class PluginMarketplaceService {
         // upstream, so this isn't an additional trust delegation — just brings
         // installLocal to parity with marketplace install.
         const approvedPluginAccess = (manifest as { pluginAccess?: PluginAccessSpec }).pluginAccess;
-        // Write an install receipt so the plugin runtime's integrity gate
-        // (verifyInstallReceipt) accepts the entry. The receipt covers
-        // `plugin.json` + every file under `dist/` — matching what
-        // installArtifact records for marketplace installs. node_modules/ is
-        // NOT integrity-tracked; the compensating control is isDevModeUnlocked()
-        // (this entire path is dev-mode-only).
-        const receiptFiles: string[] = ["plugin.json"];
-        try {
-          const distFiles = await listFilesRecursive(resolve(installDir, "dist"));
-          for (const f of distFiles) receiptFiles.push(`dist/${f}`);
-        } catch (err) {
-          // Only `dist/` missing entirely is acceptable here (receipt then
-          // covers plugin.json only and load will fail later with a clearer
-          // entry-import error). Permission / IO errors must surface so a
-          // partially-hashed receipt does not silently pass `verifyInstallReceipt`.
-          const code =
-            err && typeof err === "object" && "code" in err
-              ? (err as { code?: unknown }).code
-              : undefined;
-          if (code !== "ENOENT") throw err;
-        }
+        // The integrity receipt covers every regular payload file. Runtime
+        // verification compares this exact normalized set with disk, so an
+        // injected executable or other unlisted payload is rejected.
+        const receiptFiles = await listFilesRecursive(installDir);
         await this.finalizeInstall(pluginId, {
           version: manifestVersion,
           installSource: "local-dev",
@@ -2204,7 +2183,9 @@ export class PluginMarketplaceService {
           }
         });
         this.clearInstallReceiptValidationForPlugin(pluginId);
-        await this.discardSupersededPendingBackup(existingEntry ?? null);
+        if (!existingEntry?.pendingUpdate) {
+          await this.discardSupersededPendingBackup(existingEntry ?? null);
+        }
 
         const previousSnapshot = this.localInstallRollbackSnapshots.get(pluginId);
         if (previousSnapshot) {
@@ -2291,6 +2272,7 @@ export class PluginMarketplaceService {
     existingEntry: PluginRegistryEntry,
   ): Promise<LocalInstallRollbackSnapshot> {
     const snapshot: LocalInstallRollbackSnapshot = {
+      kind: "filesystem-snapshot",
       installDir,
       registryEntry: this.cloneRegistryEntry(existingEntry),
     };
@@ -2330,6 +2312,23 @@ export class PluginMarketplaceService {
     snapshot: LocalInstallRollbackSnapshot | null,
   ): Promise<void> {
     if (!snapshot) return;
+    if (snapshot.kind === "pending-predecessor") {
+      if (!snapshot.registryEntry.pendingUpdate) {
+        throw new Error(`Pending local rollback predecessor metadata missing: ${pluginId}`);
+      }
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        const restoredEntry = this.cloneRegistryEntry(snapshot.registryEntry);
+        const existingIndex = registry.plugins.findIndex((entry) => entry.id === pluginId);
+        if (existingIndex >= 0) registry.plugins[existingIndex] = restoredEntry;
+        else registry.plugins.push(restoredEntry);
+      });
+      const outcome = await recoverPendingPluginUpdate(this.paths, pluginId);
+      if (outcome !== "recovered") {
+        throw new Error(`Pending local rollback predecessor remains unresolved: ${pluginId}`);
+      }
+      this.clearInstallReceiptValidationForPlugin(pluginId);
+      return;
+    }
     await readPluginRegistry(this.registryPath);
     await rm(snapshot.installDir, { recursive: true, force: true });
     if (snapshot.backupDir) {
@@ -2386,6 +2385,13 @@ export class PluginMarketplaceService {
   private async discardLocalInstallRollbackSnapshot(
     snapshot: LocalInstallRollbackSnapshot | null,
   ): Promise<void> {
+    if (snapshot?.kind === "pending-predecessor") {
+      const backupDir = snapshot.registryEntry.pendingUpdate?.recoveryBackupDir;
+      if (backupDir) {
+        await cleanupObsoletePluginBackupPath(this.paths, snapshot.registryEntry.id, backupDir);
+      }
+      return;
+    }
     if (snapshot?.backupDir) {
       await rm(snapshot.backupDir, { recursive: true, force: true });
       await clearObsoletePluginBackupOwnership(

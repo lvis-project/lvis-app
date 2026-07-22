@@ -199,11 +199,16 @@ export async function verifyInstallReceiptRaw(
   if (!Array.isArray(receipt.files) || receipt.files.length === 0) {
     return { ok: false, reason: "install receipt has no file hashes" };
   }
+  const receiptPaths = new Set<string>();
   for (const file of receipt.files) {
     const relPath = normalizeReceiptPath(file.path);
     if (!relPath || relPath !== file.path) {
       return { ok: false, reason: `invalid receipt path: ${String(file.path)}` };
     }
+    if (receiptPaths.has(relPath)) {
+      return { ok: false, reason: `duplicate receipt path: ${relPath}` };
+    }
+    receiptPaths.add(relPath);
     const absPath = resolve(pluginRoot, relPath);
     if (!isContained(pluginRoot, absPath)) {
       return { ok: false, reason: `receipt file escapes plugin root: ${relPath}` };
@@ -218,6 +223,19 @@ export async function verifyInstallReceiptRaw(
     if (actual !== file.sha256) {
       return { ok: false, reason: `receipt hash mismatch: ${relPath}` };
     }
+  }
+  let actualPaths: string[];
+  try {
+    actualPaths = await listFilesRecursive(pluginRoot);
+  } catch (err) {
+    return { ok: false, reason: `installed payload unreadable: ${(err as Error).message}` };
+  }
+  if (actualPaths.length !== receiptPaths.size
+    || actualPaths.some((path) => !receiptPaths.has(path))) {
+    const unexpected = actualPaths.find((path) => !receiptPaths.has(path));
+    return { ok: false, reason: unexpected
+      ? `installed payload contains unlisted file: ${unexpected}`
+      : "install receipt file set does not match installed payload" };
   }
   return { ok: true, receipt };
 }
