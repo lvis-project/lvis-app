@@ -27,6 +27,7 @@ import { recordEffect } from "../../../permissions/effect-ledger.js";
 import { methodEffect } from "../../../permissions/effect-kind.js";
 import type { PluginRegistryEntry } from "../../../plugins/types.js";
 import { createPluginStorage } from "../../../plugins/storage.js";
+import { withPluginInstallLock } from "../../../plugins/install-lifecycle.js";
 import { probePrivateHost } from "../../../plugins/private-host-probe.js";
 import { shouldBlockPluginSecretRead } from "../../../plugins/secret-shape.js";
 import {
@@ -242,31 +243,41 @@ export function createHostApiFactory(
               `[plugin:${pluginId}] config.set('${key}'): secret fields must be saved via hostApi.setSecret(), not config.set().`,
             );
           }
-          const current = settingsService.getPluginConfig(pluginId) ?? {};
-          // structuredClone so we never accidentally hand the plugin our
-          // internal record reference.
-          const nextRecord = structuredClone({
-            ...current,
-            [key]: value as unknown,
+          await withPluginInstallLock(pluginId, async () => {
+            // The HostApi object belongs to this exact manifest incarnation.
+            // A queued write from a stopped/uninstalled instance must not
+            // recreate persisted config for a removed or reinstalled plugin.
+            if (pluginRuntime.getPluginManifest(pluginId) !== manifest) {
+              throw new Error(
+                `[plugin:${pluginId}] config.set('${key}'): plugin instance is no longer active`,
+              );
+            }
+            const current = settingsService.getPluginConfig(pluginId) ?? {};
+            // structuredClone so we never accidentally hand the plugin our
+            // internal record reference.
+            const nextRecord = structuredClone({
+              ...current,
+              [key]: value as unknown,
+            });
+            await settingsService.setPluginConfig(pluginId, nextRecord);
+            // Mirror the IPC handler — refresh the runtime's per-plugin
+            // override so the next reload picks up the new value, then emit
+            // the change so existing listeners observe it without waiting
+            // for the reload.
+            pluginRuntime.setConfigOverride(pluginId, nextRecord);
+            emitPluginConfigChange(pluginId, key, value);
+            // US-A3 — targeted restartPlugin (not restartAll) so changing one
+            // plugin's config does not wipe other plugins' in-memory state.
+            // ToolRegistry resync happens automatically via the runtime's
+            // wired `onEnable` callback.
+            try {
+              await pluginRuntime.restartPlugin(pluginId);
+            } catch (err) {
+              throw new Error(
+                `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
+              );
+            }
           });
-          await settingsService.setPluginConfig(pluginId, nextRecord);
-          // Mirror the IPC handler — refresh the runtime's per-plugin
-          // override so the next reload picks up the new value, then emit
-          // the change so existing listeners observe it without waiting
-          // for the reload.
-          pluginRuntime.setConfigOverride(pluginId, nextRecord);
-          emitPluginConfigChange(pluginId, key, value);
-          // US-A3 — targeted restartPlugin (not restartAll) so changing one
-          // plugin's config does not wipe other plugins' in-memory state.
-          // ToolRegistry resync happens automatically via the runtime's
-          // wired `onEnable` callback.
-          try {
-            await pluginRuntime.restartPlugin(pluginId);
-          } catch (err) {
-            throw new Error(
-              `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
-            );
-          }
         },
         onChange: <T = unknown>(
           key: string,
