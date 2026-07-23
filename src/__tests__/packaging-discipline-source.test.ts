@@ -17,7 +17,9 @@ describe("installer smoke and packaging discipline", () => {
     expect(workflow).toContain("scripts/smoke-packaged-app.mjs --target");
     expect(workflow).toContain("xvfb-run -a");
     expect(workflow).toContain("sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb");
-    expect(workflow).toContain("actions/cache@v6");
+    expect(workflow).toContain(
+      "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.0.0",
+    );
     expect(workflow).toContain("~/.bun/install/cache");
     expect(workflow).toContain("ELECTRON_BUILDER_CACHE");
     expect(workflow).toContain("--skip-native-rebuild");
