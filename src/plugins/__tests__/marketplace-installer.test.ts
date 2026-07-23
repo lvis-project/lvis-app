@@ -565,6 +565,35 @@ describe("installFromMarketplace — HTTP handling", () => {
     }
   });
 
+  it("caps an untrusted Retry-After delay at 30 seconds", async () => {
+    vi.useFakeTimers();
+    const tarball = Buffer.from("rate-cap");
+    const { privateKey, pubBuf } = freshEd25519();
+    const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]);
+    const http = fakeHttp(tarball, envelope, null, {
+      sequence: [
+        { status: 429, retryAfterSeconds: 24 * 60 * 60 },
+        { status: 200 },
+      ],
+    });
+    const root = tmpDownloadRoot();
+    try {
+      const promise = installFromMarketplace("x", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+      });
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(http.downloadCalls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(promise).resolves.toMatchObject({ signerKeyId: "prod-v1" });
+      expect(http.downloadCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("retries on 5xx and gives up after maxRetries", async () => {
     vi.useFakeTimers();
     const tarball = Buffer.from("5xx");

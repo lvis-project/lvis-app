@@ -1,3 +1,5 @@
+import { open } from "node:fs/promises";
+
 /**
  * Resource ceilings for marketplace artifacts.
  *
@@ -15,24 +17,29 @@ export interface MarketplaceArtifactLimits {
   maxEntryUncompressedBytes: number;
   /** Maximum aggregate declared or extracted bytes for one zip. */
   maxTotalUncompressedBytes: number;
+  /** Maximum uncompressed/compressed ratio for one non-empty zip entry. */
+  maxCompressionRatio: number;
 }
 
 export const DEFAULT_MARKETPLACE_ARTIFACT_LIMITS: Readonly<MarketplaceArtifactLimits> =
   Object.freeze({
-    // The public marketplace currently accepts at most 50 MiB per upload.
-    // Leave enterprise headroom without letting chunk accumulation double the
-    // process memory footprint into an OOM-sized allocation.
-    maxCompressedBytes: 64 * 1024 * 1024,
+    // Match the public marketplace server defaults. Enterprise deployments
+    // with different ceilings must pass one explicit policy through the fetcher.
+    maxCompressedBytes: 50 * 1024 * 1024,
     maxEntryCount: 10_000,
-    maxEntryUncompressedBytes: 256 * 1024 * 1024,
-    maxTotalUncompressedBytes: 1024 * 1024 * 1024,
+    maxEntryUncompressedBytes: 200 * 1024 * 1024,
+    maxTotalUncompressedBytes: 200 * 1024 * 1024,
+    maxCompressionRatio: 100,
   });
 
 export type MarketplaceArtifactLimitCode =
   | "ARTIFACT_TOO_LARGE"
   | "ARCHIVE_ENTRY_LIMIT_EXCEEDED"
   | "ARCHIVE_ENTRY_TOO_LARGE"
-  | "ARCHIVE_UNCOMPRESSED_TOO_LARGE";
+  | "ARCHIVE_UNCOMPRESSED_TOO_LARGE"
+  | "ARCHIVE_COMPRESSION_RATIO_EXCEEDED"
+  | "ARTIFACT_DOWNLOAD_TIMEOUT"
+  | "ARTIFACT_DOWNLOAD_ABORTED";
 
 export class MarketplaceArtifactLimitError extends Error {
   constructor(
@@ -56,6 +63,20 @@ export function resolveMarketplaceArtifactLimits(
   return Object.freeze(limits);
 }
 
+export interface MarketplaceArtifactLimitProvider {
+  getArtifactLimits(): Readonly<MarketplaceArtifactLimits>;
+}
+
+export function isMarketplaceArtifactLimitProvider(
+  value: unknown,
+): value is MarketplaceArtifactLimitProvider {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as Partial<MarketplaceArtifactLimitProvider>).getArtifactLimits === "function",
+  );
+}
+
 export function assertCompressedArtifactSize(
   bytes: number,
   limit: number,
@@ -66,5 +87,43 @@ export function assertCompressedArtifactSize(
       "ARTIFACT_TOO_LARGE",
       `${context} is ${bytes} bytes; maximum allowed is ${limit} bytes`,
     );
+  }
+}
+
+/**
+ * Read at most `limit + 1` bytes from one stable file descriptor.
+ *
+ * A separate stat followed by readFile has a TOCTOU window where a concurrent
+ * writer can grow the file after validation and force an unbounded allocation.
+ * This reader keeps the descriptor stable and proves growth with one extra
+ * byte before concatenating a bounded result.
+ */
+export async function readCompressedArtifactFile(
+  filePath: string,
+  limit: number,
+  context: string,
+): Promise<Buffer> {
+  const handle = await open(filePath, "r");
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) {
+      throw new Error(`${context} is not a regular file`);
+    }
+    assertCompressedArtifactSize(metadata.size, limit, context);
+
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    while (totalBytes <= limit) {
+      const probeRemaining = limit - totalBytes + 1;
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, probeRemaining));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
+      if (bytesRead === 0) break;
+      totalBytes += bytesRead;
+      assertCompressedArtifactSize(totalBytes, limit, context);
+      chunks.push(chunk.subarray(0, bytesRead));
+    }
+    return Buffer.concat(chunks, totalBytes);
+  } finally {
+    await handle.close();
   }
 }

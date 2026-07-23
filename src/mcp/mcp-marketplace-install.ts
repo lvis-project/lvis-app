@@ -31,6 +31,7 @@ import type { McpServerConfig } from "./types.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
 import { MAX_MCP_MANIFEST_BYTES } from "./safe-names.js";
 import { sanitizeZipEntryPath } from "../plugins/zip-entry-path.js";
+import { withMarketplaceArtifactResourceSlot } from "../plugins/marketplace-artifact-resource-gate.js";
 
 export interface InstallMcpResult {
   config: McpServerConfig;
@@ -74,47 +75,49 @@ export async function installMcpFromMarketplace(
     throw new Error(`marketplace entry "${safeSlug}" has no published version`);
   }
 
-  const zipBuffer = await opts.store.downloadVerifiedZip(detail, version, opts.onProgress);
-  // Manifest is the trust anchor: read it from the verified zip before
-  // extraction so invalid launch specs never leave executable payloads on disk.
-  const runtime = readRuntimeFromVerifiedZip(safeSlug, zipBuffer);
-  if (!opts.pythonPath && runtimeUsesPythonToken(runtime)) {
-    throw new Error(
-      `MCP runtime for "${safeSlug}" uses $PYTHON, but LVIS does not provide an app-global Python runtime. ` +
-      `Publish the server as a uvx command or provide an explicit Python interpreter.`,
+  return withMarketplaceArtifactResourceSlot(async () => {
+    const zipBuffer = await opts.store.downloadVerifiedZip(detail, version, opts.onProgress);
+    // Manifest is the trust anchor: read it from the verified zip before
+    // extraction so invalid launch specs never leave executable payloads on disk.
+    const runtime = readRuntimeFromVerifiedZip(safeSlug, zipBuffer);
+    if (!opts.pythonPath && runtimeUsesPythonToken(runtime)) {
+      throw new Error(
+        `MCP runtime for "${safeSlug}" uses $PYTHON, but LVIS does not provide an app-global Python runtime. ` +
+        `Publish the server as a uvx command or provide an explicit Python interpreter.`,
+      );
+    }
+    assertMarketplaceUvxRuntimePinned(safeSlug, runtime);
+    const installDir = opts.store.installDirFor(safeSlug);
+    const tokens = {
+      pluginDir: installDir,
+      nodePath: opts.nodePath ?? process.execPath,
+      pythonPath: opts.pythonPath ?? "",
+    };
+    const substituted = substituteRuntimeTokens(runtime, tokens);
+    const config = buildMcpServerConfig(safeSlug, substituted);
+    const authMode = substituted.auth ?? "none";
+    const { result: registration } = await opts.store.extractZipWithCommit(
+      safeSlug,
+      zipBuffer,
+      async () => opts.registerConfig(config),
     );
-  }
-  assertMarketplaceUvxRuntimePinned(safeSlug, runtime);
-  const installDir = opts.store.installDirFor(safeSlug);
-  const tokens = {
-    pluginDir: installDir,
-    nodePath: opts.nodePath ?? process.execPath,
-    pythonPath: opts.pythonPath ?? "",
-  };
-  const substituted = substituteRuntimeTokens(runtime, tokens);
-  const config = buildMcpServerConfig(safeSlug, substituted);
-  const authMode = substituted.auth ?? "none";
-  const { result: registration } = await opts.store.extractZipWithCommit(
-    safeSlug,
-    zipBuffer,
-    async () => opts.registerConfig(config),
-  );
 
-  // Record install in the store's history journal so the orchestrator
-  // can later support MCP rollback when (#265's) lifecycle mutex lands.
-  await opts.store.appendHistory(safeSlug, {
-    version,
-    installedAt: new Date().toISOString(),
+    // Record install in the store's history journal so the orchestrator
+    // can later support MCP rollback when (#265's) lifecycle mutex lands.
+    await opts.store.appendHistory(safeSlug, {
+      version,
+      installedAt: new Date().toISOString(),
+    });
+
+    return {
+      config,
+      installDir,
+      needsCredential: authMode !== "none",
+      authMode,
+      connected: registration.connected,
+      warning: registration.warning,
+    };
   });
-
-  return {
-    config,
-    installDir,
-    needsCredential: authMode !== "none",
-    authMode,
-    connected: registration.connected,
-    warning: registration.warning,
-  };
 }
 
 /**
