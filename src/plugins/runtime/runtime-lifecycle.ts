@@ -929,8 +929,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     const plugin = this.plugins.get(canonicalPluginId);
     if (plugin) {
       const generationLifecycle = this.requireGenerationLifecycle("plugin removal");
-      await generationLifecycle.deactivate(canonicalPluginId);
-      await generationLifecycle.waitForRetirements();
+      const { retirement } = await generationLifecycle.deactivateWithCommit(
+        canonicalPluginId,
+        async () => undefined,
+      );
+      await this.settleCommittedRetirement(canonicalPluginId, retirement, "plugin removal");
     } else if (
       !this.knownPluginManifests.has(canonicalPluginId) &&
       !this.failedPluginIds.has(canonicalPluginId) &&
@@ -1378,7 +1381,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
 
     const generationLifecycle = this.requireGenerationLifecycle("plugin disable");
-    await generationLifecycle.deactivateWithCommit(canonicalPluginId, async () => {
+    const { retirement } = await generationLifecycle.deactivateWithCommit(canonicalPluginId, async () => {
       if (!this.registryPath) return;
       await updatePluginRegistry(this.registryPath, (registry) => {
         const aliases = new Set([
@@ -1389,12 +1392,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         if (entry) entry.enabled = false;
       });
     });
-    await generationLifecycle.waitForRetirements();
 
     this.disabledPluginIds.add(canonicalPluginId);
     this.failedPluginIds.delete(canonicalPluginId);
     this.pluginUiRevisions.delete(canonicalPluginId);
     this.onDisable?.(canonicalPluginId);
+    await this.settleCommittedRetirement(canonicalPluginId, retirement, "plugin disable");
   }
 
   /**
@@ -1580,11 +1583,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       throw new Error(`cannot atomically remove unloaded plugin: ${pluginId}`);
     }
     const generationLifecycle = this.requireGenerationLifecycle("atomic plugin removal");
-    const result = await generationLifecycle.deactivateWithCommit(
+    const { result, retirement } = await generationLifecycle.deactivateWithCommit(
       canonicalPluginId,
       durableCommit,
     );
-    await generationLifecycle.waitForRetirements();
+    await this.settleCommittedRetirement(canonicalPluginId, retirement, "atomic plugin removal");
     // The inactive pointer is already published. This call purges only the
     // durable runtime tracking maps and fires the host cleanup callback.
     await this.removePlugin(canonicalPluginId);
