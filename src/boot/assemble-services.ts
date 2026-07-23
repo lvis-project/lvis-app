@@ -17,9 +17,9 @@ import {
   getTrackedPluginAuthPartitions as listPluginAuthPartitionsService,
 } from "../main/auth-window-service.js";
 import type { AppServices } from "./types.js";
-import type { BootContext } from "./context.js";
+import type { ReadyBootContext } from "./context.js";
 
-export function assembleAppServices(ctx: BootContext): AppServices {
+export function assembleAppServices(ctx: ReadyBootContext): AppServices {
   let shutdownPromise: Promise<void> | null = null;
 
   return {

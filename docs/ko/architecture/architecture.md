@@ -1154,6 +1154,17 @@ Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계다. Phase 1~2의 `src/age
 > assembles its extracted units. Full rationale + per-file plan:
 > [`docs/blueprints/host-structure-alignment.md`](../blueprints/host-structure-alignment.md).
 
+**메인 프로세스 조립·부팅 불변식:** `src/`의 TypeScript 정적 runtime
+import graph에는 strongly connected component가 없어야 하며,
+`bun run check:import-cycles`가 build gate에서 이를 검증한다(type-only import는
+제외). Theme replay cache와 native window event listener는 leaf module이 소유하고,
+호환 barrel은 re-export만 한다. 메뉴와 메인 윈도우에서 native window action으로
+향하는 역방향 호출은 `main.ts`가 한 번 설정하는 native-window coordinator를
+통하며, 트레이는 단방향 조립 owner로 남는다. 설정 전 호출과 중복 설정은 contract
+error다. 부팅 단계가 채우는 `BootContext`는
+`assembleAppServices` 직전에 exhaustive own-property readiness 검사를 통과해야 하며,
+누락 producer는 필드 이름과 함께 명시적으로 실패한다.
+
 ```
 lvis-app/src/
 ├── main.ts        # thin Electron entry — single-instance/whenReady/main() only;
@@ -3118,6 +3129,8 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
 **검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) → cross-field (tool-name regex, `keywords[].skillId ∈ tools[]`, `auth.*Tool ∈ uiActions`, auth tools not in `tools[]`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
+
+부트 preflight는 install receipt 검증을 manifest 파싱보다 먼저 수행한다. Receipt hash와 manifest 검증은 제한된 동시성으로 겹쳐 실행하되, 성공 결과와 실패 상태는 registry 순서대로 반영한다. 무결성 검증에 실패한 payload는 tool/event 소유권이나 dependency capability 계산에 들어가지 않으며, 통과한 manifest는 해당 부트에서 한 번만 파싱한다.
 
 규칙:
 - top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)

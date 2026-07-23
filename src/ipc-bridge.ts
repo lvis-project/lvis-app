@@ -21,7 +21,6 @@ export {
   unregisterPluginWebview,
 } from "./ipc/index.js";
 
-// Re-export host theme cache reader so non-IPC callers (e.g. main.ts'
-// `initialThemeArgs()`) don't reach into `./ipc/domains/plugins.js` directly
-// — keeps `main/` ↔ `ipc/domains/` decoupled through this façade.
-export { getLastThemePayload } from "./ipc/domains/plugins.js";
+// Preserve the public compatibility facade while keeping main-process callers
+// on the extracted leaf cache instead of the IPC domain implementation.
+export { getLastThemePayload } from "./shared/plugin-theme-cache.js";

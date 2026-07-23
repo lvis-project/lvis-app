@@ -11,7 +11,10 @@ import { t } from "../i18n/index.js";
 import { normalizeSettingsTab } from "../shared/settings-tabs.js";
 import { type DetachedWindowOptions } from "./window-manager.js";
 import { getMainWindow, getServices } from "./app-state.js";
-import { refreshTrayMenu, showOrCreateMainWindow } from "./app-tray.js";
+import {
+  requestNativeChromeRefresh,
+  requestShowOrCreateMainWindow,
+} from "./native-window-coordinator.js";
 
 function activateView(viewKey: string) {
   getMainWindow()?.webContents.send("lvis:view:activate", { viewKey });
@@ -32,7 +35,7 @@ function activateView(viewKey: string) {
  */
 export function activateInlineSettings(tabInput: unknown = "llm"): void {
   const settingsTab = normalizeSettingsTab(tabInput);
-  showOrCreateMainWindow("settings-open");
+  requestShowOrCreateMainWindow("settings-open");
   const win = getMainWindow();
   if (!win || win.isDestroyed()) return;
   const send = () => {
@@ -104,8 +107,7 @@ export function createAlwaysOnTopMenuItem(): MenuItemConstructorOptions {
       const mainWindow = getMainWindow();
       if (!mainWindow || mainWindow.isDestroyed()) return;
       mainWindow.setAlwaysOnTop(!isMainWindowAlwaysOnTop());
-      refreshApplicationMenu();
-      refreshTrayMenu();
+      requestNativeChromeRefresh();
     },
   };
 }

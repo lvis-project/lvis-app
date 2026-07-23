@@ -19,7 +19,8 @@ import {
   takePendingSideBrowserSrc,
 } from "./side-browser-webview.js";
 import { getCommonChromeOptions } from "./window-chrome.js";
-import { getLastThemePayload, registerWindowEventListeners } from "../ipc-bridge.js";
+import { getLastThemePayload } from "../shared/plugin-theme-cache.js";
+import { registerWindowEventListeners } from "./window-event-listeners.js";
 import {
   INITIAL_THEME_ARG_PREFIX,
   INITIAL_THEME_ARG_MAX_BYTES,
@@ -40,8 +41,7 @@ import {
 } from "./main-window-bounds.js";
 import { isAppUpdateInstallRequested } from "./app-update-install-intent.js";
 import { BOOTSTRAP_SPLASH, markBootstrapSplashShown } from "./bootstrap-splash.js";
-import { refreshApplicationMenu } from "./app-menu.js";
-import { refreshTrayMenu } from "./app-tray.js";
+import { requestNativeChromeRefresh } from "./native-window-coordinator.js";
 import {
   getLastRendererReloadAt,
   getMainWindow,
@@ -238,13 +238,11 @@ export function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
     }
     event.preventDefault();
     win.hide();
-    refreshApplicationMenu();
-    refreshTrayMenu();
+    requestNativeChromeRefresh();
   });
   win.on("closed", () => {
     if (getMainWindow() === win) setMainWindow(null);
-    refreshApplicationMenu();
-    refreshTrayMenu();
+    requestNativeChromeRefresh();
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     log.error({ code, desc, url }, "window failed to load");
