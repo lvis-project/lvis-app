@@ -409,7 +409,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     ]));
     await expect(callLifecycleTool("hook_probe", {
       approvalExpected: true,
-    })).resolves.toMatchObject({ ok: true });
+    })).resolves.toMatchObject({ version: "1.0.0" });
     await approveExecutableContributions();
     await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount + 1);
     activeMcpProbe = await callBundledMcp("1.0.0", {
