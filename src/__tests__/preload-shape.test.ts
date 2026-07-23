@@ -261,6 +261,7 @@ describe("preload contextBridge world shape lock", () => {
             "getStats",
           ],
           "downloadAppUpdate": "function",
+          "e2ePluginBundleSnapshot": "function",
           "exportUsageCsv": "function",
           "generateWorkBoardReport": "function",
           "getAppInfo": "function",

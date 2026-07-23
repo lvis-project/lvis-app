@@ -564,6 +564,12 @@ export function buildInternalApiSurface() {
     userAction: options?.userAction === true && navigator.userActivation?.isActive === true,
     ...(options?.operationGrantToken ? { operationGrantToken: options.operationGrantToken } : {}),
   }),
+  e2ePluginBundleSnapshot: async (pluginId: string, skillLocalId: string) =>
+    ipcRenderer.invoke(
+      CHANNELS.plugins.e2eBundleSnapshot,
+      pluginId,
+      skillLocalId,
+    ) as Promise<unknown>,
 
 
   // ─── Overlay trigger lifecycle ────────────────────────────────────────

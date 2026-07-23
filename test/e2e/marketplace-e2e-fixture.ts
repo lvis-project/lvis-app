@@ -68,6 +68,7 @@ export function buildPluginZip(
       "description: Use for the deterministic marketplace lifecycle fixture.",
       "---",
       "Call the fixture read tool and report the returned generation version.",
+      `fixture-version:${version}`,
       "",
     ].join("\n")));
     zip.addFile("hooks/audit.json", Buffer.from(JSON.stringify({
@@ -94,14 +95,16 @@ export function buildPluginZip(
     })));
     zip.addFile("mcp/echo-server.mjs", Buffer.from([
       "let buffer = Buffer.alloc(0);",
+      `const fixtureVersion = ${JSON.stringify(version)};`,
+      "const processIdentity = `${process.pid}:${Date.now()}:${process.hrtime.bigint().toString()}`;",
       "function write(message) {",
       "  const json = JSON.stringify(message);",
       "  process.stdout.write(`Content-Length: ${Buffer.byteLength(json, \"utf8\")}\\r\\n\\r\\n${json}`);",
       "}",
       "function handle(req) {",
-      "  if (req.method === \"server/discover\") return { jsonrpc: \"2.0\", id: req.id, result: { resultType: \"complete\", supportedVersions: [\"2026-07-28\"], serverInfo: { name: \"bundle-echo\", version: \"1.0.0\" }, capabilities: { tools: { listChanged: false } } } };",
+      "  if (req.method === \"server/discover\") return { jsonrpc: \"2.0\", id: req.id, result: { resultType: \"complete\", supportedVersions: [\"2026-07-28\"], serverInfo: { name: \"bundle-echo\", version: fixtureVersion }, capabilities: { tools: { listChanged: false } } } };",
       "  if (req.method === \"tools/list\") return { jsonrpc: \"2.0\", id: req.id, result: { resultType: \"complete\", tools: [{ name: \"bundle_echo\", description: \"Echo a deterministic bundle probe.\", inputSchema: { type: \"object\", properties: { text: { type: \"string\" } }, required: [\"text\"], additionalProperties: false } }] } };",
-      "  if (req.method === \"tools/call\") return { jsonrpc: \"2.0\", id: req.id, result: { resultType: \"complete\", content: [{ type: \"text\", text: String(req.params?.arguments?.text ?? \"\") }] } };",
+      "  if (req.method === \"tools/call\") return { jsonrpc: \"2.0\", id: req.id, result: { resultType: \"complete\", content: [{ type: \"text\", text: JSON.stringify({ echo: String(req.params?.arguments?.text ?? \"\"), version: fixtureVersion, pid: process.pid, processIdentity }) }] } };",
       "  return { jsonrpc: \"2.0\", id: req.id, error: { code: -32601, message: \"Method not found\" } };",
       "}",
       "process.stdin.on(\"data\", (chunk) => {",

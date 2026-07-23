@@ -1,14 +1,117 @@
 /**
- * plugins.ts (handlers) — transport-agnostic PUBLIC plugin handler logic (#1409 C10).
+ * plugins.ts (handlers) — transport-agnostic plugin handler logic (#1409 C10).
  *
- * Pure `handle*` functions behind the PUBLIC plugin channels (`plugins cards`,
- * `plugins marketplace:list`). They import NOTHING from the electron transport;
- * the `ipcMain.handle` wrapper stays in `domains/plugins.ts`. Both channels are
- * read-only (gesture: none) and were already sender-guard-optional, so the
- * wrapper is a bare delegation.
+ * Pure `handle*` functions import NOTHING from the Electron transport; the
+ * `ipcMain.handle` wrapper stays in `domains/plugins.ts`. Public card/catalog
+ * reads delegate directly. The E2E bundle projection remains behind its
+ * trusted-renderer + LVIS_E2E wrapper.
  */
 import type { IpcDeps } from "../types.js";
 import type { PluginCard } from "../../plugins/runtime/index.js";
+
+export type PluginBundleE2eSnapshot =
+  | { ok: false; error: "invalid-plugin-id" | "invalid-skill-local-id" }
+  | {
+      ok: true;
+      pluginId: string;
+      active: {
+        version: string;
+        generationId: string;
+        artifactGenerationId: string;
+      } | null;
+      skill: {
+        name: string;
+        body: string;
+        owner: {
+          pluginId: string;
+          pluginVersion: string;
+          generationId: string;
+          localId: string;
+          fingerprint: string;
+        };
+      } | null;
+      tools: Array<{
+        name: string;
+        source: "plugin" | "mcp";
+        version: string;
+        pluginId?: string;
+        mcpServerId?: string;
+        generationId?: string;
+      }>;
+    };
+
+const E2E_PLUGIN_ID = /^[a-z][a-z0-9-]{2,127}$/;
+const E2E_LOCAL_ID = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/**
+ * Test-only bundle observability projection.
+ *
+ * The IPC wrapper is available only under LVIS_E2E=1 and a trusted Host
+ * renderer. Keeping the projection here transport-agnostic makes its
+ * allowlist and owner filtering independently testable. It intentionally
+ * exposes neither arbitrary Skill paths nor registry entries owned by other
+ * plugins.
+ */
+export async function handlePluginBundleE2eSnapshot(
+  deps: IpcDeps,
+  pluginId: unknown,
+  skillLocalId: unknown,
+): Promise<PluginBundleE2eSnapshot> {
+  if (typeof pluginId !== "string" || !E2E_PLUGIN_ID.test(pluginId)) {
+    return { ok: false, error: "invalid-plugin-id" };
+  }
+  if (typeof skillLocalId !== "string" || !E2E_LOCAL_ID.test(skillLocalId)) {
+    return { ok: false, error: "invalid-skill-local-id" };
+  }
+
+  const active = deps.pluginBundleLifecycle?.getActive(pluginId);
+  const loadedSkill = await deps.skillStore?.load(
+    `plugin:${pluginId}:${skillLocalId}`,
+  );
+  const skillOwner = loadedSkill?.pluginOwner;
+  const tools = deps.toolRegistry
+    .listAll()
+    .filter(
+      (tool) =>
+        (tool.source === "plugin" || tool.source === "mcp") &&
+        (
+          tool.pluginId === pluginId ||
+          tool.pluginGeneration?.pluginId === pluginId
+        ),
+    )
+    .map((tool) => ({
+      name: tool.name,
+      source: tool.source as "plugin" | "mcp",
+      version: tool.version,
+      ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+      ...(tool.mcpServerId ? { mcpServerId: tool.mcpServerId } : {}),
+      ...(tool.pluginGeneration
+        ? { generationId: tool.pluginGeneration.generationId }
+        : {}),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    ok: true,
+    pluginId,
+    active: active
+      ? {
+          version: active.pluginVersion,
+          generationId: active.generationId,
+          artifactGenerationId: active.artifactGenerationId,
+        }
+      : null,
+    skill:
+      loadedSkill && skillOwner?.pluginId === pluginId
+        ? {
+            name: loadedSkill.name,
+            body: loadedSkill.body,
+            owner: { ...skillOwner },
+          }
+        : null,
+    tools,
+  };
+}
 
 /** PUBLIC `lvis:plugins:cards` — installed plugin cards for the renderer/api. */
 export function handlePluginCards(deps: IpcDeps) {
