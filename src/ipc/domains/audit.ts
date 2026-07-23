@@ -119,6 +119,7 @@ export function registerAuditHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, CHANNELS.dlp.stats, event);
       return UNAUTHORIZED_FRAME;
     }
+    await auditLogger.flush();
     const { getDlpStats } = await import("../../audit/dlp-stats.js");
     return getDlpStats(parseAuditStatsDays(input));
   });
