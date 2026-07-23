@@ -364,16 +364,16 @@ export function createHostApiFactory(
           });
           return merged[key] as T | undefined;
         },
-        set: async <T = unknown>(key: string, value: T): Promise<void> => {
+        set: <T = unknown>(key: string, value: T): Promise<void> => {
           const schemaProp = manifest.configSchema?.properties?.[key];
           if (schemaProp?.type === "string" && schemaProp.format === "secret") {
-            throw new Error(
+            return Promise.reject(new Error(
               `[plugin:${pluginId}] config.set('${key}'): secret fields must be saved via hostApi.setSecret(), not config.set().`,
-            );
+            ));
           }
           const nestedLifecycleMutation =
             isPluginInstallLockHeld(pluginId) || hostIncarnation.isLifecycleHookActive();
-          await hostIncarnation.trackOperation(withPluginInstallLock(pluginId, async () => {
+          const persistence = withPluginInstallLock(pluginId, async () => {
             // The HostApi object belongs to this exact manifest incarnation.
             // A queued write from a stopped/uninstalled instance must not
             // recreate persisted config for a removed or reinstalled plugin.
@@ -396,25 +396,37 @@ export function createHostApiFactory(
             // for the reload.
             pluginRuntime.setConfigOverride(pluginId, nextRecord);
             emitPluginConfigChange(pluginId, key, value);
-          }));
-          // Lifecycle hooks inherit the owning mutation context. Persist their
-          // write, but never recursively restart the instance whose start/stop
-          // Promise is currently being awaited. A config-triggered replacement
-          // is likewise already the pending restart for this plugin.
-          if (nestedLifecycleMutation || pluginRuntime.isPluginRestartPending?.(pluginId)) return;
-          try {
-            const restartResult = await pluginRuntime.restartPlugin(
-              pluginId,
-              { skipPreparation: true },
-            );
-            if (restartResult !== "started") {
-              throw new Error(`runtime reload returned ${restartResult ?? "not-loaded"}`);
+          });
+          // Return the tracked chain directly. Crossing an async/await wrapper
+          // here would transfer a detached rejection to an untracked native
+          // Promise and let the owning lifecycle mutation resolve early.
+          const operation = persistence.then(async () => {
+            // Lifecycle hooks inherit the owning mutation context. Persist
+            // their write, but never recursively restart the instance whose
+            // start/stop Promise is currently being awaited.
+            if (
+              nestedLifecycleMutation
+              || pluginRuntime.isPluginRestartPending?.(pluginId)
+            ) {
+              return;
             }
-          } catch (err) {
-            throw new Error(
-              `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
-            );
-          }
+            try {
+              const restartResult = await pluginRuntime.restartPlugin(
+                pluginId,
+                { skipPreparation: true },
+              );
+              if (restartResult !== "started") {
+                throw new Error(
+                  `runtime reload returned ${restartResult ?? "not-loaded"}`,
+                );
+              }
+            } catch (err) {
+              throw new Error(
+                `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
+              );
+            }
+          });
+          return hostIncarnation.trackOperation(operation);
         },
         onChange: <T = unknown>(
           key: string,

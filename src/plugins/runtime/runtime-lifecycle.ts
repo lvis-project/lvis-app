@@ -1583,6 +1583,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
    */
   async disable(pluginId: string, actor: Actor = "user"): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    if (this.deploymentGuard) {
+      const result = await this.deploymentGuard.canDisable(pluginId, actor);
+      if (!result.allowed) {
+        throw new Error(result.reason ?? `Plugin disable denied: ${pluginId}`);
+      }
+    }
     this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
     return withPluginInstallLock(canonicalPluginId, () =>
       this.disableLocked(pluginId, canonicalPluginId, actor)
@@ -1594,13 +1600,13 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     canonicalPluginId: string,
     actor: Actor,
   ): Promise<void> {
-    this.pendingRestartPreparations.delete(canonicalPluginId);
     if (this.deploymentGuard) {
       const result = await this.deploymentGuard.canDisable(pluginId, actor);
       if (!result.allowed) {
         throw new Error(result.reason ?? `Plugin disable denied: ${pluginId}`);
       }
     }
+    this.pendingRestartPreparations.delete(canonicalPluginId);
     this.beginPluginLifecycleOperation(canonicalPluginId);
     this.preparation.clearFor(canonicalPluginId);
 
