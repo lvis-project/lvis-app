@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   existsSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -71,6 +72,40 @@ describe("AuditLogger permission audit chain", () => {
     const logger = new AuditLogger();
     logger.setupPermissionAuditChain(SECRET);
     expect(logger.isPermissionAuditChainReady()).toBe(true);
+  });
+
+  it("rejects a malformed existing chain and leaves privileged audit readiness false", () => {
+    const logger = new AuditLogger();
+    writeFileSync(logger.getPermissionAuditLogFile(), "{not-json}\n", "utf-8");
+
+    expect(() => logger.setupPermissionAuditChain(SECRET)).toThrow(/json-parse-error/);
+    expect(logger.isPermissionAuditChainReady()).toBe(false);
+    expect(() => logger.assertPermissionAuditWritable()).toThrow(/not initialized/);
+  });
+
+  it("rejects an existing chain whose HMAC continuity is broken", () => {
+    const logger = new AuditLogger();
+    writeFileSync(
+      logger.getPermissionAuditLogFile(),
+      `${JSON.stringify({ decision: "allow", prevHash: "00".repeat(32) })}\n`,
+      "utf-8",
+    );
+
+    expect(() => logger.setupPermissionAuditChain(SECRET)).toThrow(/hmac-mismatch/);
+    expect(logger.isPermissionAuditChainReady()).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("propagates unreadable-chain failures without becoming ready", () => {
+    const logger = new AuditLogger();
+    const file = logger.getPermissionAuditLogFile();
+    writeFileSync(file, "{}\n", "utf-8");
+    chmodSync(file, 0o000);
+    try {
+      expect(() => logger.setupPermissionAuditChain(SECRET)).toThrow();
+      expect(logger.isPermissionAuditChainReady()).toBe(false);
+    } finally {
+      chmodSync(file, 0o600);
+    }
   });
 
   it("appendPermissionAuditEntry throws before setupPermissionAuditChain", async () => {

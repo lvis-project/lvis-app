@@ -95,6 +95,9 @@ export abstract class PluginRuntimeState {
   protected readonly preparation: PreparationTracker;
   protected readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
   protected readonly pendingRestartPreparations = new Map<string, Promise<void>>();
+  /** Monotonic generation used to reject stale async add/restart commits. */
+  protected readonly pluginLifecycleGenerations = new Map<string, number>();
+  protected nextPluginLifecycleGeneration = 0;
   protected readonly pluginUiRevisions = new Map<string, number>();
   protected nextPluginUiRevision = 0;
   protected toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
@@ -297,6 +300,16 @@ export abstract class PluginRuntimeState {
     return [...aliases].sort();
   }
 
+  protected beginPluginLifecycleOperation(pluginId: string): number {
+    const generation = ++this.nextPluginLifecycleGeneration;
+    this.pluginLifecycleGenerations.set(pluginId, generation);
+    return generation;
+  }
+
+  protected isPluginLifecycleOperationCurrent(pluginId: string, generation: number): boolean {
+    return this.pluginLifecycleGenerations.get(pluginId) === generation;
+  }
+
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   waitForPluginReady(pluginId: string): Promise<void> {
@@ -336,6 +349,7 @@ export abstract class PluginRuntimeState {
     this.preparation.clear();
     this.pendingRestarts.clear();
     this.pendingRestartPreparations.clear();
+    this.pluginLifecycleGenerations.clear();
     this.loaded = false;
   }
 
