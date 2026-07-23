@@ -32,6 +32,14 @@ const mockInstall = vi.fn(async () => ({
   pluginId: "meeting",
 }));
 
+function setRendererApi(value: Record<string, unknown>): void {
+  Object.defineProperty(window, "lvisApi", {
+    value,
+    writable: true,
+    configurable: true,
+  });
+}
+
 beforeEach(() => {
   mockInstall.mockReset();
   mockInstall.mockResolvedValue({ ok: true as const, pluginId: "meeting" });
@@ -117,6 +125,45 @@ describe("PluginConfigTab", () => {
     });
 
     expect(screen.queryByText("설정이 저장되었습니다.")).toBeNull();
+  });
+
+  it("surfaces contribution trust list failures instead of rendering empty success", async () => {
+    const listPluginContributionTrust = vi.fn(async () => ({
+      ok: false as const,
+      error: "plugin-bundle-lifecycle-unavailable",
+    }));
+    setRendererApi({ listPluginContributionTrust });
+
+    render(<PluginConfigTab />);
+
+    expect(
+      await screen.findByTestId("plugin-config:contribution-trust-error:meeting"),
+    ).toHaveTextContent("번들 기능 신뢰 상태를 변경하지 못했습니다");
+    expect(listPluginContributionTrust).toHaveBeenCalledWith("meeting");
+  });
+
+  it("surfaces thrown contribution trust IPC failures", async () => {
+    setRendererApi({
+      listPluginContributionTrust: vi.fn(async () => {
+        throw new Error("ipc unavailable");
+      }),
+    });
+
+    render(<PluginConfigTab />);
+
+    expect(
+      await screen.findByTestId("plugin-config:contribution-trust-error:meeting"),
+    ).toHaveTextContent("번들 기능 신뢰 상태를 변경하지 못했습니다");
+  });
+
+  it("surfaces a missing required contribution trust preload method", async () => {
+    setRendererApi({});
+
+    render(<PluginConfigTab />);
+
+    expect(
+      await screen.findByTestId("plugin-config:contribution-trust-error:meeting"),
+    ).toHaveTextContent("번들 기능 신뢰 상태를 변경하지 못했습니다");
   });
 
   it("runs Doctor for a failed plugin and refreshes the plugin card", async () => {

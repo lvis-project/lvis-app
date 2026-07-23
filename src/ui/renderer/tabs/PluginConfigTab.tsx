@@ -222,6 +222,8 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   // plugin switch.
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [contributionTrust, setContributionTrust] = useState<PluginContributionTrustRow[]>([]);
+  const [contributionTrustError, setContributionTrustError] = useState<string | null>(null);
+  const contributionTrustRefreshRef = useRef(0);
   const [trustUpdating, setTrustUpdating] = useState<string | null>(null);
   useEffect(() => {
     setToolsExpanded(false);
@@ -255,20 +257,25 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   }, []);
 
   const refreshContributionTrust = useCallback(async (pluginId: string | null): Promise<void> => {
+    const refreshId = ++contributionTrustRefreshRef.current;
     if (!pluginId) {
       setContributionTrust([]);
+      setContributionTrustError(null);
       return;
     }
+    setContributionTrust([]);
+    setContributionTrustError(null);
     try {
-      const trustApi = getApi();
-      if (typeof trustApi.listPluginContributionTrust !== "function") {
-        setContributionTrust([]);
+      const result = await getApi().listPluginContributionTrust(pluginId);
+      if (refreshId !== contributionTrustRefreshRef.current) return;
+      if (!result.ok) {
+        setContributionTrustError(t("pluginConfigTab.contributionTrustError"));
         return;
       }
-      const result = await trustApi.listPluginContributionTrust(pluginId);
-      setContributionTrust(result.ok ? result.rows : []);
+      setContributionTrust(result.rows);
     } catch {
-      setContributionTrust([]);
+      if (refreshId !== contributionTrustRefreshRef.current) return;
+      setContributionTrustError(t("pluginConfigTab.contributionTrustError"));
     }
   }, []);
 
@@ -1055,7 +1062,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                   </>
                 )}
 
-                {contributionTrust.length > 0 && (
+                {(contributionTrustError || contributionTrust.length > 0) && (
                   <>
                     <Separator />
                     <div className="space-y-2" data-testid={`plugin-config:contribution-trust:${selectedPlugin.id}`}>
@@ -1067,6 +1074,15 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                           {t("pluginConfigTab.contributionTrustDescription")}
                         </p>
                       </div>
+                      {contributionTrustError && (
+                        <p
+                          role="alert"
+                          className="text-[11px] text-destructive"
+                          data-testid={`plugin-config:contribution-trust-error:${selectedPlugin.id}`}
+                        >
+                          {contributionTrustError}
+                        </p>
+                      )}
                       {contributionTrust.map((row) => {
                         const approved = row.status === "approved";
                         const key = `${row.kind}:${row.localId}`;

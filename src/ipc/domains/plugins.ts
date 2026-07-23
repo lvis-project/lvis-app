@@ -625,9 +625,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (pluginId !== undefined && (typeof pluginId !== "string" || pluginId.length === 0)) {
       return { ok: false, error: "invalid-plugin-id" };
     }
+    const lifecycle = deps.pluginBundleLifecycle;
+    if (!lifecycle) return { ok: false, error: "plugin-bundle-lifecycle-unavailable" };
     return {
       ok: true,
-      rows: deps.pluginBundleLifecycle?.listContributionTrust(pluginId as string | undefined) ?? [],
+      rows: lifecycle.listContributionTrust(pluginId as string | undefined),
     };
   });
 
