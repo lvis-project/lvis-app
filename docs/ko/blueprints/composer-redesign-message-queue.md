@@ -162,7 +162,7 @@ BOTTOM ROW (Turn 컨트롤, 2 cluster — NEW)
 | `src/ui/renderer/ChatView.tsx` | input-cluster 에 MessageQueuePanel 추가 (SessionTodoPanel 다음) |
 | `src/ui/renderer/components/Composer.tsx` | input-bar = textarea only, footer (TokenRing/PermissionModeBadge) → BottomActionRow 로 이전, min/max-height 조정 |
 | `src/ui/renderer/components/InputActionBar.tsx` | trailing 에 PermissionModeBadge + DeferredApprovalChip 추가 (📎 와 페르소나 사이) |
-| `src/engine/conversation-loop.ts` | tool-result 후 brake-point hook 에서 message-queue.injectAll() 호출 |
+| `src/engine/turn/query-loop.ts` | tool-result 후 brake-point hook 에서 message-queue.injectAll() 호출 |
 | `src/ui/renderer/hooks/use-keyboard-shortcuts.ts` (신규 가능) | ⌘⏎ / ESC / ⌘K 통합 매핑 |
 
 ### 제거
