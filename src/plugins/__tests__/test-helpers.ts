@@ -431,8 +431,19 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
   const runRuntimeRetirement = async (
     projection: PluginRuntimeGenerationProjection,
   ): Promise<void> => {
+    const errors: Error[] = [];
     for (const step of runtime.prepareRuntimeRetirement(projection)) {
-      await step.run();
+      try {
+        await step.run();
+      } catch (error) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(
+        errors,
+        `plugin '${projection.manifest.id}' generation retirement failed`,
+      );
     }
   };
 
