@@ -192,6 +192,7 @@ async function runParityPair(opts: { deny?: boolean } = {}): Promise<ParityRun> 
     [{ id: "tu-mcp", name: PROBE, input: { ...INPUT } }],
     { sessionId: "sess-mcp", permissionContext: { trustOrigin: "user-keyboard" }, callbacks },
   ))[0];
+  await auditLogger.flush();
 
   return {
     dir, auditDir, classifySpy, gate, pluginResult, mcpResult,
