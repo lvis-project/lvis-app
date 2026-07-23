@@ -24,10 +24,18 @@ describe("Electron Node-mode Vitest runner", () => {
       new URL("../../vitest.config.ts", import.meta.url),
       "utf8",
     );
+    const analysisConfig = readFileSync(
+      new URL("../../vitest.analysis.config.ts", import.meta.url),
+      "utf8",
+    );
     const bunfig = readFileSync(new URL("../../bunfig.toml", import.meta.url), "utf8");
     expect(vitestConfig).toMatch(
       /^import "\.\/scripts\/assert-electron-node-vitest\.mjs";$/m,
     );
+    expect(vitestConfig).toMatch(
+      /^export \{ default \} from "\.\/vitest\.analysis\.config\.js";$/m,
+    );
+    expect(analysisConfig).not.toContain("assert-electron-node-vitest");
     expect(bunfig).toMatch(
       /^preload = \["\.\/scripts\/assert-electron-node-vitest\.mjs"\]$/m,
     );

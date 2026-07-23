@@ -1,0 +1,3226 @@
+{
+  "schemaVersion": 1,
+  "knipVersion": "6.23.0",
+  "entries": [
+    {
+      "type": "devDependencies",
+      "file": "package.json",
+      "name": "@ai-sdk/devtools"
+    },
+    {
+      "type": "devDependencies",
+      "file": "package.json",
+      "name": "@tailwindcss/typography"
+    },
+    {
+      "type": "devDependencies",
+      "file": "package.json",
+      "name": "@types/adm-zip"
+    },
+    {
+      "type": "devDependencies",
+      "file": "package.json",
+      "name": "baseline-browser-mapping"
+    },
+    {
+      "type": "devDependencies",
+      "file": "package.json",
+      "name": "caniuse-lite"
+    },
+    {
+      "type": "devDependencies",
+      "file": "package.json",
+      "name": "tailwindcss"
+    },
+    {
+      "type": "devDependencies",
+      "file": "package.json",
+      "name": "tw-animate-css"
+    },
+    {
+      "type": "duplicates",
+      "file": "src/api/a2a-remote-contracts.ts",
+      "name": "A2A_EXACT_SEND_REPLAY_ERROR_NAMESPACE,A2A_EXACT_SEND_REPLAY_URI"
+    },
+    {
+      "type": "duplicates",
+      "file": "src/shared/llm-vendor-defaults.ts",
+      "name": "BUILT_IN_LLM_VENDOR_IDS,DEFAULT_VISIBLE_LLM_VENDOR_IDS"
+    },
+    {
+      "type": "duplicates",
+      "file": "src/shared/llm-vendor-defaults.ts",
+      "name": "INSTALLED_LLM_VENDOR_IDS,KNOWN_LEGACY_LLM_VENDOR_IDS,MARKETPLACE_ELIGIBLE_LLM_VENDOR_IDS"
+    },
+    {
+      "type": "duplicates",
+      "file": "src/shared/subagent-policy.ts",
+      "name": "MAX_AGENT_SPAWNS_PER_ROUND,MAX_TOOL_CALLS_PER_ROUND"
+    },
+    {
+      "type": "duplicates",
+      "file": "src/ui/renderer/components/CommandPopoverPanel.tsx",
+      "name": "CommandPopoverPanel,default"
+    },
+    {
+      "type": "duplicates",
+      "file": "src/ui/renderer/components/SlashPickerPanel.tsx",
+      "name": "SlashPickerPanel,default"
+    },
+    {
+      "type": "duplicates",
+      "file": "src/ui/renderer/theme/bundles/index.ts",
+      "name": "BUNDLES,DEFAULT_VISIBLE_BUNDLES"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/evidence-lib.mjs",
+      "name": "HEAD_SHA_RE"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/evidence-lib.mjs",
+      "name": "PLACEHOLDER_RE"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/evidence-lib.mjs",
+      "name": "resolveEvidencePath"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/evidence-lib.mjs",
+      "name": "SHA256_RE"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/installer-provenance-lib.mjs",
+      "name": "collectFixedToolVersions"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/installer-provenance-lib.mjs",
+      "name": "readAndValidateProvenance"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/installer-provenance-lib.mjs",
+      "name": "SUPPORTED_INSTALLER_OSES"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/packaged-live-contract.mjs",
+      "name": "NO_SOCKET_CASE_IDS"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/packaged-live-contract.mjs",
+      "name": "TASK_METHODS"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/packaged-live-contract.mjs",
+      "name": "validateInstallReceipt"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/strict-json.mjs",
+      "name": "readStrictJsonFile"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/ui-driver-environment.mjs",
+      "name": "PACKAGED_UI_ENV_KEYS"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/lib/build-assets.mjs",
+      "name": "BUILD_ASSETS"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/lib/dev-watcher-gate.mjs",
+      "name": "waitForFirstBuild"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/lib/electron-native-modules.mjs",
+      "name": "withElectronNativeRebuildLock"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/packaged-runtime-assets.mjs",
+      "name": "hostRuntimeAssetsForInstallerTarget"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/packaged-runtime-assets.mjs",
+      "name": "PLUGIN_MANAGED_RUNTIME_ASSETS"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/uv-targets.mjs",
+      "name": "UV_TARGET_BY_DIR"
+    },
+    {
+      "type": "exports",
+      "file": "src/agents/agent-registry.ts",
+      "name": "withAgentRegistryLock"
+    },
+    {
+      "type": "exports",
+      "file": "src/agents/agent-registry.ts",
+      "name": "writeAgentRegistry"
+    },
+    {
+      "type": "exports",
+      "file": "src/api/a2a-exact-replay-handler.ts",
+      "name": "createA2AExactReplayHandler"
+    },
+    {
+      "type": "exports",
+      "file": "src/api/a2a-remote-transport.ts",
+      "name": "isA2APublicAddress"
+    },
+    {
+      "type": "exports",
+      "file": "src/api/a2a-remote-transport.ts",
+      "name": "validateA2ARemoteUrl"
+    },
+    {
+      "type": "exports",
+      "file": "src/api/a2a-router.ts",
+      "name": "buildA2AAgentCard"
+    },
+    {
+      "type": "exports",
+      "file": "src/audit/diagnostics-bundle.ts",
+      "name": "DIAGNOSTICS_BUNDLE_SCHEMA_VERSION"
+    },
+    {
+      "type": "exports",
+      "file": "src/audit/diagnostics-bundle.ts",
+      "name": "MAX_BUNDLE_BYTES"
+    },
+    {
+      "type": "exports",
+      "file": "src/audit/rationale-audit-adapter.ts",
+      "name": "RATIONALE_AUDIT_MAX_DAILY_BYTES"
+    },
+    {
+      "type": "exports",
+      "file": "src/audit/rationale-audit-adapter.ts",
+      "name": "RATIONALE_AUDIT_MAX_DAILY_LINES"
+    },
+    {
+      "type": "exports",
+      "file": "src/audit/rationale-audit-adapter.ts",
+      "name": "RATIONALE_AUDIT_SCHEMA_VERSION"
+    },
+    {
+      "type": "exports",
+      "file": "src/boot/dev-flags.ts",
+      "name": "isConfigured"
+    },
+    {
+      "type": "exports",
+      "file": "src/boot/plugins.ts",
+      "name": "registerPluginEventBridge"
+    },
+    {
+      "type": "exports",
+      "file": "src/boot/steps/reviewer-wiring.ts",
+      "name": "ReviewerProviderUnconfiguredError"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/badge.tsx",
+      "name": "badgeVariants"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/dialog.tsx",
+      "name": "DialogPortal"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/dialog.tsx",
+      "name": "DialogTrigger"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/dropdown-menu.tsx",
+      "name": "DropdownMenuGroup"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/dropdown-menu.tsx",
+      "name": "DropdownMenuPortal"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/dropdown-menu.tsx",
+      "name": "DropdownMenuSub"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/dropdown-menu.tsx",
+      "name": "DropdownMenuSubContent"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/dropdown-menu.tsx",
+      "name": "DropdownMenuSubTrigger"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/native-select.tsx",
+      "name": "NativeSelectOptGroup"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/popover.tsx",
+      "name": "PopoverAnchor"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/select.tsx",
+      "name": "SelectLabel"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/select.tsx",
+      "name": "SelectScrollDownButton"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/select.tsx",
+      "name": "SelectScrollUpButton"
+    },
+    {
+      "type": "exports",
+      "file": "src/components/ui/select.tsx",
+      "name": "SelectSeparator"
+    },
+    {
+      "type": "exports",
+      "file": "src/data/settings-store.ts",
+      "name": "FONT_SIZE_SCALE_VALUES"
+    },
+    {
+      "type": "exports",
+      "file": "src/data/settings-store.ts",
+      "name": "isValidFontFamilyOverride"
+    },
+    {
+      "type": "exports",
+      "file": "src/data/settings-store.ts",
+      "name": "LLM_VENDORS"
+    },
+    {
+      "type": "exports",
+      "file": "src/data/settings-store.ts",
+      "name": "migrateAppearanceV1ToV2"
+    },
+    {
+      "type": "exports",
+      "file": "src/engine/a2a-subagent-message-bus.ts",
+      "name": "maskA2AMessage"
+    },
+    {
+      "type": "exports",
+      "file": "src/engine/auto-compact.ts",
+      "name": "getModelContextWindow"
+    },
+    {
+      "type": "exports",
+      "file": "src/engine/turn/knowledge-cap.ts",
+      "name": "KNOWLEDGE_DEPTH_CAP"
+    },
+    {
+      "type": "exports",
+      "file": "src/engine/turn/knowledge-cap.ts",
+      "name": "KNOWLEDGE_TOOL_NAMES"
+    },
+    {
+      "type": "exports",
+      "file": "src/engine/turn/plugin-expansion.ts",
+      "name": "MAX_PLUGIN_EXPANSION"
+    },
+    {
+      "type": "exports",
+      "file": "src/engine/turn/plugin-expansion.ts",
+      "name": "MAX_SESSION_PLUGIN_EXPANSION"
+    },
+    {
+      "type": "exports",
+      "file": "src/engine/turn/rationale-conversation-orchestration.ts",
+      "name": "RATIONALE_TRIGGER_CANCELLED_RESULT"
+    },
+    {
+      "type": "exports",
+      "file": "src/engine/turn/tool-scope.ts",
+      "name": "scopedToolNameSet"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "interpolate"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "isDefaultVisibleLocale"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "isLocale"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "isLocaleMessagesLoaded"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "loadAllLocaleMessages"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "loadLocaleMessages"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "onLocaleChange"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "SUPPORTED_LOCALES"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/runtime.ts",
+      "name": "onLocaleChange"
+    },
+    {
+      "type": "exports",
+      "file": "src/ipc/handlers/chat.ts",
+      "name": "normalizePersonaPromptId"
+    },
+    {
+      "type": "exports",
+      "file": "src/ipc/handlers/chat.ts",
+      "name": "parseChatSendPayload"
+    },
+    {
+      "type": "exports",
+      "file": "src/ipc/handlers/chat.ts",
+      "name": "SESSION_KIND_VALUES"
+    },
+    {
+      "type": "exports",
+      "file": "src/ipc/index.ts",
+      "name": "auditUnauthorized"
+    },
+    {
+      "type": "exports",
+      "file": "src/ipc/index.ts",
+      "name": "UNAUTHORIZED_FRAME"
+    },
+    {
+      "type": "exports",
+      "file": "src/ipc/index.ts",
+      "name": "validateHostRendererSender"
+    },
+    {
+      "type": "exports",
+      "file": "src/ipc/index.ts",
+      "name": "validatePluginFrame"
+    },
+    {
+      "type": "exports",
+      "file": "src/ipc/index.ts",
+      "name": "validateSender"
+    },
+    {
+      "type": "exports",
+      "file": "src/lib/logger.ts",
+      "name": "transport"
+    },
+    {
+      "type": "exports",
+      "file": "src/lib/shell-resolver.ts",
+      "name": "shellPathForHostPath"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/a2a-remote-runtime.ts",
+      "name": "A2A_REMOTE_ROUTE_CONTROL_SECRET_KEY"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/a2a-remote-runtime.ts",
+      "name": "a2aRemoteDataSecretKey"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/ask-user-question-gate.ts",
+      "name": "IPC_ASK_USER_QUESTION_REQUEST"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/ask-user-question-gate.ts",
+      "name": "IPC_ASK_USER_QUESTION_RESPOND"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/auth-partition-viewer-service.ts",
+      "name": "__internals"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/auto-updater.ts",
+      "name": "CHECK_INTERVAL_MS"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/early-boot-env.ts",
+      "name": "WINDOWS_TOAST_ACTIVATOR_CLSID"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/hybrid-retriever.ts",
+      "name": "DEFAULT_CLOUD_TIMEOUT_MS"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/hybrid-retriever.ts",
+      "name": "DEFAULT_HYBRID_WEIGHTS"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/hybrid-retriever.ts",
+      "name": "DEFAULT_OVERFETCH_MULTIPLIER"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/link-window-service.ts",
+      "name": "buildPersistentBrowserUserAgent"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/main-window-bounds.ts",
+      "name": "WORK_MODE_HEIGHT"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/main-window-bounds.ts",
+      "name": "WORK_MODE_WIDTH"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/managed-child-processes.ts",
+      "name": "spawnManaged"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/project-root-authorization.ts",
+      "name": "DEFAULT_PROJECT_NAME"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/project-root-authorization.ts",
+      "name": "isAuthorizedWorkspaceProjectRoot"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/settings-window.ts",
+      "name": "openSettingsWindow"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/shutdown-timeout.ts",
+      "name": "__resetShutdownTimeoutWarnLatchesForTest"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/uv-runtime.ts",
+      "name": "currentUvTarget"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/uv-runtime.ts",
+      "name": "isPackagedUvRuntime"
+    },
+    {
+      "type": "exports",
+      "file": "src/mcp/mcp-app-download.ts",
+      "name": "MCP_APP_DOWNLOAD_MAX_FILENAME_CHARS"
+    },
+    {
+      "type": "exports",
+      "file": "src/mcp/mcp-ui-message.ts",
+      "name": "APP_NOTIFICATION_META_KEY"
+    },
+    {
+      "type": "exports",
+      "file": "src/mcp/mcp-ui-message.ts",
+      "name": "MCP_APP_MESSAGE_MAX_CHARS"
+    },
+    {
+      "type": "exports",
+      "file": "src/memory/session-search-index.ts",
+      "name": "codePointLength"
+    },
+    {
+      "type": "exports",
+      "file": "src/memory/session-search-index.ts",
+      "name": "escapeFtsQuery"
+    },
+    {
+      "type": "exports",
+      "file": "src/memory/session-search-index.ts",
+      "name": "escapeLikePattern"
+    },
+    {
+      "type": "exports",
+      "file": "src/memory/session-search-index.ts",
+      "name": "excerptAroundMatch"
+    },
+    {
+      "type": "exports",
+      "file": "src/observability/conversation-trace.ts",
+      "name": "isTraceEnabled"
+    },
+    {
+      "type": "exports",
+      "file": "src/permissions/approval-gate.ts",
+      "name": "IPC_APPROVAL_RESPOND"
+    },
+    {
+      "type": "exports",
+      "file": "src/permissions/effect-kind.ts",
+      "name": "pathEffectClass"
+    },
+    {
+      "type": "exports",
+      "file": "src/permissions/evaluation-context.ts",
+      "name": "PERMISSION_EVALUATION_CONTEXT_VERSION"
+    },
+    {
+      "type": "exports",
+      "file": "src/permissions/host-shell-execution-permit.ts",
+      "name": "parseHostShellExecutionInput"
+    },
+    {
+      "type": "exports",
+      "file": "src/permissions/permission-audit-runner.ts",
+      "name": "getDefaultAuditDir"
+    },
+    {
+      "type": "exports",
+      "file": "src/permissions/permission-settings-store.ts",
+      "name": "REVIEWER_PROVIDERS"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/capabilities.ts",
+      "name": "EVENT_NAMESPACE_CAPABILITY"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/capabilities.ts",
+      "name": "PUBLIC_HOST_EVENT_TYPES"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/envelope-verifier.ts",
+      "name": "toKeyObject"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/installed-entry-fs.ts",
+      "name": "deferTombstoneRemoval"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/marketplace-artifact-limits.ts",
+      "name": "DEFAULT_MARKETPLACE_ARTIFACT_LIMITS"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/marketplace-installer.ts",
+      "name": "encodeMarketplaceVersionForFilename"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/plugin-artifact-store.ts",
+      "name": "SAFE_ARTIFACT_SLUG_RE"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/plugin-id.ts",
+      "name": "SAFE_ARTIFACT_SLUG_RE"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/plugin-removal-transaction.ts",
+      "name": "readRemovalTransactionJournal"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/runtime/index.ts",
+      "name": "readEnabledManifestSnapshots"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/runtime/index.ts",
+      "name": "resolveManifestLoadPlan"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/runtime/manifest-validation.ts",
+      "name": "INCOMPATIBLE_APP_VERSION_CODE"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/runtime/manifest-validation.ts",
+      "name": "IncompatibleAppVersionError"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/runtime/snapshots.ts",
+      "name": "isPathContained"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/runtime/snapshots.ts",
+      "name": "isTrustedRegistryManifestPath"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/secret-shape.ts",
+      "name": "isApiKeyLikeSecretField"
+    },
+    {
+      "type": "exports",
+      "file": "src/plugins/secret-shape.ts",
+      "name": "looksLikeEndpointUrl"
+    },
+    {
+      "type": "exports",
+      "file": "src/preload/gesture-intent.ts",
+      "name": "USER_KEYBOARD_INTENT_TTL_MS"
+    },
+    {
+      "type": "exports",
+      "file": "src/preload/gesture-intent.ts",
+      "name": "userKeyboardIntentTokens"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2A_VERSION_HEADER"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_AUTH_REQUIRED"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_CANCELED"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_COMPLETED"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_FAILED"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_INPUT_REQUIRED"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_REJECTED"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_RUN_STATUS_MAP"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_SUBMITTED"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_UNSPECIFIED"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/a2a.ts",
+      "name": "A2A_TASK_STATE_WORKING"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/initial-app-mode.ts",
+      "name": "LEGACY_ACTION_APP_MODE"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/llm-vendor-defaults.ts",
+      "name": "isOpenAICompatiblePresetVendor"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/marketplace-announcements.ts",
+      "name": "MARKETPLACE_ANNOUNCEMENT_LEVELS"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/marketplace-package-assets.ts",
+      "name": "MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/marketplace-package-assets.ts",
+      "name": "MARKETPLACE_PROVIDER_PRESET_ID_PATTERN_SOURCE"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/marketplace-package-sections.ts",
+      "name": "MARKETPLACE_PACKAGE_TYPE_LABELS"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/mcp-app-message-source.ts",
+      "name": "APP_MESSAGE_SOURCE_PATTERN"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/network-access.ts",
+      "name": "normalizeNetworkAccessGrant"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/openrouter-free-models.ts",
+      "name": "OPENROUTER_FREE_MODEL_VARIANT_SUFFIX"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/permission-reviewer-framework.ts",
+      "name": "PERMISSION_REVIEWER_COMPOSITION_RULES"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/permission-reviewer-framework.ts",
+      "name": "PERMISSION_REVIEWER_INPUT_FIELDS"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/permission-reviewer-framework.ts",
+      "name": "PERMISSION_REVIEWER_LEVELS"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/permission-reviewer-framework.ts",
+      "name": "PERMISSION_REVIEWER_OUTPUT_CONTRACT"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/plugin-config.ts",
+      "name": "isPlainObject"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/plugin-config.ts",
+      "name": "PLUGIN_CONFIG_RESERVED_KEYS"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/plugin-partition.ts",
+      "name": "pluginPartitionHash"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/pricing-data.ts",
+      "name": "anthropicCacheRates"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/project-identity.ts",
+      "name": "normalizeProjectName"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/project-identity.ts",
+      "name": "normalizeProjectRoot"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/project-identity.ts",
+      "name": "projectIdentityFromRoot"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "buildRenderHtmlCspMeta"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "buildRenderHtmlThemeStyle"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "clampRenderHtmlWindowSize"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "RENDER_HTML_WINDOW_DEFAULT_HEIGHT"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "RENDER_HTML_WINDOW_DEFAULT_WIDTH"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "RENDER_HTML_WINDOW_MAX_HEIGHT"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "RENDER_HTML_WINDOW_MAX_HTML_BYTES"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "RENDER_HTML_WINDOW_MAX_WIDTH"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "RENDER_HTML_WINDOW_MIN_HEIGHT"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "RENDER_HTML_WINDOW_MIN_WIDTH"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/session-todo.ts",
+      "name": "SESSION_TODO_ITEM_STATUSES"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/settings-tabs.ts",
+      "name": "SETTINGS_TABS"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/sidebar-tab.ts",
+      "name": "SIDEBAR_TABS"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/status-bar-emojis.ts",
+      "name": "STATUS_BAR_OS_EMOJIS"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/status-bar-emojis.ts",
+      "name": "STATUS_BAR_RUNTIME_EMOJIS"
+    },
+    {
+      "type": "exports",
+      "file": "src/skills/skill-registry.ts",
+      "name": "withSkillRegistryLock"
+    },
+    {
+      "type": "exports",
+      "file": "src/skills/skill-registry.ts",
+      "name": "writeSkillRegistry"
+    },
+    {
+      "type": "exports",
+      "file": "src/telemetry/client.ts",
+      "name": "loadOrCreateDeviceUuid"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/bash.ts",
+      "name": "spawnWithSandbox"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/file-read-core.ts",
+      "name": "BINARY_SAMPLE_BYTES"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/memory-write.ts",
+      "name": "MEMORY_WRITE_RESERVED_MARKER_PATTERN"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/memory-write.ts",
+      "name": "memoryWriteTitleHasControlChar"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/pipeline/rationale-control.ts",
+      "name": "validateHostAnchorRoundReservationReceipt"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/routine-schedule.ts",
+      "name": "routineScheduleApprovalCacheKey"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/tool-result-chunk.ts",
+      "name": "READ_TOOL_RESULT_CHUNK_TOOL"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/tool-result-chunk.ts",
+      "name": "TOOL_RESULT_CHUNK_DEFAULT_CHARS"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/tool-result-chunk.ts",
+      "name": "TOOL_RESULT_CHUNK_MAX_CHARS"
+    },
+    {
+      "type": "exports",
+      "file": "src/tools/tool-result-chunk.ts",
+      "name": "TOOL_RESULT_CHUNK_MIN_CHARS"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/InputActionBar.tsx",
+      "name": "makeBottomActionSendHandler"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/LazyCalendar.tsx",
+      "name": "preloadCalendar"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/permissions/PermissionDecisionCard.tsx",
+      "name": "formatSummaryValue"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/slash-picker-data.ts",
+      "name": "normalizeSlashQuery"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/slash-picker-data.ts",
+      "name": "SLASH_COMMANDS"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/WorkBoardPanel.tsx",
+      "name": "WorkItemCreateDialog"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/WorkBoardPanel.tsx",
+      "name": "WorkItemDetailDialog"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/hooks/status-bar/utils.ts",
+      "name": "TOAST_FIELD_MAX"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/hooks/status-bar/vendor-label.ts",
+      "name": "vendorEmoji"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/bundles/index.ts",
+      "name": "DEFAULT_VISIBLE_THEME_BUNDLE_IDS"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/bundles/index.ts",
+      "name": "MARKETPLACE_ELIGIBLE_THEME_BUNDLE_IDS"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "applyBundleToDocument"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "BUNDLES"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "bundleShell"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "isBundleId"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "loadAllThemeBundles"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "loadThemeBundle"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "MARKETPLACE_THEME_BUNDLES"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "resolveSystemPair"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/plugin-token-map.ts",
+      "name": "resolvePluginTokens"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/resolve-theme.ts",
+      "name": "bundleShell"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/ThemeProvider.tsx",
+      "name": "BUNDLES"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/ThemeProvider.tsx",
+      "name": "bundleToPluginTokens"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/utils/action-panel-activity.ts",
+      "name": "addUniqueActivity"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/utils/html-preview.ts",
+      "name": "clampPreviewHeight"
+    },
+    {
+      "type": "exports",
+      "file": "src/work-board/activity-log.ts",
+      "name": "ACTIVITY_FILE"
+    },
+    {
+      "type": "exports",
+      "file": "src/work-board/storage.ts",
+      "name": "featureNamespaceStorage"
+    },
+    {
+      "type": "exports",
+      "file": "src/work-board/storage.ts",
+      "name": "WORK_BOARD_FEATURE"
+    },
+    {
+      "type": "exports",
+      "file": "src/work-board/work-memory.ts",
+      "name": "MEMORIES_DIR"
+    },
+    {
+      "type": "exports",
+      "file": "src/work-board/work-report.ts",
+      "name": "REPORT_GENERATED_EVENT"
+    },
+    {
+      "type": "exports",
+      "file": "web/components/docs/command-palette.tsx",
+      "name": "useCommandPalette"
+    },
+    {
+      "type": "exports",
+      "file": "web/components/ui/badge.tsx",
+      "name": "badgeVariants"
+    },
+    {
+      "type": "exports",
+      "file": "web/components/ui/button.tsx",
+      "name": "buttonVariants"
+    },
+    {
+      "type": "exports",
+      "file": "web/components/ui/dialog.tsx",
+      "name": "DialogClose"
+    },
+    {
+      "type": "exports",
+      "file": "web/components/ui/dialog.tsx",
+      "name": "DialogOverlay"
+    },
+    {
+      "type": "exports",
+      "file": "web/components/ui/dialog.tsx",
+      "name": "DialogPortal"
+    },
+    {
+      "type": "exports",
+      "file": "web/components/ui/sheet.tsx",
+      "name": "SheetClose"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/i18n.ts",
+      "name": "defaultLocale"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/i18n.ts",
+      "name": "locales"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/i18n.ts",
+      "name": "stripLocale"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/navigation.ts",
+      "name": "flattenNav"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/navigation.ts",
+      "name": "navigation"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/screenshots.ts",
+      "name": "shotCaption"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/search-index.ts",
+      "name": "searchEntries"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/search-index.ts",
+      "name": "searchIndex"
+    },
+    {
+      "type": "exports",
+      "file": "web/lib/ui-strings.ts",
+      "name": "ui"
+    },
+    {
+      "type": "files",
+      "file": "scripts/a2a-p4-5-live/ui-driver.mjs",
+      "name": "scripts/a2a-p4-5-live/ui-driver.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/asrt-runtime-smoke.mjs",
+      "name": "scripts/asrt-runtime-smoke.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/capture-screenshots.mjs",
+      "name": "scripts/capture-screenshots.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/check-package-footprint.mjs",
+      "name": "scripts/check-package-footprint.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/electron-after-pack.cjs",
+      "name": "scripts/electron-after-pack.cjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/hooks/node-native-abi.mjs",
+      "name": "scripts/hooks/node-native-abi.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/hooks/pre-push-comment-policy.mjs",
+      "name": "scripts/hooks/pre-push-comment-policy.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/hooks/pre-push-markdown-policy.mjs",
+      "name": "scripts/hooks/pre-push-markdown-policy.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/hooks/pre-push-test-policy.mjs",
+      "name": "scripts/hooks/pre-push-test-policy.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/hooks/run-local-checks.mjs",
+      "name": "scripts/hooks/run-local-checks.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/hooks/spawn-command.mjs",
+      "name": "scripts/hooks/spawn-command.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/i18n-build-catalog.mjs",
+      "name": "scripts/i18n-build-catalog.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/i18n-dump-maps.ts",
+      "name": "scripts/i18n-dump-maps.ts"
+    },
+    {
+      "type": "files",
+      "file": "scripts/i18n-generate-extra-locales.ts",
+      "name": "scripts/i18n-generate-extra-locales.ts"
+    },
+    {
+      "type": "files",
+      "file": "scripts/recover-electron-native-reaper.mjs",
+      "name": "scripts/recover-electron-native-reaper.mjs"
+    },
+    {
+      "type": "files",
+      "file": "scripts/run-a2a-p4-5-tck.ts",
+      "name": "scripts/run-a2a-p4-5-tck.ts"
+    },
+    {
+      "type": "files",
+      "file": "scripts/write-installer-provenance.mjs",
+      "name": "scripts/write-installer-provenance.mjs"
+    },
+    {
+      "type": "files",
+      "file": "src/data/__tests__/fixtures/secret-store-process-child.ts",
+      "name": "src/data/__tests__/fixtures/secret-store-process-child.ts"
+    },
+    {
+      "type": "files",
+      "file": "src/plugin-ui-shell.js",
+      "name": "src/plugin-ui-shell.js"
+    },
+    {
+      "type": "files",
+      "file": "src/plugins/__tests__/fixtures/registry-process-child.ts",
+      "name": "src/plugins/__tests__/fixtures/registry-process-child.ts"
+    },
+    {
+      "type": "files",
+      "file": "src/shared/host-font-stack.ts",
+      "name": "src/shared/host-font-stack.ts"
+    },
+    {
+      "type": "files",
+      "file": "src/styles.css",
+      "name": "src/styles.css"
+    },
+    {
+      "type": "files",
+      "file": "src/ui/renderer/components/LvisLogo.tsx",
+      "name": "src/ui/renderer/components/LvisLogo.tsx"
+    },
+    {
+      "type": "files",
+      "file": "web/functions/download/[platform].js",
+      "name": "web/functions/download/[platform].js"
+    },
+    {
+      "type": "files",
+      "file": "web/infra/edge-router/worker.js",
+      "name": "web/infra/edge-router/worker.js"
+    },
+    {
+      "type": "types",
+      "file": "src/agents/agent-registry.ts",
+      "name": "AgentRegistryEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-exact-replay-handler.ts",
+      "name": "A2ARemoteCallerAuthenticator"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-remote-contracts.ts",
+      "name": "A2APreparedSecretHandle"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-remote-contracts.ts",
+      "name": "A2ARemoteApprovalDecision"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-remote-contracts.ts",
+      "name": "A2ARouteOperationKind"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-remote-contracts.ts",
+      "name": "A2ARouteSnapshotWire"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-remote-transport.ts",
+      "name": "A2ADnsAnswer"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-route-control-client.ts",
+      "name": "A2ARouteControlAuthHandle"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-route-control-client.ts",
+      "name": "A2ARouteControlAuthResolver"
+    },
+    {
+      "type": "types",
+      "file": "src/api/a2a-router.ts",
+      "name": "A2AHttpRouterAuditEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-logger.ts",
+      "name": "PluginInstallEscalationAudit"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "AuditAllow"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "AuditAsk"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "AuditCommon"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "AuditDeferred"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "AuditDeferredResolve"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "AuditDeny"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "AuditManifestViolation"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "AuditModeChange"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "PermissionMode"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "RiskVerdict"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "RoutineScopeSnapshot"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/audit-schema.ts",
+      "name": "TrustOrigin"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/diagnostics-bundle.ts",
+      "name": "DiagnosticsBundleManifest"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/dlp-filter.ts",
+      "name": "DlpResult"
+    },
+    {
+      "type": "types",
+      "file": "src/audit/sandbox-audit.ts",
+      "name": "SandboxEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/boot/bootstrap-status.ts",
+      "name": "BootstrapStatusComplete"
+    },
+    {
+      "type": "types",
+      "file": "src/boot/bootstrap-status.ts",
+      "name": "BootstrapStatusError"
+    },
+    {
+      "type": "types",
+      "file": "src/boot/bootstrap-status.ts",
+      "name": "BootstrapStatusStart"
+    },
+    {
+      "type": "types",
+      "file": "src/boot/plugin-surface-permissions.ts",
+      "name": "PluginSurfacePermissionBase"
+    },
+    {
+      "type": "types",
+      "file": "src/boot/steps/reviewer-wiring.ts",
+      "name": "ActiveReviewerLlmIdentity"
+    },
+    {
+      "type": "types",
+      "file": "src/boot/steps/reviewer-wiring.ts",
+      "name": "RuntimeReviewerMode"
+    },
+    {
+      "type": "types",
+      "file": "src/boot/steps/sandbox-gate.ts",
+      "name": "SandboxGateAction"
+    },
+    {
+      "type": "types",
+      "file": "src/components/ui/badge.tsx",
+      "name": "BadgeProps"
+    },
+    {
+      "type": "types",
+      "file": "src/components/ui/button.tsx",
+      "name": "ButtonProps"
+    },
+    {
+      "type": "types",
+      "file": "src/components/ui/dialog.tsx",
+      "name": "DialogContentProps"
+    },
+    {
+      "type": "types",
+      "file": "src/core/work-board-engine.ts",
+      "name": "RunItemOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/core/work-board-engine.ts",
+      "name": "RunItemResult"
+    },
+    {
+      "type": "types",
+      "file": "src/data/secret-document-store.ts",
+      "name": "SecretStoreReconciliationWarning"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "AppearanceFontSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "AppearanceSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "AppearanceSettingsV1"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "AuditSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "ChatSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "ChatThemePreference"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "CodeThemePreference"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "DiagnosticsSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "FontSizeScale"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "LLMVendor"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "LLMVendorSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "PluginSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "PrivacySettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "RoutineSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "SystemAppMode"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "SystemCloseBehavior"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "ThemePreference"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "UpdateSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "WebSearchSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "WebViewPreferredFlow"
+    },
+    {
+      "type": "types",
+      "file": "src/data/settings-store.ts",
+      "name": "WebViewSettings"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/a2a-agent-message-envelope.ts",
+      "name": "A2ASubAgentAddress"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/a2a-agent-message-mailbox.ts",
+      "name": "A2AAgentMailboxDiagnosticReason"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/a2a-agent-message-mailbox.ts",
+      "name": "A2AAgentMailboxDraft"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/a2a-subagent-message-codec.ts",
+      "name": "InboundA2ASubAgentMessageFailureReason"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/llm/provider-error-diagnostics.ts",
+      "name": "ProviderRateLimitDiagnostics"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/llm/types.ts",
+      "name": "StreamSmoothing"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/structured-compact.ts",
+      "name": "OpenAICompactionItem"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/structured-compact.ts",
+      "name": "SummarySectionName"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/structured-compact.ts",
+      "name": "ToolCallSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/structured-compact.ts",
+      "name": "VendorOpaqueState"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/subagent-message-mailbox.ts",
+      "name": "ParentMailboxLoadDiagnosticReason"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/subagent-runner.ts",
+      "name": "SubAgentRunStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/subagent-runner.ts",
+      "name": "SubAgentSuspension"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/subagent-runner.ts",
+      "name": "SubAgentSuspensionReason"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/suggested-replies.ts",
+      "name": "StreamingFilterResult"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/turn/rationale-round.ts",
+      "name": "RationaleOnlyRoundGenerationFailure"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/turn/rationale-round.ts",
+      "name": "RationaleOnlyRoundInterrupted"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/turn/tool-search.ts",
+      "name": "ToolSearchCatalogEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/usage-stats.ts",
+      "name": "UsageConversation"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/usage-stats.ts",
+      "name": "UsagePerVendor"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/usage-stats.ts",
+      "name": "UsageTotals"
+    },
+    {
+      "type": "types",
+      "file": "src/hooks/hook-discovery.ts",
+      "name": "LockfileEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/hooks/hook-discovery.ts",
+      "name": "LockfileTrustState"
+    },
+    {
+      "type": "types",
+      "file": "src/hooks/hook-registry.ts",
+      "name": "ConfigHookRegistryEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/hooks/hook-registry.ts",
+      "name": "ShHookRegistryEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/hooks/hook-runner.ts",
+      "name": "PostHookResult"
+    },
+    {
+      "type": "types",
+      "file": "src/hooks/script-hook-types.ts",
+      "name": "ToolHookStdin"
+    },
+    {
+      "type": "types",
+      "file": "src/i18n/index.ts",
+      "name": "MessageKey"
+    },
+    {
+      "type": "types",
+      "file": "src/i18n/index.ts",
+      "name": "Messages"
+    },
+    {
+      "type": "types",
+      "file": "src/i18n/index.ts",
+      "name": "TranslationVars"
+    },
+    {
+      "type": "types",
+      "file": "src/i18n/messages/index.ts",
+      "name": "MessageKey"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/broadcast-helpers.ts",
+      "name": "BroadcastAuditLogger"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/preview.ts",
+      "name": "PreviewReadFileResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/workspace.ts",
+      "name": "WorkspaceDirEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/workspace.ts",
+      "name": "WorkspaceDropPrepareResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/workspace.ts",
+      "name": "WorkspaceListDirResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/workspace.ts",
+      "name": "WorkspaceListRootsResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/workspace.ts",
+      "name": "WorkspacePickRootResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/workspace.ts",
+      "name": "WorkspaceRemoveRootResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/workspace.ts",
+      "name": "WorkspaceRevealResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/domains/workspace.ts",
+      "name": "WorkspaceRoot"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/handlers/usage.ts",
+      "name": "UsageDailySummaryItem"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/index.ts",
+      "name": "IpcDeps"
+    },
+    {
+      "type": "types",
+      "file": "src/lib/chat-stream-state.ts",
+      "name": "TokenUsageSegment"
+    },
+    {
+      "type": "types",
+      "file": "src/lib/cost-estimator.ts",
+      "name": "ModelPricingLite"
+    },
+    {
+      "type": "types",
+      "file": "src/lib/stream-markers.ts",
+      "name": "DetectorResult"
+    },
+    {
+      "type": "types",
+      "file": "src/main/a2a-loopback-runtime.ts",
+      "name": "A2ALoopbackDiscovery"
+    },
+    {
+      "type": "types",
+      "file": "src/main/ask-user-question-gate.ts",
+      "name": "AskUserQuestionAnswer"
+    },
+    {
+      "type": "types",
+      "file": "src/main/ask-user-question-gate.ts",
+      "name": "AskUserQuestionRequest"
+    },
+    {
+      "type": "types",
+      "file": "src/main/auth-partition-viewer-service.ts",
+      "name": "AuthPartitionViewerAuditEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/main/bash-ast-validator.ts",
+      "name": "ValidationDecision"
+    },
+    {
+      "type": "types",
+      "file": "src/main/crash-reporter.ts",
+      "name": "SentryLike"
+    },
+    {
+      "type": "types",
+      "file": "src/main/host-fetch-guard.ts",
+      "name": "HostFetchAllow"
+    },
+    {
+      "type": "types",
+      "file": "src/main/host-fetch-guard.ts",
+      "name": "HostFetchDeny"
+    },
+    {
+      "type": "types",
+      "file": "src/main/host-fetch-guard.ts",
+      "name": "HostFetchDenyReason"
+    },
+    {
+      "type": "types",
+      "file": "src/main/idle-scheduler.ts",
+      "name": "Priority"
+    },
+    {
+      "type": "types",
+      "file": "src/main/local-api-server.ts",
+      "name": "A2ARouterFactory"
+    },
+    {
+      "type": "types",
+      "file": "src/main/local-api-server.ts",
+      "name": "A2ARouterFactoryContext"
+    },
+    {
+      "type": "types",
+      "file": "src/main/notification-service.ts",
+      "name": "NotificationActivationRegistration"
+    },
+    {
+      "type": "types",
+      "file": "src/main/notification-service.ts",
+      "name": "NotificationLike"
+    },
+    {
+      "type": "types",
+      "file": "src/main/notification-service.ts",
+      "name": "ToastPayload"
+    },
+    {
+      "type": "types",
+      "file": "src/main/python-runtime.ts",
+      "name": "BootstrapPhase"
+    },
+    {
+      "type": "types",
+      "file": "src/main/remote-a2a-action-controller.ts",
+      "name": "RemoteA2AActionStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/main/routines-scheduler.ts",
+      "name": "RoutineFiredEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/main/routines-store.ts",
+      "name": "RepeatKind"
+    },
+    {
+      "type": "types",
+      "file": "src/main/routines-store.ts",
+      "name": "RoutinePluginScope"
+    },
+    {
+      "type": "types",
+      "file": "src/main/routines-store.ts",
+      "name": "RoutineScope"
+    },
+    {
+      "type": "types",
+      "file": "src/main/routines-store.ts",
+      "name": "RoutinesFile"
+    },
+    {
+      "type": "types",
+      "file": "src/main/skill-approvals-store.ts",
+      "name": "SkillApprovalRecord"
+    },
+    {
+      "type": "types",
+      "file": "src/main/skill-approvals-store.ts",
+      "name": "SkillApprovalsFile"
+    },
+    {
+      "type": "types",
+      "file": "src/main/work-board-store.ts",
+      "name": "WorkItem"
+    },
+    {
+      "type": "types",
+      "file": "src/main/work-board-store.ts",
+      "name": "WorkItemPriority"
+    },
+    {
+      "type": "types",
+      "file": "src/main/work-board-store.ts",
+      "name": "WorkItemStatusResolved"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/claude-desktop-import.ts",
+      "name": "ClaudeDesktopImportEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/mcp-app-download.ts",
+      "name": "McpAppDownloadFile"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/mcp-client.ts",
+      "name": "JsonRpcNotification"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/mcp-elicitation-resolver.ts",
+      "name": "ElicitResult"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/mcp-ui-message.ts",
+      "name": "AppNotificationMeta"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/mcp-ui-message.ts",
+      "name": "AppNotificationSeverity"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/plugin-mcp-server.ts",
+      "name": "PluginToolContent"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/plugin-ui-resource-provider.ts",
+      "name": "PluginUiResourceListing"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/types.ts",
+      "name": "McpGlobalRules"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/types.ts",
+      "name": "McpLegacyRemoteServerConfig"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/types.ts",
+      "name": "McpOAuthConfig"
+    },
+    {
+      "type": "types",
+      "file": "src/mcp/types.ts",
+      "name": "McpTransport"
+    },
+    {
+      "type": "types",
+      "file": "src/memory/memory-manager.ts",
+      "name": "CheckpointTrigger"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/agent-action-approver.ts",
+      "name": "AgentActionApprovalDiagnostic"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/agent-action-approver.ts",
+      "name": "AgentActionApprovalReceipt"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/agent-action-approver.ts",
+      "name": "AgentActionApprovalRequest"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/approval-gate.ts",
+      "name": "ApprovalKind"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/category-registry.ts",
+      "name": "CategoryDecision"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/category-registry.ts",
+      "name": "CategoryDecisionInput"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/effect-ledger.ts",
+      "name": "ChokepointKind"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/effect-ledger.ts",
+      "name": "Effect"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/host-shell-execution-permit.ts",
+      "name": "ParsedHostShellExecutionInput"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/host-shell-execution-plan.ts",
+      "name": "HostShellExecutionMode"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/host-shell-execution-plan.ts",
+      "name": "HostShellFallbackReason"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/permission-audit-runner.ts",
+      "name": "DayVerifyResult"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/permission-manager.ts",
+      "name": "PermissionDecision"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/permission-settings-store.ts",
+      "name": "PermissionSettingsBlock"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/permission-settings-store.ts",
+      "name": "ReviewerInteractiveBlock"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/permission-slash.ts",
+      "name": "PermissionAuditVerb"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/permission-slash.ts",
+      "name": "PermissionDirVerb"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/permission-slash.ts",
+      "name": "PermissionReviewerVerb"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/permission-slash.ts",
+      "name": "SlashPermissionMode"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/reviewer/deferred-queue.ts",
+      "name": "DeferredEntryStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/sandbox-capability.ts",
+      "name": "SandboxConfidence"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/worker-spawn.ts",
+      "name": "WorkerOutputListener"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/workspace-root-reconciler.ts",
+      "name": "PendingWorkspaceRootCleanup"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/workspace-root-reconciler.ts",
+      "name": "RemovedWorkspaceRoot"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/workspace-root-reconciler.ts",
+      "name": "RetainedWorkspaceRoot"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/workspace-root-reconciler.ts",
+      "name": "WorkspaceRootAuditLogger"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/workspace-root-reconciler.ts",
+      "name": "WorkspaceRootGrantPruner"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/workspace-root-reconciler.ts",
+      "name": "WorkspaceRootRemovalContext"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/workspace-root-reconciler.ts",
+      "name": "WorkspaceRootRemovalReason"
+    },
+    {
+      "type": "types",
+      "file": "src/permissions/workspace-root-reconciler.ts",
+      "name": "WorkspaceRootRetentionReason"
+    },
+    {
+      "type": "types",
+      "file": "src/plugin-ui-host.tsx",
+      "name": "PluginUiMountContext"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/lifecycle-log.ts",
+      "name": "PluginPhaseValue"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/plugin-removal-transaction.ts",
+      "name": "RemovalTransactionMapping"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/plugin-removal-transaction.ts",
+      "name": "RemovalTransactionPhase"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime.ts",
+      "name": "ManifestLoadPlan"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime.ts",
+      "name": "ManifestSnapshot"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime.ts",
+      "name": "PluginCard"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime.ts",
+      "name": "PluginPerfStats"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime.ts",
+      "name": "PluginPreparationProgressInput"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime.ts",
+      "name": "PluginPreparationStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime/index.ts",
+      "name": "InstallPolicy"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime/types.ts",
+      "name": "PluginAccessSpec"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime/types.ts",
+      "name": "PluginManifest"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime/types.ts",
+      "name": "PluginToolHandler"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime/types.ts",
+      "name": "RuntimePlugin"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "DependencySpec"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "EventSubscription"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "EventSubscriptionHint"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "OpenAuthWindowCookieOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "OpenAuthWindowWithFinalUrlOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "PluginAccessTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "PluginAuthStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "PluginLifecycleEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "PluginRuntimeContext"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "PluginUiResourceDecl"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "PluginWorkerSpec"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "SpawnedPluginWorker"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
+      "name": "StorageEncoding"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-fetcher.ts",
+      "name": "WhitelistFetchResult"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-fetcher.ts",
+      "name": "WhitelistNotModified"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-registry.ts",
+      "name": "WhitelistDecision"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-registry.ts",
+      "name": "WhitelistInitOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-registry.ts",
+      "name": "WhitelistSource"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-registry.ts",
+      "name": "WhitelistState"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-registry.ts",
+      "name": "WhitelistStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-schema.ts",
+      "name": "WhitelistPluginGrant"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/whitelist/whitelist-schema.ts",
+      "name": "WhitelistSignatureEnvelope"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "ActiveHistoryResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "ListMarketplaceResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "ListPluginsResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "ListSessionsQuery"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "ListSessionsResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "PermissionModeResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "SendMessageResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "SessionHistoryResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "SetPermissionModeResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "UsageRangeQuery"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "UsageRangeResult"
+    },
+    {
+      "type": "types",
+      "file": "src/sdk/index.ts",
+      "name": "UsageSummaryResult"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AAgentCapabilities"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AAgentExtension"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AAgentInterface"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AAgentSkill"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AErrorInfo"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AHostErrorDefinition"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AHostErrorReason"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AHttpAuthSecurityScheme"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AJsonRpcErrorObject"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2AJsonRpcSuccess"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a-wire.ts",
+      "name": "A2ASecurityRequirement"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a.ts",
+      "name": "A2AFilePart"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a.ts",
+      "name": "A2AJsonPrimitive"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a.ts",
+      "name": "A2ANonEmptyArray"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a.ts",
+      "name": "A2AProjectedTaskStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a.ts",
+      "name": "A2ARawFilePart"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a.ts",
+      "name": "A2ATextPart"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/a2a.ts",
+      "name": "A2AUrlFilePart"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/abortable-deadline.ts",
+      "name": "AbortableDeadlineTerminationReason"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/attachments-deny-list.ts",
+      "name": "DenyExtension"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/chat-history.ts",
+      "name": "SerializedCheckpointMeta"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/chat-history.ts",
+      "name": "SerializedHistoryToolCall"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/chat-history.ts",
+      "name": "SerializedImportedTriggerMeta"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/chat-history.ts",
+      "name": "SerializedToolDisplayMeta"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/chat-history.ts",
+      "name": "SerializedTurnSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/llm-model-list.ts",
+      "name": "LlmModelListError"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/llm-vendor-defaults.ts",
+      "name": "BuiltInLLMVendor"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/llm-vendor-defaults.ts",
+      "name": "KnownLegacyLLMVendor"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/marketplace-package-assets.ts",
+      "name": "MarketplaceLanguagePackPackageAsset"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/marketplace-package-assets.ts",
+      "name": "MarketplaceProviderPackageCapabilities"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/marketplace-package-assets.ts",
+      "name": "MarketplaceProviderPackageTrustMetadata"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/marketplace-package-assets.ts",
+      "name": "MarketplaceThemePackageAsset"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/marketplace-package-assets.ts",
+      "name": "MarketplaceThemeShellMode"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/plugin-config.ts",
+      "name": "PluginConfigPrimitive"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/plugin-config.ts",
+      "name": "PluginConfigValue"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/plugin-ui-tokens.ts",
+      "name": "LvisHostThemeEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/plugin-ui-tokens.ts",
+      "name": "LvisThemePayload"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/plugin-ui-tokens.ts",
+      "name": "LvisThemeTokens"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/plugin-ui-tokens.ts",
+      "name": "LvisTokenMap"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/rationale-approval-display.ts",
+      "name": "RationaleApprovalDisplayRiskLevel"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/rationale-approval-display.ts",
+      "name": "RationaleApprovalDisplayScopeAlignment"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/rationale-approval-display.ts",
+      "name": "RationaleApprovalDisplayStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "RenderHtmlThemeTokenName"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/routines-types.ts",
+      "name": "RoutinePluginScope"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/work-board-types.ts",
+      "name": "WorkBoardRunPhase"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/work-board-types.ts",
+      "name": "WorkItemRunHistoryEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/skills/skill-registry.ts",
+      "name": "SkillRegistryEntry"
+    },
+    {
+      "type": "types",
+      "file": "src/telemetry/host-secret-counters.ts",
+      "name": "HostSecretDeniedReason"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/agent-send.ts",
+      "name": "A2AQuestionWaitReservation"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/agent-spawn.ts",
+      "name": "AgentSpawnEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/background-shell-manager.ts",
+      "name": "BackgroundShellStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/executor-ceiling.ts",
+      "name": "ToolCeilingTerminationReason"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/file-read-core.ts",
+      "name": "AssertReadableFailure"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/knowledge-search.ts",
+      "name": "KnowledgeSearchResultItem"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/knowledge-search.ts",
+      "name": "KnowledgeWorkerClient"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/pipeline/invocation-context.ts",
+      "name": "InvocationContext"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/pipeline/rationale-control.ts",
+      "name": "RationaleTaint"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/pipeline/rationale-orchestrator.ts",
+      "name": "RationaleEligiblePermission"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/pipeline/rationale-resume-contract.ts",
+      "name": "RationaleSecuritySuffixStep"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/pipeline/rationale-ticket-lifecycle.ts",
+      "name": "InvocationAuditState"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/powershell.ts",
+      "name": "PowerShellAstCommand"
+    },
+    {
+      "type": "types",
+      "file": "src/tools/shell-path-policy.ts",
+      "name": "ShellPathPolicyViolationKind"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/AskUserQuestionCard.tsx",
+      "name": "ChoiceResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiDisplayMode"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiHostStyles"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiStyles"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiStyleVariableKey"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiTheme"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/permissions/PermissionModeBadge.tsx",
+      "name": "ModeBadgeVariant"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/StarredView.tsx",
+      "name": "StarredItem"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/TranscriptRenderer.tsx",
+      "name": "TranscriptActionProps"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/TranscriptRenderer.tsx",
+      "name": "TranscriptEditProps"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/TranscriptRenderer.tsx",
+      "name": "TranscriptSearchProps"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/constants.ts",
+      "name": "VendorUiMeta"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/context/OverlayContext.tsx",
+      "name": "OverlayItemSource"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/hooks/use-add-project-folder.ts",
+      "name": "PendingRootWarning"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/hooks/use-permission-toasts.ts",
+      "name": "PermissionReviewSuggestionState"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/hooks/use-send-message.ts",
+      "name": "SendMode"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/hooks/use-side-chat.ts",
+      "name": "SideChatSessionSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-renderers.tsx",
+      "name": "PreviewRenderKind"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "ChatPreviewKind"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "ChatPreviewTargetBase"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "DiffPreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "FilePreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "HtmlPreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "ImagePreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "JsonPreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "PastePreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "PluginPreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "ToolResultPreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/preview-targets.ts",
+      "name": "UrlPreviewTarget"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/workspace-tabs.ts",
+      "name": "WorkspaceTabContentRef"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/preview/workspace-tabs.ts",
+      "name": "WorkspaceTabMode"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/theme/bundles/index.ts",
+      "name": "BundleTokens"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "BundleId"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "BundleTokens"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "ResolvedShell"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "ThemeBundleManifest"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "ThemeContextValue"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "AddRuleResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "ApprovalKind"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "Checkpoint"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "CheckpointTrigger"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "HostShellExecutionPlanAuditProjection"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LLMVendorSettingsRenderer"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisApprovalApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisAttachApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisDropApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisHostApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisMcpApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisPermissionApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisPluginConfigApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisPluginsApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisPolicyApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisPreviewApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisUiApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisUserApprovalApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "LvisWorkspaceApi"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "PermissionReviewerDispatchResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "PermissionReviewerFallbackOnError"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "PermissionReviewerProvider"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "PluginManifestUiExtensionSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "PluginMarketplaceActionResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "ProjectQueryOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "RemoveRuleResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "UsageConv"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "UsageDailySummaryInput"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "UsageDailySummaryResult"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "UsagePerX"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types.ts",
+      "name": "UsageTotals"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/types/attachments.ts",
+      "name": "AttachmentKind"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/utils/classify-turn-entries.ts",
+      "name": "EntryClass"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/utils/file-diff.ts",
+      "name": "FileDiffTool"
+    },
+    {
+      "type": "types",
+      "file": "src/work-board/work-report.ts",
+      "name": "CallLlm"
+    },
+    {
+      "type": "types",
+      "file": "src/work-board/work-report.ts",
+      "name": "DailyReportInput"
+    },
+    {
+      "type": "types",
+      "file": "src/work-board/work-report.ts",
+      "name": "ReportBoardReader"
+    },
+    {
+      "type": "types",
+      "file": "src/work-board/work-report.ts",
+      "name": "ReportKind"
+    },
+    {
+      "type": "types",
+      "file": "src/work-board/work-report.ts",
+      "name": "ReportResult"
+    },
+    {
+      "type": "types",
+      "file": "src/work-board/work-report.ts",
+      "name": "ReportStorage"
+    },
+    {
+      "type": "types",
+      "file": "src/work-board/work-report.ts",
+      "name": "WeeklyReportInput"
+    },
+    {
+      "type": "types",
+      "file": "web/components/ui/badge.tsx",
+      "name": "BadgeProps"
+    },
+    {
+      "type": "types",
+      "file": "web/components/ui/button.tsx",
+      "name": "ButtonProps"
+    },
+    {
+      "type": "types",
+      "file": "web/lib/downloads.ts",
+      "name": "DownloadStep"
+    },
+    {
+      "type": "types",
+      "file": "web/lib/navigation.ts",
+      "name": "NavLink"
+    },
+    {
+      "type": "types",
+      "file": "web/lib/roadmap.ts",
+      "name": "Milestone"
+    }
+  ]
+}
