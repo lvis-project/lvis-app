@@ -30,6 +30,12 @@ export class ConfigOverrideStore {
     this.overrides[pluginId] = { ...config };
   }
 
+  /** Shallow copy of a plugin's override, or undefined when none is stored. */
+  get(pluginId: string): Record<string, unknown> | undefined {
+    const current = this.overrides[pluginId];
+    return current ? { ...current } : undefined;
+  }
+
   /** Merge into a plugin's existing overrides (empty config is a no-op). */
   merge(pluginId: string, config: Record<string, unknown>): void {
     if (Object.keys(config).length === 0) return;

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { PluginRuntime } from "../../runtime.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
 import { writeTestPluginRegistry } from "../../__tests__/test-helpers.js";
 
@@ -66,6 +66,7 @@ describe("PluginRuntime boot preflight", () => {
   it("bounds receipt checks and reports staggered integrity failures in plan order", async () => {
     const integrityAuditPluginIds: string[] = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -129,6 +130,7 @@ describe("PluginRuntime boot preflight", () => {
   it("isolates an unexpected receipt verifier rejection to its plugin", async () => {
     const rejected: Array<{ pluginId: string; reason: string }> = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -173,6 +175,7 @@ describe("PluginRuntime boot preflight", () => {
     }]);
     const auditMessages: string[] = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot,
       pluginsRoot,
       registryPath,
@@ -215,6 +218,7 @@ describe("PluginRuntime boot preflight", () => {
     })));
     const auditEvents: Array<{ message: string; pluginId: string }> = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot,
       pluginsRoot,
       registryPath,

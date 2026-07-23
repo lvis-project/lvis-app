@@ -15,6 +15,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
+import { withPluginInstallLock } from "../../install-lifecycle.js";
 
 describe("PluginRuntime — active/inactive toggle (#1176)", () => {
   let testDir: string;
@@ -117,12 +118,168 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.active).toBe(true);
   });
 
+  it("serializes registry and active-state changes with canonical lifecycle mutations", async () => {
+    const changes: Array<{ id: string; enabled: boolean }> = [];
+    const runtime = makeRuntime({
+      onActiveStateChange: (id, enabled) => changes.push({ id, enabled }),
+    });
+    await runtime.startAll();
+
+    let releaseMutation!: () => void;
+    let markMutationEntered!: () => void;
+    const mutationGate = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    const mutationEntered = new Promise<void>((resolve) => {
+      markMutationEntered = resolve;
+    });
+    const mutation = withPluginInstallLock("se-plugin", async () => {
+      markMutationEntered();
+      await mutationGate;
+    });
+    await mutationEntered;
+
+    const toggle = runtime.setPluginEnabled("se-plugin", false);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    expect(changes).toEqual([]);
+    expect(
+      JSON.parse(await readFile(registryPath, "utf-8")).plugins[0].enabled,
+    ).toBe(true);
+
+    releaseMutation();
+    await mutation;
+    await toggle;
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    expect(changes).toEqual([{ id: "se-plugin", enabled: false }]);
+  });
+
+  it("cancels a pending restart before toggle lock admission", async () => {
+    let prepareRestart = false;
+    let markPreparationEntered!: () => void;
+    const preparationEntered = new Promise<void>((resolve) => {
+      markPreparationEntered = resolve;
+    });
+    const neverSettles = new Promise<void>(() => {});
+    const runtime = makeTestPluginRuntime(
+      { rootDir: testDir, registryPath, pluginsRoot: installedDir },
+      {
+        preparePluginStart: ({ pluginId }) => {
+          if (!prepareRestart || pluginId !== "se-plugin") return undefined;
+          markPreparationEntered();
+          return neverSettles;
+        },
+      },
+    );
+    await runtime.startAll();
+    prepareRestart = true;
+
+    const restart = runtime.restartPlugin("se-plugin");
+    await preparationEntered;
+
+    await expect(runtime.setPluginEnabled("se-plugin", false))
+      .resolves.toBeUndefined();
+    await expect(restart).resolves.toBe("failed");
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    expect(runtime.isPluginRestartPending("se-plugin")).toBe(false);
+  });
+
+  it("persists a canonical card toggle through its registry install alias", async () => {
+    const installAlias = "se-install-alias";
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: installAlias, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const changes: Array<{ id: string; enabled: boolean }> = [];
+    const runtime = makeRuntime({
+      onActiveStateChange: (id, enabled) => changes.push({ id, enabled }),
+    });
+    await runtime.startAll();
+
+    await runtime.setPluginEnabled("se-plugin", false);
+    expect(runtime.isPluginEnabled(installAlias)).toBe(false);
+    let registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0]).toMatchObject({
+      id: installAlias,
+      enabled: false,
+    });
+
+    await runtime.setPluginEnabled(installAlias, true);
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0]).toMatchObject({
+      id: installAlias,
+      enabled: true,
+    });
+    expect(changes).toEqual([
+      { id: "se-plugin", enabled: false },
+      { id: "se-plugin", enabled: true },
+    ]);
+  });
+
+  it("toggles a configured static plugin without inventing a registry row", async () => {
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const changes: Array<{ id: string; enabled: boolean }> = [];
+    const runtime = makeTestPluginRuntime(
+      { rootDir: testDir, registryPath, pluginsRoot: installedDir },
+      {
+        manifestPaths: [manifestPath],
+        onActiveStateChange: (id, enabled) => changes.push({ id, enabled }),
+      },
+    );
+    await runtime.startAll();
+
+    await runtime.setPluginEnabled("se-plugin", false);
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    await runtime.setPluginEnabled("se-plugin", true);
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins).toEqual([]);
+    expect(changes).toEqual([
+      { id: "se-plugin", enabled: false },
+      { id: "se-plugin", enabled: true },
+    ]);
+  });
+
   it("does not stop/reload the plugin instance on disable (call still resolves)", async () => {
     const runtime = makeRuntime();
     await runtime.startAll();
     await runtime.setPluginEnabled("se-plugin", false);
     // The instance is untouched — the underlying method still resolves.
     await expect(runtime.call("se_ping")).resolves.toBe("pong");
+  });
+
+  it("clears stale inactive state when an enabled update removes and re-adds a plugin", async () => {
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await runtime.setPluginEnabled("se-plugin", false);
+    await runtime.removePlugin("se-plugin");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "se-plugin", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin("se-plugin")).resolves.toBe("started");
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    expect(runtime.listPluginCards().find((card) => card.id === "se-plugin"))
+      .toMatchObject({
+        active: true,
+        loadStatus: "loaded",
+        runtimeLoaded: true,
+      });
   });
 
   it("throws for an unknown plugin id", async () => {

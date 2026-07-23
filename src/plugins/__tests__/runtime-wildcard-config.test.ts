@@ -6,12 +6,13 @@
  * slot intact for unrelated injectors (e.g. boot's `pythonExecutable`).
  */
 import { describe, it, expect } from "vitest";
-import { PluginRuntime } from "../runtime.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { buildPluginContext } from "../runtime/sandbox.js";
 
 describe("PluginRuntime wildcard configOverrides (#893)", () => {
   function makeRuntime(initial: Record<string, Record<string, unknown>> = {}) {
     return new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: process.cwd(),
       configOverrides: initial,
     });

@@ -22,7 +22,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime } from "../runtime.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { compileLegacyToolSurface } from "./test-helpers.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -79,6 +79,7 @@ describe("uiActions runtime-method validation", () => {
       uiActions: { foo_get: {}, foo_missing: {} },
     });
     const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [manifestPath],
     });
@@ -98,6 +99,7 @@ describe("uiActions runtime-method validation", () => {
       uiActions: { foo_get: {}, foo_list: {} },
     });
     const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [manifestPath],
     });
@@ -115,6 +117,7 @@ describe("uiActions accepts any suffix regardless of install policy", () => {
         uiActions: { [verb]: {} },
       });
       const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
         hostRoot: resolve(__dirname, "..", "..", ".."),
         manifestPaths: [manifestPath],
       });
@@ -129,6 +132,7 @@ describe("uiActions accepts any suffix regardless of install policy", () => {
         uiActions: { [verb]: {} },
       });
       const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
         hostRoot: resolve(__dirname, "..", "..", ".."),
         manifestPaths: [manifestPath],
       });
@@ -141,6 +145,7 @@ describe("uiActions accepts any suffix regardless of install policy", () => {
 describe("callFromUi scope enforcement", () => {
   it("throws when method is unknown", async () => {
     const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [],
     });
@@ -151,6 +156,7 @@ describe("callFromUi scope enforcement", () => {
     // Build a runtime with a hand-crafted plugin map so we can exercise
     // callFromUi without spinning up a real plugin entry file.
     const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [],
     });
@@ -188,6 +194,7 @@ describe("callFromUi scope enforcement", () => {
 
   it("fails closed when a UI action method has no executor delegate", async () => {
     const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [],
     });

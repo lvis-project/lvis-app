@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginRuntime } from "../runtime.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { mkdtempSync } from "node:fs";
 import { compileLegacyToolSurface } from "./test-helpers.js";
 
@@ -108,7 +108,8 @@ describe("runtime manifest validation hardening", () => {
       tools: ["pkw_hello", "pkw_bad", "pkw_good"],
       keywords: [{ keyword: "회의", skillId: "p_kw_missing" }],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -139,7 +140,8 @@ describe("runtime manifest validation hardening", () => {
         },
       },
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -157,7 +159,8 @@ describe("runtime manifest validation hardening", () => {
       eventSubscriptions: ["meeting.started"],
       notificationEvents: [{ event: "meeting.ghost" }],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -182,7 +185,8 @@ describe("runtime manifest validation hardening", () => {
         { id: "c", slot: "sidebar", kind: "embedded-page", title: "C", page: "dist/c.html" },
       ],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -212,7 +216,8 @@ describe("runtime manifest validation hardening", () => {
         { id: "z", slot: "sidebar", kind: "info-card", title: "Z" },
       ],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -232,7 +237,8 @@ describe("runtime manifest validation hardening", () => {
       tools: ["puf_hello", "puf_bad", "puf_good"],
       startupTools: ["p_unknown_field_hello"],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -255,6 +261,7 @@ describe("runtime manifest validation hardening", () => {
     });
     const auditLog = vi.fn();
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
