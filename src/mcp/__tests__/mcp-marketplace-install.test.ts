@@ -12,7 +12,6 @@ import { describe, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   buildMcpServerConfig,
@@ -27,8 +26,7 @@ import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
 
 function makeTmpDir(): string {
-  const root = tmpdir();
-  return mkdtempSync(join(root, "mcp-install-"));
+  return mkdtempSync(join(process.cwd(), ".mcp-install-"));
 }
 
 describe("substituteRuntimeTokens", () => {
@@ -347,8 +345,8 @@ describe("readRuntimeFromInstalledManifest", () => {
 
 describe("readRuntimeFromVerifiedZip", () => {
   const inspectionStore = new PluginArtifactStore({
-    installRoot: resolve(tmpdir(), "lvis-mcp-inspection-installed"),
-    cacheRoot: resolve(tmpdir(), "lvis-mcp-inspection-cache"),
+    installRoot: resolve(process.cwd(), ".lvis-mcp-inspection-installed"),
+    cacheRoot: resolve(process.cwd(), ".lvis-mcp-inspection-cache"),
     fetcher: {
       listPlugins: async () => [],
       getPluginDetail: async () => null,

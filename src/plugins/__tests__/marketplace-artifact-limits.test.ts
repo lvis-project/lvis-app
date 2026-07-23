@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -10,7 +9,7 @@ describe("readCompressedArtifactFile", () => {
   it.runIf(process.platform !== "win32")(
     "rejects a FIFO without blocking while opening an attacker-replaced cache path",
     async () => {
-      const tmp = mkdtempSync(join(tmpdir(), "marketplace-artifact-fifo-"));
+      const tmp = mkdtempSync(join(process.cwd(), ".marketplace-artifact-fifo-"));
       const fifoPath = join(tmp, "artifact.zip");
       try {
         const created = spawnSync("mkfifo", [fifoPath], { encoding: "utf-8" });

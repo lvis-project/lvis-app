@@ -8,7 +8,6 @@
  * copying `makeStore` into each suite trips the `--fail-on-duplicates` gate.
  */
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { PluginArtifactStore, type ArtifactStoreOptions } from "../plugin-artifact-store.js";
@@ -37,5 +36,5 @@ export function makeStore(
 
 /** Throwaway temp dir; callers are responsible for `rmSync(..., {recursive, force})`. */
 export function makeTmpDir(prefix = "artifact-store-"): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return mkdtempSync(join(process.cwd(), `.${prefix}`));
 }
