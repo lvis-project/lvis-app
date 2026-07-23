@@ -6,7 +6,20 @@ name: Marketplace E2E (publish ↔ install)
 # the way the UI e2e suite did (#1212) — it is opt-in, so without a schedule it
 # would never actually run on main. Keeps per-PR CI fast (still label-gated).
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      marketplace_ref:
+        description: Exact 40-character lvis-marketplace commit SHA
+        required: true
+        type: string
+      sdk_ref:
+        description: Exact 40-character lvis-plugin-sdk commit SHA consumed by ep-api
+        required: true
+        type: string
+      ep_api_ref:
+        description: Exact 40-character lvis-plugin-lge-api commit SHA
+        required: true
+        type: string
   pull_request:
     types: [labeled]
   schedule:
@@ -16,6 +29,7 @@ on:
 
 jobs:
   marketplace-e2e:
+    name: Marketplace E2E (${{ matrix.lane }})
     # workflow_dispatch (manual), nightly schedule, OR same-repo PR labeled
     # `marketplace-e2e`. Sibling marketplace + signing-key secrets are not
     # exposed to forks.
@@ -27,13 +41,19 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [live-lifecycle, containment-rehearsal]
     env:
-      # Both keys MUST be provided as repo/org secrets. The prior committed
-      # literals are now considered burned — rotate the marketplace-side
-      # counterparts before the next M4 E2E run and configure the secrets
-      # below. (Literal values intentionally NOT re-inscribed here.)
-      PUBLISHER_KEY: ${{ secrets.M4_PUBLISHER_KEY }}
-      MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: ${{ secrets.M4_MARKETPLACE_SIGNING_KEY_POC_V1 }}
+      HOST_SHA: ${{ github.sha }}
+      MARKETPLACE_SHA: ${{ inputs.marketplace_ref || vars.M4_MARKETPLACE_SHA }}
+      SDK_SHA: ${{ inputs.sdk_ref || vars.M4_SDK_SHA }}
+      EP_API_SHA: ${{ inputs.ep_api_ref || vars.M4_EP_API_SHA }}
+      # These authorize only the ephemeral loopback database created by this
+      # job. They are unique per run and are not production credentials.
+      PUBLISHER_KEY: lvismkt_e2epub_${{ github.run_id }}_${{ github.run_attempt }}
+      ADMIN_KEY: lvismkt_e2eadm_${{ github.run_id }}_${{ github.run_attempt }}
     steps:
       - name: Checkout lvis-app
         uses: actions/checkout@v7
@@ -45,8 +65,40 @@ jobs:
         with:
           repository: lvis-project/lvis-marketplace
           path: lvis-marketplace
+          ref: ${{ env.MARKETPLACE_SHA }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
           submodules: recursive
+
+      - name: Checkout lvis-plugin-sdk
+        uses: actions/checkout@v7
+        with:
+          repository: lvis-project/lvis-plugin-sdk
+          path: lvis-plugin-sdk
+          ref: ${{ env.SDK_SHA }}
+          token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+
+      - name: Checkout lvis-plugin-lge-api
+        uses: actions/checkout@v7
+        with:
+          repository: lvis-project/lvis-plugin-lge-api
+          path: lvis-plugin-lge-api
+          ref: ${{ env.EP_API_SHA }}
+          token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+
+      - name: Prove immutable checkout refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in "$HOST_SHA" "$MARKETPLACE_SHA" "$SDK_SHA" "$EP_API_SHA"; do
+            if [[ ! "$value" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Every cross-repository ref must be an exact lowercase 40-character SHA"
+              exit 1
+            fi
+          done
+          test "$(git -C lvis-app rev-parse HEAD)" = "$HOST_SHA"
+          test "$(git -C lvis-marketplace rev-parse HEAD)" = "$MARKETPLACE_SHA"
+          test "$(git -C lvis-plugin-sdk rev-parse HEAD)" = "$SDK_SHA"
+          test "$(git -C lvis-plugin-lge-api rev-parse HEAD)" = "$EP_API_SHA"
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -90,42 +142,16 @@ jobs:
         working-directory: lvis-marketplace/server
         run: |
           uv run python scripts/seed_e2e_keys.py \
-            --publisher-key "$PUBLISHER_KEY"
+            --publisher-key "$PUBLISHER_KEY" \
+            --admin-key "$ADMIN_KEY"
 
-      - name: Sync poc-v1 public key from M4 signing secret (M4-local only)
+      - name: Load committed poc-v1 test signer (loopback only)
         working-directory: lvis-marketplace/server
-        env:
-          MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: ${{ secrets.M4_MARKETPLACE_SIGNING_KEY_POC_V1 }}
         run: |
-          # The repo-committed schemas/keys/poc-v1.pub is the production public
-          # key. The M4 signing secret is a separate keypair, so server startup
-          # warns "public key on disk does NOT match the loaded private key"
-          # and publish fails 500 at signing time.
-          # Derive the public from our private secret and write it locally only
-          # (working-directory checkout is ephemeral; production repo + deploy
-          # unchanged). Same key_id (poc-v1), private from secret, pub regenerated.
-          # Use `uv run python` so cryptography (already installed via uv sync) is on path.
-          uv run python -c "
-          import base64, os, sys
-          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-          from cryptography.hazmat.primitives import serialization
-          priv_b64 = os.environ['MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1']
-          raw = base64.b64decode(priv_b64)
-          if len(raw) != 32:
-              print(f'ERROR: private key must be 32 bytes raw, got {len(raw)}', file=sys.stderr); sys.exit(1)
-          priv = Ed25519PrivateKey.from_private_bytes(raw)
-          pub = priv.public_key().public_bytes(
-              encoding=serialization.Encoding.Raw,
-              format=serialization.PublicFormat.Raw,
-          )
-          print(base64.b64encode(pub).decode())
-          " > /tmp/m4-poc-v1.pub
-          echo "derived pub: $(cat /tmp/m4-poc-v1.pub)"
-          # schemas/keys/ is at marketplace repo root; we are in server/ subdir.
-          PUB_PATH="../schemas/keys/poc-v1.pub"
-          echo "old pub on disk: $(cat "$PUB_PATH" 2>/dev/null || echo 'absent')"
-          cp /tmp/m4-poc-v1.pub "$PUB_PATH"
-          echo "new pub on disk: $(cat "$PUB_PATH")"
+          signer_json="$(uv run python scripts/print_test_poc_signer_env.py --format json)"
+          signer="$(jq -er '.MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1' <<<"$signer_json")"
+          echo "::add-mask::$signer"
+          echo "MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1=$signer" >> "$GITHUB_ENV"
 
       - name: Start marketplace server (sqlite, background)
         working-directory: lvis-marketplace/server
@@ -144,7 +170,7 @@ jobs:
             >/tmp/m4-server.log 2>&1 &
           echo $! > /tmp/m4-marketplace.pid
           # Wait for readiness.
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8765/api/v1/health >/dev/null; then
               echo "marketplace ready"; exit 0
             fi
@@ -153,8 +179,6 @@ jobs:
           echo "marketplace failed to start" >&2; exit 1
 
       - name: Debug — inspect DB after seed + GET /me
-        env:
-          PUBLISHER_KEY: ${{ secrets.M4_PUBLISHER_KEY }}
         run: |
           sudo apt-get install -y sqlite3 >/dev/null 2>&1 || true
           echo "=== DB file ==="
@@ -180,12 +204,26 @@ jobs:
         working-directory: lvis-app
         run: bun install --frozen-lockfile
 
-      - name: Run M4 E2E test
+      - name: Prove consumed SDK and cross-repository schema identity
+        working-directory: lvis-app
+        env:
+          HOST_ROOT: .
+          SDK_ROOT: ../lvis-plugin-sdk
+          MARKETPLACE_ROOT: ../lvis-marketplace
+          EP_API_ROOT: ../lvis-plugin-lge-api
+          BUNDLE_E2E_EVIDENCE_PATH: /tmp/marketplace-live-lifecycle-evidence.json
+        run: |
+          bun run test:plugin-bundle-inputs
+          node scripts/plugin-bundle-e2e-inputs.mjs
+
+      - name: Run live install lifecycle
+        if: matrix.lane == 'live-lifecycle'
         working-directory: lvis-app
         env:
           M4_E2E: "1"
           MARKETPLACE_URL: http://127.0.0.1:8765
           MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
+          MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
         run: |
           echo "=== env debug ==="
           echo "M4_E2E=$M4_E2E"
@@ -193,11 +231,33 @@ jobs:
           echo "=== vitest collection (dry-run via --reporter=verbose, single file) ==="
           M4_E2E=1 bun run test:vitest -- run --reporter=verbose test/e2e/marketplace-e2e.test.ts
 
+      - name: Run loopback reverse-containment rehearsal
+        if: matrix.lane == 'containment-rehearsal'
+        working-directory: lvis-app
+        env:
+          M4_E2E: "1"
+          MARKETPLACE_URL: http://127.0.0.1:8765
+          MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
+          MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
+          SDK_ROOT: ../lvis-plugin-sdk
+          BUNDLE_E2E_EVIDENCE_PATH: /tmp/marketplace-live-lifecycle-evidence.json
+        run: >-
+          bun run test:vitest -- run --reporter=verbose
+          test/e2e/marketplace-containment-rehearsal.test.ts
+
       - name: Dump marketplace server log (always)
         if: always()
         run: |
           echo "=== /tmp/m4-server.log ==="
           tail -200 /tmp/m4-server.log 2>&1 || echo "no server log"
+
+      - name: Upload immutable-ref evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: marketplace-${{ matrix.lane }}-evidence-${{ github.sha }}
+          path: /tmp/marketplace-live-lifecycle-evidence.json
+          if-no-files-found: error
 
       - name: Stop marketplace
         if: always()
