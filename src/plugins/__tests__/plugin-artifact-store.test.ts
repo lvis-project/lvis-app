@@ -444,6 +444,49 @@ describe("PluginArtifactStore — process-wide artifact resource slot", () => {
       rmSync(secondTmp, { recursive: true, force: true });
     }
   });
+
+  it("releases the slot after rejection so the next operation can run", async () => {
+    const tmp = makeTmpDir("artifact-store-slot-reject-");
+    try {
+      const store = makeStore(tmp);
+      const failure = new Error("inspection failed");
+      await expect(store.withArtifactResourceSlot(async () => {
+        throw failure;
+      })).rejects.toBe(failure);
+      await expect(store.withArtifactResourceSlot(async () => "next")).resolves.toBe("next");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("aborts a queued waiter without releasing the active slot early", async () => {
+    const tmp = makeTmpDir("artifact-store-slot-abort-");
+    try {
+      const store = makeStore(tmp);
+      let releaseFirst!: () => void;
+      let thirdEntered = false;
+      const first = store.withArtifactResourceSlot(
+        () => new Promise<void>((resolvePromise) => { releaseFirst = resolvePromise; }),
+      );
+      await vi.waitFor(() => expect(releaseFirst).toBeTypeOf("function"));
+
+      const controller = new AbortController();
+      const second = store.withArtifactResourceSlot(async () => "second", controller.signal);
+      const third = store.withArtifactResourceSlot(async () => {
+        thirdEntered = true;
+        return "third";
+      });
+      controller.abort();
+      await expect(second).rejects.toMatchObject({ name: "AbortError" });
+      expect(thirdEntered).toBe(false);
+
+      releaseFirst();
+      await first;
+      await expect(third).resolves.toBe("third");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("assertSafeArtifactSlug", () => {

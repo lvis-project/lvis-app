@@ -21,9 +21,10 @@ import {
   fetchPublicHttpResponse,
   NetworkGuardError,
 } from "../core/network-guard.js";
-import type {
-  MarketplaceArtifactDownloadOptions,
-  MarketplaceHttp,
+import {
+  MarketplaceTransientDownloadError,
+  type MarketplaceArtifactDownloadOptions,
+  type MarketplaceHttp,
 } from "./marketplace-installer.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
@@ -73,6 +74,8 @@ export interface RealCloudMarketplaceConfig {
   artifactLimits?: Partial<MarketplaceArtifactLimits>;
   /** Deadline for consuming one artifact body after response headers. Default 120s. */
   artifactReadTimeoutMs?: number;
+  /** Deadline for consuming the small signature envelope body. Default 15s. */
+  envelopeReadTimeoutMs?: number;
 }
 
 /** Loose shape for a catalog row returned by the server. */
@@ -151,12 +154,17 @@ interface ServerAnnouncementRow {
 export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp, MarketplaceArtifactLimitProvider {
   private readonly artifactLimits: Readonly<MarketplaceArtifactLimits>;
   private readonly artifactReadTimeoutMs: number;
+  private readonly envelopeReadTimeoutMs: number;
 
   constructor(private config: RealCloudMarketplaceConfig) {
     this.artifactLimits = resolveMarketplaceArtifactLimits(config.artifactLimits);
     this.artifactReadTimeoutMs = config.artifactReadTimeoutMs ?? 120_000;
     if (!Number.isSafeInteger(this.artifactReadTimeoutMs) || this.artifactReadTimeoutMs <= 0) {
       throw new RangeError("artifactReadTimeoutMs must be a positive safe integer");
+    }
+    this.envelopeReadTimeoutMs = config.envelopeReadTimeoutMs ?? 15_000;
+    if (!Number.isSafeInteger(this.envelopeReadTimeoutMs) || this.envelopeReadTimeoutMs <= 0) {
+      throw new RangeError("envelopeReadTimeoutMs must be a positive safe integer");
     }
   }
 
@@ -222,12 +230,27 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     status: number;
     retryAfterSeconds?: number;
   }> {
-    const res = await this.request(
-      "GET",
-      `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download`,
-      { accept: "application/octet-stream" },
-      { allowNonOk: true, signal: options?.signal },
-    );
+    let res: Response;
+    try {
+      res = await this.request(
+        "GET",
+        `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download`,
+        { accept: "application/octet-stream" },
+        { allowNonOk: true, signal: options?.signal },
+      );
+    } catch (err) {
+      if (options?.signal?.aborted) {
+        throw new MarketplaceArtifactLimitError(
+          "ARTIFACT_DOWNLOAD_ABORTED",
+          `marketplace artifact download aborted for ${slug}@${version}`,
+        );
+      }
+      if (err instanceof MarketplaceNetworkPolicyError) throw err;
+      throw new MarketplaceTransientDownloadError(
+        `marketplace artifact transport failed for ${slug}@${version}: ${(err as Error).message}`,
+        { cause: err },
+      );
+    }
     const retryAfter = parseRetryAfterSeconds(res.headers?.get?.("retry-after") ?? null);
 
     // Status handling does not consume response content. Cancel it immediately
@@ -253,7 +276,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     const declaredBytes = contentLength && /^\d+$/.test(contentLength)
       ? Number(contentLength)
       : null;
-    const validBytesTotal =
+    let progressBytesTotal =
       declaredBytes !== null && Number.isSafeInteger(declaredBytes) && declaredBytes >= 0
         ? declaredBytes
         : null;
@@ -305,11 +328,14 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
             this.artifactLimits.maxCompressedBytes,
             `marketplace artifact ${slug}@${version}`,
           );
+          if (progressBytesTotal !== null && bytesDownloaded > progressBytesTotal) {
+            progressBytesTotal = null;
+          }
           chunks.push(Buffer.from(value));
           const now = Date.now();
           if (onChunk && now - lastEmitMs >= THROTTLE_MS) {
             lastEmitMs = now;
-            onChunk(bytesDownloaded, validBytesTotal);
+            onChunk(bytesDownloaded, progressBytesTotal);
           }
         }
       }
@@ -322,7 +348,10 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       reader.releaseLock();
     }
     // Always emit final progress so the bar reaches 100%.
-    onChunk?.(bytesDownloaded, validBytesTotal);
+    if (progressBytesTotal !== null && bytesDownloaded !== progressBytesTotal) {
+      progressBytesTotal = null;
+    }
+    onChunk?.(bytesDownloaded, progressBytesTotal);
 
     return {
       body: Buffer.concat(chunks),
@@ -332,12 +361,40 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     };
   }
 
-  async fetchSignatureEnvelope(slug: string, version: string): Promise<SignatureEnvelope> {
-    const res = await this.request(
-      "GET",
-      `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download.sig`,
+  async fetchSignatureEnvelope(
+    slug: string,
+    version: string,
+    options?: MarketplaceArtifactDownloadOptions,
+  ): Promise<SignatureEnvelope> {
+    let res: Response;
+    try {
+      res = await this.request(
+        "GET",
+        `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download.sig`,
+        {},
+        { signal: options?.signal },
+      );
+    } catch (err) {
+      if (options?.signal?.aborted) {
+        throw new MarketplaceArtifactLimitError(
+          "ARTIFACT_DOWNLOAD_ABORTED",
+          `marketplace signature envelope download aborted for ${slug}@${version}`,
+        );
+      }
+      throw err;
+    }
+    const body = await readBoundedSignatureEnvelopeBody(
+      res,
+      slug,
+      version,
+      this.envelopeReadTimeoutMs,
+      options?.signal,
     );
-    return (await res.json()) as SignatureEnvelope;
+    try {
+      return JSON.parse(body.toString("utf-8")) as SignatureEnvelope;
+    } catch (err) {
+      throw new Error(`marketplace signature envelope is not valid JSON: ${(err as Error).message}`);
+    }
   }
 
   // ─── Internals ────────────────────────────────────────────────
@@ -370,12 +427,13 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
         allowLoopback: privateNetworkScope,
       });
       if (!options.allowNonOk && !res.ok) {
+        await res.body?.cancel().catch(() => undefined);
         throw new Error(`marketplace ${res.status}: ${res.statusText}`);
       }
       return res;
     } catch (err) {
       if (err instanceof NetworkGuardError) {
-        throw new Error(`network guard: ${err.message}`);
+        throw new MarketplaceNetworkPolicyError(`network guard: ${err.message}`, { cause: err });
       }
       throw err;
     }
@@ -670,6 +728,88 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       ...(transport ? { transport } : {}),
       ...oauth,
     };
+  }
+}
+
+class MarketplaceNetworkPolicyError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "MarketplaceNetworkPolicyError";
+  }
+}
+
+const MAX_SIGNATURE_ENVELOPE_BYTES = 64 * 1024;
+
+async function readBoundedSignatureEnvelopeBody(
+  response: Response,
+  slug: string,
+  version: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  if (!response.body) {
+    throw new Error(`marketplace signature envelope ${slug}@${version} has no readable body`);
+  }
+  const reader = response.body.getReader();
+  let terminalError: MarketplaceArtifactLimitError | null = null;
+  const cancelWith = (error: MarketplaceArtifactLimitError): void => {
+    if (terminalError) return;
+    terminalError = error;
+    void reader.cancel(error).catch(() => undefined);
+  };
+  const timeout = setTimeout(() => {
+    cancelWith(new MarketplaceArtifactLimitError(
+      "SIGNATURE_ENVELOPE_TIMEOUT",
+      `marketplace signature envelope ${slug}@${version} exceeded ${timeoutMs}ms deadline`,
+    ));
+  }, timeoutMs);
+  const onAbort = () => {
+    cancelWith(new MarketplaceArtifactLimitError(
+      "ARTIFACT_DOWNLOAD_ABORTED",
+      `marketplace signature envelope download aborted for ${slug}@${version}`,
+    ));
+  };
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort, { once: true });
+  const declaredLength = response.headers.get("content-length");
+  const declaredBytes = declaredLength && /^\d+$/.test(declaredLength)
+    ? Number(declaredLength)
+    : null;
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  try {
+    if (terminalError) throw terminalError;
+    if (
+      declaredBytes !== null &&
+      (!Number.isSafeInteger(declaredBytes) || declaredBytes > MAX_SIGNATURE_ENVELOPE_BYTES)
+    ) {
+      throw new MarketplaceArtifactLimitError(
+        "SIGNATURE_ENVELOPE_TOO_LARGE",
+        `marketplace signature envelope ${slug}@${version} exceeds ${MAX_SIGNATURE_ENVELOPE_BYTES} bytes`,
+      );
+    }
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (terminalError) throw terminalError;
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_SIGNATURE_ENVELOPE_BYTES) {
+        throw new MarketplaceArtifactLimitError(
+          "SIGNATURE_ENVELOPE_TOO_LARGE",
+          `marketplace signature envelope ${slug}@${version} exceeds ${MAX_SIGNATURE_ENVELOPE_BYTES} bytes`,
+        );
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, totalBytes);
+  } catch (err) {
+    await reader.cancel(err).catch(() => undefined);
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", onAbort);
+    reader.releaseLock();
   }
 }
 

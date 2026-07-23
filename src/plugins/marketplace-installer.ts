@@ -54,7 +54,11 @@ export interface MarketplaceHttp {
     retryAfterSeconds?: number;
   }>;
   /** GET `/api/v1/plugins/{slug}/download.sig?version=X`. */
-  fetchSignatureEnvelope(slug: string, version: string): Promise<SignatureEnvelope>;
+  fetchSignatureEnvelope(
+    slug: string,
+    version: string,
+    options?: MarketplaceArtifactDownloadOptions,
+  ): Promise<SignatureEnvelope>;
 }
 
 export interface MarketplaceArtifactDownloadOptions {
@@ -126,6 +130,8 @@ export interface InstalledArtifact {
   tarballPath: string;
   sha256: string;
   signerKeyId: string;
+  /** The exact in-memory bytes whose digest and signature were verified. */
+  zipBuffer: Buffer;
 }
 
 export class MarketplaceInstallerError extends Error {
@@ -137,9 +143,18 @@ export class MarketplaceInstallerError extends Error {
   }
 }
 
+/** Explicit retry marker for transport failures before a usable response exists. */
+export class MarketplaceTransientDownloadError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "MarketplaceTransientDownloadError";
+  }
+}
+
 const DEFAULT_MAX_SKEW_SEC = 72 * 3600;
 const DEFAULT_MAX_RETRIES = 3;
 const MAX_RETRY_AFTER_SECONDS = 30;
+const MAX_DOWNLOAD_RETRY_ELAPSED_MS = 90_000;
 
 /**
  * Encodes an untrusted marketplace version into a flat filename component.
@@ -278,8 +293,11 @@ export async function installFromMarketplace(
   //    security flag: cache hits must not bypass envelope-verifier).
   let envelope: SignatureEnvelope;
   try {
-    envelope = await opts.http.fetchSignatureEnvelope(slug, version);
+    envelope = opts.signal
+      ? await opts.http.fetchSignatureEnvelope(slug, version, { signal: opts.signal })
+      : await opts.http.fetchSignatureEnvelope(slug, version);
   } catch (err) {
+    if (err instanceof MarketplaceArtifactLimitError) throw err;
     throw new MarketplaceInstallerError(
       "ENVELOPE_FETCH_FAILED",
       `failed to fetch signature envelope: ${(err as Error).message}`,
@@ -375,6 +393,7 @@ export async function installFromMarketplace(
     tarballPath,
     sha256: computedSha256,
     signerKeyId,
+    zipBuffer: body,
   };
 }
 
@@ -392,6 +411,7 @@ async function downloadWithRetry(
   signal?: AbortSignal,
 ): Promise<{ body: Buffer; sha256Header: string | null }> {
   let lastErr: Error | null = null;
+  const retryDeadline = Date.now() + MAX_DOWNLOAD_RETRY_ELAPSED_MS;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (signal?.aborted) {
       throw new MarketplaceArtifactLimitError(
@@ -412,9 +432,16 @@ async function downloadWithRetry(
           `marketplace artifact download aborted for ${slug}@${version}`,
         );
       }
-      lastErr = err as Error;
-      // Network errors: retry with backoff like 429.
-      await sleep(backoffMs(attempt), signal, slug, version);
+      if (!(err instanceof MarketplaceTransientDownloadError)) throw err;
+      lastErr = err;
+      if (attempt + 1 >= maxRetries) break;
+      await sleepWithinRetryDeadline(
+        backoffMs(attempt),
+        retryDeadline,
+        signal,
+        slug,
+        version,
+      );
       continue;
     }
     assertCompressedArtifactSize(
@@ -431,7 +458,14 @@ async function downloadWithRetry(
         "RATE_LIMITED",
         `marketplace returned 429 for ${slug}@${version} (retry-after=${waitSec}s)`,
       );
-      await sleep(Math.max(0, waitSec * 1000), signal, slug, version);
+      if (attempt + 1 >= maxRetries) break;
+      await sleepWithinRetryDeadline(
+        Math.max(0, waitSec * 1000),
+        retryDeadline,
+        signal,
+        slug,
+        version,
+      );
       continue;
     }
     if (res.status >= 500) {
@@ -439,7 +473,14 @@ async function downloadWithRetry(
         "SERVER_ERROR",
         `marketplace returned ${res.status} for ${slug}@${version}`,
       );
-      await sleep(backoffMs(attempt), signal, slug, version);
+      if (attempt + 1 >= maxRetries) break;
+      await sleepWithinRetryDeadline(
+        backoffMs(attempt),
+        retryDeadline,
+        signal,
+        slug,
+        version,
+      );
       continue;
     }
     if (res.status >= 400) {
@@ -481,4 +522,27 @@ function sleep(ms: number, signal: AbortSignal | undefined, slug: string, versio
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+async function sleepWithinRetryDeadline(
+  requestedMs: number,
+  deadlineMs: number,
+  signal: AbortSignal | undefined,
+  slug: string,
+  version: string,
+): Promise<void> {
+  const remainingMs = deadlineMs - Date.now();
+  if (remainingMs <= 0) {
+    throw new MarketplaceInstallerError(
+      "RETRY_EXHAUSTED",
+      `download retry deadline exceeded for ${slug}@${version}`,
+    );
+  }
+  await sleep(Math.min(requestedMs, remainingMs), signal, slug, version);
+  if (Date.now() >= deadlineMs) {
+    throw new MarketplaceInstallerError(
+      "RETRY_EXHAUSTED",
+      `download retry deadline exceeded for ${slug}@${version}`,
+    );
+  }
 }

@@ -32,15 +32,19 @@ const mockedFetchPublic = fetchPublicHttpResponse as unknown as ReturnType<typeo
 function jsonResponse(body: unknown, init: { status?: number; ok?: boolean } = {}): Response {
   const status = init.status ?? 200;
   const ok = init.ok ?? status < 400;
+  const response = new Response(JSON.stringify(body), {
+    status,
+    statusText: ok ? "OK" : "ERR",
+    headers: { "content-type": "application/json" },
+  });
   return {
     ok,
     status,
     statusText: ok ? "OK" : "ERR",
+    headers: response.headers,
+    body: response.body,
     async json() {
       return body;
-    },
-    async arrayBuffer() {
-      throw new Error("not used");
     },
   } as unknown as Response;
 }
@@ -813,6 +817,24 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     expect(onChunk).toHaveBeenLastCalledWith(5, 5);
   });
 
+  it("switches progress to indeterminate when Content-Length understates the body", async () => {
+    const payload = new TextEncoder().encode("123");
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(payload, { contentLength: "2", chunks: [3] }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      artifactLimits: { maxCompressedBytes: 5 },
+    });
+
+    const onChunk = vi.fn();
+    await expect(fetcher.downloadArtifact("acme", "1.0.0", onChunk))
+      .resolves.toMatchObject({ body: Buffer.from("123") });
+    expect(onChunk).toHaveBeenLastCalledWith(3, null);
+    expect(onChunk).not.toHaveBeenCalledWith(3, 2);
+  });
+
   it("cancels a stalled body at its read deadline", async () => {
     const onCancel = vi.fn();
     mockedFetchPublic.mockReset();
@@ -852,6 +874,56 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
       code: "ARTIFACT_DOWNLOAD_ABORTED",
     });
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("bounds and times out the signature envelope body", async () => {
+    const oversizedCancel = vi.fn();
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(new Uint8Array(), {
+        contentLength: String(64 * 1024 + 1),
+        onCancel: oversizedCancel,
+      }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.fetchSignatureEnvelope("acme", "1.0.0"))
+      .rejects.toMatchObject({ code: "SIGNATURE_ENVELOPE_TOO_LARGE" });
+    expect(oversizedCancel).toHaveBeenCalledOnce();
+
+    const stalledCancel = vi.fn();
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(new Uint8Array(), { stall: true, onCancel: stalledCancel }),
+    );
+    const shortDeadlineFetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      envelopeReadTimeoutMs: 10,
+    });
+    await expect(shortDeadlineFetcher.fetchSignatureEnvelope("acme", "1.0.0"))
+      .rejects.toMatchObject({ code: "SIGNATURE_ENVELOPE_TIMEOUT" });
+    expect(stalledCancel).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry a deterministic missing-body response", async () => {
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const downloadRoot = mkdtempSync(join(tmpdir(), "marketplace-protocol-integration-"));
+    try {
+      await expect(installFromMarketplace("acme", "1.0.0", {
+        http: fetcher,
+        publicKeys: {},
+        downloadRoot,
+        maxRetries: 3,
+      })).rejects.toThrow(/no readable body/);
+      expect(mockedFetchPublic).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(downloadRoot, { recursive: true, force: true });
+    }
   });
 
   it("does not retry or reclassify a streamed limit failure through the installer", async () => {
