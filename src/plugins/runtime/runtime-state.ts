@@ -417,10 +417,11 @@ export abstract class PluginRuntimeState {
   protected rememberPluginInstallAlias(pluginId: string, alias: string | undefined): void {
     const normalizedPluginId = pluginId.trim();
     const normalizedAlias = alias?.trim();
-    if (!normalizedPluginId || !normalizedAlias || normalizedAlias === normalizedPluginId) return;
+    if (!normalizedPluginId || !normalizedAlias) return;
     this.assertPluginIdentityNamespace([
       { pluginId: normalizedPluginId, alias: normalizedAlias },
     ]);
+    if (normalizedAlias === normalizedPluginId) return;
     let aliases = this.knownInstallAliases.get(normalizedPluginId);
     if (!aliases) {
       aliases = new Set<string>();
@@ -448,10 +449,13 @@ export abstract class PluginRuntimeState {
     const normalizedReservedIds = [...reservedInstallIds]
       .map((pluginId) => pluginId.trim())
       .filter(Boolean);
-    const canonicalIds = new Set([
+    const existingCanonicalIds = new Set([
       ...this.knownPluginManifests.keys(),
       ...this.plugins.keys(),
       ...this.knownInstallAliases.keys(),
+    ]);
+    const canonicalIds = new Set([
+      ...existingCanonicalIds,
       ...normalizedMappings.map(({ pluginId }) => pluginId),
     ]);
     const aliasOwners = new Map<string, string>();
@@ -470,13 +474,35 @@ export abstract class PluginRuntimeState {
       for (const alias of aliases) recordAliasOwner(alias, canonicalId);
     }
 
-    for (const { pluginId } of normalizedMappings) {
+    const canonicalClaimCounts = new Map<string, number>();
+    for (const { pluginId, alias } of normalizedMappings) {
+      const claimCount = (canonicalClaimCounts.get(pluginId) ?? 0) + 1;
+      canonicalClaimCounts.set(pluginId, claimCount);
+      if (claimCount > 1) {
+        throw this.pluginIdentityCollision(
+          pluginId,
+          `multiple active artifacts claim canonical id '${pluginId}'`,
+        );
+      }
       const aliasOwner = aliasOwners.get(pluginId);
       if (aliasOwner && aliasOwner !== pluginId) {
         throw this.pluginIdentityCollision(
           pluginId,
           `canonical id for '${pluginId}' and install alias for '${aliasOwner}'`,
         );
+      }
+      if (existingCanonicalIds.has(pluginId) && alias) {
+        const knownAliases = this.knownInstallAliases.get(pluginId);
+        const reusesKnownIdentity =
+          alias === pluginId
+            ? !knownAliases || knownAliases.size === 0
+            : knownAliases?.has(alias) === true;
+        if (!reusesKnownIdentity) {
+          throw this.pluginIdentityCollision(
+            alias,
+            `new install alias for existing canonical id '${pluginId}'`,
+          );
+        }
       }
     }
     for (const { pluginId, alias } of normalizedMappings) {
@@ -515,6 +541,25 @@ export abstract class PluginRuntimeState {
         );
       }
     }
+  }
+
+  protected assertCurrentPluginIdentityLoadPlan(
+    loadPlan: ManifestLoadPlan[],
+    snapshots: Map<string, ManifestSnapshot>,
+  ): Array<{ plan: ManifestLoadPlan; snapshot: ManifestSnapshot }> {
+    const registryIdentities = loadPlan.flatMap((plan) => {
+      if (!plan.pluginIdHint) return [];
+      const snapshot = snapshots.get(plan.pluginIdHint);
+      return snapshot ? [{ plan, snapshot }] : [];
+    });
+    this.assertPluginIdentityNamespace(
+      registryIdentities.map(({ plan, snapshot }) => ({
+        pluginId: snapshot.manifest.id,
+        alias: plan.pluginIdHint,
+      })),
+      loadPlan.flatMap((plan) => plan.pluginIdHint ? [plan.pluginIdHint] : []),
+    );
+    return registryIdentities;
   }
 
   private pluginIdentityCollision(identifier: string, detail: string): Error {

@@ -490,11 +490,25 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     if (!isCurrent()) return "failed";
     const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
     if (!isCurrent()) return "failed";
-    const snapshot = enabledSnapshots.get(pluginId);
-    const targetPlan = loadPlan.find(
-      (p) =>
-        p.pluginIdHint === pluginId ||
-        (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
+    const registryIdentities = this.assertCurrentPluginIdentityLoadPlan(
+      loadPlan,
+      enabledSnapshots,
+    );
+    const knownAliases = new Set(this.getPluginInstallAliases(pluginId) ?? []);
+    const targetIdentity = registryIdentities.find(({ plan, snapshot }) =>
+      snapshot.manifest.id === pluginId
+      && (
+        knownAliases.size > 0
+          ? knownAliases.has(plan.pluginIdHint!)
+          : plan.pluginIdHint === pluginId
+      )
+    );
+    const snapshot = targetIdentity?.snapshot ?? enabledSnapshots.get(pluginId);
+    const targetPlan = targetIdentity?.plan ?? loadPlan.find(
+      (plan) =>
+        !plan.pluginIdHint
+        && plan.enabled
+        && this.matchesManifestPath(plan.manifestPath, pluginId),
     );
     const pluginRoot = targetPlan ? dirname(targetPlan.manifestPath) : plugin.pluginRoot;
     const approvedPluginAccess =
@@ -850,19 +864,6 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     const knownPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(knownPluginId);
     if (this.plugins.has(knownPluginId)) {
-      // Validate a freshly installed registry entry before treating its id as
-      // a restart of an existing canonical runtime identity.
-      const currentLoadPlan = await this.resolveManifestLoadPlanInternal();
-      const requestedPlan = currentLoadPlan.find(
-        (plan) => plan.enabled && plan.pluginIdHint === pluginId,
-      );
-      if (requestedPlan) {
-        const requestedManifest = await this.readManifest(requestedPlan.manifestPath);
-        this.assertPluginIdentityNamespace([{
-          pluginId: requestedManifest.id,
-          alias: requestedPlan.pluginIdHint,
-        }]);
-      }
       try {
         const restartResult = await this.restartPlugin(knownPluginId);
         if (restartResult === "deferred") return "preparing";
@@ -870,6 +871,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           throw new Error(`restartPlugin failed for ${pluginId}`);
         }
       } catch (err) {
+        if ((err as { code?: string })?.code === "plugin-identity-collision") throw err;
         throw new Error(`addPlugin failed for ${pluginId}: ${(err as Error).message}`);
       }
       this.throwIfPluginFailedAfterAdd(knownPluginId);
@@ -890,6 +892,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     if (this.pluginLifecycleGenerations.get(pluginId) !== lifecycleGeneration) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
+    this.assertCurrentPluginIdentityLoadPlan(loadPlan, enabledSnapshots);
     const snapshot = enabledSnapshots.get(pluginId);
     const targetPlan = loadPlan.find(
       (p) => p.pluginIdHint === pluginId || (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
