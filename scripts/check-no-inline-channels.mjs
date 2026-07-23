@@ -5,9 +5,9 @@
  * EVERY `src/ipc/domains/*.ts` IPC domain, host/plugin preload entry, selected
  * main-side producer, and external-surface consumer must reference Electron
  * wire channels ONLY through the `src/contract/` SOT (`CHANNELS.*`). The guard
- * rejects actual string and template literals in the `lvis:`, legacy
- * `marketplace:updates-available`, and `window:` namespaces while ignoring
- * comments and documentation.
+ * rejects actual string, template, and statically concatenated literals in
+ * the `lvis:`, `marketplace:`, and `window:` namespaces while ignoring comments
+ * and documentation.
  *
  * The domain directory is read dynamically (M1: cluster-review finding —
  * previously only the C2-swept chat/plugins/settings domains were guarded, so
@@ -59,10 +59,30 @@ const TARGETS = [
   "src/boot/steps/post-boot.ts",
 ];
 
-function isInlineChannel(value) {
+function isCliCommandName(node, rel) {
+  if (rel !== "src/cli/commands.ts" || !ts.isPropertyAssignment(node.parent)) return false;
+  const propertyName = node.parent.name;
+  return (ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName))
+    && propertyName.text === "name";
+}
+
+function isInlineChannel(value, node, rel) {
   return value.startsWith("lvis:")
-    || value === "marketplace:updates-available"
+    || (value.startsWith("marketplace:") && !isCliCommandName(node, rel))
     || value.startsWith("window:");
+}
+
+function staticText(node) {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
+  }
+  if (ts.isTemplateExpression(node)) return node.head.text;
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticText(node.left);
+    const right = staticText(node.right);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
+  return undefined;
 }
 
 let violations = 0;
@@ -78,13 +98,8 @@ for (const rel of TARGETS) {
   const source = ts.createSourceFile(rel, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const lines = content.split("\n");
   const visit = (node) => {
-    let value;
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      value = node.text;
-    } else if (ts.isTemplateExpression(node)) {
-      value = node.head.text;
-    }
-    if (value !== undefined && isInlineChannel(value)) {
+    const value = staticText(node);
+    if (value !== undefined && isInlineChannel(value, node, rel)) {
       const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
       console.error(
         `[no-inline-channels] ${rel}:${line + 1} inline channel literal — use CHANNELS.* from src/contract/`,
