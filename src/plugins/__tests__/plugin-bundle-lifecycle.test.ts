@@ -130,7 +130,7 @@ describe("PluginBundleLifecycle", () => {
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
-        retireRuntimeGeneration: vi.fn(async () => undefined),
+        prepareRuntimeRetirement: vi.fn(() => []),
       },
       receiptCacheRoot: cacheRoot,
       skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
@@ -178,7 +178,7 @@ describe("PluginBundleLifecycle", () => {
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
-        retireRuntimeGeneration: vi.fn(async () => undefined),
+        prepareRuntimeRetirement: vi.fn(() => []),
       },
       receiptCacheRoot: cacheRoot,
       skillStore,
@@ -240,7 +240,7 @@ describe("PluginBundleLifecycle", () => {
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
-        retireRuntimeGeneration: vi.fn(async () => undefined),
+        prepareRuntimeRetirement: vi.fn(() => []),
       },
       receiptCacheRoot: cacheRoot,
       skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
@@ -301,7 +301,7 @@ describe("PluginBundleLifecycle", () => {
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
-        retireRuntimeGeneration: vi.fn(async () => undefined),
+        prepareRuntimeRetirement: vi.fn(() => []),
       },
       receiptCacheRoot: cacheRoot,
       skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
@@ -342,7 +342,7 @@ describe("PluginBundleLifecycle", () => {
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
-        retireRuntimeGeneration: vi.fn(async () => undefined),
+        prepareRuntimeRetirement: vi.fn(() => []),
       },
       receiptCacheRoot: valid.cacheRoot,
       skillStore,
@@ -377,10 +377,15 @@ describe("PluginBundleLifecycle", () => {
 
   it("journals retirement progress and retries only the failed cleanup phase", async () => {
     const { root, pluginRoot, cacheRoot, manifest } = await fixture();
-    const retireRuntimeGeneration = vi.fn(async () => undefined);
-    const disconnectBundledGeneration = vi.fn()
-      .mockRejectedValueOnce(new Error("MCP disconnect failed"))
+    const stopRuntime = vi.fn();
+    const drainRuntime = vi.fn()
+      .mockRejectedValueOnce(new Error("HostApi drain failed"))
       .mockResolvedValue(undefined);
+    const prepareRuntimeRetirement = vi.fn(() => [
+      { phase: "runtime.stop" as const, run: stopRuntime },
+      { phase: "runtime.drain" as const, run: drainRuntime },
+    ]);
+    const disconnectBundledGeneration = vi.fn();
     const lifecycle = makeLifecycle({
       pluginRuntime: {
         getPluginManifest: () => manifest,
@@ -391,7 +396,7 @@ describe("PluginBundleLifecycle", () => {
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
-        retireRuntimeGeneration,
+        prepareRuntimeRetirement,
       },
       receiptCacheRoot: cacheRoot,
       skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
@@ -420,8 +425,10 @@ describe("PluginBundleLifecycle", () => {
     expect(committed.result).toBe("removed");
     await committed.retirement;
 
-    expect(disconnectBundledGeneration).toHaveBeenCalledTimes(2);
-    expect(retireRuntimeGeneration).toHaveBeenCalledTimes(1);
+    expect(disconnectBundledGeneration).toHaveBeenCalledTimes(1);
+    expect(prepareRuntimeRetirement).toHaveBeenCalledTimes(2);
+    expect(stopRuntime).toHaveBeenCalledTimes(1);
+    expect(drainRuntime).toHaveBeenCalledTimes(2);
     const journal = JSON.parse(await readFile(join(cacheRoot, "plugin-retirement-journal.json"), "utf8"));
     expect(journal.retirements).toEqual([]);
   });
@@ -438,7 +445,7 @@ describe("PluginBundleLifecycle", () => {
         postPublishRuntimeGeneration: vi.fn(async () => { throw new Error("runtime restore failed"); }),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
-        retireRuntimeGeneration: vi.fn(async () => undefined),
+        prepareRuntimeRetirement: vi.fn(() => []),
       },
       receiptCacheRoot: cacheRoot,
       skillStore: new SkillStore({ userDir: join(root, "user-skills") }),

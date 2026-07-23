@@ -22,6 +22,7 @@ import type {
   HostPluginGenerationState,
   PluginRuntimeGenerationLifecycle,
   PluginRuntimeGenerationProjection,
+  PluginRuntimeRetirementPhase,
 } from "./plugin-host-generation.js";
 import type { PluginGenerationLease } from "./plugin-generation-coordinator.js";
 import { createLogger } from "../lib/logger.js";
@@ -44,7 +45,7 @@ type RetirementPhase =
   | "hooks"
   | "mcp"
   | "loopback"
-  | "runtime"
+  | PluginRuntimeRetirementPhase
   | "payload"
   | "health";
 
@@ -81,7 +82,7 @@ export interface PluginBundleLifecycleDeps {
     | "postPublishRuntimeGeneration"
     | "publishRuntimeGeneration"
     | "unpublishRuntimeGeneration"
-    | "retireRuntimeGeneration"
+    | "prepareRuntimeRetirement"
   >;
   receiptCacheRoot: string;
   skillStore: SkillStore;
@@ -642,8 +643,11 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
         generation.pluginId,
         generation.generationId,
       ));
-    await runPhase("runtime", () =>
-      this.deps.pluginRuntime.retireRuntimeGeneration(generation.state.runtime));
+    for (const step of this.deps.pluginRuntime.prepareRuntimeRetirement(
+      generation.state.runtime,
+    )) {
+      await runPhase(step.phase, step.run);
+    }
     if (errors.length > 0) {
       const aggregate = new AggregateError(errors, `plugin '${generation.pluginId}' generation retirement failed`);
       this.retirementJournal.record(generation.pluginId, generation.generationId, aggregate);

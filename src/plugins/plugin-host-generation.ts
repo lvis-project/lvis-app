@@ -43,6 +43,17 @@ export interface PreparedPluginRuntimeGenerationPublication {
   publish(): void;
 }
 
+export type PluginRuntimeRetirementPhase =
+  | "runtime.authority"
+  | "runtime.stop"
+  | "runtime.effects"
+  | "runtime.drain";
+
+export interface PluginRuntimeRetirementStep {
+  readonly phase: PluginRuntimeRetirementPhase;
+  run(): void | Promise<void>;
+}
+
 export interface CommittedPluginGeneration<T> {
   readonly result: T;
   /** Settles only after every predecessor lease drains and retirement finishes. */
