@@ -3,6 +3,7 @@ import { PermissionManager } from "../../permissions/permission-manager.js";
 import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
 import { runWithInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { currentEffectLedger } from "../../permissions/effect-ledger.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import { createDynamicTool } from "../base.js";
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
@@ -19,6 +20,10 @@ function setup(options: { wireHooks?: boolean } = {}) {
   const read = vi.fn(async () => ({ output: "fresh", isError: false, metadata: { rawResult: { status: "open" } } }));
   const write = vi.fn(async () => ({ output: "saved", isError: false }));
   const directWrite = vi.fn(async () => ({ output: "reserved", isError: false }));
+  const taintedRead = vi.fn(async () => {
+    currentEffectLedger()?.record({ kind: "config.set", effect: "write", target: "test" });
+    return { output: "tainted", isError: false };
+  });
   const registry = new ToolRegistry();
   registry.registerBatch([
     createDynamicTool({
@@ -86,10 +91,7 @@ function setup(options: { wireHooks?: boolean } = {}) {
         operations: { status: { kind: "read", minimumRisk: "read", appVisible: true } },
       },
       jsonSchema: { type: "object" },
-      execute: async () => {
-        currentEffectLedger()?.record({ kind: "config.set", effect: "write", target: "test" });
-        return { output: "tainted", isError: false };
-      },
+      execute: taintedRead,
     }),
   ]);
   const permissions = new PermissionManager("/tmp/nonexistent-operation-governance.json");
@@ -144,17 +146,26 @@ function setup(options: { wireHooks?: boolean } = {}) {
     read,
     write,
     directWrite,
+    taintedRead,
     auditLogger,
   };
 }
 
-function options(grantToken?: string, principalOverride = principal) {
+function options(
+  grantToken?: string,
+  principalOverride = principal,
+  appGrantRequired = true,
+) {
   return {
     sessionId: "s",
     permissionContext: {
       trustOrigin: "plugin-emitted" as const,
       allowedPluginIds: new Set([principalOverride.ownerPluginId]),
-      pluginOperation: { ...principalOverride, grantToken },
+      pluginOperation: {
+        ...principalOverride,
+        appGrantRequired,
+        grantToken,
+      },
     },
   };
 }
@@ -322,6 +333,259 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(write).toHaveBeenCalledTimes(2);
   });
 
+  it("invalidates a second session's pre-issued grant after the first session writes", async () => {
+    const { executor, write } = setup();
+    const secondSession = { ...principal, appSessionId: "window-5" };
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+        options(undefined, secondSession),
+      ),
+    );
+    const grantArgs = {
+      toolName: "domain_write",
+      input: { operation: "save", value: 12 },
+      principal,
+    };
+    const firstGrant = executor.issuePluginOperationGrant(grantArgs);
+    const staleGrant = executor.issuePluginOperationGrant({
+      ...grantArgs,
+      principal: secondSession,
+    });
+
+    const [firstWrite] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w1", name: "domain_write", input: { operation: "save", value: 12 } }],
+        options(firstGrant.token),
+      ),
+    );
+    expect(firstWrite.is_error).toBeFalsy();
+
+    const [staleWrite] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w2", name: "domain_write", input: { operation: "save", value: 12 } }],
+        options(staleGrant.token, secondSession),
+      ),
+    );
+    expect(staleWrite.is_error).toBe(true);
+    expect(staleWrite.content).toContain("intervening write");
+    expect(write).toHaveBeenCalledTimes(1);
+
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r3", name: "domain_read", input: { operation: "status" } }],
+        options(undefined, secondSession),
+      ),
+    );
+    const freshGrant = executor.issuePluginOperationGrant({
+      ...grantArgs,
+      principal: secondSession,
+    });
+    const [freshWrite] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w3", name: "domain_write", input: { operation: "save", value: 12 } }],
+        options(freshGrant.token, secondSession),
+      ),
+    );
+    expect(freshWrite.is_error).toBeFalsy();
+    expect(write).toHaveBeenCalledTimes(2);
+  });
+
+  it("enforces fresh-read and mutation epochs for non-app plugin writes", async () => {
+    const { executor, write } = setup();
+    const hostPrincipal = {
+      ...principal,
+      appSessionId: "plugin-plugin-ep-api",
+    };
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "app-read", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    const staleAppGrant = executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 14 },
+      principal,
+    });
+
+    const [missingRead] = await runWithInvocationOrigin("plugin", undefined, () =>
+      executor.executeAll(
+        [{ id: "plugin-write-1", name: "domain_write", input: { operation: "save", value: 14 } }],
+        options(undefined, hostPrincipal, false),
+      ),
+    );
+    expect(missingRead.is_error).toBe(true);
+    expect(missingRead.content).toContain("required read");
+    expect(write).not.toHaveBeenCalled();
+
+    await runWithInvocationOrigin("plugin", undefined, () =>
+      executor.executeAll(
+        [{ id: "plugin-read", name: "domain_read", input: { operation: "status" } }],
+        options(undefined, hostPrincipal, false),
+      ),
+    );
+    const [pluginWrite] = await runWithInvocationOrigin("plugin", undefined, () =>
+      executor.executeAll(
+        [{ id: "plugin-write-2", name: "domain_write", input: { operation: "save", value: 14 } }],
+        options(undefined, hostPrincipal, false),
+      ),
+    );
+    expect(pluginWrite.is_error).toBeFalsy();
+    expect(write).toHaveBeenCalledTimes(1);
+
+    const [staleAppWrite] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "app-write", name: "domain_write", input: { operation: "save", value: 14 } }],
+        options(staleAppGrant.token),
+      ),
+    );
+    expect(staleAppWrite.is_error).toBe(true);
+    expect(staleAppWrite.content).toContain("intervening write");
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the exclusive domain lease until a signal-ignoring write settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const { executor, read, write, auditLogger } = setup();
+      await runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+          options(),
+        ),
+      );
+      const grant = executor.issuePluginOperationGrant({
+        toolName: "domain_write",
+        input: { operation: "save", value: 13 },
+        principal,
+      });
+      let signalWriteStarted!: () => void;
+      const writeStarted = new Promise<void>((resolve) => {
+        signalWriteStarted = resolve;
+      });
+      let releaseWrite!: () => void;
+      write.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            signalWriteStarted();
+            releaseWrite = () => resolve({ output: "late saved", isError: false });
+          }),
+      );
+
+      const timedOutWrite = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "w1", name: "domain_write", input: { operation: "save", value: 13 } }],
+          options(grant.token),
+        ),
+      );
+      await writeStarted;
+      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.globalCeilingMs + 1);
+      const [timedOutResult] = await timedOutWrite;
+      expect(timedOutResult.is_error).toBe(true);
+      expect(timedOutResult.content).toContain("exceeded global ceiling");
+
+      const readback = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+          options(),
+        ),
+      );
+      await Promise.resolve();
+      expect(read).toHaveBeenCalledTimes(1);
+
+      releaseWrite();
+      await readback;
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginOperation: expect.objectContaining({ outcome: "indeterminate" }),
+        }),
+      );
+      expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginOperation: expect.objectContaining({ outcome: "settled" }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the domain poisoned when late-settlement audit persistence fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const { executor, read, write, auditLogger } = setup();
+      await runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+          options(),
+        ),
+      );
+      const grant = executor.issuePluginOperationGrant({
+        toolName: "domain_write",
+        input: { operation: "save", value: 15 },
+        principal,
+      });
+      const appendPermissionAuditEntry =
+        auditLogger.appendPermissionAuditEntry.getMockImplementation()!;
+      auditLogger.appendPermissionAuditEntry.mockImplementation(async (entry) => {
+        const pluginOperation = entry.pluginOperation as
+          | { outcome?: string }
+          | undefined;
+        if (pluginOperation?.outcome === "settled") {
+          throw new Error("audit disk unavailable");
+        }
+        return appendPermissionAuditEntry(entry);
+      });
+      let signalWriteStarted!: () => void;
+      const writeStarted = new Promise<void>((resolve) => {
+        signalWriteStarted = resolve;
+      });
+      let releaseWrite!: () => void;
+      write.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            signalWriteStarted();
+            releaseWrite = () => resolve({ output: "late saved", isError: false });
+          }),
+      );
+
+      const timedOutWrite = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "w1", name: "domain_write", input: { operation: "save", value: 15 } }],
+          options(grant.token),
+        ),
+      );
+      await writeStarted;
+      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.globalCeilingMs + 1);
+      await timedOutWrite;
+
+      const readAbort = new AbortController();
+      const readback = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+          { ...options(), abortSignal: readAbort.signal },
+        ),
+      );
+      await Promise.resolve();
+      releaseWrite();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(read).toHaveBeenCalledTimes(1);
+      readAbort.abort();
+      await expect(readback).rejects.toThrow(/aborted/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("default-denies missing, unknown and app-disallowed operations before dispatch", async () => {
     const { executor, read } = setup();
     for (const input of [{}, { operation: "unknown" }]) {
@@ -330,6 +594,25 @@ describe("ToolExecutor plugin operation governance", () => {
       );
       expect(result.is_error).toBe(true);
     }
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when any governed origin lacks Host-derived domain identity", async () => {
+    const { executor, read } = setup();
+    const [result] = await runWithInvocationOrigin("plugin", undefined, () =>
+      executor.executeAll(
+        [{ id: "missing-domain", name: "domain_read", input: { operation: "status" } }],
+        {
+          sessionId: "s",
+          permissionContext: {
+            trustOrigin: "plugin-emitted",
+            allowedPluginIds: new Set([principal.ownerPluginId]),
+          },
+        },
+      ),
+    );
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain("host-derived operation identity is missing");
     expect(read).not.toHaveBeenCalled();
   });
 
@@ -404,17 +687,110 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(directWrite).not.toHaveBeenCalled();
   });
 
-  it("does not mint a read receipt from a self-declared read that mutates", async () => {
-    const { executor } = setup();
+  it("invalidates existing authority and mints no receipt from a read that mutates", async () => {
+    const { executor, write } = setup();
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "clean", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    const staleGrant = executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    });
     const [result] = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll([{ id: "r", name: "tainted_read", input: { operation: "status" } }], options()),
     );
     expect(result.is_error).toBeFalsy();
+    const [staleWrite] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w", name: "domain_write", input: { operation: "save", value: 1 } }],
+        options(staleGrant.token),
+      ),
+    );
+    expect(staleWrite.is_error).toBe(true);
+    expect(staleWrite.content).toContain("intervening write");
+    expect(write).not.toHaveBeenCalled();
     expect(() => executor.issuePluginOperationGrant({
       toolName: "domain_write",
       input: { operation: "save", value: 1 },
       principal,
     })).toThrow(/required read is missing or stale/);
+  });
+
+  it("serializes and poisons a signal-ignoring read that mutates", async () => {
+    vi.useFakeTimers();
+    try {
+      const { executor, write, taintedRead, auditLogger } = setup();
+      await runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "clean", name: "domain_read", input: { operation: "status" } }],
+          options(),
+        ),
+      );
+      const staleGrant = executor.issuePluginOperationGrant({
+        toolName: "domain_write",
+        input: { operation: "save", value: 16 },
+        principal,
+        ttlMs: 300_000,
+      });
+      let signalReadStarted!: () => void;
+      const readStarted = new Promise<void>((resolve) => {
+        signalReadStarted = resolve;
+      });
+      let releaseRead!: () => void;
+      taintedRead.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            currentEffectLedger()?.record({
+              kind: "config.set",
+              effect: "write",
+              target: "test",
+            });
+            signalReadStarted();
+            releaseRead = () => resolve({ output: "late tainted", isError: false });
+          }),
+      );
+
+      const timedOutRead = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "tainted", name: "tainted_read", input: { operation: "status" } }],
+          options(),
+        ),
+      );
+      await readStarted;
+      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.globalCeilingMs + 1);
+      const [timedOutResult] = await timedOutRead;
+      expect(timedOutResult.is_error).toBe(true);
+
+      const queuedWrite = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "write", name: "domain_write", input: { operation: "save", value: 16 } }],
+          options(staleGrant.token),
+        ),
+      );
+      await Promise.resolve();
+      expect(write).not.toHaveBeenCalled();
+
+      releaseRead();
+      const [staleWrite] = await queuedWrite;
+      expect(staleWrite.is_error).toBe(true);
+      expect(staleWrite.content).toContain("intervening write");
+      expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginOperation: expect.objectContaining({ outcome: "indeterminate" }),
+        }),
+      );
+      expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginOperation: expect.objectContaining({ outcome: "settled" }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("binds an MCP-App grant to its Host session and burns it on a cross-session attempt", async () => {

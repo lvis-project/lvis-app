@@ -13,10 +13,19 @@
 /** Termination reason recorded for audit and error message branching. */
 export type ToolCeilingTerminationReason = "ceiling" | "user-abort" | "error";
 
-/** Result of a ceiling-wrapped execution. Discriminated by `ok`. */
-export type ToolCeilingOutcome<T> =
+/** Actual underlying task settlement. Discriminated by `ok`. */
+type ToolTaskOutcome<T> =
   | { ok: true; value: T }
   | { ok: false; reason: ToolCeilingTerminationReason; error: Error };
+
+/**
+ * Prompt caller-facing outcome. When interruption wins before a
+ * signal-ignoring task settles, `settlement` remains pending until that actual
+ * task finishes so authority owners can keep their lease poisoned meanwhile.
+ */
+export type ToolCeilingOutcome<T> = ToolTaskOutcome<T> & {
+  readonly settlement?: Promise<ToolTaskOutcome<T>>;
+};
 
 /**
  * Run `task` under a ceiling. The task receives a signal that aborts when:
@@ -35,9 +44,9 @@ export async function runWithCeiling<T>(
   taskName: string,
 ): Promise<ToolCeilingOutcome<T>> {
   const ceilingController = new AbortController();
-  let resolveInterruption: (outcome: ToolCeilingOutcome<T>) => void = () => {};
+  let resolveInterruption: (outcome: ToolTaskOutcome<T>) => void = () => {};
   let interruptionSettled = false;
-  const interruptionOutcome = new Promise<ToolCeilingOutcome<T>>((resolve) => {
+  const interruptionOutcome = new Promise<ToolTaskOutcome<T>>((resolve) => {
     resolveInterruption = (outcome) => {
       if (interruptionSettled) return;
       interruptionSettled = true;
@@ -74,10 +83,10 @@ export async function runWithCeiling<T>(
     parentAbortSignal.addEventListener("abort", parentAbortListener, { once: true });
   }
 
-  const taskOutcome = Promise.resolve()
+  const taskOutcome: Promise<ToolTaskOutcome<T>> = Promise.resolve()
     .then(() => task(ceilingController.signal))
-    .then((value): ToolCeilingOutcome<T> => ({ ok: true, value }))
-    .catch((err): ToolCeilingOutcome<T> => {
+    .then((value): ToolTaskOutcome<T> => ({ ok: true, value }))
+    .catch((err): ToolTaskOutcome<T> => {
       if (ceilingFired) {
         return {
           ok: false,
@@ -102,7 +111,16 @@ export async function runWithCeiling<T>(
     });
 
   try {
-    return await Promise.race([taskOutcome, interruptionOutcome]);
+    const winner = await Promise.race([
+      taskOutcome.then((outcome) => ({ source: "task" as const, outcome })),
+      interruptionOutcome.then((outcome) => ({
+        source: "interruption" as const,
+        outcome,
+      })),
+    ]);
+    return winner.source === "task"
+      ? winner.outcome
+      : { ...winner.outcome, settlement: taskOutcome };
   } finally {
     interruptionSettled = true;
     clearTimeout(timer);

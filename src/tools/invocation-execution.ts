@@ -242,16 +242,25 @@ export async function executeAuthorizedToolInvocation(
     }
   }
 
-  const operationExecutionLease =
+  const operationExecutionDomain =
     resolvedPluginOperation && pluginOperationPrincipal
+      ? pluginOperationExecutionDomain(
+          pluginOperationPrincipal,
+          toolUse.name,
+          resolvedPluginOperation.operation,
+          services.toolRegistry.listAll(),
+        )
+      : undefined;
+  const operationExecutionLease =
+    resolvedPluginOperation &&
+    pluginOperationPrincipal &&
+    operationExecutionDomain
       ? await services.pluginOperationGrants.acquireExecutionLease(
-          pluginOperationExecutionDomain(
-            pluginOperationPrincipal,
-            toolUse.name,
-            resolvedPluginOperation.operation,
-            services.toolRegistry.listAll(),
-          ),
-          resolvedPluginOperation.rule.kind,
+          operationExecutionDomain,
+          // A signed read declaration can still reach a Host-observed write
+          // effect. Serialize every governed operation so a dishonest or
+          // compromised handler cannot mutate under a shared read lease.
+          "write",
           abortSignal,
         )
       : undefined;
@@ -260,7 +269,15 @@ export async function executeAuthorizedToolInvocation(
   let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
   let rawResult: unknown;
   let image: ToolResultImage | undefined;
-  let terminationReason: "ok" | "ceiling" | "user-abort" | "error" = "ok";
+  let terminationReason:
+    | "ok"
+    | "ceiling"
+    | "user-abort"
+    | "error"
+    | "indeterminate" = "ok";
+  let consumedPluginOperationGrantId: string | undefined;
+  let deferredOperationSettlement: Promise<unknown> | undefined;
+  let interruptionReason: "ceiling" | "user-abort" | undefined;
   try {
     if (rationaleResumeContext) {
       if (!rationaleResumeContext.authorized) {
@@ -287,16 +304,34 @@ export async function executeAuthorizedToolInvocation(
     ) {
       const readRequirement = resolvedPluginOperation.rule.requiresRead;
       const grantContext = invocationPermissionContext.pluginOperation;
-      const consumed = services.pluginOperationGrants.consume(
-        grantContext?.grantToken,
-        {
-          ...pluginOperationPrincipal,
-          toolName: toolUse.name,
-          operation: resolvedPluginOperation.operation,
-          intentHash: resolvedPluginOperation.intentHash,
-          requiresRead: readRequirement !== undefined,
-        },
-      );
+      const consumed = grantContext?.appGrantRequired === true
+        ? services.pluginOperationGrants.consume(
+            grantContext.grantToken,
+            {
+              ...pluginOperationPrincipal,
+              toolName: toolUse.name,
+              operation: resolvedPluginOperation.operation,
+              intentHash: resolvedPluginOperation.intentHash,
+              requiresRead: readRequirement !== undefined,
+            },
+            operationExecutionDomain!,
+          )
+        : readRequirement
+          ? services.pluginOperationGrants.consumeRequiredRead(
+              pluginOperationPrincipal,
+              {
+                readTool: readRequirement.tool,
+                readOperations: readRequirement.operations,
+                maxAgeMs: readRequirement.maxAgeMs,
+              },
+              operationExecutionDomain!,
+            )
+          : { ok: true as const };
+      const consumedGrantId =
+        "grantId" in consumed && typeof consumed.grantId === "string"
+          ? consumed.grantId
+          : undefined;
+      if (consumed.ok) consumedPluginOperationGrantId = consumedGrantId;
       let grantAuditError: unknown;
       try {
         const commonGrantAudit = {
@@ -310,7 +345,7 @@ export async function executeAuthorizedToolInvocation(
             pluginId: pluginOperationPrincipal.ownerPluginId,
             operation: resolvedPluginOperation.operation,
             outcome: consumed.ok ? "consumed" : "rejected",
-            ...(consumed.grantId ? { grantId: consumed.grantId } : {}),
+            ...(consumedGrantId ? { grantId: consumedGrantId } : {}),
           },
         } as const;
         if (consumed.ok) {
@@ -503,6 +538,51 @@ export async function executeAuthorizedToolInvocation(
     abortSignal,
     toolUse.name,
   );
+  if (
+    resolvedPluginOperation &&
+    operationExecutionDomain
+  ) {
+    if (
+      resolvedPluginOperation.rule.kind === "write" ||
+      outcome.settlement
+    ) {
+      // Declared writes and any interrupted governed execution may have
+      // changed remote state. Advance before the exclusive lease can release.
+      services.pluginOperationGrants.markDomainMutation(
+        operationExecutionDomain,
+      );
+    }
+  }
+  if (
+    outcome.settlement &&
+    resolvedPluginOperation &&
+    pluginOperationPrincipal
+  ) {
+    deferredOperationSettlement = outcome.settlement;
+    terminationReason = "indeterminate";
+    await services.auditLogger.appendPermissionAuditEntry({
+      ts: new Date().toISOString(),
+      auditId: randomUUID(),
+      tool: toolUse.name,
+      source,
+      category: invocationCategory,
+      trustOrigin: invocationPermissionContext.trustOrigin,
+      decision: "deny",
+      denyReasons: [{
+        layer: 6,
+        reason: "authorized plugin write remains unsettled after interruption",
+        source: "plugin-operation-execution",
+      }],
+      pluginOperation: {
+        pluginId: pluginOperationPrincipal.ownerPluginId,
+        operation: resolvedPluginOperation.operation,
+        outcome: "indeterminate",
+        ...(consumedPluginOperationGrantId
+          ? { grantId: consumedPluginOperationGrantId }
+          : {}),
+      },
+    });
+  }
   if (outcome.ok) {
     const result = outcome.value;
     content = result.output;
@@ -522,7 +602,13 @@ export async function executeAuthorizedToolInvocation(
     }
     if (isError) terminationReason = "error";
   } else {
-    terminationReason = outcome.reason;
+    if (
+      outcome.reason === "ceiling" ||
+      outcome.reason === "user-abort"
+    ) {
+      interruptionReason = outcome.reason;
+    }
+    if (!outcome.settlement) terminationReason = outcome.reason;
     content =
       outcome.reason === "ceiling"
         ? `tool execution exceeded global ceiling (${effectiveCeilingMs}ms): ${toolUse.name}`
@@ -539,6 +625,16 @@ export async function executeAuthorizedToolInvocation(
   // read/write classification for this call; it drives NO permission decision
   // here — a later read-recognition gate consumes it.
   const effectSummary = effectLedger.summary();
+  if (
+    operationExecutionDomain &&
+    resolvedPluginOperation?.rule.kind === "read" &&
+    !outcome.settlement &&
+    effectSummary.hasMutatingEffect
+  ) {
+    services.pluginOperationGrants.markDomainMutation(
+      operationExecutionDomain,
+    );
+  }
   // Propagate a MUTATING inner invocation onto the parent (outer wrapper)
   // ledger. Without this a read-declared wrapper W that delegates a mutation
   // via callTool(M) would record `hasMutatingEffect:false` on its OWN ledger
@@ -565,7 +661,7 @@ export async function executeAuthorizedToolInvocation(
       ...pluginOperationPrincipal,
       readTool: toolUse.name,
       readOperation: resolvedPluginOperation.operation,
-    });
+    }, operationExecutionDomain!);
   }
   // Emit the EFFECT shadow record for plugin/MCP invocations (builtins never
   // touch the hostApi closures, so their ledger is empty — no reconciliation
@@ -587,10 +683,56 @@ export async function executeAuthorizedToolInvocation(
     );
   }
   } finally {
-    operationExecutionLease?.release();
+    if (
+      operationExecutionLease &&
+      deferredOperationSettlement &&
+      pluginOperationPrincipal &&
+      resolvedPluginOperation
+    ) {
+      const lease = operationExecutionLease;
+      const pluginId = pluginOperationPrincipal.ownerPluginId;
+      const operation = resolvedPluginOperation.operation;
+      const grantId = consumedPluginOperationGrantId;
+      void deferredOperationSettlement
+        .then(async () => {
+          try {
+            await services.auditLogger.appendPermissionAuditEntry({
+              ts: new Date().toISOString(),
+              auditId: randomUUID(),
+              tool: toolUse.name,
+              source,
+              category: invocationCategory,
+              trustOrigin: invocationPermissionContext.trustOrigin,
+              decision: "allow",
+              layer: 6,
+              pluginOperation: {
+                pluginId,
+                operation,
+                outcome: "settled",
+                ...(grantId ? { grantId } : {}),
+              },
+            });
+            lease.release();
+          } catch (error) {
+            log.error(
+              "late plugin operation settlement audit failed; domain remains poisoned for %s: %s",
+              toolUse.name,
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }, (error) => {
+          log.error(
+            "late plugin operation settlement tracking failed; domain remains poisoned for %s: %s",
+            toolUse.name,
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+    } else {
+      operationExecutionLease?.release();
+    }
   }
 
-  if (terminationReason === "user-abort") {
+  if (interruptionReason === "user-abort") {
     const durationMs = Date.now() - startTime;
     if (!rationaleResumeContext?.started) {
       callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);

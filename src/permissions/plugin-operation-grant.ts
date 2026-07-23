@@ -9,6 +9,11 @@ export interface PluginOperationPrincipal {
   accountHash: string;
 }
 
+export type PluginOperationDomainPrincipal = Omit<
+  PluginOperationPrincipal,
+  "appSessionId"
+>;
+
 export interface PluginOperationGrantBinding extends PluginOperationPrincipal {
   contractVersion: 1;
   toolName: string;
@@ -61,6 +66,8 @@ interface ReadSnapshot {
   revision: string;
   recordedAt: number;
   sequence: number;
+  domainKey: string;
+  domainRevision: string;
 }
 
 interface ReservedReadSnapshot {
@@ -84,76 +91,30 @@ function snapshotKey(value: PluginReadSnapshotKey): string {
   return `${principalKey(value)}\0${value.readTool}\0${value.readOperation}`;
 }
 
-function operationNode(toolName: string, operation: string): string {
-  return `${toolName}\0${operation}`;
-}
-
 /**
- * Compute the Host-private connected operation domain for one invocation.
+ * Compute the Host-private account operation domain for one invocation.
  *
- * Every operation on the same consolidated Tool belongs to one domain. A
- * write's declared read prerequisites join the read and write Tools into the
- * same component. The account, plugin version, and immutable generation scope
- * the resulting lock; app windows for the same provider account deliberately
- * share it so two sessions cannot race the same remote state.
+ * Every governed operation in one immutable plugin generation and provider
+ * account shares the same domain. Operation declarations may add restrictions,
+ * but cannot prove that a compromised handler will stay within a narrower
+ * resource component; account-wide serialization therefore remains Host-owned.
  */
 export function pluginOperationExecutionDomain(
-  principal: PluginOperationPrincipal,
+  principal: PluginOperationDomainPrincipal,
   toolName: string,
   operation: string,
   tools: readonly PluginOperationDomainTool[],
 ): string {
-  const graph = new Map<string, Set<string>>();
-  const connect = (left: string, right: string): void => {
-    const leftEdges = graph.get(left) ?? new Set<string>();
-    const rightEdges = graph.get(right) ?? new Set<string>();
-    leftEdges.add(right);
-    rightEdges.add(left);
-    graph.set(left, leftEdges);
-    graph.set(right, rightEdges);
-  };
-
-  for (const tool of tools) {
-    if (
-      tool.pluginId !== principal.ownerPluginId ||
-      tool.pluginGeneration?.generationId !== principal.generationId ||
-      !tool.operationPolicy
-    ) {
-      continue;
-    }
-    const nodes = Object.keys(tool.operationPolicy.operations)
-      .map((candidateOperation) => operationNode(tool.name, candidateOperation));
-    for (const node of nodes) {
-      graph.set(node, graph.get(node) ?? new Set());
-      for (const sibling of nodes) connect(node, sibling);
-    }
-    for (const [candidateOperation, rule] of Object.entries(
-      tool.operationPolicy.operations,
-    )) {
-      if (rule.kind !== "write" || !rule.requiresRead) continue;
-      const writeNode = operationNode(tool.name, candidateOperation);
-      for (const readOperation of rule.requiresRead.operations) {
-        connect(
-          writeNode,
-          operationNode(rule.requiresRead.tool, readOperation),
-        );
-      }
-    }
-  }
-
-  const start = operationNode(toolName, operation);
-  if (!graph.has(start)) {
+  const target = tools.find((tool) =>
+    tool.name === toolName &&
+    tool.pluginId === principal.ownerPluginId &&
+    tool.pluginGeneration?.generationId === principal.generationId &&
+    tool.operationPolicy?.operations[operation] !== undefined
+  );
+  if (!target) {
     throw new Error(
       `plugin operation domain is missing '${toolName}.${operation}' in active generation`,
     );
-  }
-  const component = new Set<string>();
-  const pending = [start];
-  while (pending.length > 0) {
-    const node = pending.pop()!;
-    if (component.has(node)) continue;
-    component.add(node);
-    for (const neighbor of graph.get(node) ?? []) pending.push(neighbor);
   }
   return hash([
     "plugin-operation-domain/v1",
@@ -161,7 +122,6 @@ export function pluginOperationExecutionDomain(
     principal.ownerVersion,
     principal.generationId,
     principal.accountHash,
-    ...[...component].sort(),
   ].join("\0"));
 }
 
@@ -179,25 +139,38 @@ interface ExecutionDomainState {
   queue: PendingExecutionLease[];
 }
 
+interface ExecutionDomainRevision {
+  readonly ownerPluginId: string;
+  readonly generationId: string;
+  readonly accountHash: string;
+  revision: string;
+  revoked: boolean;
+}
+
 export class PluginOperationGrantCoordinator {
   private readonly grants = new Map<string, {
     id: string;
     binding: PluginOperationGrantBinding;
     reservedRead?: ReservedReadSnapshot;
+    domainKey: string;
+    domainRevision: string;
   }>();
   private readonly snapshots = new Map<string, ReadSnapshot>();
   private readonly latestReadSequences = new Map<string, number>();
   private readonly executionDomains = new Map<string, ExecutionDomainState>();
+  private readonly domainRevisions = new Map<string, ExecutionDomainRevision>();
   private nextReadSequence = 0;
 
   constructor(
     private readonly now: () => number = Date.now,
     private readonly maxGrants = 1024,
     private readonly maxSnapshots = 2048,
+    private readonly maxDomains = 4096,
   ) {}
 
-  recordRead(key: PluginReadSnapshotKey): string {
+  recordRead(key: PluginReadSnapshotKey, domainKey: string): string {
     this.trimSnapshots();
+    const domain = this.requireDomain(domainKey, key);
     const revision = randomUUID();
     const keyString = snapshotKey(key);
     const sequence = ++this.nextReadSequence;
@@ -205,6 +178,8 @@ export class PluginOperationGrantCoordinator {
       revision,
       recordedAt: this.now(),
       sequence,
+      domainKey,
+      domainRevision: domain.revision,
     });
     this.latestReadSequences.set(keyString, sequence);
     return revision;
@@ -215,24 +190,35 @@ export class PluginOperationGrantCoordinator {
     readTool: string,
     readOperations: readonly string[],
     maxAgeMs: number,
+    domainKey: string,
   ): string | undefined {
+    const domain = this.requireDomain(domainKey, principal);
     let newest: ReadSnapshot | undefined;
     for (const readOperation of readOperations) {
       const candidate = this.snapshots.get(snapshotKey({ ...principal, readTool, readOperation }));
       if (candidate && (!newest || candidate.sequence > newest.sequence)) newest = candidate;
     }
-    if (!newest || this.now() - newest.recordedAt > maxAgeMs) return undefined;
+    if (
+      !newest ||
+      newest.domainKey !== domainKey ||
+      newest.domainRevision !== domain.revision ||
+      this.now() - newest.recordedAt > maxAgeMs
+    ) {
+      return undefined;
+    }
     return newest.revision;
   }
 
   issue(
     binding: Omit<PluginOperationGrantBinding, "contractVersion" | "nonce">,
+    domainKey: string,
     requiredRead?: PluginRequiredReadReservation,
   ): {
     token: string;
     grantId: string;
   } {
     this.collectExpired();
+    const domain = this.requireDomain(domainKey, binding);
     let reservedRead: ReservedReadSnapshot | undefined;
     if (binding.readRevision === null) {
       if (requiredRead) {
@@ -240,7 +226,13 @@ export class PluginOperationGrantCoordinator {
       }
     } else {
       const snapshot = requiredRead
-        ? this.reserveRequiredRead(binding, requiredRead, binding.readRevision)
+        ? this.reserveRequiredRead(
+            binding,
+            requiredRead,
+            binding.readRevision,
+            domainKey,
+            domain.revision,
+          )
         : undefined;
       if (!requiredRead || !snapshot) {
         throw new Error(
@@ -259,6 +251,8 @@ export class PluginOperationGrantCoordinator {
       id: grantId,
       binding: { ...binding, contractVersion: 1, nonce: randomUUID() },
       ...(reservedRead ? { reservedRead } : {}),
+      domainKey,
+      domainRevision: domain.revision,
     });
     return { token, grantId };
   }
@@ -266,12 +260,20 @@ export class PluginOperationGrantCoordinator {
   consume(
     token: string | undefined,
     expected: PluginOperationGrantExpectation,
+    domainKey: string,
   ): GrantConsumeResult {
     if (!token) return { ok: false, reason: "operation grant missing" };
     const key = hash(token);
     const stored = this.grants.get(key);
     this.grants.delete(key); // burn before every comparison; no await may precede this line
     if (!stored) return { ok: false, reason: "operation grant unknown or already consumed" };
+    if (stored.domainKey !== domainKey) {
+      return {
+        ok: false,
+        reason: "operation grant domain mismatch",
+        grantId: stored.id,
+      };
+    }
     const { binding } = stored;
     if (binding.expiresAt <= this.now()) return { ok: false, reason: "operation grant expired", grantId: stored.id };
     for (const field of [
@@ -290,6 +292,14 @@ export class PluginOperationGrantCoordinator {
       };
     }
     if (binding.readRevision !== null) {
+      const domain = this.domainRevisions.get(domainKey);
+      if (!domain || stored.domainRevision !== domain.revision) {
+        return {
+          ok: false,
+          reason: "operation grant required read was invalidated by an intervening write",
+          grantId: stored.id,
+        };
+      }
       if (
         !stored.reservedRead ||
         stored.reservedRead.snapshot.revision !== binding.readRevision
@@ -321,6 +331,47 @@ export class PluginOperationGrantCoordinator {
     return { ok: true, grantId: stored.id };
   }
 
+  consumeRequiredRead(
+    principal: PluginOperationPrincipal,
+    requirement: PluginRequiredReadReservation,
+    domainKey: string,
+  ): { ok: true } | { ok: false; reason: string } {
+    const revision = this.latestRequiredRead(
+      principal,
+      requirement.readTool,
+      requirement.readOperations,
+      requirement.maxAgeMs,
+      domainKey,
+    );
+    if (!revision) {
+      return {
+        ok: false,
+        reason: "operation required read is missing or stale",
+      };
+    }
+    const domain = this.requireDomain(domainKey, principal);
+    return this.reserveRequiredRead(
+      principal,
+      requirement,
+      revision,
+      domainKey,
+      domain.revision,
+    )
+      ? { ok: true }
+      : {
+          ok: false,
+          reason: "operation required read changed before execution",
+        };
+  }
+
+  markDomainMutation(domainKey: string): void {
+    const domain = this.domainRevisions.get(domainKey);
+    if (!domain) {
+      throw new Error("plugin operation domain is not registered");
+    }
+    domain.revision = randomUUID();
+  }
+
   acquireExecutionLease(
     domainKey: string,
     kind: "read" | "write",
@@ -328,6 +379,9 @@ export class PluginOperationGrantCoordinator {
   ): Promise<PluginOperationExecutionLease> {
     if (!/^[0-9a-f]{64}$/.test(domainKey)) {
       return Promise.reject(new Error("plugin operation domain key is invalid"));
+    }
+    if (this.domainRevisions.get(domainKey)?.revoked) {
+      return Promise.reject(new Error("plugin operation domain is revoked"));
     }
     if (signal?.aborted) {
       return Promise.reject(new Error("plugin operation execution lease aborted"));
@@ -366,6 +420,14 @@ export class PluginOperationGrantCoordinator {
     for (const [key] of this.latestReadSequences) {
       if (key.startsWith(`${ownerPluginId}\0`) && key.includes(`\0${generationId}\0`)) this.latestReadSequences.delete(key);
     }
+    for (const [domainKey, domain] of this.domainRevisions) {
+      if (
+        domain.ownerPluginId === ownerPluginId &&
+        domain.generationId === generationId
+      ) {
+        this.revokeDomain(domainKey, domain);
+      }
+    }
   }
 
   revokeSession(appSessionId: string): void {
@@ -392,6 +454,15 @@ export class PluginOperationGrantCoordinator {
         value.binding.accountHash === accountHash
       ) {
         this.grants.delete(key);
+      }
+    }
+    for (const [domainKey, domain] of this.domainRevisions) {
+      if (
+        domain.ownerPluginId === ownerPluginId &&
+        domain.generationId === generationId &&
+        domain.accountHash === accountHash
+      ) {
+        this.revokeDomain(domainKey, domain);
       }
     }
     const principalPrefix = `${ownerPluginId}\0`;
@@ -426,6 +497,8 @@ export class PluginOperationGrantCoordinator {
     principal: PluginOperationPrincipal,
     requiredRead: PluginRequiredReadReservation,
     expectedRevision: string,
+    domainKey: string,
+    domainRevision: string,
   ): ReadSnapshot | undefined {
     let newest:
       | { key: string; snapshot: ReadSnapshot }
@@ -447,6 +520,8 @@ export class PluginOperationGrantCoordinator {
     if (
       !newest ||
       newest.snapshot.revision !== expectedRevision ||
+      newest.snapshot.domainKey !== domainKey ||
+      newest.snapshot.domainRevision !== domainRevision ||
       this.now() - newest.snapshot.recordedAt > requiredRead.maxAgeMs
     ) {
       return undefined;
@@ -456,6 +531,41 @@ export class PluginOperationGrantCoordinator {
     // from the same user-visible read snapshot.
     this.snapshots.delete(newest.key);
     return newest.snapshot;
+  }
+
+  private requireDomain(
+    domainKey: string,
+    principal: PluginOperationPrincipal,
+  ): ExecutionDomainRevision {
+    if (!/^[0-9a-f]{64}$/.test(domainKey)) {
+      throw new Error("plugin operation domain key is invalid");
+    }
+    const existing = this.domainRevisions.get(domainKey);
+    if (existing) {
+      if (
+        existing.ownerPluginId !== principal.ownerPluginId ||
+        existing.generationId !== principal.generationId ||
+        existing.accountHash !== principal.accountHash
+      ) {
+        throw new Error("plugin operation domain owner mismatch");
+      }
+      if (existing.revoked) {
+        throw new Error("plugin operation domain is revoked");
+      }
+      return existing;
+    }
+    if (this.domainRevisions.size >= this.maxDomains) {
+      throw new Error("plugin operation domain capacity exceeded");
+    }
+    const created: ExecutionDomainRevision = {
+      ownerPluginId: principal.ownerPluginId,
+      generationId: principal.generationId,
+      accountHash: principal.accountHash,
+      revision: randomUUID(),
+      revoked: false,
+    };
+    this.domainRevisions.set(domainKey, created);
+    return created;
   }
 
   private hasSupersedingRead(
@@ -495,6 +605,9 @@ export class PluginOperationGrantCoordinator {
     const first = state.queue[0];
     if (!first) {
       this.executionDomains.delete(domainKey);
+      if (this.domainRevisions.get(domainKey)?.revoked) {
+        this.domainRevisions.delete(domainKey);
+      }
       return;
     }
     if (first.kind === "write") {
@@ -507,6 +620,29 @@ export class PluginOperationGrantCoordinator {
       const reader = state.queue.shift()!;
       state.readers += 1;
       this.resolveExecutionLease(domainKey, state, reader);
+    }
+  }
+
+  private revokeDomain(
+    domainKey: string,
+    domain: ExecutionDomainRevision,
+  ): void {
+    domain.revision = randomUUID();
+    domain.revoked = true;
+    const state = this.executionDomains.get(domainKey);
+    if (!state) {
+      this.domainRevisions.delete(domainKey);
+      return;
+    }
+    for (const request of state.queue.splice(0)) {
+      if (request.signal && request.onAbort) {
+        request.signal.removeEventListener("abort", request.onAbort);
+      }
+      request.reject(new Error("plugin operation domain is revoked"));
+    }
+    if (!state.writer && state.readers === 0) {
+      this.executionDomains.delete(domainKey);
+      this.domainRevisions.delete(domainKey);
     }
   }
 
