@@ -18,8 +18,18 @@ USER root
 COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /deps
 COPY --from=candidate package.json bun.lock ./
+COPY --from=control \
+  test/control/marketplace-e2e/verify-bun-dependency-inputs.mjs \
+  /trusted/verify-bun-dependency-inputs.mjs
+RUN --network=none node /trusted/verify-bun-dependency-inputs.mjs \
+      --mode host \
+      --package package.json \
+      --lock bun.lock
 RUN --mount=type=cache,id=lvis-m4-host-candidate-bun,target=/root/.bun/install/cache \
-    bun install --frozen-lockfile --ignore-scripts
+    bun install \
+      --frozen-lockfile \
+      --ignore-scripts \
+      --registry=https://registry.npmjs.org
 
 FROM native-toolchain AS trusted-runner
 USER root
