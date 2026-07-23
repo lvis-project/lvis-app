@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { PluginOperationGrantCoordinator } from "../plugin-operation-grant.js";
+import {
+  PluginOperationGrantCoordinator,
+  pluginOperationExecutionDomain,
+} from "../plugin-operation-grant.js";
 
 const principal = {
   ownerPluginId: "ep-api",
@@ -15,6 +18,122 @@ const requiredRead = {
 } as const;
 
 describe("PluginOperationGrantCoordinator", () => {
+  it("derives one account-scoped connected domain for read-backed writes", () => {
+    const tools = [
+      {
+        name: "ep_attendance_read",
+        pluginId: "ep-api",
+        pluginGeneration: { generationId: "gen-1" },
+        operationPolicy: {
+          discriminant: "operation" as const,
+          operations: {
+            today: { kind: "read" as const, minimumRisk: "read" as const },
+            week: { kind: "read" as const, minimumRisk: "network" as const },
+          },
+        },
+      },
+      {
+        name: "ep_attendance_write",
+        pluginId: "ep-api",
+        pluginGeneration: { generationId: "gen-1" },
+        operationPolicy: {
+          discriminant: "operation" as const,
+          operations: {
+            clock: {
+              kind: "write" as const,
+              minimumRisk: "write" as const,
+              requiresRead: {
+                tool: "ep_attendance_read",
+                operations: ["today", "week"],
+                maxAgeMs: 1_000,
+              },
+            },
+          },
+        },
+      },
+    ];
+
+    const readDomain = pluginOperationExecutionDomain(
+      principal,
+      "ep_attendance_read",
+      "today",
+      tools,
+    );
+    const writeDomain = pluginOperationExecutionDomain(
+      { ...principal, appSessionId: "another-window" },
+      "ep_attendance_write",
+      "clock",
+      tools,
+    );
+    const anotherAccount = pluginOperationExecutionDomain(
+      { ...principal, accountHash: "another-account" },
+      "ep_attendance_write",
+      "clock",
+      tools,
+    );
+
+    expect(writeDomain).toBe(readDomain);
+    expect(anotherAccount).not.toBe(readDomain);
+  });
+
+  it("runs domain reads concurrently but queues them behind writes without writer starvation", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const domain = "a".repeat(64);
+    const firstRead = await coordinator.acquireExecutionLease(domain, "read");
+    let concurrentReadStarted = false;
+    const concurrentRead = coordinator.acquireExecutionLease(domain, "read").then((lease) => {
+      concurrentReadStarted = true;
+      return lease;
+    });
+    const concurrentReadLease = await concurrentRead;
+    expect(concurrentReadStarted).toBe(true);
+
+    let writeStarted = false;
+    const write = coordinator.acquireExecutionLease(domain, "write").then((lease) => {
+      writeStarted = true;
+      return lease;
+    });
+    await Promise.resolve();
+    expect(writeStarted).toBe(false);
+
+    let lateReadStarted = false;
+    const lateRead = coordinator.acquireExecutionLease(domain, "read").then((lease) => {
+      lateReadStarted = true;
+      return lease;
+    });
+    await Promise.resolve();
+    expect(lateReadStarted).toBe(false);
+
+    firstRead.release();
+    await Promise.resolve();
+    expect(writeStarted).toBe(false);
+    concurrentReadLease.release();
+    const writeLease = await write;
+    expect(writeStarted).toBe(true);
+    expect(lateReadStarted).toBe(false);
+    writeLease.release();
+    const lateReadLease = await lateRead;
+    expect(lateReadStarted).toBe(true);
+    lateReadLease.release();
+  });
+
+  it("releases an aborted queued execution lease without blocking the domain", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const domain = "b".repeat(64);
+    const writer = await coordinator.acquireExecutionLease(domain, "write");
+    const controller = new AbortController();
+    const queued = coordinator.acquireExecutionLease(
+      domain,
+      "read",
+      controller.signal,
+    );
+    controller.abort();
+    await expect(queued).rejects.toThrow("aborted");
+    writer.release();
+    const next = await coordinator.acquireExecutionLease(domain, "write");
+    next.release();
+  });
+
   it("records opaque read revisions and consumes a matching grant exactly once", () => {
     let now = 1_000;
     const coordinator = new PluginOperationGrantCoordinator(() => now);

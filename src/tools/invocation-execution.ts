@@ -58,7 +58,10 @@ import {
 } from "./executor-contract.js";
 import type { RationaleResumeExecutionContext } from "./invocation-runner.js";
 import type { ResolvedPluginOperation } from "./plugin-operation-governance.js";
-import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
+import {
+  pluginOperationExecutionDomain,
+  type PluginOperationPrincipal,
+} from "../permissions/plugin-operation-grant.js";
 
 const log = createLogger("executor");
 
@@ -239,128 +242,143 @@ export async function executeAuthorizedToolInvocation(
     }
   }
 
-  if (rationaleResumeContext) {
-    if (!rationaleResumeContext.authorized) {
-      return returnRationaleResumeBlock(
-        "rationale resume authorization was lost before invocation start",
-        finalInput,
-        permissionResult,
-      );
-    }
-    const started = await startRationaleResume(rationaleResumeContext.authorized);
-    if (!started.ok) {
-      return returnRationaleResumeBlock(
-        started.reason,
-        finalInput,
-        permissionResult,
-      );
-    }
-    rationaleResumeContext.started = started.value;
-  }
-
-  if (
-    resolvedPluginOperation?.rule.kind === "write" &&
-    pluginOperationPrincipal
-  ) {
-    const readRequirement = resolvedPluginOperation.rule.requiresRead;
-    const grantContext = invocationPermissionContext.pluginOperation;
-    const consumed = services.pluginOperationGrants.consume(
-      grantContext?.grantToken,
-      {
-        ...pluginOperationPrincipal,
-        toolName: toolUse.name,
-        operation: resolvedPluginOperation.operation,
-        intentHash: resolvedPluginOperation.intentHash,
-        requiresRead: readRequirement !== undefined,
-      },
-    );
-    let grantAuditError: unknown;
-    try {
-      const commonGrantAudit = {
-        ts: new Date().toISOString(),
-        auditId: randomUUID(),
-        tool: toolUse.name,
-        source,
-        category: invocationCategory,
-        trustOrigin: invocationPermissionContext.trustOrigin,
-        pluginOperation: {
-          pluginId: pluginOperationPrincipal.ownerPluginId,
-          operation: resolvedPluginOperation.operation,
-          outcome: consumed.ok ? "consumed" : "rejected",
-          ...(consumed.grantId ? { grantId: consumed.grantId } : {}),
-        },
-      } as const;
-      if (consumed.ok) {
-        await services.auditLogger.appendPermissionAuditEntry({
-          ...commonGrantAudit,
-          decision: "allow",
-          layer: 6,
-        });
-      } else {
-        await services.auditLogger.appendPermissionAuditEntry({
-          ...commonGrantAudit,
-          decision: "deny",
-          denyReasons: [{
-            layer: 6,
-            reason: consumed.reason,
-            source: "plugin-operation-grant",
-          }],
-        });
-      }
-    } catch (error) {
-      grantAuditError = error;
-    }
-    if (!consumed.ok || grantAuditError !== undefined) {
-      const reason = consumed.ok
-        ? `permission audit chain failed: ${grantAuditError instanceof Error ? grantAuditError.message : String(grantAuditError)}`
-        : consumed.reason;
-      const msg = `Plugin operation denied: ${reason}`;
-      const durationMs = Date.now() - startTime;
-      const denied: PermissionCheckResult = {
-        decision: "deny",
-        reason,
-        layer: 6,
-      };
-      callbacks?.onToolEnd?.(
-        toolUse.name,
-        msg,
-        true,
-        meta,
-        undefined,
-        durationMs,
-      );
-      await auditCurrentToolCall(
-        sessionId,
-        toolUse.name,
-        source,
-        trust,
-        finalInput,
-        msg,
-        true,
-        startTime,
-        denied,
-        rateResult.remaining,
-        invocationPermissionContext,
-        invocationCategory,
-        executionCwd,
-      );
-      return withHostShellExecutionPlan({
-        tool_use_id: toolUse.id,
-        content: msg,
-        is_error: true,
-        durationMs,
-      });
-    }
-  }
-
-  emitToolStart(callbacks, toolUse.name, finalInput, meta);
-
-  // ── Step 6: Execute ─────────────────────────────
+  const operationExecutionLease =
+    resolvedPluginOperation && pluginOperationPrincipal
+      ? await services.pluginOperationGrants.acquireExecutionLease(
+          pluginOperationExecutionDomain(
+            pluginOperationPrincipal,
+            toolUse.name,
+            resolvedPluginOperation.operation,
+            services.toolRegistry.listAll(),
+          ),
+          resolvedPluginOperation.rule.kind,
+          abortSignal,
+        )
+      : undefined;
   let content: string;
   let isError = false;
   let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
   let rawResult: unknown;
   let image: ToolResultImage | undefined;
+  let terminationReason: "ok" | "ceiling" | "user-abort" | "error" = "ok";
+  try {
+    if (rationaleResumeContext) {
+      if (!rationaleResumeContext.authorized) {
+        return returnRationaleResumeBlock(
+          "rationale resume authorization was lost before invocation start",
+          finalInput,
+          permissionResult,
+        );
+      }
+      const started = await startRationaleResume(rationaleResumeContext.authorized);
+      if (!started.ok) {
+        return returnRationaleResumeBlock(
+          started.reason,
+          finalInput,
+          permissionResult,
+        );
+      }
+      rationaleResumeContext.started = started.value;
+    }
+
+    if (
+      resolvedPluginOperation?.rule.kind === "write" &&
+      pluginOperationPrincipal
+    ) {
+      const readRequirement = resolvedPluginOperation.rule.requiresRead;
+      const grantContext = invocationPermissionContext.pluginOperation;
+      const consumed = services.pluginOperationGrants.consume(
+        grantContext?.grantToken,
+        {
+          ...pluginOperationPrincipal,
+          toolName: toolUse.name,
+          operation: resolvedPluginOperation.operation,
+          intentHash: resolvedPluginOperation.intentHash,
+          requiresRead: readRequirement !== undefined,
+        },
+      );
+      let grantAuditError: unknown;
+      try {
+        const commonGrantAudit = {
+          ts: new Date().toISOString(),
+          auditId: randomUUID(),
+          tool: toolUse.name,
+          source,
+          category: invocationCategory,
+          trustOrigin: invocationPermissionContext.trustOrigin,
+          pluginOperation: {
+            pluginId: pluginOperationPrincipal.ownerPluginId,
+            operation: resolvedPluginOperation.operation,
+            outcome: consumed.ok ? "consumed" : "rejected",
+            ...(consumed.grantId ? { grantId: consumed.grantId } : {}),
+          },
+        } as const;
+        if (consumed.ok) {
+          await services.auditLogger.appendPermissionAuditEntry({
+            ...commonGrantAudit,
+            decision: "allow",
+            layer: 6,
+          });
+        } else {
+          await services.auditLogger.appendPermissionAuditEntry({
+            ...commonGrantAudit,
+            decision: "deny",
+            denyReasons: [{
+              layer: 6,
+              reason: consumed.reason,
+              source: "plugin-operation-grant",
+            }],
+          });
+        }
+      } catch (error) {
+        grantAuditError = error;
+      }
+      if (!consumed.ok || grantAuditError !== undefined) {
+        const reason = consumed.ok
+          ? `permission audit chain failed: ${grantAuditError instanceof Error ? grantAuditError.message : String(grantAuditError)}`
+          : consumed.reason;
+        const msg = `Plugin operation denied: ${reason}`;
+        const durationMs = Date.now() - startTime;
+        const denied: PermissionCheckResult = {
+          decision: "deny",
+          reason,
+          layer: 6,
+        };
+        callbacks?.onToolEnd?.(
+          toolUse.name,
+          msg,
+          true,
+          meta,
+          undefined,
+          durationMs,
+        );
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          source,
+          trust,
+          finalInput,
+          msg,
+          true,
+          startTime,
+          denied,
+          rateResult.remaining,
+          invocationPermissionContext,
+          invocationCategory,
+          executionCwd,
+        );
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: msg,
+          is_error: true,
+          durationMs,
+        });
+      }
+    }
+
+    emitToolStart(callbacks, toolUse.name, finalInput, meta);
+
+    // ── Step 6: Execute ─────────────────────────────
   // Mint only after all permission, hook, rate-limit, and audit gates passed.
   // The permit is private host state, binds this exact final shell action,
   // and is consumed once by the plain requested-sandbox fallback spawn path.
@@ -452,7 +470,6 @@ export async function executeAuthorizedToolInvocation(
     toolUse.name === "agent_spawn"
       ? TOOL_TIMEOUT_POLICY.subAgentCeilingMs
       : TOOL_TIMEOUT_POLICY.globalCeilingMs;
-  let terminationReason: "ok" | "ceiling" | "user-abort" | "error" = "ok";
   const outcome = await runWithCeiling(
     async (signal) => {
       const ctx: ToolExecutionContext = { ...executionContext, abortSignal: signal };
@@ -568,6 +585,9 @@ export async function executeAuthorizedToolInvocation(
       },
       services.auditLogger,
     );
+  }
+  } finally {
+    operationExecutionLease?.release();
   }
 
   if (terminationReason === "user-abort") {
