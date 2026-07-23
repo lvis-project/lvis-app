@@ -150,6 +150,8 @@ export const CHANNELS = {
   },
   marketplace: {
     ping: "lvis:marketplace:ping",
+    /** Legacy main-to-renderer update notification; kept byte-identical on wire. */
+    updatesAvailable: "marketplace:updates-available",
   },
   agents: {
     list: "lvis:agents:list",
@@ -290,6 +292,7 @@ export const CHANNELS = {
     openExternal: "lvis:shell:open-external",
   },
   telemetry: {
+    consentPrompt: "lvis:telemetry:consent-prompt",
     consentAnswer: "lvis:telemetry:consent-answer",
   },
   usage: {
@@ -380,6 +383,12 @@ export const CHANNELS = {
     event: "lvis:skill-load:event",
   },
   window: {
+    minimize: "window:minimize",
+    toggleMaximize: "window:toggleMaximize",
+    close: "window:close",
+    syncTitleBarTheme: "window:syncTitleBarTheme",
+    maximizedChanged: "window:maximizedChanged",
+    fullscreenChanged: "window:fullscreenChanged",
     openDetached: "lvis:window:open-detached",
     closeDetached: "lvis:window:close-detached",
     listDetached: "lvis:window:list-detached",
