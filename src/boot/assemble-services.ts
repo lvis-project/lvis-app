@@ -46,6 +46,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     pluginBundleLifecycle: ctx.pluginBundleLifecycle,
     getPluginToolInvoker: () => ctx.lateBinding.pluginToolInvokerRef.fn,
     requestPluginOperationGrant: ctx.requestPluginOperationGrant,
+    revokePluginOperationSession: ctx.revokePluginOperationSession,
     mcpArtifactStore: ctx.mcpArtifactStore,
     agentArtifactStore: ctx.agentArtifactStore,
     skillArtifactStore: ctx.skillArtifactStore,

@@ -328,10 +328,10 @@ describe("plugin theme IPC handlers", () => {
   });
 
   afterEach(() => {
-    unregisterPluginWebview(1701);
-    unregisterPluginWebview(1702);
-    unregisterPluginWebview(1703);
-    unregisterPluginWebview(1704);
+    unregisterPluginWebview(1701, () => {});
+    unregisterPluginWebview(1702, () => {});
+    unregisterPluginWebview(1703, () => {});
+    unregisterPluginWebview(1704, () => {});
     __resetLastThemePayloadForTests();
   });
 
@@ -411,6 +411,31 @@ describe("plugin theme IPC handlers", () => {
       ok: true,
       entryUrl: "lvis-plugin://asset/index.html?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7",
     });
+  });
+
+  it("revokes every unique app session exactly once when registered webviews tear down", () => {
+    const { root, entryUrl } = createPluginFixture();
+    const { deps } = createDeps(root);
+    registerPluginsHandlers(deps);
+    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const revokedSessions: string[] = [];
+    const revokeSession = (appSessionId: string) => revokedSessions.push(appSessionId);
+    const webContentsIds = Array.from({ length: 64 }, (_, index) => 2_000 + index);
+
+    for (const webContentsId of webContentsIds) {
+      expect(registerWebview(rendererEvent(), {
+        webContentsId,
+        pluginId: "meeting",
+        entryUrl,
+      })).toEqual({ ok: true });
+    }
+    for (const webContentsId of webContentsIds) {
+      unregisterPluginWebview(webContentsId, revokeSession);
+      unregisterPluginWebview(webContentsId, revokeSession);
+    }
+
+    expect(revokedSessions).toHaveLength(webContentsIds.length);
+    expect(new Set(revokedSessions)).toHaveLength(webContentsIds.length);
   });
 
   it("rejects host namespace emits through the production plugin emit IPC handler", () => {

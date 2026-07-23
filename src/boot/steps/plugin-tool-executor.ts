@@ -378,6 +378,9 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
   ctx.revokePluginOperationGeneration = (pluginId, generationId) => {
     pluginSurfaceExecutor.revokePluginOperationGeneration(pluginId, generationId);
   };
+  ctx.revokePluginOperationSession = (appSessionId) => {
+    pluginSurfaceExecutor.revokePluginOperationSession(appSessionId);
+  };
 
   ctx.hookRunner = hookRunner;
   ctx.scriptHookManager = scriptHookManager;
