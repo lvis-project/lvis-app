@@ -25,7 +25,6 @@ export interface PluginReadSnapshotKey extends PluginOperationPrincipal {
 
 interface ReadSnapshot {
   revision: string;
-  contentHash: string;
   recordedAt: number;
 }
 
@@ -55,18 +54,11 @@ export class PluginOperationGrantCoordinator {
     private readonly maxSnapshots = 2048,
   ) {}
 
-  recordRead(key: PluginReadSnapshotKey, content: unknown): string {
+  recordRead(key: PluginReadSnapshotKey): string {
     this.trimSnapshots();
     const revision = randomUUID();
-    const contentHash = hash(JSON.stringify(content) ?? "null");
-    this.snapshots.set(snapshotKey(key), { revision, contentHash, recordedAt: this.now() });
+    this.snapshots.set(snapshotKey(key), { revision, recordedAt: this.now() });
     return revision;
-  }
-
-  latestRead(key: PluginReadSnapshotKey, maxAgeMs: number): string | undefined {
-    const snapshot = this.snapshots.get(snapshotKey(key));
-    if (!snapshot || this.now() - snapshot.recordedAt > maxAgeMs) return undefined;
-    return snapshot.revision;
   }
 
   latestRequiredRead(

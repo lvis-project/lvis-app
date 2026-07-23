@@ -1862,7 +1862,7 @@ export class PluginRuntime {
     const { pluginId } = entry;
     return this.withPinnedGeneration(pluginId, async (projection) => {
       this.throwIfPluginNotStarted(pluginId);
-      const handler = projection?.methods.get(method) ?? entry.handler;
+      const handler = projection ? projection.methods.get(method) : entry.handler;
       if (!handler) throw new Error(`Plugin method not found in active generation: ${method}`);
       const stats = this.perf.beginCall(pluginId);
       const t0 = Date.now();
@@ -1986,7 +1986,7 @@ export class PluginRuntime {
     return this.withPinnedGeneration(entry.pluginId, async (projection) => {
       const plugin = this.plugins.get(entry.pluginId);
       this.throwIfPluginNotStarted(entry.pluginId);
-      const manifest = projection?.manifest ?? plugin?.manifest;
+      const manifest = projection ? projection.manifest : plugin?.manifest;
       assertUiActionInvokable({
         method,
         pluginId: entry.pluginId,
@@ -2077,7 +2077,7 @@ export class PluginRuntime {
     return this.withPinnedGeneration(entry.pluginId, async (projection) => {
       const plugin = this.plugins.get(entry.pluginId);
       this.throwIfPluginNotStarted(entry.pluginId);
-      const manifest = projection?.manifest ?? plugin?.manifest;
+      const manifest = projection ? projection.manifest : plugin?.manifest;
       assertUiActionInvokable({
         method,
         pluginId: entry.pluginId,
@@ -2163,7 +2163,7 @@ export class PluginRuntime {
 
     const html = await this.withPinnedGeneration(pluginId, async (projection) => {
       const plugin = this.plugins.get(pluginId);
-      const instance = projection?.instance ?? plugin?.instance;
+      const instance = projection ? projection.instance : plugin?.instance;
       if (!instance) {
         throw new Error(`Plugin '${pluginId}' is not loaded; cannot serve '${uri}'.`);
       }
