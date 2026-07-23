@@ -12,6 +12,8 @@ import { mcpToolToTool } from "../mcp-tool-adapter.js";
 import type { McpToolSchema, McpUiToolVisibility } from "../types.js";
 import type { Tool } from "../../tools/base.js";
 
+const INVOCATION = { appSessionId: "mcp-app:github:17", operationGrantToken: "grant-once" };
+
 function schema(name: string, visibility?: McpUiToolVisibility[] | unknown): McpToolSchema {
   return {
     name,
@@ -101,7 +103,7 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
   it("REJECTS a tool whose _meta.ui.visibility does not include \"app\" and never invokes it", async () => {
     const { source, invoker } = externalSource([externalTool("github", "query", ["model"])]);
 
-    await expect(source.callTool("github", "query", {})).rejects.toThrow(/not app-callable/i);
+    await expect(source.callTool("github", "query", {}, INVOCATION)).rejects.toThrow(/not app-callable/i);
     expect(invoker).not.toHaveBeenCalled();
   });
 
@@ -109,20 +111,25 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
     const raw = { name: "mcp_gh_query", mcpServerId: "github" } as unknown as Tool;
     const { source, invoker } = externalSource([raw]);
 
-    await expect(source.callTool("github", "query", {})).rejects.toThrow(/not app-callable/i);
+    await expect(source.callTool("github", "query", {}, INVOCATION)).rejects.toThrow(/not app-callable/i);
     expect(invoker).not.toHaveBeenCalled();
   });
 
   it("runs an app-visible tool through the GATED executor delegate — never a raw mcpManager.callTool", async () => {
     const { source, invoker } = externalSource([externalTool("github", "query", ["model", "app"])]);
 
-    await expect(source.callTool("github", "query", { q: "x" })).resolves.toBe("tool-output");
+    await expect(source.callTool("github", "query", { q: "x" }, INVOCATION)).resolves.toBe("tool-output");
     // The NAMESPACED registry name (the gated `Tool`), the app's args, and the
     // APP origin (never "ui" — a card is not the plugin's trusted panel) that is
     // never marked user-initiated.
     expect(invoker).toHaveBeenCalledWith("mcp_gh_query", { q: "x" }, {
       origin: "mcp-app",
       userAction: false,
+      appInvocation: {
+        surface: "mcp-app",
+        sessionId: INVOCATION.appSessionId,
+        operationGrantToken: INVOCATION.operationGrantToken,
+      },
       expectedMcpServerId: "github",
     });
   });
@@ -133,17 +140,22 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
     // way. Both land on the executor — same origin, same no-gesture, same gate.
     const { source, invoker } = externalSource([externalTool("github", "list_rows", ["app"])]);
 
-    await expect(source.callTool("github", "list_rows", { page: 2 })).resolves.toBe("tool-output");
+    await expect(source.callTool("github", "list_rows", { page: 2 }, INVOCATION)).resolves.toBe("tool-output");
     expect(invoker).toHaveBeenCalledWith("mcp_gh_list_rows", { page: 2 }, {
       origin: "mcp-app",
       userAction: false,
+      appInvocation: {
+        surface: "mcp-app",
+        sessionId: INVOCATION.appSessionId,
+        operationGrantToken: INVOCATION.operationGrantToken,
+      },
       expectedMcpServerId: "github",
     });
   });
 
   it("rechecks the exact server owner at invocation time", async () => {
     const { source, invoker } = externalSource([externalTool("replacement", "query", ["app"])]);
-    await expect(source.callTool("github", "query", {})).rejects.toThrow(/owner changed/);
+    await expect(source.callTool("github", "query", {}, INVOCATION)).rejects.toThrow(/owner changed/);
     expect(invoker).not.toHaveBeenCalled();
   });
 
@@ -154,7 +166,7 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
       findTool: (n) => byName.get(n),
       getInvoker: () => null,
     });
-    await expect(source.callTool("github", "query", {})).rejects.toThrow(/not wired/i);
+    await expect(source.callTool("github", "query", {}, INVOCATION)).rejects.toThrow(/not wired/i);
   });
 });
 
@@ -164,7 +176,7 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
       resolveToolOwner: vi.fn((m: string) => (m === "acme_open" ? "acme-cards" : undefined)),
       callFromApp: vi.fn(async () => "plugin-result"),
     };
-    const source = createLoopbackToolCallSource(runtime);
+    const source = createLoopbackToolCallSource({ runtime, findTool: () => undefined });
 
     expect(source.resolveToolOwner("acme-cards", "acme_open")).toBe("acme-cards");
     expect(source.resolveToolOwner("acme-cards", "other_open")).toBeUndefined();
@@ -182,11 +194,10 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
       callFromApp: vi.fn(async () => "plugin-result"),
       callFromUi,
     };
-    const source = createLoopbackToolCallSource(runtime);
+    const source = createLoopbackToolCallSource({ runtime, findTool: () => undefined });
 
-    await expect(source.callTool("acme-cards", "acme_open", { id: 7 })).resolves.toBe("plugin-result");
-    // Two args: there is no `userAction` option on the app path at all.
-    expect(runtime.callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 });
+    await expect(source.callTool("acme-cards", "acme_open", { id: 7 }, INVOCATION)).resolves.toBe("plugin-result");
+    expect(runtime.callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 }, INVOCATION);
     expect(callFromUi).not.toHaveBeenCalled();
   });
 
@@ -200,9 +211,9 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
         );
       }),
     };
-    const source = createLoopbackToolCallSource(runtime);
+    const source = createLoopbackToolCallSource({ runtime, findTool: () => undefined });
 
-    await expect(source.callTool("acme-cards", "acme_secret", {})).rejects.toThrow(
+    await expect(source.callTool("acme-cards", "acme_secret", {}, INVOCATION)).rejects.toThrow(
       /not declared as a UI action/,
     );
   });
@@ -218,11 +229,43 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
       resolveToolOwner: vi.fn(() => "acme-cards"),
       callFromApp: vi.fn(async () => "governed-result"),
     };
-    const source = createLoopbackToolCallSource(runtime);
+    const source = createLoopbackToolCallSource({ runtime, findTool: () => undefined });
 
-    await expect(source.callTool("acme-cards", "acme_auth_status", { q: 1 })).resolves.toBe(
+    await expect(source.callTool("acme-cards", "acme_auth_status", { q: 1 }, INVOCATION)).resolves.toBe(
       "governed-result",
     );
-    expect(runtime.callFromApp).toHaveBeenCalledWith("acme_auth_status", { q: 1 });
+    expect(runtime.callFromApp).toHaveBeenCalledWith("acme_auth_status", { q: 1 }, INVOCATION);
+  });
+
+  it("identifies only read-backed writes from the Host registry as grant targets", () => {
+    const runtime = {
+      resolveToolOwner: vi.fn(() => "acme-cards"),
+      callFromApp: vi.fn(async () => "ok"),
+    };
+    const policy = {
+      discriminant: "operation" as const,
+      appAllowed: ["list", "update"],
+      operations: {
+        list: { kind: "read" as const, minimumRisk: "read" as const },
+        update: {
+          kind: "write" as const,
+          minimumRisk: "write" as const,
+          requiresRead: { tool: "ep_read", operations: ["list"], maxAgeMs: 60_000 },
+        },
+      },
+    };
+    const tool = {
+      name: "ep_write",
+      pluginId: "acme-cards",
+      operationGovernance: policy,
+    } as Tool;
+    const source = createLoopbackToolCallSource({ runtime, findTool: () => tool });
+
+    expect(source.resolveOperationGrantTarget("acme-cards", "ep_write", { operation: "list" }))
+      .toBeUndefined();
+    expect(source.resolveOperationGrantTarget("acme-cards", "ep_write", { operation: "update" }))
+      .toEqual({ pluginId: "acme-cards", toolName: "ep_write" });
+    expect(() => source.resolveOperationGrantTarget("acme-cards", "ep_write", { operation: "admin" }))
+      .toThrow(/unknown operation/);
   });
 });

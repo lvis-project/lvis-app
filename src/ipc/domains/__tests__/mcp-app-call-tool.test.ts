@@ -38,10 +38,16 @@ async function setup() {
 
   const callFromApp = vi.fn(async () => "plugin-result");
   const invokePluginTool = vi.fn(async () => "external-result");
+  const requestPluginOperationGrant = vi.fn(async () => ({
+    operationGrantToken: "host-one-shot-token",
+    grantId: "grant-1",
+    expiresAt: Date.now() + 60_000,
+  }));
 
   const deps = {
     pluginRuntime: {
-      resolveToolOwner: vi.fn((method: string) => (method === "acme_open" ? "acme-cards" : undefined)),
+      resolveToolOwner: vi.fn((method: string) =>
+        method === "acme_open" || method === "acme_write" ? "acme-cards" : undefined),
       callFromApp,
       getPerfStats: vi.fn(() => ({})),
     },
@@ -61,10 +67,31 @@ async function setup() {
       findByName: vi.fn((name: string) =>
         name === "mcp_gh_query"
           ? { name: "mcp_gh_query", mcpServerId: "github", appInvokable: true }
+          : name === "acme_write"
+            ? {
+                name: "acme_write",
+                pluginId: "acme-cards",
+                operationGovernance: {
+                  discriminant: "operation",
+                  appAllowed: ["update"],
+                  operations: {
+                    update: {
+                      kind: "write",
+                      minimumRisk: "write",
+                      requiresRead: {
+                        tool: "acme_read",
+                        operations: ["get"],
+                        maxAgeMs: 60_000,
+                      },
+                    },
+                  },
+                },
+              }
           : undefined,
       ),
     },
     getPluginToolInvoker: () => invokePluginTool,
+    requestPluginOperationGrant,
     settingsService: { get: vi.fn(() => ({})) },
     auditLogger: { log: vi.fn() },
     pluginMarketplace: { list: vi.fn(async () => []) },
@@ -75,7 +102,7 @@ async function setup() {
 
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, callFromApp, invokePluginTool };
+  return { deps, callFromApp, invokePluginTool, requestPluginOperationGrant };
 }
 
 beforeEach(() => {
@@ -176,9 +203,9 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
     const result = await invoke(CHANNEL, "acme-cards", "acme_open", { id: 7 });
 
     expect(result).toEqual({ ok: true, result: "plugin-result" });
-    // Two args — the app path has no `userAction` option to pass: a gesture claim
-    // from inside an untrusted iframe is unverifiable, so it does not exist here.
-    expect(callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 });
+    expect(callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 }, {
+      appSessionId: "mcp-app:acme-cards:0:0",
+    });
     expect(invokePluginTool).not.toHaveBeenCalled();
   });
 
@@ -191,7 +218,12 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
     expect(invokePluginTool).toHaveBeenCalledWith(
       "mcp_gh_query",
       { q: "x" },
-      { origin: "mcp-app", userAction: false },
+      {
+        origin: "mcp-app",
+        userAction: false,
+        appInvocation: { surface: "mcp-app", sessionId: "mcp-app:github:0:0" },
+        expectedMcpServerId: "github",
+      },
     );
     expect(callFromApp).not.toHaveBeenCalled();
   });
@@ -199,7 +231,35 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
   it("coerces non-object args to an empty input rather than forwarding junk", async () => {
     const { callFromApp } = await setup();
     await invoke(CHANNEL, "acme-cards", "acme_open", "not-an-object");
-    expect(callFromApp).toHaveBeenCalledWith("acme_open", {});
+    expect(callFromApp).toHaveBeenCalledWith("acme_open", {}, {
+      appSessionId: "mcp-app:acme-cards:0:0",
+    });
+  });
+
+  it("keeps a governed write grant inside main and binds it to the Host-minted card session", async () => {
+    const { callFromApp, requestPluginOperationGrant } = await setup();
+
+    const result = await invoke(CHANNEL, "acme-cards", "acme_write", {
+      operation: "update",
+      employeeId: "E-7",
+    });
+
+    expect(result).toEqual({ ok: true, result: "plugin-result" });
+    expect(requestPluginOperationGrant).toHaveBeenCalledWith({
+      pluginId: "acme-cards",
+      toolName: "acme_write",
+      input: { operation: "update", employeeId: "E-7" },
+      appSessionId: "mcp-app:acme-cards:0:0",
+      origin: "mcp-app",
+    });
+    expect(callFromApp).toHaveBeenCalledWith(
+      "acme_write",
+      { operation: "update", employeeId: "E-7" },
+      {
+        appSessionId: "mcp-app:acme-cards:0:0",
+        operationGrantToken: "host-one-shot-token",
+      },
+    );
   });
 
   it("turns a gate DENIAL into an outcome (never a throw across the IPC)", async () => {

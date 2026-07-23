@@ -568,6 +568,7 @@ export class ToolExecutor {
     toolName: string;
     input: Record<string, unknown>;
     principal: PluginOperationPrincipal;
+    origin?: "ui" | "mcp-app";
     ttlMs?: number;
   }): { token: string; grantId: string; readRevision: string } {
     const inspected = this.inspectPluginOperationGrant(args);
@@ -586,6 +587,7 @@ export class ToolExecutor {
     toolName: string;
     input: Record<string, unknown>;
     principal: PluginOperationPrincipal;
+    origin?: "ui" | "mcp-app";
   }): { operation: string; intentHash: string; readRevision: string } {
     const tool = this.toolRegistry.findByName(args.toolName);
     if (!tool?.pluginId || !tool.operationGovernance) {
@@ -594,7 +596,7 @@ export class ToolExecutor {
     if (tool.pluginId !== args.principal.ownerPluginId) {
       throw new Error("[plugin-operation-policy] owner mismatch");
     }
-    const resolved = resolvePluginOperation(tool.operationGovernance, args.input, "ui");
+    const resolved = resolvePluginOperation(tool.operationGovernance, args.input, args.origin ?? "ui");
     if (resolved.rule.kind !== "write" || !resolved.rule.requiresRead) {
       throw new Error("[plugin-operation-policy] only read-backed writes receive app grants");
     }

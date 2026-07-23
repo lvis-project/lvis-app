@@ -161,6 +161,7 @@ export interface BootContext {
     toolName: string;
     input: Record<string, unknown>;
     appSessionId: string;
+    origin?: "ui" | "mcp-app";
   }) => Promise<{
     operationGrantToken: string;
     grantId: string;
