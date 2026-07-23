@@ -1412,7 +1412,6 @@ export default async function createPlugin({ hostApi }) {
           pluginId,
           _manifest,
           _pluginDataDir,
-          incarnation,
         );
         const getSecret = (_key: string): null => {
           if (!incarnation.isActive()) throw new Error("plugin instance is no longer active");
