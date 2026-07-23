@@ -356,11 +356,12 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
   const retirementTasks = new Set<Promise<void>>();
   let sequence = 0;
 
-  const trackRetirement = (retirement: Promise<void>): void => {
+  const trackRetirement = (retirement: Promise<void>): Promise<void> => {
     retirementTasks.add(retirement);
     void retirement
       .finally(() => retirementTasks.delete(retirement))
       .catch(() => undefined);
+    return retirement;
   };
 
   const runInLifecycleQueue = <T>(
@@ -427,7 +428,9 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
     return generation;
   };
 
-  const publish = async (projection: PluginRuntimeGenerationProjection): Promise<void> => {
+  const publish = async (
+    projection: PluginRuntimeGenerationProjection,
+  ): Promise<{ retirement: Promise<void> }> => {
     const pluginId = projection.manifest.id;
     const predecessor = active.get(pluginId);
     const generationId = `test-generation-${++sequence}`;
@@ -448,18 +451,22 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
         mcpServers: [],
       },
     });
-    if (predecessor && predecessor.state.runtime !== projection) {
-      trackRetirement(runtime.retireRuntimeGeneration(predecessor.state.runtime));
-    }
+    const retirement = predecessor && predecessor.state.runtime !== projection
+      ? trackRetirement(runtime.retireRuntimeGeneration(predecessor.state.runtime))
+      : Promise.resolve();
+    return { retirement };
   };
 
-  const deactivate = async (pluginId: string): Promise<void> => {
+  const deactivate = async (
+    pluginId: string,
+  ): Promise<{ retirement: Promise<void> }> => {
     const predecessor = active.get(pluginId);
     runtime.prepareRuntimeRemoval(pluginId).publish();
     active.delete(pluginId);
-    if (predecessor) {
-      trackRetirement(runtime.retireRuntimeGeneration(predecessor.state.runtime));
-    }
+    const retirement = predecessor
+      ? trackRetirement(runtime.retireRuntimeGeneration(predecessor.state.runtime))
+      : Promise.resolve();
+    return { retirement };
   };
 
   const lifecycle = {
@@ -487,22 +494,26 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
       return { generation, release: () => undefined };
     },
     runWithLease: async <T>(_lease: unknown, operation: () => Promise<T>) => operation(),
-    replaceRuntime: publish,
+    replaceRuntime: async (projection: PluginRuntimeGenerationProjection) => {
+      await publish(projection);
+    },
     replaceRuntimeWithCommit: <T>(
       projection: PluginRuntimeGenerationProjection,
       _receiptRaw: string,
       durableCommit: () => Promise<T>,
     ) => runInLifecycleQueue(projection.manifest.id, async () => {
       const result = await durableCommit();
-      await publish(projection);
-      return { result, retirement: Promise.resolve() };
+      const { retirement } = await publish(projection);
+      return { result, retirement };
     }),
-    deactivate: (pluginId: string) => runInLifecycleQueue(pluginId, () => deactivate(pluginId)),
+    deactivate: (pluginId: string) => runInLifecycleQueue(pluginId, async () => {
+      await deactivate(pluginId);
+    }),
     deactivateWithCommit: <T>(pluginId: string, durableCommit: () => Promise<T>) =>
       runInLifecycleQueue(pluginId, async () => {
         const result = await durableCommit();
-        await deactivate(pluginId);
-        return result;
+        const { retirement } = await deactivate(pluginId);
+        return { result, retirement };
       }),
     recoverRetirements: async () => undefined,
     waitForRetirements: async () => {

@@ -652,6 +652,26 @@ export abstract class PluginRuntimeState {
     }
   }
 
+  protected async settleCommittedRetirement(
+    pluginId: string,
+    retirement: Promise<void>,
+    context: string,
+  ): Promise<void> {
+    try {
+      await retirement;
+    } catch (error) {
+      log.error(
+        `plugin generation retirement deferred after ${context} for ${pluginId}: %s`,
+        error instanceof Error ? error.message : String(error),
+      );
+      this.auditLog?.("error", "plugin_generation_retirement_deferred", {
+        pluginId,
+        context,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   protected async failClosedLoadedPlugin(
     pluginId: string,
     plugin: LoadedPlugin,

@@ -81,7 +81,10 @@ export interface PluginRuntimeGenerationLifecycle extends PluginRuntimeGeneratio
     durableCommit: () => Promise<T>,
   ): Promise<CommittedPluginGeneration<T>>;
   deactivate(pluginId: string): Promise<void>;
-  deactivateWithCommit<T>(pluginId: string, durableCommit: () => Promise<T>): Promise<T>;
+  deactivateWithCommit<T>(
+    pluginId: string,
+    durableCommit: () => Promise<T>,
+  ): Promise<CommittedPluginGeneration<T>>;
   recoverRetirements(): Promise<void>;
   waitForRetirements(): Promise<void>;
 }

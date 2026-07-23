@@ -1439,6 +1439,43 @@ export default async function createPlugin({ hostApi }) {
     expect(disposed).toEqual([pluginId, pluginId]);
   });
 
+  it("finishes atomic removal tracking when bounded generation retirement fails", async () => {
+    const pluginId = "p-remove-stop-timeout";
+    const toolName = "p_remove_stop_timeout_ping";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      join(installedDir, pluginId, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: { ${JSON.stringify(toolName)}: async () => "active" },
+    stop: async () => new Promise(() => {}),
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: pluginId, manifestPath, enabled: true }],
+    }), "utf-8");
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await expect(runtime.call(toolName)).resolves.toBe("active");
+
+    await expect(runtime.removePluginWithCommit(
+      pluginId,
+      async () => "durably-removed",
+    )).resolves.toBe("durably-removed");
+
+    expect(runtime.listPluginIds()).not.toContain(pluginId);
+    await expect(runtime.call(toolName)).rejects.toThrow(/not found/);
+    const state = runtime as unknown as {
+      knownPluginManifests: Map<string, unknown>;
+      failedPluginIds: Set<string>;
+    };
+    expect(state.knownPluginManifests.has(pluginId)).toBe(false);
+    expect(state.failedPluginIds.has(pluginId)).toBe(false);
+  }, 10_000);
+
   it("addPlugin stops a newly-instantiated plugin when start fails", async () => {
     const existingPath = await writePlugin("p-existing");
     await writeFile(
