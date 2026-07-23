@@ -24,7 +24,7 @@ function runtime(): PluginRuntime {
     getActive: vi.fn(() => ({
       pluginId,
       generationId,
-      state: { runtime: { manifest } },
+      manifest,
     })),
     replaceRuntime: vi.fn(),
   } as never);
