@@ -608,7 +608,40 @@ export class PluginArtifactStore {
       return { files, result: coordinated.result, predecessorRetired };
     } catch (err) {
       if (existsSync(stageDir)) {
-        await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
+        try {
+          await retryOnTransientFsLock(() => this.removeAbandonedStage(stageDir), {
+            onRetry: (attempt, code) =>
+              log.warn(
+                { safeSlug, stageDir, attempt, code },
+                "retrying failed artifact stage cleanup under fs lock",
+              ),
+          });
+        } catch (cleanupErr) {
+          try {
+            const tombstone = await tombstoneAndDeferredRemove(
+              stageDir,
+              this.installRoot,
+              {
+                onDeferredRmError: (path, error) => {
+                  log.warn(
+                    { safeSlug, path, err: error },
+                    "failed artifact stage tombstone retained for boot sweeper",
+                  );
+                },
+              },
+            );
+            log.warn(
+              { safeSlug, stageDir, tombstone, err: cleanupErr },
+              "failed artifact stage routed to durable tombstone ownership",
+            );
+          } catch (tombstoneErr) {
+            throw new ArtifactRollbackError(
+              `artifact extraction and staged-directory cleanup both failed: ${safeSlug}`,
+              [err, cleanupErr, tombstoneErr],
+              stageDir,
+            );
+          }
+        }
       }
       throw err;
     }
@@ -880,6 +913,10 @@ export class PluginArtifactStore {
   }
 
   private async removeCommittedBackup(path: string): Promise<void> {
+    await rm(path, { recursive: true, force: true });
+  }
+
+  private async removeAbandonedStage(path: string): Promise<void> {
     await rm(path, { recursive: true, force: true });
   }
 }

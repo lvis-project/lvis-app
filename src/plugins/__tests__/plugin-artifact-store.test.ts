@@ -352,6 +352,47 @@ describe("PluginArtifactStore — extractZip", () => {
     }
   });
 
+  it.runIf(process.platform !== "win32")(
+    "routes a persistently locked failed stage into the boot-swept tombstone namespace",
+    async () => {
+      const tmp = makeTmpDir();
+      const installRoot = resolve(tmp, "installed");
+      try {
+        const store = makeStore(tmp, { artifactLimits: { maxEntryCount: 1 } });
+        const removeStage = vi.spyOn(
+          store as unknown as { removeAbandonedStage: (path: string) => Promise<void> },
+          "removeAbandonedStage",
+        ).mockRejectedValue(Object.assign(new Error("persistent stage lock"), { code: "EACCES" }));
+        const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
+        const tombstoneSpy = vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(
+          (path, root, options) => originalTombstone(path, root, { ...options, deferRemoval: false }),
+        );
+        try {
+          const zip = new AdmZip();
+          zip.addFile("one.txt", Buffer.from("1"));
+          zip.addFile("two.txt", Buffer.from("2"));
+
+          await expect(store.extractZip("acme", zip.toBuffer())).rejects.toMatchObject({
+            code: "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
+          });
+
+          expect(removeStage.mock.calls.length).toBeGreaterThan(1);
+          const rootEntries = await readdir(installRoot);
+          expect(rootEntries.filter((name) => name.includes(".stage-"))).toEqual([]);
+          const tombstones = await readdir(resolve(installRoot, TOMBSTONE_SUBDIR));
+          expect(tombstones).toHaveLength(1);
+          expect(tombstones[0]).toMatch(/^\.acme\.stage-/);
+        } finally {
+          tombstoneSpy.mockRestore();
+          removeStage.mockRestore();
+        }
+      } finally {
+        await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      }
+    },
+    10_000,
+  );
+
   it("rejects an excessive declared entry count before enumerating central-directory entries", async () => {
     const tmp = makeTmpDir();
     try {

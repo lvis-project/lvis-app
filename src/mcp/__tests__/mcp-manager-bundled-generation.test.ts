@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDynamicTool } from "../../tools/base.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import type { ActivePluginGeneration } from "../../plugins/plugin-generation-coordinator.js";
@@ -68,6 +68,10 @@ function generation(generationId: string): ActivePluginGeneration {
 }
 
 afterAll(async () => rm(root, { recursive: true, force: true }));
+beforeEach(() => {
+  disconnect.mockReset();
+  disconnect.mockResolvedValue(undefined);
+});
 
 describe("McpManager bundled generation", () => {
   it("prepares hidden, atomically swaps stable tools, and exact-gates stale calls", async () => {
@@ -116,5 +120,32 @@ describe("McpManager bundled generation", () => {
     expect(registry.findByName("mcp_ep_api_ep_read")?.mcpServerId).toBe(g2Projection.serverId);
     await expect(oldTool?.execute({}, {} as never)).rejects.toThrow(/stale generation/);
     await expect(registry.findByName("mcp_ep_api_ep_read")?.execute({}, {} as never)).resolves.toMatchObject({ isError: false });
+  });
+
+  it("retains a discarded candidate handle until disconnect succeeds", async () => {
+    const registry = new ToolRegistry();
+    const manager = new McpManager(
+      new McpGovernance(join(root, "policy-retry.json")),
+      registry,
+      join(root, "servers-retry.json"),
+    );
+    const trust = new PluginMcpTrustStore();
+    const projection = preparePluginMcpGeneration(generation("g-retry"), root)[0];
+    trust.approve(projection);
+    const prepared = await manager.prepareBundledGeneration(
+      { pluginId: "ep-api", generationId: "g-retry" },
+      [projection],
+      trust,
+    );
+
+    disconnect.mockRejectedValueOnce(
+      Object.assign(new Error("transport still owns child"), { code: "EBUSY" }),
+    );
+    await expect(manager.discardBundledGeneration(prepared)).rejects.toThrow(
+      /cleanup remains pending/,
+    );
+
+    await expect(manager.discardBundledGeneration(prepared)).resolves.toBeUndefined();
+    expect(disconnect).toHaveBeenCalledTimes(2);
   });
 });
