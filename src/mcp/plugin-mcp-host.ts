@@ -34,6 +34,7 @@ import { createLogger } from "../lib/logger.js";
 import type { Tool } from "../tools/base.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PluginManifest } from "../plugins/types.js";
+import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
 import type { McpUiPayload, McpUiResourceMeta, McpUiResourceRead } from "./types.js";
 
 const log = createLogger("plugin-mcp-host");
@@ -84,6 +85,7 @@ export class PluginMcpHost {
     private readonly pluginId: string,
     private readonly transport: McpTransport,
     private readonly toolRegistry: ToolRegistry,
+    private readonly operationGovernance: Record<string, PluginToolOperationPolicy> = {},
   ) {}
 
   /**
@@ -98,7 +100,12 @@ export class PluginMcpHost {
     uiResources?: PluginUiResourceProvider,
   ): PluginMcpHost {
     const server = new PluginMcpServer(manifest, delegate, uiResources);
-    return new PluginMcpHost(manifest.id, new LoopbackTransport(server), toolRegistry);
+    return new PluginMcpHost(
+      manifest.id,
+      new LoopbackTransport(server),
+      toolRegistry,
+      (manifest as PluginManifest & { operationGovernance?: Record<string, PluginToolOperationPolicy> }).operationGovernance,
+    );
   }
 
   /**
@@ -152,8 +159,11 @@ export class PluginMcpHost {
         // hard-fails (host-classifies-risk: default-strict write-equivalent);
         // the remaining authority hard failure is the RC protocol mismatch
         // checked above.
-        const registryTool = mcpToolToPluginTool(this.pluginId, tool, (name, args) =>
-          this.invoke(name, args),
+        const registryTool = mcpToolToPluginTool(
+          this.pluginId,
+          tool,
+          (name, args) => this.invoke(name, args),
+          this.operationGovernance?.[tool.name],
         );
 
         // THEN #1182 provider-strict lint, fail-soft per tool: a schema

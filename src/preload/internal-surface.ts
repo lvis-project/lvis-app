@@ -547,9 +547,10 @@ export function buildInternalApiSurface() {
   callPluginMethod: async (
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; operationGrantToken?: string },
   ) => ipcRenderer.invoke(CHANNELS.plugins.call, method, payload, {
     userAction: options?.userAction === true && navigator.userActivation?.isActive === true,
+    ...(options?.operationGrantToken ? { operationGrantToken: options.operationGrantToken } : {}),
   }),
 
 
