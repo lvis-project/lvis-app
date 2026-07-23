@@ -172,8 +172,14 @@ describe("PythonRuntimeBootstrapper", () => {
     vi.mocked(fsMock.readdir).mockRejectedValue(
       Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
     );
-    // process.resourcesPath를 undefined로 설정 (개발 환경 시뮬레이션)
-    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = undefined;
+    // Electron 43 exposes resourcesPath as a read-only process property.
+    // Re-declare it as a writable test fixture so packaged/development cases
+    // can isolate their process state without depending on Electron internals.
+    Object.defineProperty(process, "resourcesPath", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
   });
 
   afterEach(() => {
