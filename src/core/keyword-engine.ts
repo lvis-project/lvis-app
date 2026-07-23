@@ -14,9 +14,15 @@ export type InputClassification =
   | { type: "general"; input: string };
 
 export interface SkillKeyword {
-
+  /** Case-insensitive substring that can activate plugin scope and tool preload. */
   keyword: string;
-
+  /**
+   * Exact model-visible Tool name to preload when this keyword matches.
+   *
+   * @deprecated Owner: `lvis-app` plugin runtime. Remove after every supported
+   * plugin has migrated to bundled `manifest.skills` and no active manifest
+   * declares `keywords`.
+   */
   skillId: string;
 
 
@@ -131,6 +137,14 @@ export class KeywordEngine {
 
 
 
+  /**
+   * Return the exact Tool names selected by matching keyword entries.
+   *
+   * The caller supplies the current model-visible, plugin-scoped membership
+   * predicate, so a stale or dynamically registered `skillId` cannot widen the
+   * turn scope. This method selects tool schemas for the model; it never invokes
+   * a Tool.
+   */
   matchToolNames(input: string, isToolName: (name: string) => boolean): Set<string> {
     const lowerInput = input.trim().toLowerCase();
     const result = new Set<string>();

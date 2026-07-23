@@ -5,6 +5,12 @@
 > schemas. It complements `docs/architecture/architecture.md` §4.5, §6.1, §6.4,
 > §9, §14 and the implementation design in
 > `docs/development/tool-level-deferral-design.md`.
+>
+> The keyword path below is deprecated keyword-to-Tool-schema preload, despite
+> the legacy internal name `SkillKeyword.skillId`. It is separate from bundled
+> `manifest.skills` instruction discovery and never invokes a Tool. Owner:
+> `lvis-app` plugin runtime. Remove it after every supported plugin has migrated
+> to bundled `manifest.skills` and no active manifest declares `keywords`.
 
 ## Decision
 
@@ -114,8 +120,9 @@ Tools may enter `tools[]` only through one of these paths:
   `tool_search`.
 - Eager full-schema exposure for all active plugin/MCP tools when
   `eligibleCount < EAGER_TOOL_EXPOSURE_CEILING`.
-- Keyword preloading from `SkillKeyword.skillId` when the owning plugin is in
-  scope and deferral is active.
+- Deprecated Tool-schema preloading from the legacy-named
+  `SkillKeyword.skillId` when the owning plugin is in scope and deferral is
+  active.
 - `tool_search` promotion from the current compact catalog.
 - Carry-forward from the previous turn, clamped to the current active plugin/MCP
   scope.
@@ -134,7 +141,7 @@ selected subset**, not whole plugin.
 Default promotion should be conservative:
 
 - exact tool-name match: load the matching tool
-- strong keyword match: load the matching `skillId` tool
+- strong keyword match: load the Tool schema named by the legacy `skillId`
 - broad/natural-language query: score candidates and load only the top few
 - explicit multi-tool intent: load a small group if the group is justified
 
@@ -196,10 +203,10 @@ the single count-based policy.
 
 ## Implementation Direction
 
-The current direction in `tool-level-deferral-design.md` is correct: use
-host-side keyword preload plus `tool_search` to promote individual tools or
-small tool subsets. The next implementation should harden that design rather
-than replace it with native-provider-specific hosted tool search.
+The current implementation uses deprecated host-side keyword-to-Tool-schema
+preload plus `tool_search` to promote individual tools or small tool subsets.
+Do not expand the keyword surface; bundled instruction discovery belongs to
+`manifest.skills`.
 
 Do not switch the app to OpenAI-only hosted tool search as the first fix. LVIS
 currently routes tool schemas through the cross-vendor Vercel AI SDK provider

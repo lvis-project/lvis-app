@@ -172,11 +172,23 @@ capability checks, marketplace policy, and host APIs.
 
 Key boundaries:
 
+- The complete plugin-author TypeScript contract and its JSDoc are Host-owned in
+  `src/plugins/public-contract.ts`. `src/plugins/types.ts` re-exports that
+  surface and adds Host-private registry/marketplace DTOs. The SDK copies the
+  public module mechanically and adds no declarations, documentation, aliases,
+  or validation policy.
 - plugin code cannot invent its own identity when calling HostApi;
 - installed plugin assets are loaded through host-approved URLs;
 - plugin tools must declare schemas (pure MCP `Tool` objects); per-tool category
   is not a manifest field — the host classifies the effective category per
   invocation;
+- deprecated `keywords[].skillId` must exactly name a model-visible manifest
+  Tool. A matching keyword preloads that Tool schema into the model-visible
+  turn scope; it never invokes the Tool directly and cannot target an app-only
+  Tool. This is separate from bundled `manifest.skills` instruction discovery.
+  Owner: `lvis-app` plugin runtime. Remove after every supported plugin has
+  migrated to bundled `manifest.skills` and no active manifest declares
+  `keywords`;
 - plugin UI can render in host slots but cannot bypass permission review;
 - optional `manifest.onboarding.firstTask` copy is inert, localized metadata:
   the host may prefill the visible composer, but it never auto-submits or invokes
