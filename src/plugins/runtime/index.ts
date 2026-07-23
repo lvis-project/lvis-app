@@ -77,6 +77,70 @@ import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
+const BOOT_PREFLIGHT_CONCURRENCY = 4;
+
+type PluginIntegrityCheckResult =
+  | {
+      ok: true;
+      verified?: {
+        installSource: "marketplace" | "local-dev";
+        signerKeyId: string | null;
+        artifactSha256: string | null;
+      };
+    }
+  | {
+      ok: false;
+      reason: string;
+      error?: unknown;
+    };
+
+type BootPreflightOutcome =
+  | {
+      ok: true;
+      plan: ManifestLoadPlan;
+      manifest: PluginManifest;
+      approvedPluginAccess: PluginAccessSpec | undefined;
+      integrityResult?: PluginIntegrityCheckResult;
+    }
+  | {
+      ok: false;
+      plan: ManifestLoadPlan;
+      kind: "integrity";
+      integrityResult: PluginIntegrityCheckResult & { ok: false };
+    }
+  | {
+      ok: false;
+      plan: ManifestLoadPlan;
+      kind: "manifest";
+      error: unknown;
+      integrityResult?: PluginIntegrityCheckResult;
+    };
+
+/**
+ * Bounded parallel map whose result positions always match the input order.
+ * Receipt hashing is I/O-heavy, so an unbounded Promise.all can make startup
+ * slower on large managed fleets even though a small amount of overlap helps.
+ */
+async function mapBoundedInOrder<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapItem: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapItem(items[index]!, index);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, () => worker()),
+  );
+  return results;
+}
 
 /**
  * Hard cap on the HTML one {@link RuntimePlugin.readUiResource} call may return
@@ -333,6 +397,7 @@ export class PluginRuntime {
   private loaded = false;
   /** §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
   private manifestValidator: ValidateFunction | null = null;
+  private manifestValidatorPromise: Promise<ValidateFunction> | null = null;
 
   constructor(options: PluginRuntimeOptions) {
     this.hostRoot = resolve(options.hostRoot);
@@ -363,23 +428,40 @@ export class PluginRuntime {
 
   private async getManifestValidator(): Promise<ValidateFunction> {
     if (this.manifestValidator) return this.manifestValidator;
-    this.manifestValidator = await buildManifestValidator();
-    return this.manifestValidator;
+    if (!this.manifestValidatorPromise) {
+      this.manifestValidatorPromise = buildManifestValidator()
+        .then((validator) => {
+          this.manifestValidator = validator;
+          return validator;
+        })
+        .finally(() => {
+          this.manifestValidatorPromise = null;
+        });
+    }
+    return this.manifestValidatorPromise;
   }
 
-  private async readManifest(path: string): Promise<PluginManifest> {
+  private async readManifest(
+    path: string,
+    options: { report?: boolean } = {},
+  ): Promise<PluginManifest> {
     const validator = await this.getManifestValidator();
     try {
       return await parsePluginJson(path, validator);
     } catch (err) {
-      // Supply-chain visibility — manifest schema reject / cross-field violation /
+      if (options.report !== false) this.reportPluginManifestRejected(path, err);
+      throw err;
+    }
+  }
 
-
+  private reportPluginManifestRejected(path: string, error: unknown): void {
+    try {
       this.auditLog?.("error", "plugin_manifest_rejected", {
         manifestPath: path,
-        error: err instanceof Error ? err.message.slice(0, 500) : String(err),
+        error: error instanceof Error ? error.message.slice(0, 500) : String(error),
       });
-      throw err;
+    } catch (auditError) {
+      log.error({ manifestPath: path, err: auditError }, "plugin manifest rejection audit failed");
     }
   }
 
@@ -511,41 +593,106 @@ export class PluginRuntime {
     return this.preparation.waitForReady(pluginId);
   }
 
+  /**
+   * Verify installed bytes before parsing any manifest, then parse each accepted
+   * manifest exactly once. Work overlaps with a conservative bound while the
+   * returned array preserves registry/load-plan order for deterministic state
+   * projection and failure reporting.
+   */
+  private async preflightBootLoadPlan(
+    loadPlan: ManifestLoadPlan[],
+  ): Promise<BootPreflightOutcome[]> {
+    if (loadPlan.length === 0) return [];
+    // Compile AJV once before concurrent reads. This also prevents parallel
+    // callers from paying duplicate schema-compilation cost.
+    await this.getManifestValidator();
+    return mapBoundedInOrder(
+      loadPlan,
+      BOOT_PREFLIGHT_CONCURRENCY,
+      async (plan): Promise<BootPreflightOutcome> => {
+        let integrityResult: PluginIntegrityCheckResult | undefined;
+        if (plan.pluginIdHint) {
+          try {
+            integrityResult = await this.verifyReceiptAndDevGuard(
+              plan.pluginIdHint,
+              dirname(plan.manifestPath),
+              { report: false },
+            );
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            integrityResult = {
+              ok: false,
+              reason: `install receipt verification failed unexpectedly: ${detail}`,
+              error,
+            };
+          }
+          if (!integrityResult.ok) {
+            return { ok: false, plan, kind: "integrity", integrityResult };
+          }
+        }
+        try {
+          const manifest = await this.readManifest(plan.manifestPath, { report: false });
+          return {
+            ok: true,
+            plan,
+            manifest,
+            approvedPluginAccess: plan.approvedPluginAccess,
+            integrityResult,
+          };
+        } catch (error) {
+          return { ok: false, plan, kind: "manifest", error, integrityResult };
+        }
+      },
+    );
+  }
+
   async load(): Promise<void> {
     if (this.loaded) return;
     const loadPlan = await this.resolveManifestLoadPlanInternal();
-    const enabledManifestSnapshots = await this.readSnapshotsInternal(loadPlan);
-    for (const [pluginId, snapshot] of enabledManifestSnapshots) {
-      const { manifest, approvedPluginAccess } = snapshot;
-      this.rememberPluginInstallAlias(manifest.id, pluginId);
-      this.knownPluginManifests.set(pluginId, manifest);
-      this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
-      this.rememberToolOwners(pluginId, manifest); // #885 §2.4a MODEL-ONLY (see method)
-      for (const eventType of getDeclaredEmittedEvents(manifest)) {
+    for (const plan of loadPlan) {
+      const pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(plan.manifestPath))}>`;
+      plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
+    }
+    const preflight = await this.preflightBootLoadPlan(loadPlan);
+    const enabledManifestSnapshots = new Map<string, ManifestSnapshot>();
+    for (const outcome of preflight) {
+      if (
+        outcome.plan.pluginIdHint
+        && "integrityResult" in outcome
+        && outcome.integrityResult
+      ) {
+        this.reportPluginIntegrityResult(outcome.plan.pluginIdHint, outcome.integrityResult);
+      }
+      if (!outcome.ok && outcome.kind === "manifest") {
+        this.reportPluginManifestRejected(outcome.plan.manifestPath, outcome.error);
+      }
+      if (!outcome.ok) continue;
+      const pluginId = outcome.plan.pluginIdHint ?? outcome.manifest.id;
+      enabledManifestSnapshots.set(pluginId, {
+        manifest: outcome.manifest,
+        approvedPluginAccess: outcome.approvedPluginAccess,
+      });
+      this.rememberPluginInstallAlias(outcome.manifest.id, outcome.plan.pluginIdHint);
+      this.knownPluginManifests.set(pluginId, outcome.manifest);
+      this.knownPluginAccessGrants.set(pluginId, outcome.approvedPluginAccess);
+      this.rememberToolOwners(pluginId, outcome.manifest); // #885 §2.4a MODEL-ONLY (see method)
+      for (const eventType of getDeclaredEmittedEvents(outcome.manifest)) {
         this.knownEventOwners.set(eventType, pluginId);
       }
     }
-    for (const plan of loadPlan) {
+    for (const outcome of preflight) {
+      const { plan } = outcome;
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      // pluginId starts as hint (may be "<unresolved:basename>"); reassigned to
-      // manifest.id once the manifest is parsed so all post-read phases are consistent.
       let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
-      plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
-      if (plan.pluginIdHint) {
-        const integrityResult = await this.verifyReceiptAndDevGuard(
-          plan.pluginIdHint,
-          pluginRoot,
-        );
-        if (!integrityResult.ok) {
-          this.markFailed(plan.pluginIdHint);
+      if (!outcome.ok) {
+        if (outcome.kind === "integrity") {
+          if (plan.pluginIdHint) {
+            this.markFailed(plan.pluginIdHint);
+          }
           continue;
         }
-      }
-      let manifest: PluginManifest;
-      try {
-        manifest = await this.readManifest(manifestPath);
-      } catch (err) {
+        const err = outcome.error;
         const reason =
           err instanceof SyntaxError ? "manifest_parse"
           : (err as Error).message?.includes("schema validation") ? "manifest_schema"
@@ -557,14 +704,6 @@ export class PluginRuntime {
             name: plan.pluginIdHint,
             description: "Plugin manifest could not be loaded.",
           }, {
-            // A schema-invalid on-disk manifest (e.g. a pre-v6 shape rejected
-            // after #885 Phase R) is repaired by reinstalling the latest
-            // marketplace version, which ships a valid manifest. Reuse the
-            // marketplace `manifest-validation-error` kind so the Doctor shows
-            // the same "manifest validation failed" diagnosis and offers the
-            // reinstall auto-repair. Missing/corrupt/unreadable manifests stay
-            // unclassified (generic reinstall-fixable) but still surface the
-            // underlying reason as the Doctor failure detail.
             ...(reason === "manifest_schema"
               ? { installFailureKind: "manifest-validation-error" as const }
               : {}),
@@ -573,11 +712,10 @@ export class PluginRuntime {
         }
         continue;
       }
+      const { manifest, approvedPluginAccess } = outcome;
       // Reassign to manifest.id so all subsequent phases use the canonical id.
       pluginId = manifest.id;
       this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
-      const approvedPluginAccess =
-        enabledManifestSnapshots.get(manifest.id)?.approvedPluginAccess ?? plan.approvedPluginAccess;
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
       this.loadFailureInfo.delete(manifest.id);
@@ -604,9 +742,9 @@ export class PluginRuntime {
       }
       const requiredCapabilities = manifest.requires?.capabilities ?? [];
       if (requiredCapabilities.length > 0) {
-        const availableManifests = [...enabledManifestSnapshots.entries()]
-          .filter(([pluginId]) => pluginId !== manifest.id)
-          .map(([, candidate]) => candidate.manifest);
+        const availableManifests = [...enabledManifestSnapshots.values()]
+          .filter((candidate) => candidate.manifest.id !== manifest.id)
+          .map((candidate) => candidate.manifest);
         const dependencyResult = resolveDependencies(requiredCapabilities, availableManifests);
         if (!dependencyResult.ok) {
           const reason = `missing required capabilities: ${dependencyResult.missing.join(", ")}`;
@@ -1188,8 +1326,8 @@ export class PluginRuntime {
 
   /**
    * Verify the install receipt for `pluginId` under `pluginRoot` and enforce
-   * the dev-signer-in-packaged-build guard. Emits all relevant audit log
-   * entries so callers cannot forget them.
+   * the dev-signer-in-packaged-build guard. Reporting may be deferred so boot
+   * can perform concurrent checks while emitting results in registry order.
    *
    * Returns `{ ok: true }` when verification passes (or is not required).
    * Returns `{ ok: false }` when the plugin must be rejected — the caller is
@@ -1204,7 +1342,8 @@ export class PluginRuntime {
   private async verifyReceiptAndDevGuard(
     pluginId: string,
     pluginRoot: string,
-  ): Promise<{ ok: true } | { ok: false }> {
+    options: { report?: boolean } = {},
+  ): Promise<PluginIntegrityCheckResult> {
     if (!this.installReceiptCacheRoot) {
       return { ok: true };
     }
@@ -1214,12 +1353,9 @@ export class PluginRuntime {
       pluginRoot,
     );
     if (!receiptResult.ok) {
-      log.error({ pluginId, reason: receiptResult.reason }, `${pluginId} rejected — install receipt integrity failed`);
-      this.auditLog?.("error", "plugin_integrity_rejected", {
-        pluginId,
-        reason: receiptResult.reason,
-      });
-      return { ok: false };
+      const result = { ok: false as const, reason: receiptResult.reason };
+      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
+      return result;
     }
     const { installSource, signerKeyId, artifactSha256 } = receiptResult.receipt;
     // Policy gate: local-dev receipts are only valid in unpackaged dev builds.
@@ -1227,17 +1363,46 @@ export class PluginRuntime {
     // policy (packaged vs dev) is enforced here in the runtime layer.
     if (installSource === "local-dev" && !isDevModeUnlocked()) {
       const reason = "local-dev install rejected in packaged build";
-      log.error({ pluginId, reason }, `${pluginId} rejected — ${reason}`);
-      this.auditLog?.("error", "plugin_integrity_rejected", { pluginId, reason });
-      return { ok: false };
+      const result = { ok: false as const, reason };
+      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
+      return result;
     }
-    this.auditLog?.("info", "plugin_integrity_verified", {
-      pluginId,
-      installSource,
-      artifactSha256,
-      signerKeyId,
-    });
-    return { ok: true };
+    const result: PluginIntegrityCheckResult = {
+      ok: true,
+      verified: { installSource, artifactSha256, signerKeyId },
+    };
+    if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
+    return result;
+  }
+
+  private reportPluginIntegrityResult(
+    pluginId: string,
+    result: PluginIntegrityCheckResult,
+  ): void {
+    if (!result.ok) {
+      log.error(
+        { pluginId, reason: result.reason, ...(result.error === undefined ? {} : { err: result.error }) },
+        `${pluginId} rejected — install receipt integrity failed`,
+      );
+      try {
+        this.auditLog?.("error", "plugin_integrity_rejected", {
+          pluginId,
+          reason: result.reason,
+        });
+      } catch (error) {
+        log.error({ pluginId, err: error }, "plugin integrity rejection audit failed");
+      }
+      return;
+    }
+    if (!result.verified) return;
+    try {
+      this.auditLog?.("info", "plugin_integrity_verified", {
+        pluginId,
+        ...result.verified,
+      });
+    } catch (error) {
+      log.error({ pluginId, err: error }, "plugin integrity verification audit failed");
+    }
   }
 
   /**

@@ -182,6 +182,11 @@ Key boundaries:
   the host may prefill the visible composer, but it never auto-submits or invokes
   a tool, and undeclared or unusable plugins produce no proposal;
 - marketplace metadata should not override local policy or managed-plugin rules.
+- boot verifies each installed payload's receipt before parsing its manifest.
+  Receipt hashing and manifest validation run with bounded concurrency, but
+  successful results and failures are projected in registry order. A rejected
+  payload never contributes tool/event ownership or dependency capability, and
+  an accepted manifest is parsed only once for that boot load.
 - plugin replacements keep the prior registry row in a strict `pendingUpdate`
   state from the pre-promotion boundary through registry commit. Runtime and
   HostApi trust caches skip pending rows, while uninstall/bundle planners retain

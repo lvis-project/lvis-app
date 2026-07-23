@@ -3119,6 +3119,8 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 
 **검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) → cross-field (tool-name regex, `keywords[].skillId ∈ tools[]`, `auth.*Tool ∈ uiActions`, auth tools not in `tools[]`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
 
+부트 preflight는 install receipt 검증을 manifest 파싱보다 먼저 수행한다. Receipt hash와 manifest 검증은 제한된 동시성으로 겹쳐 실행하되, 성공 결과와 실패 상태는 registry 순서대로 반영한다. 무결성 검증에 실패한 payload는 tool/event 소유권이나 dependency capability 계산에 들어가지 않으며, 통과한 manifest는 해당 부트에서 한 번만 파싱한다.
+
 규칙:
 - top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)
 - JSON Schema draft-07
