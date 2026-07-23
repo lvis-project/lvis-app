@@ -14,14 +14,14 @@ const MAX_EVIDENCE_BYTES = 1024 * 1024;
 function openEvidence(path: string): number {
   const readWriteNoFollow = constants.O_RDWR | constants.O_CLOEXEC | constants.O_NOFOLLOW;
   try {
-    return openSync(path, readWriteNoFollow);
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
     return openSync(
       path,
       readWriteNoFollow | constants.O_CREAT | constants.O_EXCL,
       0o600,
     );
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+    return openSync(path, readWriteNoFollow);
   }
 }
 
@@ -35,6 +35,14 @@ export function mergeEvidenceFile(
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.size > MAX_EVIDENCE_BYTES) {
       throw new Error("E2E evidence must be a regular file no larger than 1 MiB");
+    }
+    const currentUid = process.getuid?.();
+    if (
+      stat.nlink !== 1 ||
+      (currentUid !== undefined && stat.uid !== currentUid) ||
+      (stat.mode & 0o077) !== 0
+    ) {
+      throw new Error("E2E evidence must be singly linked, owner-controlled, and private");
     }
     const raw = readFileSync(fd, "utf8");
     const current = raw.trim()
