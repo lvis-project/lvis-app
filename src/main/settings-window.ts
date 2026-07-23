@@ -17,10 +17,10 @@ import { resolveAppIconPath } from "./app-icon.js";
 import { normalizeSettingsTab } from "../shared/settings-tabs.js";
 import {
   auditUnauthorized,
-  registerWindowEventListeners,
   UNAUTHORIZED_FRAME,
   validateSender,
 } from "../ipc-bridge.js";
+import { registerWindowEventListeners } from "./window-event-listeners.js";
 import type { AppServices } from "../boot.js";
 import { getSettingsWindow, setSettingsWindow } from "./app-state.js";
 import { getAppWindows, initialThemeArgs, rendererIndexUrl } from "./main-window.js";

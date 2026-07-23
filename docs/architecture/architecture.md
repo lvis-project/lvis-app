@@ -215,6 +215,22 @@ Key boundaries:
   filesystem read grants must be declared explicitly as `allowReadPaths` and are
   never inferred from argv.
 
+## Main-process composition and boot readiness
+
+TypeScript under `src/` must have no static runtime-import strongly
+connected components. `bun run check:import-cycles` enforces this in the build
+gate while ignoring type-only imports. Shared theme replay state and native
+window event listeners therefore live in leaf modules; compatibility barrels
+may re-export them but native window construction imports the leaves directly.
+
+Reverse calls from menu and main-window modules into native window actions go
+through the native-window coordinator configured once by `main.ts`; the tray
+remains the one-way composition owner. Calls before configuration and repeat
+configuration are contract errors. Boot uses a staged `BootContext`, then an
+exhaustive own-property readiness assertion before `assembleAppServices`; a
+missing producer is reported by field name instead of leaking `undefined` into
+the running application.
+
 ## Tool Governance
 
 All tool execution flows through the registry and executor:
