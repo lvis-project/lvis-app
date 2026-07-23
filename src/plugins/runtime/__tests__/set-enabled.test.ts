@@ -325,7 +325,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     );
 
     await expect(runtime.setPluginEnabled("se-plugin", false)).rejects.toThrow(
-      /retirement drain failed/,
+      /generation retirement failed/,
     );
 
     expect(onActiveStateChange).toHaveBeenCalledWith("se-plugin", false);
