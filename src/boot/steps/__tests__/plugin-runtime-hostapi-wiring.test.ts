@@ -83,6 +83,7 @@ vi.mock("../../../plugins/registry.js", () => ({
 }));
 
 import { initPluginRuntime } from "../plugin-runtime.js";
+import { withPluginInstallLock } from "../../../plugins/install-lifecycle.js";
 
 type ConfigHostApi = {
   config: {
@@ -211,11 +212,24 @@ describe("HostApi.config.get merged-read precedence", () => {
 });
 
 describe("HostApi.config.set round-trip", () => {
+  beforeEach(() => {
+    runtimeTestState.runtime.getPluginManifest.mockImplementation((pluginId: string) => (
+      pluginId === "plugin-a" ? activeManifest : null
+    ));
+  });
+
+  let activeManifest: Parameters<CreateHostApi>[1];
+
+  async function createActiveApi(settings: ReturnType<typeof makeSettingsService>) {
+    const createHostApi = await initAndGetFactory(settings);
+    activeManifest = { id: "plugin-a", config: {} };
+    return createHostApi("plugin-a", activeManifest, mkdtempSync("/tmp/lvis-cfg-set-"));
+  }
+
   it("persists via setPluginConfig, refreshes the override, restarts the plugin, and re-reads the value", async () => {
     const store = new Map<string, Record<string, unknown>>();
     const settings = makeSettingsService(store);
-    const createHostApi = await initAndGetFactory(settings);
-    const api = createHostApi("plugin-a", { id: "plugin-a", config: {} }, mkdtempSync("/tmp/lvis-cfg-set-"));
+    const api = await createActiveApi(settings);
 
     await api.config.set("k", "v");
 
@@ -229,18 +243,45 @@ describe("HostApi.config.set round-trip", () => {
     const store = new Map<string, Record<string, unknown>>();
     const settings = makeSettingsService(store);
     const createHostApi = await initAndGetFactory(settings);
+    activeManifest = {
+      id: "plugin-a",
+      config: {},
+      configSchema: { properties: { secretKey: { type: "string", format: "secret" } } },
+    };
     const api = createHostApi(
       "plugin-a",
-      {
-        id: "plugin-a",
-        config: {},
-        configSchema: { properties: { secretKey: { type: "string", format: "secret" } } },
-      },
+      activeManifest,
       mkdtempSync("/tmp/lvis-cfg-secret-"),
     );
 
     await expect(api.config.set("secretKey", "leak")).rejects.toThrow(/secret fields must be saved via hostApi\.setSecret/);
     expect(settings.setPluginConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects a queued write when uninstall invalidates the HostApi instance", async () => {
+    const store = new Map<string, Record<string, unknown>>();
+    const settings = makeSettingsService(store);
+    const api = await createActiveApi(settings);
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lockEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const uninstall = withPluginInstallLock("plugin-a", async () => {
+      entered();
+      await gate;
+    });
+    await lockEntered;
+
+    const write = api.config.set("k", "stale");
+    await Promise.resolve();
+    expect(settings.setPluginConfig).not.toHaveBeenCalled();
+
+    runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+    release();
+    await uninstall;
+    await expect(write).rejects.toThrow(/plugin instance is no longer active/);
+    expect(settings.setPluginConfig).not.toHaveBeenCalled();
+    expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
   });
 });
 

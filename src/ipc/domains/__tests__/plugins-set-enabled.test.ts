@@ -244,4 +244,32 @@ describe("lvis:plugins:config:set", () => {
     expect(setPluginConfig).toHaveBeenCalledOnce();
     expect(restartPlugin).toHaveBeenCalledOnce();
   });
+
+  it("does not recreate config when uninstall removes the plugin before a queued save", async () => {
+    const { withPluginInstallLock } = await import("../../../plugins/install-lifecycle.js");
+    const { deps, setPluginConfig, restartPlugin } = await setup();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lockEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const uninstall = withPluginInstallLock("plugin-config", async () => {
+      entered();
+      await gate;
+    });
+    await lockEntered;
+
+    const configSet = invoke("lvis:plugins:config:set", "plugin-config", { kept: "stale" });
+    await Promise.resolve();
+    expect(setPluginConfig).not.toHaveBeenCalled();
+    deps.pluginRuntime.getPluginManifest.mockReturnValue(null);
+
+    release();
+    await uninstall;
+    await expect(configSet).resolves.toMatchObject({
+      ok: false,
+      error: "plugin-config-save-failed",
+    });
+    expect(setPluginConfig).not.toHaveBeenCalled();
+    expect(restartPlugin).not.toHaveBeenCalled();
+  });
 });
