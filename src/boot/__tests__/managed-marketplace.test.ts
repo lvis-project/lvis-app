@@ -8,6 +8,16 @@ import type { PluginMarketplaceService } from "../../plugins/marketplace.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 
 describe("resolveManagedPluginBootstrap", () => {
+  it("disables network-managed bootstrap in isolated E2E test mode", () => {
+    expect(resolveManagedPluginBootstrap({
+      marketplace: { backend: "real-cloud", cloudBaseUrl: "https://marketplace.lvis.internal" },
+      e2eTestMode: true,
+    })).toEqual({
+      enabled: false,
+      reason: "managed plugin bootstrap disabled in isolated E2E test mode",
+    });
+  });
+
   it("disables bootstrap when no base URL is configured", () => {
     expect(resolveManagedPluginBootstrap({
       marketplace: { backend: "real-cloud" },
