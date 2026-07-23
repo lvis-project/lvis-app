@@ -1,7 +1,6 @@
 import AdmZip from "adm-zip";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -66,7 +65,7 @@ function makeStore(buffer: Buffer): PluginArtifactStore & {
 
 describe("assistant package installers", () => {
   it("end-to-end: installs an agent package and records the marketplace registry entry", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "lvis-agent-package-"));
+    const tmp = mkdtempSync(join(process.cwd(), ".lvis-agent-package-"));
     try {
       const store = makeStore(zipBuffer({
         "plugin.json": JSON.stringify({ id: "reviewer", version: "1.0.0" }),
@@ -113,7 +112,7 @@ describe("assistant package installers", () => {
   });
 
   it("end-to-end: installs a skill package and records the marketplace registry entry", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "lvis-skill-package-"));
+    const tmp = mkdtempSync(join(process.cwd(), ".lvis-skill-package-"));
     try {
       const store = makeStore(zipBuffer({
         "plugin.json": JSON.stringify({ id: "audit", version: "1.0.0" }),
@@ -228,7 +227,7 @@ describe("assistant package installers", () => {
   });
 
   it("serializes Agent and Skill artifact lifetimes through the shared process slot", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "lvis-assistant-package-slot-"));
+    const tmp = mkdtempSync(join(process.cwd(), ".lvis-assistant-package-slot-"));
     const agentBuffer = zipBuffer({
       "plugin.json": JSON.stringify({ id: "reviewer", version: "1.0.0" }),
       "AGENTS.md": "---\nname: reviewer\n---\nDo reviewer work.\n",

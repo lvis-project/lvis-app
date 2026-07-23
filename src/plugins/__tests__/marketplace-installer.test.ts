@@ -10,7 +10,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import {
   buildVerifiedTarballPaths,
@@ -99,7 +98,7 @@ function fakeHttp(
 }
 
 function tmpDownloadRoot(): string {
-  return mkdtempSync(join(tmpdir(), "s2-installer-"));
+  return mkdtempSync(join(process.cwd(), ".s2-installer-"));
 }
 
 describe("installFromMarketplace — happy path", () => {
@@ -634,6 +633,80 @@ describe("installFromMarketplace — HTTP handling", () => {
       vi.useRealTimers();
       rmSync(firstRoot, { recursive: true, force: true });
       rmSync(deadlineRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("aborts a stalled download attempt when the aggregate deadline expires", async () => {
+    vi.useFakeTimers();
+    const { pubBuf } = freshEd25519();
+    let observedAbort = false;
+    const http: MarketplaceHttp = {
+      async downloadArtifact(_slug, _version, _onChunk, options) {
+        return await new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => {
+            observedAbort = true;
+            reject(new MarketplaceTransientDownloadError("request aborted"));
+          }, { once: true });
+        });
+      },
+      async fetchSignatureEnvelope() {
+        throw new Error("not reached");
+      },
+    };
+    const root = tmpDownloadRoot();
+    try {
+      const result = installFromMarketplace("x", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+      }).catch((error) => error);
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(observedAbort).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toMatchObject({
+        code: "RETRY_EXHAUSTED",
+        message: expect.stringMatching(/retry deadline exceeded/i),
+      });
+      expect(observedAbort).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects at the aggregate deadline even when the HTTP adapter ignores abort", async () => {
+    vi.useFakeTimers();
+    const tarball = Buffer.from("late-success");
+    const { privateKey, pubBuf } = freshEd25519();
+    const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]);
+    const http: MarketplaceHttp = {
+      async downloadArtifact() {
+        return await new Promise((resolve) => {
+          setTimeout(() => resolve({
+            body: tarball,
+            sha256Header: createHash("sha256").update(tarball).digest("hex"),
+            status: 200,
+          }), 120_000);
+        });
+      },
+      async fetchSignatureEnvelope() {
+        return envelope;
+      },
+    };
+    const root = tmpDownloadRoot();
+    try {
+      const result = installFromMarketplace("x", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+      }).catch((error) => error);
+      await vi.advanceTimersByTimeAsync(90_000);
+      await expect(result).resolves.toMatchObject({ code: "RETRY_EXHAUSTED" });
+      await vi.advanceTimersByTimeAsync(30_000);
+    } finally {
+      vi.useRealTimers();
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
