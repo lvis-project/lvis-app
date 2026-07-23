@@ -34,6 +34,7 @@
 // interacted badly with the sandbox isolation, leaving `contextBridge`
 // undefined while the preload appeared to have executed cleanly.
 import { contextBridge, ipcRenderer } from "electron";
+import { CHANNELS } from "./contract/app-contract.js";
 
 // Diagnostic probe — temporarily ungated while we verify the
 // session.setPreloads() fix for sandboxed <webview> preload loading.
@@ -71,7 +72,7 @@ console.log("[lvis:plugin-preload] loaded", {
 const STICKY_EVENT_TYPES = new Set<string>(["host.theme.changed"]);
 const stickyLastPayload = new Map<string, unknown>();
 
-ipcRenderer.on("lvis:plugin:event", (_e, type: string, data: unknown) => {
+ipcRenderer.on(CHANNELS.pluginBridge.event, (_e, type: string, data: unknown) => {
   if (STICKY_EVENT_TYPES.has(type)) stickyLastPayload.set(type, data);
 });
 
@@ -96,13 +97,13 @@ function hasActiveUserActivation(): boolean {
 contextBridge.exposeInMainWorld("lvisPlugin", {
   callTool: async (name: string, args?: unknown): Promise<unknown> =>
     unwrapEnvelope(
-      await ipcRenderer.invoke("lvis:plugin:call-tool", name, args, {
+      await ipcRenderer.invoke(CHANNELS.pluginBridge.callTool, name, args, {
         userAction: hasActiveUserActivation(),
       }),
     ),
 
   emitEvent: async (type: string, data?: unknown): Promise<void> => {
-    unwrapEnvelope(await ipcRenderer.invoke("lvis:plugin:emit-event", type, data));
+    unwrapEnvelope(await ipcRenderer.invoke(CHANNELS.pluginBridge.emitEvent, type, data));
   },
 
   onEvent: (type: string, handler: (data: unknown) => void): (() => void) => {
@@ -112,8 +113,8 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
     const listener = (_event: unknown, incomingType: string, data: unknown) => {
       if (incomingType === type) handler(data);
     };
-    ipcRenderer.on("lvis:plugin:event", listener);
-    return () => ipcRenderer.removeListener("lvis:plugin:event", listener);
+    ipcRenderer.on(CHANNELS.pluginBridge.event, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.pluginBridge.event, listener);
   },
 
   /**
@@ -131,11 +132,11 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
    * shell's catch block surfaces the reason.
    */
   getEntryUrl: async (): Promise<string> => {
-    const reply = (await ipcRenderer.invoke("lvis:plugin:get-entry-url")) as
+    const reply = (await ipcRenderer.invoke(CHANNELS.pluginBridge.getEntryUrl)) as
       | { ok: true; entryUrl: string }
       | { ok: false; error: string };
     if (!reply || reply.ok !== true) {
-      throw new Error(`lvis:plugin:get-entry-url rejected: ${reply?.error ?? "unknown"}`);
+      throw new Error(`${CHANNELS.pluginBridge.getEntryUrl} rejected: ${reply?.error ?? "unknown"}`);
     }
     return reply.entryUrl;
   },
@@ -153,7 +154,7 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
    * hidden as a cold-boot theme.
    */
   getTheme: async (): Promise<unknown> => {
-    const reply = (await ipcRenderer.invoke("lvis:plugin:get-theme")) as
+    const reply = (await ipcRenderer.invoke(CHANNELS.pluginBridge.getTheme)) as
       | { ok: true; theme: unknown }
       | { ok: false; error: string };
     if (!reply || typeof reply !== "object" || typeof reply.ok !== "boolean") {
@@ -174,20 +175,20 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
   // bypass the keychain by writing through this surface.
   config: {
     get: async <T = unknown>(key: string): Promise<T | undefined> => {
-      const reply = (await ipcRenderer.invoke("lvis:plugin:config:get", key)) as
+      const reply = (await ipcRenderer.invoke(CHANNELS.pluginBridge.configGet, key)) as
         | { ok: true; value: T | undefined }
         | { ok: false; error: string };
       if (!reply || reply.ok !== true) {
-        throw new Error(`lvis:plugin:config:get rejected: ${reply?.error ?? "unknown"}`);
+        throw new Error(`${CHANNELS.pluginBridge.configGet} rejected: ${reply?.error ?? "unknown"}`);
       }
       return reply.value;
     },
     set: async <T = unknown>(key: string, value: T): Promise<void> => {
-      const reply = (await ipcRenderer.invoke("lvis:plugin:config:set", key, value)) as
+      const reply = (await ipcRenderer.invoke(CHANNELS.pluginBridge.configSet, key, value)) as
         | { ok: true }
         | { ok: false; error: string };
       if (!reply || reply.ok !== true) {
-        throw new Error(`lvis:plugin:config:set rejected: ${reply?.error ?? "unknown"}`);
+        throw new Error(`${CHANNELS.pluginBridge.configSet} rejected: ${reply?.error ?? "unknown"}`);
       }
     },
   },
@@ -201,20 +202,20 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
   // that needs cross-plugin coordination goes through the event bus.
   storage: {
     get: async <T = unknown>(key: string): Promise<T | undefined> => {
-      const reply = (await ipcRenderer.invoke("lvis:plugin:storage:get", key)) as
+      const reply = (await ipcRenderer.invoke(CHANNELS.pluginBridge.storageGet, key)) as
         | { ok: true; value: T | undefined }
         | { ok: false; error: string };
       if (!reply || reply.ok !== true) {
-        throw new Error(`lvis:plugin:storage:get rejected: ${reply?.error ?? "unknown"}`);
+        throw new Error(`${CHANNELS.pluginBridge.storageGet} rejected: ${reply?.error ?? "unknown"}`);
       }
       return reply.value;
     },
     set: async <T = unknown>(key: string, value: T): Promise<void> => {
-      const reply = (await ipcRenderer.invoke("lvis:plugin:storage:set", key, value)) as
+      const reply = (await ipcRenderer.invoke(CHANNELS.pluginBridge.storageSet, key, value)) as
         | { ok: true }
         | { ok: false; error: string };
       if (!reply || reply.ok !== true) {
-        throw new Error(`lvis:plugin:storage:set rejected: ${reply?.error ?? "unknown"}`);
+        throw new Error(`${CHANNELS.pluginBridge.storageSet} rejected: ${reply?.error ?? "unknown"}`);
       }
     },
   },

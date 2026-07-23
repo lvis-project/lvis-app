@@ -11,6 +11,7 @@ import type { NotificationService } from "../main/notification-service.js";
 import { classifySubscription } from "../plugins/capabilities.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
 import { createLogger } from "../lib/logger.js";
+import { CHANNELS } from "../contract/app-contract.js";
 const log = createLogger("lvis");
 
 export interface EventCollector {
@@ -148,7 +149,7 @@ export function registerPluginEventBridge(
       const handler: EventHandler = (data) => {
         if (mainWindow.isDestroyed()) return;
         try {
-          mainWindow.webContents.send("lvis:plugin:event", eventType, data);
+          mainWindow.webContents.send(CHANNELS.pluginBridge.event, eventType, data);
         } catch (e) {
           log.warn(
             `boot: plugin-event-bridge send failed (${eventType}): %s`,

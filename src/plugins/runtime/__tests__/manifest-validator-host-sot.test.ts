@@ -23,6 +23,31 @@ import {
 import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 
+function manifestWithFirstTask(firstTask: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: "sample-onboarding-plugin",
+    name: "Sample Onboarding Plugin",
+    version: "1.0.0",
+    description: "Synthetic manifest used to validate declarative onboarding.",
+    publisher: "LVIS",
+    entry: "dist/index.js",
+    tools: [],
+    onboarding: { firstTask },
+  };
+}
+
+const validFirstTask = {
+  priority: 10,
+  locales: {
+    en: {
+      headline: "Try the sample plugin",
+      body: "Prefill a visible prompt without invoking a tool.",
+      actionLabel: "Prefill",
+      composerPrompt: "Help me use the sample plugin",
+    },
+  },
+};
+
 describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("compiles the host schema into a working validator", async () => {
     const validator = await buildManifestValidator();
@@ -51,6 +76,37 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         ],
       }),
     ).toBe(true);
+  });
+
+  it("accepts a complete declarative first task", async () => {
+    const validator = await buildManifestValidator();
+    expect(validator(manifestWithFirstTask(validFirstTask))).toBe(true);
+  });
+
+  it.each([
+    ["missing English fallback", {
+      ...validFirstTask,
+      locales: { ko: validFirstTask.locales.en },
+    }],
+    ["invalid locale key", {
+      ...validFirstTask,
+      locales: { ...validFirstTask.locales, en_US: validFirstTask.locales.en },
+    }],
+    ["out-of-range priority", { ...validFirstTask, priority: 1001 }],
+    ["unknown executable field", { ...validFirstTask, autoSubmit: true }],
+    ["incomplete localized copy", {
+      ...validFirstTask,
+      locales: { en: { headline: "Incomplete" } },
+    }],
+    ["oversized composer prompt", {
+      ...validFirstTask,
+      locales: {
+        en: { ...validFirstTask.locales.en, composerPrompt: "x".repeat(513) },
+      },
+    }],
+  ])("rejects malformed onboarding: %s", async (_name, firstTask) => {
+    const validator = await buildManifestValidator();
+    expect(validator(manifestWithFirstTask(firstTask))).toBe(false);
   });
 
   it("REJECTS a tool _meta carrying the legacy xyz.lvis/pathFields key (fail-closed — the dual-read was removed)", async () => {

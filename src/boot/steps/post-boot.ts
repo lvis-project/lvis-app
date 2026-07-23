@@ -25,6 +25,7 @@ import { PluginTelemetryClient } from "../../telemetry/client.js";
 import { sendToWindow } from "../../ipc/safe-send.js";
 import { onEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 const log = createLogger("lvis");
 
 export interface ReleasePrepOutput {
@@ -69,7 +70,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       setTimeout(() => {
         try {
           if (!mainWindow.isDestroyed()) {
-            mainWindow.webContents.send("lvis:telemetry:consent-prompt");
+            mainWindow.webContents.send(CHANNELS.telemetry.consentPrompt);
           }
         } catch (e) {
           log.warn("boot: telemetry consent prompt send failed: %s", (e as Error).message);
@@ -204,7 +205,7 @@ export function wireUpdateCheck(input: UpdateCheckInput): void {
         return;
       }
       lastBroadcastKey = key;
-      mainWindow?.webContents?.send("marketplace:updates-available", updates);
+      mainWindow?.webContents?.send(CHANNELS.marketplace.updatesAvailable, updates);
       if (updates.length > 0) {
         log.info("update-check: %d plugin update(s) available", updates.length);
       } else {
