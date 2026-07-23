@@ -1229,7 +1229,13 @@ lvis-app/src/
 │
 ├── tools/         # 1-file-per-tool
 │   ├── base.ts
-│   ├── executor.ts              # ToolExecutor facade + executeAll/executeOne orchestrator
+│   ├── executor.ts              # 안정적인 public barrel (ToolExecutor + executor contracts)
+│   ├── executor-contract.ts     # public invocation/result/callback contracts
+│   ├── executor-implementation.ts # constructor + batch/resume facade; 단일 invocation 위임
+│   ├── invocation-runner.ts     # preparation, path policy, ordered stage orchestration
+│   ├── invocation-authorization.ts # permission/reviewer/rationale stage
+│   ├── invocation-execution.ts  # rate-limit, execution, post-hook, DLP, terminal audit stage
+│   ├── invocation-services.ts   # stage가 공유하는 명시적 host service boundary
 │   ├── executor-ceiling.ts      # runWithCeiling AbortController helper (SOT)
 │   ├── pipeline/ # §4.5.6 pipeline units (C7/C8): path-extraction, approval-purpose,
 │   │            #  audit-entries, display-mask, rate-limiter,
