@@ -287,6 +287,10 @@ export class ToolExecutor {
     this.pluginOperationGrants.revokeGeneration(pluginId, generationId);
   }
 
+  revokePluginOperationSession(appSessionId: string): void {
+    this.pluginOperationGrants.revokeSession(appSessionId);
+  }
+
   revokePluginOperationAccount(
     pluginId: string,
     generationId: string,

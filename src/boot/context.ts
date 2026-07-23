@@ -176,6 +176,7 @@ export class BootContext {
     expiresAt: number;
   }>;
   declare revokePluginOperationGeneration: (pluginId: string, generationId: string) => void;
+  declare revokePluginOperationSession: (appSessionId: string) => void;
 
   // ── Conversation / agent loop ──────────────────────────────────────────────
   declare routineEngine: RoutineEngine;
@@ -279,6 +280,7 @@ const BOOT_CONTEXT_FIELDS = [
   "pluginBundleLifecycle",
   "requestPluginOperationGrant",
   "revokePluginOperationGeneration",
+  "revokePluginOperationSession",
   "routineEngine",
   "postTurnHookChain",
   "conversationLoop",

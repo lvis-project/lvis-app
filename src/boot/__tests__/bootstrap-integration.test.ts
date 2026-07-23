@@ -571,6 +571,7 @@ describe("bootstrap() integration lock", () => {
         "registerPluginEventBridge",
         "remoteA2AActionController",
         "requestPluginOperationGrant",
+        "revokePluginOperationSession",
         "rewireReviewerAgent",
         "routeEngine",
         "routineEngine",

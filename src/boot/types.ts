@@ -132,6 +132,8 @@ export interface AppServices {
     grantId: string;
     expiresAt: number;
   }>;
+  /** Revoke one plugin-panel session and its read/grant lifecycle state. */
+  revokePluginOperationSession: (appSessionId: string) => void;
   /**
    * §FU#259 — artifact store rooted at `userData/mcp-servers/`.
    * Constructed at boot when the marketplace fetcher supports verified
