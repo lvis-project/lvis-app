@@ -34,6 +34,7 @@ import {
   isAppOnlyRuntimeInvocation,
 } from "../plugin-tool-invocation.js";
 import type { BootContext } from "../context.js";
+import { resolvePluginOperationAccountHash } from "./plugin-operation-account.js";
 
 function toPluginToolInput(payload: unknown): Record<string, unknown> {
   if (payload === undefined || payload === null) return {};
@@ -147,7 +148,12 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
         : undefined;
       const manifest = invocationGeneration?.state.runtime.manifest;
       const accountHash = ownerPluginId && context.ownerGenerationId
-        ? pluginRuntime.getPluginOperationAccountHash(ownerPluginId, context.ownerGenerationId)
+        ? resolvePluginOperationAccountHash(
+            pluginRuntime,
+            manifest,
+            ownerPluginId,
+            context.ownerGenerationId,
+          )
         : undefined;
       const pluginOperation = appInvocation && ownerPluginId && manifest && invocationGeneration && accountHash
         ? {
@@ -242,7 +248,9 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       return await lifecycle.runWithLease(generationLease, async () => {
     const activeGeneration = generationLease.generation;
     const manifest = activeGeneration.state.runtime.manifest;
-    const accountHash = pluginRuntime.getPluginOperationAccountHash(
+    const accountHash = resolvePluginOperationAccountHash(
+      pluginRuntime,
+      manifest,
       pluginId,
       activeGeneration.generationId,
     );

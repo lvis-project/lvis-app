@@ -64,53 +64,72 @@ export async function handlePluginBundleE2eSnapshot(
     return { ok: false, error: "invalid-skill-local-id" };
   }
 
-  const active = deps.pluginBundleLifecycle?.getActive(pluginId);
-  const loadedSkill = await deps.skillStore?.load(
-    `plugin:${pluginId}:${skillLocalId}`,
-  );
-  const skillOwner = loadedSkill?.pluginOwner;
-  const tools = deps.toolRegistry
-    .listAll()
-    .filter(
-      (tool) =>
-        (tool.source === "plugin" || tool.source === "mcp") &&
-        (
-          tool.pluginId === pluginId ||
-          tool.pluginGeneration?.pluginId === pluginId
-        ),
-    )
-    .map((tool) => ({
-      name: tool.name,
-      source: tool.source as "plugin" | "mcp",
-      version: tool.version,
-      ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
-      ...(tool.mcpServerId ? { mcpServerId: tool.mcpServerId } : {}),
-      ...(tool.pluginGeneration
-        ? { generationId: tool.pluginGeneration.generationId }
-        : {}),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const lifecycle = deps.pluginBundleLifecycle;
+  if (!lifecycle) {
+    return { ok: true, pluginId, active: null, skill: null, tools: [] };
+  }
 
-  return {
-    ok: true,
-    pluginId,
-    active: active
-      ? {
-          version: active.pluginVersion,
-          generationId: active.generationId,
-          artifactGenerationId: active.artifactGenerationId,
-        }
-      : null,
-    skill:
-      loadedSkill && skillOwner?.pluginId === pluginId
-        ? {
-            name: loadedSkill.name,
-            body: loadedSkill.body,
-            owner: { ...skillOwner },
-          }
-        : null,
-    tools,
-  };
+  let lease;
+  try {
+    lease = await lifecycle.acquire(pluginId);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === `plugin '${pluginId}' has no active generation`
+    ) {
+      return { ok: true, pluginId, active: null, skill: null, tools: [] };
+    }
+    throw error;
+  }
+
+  try {
+    const active = lease.generation;
+    const loadedSkill = deps.skillStore?.loadPluginGeneration(
+      active,
+      `plugin:${pluginId}:${skillLocalId}`,
+    );
+    const skillOwner = loadedSkill?.pluginOwner;
+    const tools = deps.toolRegistry
+      .listAll()
+      .filter(
+        (tool) =>
+          (tool.source === "plugin" || tool.source === "mcp") &&
+          tool.pluginGeneration?.pluginId === pluginId &&
+          tool.pluginGeneration.generationId === active.generationId,
+      )
+      .map((tool) => ({
+        name: tool.name,
+        source: tool.source as "plugin" | "mcp",
+        version: tool.version,
+        ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+        ...(tool.mcpServerId ? { mcpServerId: tool.mcpServerId } : {}),
+        ...(tool.pluginGeneration
+          ? { generationId: tool.pluginGeneration.generationId }
+          : {}),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      ok: true,
+      pluginId,
+      active: {
+        version: active.pluginVersion,
+        generationId: active.generationId,
+        artifactGenerationId: active.artifactGenerationId,
+      },
+      skill:
+        loadedSkill && skillOwner?.pluginId === pluginId
+          ? {
+              name: loadedSkill.name,
+              body: loadedSkill.body,
+              owner: { ...skillOwner },
+            }
+          : null,
+      tools,
+    };
+  } finally {
+    lease.release();
+  }
 }
 
 /** PUBLIC `lvis:plugins:cards` — installed plugin cards for the renderer/api. */
