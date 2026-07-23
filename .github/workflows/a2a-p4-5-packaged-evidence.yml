@@ -1,11 +1,12 @@
 name: A2A P4-5 Packaged Evidence
 
 on:
-  # repository_dispatch always loads the signing workflow from the default
-  # branch. Mutable candidate branches cannot replace the code receiving
-  # platform signing credentials.
+  # repository_dispatch loads this workflow only from the default branch.
   repository_dispatch:
     types: [a2a-packaged-evidence]
+
+permissions:
+  contents: read
 
 jobs:
   plan:
@@ -45,9 +46,161 @@ jobs:
           esac
           printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
 
-  installers:
+  unsigned-installers:
     needs: plan
-    name: ${{ matrix.name }}
+    name: Build unsigned ${{ matrix.name }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+      REQUESTED_HEAD: ${{ github.event.client_payload.head_sha }}
+      AGENT_HUB_HEAD: ${{ github.event.client_payload.agent_hub_head_sha }}
+    steps:
+      - name: Checkout exact candidate source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.REQUESTED_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact Agent Hub source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lvis-project/agent-hub
+          ref: ${{ env.AGENT_HUB_HEAD }}
+          path: .evidence/agent-hub
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Pin exact source heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$REQUESTED_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Requested lvis-app head must be exactly 40 lowercase hexadecimal characters" >&2
+            exit 1
+          fi
+          if [ "$REQUESTED_HEAD" != "$GITHUB_SHA" ]; then
+            echo "Requested head must equal the immutable workflow source head" >&2
+            exit 1
+          fi
+          if [[ ! "$AGENT_HUB_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Agent Hub head must be exactly 40 lowercase hexadecimal characters" >&2
+            exit 1
+          fi
+          [ "$(git rev-parse HEAD)" = "$REQUESTED_HEAD" ]
+          [ "$(git -C .evidence/agent-hub rev-parse HEAD)" = "$AGENT_HUB_HEAD" ]
+          git show-ref --verify --quiet refs/remotes/origin/main
+          git merge-base --is-ancestor \
+            "$REQUESTED_HEAD" \
+            refs/remotes/origin/main
+          git -C .evidence/agent-hub show-ref \
+            --verify \
+            --quiet \
+            refs/remotes/origin/main
+          git -C .evidence/agent-hub merge-base --is-ancestor \
+            "$AGENT_HUB_HEAD" \
+            refs/remotes/origin/main
+
+          hub_lock=.evidence/agent-hub/server/bun.lock
+          if [ -L "$hub_lock" ] || [ ! -f "$hub_lock" ]; then
+            echo "Agent Hub server lock must be a regular file" >&2
+            exit 1
+          fi
+          hub_lock_digest="$(sha256sum "$hub_lock" | cut -d ' ' -f 1)"
+          [[ "$hub_lock_digest" =~ ^[0-9a-f]{64}$ ]]
+          printf 'AGENT_HUB_LOCK_DIGEST_SHA256=%s\n' "$hub_lock_digest" >> "$GITHUB_ENV"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Restore candidate build caches
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.bun/install/cache
+            .cache/electron
+            .cache/electron-builder
+            resources/uv
+          key: ${{ runner.os }}-unsigned-a2a-${{ hashFiles('bun.lock', 'package.json', 'scripts/uv-targets.mjs', 'scripts/fetch-uv.mjs') }}
+
+      - name: Scope electron-builder cache directory as CommonJS
+        shell: bash
+        run: |
+          mkdir -p "$ELECTRON_BUILDER_CACHE"
+          printf '{ "type": "commonjs" }\n' > "$ELECTRON_BUILDER_CACHE/package.json"
+
+      - name: Install Linux packaging tools
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb
+
+      - name: Install candidate dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build unsigned installer payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/build-installers.mjs \
+            "--${{ matrix.target }}" \
+            --skip-native-rebuild \
+            --skip-code-sign
+
+      - name: Smoke launch unsigned candidate
+        shell: bash
+        env:
+          LVIS_ALLOW_DISPOSABLE_WINDOWS_INSTALLER_SMOKE: ${{ matrix.target == 'win' && '1' || '' }}
+          LVIS_ALLOW_DESTRUCTIVE_UNINSTALL_SMOKE: ${{ matrix.target == 'win' && '1' || '' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.target }}" = "linux" ]; then
+            xvfb-run -a node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
+          else
+            node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
+          fi
+
+      - name: Seal unsigned payload and exact source metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p unsigned-input
+          tar -czf unsigned-input/release.tar.gz release
+          sha256sum unsigned-input/release.tar.gz |
+            cut -d ' ' -f 1 > unsigned-input/release.sha256
+          version="$(
+            node --input-type=module -e '
+              import {readFileSync} from "node:fs";
+              const value = JSON.parse(readFileSync("package.json", "utf8")).version;
+              if (typeof value !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(value)) process.exit(2);
+              process.stdout.write(value);
+            '
+          )"
+          {
+            printf 'REQUESTED_HEAD=%s\n' "$REQUESTED_HEAD"
+            printf 'AGENT_HUB_HEAD=%s\n' "$AGENT_HUB_HEAD"
+            printf 'AGENT_HUB_LOCK_DIGEST_SHA256=%s\n' "$AGENT_HUB_LOCK_DIGEST_SHA256"
+            printf 'PACKAGE_JSON_SHA256=%s\n' "$(sha256sum package.json | cut -d ' ' -f 1)"
+            printf 'BUN_LOCK_SHA256=%s\n' "$(sha256sum bun.lock | cut -d ' ' -f 1)"
+            printf 'VERSION=%s\n' "$version"
+            printf 'TARGET=%s\n' "${{ matrix.target }}"
+          } > unsigned-input/source.env
+
+      - name: Upload sealed unsigned payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: a2a-p4-5-${{ matrix.artifact_name }}-unsigned-${{ github.run_id }}-${{ github.run_attempt }}
+          path: unsigned-input
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-and-attest:
+    needs: [plan, unsigned-installers]
+    name: Sign and attest ${{ matrix.name }}
     permissions:
       contents: read
       id-token: write
@@ -57,111 +210,155 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     environment: release-signing
+    timeout-minutes: 45
     env:
-      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
       REQUESTED_HEAD: ${{ github.event.client_payload.head_sha }}
       AGENT_HUB_HEAD: ${{ github.event.client_payload.agent_hub_head_sha }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      # This checkout is the immutable default-branch workflow source, not the
+      # candidate artifact. The privileged job executes no candidate script.
+      - name: Checkout trusted signing and verification policy
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.client_payload.head_sha }}
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          path: trusted-policy
+          fetch-depth: 1
           persist-credentials: false
-      - name: Checkout exact Agent Hub source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Checkout exact Agent Hub evidence input
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/agent-hub
-          ref: ${{ github.event.client_payload.agent_hub_head_sha }}
-          path: .evidence/agent-hub
+          ref: ${{ env.AGENT_HUB_HEAD }}
+          path: trusted-agent-hub
           fetch-depth: 0
           persist-credentials: false
-      - name: Pin exact source heads
+
+      - name: Download sealed unsigned payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: a2a-p4-5-${{ matrix.artifact_name }}-unsigned-${{ github.run_id }}-${{ github.run_attempt }}
+          path: unsigned-input
+
+      - name: Setup fixed archive verifier
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Verify exact metadata and safely expand unsigned payload
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$REQUESTED_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Requested lvis-app head must be exactly 40 lowercase hexadecimal characters" >&2
-            exit 1
-          fi
-          if [[ ! "$AGENT_HUB_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Agent Hub head must be exactly 40 lowercase hexadecimal characters" >&2
-            exit 1
-          fi
-          actual_head="$(git rev-parse HEAD)"
-          if [ "$actual_head" != "$REQUESTED_HEAD" ]; then
-            echo "Checkout HEAD does not equal the requested head" >&2
-            exit 1
-          fi
-          actual_hub_head="$(git -C .evidence/agent-hub rev-parse HEAD)"
-          if [ "$actual_hub_head" != "$AGENT_HUB_HEAD" ]; then
-            echo "Agent Hub checkout HEAD does not equal the requested exact commit" >&2
-            exit 1
-          fi
-          git fetch origin main --quiet
-          if ! git merge-base --is-ancestor "$REQUESTED_HEAD" origin/main; then
-            echo "Requested lvis-app head must be reachable from origin/main" >&2
-            exit 1
-          fi
-          git -C .evidence/agent-hub fetch origin main --quiet
-          if ! git -C .evidence/agent-hub merge-base --is-ancestor "$AGENT_HUB_HEAD" origin/main; then
-            echo "Requested Agent Hub head must be reachable from origin/main" >&2
-            exit 1
-          fi
-          hub_lock=.evidence/agent-hub/server/bun.lock
-          hub_lock_digest="$(node --input-type=module -e 'import {resolve} from "node:path";import {readRegularFile} from "./scripts/a2a-p4-5-live/evidence-lib.mjs";const lock=readRegularFile(resolve(process.argv[1]),"Agent Hub server lock",{maxBytes:16*1024*1024,loadBytes:false});process.stdout.write(lock.sha256)' "$hub_lock")"
-          if [[ ! "$hub_lock_digest" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "Agent Hub server lock digest was not canonical SHA-256" >&2
-            exit 1
-          fi
-          echo "AGENT_HUB_LOCK_DIGEST_SHA256=$hub_lock_digest" >> "$GITHUB_ENV"
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - name: Restore package manager and installer caches
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+          [ "$(git -C trusted-policy rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$REQUESTED_HEAD" = "$GITHUB_SHA" ]
+          [[ "$REQUESTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$AGENT_HUB_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [ ! -L unsigned-input/source.env ] && [ -f unsigned-input/source.env ]
+          [ "$(wc -l < unsigned-input/source.env)" -eq 7 ]
+          grep -Fx "REQUESTED_HEAD=$REQUESTED_HEAD" unsigned-input/source.env
+          grep -Fx "AGENT_HUB_HEAD=$AGENT_HUB_HEAD" unsigned-input/source.env
+          grep -Fx "TARGET=${{ matrix.target }}" unsigned-input/source.env
+          [ "$(git -C trusted-agent-hub rev-parse HEAD)" = "$AGENT_HUB_HEAD" ]
+          git -C trusted-agent-hub show-ref \
+            --verify \
+            --quiet \
+            refs/remotes/origin/main
+          git -C trusted-agent-hub merge-base --is-ancestor \
+            "$AGENT_HUB_HEAD" \
+            refs/remotes/origin/main
+
+          expected_release_sha256="$(cat unsigned-input/release.sha256)"
+          [[ "$expected_release_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [ "$(sha256sum unsigned-input/release.tar.gz | cut -d ' ' -f 1)" = "$expected_release_sha256" ]
+          package_sha256="$(sha256sum trusted-policy/package.json | cut -d ' ' -f 1)"
+          bun_lock_sha256="$(sha256sum trusted-policy/bun.lock | cut -d ' ' -f 1)"
+          grep -Fx "PACKAGE_JSON_SHA256=$package_sha256" unsigned-input/source.env
+          grep -Fx "BUN_LOCK_SHA256=$bun_lock_sha256" unsigned-input/source.env
+          agent_hub_lock_digest_sha256="$(
+            sha256sum trusted-agent-hub/server/bun.lock | cut -d ' ' -f 1
+          )"
+          [[ "$agent_hub_lock_digest_sha256" =~ ^[0-9a-f]{64}$ ]]
+          grep -Fx \
+            "AGENT_HUB_LOCK_DIGEST_SHA256=$agent_hub_lock_digest_sha256" \
+            unsigned-input/source.env
+
+          python - unsigned-input/release.tar.gz unsigned-release <<'PY'
+          import sys
+          import tarfile
+          from pathlib import Path, PurePosixPath
+
+          archive = Path(sys.argv[1])
+          destination = Path(sys.argv[2])
+          maximum_members = 250_000
+          maximum_expanded_bytes = 12 * 1024 * 1024 * 1024
+
+          def require_safe_path(value: str, label: str) -> PurePosixPath:
+              path = PurePosixPath(value)
+              if path.is_absolute() or not path.parts or path.parts[0] != "release":
+                  raise SystemExit(f"{label} escaped release/: {value!r}")
+              if any(part in {"", ".", ".."} for part in path.parts):
+                  raise SystemExit(f"{label} was not canonical: {value!r}")
+              return path
+
+          with tarfile.open(archive, mode="r:gz") as bundle:
+              members = bundle.getmembers()
+              if not members or len(members) > maximum_members:
+                  raise SystemExit("unsigned archive member count is invalid")
+              expanded_bytes = 0
+              for member in members:
+                  member_path = require_safe_path(member.name, "archive member")
+                  if member.isdev() or member.isfifo():
+                      raise SystemExit(f"special archive entry is forbidden: {member.name!r}")
+                  if member.isfile():
+                      expanded_bytes += member.size
+                      if expanded_bytes > maximum_expanded_bytes:
+                          raise SystemExit("unsigned archive expands beyond the fixed limit")
+                  if member.issym():
+                      target = member_path.parent / PurePosixPath(member.linkname)
+                      require_safe_path(str(target), "symbolic-link target")
+                  elif member.islnk():
+                      require_safe_path(member.linkname, "hard-link target")
+              destination.mkdir(mode=0o700)
+              bundle.extractall(destination, members=members, filter="data")
+          PY
+          unsigned_root="$(cd unsigned-release && pwd -P)"
+          while IFS= read -r link; do
+            target="$(realpath "$link")"
+            case "$target" in
+              "$unsigned_root"/*) ;;
+              *) echo "::error::unsigned payload symlink escapes extraction root: $link"; exit 1 ;;
+            esac
+          done < <(find unsigned-release -type l -print)
+
+          version="$(sed -n 's/^VERSION=//p' unsigned-input/source.env)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          [ "$(grep -c '^VERSION=' unsigned-input/source.env)" -eq 1 ]
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+          printf 'AGENT_HUB_LOCK_DIGEST_SHA256=%s\n' \
+            "$agent_hub_lock_digest_sha256" >> "$GITHUB_ENV"
+
+      - name: Setup trusted Node runtime
+        if: matrix.target != 'linux'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          path: |
-            ~/.bun/install/cache
-            .cache/electron
-            .cache/electron-builder
-          key: ${{ runner.os }}-installers-${{ hashFiles('bun.lock') }}-${{ hashFiles('package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-installers-${{ hashFiles('bun.lock') }}-
-            ${{ runner.os }}-installers-
-      # Cache fetched uv runtime (downloaded by scripts/fetch-uv.mjs during postinstall).
-      # Key is pinned to uv-targets.mjs so version bumps invalidate the cache. Saves
-      # ~30s per matrix job on cold runners and avoids re-downloading from GitHub releases.
-      - name: Restore uv runtime cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: resources/uv
-          key: ${{ runner.os }}-uv-${{ hashFiles('scripts/uv-targets.mjs', 'scripts/fetch-uv.mjs') }}
-          restore-keys: |
-            ${{ runner.os }}-uv-
-      # electron-builder >= 26.14 extracts its icon-conversion helper
-      # (icons@x.y.z/icon-tool.js — CommonJS, uses `require`) under
-      # ELECTRON_BUILDER_CACHE, which this workflow places INSIDE the
-      # workspace (.cache/). Node resolves that file's module scope by
-      # walking up to the nearest package.json — the repo root, whose
-      # "type": "module" makes the CJS tool execute as ESM and die with
-      # "ReferenceError: require is not defined in ES module scope"
-      # (v0.3.0 mac/win installer failure; linux passed because AppImage
-      # consumes the png directly). Scoping the ELECTRON_BUILDER_CACHE
-      # directory itself as CommonJS stops the walk at that boundary for
-      # every tool electron-builder extracts there, without touching the
-      # sibling ELECTRON_CACHE (.cache/electron) or anything else under
-      # .cache/. Local builds are unaffected — the default cache lives in
-      # the OS cache dir, outside any workspace package.json scope.
-      - name: Scope electron-builder cache dir as CommonJS
+          node-version: "20"
+
+      - name: Install fixed signing packager without lifecycle scripts
+        if: matrix.target != 'linux'
         shell: bash
         run: |
-          mkdir -p "$ELECTRON_BUILDER_CACHE"
-          printf '{ "type": "commonjs" }\n' > "$ELECTRON_BUILDER_CACHE/package.json"
-      - name: Install Linux packaging tools
-        if: matrix.target == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/trusted-tools"
+          npm install \
+            --prefix "$RUNNER_TEMP/trusted-tools" \
+            --ignore-scripts \
+            --no-audit \
+            --no-fund \
+            --save-exact \
+            electron-builder@26.15.3
+
       - name: Require platform signing credentials
+        if: matrix.target != 'linux'
         shell: bash
         env:
           CSC_LINK: ${{ matrix.target == 'mac' && secrets.CSC_LINK || '' }}
@@ -177,104 +374,176 @@ jobs:
         run: |
           set -euo pipefail
           require_secret() {
-            local name="$1"
-            if [ -z "${!name:-}" ]; then
-              echo "Required signing secret is unavailable: $name" >&2
-              exit 1
-            fi
+            [ -n "${!1:-}" ] || { echo "Required signing secret is unavailable: $1" >&2; exit 1; }
           }
-          if [ "${{ matrix.target }}" = "mac" ]; then
+          if [ "${{ matrix.target }}" = mac ]; then
             for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID LVIS_MAC_SIGNER_CERT_SHA256; do
               require_secret "$name"
             done
-          elif [ "${{ matrix.target }}" = "win" ]; then
+          else
             for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD LVIS_WINDOWS_PUBLISHER_SUBJECT LVIS_WINDOWS_SIGNER_THUMBPRINT; do
               require_secret "$name"
             done
           fi
-      - name: Build installer
+
+      - name: Package and sign prebuilt candidate without candidate scripts
+        if: matrix.target != 'linux'
         shell: bash
-        run: |
-          set -euo pipefail
-          args=("--${{ matrix.target }}" "--skip-native-rebuild")
-          # Evidence builds never publish or mutate a GitHub Release.
-          node scripts/build-installers.mjs "${args[@]}"
         env:
-          CSC_LINK: ${{ matrix.target == 'mac' && secrets.CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.CSC_LINK || secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.CSC_KEY_PASSWORD || secrets.WIN_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ matrix.target == 'mac' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.target == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
-          WIN_CSC_LINK: ${{ matrix.target == 'win' && secrets.WIN_CSC_LINK || '' }}
-          WIN_CSC_KEY_PASSWORD: ${{ matrix.target == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
-      - name: Smoke launch packaged app
-        shell: bash
-        env:
-          # Explicitly authorize machine-wide mutation only on the disposable
-          # Windows runner, then verify both preservation and full cleanup.
-          LVIS_ALLOW_DISPOSABLE_WINDOWS_INSTALLER_SMOKE: ${{ matrix.target == 'win' && '1' || '' }}
-          # Windows runners are disposable, so the installer smoke can verify
-          # both /KEEP_APP_DATA preservation and the full uninstall cleanup.
-          LVIS_ALLOW_DESTRUCTIVE_UNINSTALL_SMOKE: ${{ matrix.target == 'win' && '1' || '' }}
         run: |
           set -euo pipefail
-          if [ "${{ matrix.target }}" = "linux" ]; then
-            xvfb-run -a node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
+          [ "$(sha256sum trusted-policy/build/installer.nsh | cut -d ' ' -f 1)" = "8918447eb50ba12894f41f6687bbb397c7d759e036c4a1a025d1f3834daaee0b" ]
+          [ "$(sha256sum trusted-policy/build/entitlements.mac.plist | cut -d ' ' -f 1)" = "4d58bf05b158e0e61a8fa8eecd49161f95c2ccf90edba2b7a4b5a5ccc3c2e257" ]
+
+          shopt -s nullglob
+          if [ "${{ matrix.target }}" = mac ]; then
+            candidates=(unsigned-release/release/*.app unsigned-release/release/*/*.app)
           else
-            node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
+            candidates=(unsigned-release/release/win-unpacked unsigned-release/release/win-*-unpacked)
           fi
+          [ "${#candidates[@]}" -eq 1 ]
+          prepackaged="$(cd "${candidates[0]}" && pwd -P)"
+          mkdir -p "$RUNNER_TEMP/signing-policy" signed-release
+          export PREPACKAGED="$prepackaged"
+          export SIGNED_OUTPUT="$GITHUB_WORKSPACE/signed-release"
+          export TRUSTED_POLICY="$GITHUB_WORKSPACE/trusted-policy"
+          export SIGN_TARGET="${{ matrix.target }}"
+
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          const version = process.env.VERSION;
+          const target = process.env.SIGN_TARGET;
+          const trusted = process.env.TRUSTED_POLICY;
+          const output = process.env.SIGNED_OUTPUT;
+          if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(version)) process.exit(2);
+          writeFileSync(
+            join(process.env.RUNNER_TEMP, "signing-policy", "package.json"),
+            `${JSON.stringify({ name: "lvis-trusted-signing", version, description: "LVIS", author: "LVIS Project" })}\n`,
+          );
+          const config = {
+            appId: "xyz.lvisai.app",
+            productName: "LVIS",
+            artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
+            directories: { output },
+          };
+          if (target === "mac") {
+            config.mac = {
+              target: ["dmg"],
+              category: "public.app-category.productivity",
+              entitlements: join(trusted, "build", "entitlements.mac.plist"),
+              entitlementsInherit: join(trusted, "build", "entitlements.mac.plist"),
+              notarize: true,
+            };
+            config.dmg = {
+              artifactName: "${productName}-${version}-mac-${arch}.${ext}",
+              window: { width: 540, height: 280 },
+              contents: [
+                { x: 140, y: 130, type: "file" },
+                { x: 400, y: 130, type: "link", path: "/Applications" },
+              ],
+            };
+          } else if (target === "win") {
+            config.win = { target: ["nsis"] };
+            config.nsis = {
+              oneClick: true,
+              perMachine: true,
+              runAfterFinish: true,
+              differentialPackage: true,
+              createDesktopShortcut: "always",
+              createStartMenuShortcut: true,
+              deleteAppDataOnUninstall: false,
+              include: join(trusted, "build", "installer.nsh"),
+              installerIcon: join(trusted, "build", "installerIcon.ico"),
+              installerHeaderIcon: join(trusted, "build", "installerHeaderIcon.ico"),
+              uninstallDisplayName: "LVIS",
+              shortcutName: "LVIS",
+              artifactName: "${productName}-${version}-windows-${arch}-setup.${ext}",
+            };
+          } else {
+            process.exit(3);
+          }
+          writeFileSync(
+            join(process.env.RUNNER_TEMP, "signing-policy", "electron-builder.json"),
+            `${JSON.stringify(config, null, 2)}\n`,
+          );
+          NODE
+
+          cd "$RUNNER_TEMP/signing-policy"
+          node "$RUNNER_TEMP/trusted-tools/node_modules/electron-builder/cli.js" \
+            "--${{ matrix.target }}" \
+            --prepackaged "$PREPACKAGED" \
+            --config electron-builder.json \
+            --publish never
+
+      - name: Select unsigned Linux packages
+        if: matrix.target == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir signed-release
+          shopt -s nullglob
+          installers=(
+            unsigned-release/release/*.AppImage
+            unsigned-release/release/*.deb
+            unsigned-release/release/*.rpm
+          )
+          [ "${#installers[@]}" -gt 0 ]
+          cp "${installers[@]}" signed-release/
+
       - name: Verify macOS codesign and Gatekeeper identity
         if: matrix.target == 'mac'
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          installers=(release/*.dmg)
+          installers=(signed-release/*.dmg)
           [ "${#installers[@]}" -eq 1 ]
-          for installer in "${installers[@]}"; do
-            codesign --verify --deep --strict --verbose=4 "$installer"
-            spctl --assess --type open --context context:primary-signature --verbose=4 "$installer"
-            attach_plist="$(hdiutil attach -readonly -nobrowse -plist "$installer")"
-            mount_point="$(
-              printf '%s\n' "$attach_plist" |
-                plutil -convert json -o - - |
-                node -e 'let input=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { const entities = JSON.parse(input)["system-entities"]; const points = Array.isArray(entities) ? entities.map((entry) => entry?.["mount-point"]).filter((value) => typeof value === "string") : []; if (points.length !== 1) process.exit(2); process.stdout.write(points[0]); });'
-            )"
-            if [[ "$mount_point" != /Volumes/* ]]; then
-              echo "DMG mount point was not canonical" >&2
-              exit 1
-            fi
-            trap 'hdiutil detach "$mount_point"' EXIT
-            if [ -L "$mount_point/LVIS.app" ] || [ ! -d "$mount_point/LVIS.app" ]; then
-              echo "DMG did not contain one regular LVIS.app bundle" >&2
-              exit 1
-            fi
-            codesign --verify --deep --strict --verbose=4 "$mount_point/LVIS.app"
-            codesign --display --verbose=4 "$mount_point/LVIS.app"
-            spctl --assess --type execute --verbose=4 "$mount_point/LVIS.app"
-            hdiutil detach "$mount_point"
-            trap - EXIT
-          done
+          codesign --verify --deep --strict --verbose=4 "${installers[0]}"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "${installers[0]}"
+          attach_plist="$(hdiutil attach -readonly -nobrowse -plist "${installers[0]}")"
+          mount_point="$(
+            printf '%s\n' "$attach_plist" |
+              plutil -convert json -o - - |
+              node -e 'let input="";process.stdin.on("data",c=>input+=c);process.stdin.on("end",()=>{const entities=JSON.parse(input)["system-entities"];const points=Array.isArray(entities)?entities.map(e=>e?.["mount-point"]).filter(v=>typeof v==="string"):[];if(points.length!==1)process.exit(2);process.stdout.write(points[0]);});'
+          )"
+          [[ "$mount_point" == /Volumes/* ]]
+          trap 'hdiutil detach "$mount_point"' EXIT
+          [ ! -L "$mount_point/LVIS.app" ] && [ -d "$mount_point/LVIS.app" ]
+          codesign --verify --deep --strict --verbose=4 "$mount_point/LVIS.app"
+          codesign --display --verbose=4 "$mount_point/LVIS.app"
+          spctl --assess --type execute --verbose=4 "$mount_point/LVIS.app"
+          hdiutil detach "$mount_point"
+          trap - EXIT
+
       - name: Verify Windows Authenticode signature validity
         if: matrix.target == 'win'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $installers = @(Get-ChildItem release -Filter *.exe -File)
-          if ($installers.Count -eq 0) { throw 'No Windows installer found' }
-          foreach ($installer in $installers) {
-            $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
-            if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
-              throw "Authenticode verification failed for $($installer.Name): $($signature.Status)"
-            }
+          $installers = @(Get-ChildItem signed-release -Filter *.exe -File)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one Windows installer' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installers[0].FullName
+          if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
+            throw "Authenticode verification failed: $($signature.Status)"
           }
+
+      - name: Install fixed Linux package inspectors
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Verify Linux package metadata before independent attestation
         if: matrix.target == 'linux'
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          installers=(release/*.deb release/*.rpm release/*.AppImage)
+          installers=(signed-release/*.deb signed-release/*.rpm signed-release/*.AppImage)
           [ "${#installers[@]}" -gt 0 ]
           for installer in "${installers[@]}"; do
             case "$installer" in
@@ -284,32 +553,38 @@ jobs:
               *) exit 1 ;;
             esac
           done
+
       - name: Attest macOS installer
         if: matrix.target == 'mac'
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
-          subject-path: release/*.dmg
+          subject-path: signed-release/*.dmg
+
       - name: Attest Windows installer
         if: matrix.target == 'win'
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
-          subject-path: release/*.exe
+          subject-path: signed-release/*.exe
+
       - name: Attest Linux AppImage
         if: matrix.target == 'linux'
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
-          subject-path: release/*.AppImage
+          subject-path: signed-release/*.AppImage
+
       - name: Attest Linux deb
         if: matrix.target == 'linux'
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
-          subject-path: release/*.deb
+          subject-path: signed-release/*.deb
+
       - name: Attest Linux rpm
         if: matrix.target == 'linux'
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
-          subject-path: release/*.rpm
-      - name: Verify attestations and write strict provenance
+          subject-path: signed-release/*.rpm
+
+      - name: Capture verified attestation reports and signer identity
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -319,18 +594,31 @@ jobs:
           LVIS_EXPECTED_WINDOWS_CERT_THUMBPRINT: ${{ matrix.target == 'win' && secrets.LVIS_WINDOWS_SIGNER_THUMBPRINT || '' }}
         run: |
           set -euo pipefail
-          mkdir -p release/evidence
+          mkdir -p signed-release/evidence
+          printf '%s' "$LVIS_EXPECTED_MAC_TEAM_ID" \
+            > signed-release/evidence/expected-mac-team-id.txt
+          printf '%s' "$LVIS_EXPECTED_MAC_CERT_SHA256" \
+            > signed-release/evidence/expected-mac-certificate-sha256.txt
+          printf '%s' "$LVIS_EXPECTED_WINDOWS_PUBLISHER_SUBJECT" \
+            > signed-release/evidence/expected-windows-publisher-subject.txt
+          printf '%s' "$LVIS_EXPECTED_WINDOWS_CERT_THUMBPRINT" \
+            > signed-release/evidence/expected-windows-certificate-thumbprint.txt
+          {
+            printf 'REQUESTED_HEAD=%s\n' "$REQUESTED_HEAD"
+            printf 'AGENT_HUB_HEAD=%s\n' "$AGENT_HUB_HEAD"
+            printf 'AGENT_HUB_LOCK_DIGEST_SHA256=%s\n' "$AGENT_HUB_LOCK_DIGEST_SHA256"
+          } > signed-release/evidence/exact-source.env
           shopt -s nullglob
           case "${{ matrix.target }}" in
-            mac) installers=(release/*.dmg) ;;
-            win) installers=(release/*.exe) ;;
-            linux) installers=(release/*.AppImage release/*.deb release/*.rpm) ;;
+            mac) installers=(signed-release/*.dmg) ;;
+            win) installers=(signed-release/*.exe) ;;
+            linux) installers=(signed-release/*.AppImage signed-release/*.deb signed-release/*.rpm) ;;
             *) exit 1 ;;
           esac
           [ "${#installers[@]}" -gt 0 ]
           for installer in "${installers[@]}"; do
             name="$(basename "$installer")"
-            report="release/evidence/${name}.attestation.json"
+            report="signed-release/evidence/${name}.attestation.json"
             gh attestation verify "$installer" \
               --repo "$GITHUB_REPOSITORY" \
               --source-digest "$REQUESTED_HEAD" \
@@ -338,33 +626,141 @@ jobs:
               --predicate-type https://slsa.dev/provenance/v1 \
               --deny-self-hosted-runners \
               --format json > "$report"
-            env -u GH_TOKEN node scripts/write-installer-provenance.mjs \
-              --installer "$installer" \
-              --os "${{ matrix.provenance_os }}" \
-              --app-head "$REQUESTED_HEAD" \
-              --hub-head "$AGENT_HUB_HEAD" \
-              --hub-lock-digest "$AGENT_HUB_LOCK_DIGEST_SHA256" \
-              --workflow-run-id "$GITHUB_RUN_ID" \
-              --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
-              --repository "$GITHUB_REPOSITORY" \
-              --attestation "$report" \
-              --output "release/evidence/${name}.provenance.json" \
-              --mac-team-id "$LVIS_EXPECTED_MAC_TEAM_ID" \
-              --mac-certificate-sha256 "$LVIS_EXPECTED_MAC_CERT_SHA256" \
-              --windows-publisher-subject "$LVIS_EXPECTED_WINDOWS_PUBLISHER_SUBJECT" \
-              --windows-certificate-thumbprint "$LVIS_EXPECTED_WINDOWS_CERT_THUMBPRINT"
           done
+
+      - name: Upload signed and attested payload for unprivileged verification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: a2a-p4-5-${{ matrix.artifact_name }}-signed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            signed-release/*.dmg
+            signed-release/*.AppImage
+            signed-release/*.deb
+            signed-release/*.rpm
+            signed-release/*.exe
+            signed-release/evidence/*.attestation.json
+            signed-release/evidence/*.txt
+            signed-release/evidence/exact-source.env
+          if-no-files-found: error
+          retention-days: 1
+
+  verify-evidence:
+    needs: [plan, sign-and-attest]
+    name: Verify evidence ${{ matrix.name }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      REQUESTED_HEAD: ${{ github.event.client_payload.head_sha }}
+      AGENT_HUB_HEAD: ${{ github.event.client_payload.agent_hub_head_sha }}
+    steps:
+      # Candidate-owned verifiers execute only here: this fresh job has no
+      # environment, signing credential, OIDC permission, or write token.
+      - name: Checkout exact unprivileged verifier source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.REQUESTED_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout exact Agent Hub evidence input
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lvis-project/agent-hub
+          ref: ${{ env.AGENT_HUB_HEAD }}
+          path: .evidence/agent-hub
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download signed and attested payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: a2a-p4-5-${{ matrix.artifact_name }}-signed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: signed-release
+
+      - name: Install fixed Linux evidence inspectors
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Reverify exact evidence inputs and write strict provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$REQUESTED_HEAD" ]
+          [ "$(git -C .evidence/agent-hub rev-parse HEAD)" = "$AGENT_HUB_HEAD" ]
+          [[ "$REQUESTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$AGENT_HUB_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          source_metadata=signed-release/evidence/exact-source.env
+          [ ! -L "$source_metadata" ] && [ -f "$source_metadata" ]
+          [ "$(wc -l < "$source_metadata")" -eq 3 ]
+          grep -Fx "REQUESTED_HEAD=$REQUESTED_HEAD" "$source_metadata"
+          grep -Fx "AGENT_HUB_HEAD=$AGENT_HUB_HEAD" "$source_metadata"
+          agent_hub_lock_digest_sha256="$(
+            sha256sum .evidence/agent-hub/server/bun.lock | cut -d ' ' -f 1
+          )"
+          grep -Fx \
+            "AGENT_HUB_LOCK_DIGEST_SHA256=$agent_hub_lock_digest_sha256" \
+            "$source_metadata"
+
+          mac_team_id="$(cat signed-release/evidence/expected-mac-team-id.txt)"
+          mac_certificate_sha256="$(
+            cat signed-release/evidence/expected-mac-certificate-sha256.txt
+          )"
+          windows_publisher_subject="$(
+            cat signed-release/evidence/expected-windows-publisher-subject.txt
+          )"
+          windows_certificate_thumbprint="$(
+            cat signed-release/evidence/expected-windows-certificate-thumbprint.txt
+          )"
+
+          shopt -s nullglob
+          case "${{ matrix.target }}" in
+            mac) installers=(signed-release/*.dmg) ;;
+            win) installers=(signed-release/*.exe) ;;
+            linux) installers=(signed-release/*.AppImage signed-release/*.deb signed-release/*.rpm) ;;
+            *) exit 1 ;;
+          esac
+          [ "${#installers[@]}" -gt 0 ]
+          for installer in "${installers[@]}"; do
+            name="$(basename "$installer")"
+            report="signed-release/evidence/${name}.attestation.json"
+            [ ! -L "$report" ] && [ -f "$report" ]
+            env \
+              -u GH_TOKEN \
+              -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u ACTIONS_ID_TOKEN_REQUEST_URL \
+              node scripts/write-installer-provenance.mjs \
+                --installer "$installer" \
+                --os "${{ matrix.provenance_os }}" \
+                --app-head "$REQUESTED_HEAD" \
+                --hub-head "$AGENT_HUB_HEAD" \
+                --hub-lock-digest "$agent_hub_lock_digest_sha256" \
+                --workflow-run-id "$GITHUB_RUN_ID" \
+                --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+                --repository "$GITHUB_REPOSITORY" \
+                --attestation "$report" \
+                --output "signed-release/evidence/${name}.provenance.json" \
+                --mac-team-id "$mac_team_id" \
+                --mac-certificate-sha256 "$mac_certificate_sha256" \
+                --windows-publisher-subject "$windows_publisher_subject" \
+                --windows-certificate-thumbprint "$windows_certificate_thumbprint"
+          done
+
       - name: Upload attested installers and provenance
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: a2a-p4-5-${{ matrix.artifact_name }}-packaged-evidence
           path: |
-            release/*.dmg
-            release/*.AppImage
-            release/*.deb
-            release/*.rpm
-            release/*.exe
-            release/evidence/*.attestation.json
-            release/evidence/*.provenance.json
+            signed-release/*.dmg
+            signed-release/*.AppImage
+            signed-release/*.deb
+            signed-release/*.rpm
+            signed-release/*.exe
+            signed-release/evidence/*.attestation.json
+            signed-release/evidence/*.provenance.json
           if-no-files-found: error
           retention-days: 14
