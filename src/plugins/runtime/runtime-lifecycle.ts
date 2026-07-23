@@ -11,7 +11,14 @@ import { resolveDependencies } from "../dependency-resolver.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
-import { runPluginFactoryWithTimeout, runStartWithTimeout } from "./lifecycle-timeout.js";
+import {
+  PluginFactoryTimeoutError,
+  PluginImportTimeoutError,
+  PluginStartupTimeoutError,
+  runPluginFactoryWithTimeout,
+  runPluginImportWithTimeout,
+  runStartWithTimeout,
+} from "./lifecycle-timeout.js";
 
 import {
   getDeclaredEmittedEvents,
@@ -97,6 +104,26 @@ async function mapBoundedInOrder<T, R>(
 }
 
 export class PluginRuntimeLifecycle extends PluginRuntimeState {
+  private async importPluginFactoryForLifecycle(
+    pluginId: string,
+    resolvedEntryPath: string,
+    bustCache?: boolean,
+  ): Promise<RuntimePluginFactory | undefined> {
+    this.assertPluginLifecycleAvailable(pluginId);
+    try {
+      return await runPluginImportWithTimeout(
+        () => importPluginFactory(resolvedEntryPath, bustCache),
+      );
+    } catch (err) {
+      if (err instanceof PluginImportTimeoutError) {
+        // ESM evaluation cannot be cancelled in-process. Never admit another
+        // same-id incarnation while that abandoned module body may still run.
+        this.quarantinePluginLifecycle(pluginId, err.message);
+      }
+      throw err;
+    }
+  }
+
   protected async preflightBootLoadPlan(
     loadPlan: ManifestLoadPlan[],
   ): Promise<BootPreflightOutcome[]> {
@@ -278,7 +305,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       const resolvedEntryPath = resolveRealEntryPath(entryPath);
       let createPlugin: RuntimePluginFactory | undefined;
       try {
-        createPlugin = await importPluginFactory(resolvedEntryPath);
+        createPlugin = await this.importPluginFactoryForLifecycle(
+          manifest.id,
+          resolvedEntryPath,
+        );
       } catch (err) {
         plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "import" }, "import failed");
         this.auditLog?.("error", "plugin_import_failed", {
@@ -295,14 +325,14 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
 
       const pluginDataDir = this.ensureDataDir(manifest.id, pluginRoot);
-      const { hostApi, disposers, deactivate, commit } =
+      const { hostApi, disposers, deactivate, drainOperations, commit, lifecycleHookScope } =
         this.buildHostApiIncarnation(manifest.id, manifest, pluginDataDir);
 
       let instance: RuntimePlugin;
       try {
         instance = await runPluginFactoryWithTimeout(
           () => this.runPluginLifecycleHook(
-            manifest.id,
+            lifecycleHookScope,
             () => createPlugin(
               buildPluginContext({
                 pluginId: manifest.id,
@@ -317,12 +347,18 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           ),
           async (lateInstance) => {
             deactivate();
-            await this.stopAfterStartFailure(manifest.id, lateInstance);
+            await this.stopAfterStartFailure(manifest.id, lateInstance, lifecycleHookScope);
           },
         );
       } catch (err) {
         deactivate();
+        if (err instanceof PluginFactoryTimeoutError) {
+          this.quarantinePluginLifecycle(manifest.id, err.message);
+        }
         this.runDisposerList(disposers, "failed load factory");
+        await this.drainPluginHostApiOperations(manifest.id, {
+          drainHostApiOperations: drainOperations,
+        });
         plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "factory" }, "plugin factory failed");
         this.markFailed(manifest.id);
         throw err;
@@ -338,8 +374,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         methods.set(toolName, handler);
         if (this.methodMap.has(toolName)) {
           deactivate();
-          await this.stopAfterStartFailure(manifest.id, instance);
+          await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
           this.runDisposerList(disposers, "duplicate load method");
+          await this.drainPluginHostApiOperations(manifest.id, {
+            drainHostApiOperations: drainOperations,
+          });
           throw new Error(`Duplicate plugin method registered: ${toolName}`);
         }
       }
@@ -362,6 +401,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         approvedPluginAccess,
         started: false,
         deactivateHostApi: deactivate,
+        drainHostApiOperations: drainOperations,
+        lifecycleHookScope,
       });
       this.disposers.set(manifest.id, disposers);
       this.markPluginUiRevision(manifest.id);
@@ -396,13 +437,20 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
             plugin.started = true;
             return;
           }
-          await runStartWithTimeout(
-            () => this.runPluginLifecycleHook(
-              id,
-              plugin.instance.start!.bind(plugin.instance),
-            ),
-            plugin.manifest.startupTimeoutMs,
-          );
+          try {
+            await runStartWithTimeout(
+              () => this.runPluginLifecycleHook(
+                plugin.lifecycleHookScope,
+                plugin.instance.start!.bind(plugin.instance),
+              ),
+              plugin.manifest.startupTimeoutMs,
+            );
+          } catch (err) {
+            if (err instanceof PluginStartupTimeoutError) {
+              this.quarantinePluginLifecycle(id, err.message);
+            }
+            throw err;
+          }
         } finally {
           clearTimeout(slowTimer);
         }
@@ -434,14 +482,26 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       const plugin = this.plugins.get(id);
       if (!plugin) continue;
       this.markFailed(id);
+      await this.stopAfterStartFailure(
+        plugin.manifest.id,
+        plugin.instance,
+        plugin.lifecycleHookScope,
+      );
       this.cleanupFailedStartRuntimeState(id, plugin.methods);
-      await this.stopAfterStartFailure(plugin.manifest.id, plugin.instance);
+      await this.drainPluginHostApiOperations(id, plugin);
     }
   }
 
   async stopAll(): Promise<void> {
     for (const plugin of this.plugins.values()) {
-      await this.stopAfterStartFailure(plugin.manifest.id, plugin.instance);
+      await this.stopAfterStartFailure(
+        plugin.manifest.id,
+        plugin.instance,
+        plugin.lifecycleHookScope,
+      );
+      plugin.deactivateHostApi?.();
+      this.runPluginDisposers(plugin.manifest.id, "stopAll");
+      await this.drainPluginHostApiOperations(plugin.manifest.id, plugin);
     }
   }
 
@@ -483,6 +543,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     opts: { skipPreparation?: boolean } = {},
   ): Promise<RestartPluginResult> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    this.assertPluginLifecycleAvailable(canonicalPluginId);
     const pending = this.pendingRestarts.get(canonicalPluginId);
     if (pending) return pending;
     const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
@@ -590,7 +651,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     // even when the on-disk bundle changed. Mirrors `reloadPlugin`.
     let createPlugin: RuntimePluginFactory | undefined;
     try {
-      createPlugin = await importPluginFactory(resolvedEntryPath, true);
+      createPlugin = await this.importPluginFactoryForLifecycle(
+        pluginId,
+        resolvedEntryPath,
+        true,
+      );
       plog("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");
     } catch (err) {
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
@@ -609,7 +674,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       hostApi,
       disposers: replacementDisposers,
       deactivate: deactivateReplacementHostApi,
+      drainOperations: drainReplacementHostApiOperations,
       commit: commitReplacementHostApi,
+      lifecycleHookScope: replacementLifecycleHookScope,
     } = this.buildHostApiIncarnation(
       pluginId,
       manifest,
@@ -620,7 +687,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     try {
       instance = await runPluginFactoryWithTimeout(
         () => this.runPluginLifecycleHook(
-          pluginId,
+          replacementLifecycleHookScope,
           () => createPlugin(
             buildPluginContext({
               pluginId,
@@ -635,20 +702,33 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         ),
         async (lateInstance) => {
           deactivateReplacementHostApi();
-          await this.stopAfterStartFailure(pluginId, lateInstance);
+          await this.stopAfterStartFailure(
+            pluginId,
+            lateInstance,
+            replacementLifecycleHookScope,
+          );
         },
       );
     } catch (err) {
       deactivateReplacementHostApi();
+      if (err instanceof PluginFactoryTimeoutError) {
+        this.quarantinePluginLifecycle(pluginId, err.message);
+      }
       this.runDisposerList(replacementDisposers, "failed restart factory");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: drainReplacementHostApiOperations,
+      });
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
       return "failed";
     }
 
     if (!isCurrent()) {
       deactivateReplacementHostApi();
-      await this.stopAfterStartFailure(pluginId, instance);
+      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "stale restart factory");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: drainReplacementHostApiOperations,
+      });
       return "failed";
     }
 
@@ -659,27 +739,43 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     try {
       if (instance.start) {
         await runStartWithTimeout(
-          () => this.runPluginLifecycleHook(pluginId, instance.start!.bind(instance)),
+          () => this.runPluginLifecycleHook(
+            replacementLifecycleHookScope,
+            instance.start!.bind(instance),
+          ),
           manifest.startupTimeoutMs,
         );
       }
       plog("debug", { pluginId, phase: PluginPhase.RESTART_START_OK }, "restart complete");
     } catch (err) {
+      if (err instanceof PluginStartupTimeoutError) {
+        this.quarantinePluginLifecycle(pluginId, err.message);
+      }
       plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
       deactivateReplacementHostApi();
-      await this.stopAfterStartFailure(pluginId, instance);
+      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "failed restart start");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: drainReplacementHostApiOperations,
+      });
       return "failed";
     }
 
     if (!isCurrent()) {
       deactivateReplacementHostApi();
-      await this.stopAfterStartFailure(pluginId, instance);
+      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "stale restart start");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: drainReplacementHostApiOperations,
+      });
       return "failed";
     }
 
-    const previousStopped = await this.stopAfterStartFailure(pluginId, plugin.instance);
+    const previousStopped = await this.stopAfterStartFailure(
+      pluginId,
+      plugin.instance,
+      plugin.lifecycleHookScope,
+    );
     if (previousStopped) {
       plog("debug", { pluginId, phase: PluginPhase.RESTART_STOP_OK }, "stopped previous instance");
     } else {
@@ -694,17 +790,24 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
       this.plugins.delete(pluginId);
       this.runPluginDisposers(pluginId, "restartPlugin uncertain previous stop");
+      await this.drainPluginHostApiOperations(pluginId, plugin);
       this.onDisable?.(pluginId);
       this.markFailed(pluginId);
       deactivateReplacementHostApi();
-      await this.stopAfterStartFailure(pluginId, instance);
+      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "failed restart previous stop");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: drainReplacementHostApiOperations,
+      });
       return "failed";
     }
     if (!isCurrent()) {
       deactivateReplacementHostApi();
-      await this.stopAfterStartFailure(pluginId, instance);
+      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "stale restart swap");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: drainReplacementHostApiOperations,
+      });
       return "failed";
     }
     plugin.deactivateHostApi?.();
@@ -715,6 +818,18 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.plugins.delete(pluginId);
 
     this.runPluginDisposers(pluginId, "restartPlugin");
+
+    const previousOperationsDrained = await this.drainPluginHostApiOperations(pluginId, plugin);
+    if (!previousOperationsDrained) {
+      deactivateReplacementHostApi();
+      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
+      this.runDisposerList(replacementDisposers, "failed restart HostApi drain");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: drainReplacementHostApiOperations,
+      });
+      this.onDisable?.(pluginId);
+      return "failed";
+    }
 
     this.onDisable?.(pluginId);
 
@@ -734,6 +849,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       approvedPluginAccess,
       started: true,
       deactivateHostApi: deactivateReplacementHostApi,
+      drainHostApiOperations: drainReplacementHostApiOperations,
+      lifecycleHookScope: replacementLifecycleHookScope,
     });
     this.disposers.set(pluginId, replacementDisposers);
     this.markPluginUiRevision(pluginId);
@@ -799,6 +916,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
    */
   async addPlugin(pluginId: string): Promise<"started" | "preparing"> {
     const knownPluginId = this.resolveKnownPluginId(pluginId);
+    this.assertPluginLifecycleAvailable(knownPluginId);
     if (this.plugins.has(knownPluginId)) {
       try {
         const restartResult = await this.restartPlugin(knownPluginId);
@@ -897,7 +1015,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     // marketplace registry.
     const plugin = this.plugins.get(canonicalPluginId);
     if (plugin) {
-      await this.stopAfterStartFailure(canonicalPluginId, plugin.instance);
+      const stopped = await this.stopAfterStartFailure(
+        canonicalPluginId,
+        plugin.instance,
+        plugin.lifecycleHookScope,
+      );
       plugin.deactivateHostApi?.();
 
       for (const method of plugin.methods.keys()) {
@@ -905,6 +1027,15 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
       this.plugins.delete(canonicalPluginId);
       this.runPluginDisposers(canonicalPluginId, "removePlugin");
+      const operationsDrained = await this.drainPluginHostApiOperations(
+        canonicalPluginId,
+        plugin,
+      );
+      if (!stopped || !operationsDrained) {
+        throw new Error(
+          `removePlugin blocked while the previous instance remains uncertain: ${canonicalPluginId}`,
+        );
+      }
     } else if (
       !this.knownPluginManifests.has(canonicalPluginId) &&
       !this.failedPluginIds.has(canonicalPluginId) &&
@@ -1113,7 +1244,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
     let createPlugin: RuntimePluginFactory | undefined;
     try {
-      createPlugin = await importPluginFactory(resolvedEntryPath, opts.cacheBust);
+      createPlugin = await this.importPluginFactoryForLifecycle(
+        manifest.id,
+        resolvedEntryPath,
+        opts.cacheBust,
+      );
     } catch (err) {
       if (!canCommit()) return "cancelled";
       log.error(`${manifest.id} import failed: %s`, (err as Error).message);
@@ -1132,17 +1267,18 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
 
     const pluginDataDir = this.ensureDataDir(manifest.id, pluginRoot);
-    const { hostApi, disposers, deactivate, commit } = this.buildHostApiIncarnation(
-      manifest.id,
-      manifest,
-      pluginDataDir,
-    );
+    const { hostApi, disposers, deactivate, drainOperations, commit, lifecycleHookScope } =
+      this.buildHostApiIncarnation(
+        manifest.id,
+        manifest,
+        pluginDataDir,
+      );
 
     let instance: RuntimePlugin;
     try {
       instance = await runPluginFactoryWithTimeout(
         () => this.runPluginLifecycleHook(
-          manifest.id,
+          lifecycleHookScope,
           () => createPlugin(
             buildPluginContext({
               pluginId: manifest.id,
@@ -1157,12 +1293,18 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         ),
         async (lateInstance) => {
           deactivate();
-          await this.stopAfterStartFailure(manifest.id, lateInstance);
+          await this.stopAfterStartFailure(manifest.id, lateInstance, lifecycleHookScope);
         },
       );
     } catch (err) {
       deactivate();
+      if (err instanceof PluginFactoryTimeoutError) {
+        this.quarantinePluginLifecycle(manifest.id, err.message);
+      }
       this.runDisposerList(disposers, "failed add factory");
+      await this.drainPluginHostApiOperations(manifest.id, {
+        drainHostApiOperations: drainOperations,
+      });
       if (!canCommit()) return "cancelled";
       log.error(`${manifest.id} createPlugin failed: %s`, (err as Error).message);
       this.markFailed(manifest.id);
@@ -1179,16 +1321,22 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       methods.set(toolName, handler);
       if (this.methodMap.has(toolName)) {
         deactivate();
-        await this.stopAfterStartFailure(manifest.id, instance);
+        await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
         this.runDisposerList(disposers, "duplicate add method");
+        await this.drainPluginHostApiOperations(manifest.id, {
+          drainHostApiOperations: drainOperations,
+        });
         throw new Error(`Duplicate plugin method registered: ${toolName}`);
       }
     }
 
     if (!canCommit()) {
       deactivate();
-      await this.stopAfterStartFailure(manifest.id, instance);
+      await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
       this.runDisposerList(disposers, "stale add factory");
+      await this.drainPluginHostApiOperations(manifest.id, {
+        drainHostApiOperations: drainOperations,
+      });
       return "cancelled";
     }
 
@@ -1198,7 +1346,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       try {
         await runStartWithTimeout(
           () => this.runPluginLifecycleHook(
-            manifest.id,
+            lifecycleHookScope,
             instance.start!.bind(instance),
           ),
           manifest.startupTimeoutMs,
@@ -1206,29 +1354,44 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         startupMs = Date.now() - startedAt;
       } catch (err) {
         deactivate();
+        if (err instanceof PluginStartupTimeoutError) {
+          this.quarantinePluginLifecycle(manifest.id, err.message);
+        }
         if (!canCommit()) {
-          await this.stopAfterStartFailure(manifest.id, instance);
+          await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
           this.runDisposerList(disposers, "stale add start");
+          await this.drainPluginHostApiOperations(manifest.id, {
+            drainHostApiOperations: drainOperations,
+          });
           return "cancelled";
         }
         log.error(`start during addPlugin failed: %s`, (err as Error).message);
         this.markFailed(manifest.id);
-        await this.stopAfterStartFailure(manifest.id, instance);
+        await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
         this.runDisposerList(disposers, "failed add start");
+        await this.drainPluginHostApiOperations(manifest.id, {
+          drainHostApiOperations: drainOperations,
+        });
         return "failed";
       }
     }
     if (!canCommit()) {
       deactivate();
-      await this.stopAfterStartFailure(manifest.id, instance);
+      await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
       this.runDisposerList(disposers, "stale add commit");
+      await this.drainPluginHostApiOperations(manifest.id, {
+        drainHostApiOperations: drainOperations,
+      });
       return "cancelled";
     }
     for (const toolName of methods.keys()) {
       if (this.methodMap.has(toolName)) {
         deactivate();
-        await this.stopAfterStartFailure(manifest.id, instance);
+        await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
         this.runDisposerList(disposers, "duplicate add method");
+        await this.drainPluginHostApiOperations(manifest.id, {
+          drainHostApiOperations: drainOperations,
+        });
         throw new Error(`Duplicate plugin method registered: ${toolName}`);
       }
     }
@@ -1249,6 +1412,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       approvedPluginAccess,
       started: true,
       deactivateHostApi: deactivate,
+      drainHostApiOperations: drainOperations,
+      lifecycleHookScope,
     });
     this.disposers.set(manifest.id, disposers);
     this.markPluginUiRevision(manifest.id);
@@ -1266,6 +1431,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
    */
   async reloadPlugin(pluginId: string): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    this.assertPluginLifecycleAvailable(canonicalPluginId);
     const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
     const isCurrent = () =>
       this.isPluginLifecycleOperationCurrent(canonicalPluginId, generation);
@@ -1275,7 +1441,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
     const { manifest, pluginRoot } = plugin;
 
-    await this.stopAfterStartFailure(canonicalPluginId, plugin.instance);
+    const previousStopped = await this.stopAfterStartFailure(
+      canonicalPluginId,
+      plugin.instance,
+      plugin.lifecycleHookScope,
+    );
     plugin.deactivateHostApi?.();
 
     if (plugin) {
@@ -1286,12 +1456,28 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.plugins.delete(canonicalPluginId);
     this.runPluginDisposers(canonicalPluginId, "reload");
 
+    const operationsDrained = await this.drainPluginHostApiOperations(
+      canonicalPluginId,
+      plugin,
+    );
+
     this.onDisable?.(canonicalPluginId);
+
+    if (!previousStopped || !operationsDrained) {
+      this.markFailed(canonicalPluginId);
+      throw new Error(
+        `reloadPlugin blocked because the previous instance did not stop cleanly: ${canonicalPluginId}`,
+      );
+    }
 
     const entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
     // cache-bust for dev reload
-    const createPlugin = await importPluginFactory(resolvedEntryPath, true);
+    const createPlugin = await this.importPluginFactoryForLifecycle(
+      canonicalPluginId,
+      resolvedEntryPath,
+      true,
+    );
     if (!isCurrent()) {
       throw new Error(`reloadPlugin cancelled for ${canonicalPluginId}`);
     }
@@ -1300,13 +1486,13 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
 
     const pluginDataDir = this.ensureDataDir(canonicalPluginId, pluginRoot);
-    const { hostApi, disposers, deactivate, commit } =
+    const { hostApi, disposers, deactivate, drainOperations, commit, lifecycleHookScope } =
       this.buildHostApiIncarnation(canonicalPluginId, manifest, pluginDataDir);
     let instance: RuntimePlugin;
     try {
       instance = await runPluginFactoryWithTimeout(
         () => this.runPluginLifecycleHook(
-          canonicalPluginId,
+          lifecycleHookScope,
           () => createPlugin(
             buildPluginContext({
               pluginId: canonicalPluginId,
@@ -1321,12 +1507,22 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         ),
         async (lateInstance) => {
           deactivate();
-          await this.stopAfterStartFailure(canonicalPluginId, lateInstance);
+          await this.stopAfterStartFailure(
+            canonicalPluginId,
+            lateInstance,
+            lifecycleHookScope,
+          );
         },
       );
     } catch (err) {
       deactivate();
+      if (err instanceof PluginFactoryTimeoutError) {
+        this.quarantinePluginLifecycle(canonicalPluginId, err.message);
+      }
       this.runDisposerList(disposers, "failed reload factory");
+      await this.drainPluginHostApiOperations(canonicalPluginId, {
+        drainHostApiOperations: drainOperations,
+      });
       if (isCurrent()) {
         this.markFailed(canonicalPluginId);
         this.onDisable?.(canonicalPluginId);
@@ -1335,8 +1531,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
     if (!isCurrent()) {
       deactivate();
-      await this.stopAfterStartFailure(canonicalPluginId, instance);
+      await this.stopAfterStartFailure(canonicalPluginId, instance, lifecycleHookScope);
       this.runDisposerList(disposers, "stale reload factory");
+      await this.drainPluginHostApiOperations(canonicalPluginId, {
+        drainHostApiOperations: drainOperations,
+      });
       throw new Error(`reloadPlugin cancelled for ${canonicalPluginId}`);
     }
 
@@ -1347,7 +1546,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       if (instance.start) {
         await runStartWithTimeout(
           () => this.runPluginLifecycleHook(
-            canonicalPluginId,
+            lifecycleHookScope,
             instance.start!.bind(instance),
           ),
           manifest.startupTimeoutMs,
@@ -1355,9 +1554,15 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
     } catch (err) {
       deactivate();
+      if (err instanceof PluginStartupTimeoutError) {
+        this.quarantinePluginLifecycle(canonicalPluginId, err.message);
+      }
       log.error(`start after reload failed: %s`, (err as Error).message);
       this.runDisposerList(disposers, "failed reload start");
-      await this.stopAfterStartFailure(canonicalPluginId, instance);
+      await this.drainPluginHostApiOperations(canonicalPluginId, {
+        drainHostApiOperations: drainOperations,
+      });
+      await this.stopAfterStartFailure(canonicalPluginId, instance, lifecycleHookScope);
       if (isCurrent()) {
         this.markFailed(canonicalPluginId);
         this.onDisable?.(canonicalPluginId);
@@ -1366,8 +1571,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
     if (!isCurrent()) {
       deactivate();
-      await this.stopAfterStartFailure(canonicalPluginId, instance);
+      await this.stopAfterStartFailure(canonicalPluginId, instance, lifecycleHookScope);
       this.runDisposerList(disposers, "stale reload start");
+      await this.drainPluginHostApiOperations(canonicalPluginId, {
+        drainHostApiOperations: drainOperations,
+      });
       throw new Error(`reloadPlugin cancelled for ${canonicalPluginId}`);
     }
     for (const [toolName, handler] of methods) {
@@ -1386,6 +1594,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         plugin.approvedPluginAccess ?? this.knownPluginAccessGrants.get(canonicalPluginId),
       started: true,
       deactivateHostApi: deactivate,
+      drainHostApiOperations: drainOperations,
+      lifecycleHookScope,
     });
     this.disposers.set(canonicalPluginId, disposers);
     this.markPluginUiRevision(canonicalPluginId);
@@ -1424,7 +1634,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       });
     }
 
-    await this.stopAfterStartFailure(canonicalPluginId, plugin.instance);
+    const stopped = await this.stopAfterStartFailure(
+      canonicalPluginId,
+      plugin.instance,
+      plugin.lifecycleHookScope,
+    );
     plugin.deactivateHostApi?.();
 
     for (const method of plugin.methods.keys()) {
@@ -1433,11 +1647,20 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.plugins.delete(canonicalPluginId);
 
     this.runPluginDisposers(canonicalPluginId, "disable");
+    const operationsDrained = await this.drainPluginHostApiOperations(
+      canonicalPluginId,
+      plugin,
+    );
     this.disabledPluginIds.add(canonicalPluginId);
     this.failedPluginIds.delete(canonicalPluginId);
     this.pluginUiRevisions.delete(canonicalPluginId);
 
     this.onDisable?.(canonicalPluginId);
+    if (!stopped || !operationsDrained) {
+      throw new Error(
+        `disable completed with a quarantined plugin lifecycle: ${canonicalPluginId}`,
+      );
+    }
   }
 
   // ─── Dispatcher / Bridge ───────────────────────────────────────────────────

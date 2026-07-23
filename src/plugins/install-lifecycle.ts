@@ -18,6 +18,7 @@ const heldPluginInstallLocks = new AsyncLocalStorage<ReadonlyMap<string, HeldPlu
 const currentReentrantOperation = new AsyncLocalStorage<TrackedReentrantOperation>();
 const ALL_PLUGIN_LOCK_KEY = "\0all-plugins";
 const PLUGIN_LIFECYCLE_DRAIN_TIMEOUT_MS = 10_000;
+const quarantinedPluginInstallLocks = new Set<string>();
 let exclusiveLifecycleTail: Promise<void> = Promise.resolve();
 let queuedExclusiveLifecycleMutations = 0;
 let activePluginLifecycleMutations = 0;
@@ -115,6 +116,8 @@ export function withPluginInstallLock<T>(
   pluginId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
+  const quarantineError = getPluginLifecycleQuarantineError(pluginId);
+  if (quarantineError) return Promise.reject(quarantineError);
   try {
     assertAppUpdateInstallNotRequested();
   } catch (err) {
@@ -174,29 +177,43 @@ async function acquirePluginInstallLock<T>(
     };
     const nextHeldLocks = copyActiveHeldLocks(heldLocks);
     nextHeldLocks.set(pluginId, token);
+    let ownerValue!: T;
+    let ownerFailed = false;
+    let ownerError: unknown;
     try {
-      return await heldPluginInstallLocks.run(nextHeldLocks, fn);
-    } finally {
-      try {
-        await drainReentrantOperations(token);
-        token.active = false;
-      } catch (err) {
-        if (err instanceof PluginLifecycleDrainTimeoutError) {
-          // Fail the caller within a bounded time, but retain the lock token and
-          // queue position until the already-started mutation really settles.
-          // Releasing here would allow uninstall cleanup to race that stale
-          // write. This is a fail-closed quarantine, not an event-loop wait.
-          releaseDeferred = true;
-          void settleReentrantOperations(token).finally(() => {
-            token.active = false;
-            finalize();
-          });
-        } else {
+      ownerValue = await heldPluginInstallLocks.run(nextHeldLocks, fn);
+    } catch (err) {
+      ownerFailed = true;
+      ownerError = err;
+    }
+    let drainError: unknown;
+    try {
+      await drainReentrantOperations(token);
+      token.active = false;
+    } catch (err) {
+      drainError = err;
+      if (err instanceof PluginLifecycleDrainTimeoutError) {
+        quarantinedPluginInstallLocks.add(pluginId);
+        // Fail the caller within a bounded time, but retain the lock token and
+        // queue position until the already-started mutation really settles.
+        // Releasing here would allow uninstall cleanup to race that stale
+        // write. This is a fail-closed quarantine, not an event-loop wait.
+        releaseDeferred = true;
+        void settleReentrantOperations(token).finally(() => {
+          quarantinedPluginInstallLocks.delete(pluginId);
           token.active = false;
-        }
-        throw err;
+          finalize();
+        });
+      } else {
+        token.active = false;
       }
     }
+    if (ownerFailed) {
+      if (drainError !== undefined) throw combineLifecycleErrors(ownerError, drainError);
+      throw ownerError;
+    }
+    if (drainError !== undefined) throw drainError;
+    return ownerValue;
   } finally {
     if (!releaseDeferred) finalize();
   }
@@ -222,6 +239,11 @@ export async function drainPluginInstallLockOperations(pluginId: string): Promis
 
 /** Serialize a multi-plugin artifact mutation plus its full runtime rebuild. */
 export function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promise<T> {
+  if (quarantinedPluginInstallLocks.size > 0) {
+    return Promise.reject(new PluginLifecycleQuarantinedError(
+      [...quarantinedPluginInstallLocks].sort().join(", "),
+    ));
+  }
   const heldLocks = heldPluginInstallLocks.getStore();
   const heldAllLock = heldLocks?.get(ALL_PLUGIN_LOCK_KEY);
   if (heldAllLock?.active) return trackReentrantOperation(heldAllLock, fn);
@@ -280,26 +302,50 @@ async function acquireAllPluginInstallLocks<T>(
   };
   try {
     assertAppUpdateInstallNotRequested();
-    return await heldPluginInstallLocks.run(nextHeldLocks, fn);
-  } finally {
+    let ownerValue!: T;
+    let ownerFailed = false;
+    let ownerError: unknown;
+    try {
+      ownerValue = await heldPluginInstallLocks.run(nextHeldLocks, fn);
+    } catch (err) {
+      ownerFailed = true;
+      ownerError = err;
+    }
+    let drainError: unknown;
     try {
       await drainReentrantOperations(token);
       token.active = false;
     } catch (err) {
+      drainError = err;
       if (err instanceof PluginLifecycleDrainTimeoutError) {
+        quarantinedPluginInstallLocks.add(ALL_PLUGIN_LOCK_KEY);
         releaseDeferred = true;
         void settleReentrantOperations(token).finally(() => {
+          quarantinedPluginInstallLocks.delete(ALL_PLUGIN_LOCK_KEY);
           token.active = false;
           finalize();
         });
       } else {
         token.active = false;
       }
-      throw err;
-    } finally {
-      if (!releaseDeferred) finalize();
     }
+    if (ownerFailed) {
+      if (drainError !== undefined) throw combineLifecycleErrors(ownerError, drainError);
+      throw ownerError;
+    }
+    if (drainError !== undefined) throw drainError;
+    return ownerValue;
+  } finally {
+    if (!releaseDeferred) finalize();
   }
+}
+
+function combineLifecycleErrors(primary: unknown, drain: unknown): AggregateError {
+  const drainErrors = drain instanceof AggregateError ? drain.errors : [drain];
+  return new AggregateError(
+    [primary, ...drainErrors],
+    "Plugin lifecycle owner and detached mutations failed",
+  );
 }
 
 function trackReentrantOperation<T>(
@@ -380,6 +426,24 @@ function copyActiveHeldLocks(
   return new Map(
     [...(heldLocks?.entries() ?? [])].filter(([, token]) => token.active),
   );
+}
+
+class PluginLifecycleQuarantinedError extends Error {
+  readonly code = "plugin-lifecycle-quarantined";
+
+  constructor(pluginId: string) {
+    super(`Plugin lifecycle is quarantined until a timed-out mutation settles: ${pluginId}`);
+  }
+}
+
+function getPluginLifecycleQuarantineError(pluginId: string): Error | null {
+  if (quarantinedPluginInstallLocks.has(ALL_PLUGIN_LOCK_KEY)) {
+    return new PluginLifecycleQuarantinedError("all plugins");
+  }
+  if (quarantinedPluginInstallLocks.has(pluginId)) {
+    return new PluginLifecycleQuarantinedError(pluginId);
+  }
+  return null;
 }
 
 export function hasPluginInstallInFlight(): boolean {

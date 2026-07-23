@@ -10,6 +10,53 @@
 
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
+export class PluginImportTimeoutError extends Error {
+  readonly code = "plugin-import-timeout";
+
+  constructor(timeoutMs: number) {
+    super(`plugin import timeout (>${timeoutMs}ms)`);
+  }
+}
+
+export class PluginFactoryTimeoutError extends Error {
+  readonly code = "plugin-factory-timeout";
+
+  constructor(timeoutMs: number) {
+    super(`plugin factory timeout (>${timeoutMs}ms)`);
+  }
+}
+
+export class PluginStartupTimeoutError extends Error {
+  readonly code = "plugin-startup-timeout";
+
+  constructor(timeoutMs: number) {
+    super(`startup timeout (>${timeoutMs}ms)`);
+  }
+}
+
+/**
+ * Bound the host's wait for ESM evaluation. Dynamic import cannot be aborted
+ * in the main process, so callers must quarantine the affected plugin id when
+ * this error is observed. The late operation is always observed to avoid an
+ * unhandled rejection.
+ */
+export async function runPluginImportWithTimeout<T>(
+  importer: () => Promise<T>,
+  timeoutMs: number = TOOL_TIMEOUT_POLICY.pluginImportMs,
+): Promise<T> {
+  const operation = Promise.resolve().then(importer);
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new PluginImportTimeoutError(timeoutMs)), timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    void operation.catch(() => undefined);
+  }
+}
+
 /**
  * Bound plugin factory execution without abandoning a late-created instance.
  * The caller revokes the pending HostApi incarnation when this rejects;
@@ -27,7 +74,7 @@ export async function runPluginFactoryWithTimeout<T>(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       timedOut = true;
-      reject(new Error(`plugin factory timeout (>${timeoutMs}ms)`));
+      reject(new PluginFactoryTimeoutError(timeoutMs));
     }, timeoutMs);
   });
   try {
@@ -61,7 +108,7 @@ export async function runStartWithTimeout(
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`));
+      reject(new PluginStartupTimeoutError(hardTimeoutMs));
     }, hardTimeoutMs);
   });
   try {

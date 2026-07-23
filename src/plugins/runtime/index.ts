@@ -29,6 +29,7 @@ import { runWithCeiling } from "../../tools/executor-ceiling.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
 import { sessionContext } from "../../engine/session-context.js";
 import {
+  runPluginImportWithTimeout,
   runPluginFactoryWithTimeout,
   runStartWithTimeout,
   SessionActivationTracker,
@@ -63,7 +64,7 @@ const log = createLogger("plugin-runtime");
  */
 export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
-export { runPluginFactoryWithTimeout, runStartWithTimeout };
+export { runPluginFactoryWithTimeout, runPluginImportWithTimeout, runStartWithTimeout };
 export type { PluginPerfStats };
 
 export type { InstallPolicy };
@@ -209,6 +210,7 @@ export interface PluginStartPreparationContext {
 
 export interface PluginHostApiIncarnation {
   registerDisposer(dispose: () => void): void;
+  trackOperation<T>(operation: Promise<T>): Promise<T>;
   isActive(): boolean;
   isLifecycleHookActive(): boolean;
 }

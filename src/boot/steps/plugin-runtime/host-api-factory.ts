@@ -111,7 +111,16 @@ function enforceActiveHostApi(
                 `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
               );
             }
-            return Reflect.apply(value, currentTarget, args);
+            const result = Reflect.apply(value, currentTarget, args) as unknown;
+            if (
+              memberPath !== "hostApi.config.set"
+              && result !== null
+              && typeof result === "object"
+              && typeof (result as PromiseLike<unknown>).then === "function"
+            ) {
+              return incarnation.trackOperation(Promise.resolve(result));
+            }
+            return result;
           };
         }
         if (value !== null && typeof value === "object") {
@@ -207,6 +216,61 @@ export function createHostApiFactory(
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
     const hostIncarnation = incarnation;
+    const assertIssuedCapabilityActive = (memberPath: string): void => {
+      if (!hostIncarnation.isActive()) {
+        throw new Error(
+          `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
+        );
+      }
+    };
+    const bindApiKeyResult = (
+      result: Awaited<ReturnType<NonNullable<PluginHostApi["resolveApiKey"]>>>,
+    ): Awaited<ReturnType<NonNullable<PluginHostApi["resolveApiKey"]>>> => {
+      if (!result.ok) return result;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        result.release();
+      };
+      hostIncarnation.registerDisposer(release);
+      return {
+        ...result,
+        bearer: () => {
+          assertIssuedCapabilityActive("hostApi.resolveApiKey().bearer");
+          return result.bearer();
+        },
+        release,
+      };
+    };
+    const bindWorkerHandle = (
+      worker: Awaited<ReturnType<NonNullable<PluginHostApi["spawnWorker"]>>>,
+    ): Awaited<ReturnType<NonNullable<PluginHostApi["spawnWorker"]>>> => {
+      let stopped = false;
+      const stop = () => {
+        if (stopped) return;
+        stopped = true;
+        worker.stop();
+      };
+      hostIncarnation.registerDisposer(stop);
+      return {
+        socketPath: worker.socketPath,
+        pid: worker.pid,
+        stop,
+        onStdout: (listener) => {
+          assertIssuedCapabilityActive("hostApi.spawnWorker().onStdout");
+          worker.onStdout(listener);
+        },
+        onStderr: (listener) => {
+          assertIssuedCapabilityActive("hostApi.spawnWorker().onStderr");
+          worker.onStderr(listener);
+        },
+        onExit: (listener) => {
+          assertIssuedCapabilityActive("hostApi.spawnWorker().onExit");
+          worker.onExit(listener);
+        },
+      };
+    };
       // #893 Stage 2 — manifest sha256 pin (Tier-3 whitelist check). The
       // whitelist registry stores `approvedManifestSha256` per pluginId; we
       // compare against the canonicalized JSON of the running manifest so a
@@ -432,7 +496,7 @@ export function createHostApiFactory(
       // the call here is a thin closure capture of pluginId + manifest +
       // manifestSha256 + the shared audit/settings services.
       resolveApiKey: async (opts) => {
-        return resolveApiKeyImpl(
+        const result = await resolveApiKeyImpl(
           {
             purpose: opts.purpose as ResolveApiKeyPurpose,
             vendor: opts.vendor as ResolveApiKeyVendor | undefined,
@@ -469,6 +533,13 @@ export function createHostApiFactory(
               : {}),
           },
         );
+        if (!hostIncarnation.isActive() && result.ok) {
+          result.release();
+          throw new Error(
+            `[plugin:${pluginId}] hostApi.resolveApiKey: plugin instance is no longer active`,
+          );
+        }
+        return bindApiKeyResult(result);
       },
       getSecret: (key) => {
         // #893 Stage 2 — Four-tier secret access gate:
@@ -814,8 +885,15 @@ export function createHostApiFactory(
       // prove that its call path actually uses this worker before setting
       // Tool.workerId; a plugin-self-claimed worker id is advisory only (#885 v6
       // removed the manifest field — normalize drops any legacy `workerId`).
-      spawnWorker: (workerSpec) => {
-        return spawnWorker({ ...workerSpec, pluginId });
+      spawnWorker: async (workerSpec) => {
+        const worker = await spawnWorker({ ...workerSpec, pluginId });
+        if (!hostIncarnation.isActive()) {
+          worker.stop();
+          throw new Error(
+            `[plugin:${pluginId}] hostApi.spawnWorker: plugin instance is no longer active`,
+          );
+        }
+        return bindWorkerHandle(worker);
       },
       // ─── §B3 External URL viewer + host public preference read ─────────
       // openExternalUrl: follows the Settings → webView.preferredFlow toggle:

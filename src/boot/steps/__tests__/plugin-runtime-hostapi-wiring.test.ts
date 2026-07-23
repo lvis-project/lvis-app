@@ -21,6 +21,7 @@ const runtimeTestState = vi.hoisted(() => ({
   browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void } }>,
   capturedRuntimeOptions: null as Record<string, unknown> | null,
   readPluginRegistry: vi.fn(async () => ({ version: 1, plugins: [] })),
+  spawnWorker: vi.fn(),
   runtime: {
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
@@ -66,6 +67,10 @@ vi.mock("../../../plugins/dev-watcher.js", () => ({
   startPluginDevWatcher: vi.fn(() => ({ stop: vi.fn() })),
 }));
 
+vi.mock("../../../permissions/worker-spawn.js", () => ({
+  spawnWorker: runtimeTestState.spawnWorker,
+}));
+
 vi.mock("../../../main/html-preview-partition.js", () => ({
   installPluginPartitionPolicy: vi.fn(),
 }));
@@ -93,6 +98,18 @@ type ConfigHostApi = {
   emitEvent: (type: string, data?: unknown) => void;
   onEvent: (type: string, handler: (data: unknown) => void) => () => void;
   getSecret: (key: string) => string | undefined | null;
+  resolveApiKey: (opts: { purpose: "llm"; vendor?: "openai" }) => Promise<
+    | { ok: false; reason: string }
+    | { ok: true; vendor: string; bearer: () => string; release: () => void }
+  >;
+  spawnWorker: (spec: { workerId: string; command: string }) => Promise<{
+    socketPath: string | null;
+    pid: number | undefined;
+    stop: () => void;
+    onStdout: (listener: (chunk: string) => void) => void;
+    onStderr: (listener: (chunk: string) => void) => void;
+    onExit: (listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void) => void;
+  }>;
 };
 
 type CreateHostApi = (
@@ -107,6 +124,7 @@ type CreateHostApi = (
   pluginDataDir: string,
   incarnation: {
     registerDisposer: (dispose: () => void) => void;
+    trackOperation: <T>(operation: Promise<T>) => Promise<T>;
     isActive: () => boolean;
     isLifecycleHookActive: () => boolean;
   },
@@ -161,6 +179,7 @@ function makeSettingsService(store: Map<string, Record<string, unknown>>) {
 function activeIncarnation() {
   return {
     registerDisposer: vi.fn(),
+    trackOperation: <T>(operation: Promise<T>) => operation,
     isActive: () => true,
     isLifecycleHookActive: () => false,
   };
@@ -173,6 +192,7 @@ beforeEach(() => {
   runtimeTestState.runtime.restartPlugin.mockClear();
   runtimeTestState.runtime.getWildcardConfigOverride.mockReturnValue({});
   runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+  runtimeTestState.spawnWorker.mockReset();
 });
 
 describe("HostApi.config.get merged-read precedence", () => {
@@ -246,6 +266,7 @@ describe("HostApi.config.set round-trip", () => {
       mkdtempSync("/tmp/lvis-cfg-set-"),
       {
         registerDisposer: vi.fn(),
+        trackOperation: <T>(operation: Promise<T>) => operation,
         isActive: () =>
           runtimeTestState.runtime.getPluginManifest("plugin-a") === activeManifest,
         isLifecycleHookActive: () => false,
@@ -327,6 +348,7 @@ describe("HostApi.config.set round-trip", () => {
       mkdtempSync("/tmp/lvis-cfg-lifecycle-"),
       {
         registerDisposer: vi.fn(),
+        trackOperation: <T>(operation: Promise<T>) => operation,
         isActive: () => true,
         isLifecycleHookActive: () => true,
       },
@@ -384,6 +406,53 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  it("releases returned API-key and worker capabilities when the incarnation is disposed", async () => {
+    const settings = makeSettingsService(new Map());
+    settings.getSecret.mockImplementation((key: string) => (
+      key === "plugin.plugin-a.llm.apiKey.openai" ? "sk-incarnation" : undefined
+    ));
+    const workerStop = vi.fn();
+    const workerOnStdout = vi.fn();
+    runtimeTestState.spawnWorker.mockResolvedValue({
+      socketPath: "/tmp/plugin-a.sock",
+      pid: 42,
+      stop: workerStop,
+      onStdout: workerOnStdout,
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+    });
+    const disposers: Array<() => void> = [];
+    let active = true;
+    const createHostApi = await initAndGetFactory(settings);
+    const api = createHostApi(
+      "plugin-a",
+      { id: "plugin-a", config: {} },
+      mkdtempSync("/tmp/lvis-issued-capabilities-"),
+      {
+        registerDisposer: (dispose) => disposers.push(dispose),
+        trackOperation: <T>(operation: Promise<T>) => operation,
+        isActive: () => active,
+        isLifecycleHookActive: () => false,
+      },
+    );
+
+    const key = await api.resolveApiKey({ purpose: "llm", vendor: "openai" });
+    expect(key.ok).toBe(true);
+    if (!key.ok) throw new Error("expected API key capability");
+    expect(key.bearer()).toBe("sk-incarnation");
+    const worker = await api.spawnWorker({ workerId: "worker-a", command: "node" });
+    worker.onStdout(vi.fn());
+
+    active = false;
+    for (const dispose of disposers) dispose();
+
+    expect(() => key.bearer()).toThrow(/plugin instance is no longer active/);
+    expect(() => worker.onStdout(vi.fn())).toThrow(/plugin instance is no longer active/);
+    expect(workerStop).toHaveBeenCalledTimes(1);
+    worker.stop();
+    expect(workerStop).toHaveBeenCalledTimes(1);
+  });
+
   it("revokes every callable HostApi surface when its incarnation is deactivated", async () => {
     const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
     let active = true;
@@ -393,6 +462,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
       mkdtempSync("/tmp/lvis-revoked-hostapi-"),
       {
         registerDisposer: vi.fn(),
+        trackOperation: <T>(operation: Promise<T>) => operation,
         isActive: () => active,
         isLifecycleHookActive: () => false,
       },
