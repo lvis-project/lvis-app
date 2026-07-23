@@ -534,6 +534,46 @@ describe("AuditLogger permission audit chain", () => {
     );
   });
 
+  it("archives and truncates a torn tail only when the external seal authenticates its predecessor", async () => {
+    const seals = new MemorySecretStore();
+    const logger = new AuditLogger();
+    await logger.setupPermissionAuditChain(SECRET, seals);
+    await logger.appendPermissionAuditEntry({
+      decision: "allow",
+      auditId: "durable-predecessor",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      tool: "fs_read",
+      source: "builtin",
+      category: "read",
+      layer: 1,
+    });
+    const activePath = logger.getPermissionAuditLogFile();
+    writeFileSync(activePath, `${readFileSync(activePath, "utf-8")}{\"partial\":`, "utf-8");
+
+    const rebooted = new AuditLogger();
+    await expect(rebooted.setupPermissionAuditChain(SECRET, seals)).resolves.toBeUndefined();
+    expect(readPermissionAuditLines(activePath)).toHaveLength(1);
+    const tornArchives = readdirSync(auditDir).filter((name) =>
+      name.includes(".permission-audit.torn-unverified-")
+    );
+    expect(tornArchives).toHaveLength(1);
+    expect(readFileSync(join(auditDir, tornArchives[0]!), "utf-8"))
+      .toContain('{"partial":');
+
+    await expect(rebooted.appendPermissionAuditEntry({
+      decision: "deny",
+      auditId: "after-torn-recovery",
+      ts: "2026-05-09T00:00:01.000Z",
+      trustOrigin: "user-keyboard",
+      tool: "fs_write",
+      source: "builtin",
+      category: "write",
+      layer: 2,
+    })).resolves.toMatchObject({ auditId: "after-torn-recovery" });
+    expect(readPermissionAuditLines(activePath)).toHaveLength(2);
+  });
+
   it("rejects an oversized audit row without reading the whole file into memory", async () => {
     const logger = new AuditLogger();
     writeFileSync(

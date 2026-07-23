@@ -97,6 +97,12 @@ type CreateHostApi = (
   pluginId: string,
   manifest: { id: string; config?: Record<string, unknown>; capabilities?: string[] },
   pluginDataDir: string,
+  incarnation: {
+    registerDisposer: (dispose: () => void) => void;
+    trackOperation: <T>(operation: Promise<T>) => Promise<T>;
+    isActive: () => boolean;
+    isLifecycleHookActive: () => boolean;
+  },
 ) => PluginHostApi;
 
 /** Build a REAL hostApi object via the production createHostApi factory. */
@@ -149,6 +155,12 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
     "completeness-plugin",
     { id: "completeness-plugin", config: {}, capabilities: [...KNOWN_CAPABILITIES] },
     pluginDataDir,
+    {
+      registerDisposer: vi.fn(),
+      trackOperation: <T>(operation: Promise<T>) => operation,
+      isActive: () => true,
+      isLifecycleHookActive: () => false,
+    },
   );
 }
 

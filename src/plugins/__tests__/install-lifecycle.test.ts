@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   drainPluginInstallLockOperations,
+  hasPluginInstallInFlight,
   withPluginInstallLock,
   withAllPluginInstallLocks,
   installMarketplacePluginWithLifecycle,
@@ -166,6 +167,20 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect((error as AggregateError).errors).toEqual([detachedFailure]);
   });
 
+  it("preserves the primary owner failure before detached mutation failures", async () => {
+    const ownerFailure = new Error("owner failed");
+    const detachedFailure = new Error("detached failed");
+    const error = await withPluginInstallLock("p", async () => {
+      void withPluginInstallLock("p", async () => {
+        throw detachedFailure;
+      });
+      throw ownerFailure;
+    }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([ownerFailure, detachedFailure]);
+  });
+
   it("rejects a per-plugin to all-plugin lock upgrade instead of deadlocking", async () => {
     await expect(withPluginInstallLock("p", async () => {
       await withAllPluginInstallLocks(async () => undefined);
@@ -177,13 +192,15 @@ describe("installMarketplacePluginWithLifecycle", () => {
     try {
       let releaseDetached!: () => void;
       let detachedStarted!: () => void;
+      let detachedOperation!: Promise<void>;
       const detachedGate = new Promise<void>((resolve) => { releaseDetached = resolve; });
       const started = new Promise<void>((resolve) => { detachedStarted = resolve; });
       const owner = withPluginInstallLock("p", async () => {
-        void withPluginInstallLock("p", async () => {
+        detachedOperation = withPluginInstallLock("p", async () => {
           detachedStarted();
           await detachedGate;
         });
+        void detachedOperation;
         await started;
       });
       const ownerResult = owner.catch((caught) => caught);
@@ -197,11 +214,20 @@ describe("installMarketplacePluginWithLifecycle", () => {
       const next = withPluginInstallLock("p", async () => {
         nextEntered = true;
       });
-      await Promise.resolve();
+      await expect(next).rejects.toMatchObject({
+        code: "plugin-lifecycle-quarantined",
+      });
       expect(nextEntered).toBe(false);
 
       releaseDetached();
-      await next;
+      await detachedOperation;
+      for (let attempt = 0; attempt < 20 && hasPluginInstallInFlight(); attempt += 1) {
+        await Promise.resolve();
+      }
+      expect(hasPluginInstallInFlight()).toBe(false);
+      await expect(withPluginInstallLock("p", async () => {
+        nextEntered = true;
+      })).resolves.toBeUndefined();
       expect(nextEntered).toBe(true);
     } finally {
       vi.useRealTimers();

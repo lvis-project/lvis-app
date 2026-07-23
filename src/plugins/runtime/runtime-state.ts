@@ -28,7 +28,13 @@ import {
   ensurePluginDataDir,
   resolveEntryPath,
 } from "./sandbox.js";
-import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot, SinglePluginStartResult } from "./types.js";
+import type {
+  LoadedPlugin,
+  ManifestLoadPlan,
+  ManifestSnapshot,
+  PluginLifecycleHookScope,
+  SinglePluginStartResult,
+} from "./types.js";
 import { PerfStatsTracker } from "./perf-stats.js";
 import { ConfigOverrideStore } from "./config-overrides.js";
 import { PreparationTracker } from "./preparation.js";
@@ -44,6 +50,7 @@ import type {
 
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
+const HOST_API_OPERATION_DRAIN_TIMEOUT_MS = 10_000;
 
 export type RestartPluginResult = "started" | "deferred" | "failed" | undefined;
 
@@ -103,10 +110,15 @@ export abstract class PluginRuntimeState {
   protected readonly pendingRestartPreparations = new Map<string, Promise<void>>();
   /** Monotonic generation used to reject stale async add/restart commits. */
   protected readonly pluginLifecycleGenerations = new Map<string, number>();
+  /**
+   * Process-lifetime quarantine for lifecycle work whose execution state is
+   * unknowable. In-process ESM evaluation and plugin hooks cannot be cancelled;
+   * another same-id incarnation would permit concurrent stale bodies.
+   */
+  protected readonly quarantinedPluginLifecycles = new Map<string, string>();
   /** HostApi incarnations whose plugin factory has not committed an instance. */
   private readonly pendingHostApiIncarnations = new Map<string, Set<() => void>>();
   protected nextPluginLifecycleGeneration = 0;
-  protected readonly activePluginLifecycleHooks = new Map<string, number>();
   protected readonly pluginUiRevisions = new Map<string, number>();
   protected nextPluginUiRevision = 0;
   protected toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
@@ -206,10 +218,14 @@ export abstract class PluginRuntimeState {
     hostApi: PluginHostApi;
     disposers: Array<() => void>;
     deactivate: () => void;
+    drainOperations: () => Promise<void>;
     commit: () => void;
+    lifecycleHookScope: PluginLifecycleHookScope;
   } {
     const disposers: Array<() => void> = [];
+    const pendingOperations = new Set<Promise<unknown>>();
     let active = true;
+    const lifecycleHookScope: PluginLifecycleHookScope = { active: true, depth: 0 };
     let pending = true;
     let deactivate!: () => void;
     const forgetPending = () => {
@@ -222,6 +238,8 @@ export abstract class PluginRuntimeState {
     };
     deactivate = () => {
       active = false;
+      lifecycleHookScope.active = false;
+      lifecycleHookScope.depth = 0;
       if (pending) forgetPending();
     };
     let pendingForPlugin = this.pendingHostApiIncarnations.get(pluginId);
@@ -238,9 +256,18 @@ export abstract class PluginRuntimeState {
         }
         try { dispose(); } catch { /* best-effort stale cleanup */ }
       },
+      trackOperation: <T>(operation: Promise<T>): Promise<T> => {
+        const tracked = Promise.resolve(operation);
+        pendingOperations.add(tracked);
+        void tracked.then(
+          () => pendingOperations.delete(tracked),
+          () => pendingOperations.delete(tracked),
+        );
+        return tracked;
+      },
       isActive: () => active,
       isLifecycleHookActive: () =>
-        (this.activePluginLifecycleHooks.get(pluginId) ?? 0) > 0,
+        lifecycleHookScope.active && lifecycleHookScope.depth > 0,
     };
     try {
       const hostApi = this.createHostApi?.(
@@ -258,6 +285,26 @@ export abstract class PluginRuntimeState {
         hostApi,
         disposers,
         deactivate,
+        drainOperations: async () => {
+          if (pendingOperations.size === 0) return;
+          let timer: NodeJS.Timeout | undefined;
+          try {
+            await Promise.race([
+              Promise.allSettled([...pendingOperations]),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error(
+                    `HostApi operation drain timeout (>${HOST_API_OPERATION_DRAIN_TIMEOUT_MS}ms)`,
+                  )),
+                  HOST_API_OPERATION_DRAIN_TIMEOUT_MS,
+                );
+              }),
+            ]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        },
+        lifecycleHookScope,
         commit: () => {
           if (!active) {
             throw new Error(`Cannot commit inactive HostApi incarnation: ${pluginId}`);
@@ -272,19 +319,15 @@ export abstract class PluginRuntimeState {
   }
 
   protected async runPluginLifecycleHook<T>(
-    pluginId: string,
+    scope: PluginLifecycleHookScope | undefined,
     hook: () => Promise<T> | T,
   ): Promise<T> {
-    this.activePluginLifecycleHooks.set(
-      pluginId,
-      (this.activePluginLifecycleHooks.get(pluginId) ?? 0) + 1,
-    );
+    if (!scope) return await hook();
+    scope.depth += 1;
     try {
       return await hook();
     } finally {
-      const remaining = (this.activePluginLifecycleHooks.get(pluginId) ?? 1) - 1;
-      if (remaining <= 0) this.activePluginLifecycleHooks.delete(pluginId);
-      else this.activePluginLifecycleHooks.set(pluginId, remaining);
+      scope.depth = Math.max(0, scope.depth - 1);
     }
   }
 
@@ -418,6 +461,28 @@ export abstract class PluginRuntimeState {
     return generation;
   }
 
+  protected assertPluginLifecycleAvailable(pluginId: string): void {
+    const canonicalId = this.resolveKnownPluginId(pluginId);
+    const reason = this.quarantinedPluginLifecycles.get(canonicalId)
+      ?? this.quarantinedPluginLifecycles.get(pluginId);
+    if (!reason) return;
+    const error = new Error(
+      `Plugin lifecycle is quarantined until host restart: ${canonicalId} (${reason})`,
+    ) as Error & { code?: string };
+    error.code = "plugin-lifecycle-quarantined";
+    throw error;
+  }
+
+  protected quarantinePluginLifecycle(pluginId: string, reason: string): void {
+    const canonicalId = this.resolveKnownPluginId(pluginId);
+    this.quarantinedPluginLifecycles.set(canonicalId, reason);
+    this.quarantinedPluginLifecycles.set(pluginId, reason);
+    for (const alias of this.knownInstallAliases.get(canonicalId) ?? []) {
+      this.quarantinedPluginLifecycles.set(alias, reason);
+    }
+    this.markFailed(canonicalId);
+  }
+
   protected adoptPluginLifecycleIdentity(
     requestedPluginId: string,
     canonicalPluginId: string,
@@ -500,19 +565,19 @@ export abstract class PluginRuntimeState {
     this.pendingRestarts.clear();
     this.pendingRestartPreparations.clear();
     this.pluginLifecycleGenerations.clear();
-    this.activePluginLifecycleHooks.clear();
     this.loaded = false;
   }
 
   protected async stopAfterStartFailure(
     pluginId: string,
     instance: RuntimePlugin,
+    lifecycleHookScope?: PluginLifecycleHookScope,
   ): Promise<boolean> {
     if (!instance.stop) return true;
     let timer: NodeJS.Timeout | undefined;
     try {
       await Promise.race([
-        this.runPluginLifecycleHook(pluginId, () => instance.stop!()),
+        this.runPluginLifecycleHook(lifecycleHookScope, () => instance.stop!()),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error(`stop timeout (>${START_FAILURE_STOP_TIMEOUT_MS}ms)`)),
@@ -523,10 +588,30 @@ export abstract class PluginRuntimeState {
       plog("debug", { pluginId, phase: PluginPhase.STOP_OK }, "stopped after start failure");
       return true;
     } catch (err) {
+      this.quarantinePluginLifecycle(pluginId, (err as Error).message);
       plog("error", { pluginId, phase: PluginPhase.STOP_FAIL, err }, "stop after start failure failed");
       return false;
     } finally {
       if (timer) clearTimeout(timer);
+    }
+  }
+
+  protected async drainPluginHostApiOperations(
+    pluginId: string,
+    plugin: Pick<LoadedPlugin, "drainHostApiOperations">,
+  ): Promise<boolean> {
+    if (!plugin.drainHostApiOperations) return true;
+    try {
+      await plugin.drainHostApiOperations();
+      return true;
+    } catch (err) {
+      this.quarantinePluginLifecycle(pluginId, (err as Error).message);
+      plog(
+        "error",
+        { pluginId, phase: PluginPhase.STOP_FAIL, err },
+        "HostApi operation drain failed",
+      );
+      return false;
     }
   }
 

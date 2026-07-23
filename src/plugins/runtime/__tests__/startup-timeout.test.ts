@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runPluginFactoryWithTimeout, runStartWithTimeout } from "../index.js";
+import {
+  runPluginFactoryWithTimeout,
+  runPluginImportWithTimeout,
+  runStartWithTimeout,
+} from "../index.js";
 import { TOOL_TIMEOUT_POLICY } from "../../../shared/tool-timeout-policy.js";
 
 describe("runStartWithTimeout — plugin instance.start() host-enforced timeout", () => {
@@ -107,5 +111,27 @@ describe("runPluginFactoryWithTimeout", () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
     expect(cleanup).toHaveBeenCalledWith({ id: "late" });
+  });
+});
+
+describe("runPluginImportWithTimeout", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("bounds non-settling ESM evaluation with a typed quarantine signal", async () => {
+    const promise = runPluginImportWithTimeout(
+      () => new Promise<never>(() => undefined),
+      1_000,
+    );
+    const rejection = promise.catch((error) => error);
+    await vi.advanceTimersByTimeAsync(1_001);
+    await expect(rejection).resolves.toMatchObject({
+      code: "plugin-import-timeout",
+      message: "plugin import timeout (>1000ms)",
+    });
   });
 });
