@@ -1408,27 +1408,22 @@ export default async function createPlugin({ hostApi }) {
       registryPath,
       pluginsRoot: installedDir,
       createHostApi: (pluginId, _manifest, _pluginDataDir, incarnation) => {
+        const hostApi = createNoopHostApiForTests(
+          pluginId,
+          _manifest,
+          _pluginDataDir,
+          incarnation,
+        );
         const getSecret = (_key: string): null => {
           if (!incarnation.isActive()) throw new Error("plugin instance is no longer active");
           return null;
         };
-        const hostApi = {
-          registerKeywords: () => {},
-          emitEvent: () => {},
-          onEvent: () => () => {},
-          getInstalledPluginIds: () => [],
-          onPluginsChanged: () => () => {},
-          getSecret,
-          callTool: async () => undefined,
-          callLlm: async () => undefined,
-          logEvent: () => {},
-          onShutdown: () => {},
-        };
+        hostApi.getSecret = getSecret;
         if (pluginId === timedId) {
           timedHostApi = hostApi;
           timedIncarnation = incarnation;
         }
-        return hostApi as unknown as import("../types.js").PluginHostApi;
+        return hostApi;
       },
     });
     let settled = false;
