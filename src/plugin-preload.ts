@@ -115,7 +115,7 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
     args: unknown,
   ): Promise<{ operationGrantToken: string; grantId: string; expiresAt: number }> =>
     unwrapEnvelope(
-      await ipcRenderer.invoke("lvis:plugin:request-operation-grant", name, args),
+      await ipcRenderer.invoke(CHANNELS.pluginBridge.requestOperationGrant, name, args),
     ) as { operationGrantToken: string; grantId: string; expiresAt: number },
 
   emitEvent: async (type: string, data?: unknown): Promise<void> => {

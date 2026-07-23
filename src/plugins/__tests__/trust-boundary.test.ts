@@ -14,7 +14,6 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import { join } from "node:path";
-import { PluginRuntime } from "../runtime.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import {
   hashReceiptFiles,
@@ -26,7 +25,10 @@ import {
   isDevModeUnlocked,
   setIsPackaged,
 } from "../../boot/dev-flags.js";
-import { writeTestPluginRegistry } from "./test-helpers.js";
+import {
+  TestPluginRuntime as PluginRuntime,
+  writeTestPluginRegistry,
+} from "./test-helpers.js";
 
 const ENTRY_SOURCE = `export default async function createPlugin(ctx) {
   return { handlers: { tb_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };

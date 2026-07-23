@@ -21,6 +21,7 @@ export type { PluginAccessSpec, PluginManifest, PluginToolHandler, RuntimePlugin
  * tool-visibility primitive.
  */
 export type LoadedPlugin = {
+  activationId: string;
   manifest: PluginManifest;
   pluginRoot: string;
   instance: RuntimePlugin;

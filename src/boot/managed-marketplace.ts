@@ -1,6 +1,10 @@
 import type { BrowserWindow } from "electron";
 import type { MarketplaceSettings } from "../data/settings-store.js";
-import type { PluginMarketplaceService } from "../plugins/marketplace.js";
+import type {
+  PluginMarketplaceService,
+  PreparedMarketplacePluginArtifact,
+  PreparedMarketplacePluginActivation,
+} from "../plugins/marketplace.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
@@ -90,7 +94,12 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   }
   notifyBootstrapStatus(mainWindow, { phase: "start" });
   try {
-    const ensureResult = await pluginMarketplace.ensureManagedInstalled();
+    const activatePreparedArtifact: PreparedMarketplacePluginActivation =
+      (prepared: PreparedMarketplacePluginArtifact) =>
+        pluginRuntime.activatePreparedArtifact<string>(prepared);
+    const ensureResult = await pluginMarketplace.ensureManagedInstalled({
+      activatePreparedArtifact,
+    });
     const updated = ensureResult.updated ?? [];
     if (ensureResult.installed.length > 0) {
       log.info(
@@ -101,11 +110,6 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
       log.info(
         `boot: managed plugin bootstrap auto-updated ${updated.length}: ${updated.join(", ")}`,
       );
-    }
-    // Reload the runtime once if anything was installed OR auto-updated so the
-    // new versions are picked up without an app restart.
-    if (ensureResult.installed.length > 0 || updated.length > 0) {
-      await pluginRuntime.restartAll();
     }
     if (ensureResult.failed.length > 0) {
       log.warn(

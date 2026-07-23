@@ -107,7 +107,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     acquirePluginSkillGeneration: async (owner) => {
       const lifecycle = ctx.pluginBundleLifecycle;
       if (!lifecycle) throw new Error("plugin generation lifecycle is not ready");
-      return lifecycle.acquireExact(owner.pluginId, owner.generationId);
+      return lifecycle.acquire(owner.pluginId);
     },
     networkFetch,
   };

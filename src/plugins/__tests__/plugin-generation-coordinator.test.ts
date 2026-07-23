@@ -8,6 +8,7 @@ function generation(id: string): ActivePluginGeneration<{ label: string }> {
   return {
     pluginId: "bundle-host-test",
     pluginVersion: id === "g1" ? "1.0.0" : "2.0.0",
+    artifactGenerationId: (id === "g1" ? "c" : "d").repeat(64),
     generationId: id,
     manifestSha256: (id === "g1" ? "1" : "2").repeat(64),
     receiptSha256: (id === "g1" ? "a" : "b").repeat(64),

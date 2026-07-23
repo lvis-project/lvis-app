@@ -32,7 +32,6 @@ import { mcpToolToPluginTool, type DiscoveredMcpTool } from "./plugin-tool-from-
 import { lintToolInputSchema } from "../plugins/tool-schema-lint.js";
 import { createLogger } from "../lib/logger.js";
 import type { Tool } from "../tools/base.js";
-import type { ToolRegistry } from "../tools/registry.js";
 import type { PluginManifest } from "../plugins/types.js";
 import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
 import type { McpUiPayload, McpUiResourceMeta, McpUiResourceRead } from "./types.js";
@@ -79,14 +78,17 @@ export class PluginMcpHost {
     { resolve: (result: unknown) => void; reject: (err: Error) => void }
   >();
   private started = false;
-  private readonly registeredToolNames: string[] = [];
 
   constructor(
     private readonly pluginId: string,
     private readonly transport: McpTransport,
-    private readonly toolRegistry: ToolRegistry,
     private readonly operationGovernance: Record<string, PluginToolOperationPolicy> = {},
-  ) {}
+    private readonly generationId: string,
+  ) {
+    if (typeof generationId !== "string" || generationId.trim().length === 0) {
+      throw new Error(`[plugin-mcp-host] immutable generation id is required for '${pluginId}'`);
+    }
+  }
 
   /**
    * Build a loopback-backed host for a first-party plugin: the plugin's tool
@@ -96,39 +98,29 @@ export class PluginMcpHost {
   static loopback(
     manifest: PluginManifest,
     delegate: PluginToolDelegate,
-    toolRegistry: ToolRegistry,
-    uiResources?: PluginUiResourceProvider,
+    uiResources: PluginUiResourceProvider | undefined,
+    generationId: string,
   ): PluginMcpHost {
     const server = new PluginMcpServer(manifest, delegate, uiResources);
     return new PluginMcpHost(
       manifest.id,
       new LoopbackTransport(server),
-      toolRegistry,
       (manifest as PluginManifest & { operationGovernance?: Record<string, PluginToolOperationPolicy> }).operationGovernance,
+      generationId,
     );
   }
 
-  /**
-   * Open the transport, discover the plugin's RC server, and register its tools
-   * into the {@link ToolRegistry}. Returns the registered (natural, un-namespaced)
-   * tool names. Fail-closed: a plugin server that does not advertise the RC
-   * protocol version is rejected (No-Fallback — first-party plugins are RC-only).
-   */
-  async start(): Promise<string[]> {
+  /** Build the complete loopback Tool set without touching the live registry. */
+  async prepareTools(): Promise<readonly Tool[]> {
     if (this.started) {
       throw new Error(`[plugin-mcp-host] '${this.pluginId}' already started`);
     }
-    // ATOMIC reload: build the full tool set with NO registry mutation first
-    // (buildTools is registry-read-only and throws on any authority failure), so
-    // a failed reload leaves the PREVIOUS registration intact. Only once the new
-    // set is known-good do we commit it in a single replacePluginTools swap —
-    // there is never a window where the plugin has zero tools.
-    const tools = await this.buildTools();
-    this.toolRegistry.replacePluginTools([this.pluginId], tools);
-    this.registeredToolNames.length = 0;
-    this.registeredToolNames.push(...tools.map((t) => t.name));
+    return Object.freeze(await this.buildTools());
+  }
+
+  /** Assignment-only publish half used by the bundle coordinator. */
+  publishPrepared(_tools: readonly Tool[]): void {
     this.started = true;
-    return [...this.registeredToolNames];
   }
 
   /**
@@ -164,6 +156,7 @@ export class PluginMcpHost {
           tool,
           (name, args) => this.invoke(name, args),
           this.operationGovernance?.[tool.name],
+          this.generationId,
         );
 
         // THEN #1182 provider-strict lint, fail-soft per tool: a schema
@@ -187,15 +180,6 @@ export class PluginMcpHost {
       await this.transport.close();
       throw err;
     }
-  }
-
-  /** Unregister the plugin's tools and close the transport. Idempotent. */
-  async stop(): Promise<void> {
-    if (!this.started) return;
-    this.toolRegistry.unregisterByPlugin(this.pluginId);
-    this.registeredToolNames.length = 0;
-    this.started = false;
-    await this.transport.close();
   }
 
   /**
@@ -241,6 +225,7 @@ export class PluginMcpHost {
     const uiPayload: McpUiPayload | undefined = uiMeta?.resourceUri
       ? {
           serverId: this.pluginId,
+          generationId: this.generationId,
           resourceUri: uiMeta.resourceUri,
           slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
           height: uiMeta.height,

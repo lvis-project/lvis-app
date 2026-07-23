@@ -43,7 +43,7 @@ function fixture() {
   });
   const epApiSha = makeRepo(epApiRoot, {
     "package.json": `${JSON.stringify({
-      dependencies: {
+      devDependencies: {
         "@lvis/plugin-sdk": `github:lvis-project/lvis-plugin-sdk#${sdkSha}`,
       },
     })}\n`,
@@ -93,6 +93,17 @@ test("rejects an SDK ref that ep-api does not consume", () => {
   const packagePath = join(f.epApiRoot, "package.json");
   writeFileSync(packagePath, '{"dependencies":{"@lvis/plugin-sdk":"github:lvis-project/lvis-plugin-sdk#main"}}\n');
   assert.throws(() => verifyPluginBundleE2EInputs(f), /ep-api must consume/);
+});
+
+test("rejects duplicate runtime and build-time SDK declarations", () => {
+  const f = fixture();
+  const packagePath = join(f.epApiRoot, "package.json");
+  const dependency = `github:lvis-project/lvis-plugin-sdk#${f.sdkSha}`;
+  writeFileSync(packagePath, `${JSON.stringify({
+    dependencies: { "@lvis/plugin-sdk": dependency },
+    devDependencies: { "@lvis/plugin-sdk": dependency },
+  })}\n`);
+  assert.throws(() => verifyPluginBundleE2EInputs(f), /exactly one dependency section/);
 });
 
 test("rejects cross-repository schema drift", () => {

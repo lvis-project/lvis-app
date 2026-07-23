@@ -1660,7 +1660,7 @@ export type LvisMcpApi = {
    * the server's declared policy; main sanitizes it and emits it as the proxy
    * document's CSP response header.
    */
-  readUiResource: (serverId: string, uri: string) => Promise<McpUiResourceBundle>;
+  readUiResource: (serverId: string, uri: string, generationId?: string) => Promise<McpUiResourceBundle>;
   /**
    * MCP Apps `oncalltool` — run a tool on the card's OWN server through the host's
    * risk/consent gate. `serverId` comes from the card payload the renderer holds,
@@ -1670,6 +1670,7 @@ export type LvisMcpApi = {
     serverId: string,
     name: string,
     args: Record<string, unknown>,
+    generationId?: string,
   ) => Promise<McpUiToolCallOutcome>;
   /**
    * MCP Apps `onmessage` (`ui/message`). `serverId` + `sessionId` are bound by the

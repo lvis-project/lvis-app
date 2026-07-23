@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { ActivePluginGeneration } from "../../plugins/plugin-generation-coordinator.js";
 import { ScriptHookManager } from "../script-hook-manager.js";
 import { PluginHookTrustStore, preparePluginHookGeneration } from "../plugin-hook-projection.js";
@@ -16,6 +16,9 @@ function generation(version: string, generationId: string, fingerprint = "a".rep
   return {
     pluginId: "bundle-hooks",
     pluginVersion: version,
+    artifactGenerationId: version === "1.0.0" && fingerprint === "a".repeat(64)
+      ? "a".repeat(64)
+      : "b".repeat(64),
     generationId,
     manifestSha256: "1".repeat(64),
     receiptSha256: "2".repeat(64),
@@ -55,7 +58,7 @@ describe("plugin-owned Hook projections", () => {
         owner: expect.objectContaining({
           pluginId: "bundle-hooks",
           pluginVersion: "1.0.0",
-          generationId: "g1",
+          generationId: "a".repeat(64),
           localId: "policy",
           fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
         }),
@@ -78,6 +81,42 @@ describe("plugin-owned Hook projections", () => {
       sessionId: "session-1",
       trustOrigin: "user-keyboard",
     })).rejects.toThrow(/cannot run without generation leasing/);
+  });
+
+  it("rejects a plugin Hook projection without an exact activation identity", () => {
+    const [projection] = preparePluginHookGeneration(generation("1.0.0", "g1"), payloadRoot);
+    const missingActivation = {
+      ...projection,
+      owner: { ...projection.owner, activationId: undefined },
+    };
+    const manager = new ScriptHookManager();
+    expect(() => manager.preparePluginGeneration(
+      [missingActivation] as never,
+      new PluginHookTrustStore(),
+      { pluginId: "bundle-hooks", generationId: "g1" },
+    )).toThrow(/activation identity is missing/);
+  });
+
+  it("fails closed when a hook snapshot races generation retirement", async () => {
+    const [projection] = preparePluginHookGeneration(generation("1.0.0", "g1"), payloadRoot);
+    const trust = new PluginHookTrustStore();
+    const manager = new ScriptHookManager();
+    trust.approve(projection);
+    manager.publishPluginGeneration([projection], trust);
+    const acquireExact = vi.fn(async () => {
+      throw new Error("generation g1 retired before lease acquisition");
+    });
+    manager.setPluginGenerationAccess({ acquireExact } as never);
+
+    await expect(manager.runPreToolUse({
+      toolName: "ep_write",
+      source: "plugin",
+      category: "write",
+      input: {},
+      sessionId: "session-race",
+      trustOrigin: "user-keyboard",
+    })).rejects.toThrow(/retired before lease acquisition/);
+    expect(acquireExact).toHaveBeenCalledOnce();
   });
 
   it("does not transfer trust across versions or fingerprints", () => {

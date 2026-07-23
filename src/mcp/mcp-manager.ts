@@ -28,8 +28,19 @@ const DEFAULT_CONFIG_PATH = join(lvisHome(), "mcp", "servers.json");
 interface PreparedBundledMcpRecord {
   projection: PreparedPluginMcpProjection;
   client: McpClient;
+  baseTools: readonly Tool[];
   tools: readonly Tool[];
   reused: boolean;
+}
+
+export interface BundledMcpDegradedState {
+  readonly pluginId: string;
+  readonly generationId: string;
+  readonly localId: string;
+  readonly code: "connection_failed";
+  readonly message: string;
+  readonly retryable: true;
+  readonly lastAttemptAt: string;
 }
 
 export interface PreparedBundledMcpGeneration {
@@ -38,14 +49,20 @@ export interface PreparedBundledMcpGeneration {
   readonly predecessorServerIds: readonly string[];
   readonly predecessorToolNames: readonly string[];
   readonly records: readonly PreparedBundledMcpRecord[];
+  readonly degraded: readonly BundledMcpDegradedState[];
   readonly registryReplacement: PreparedMcpRegistryReplacement;
+  readonly governancePublication: { publish(): void };
+  readonly permissionPublication?: { publish(): void };
   published: boolean;
 }
 
 export class McpManager {
-  private readonly clients = new Map<string, McpClient>();
-  private readonly bundledOwners = new Map<string, PluginMcpOwner>();
-  private readonly activeBundledServerIds = new Set<string>();
+  private clients = new Map<string, McpClient>();
+  private bundledOwners = new Map<string, PluginMcpOwner>();
+  private activeBundledServerIds = new Set<string>();
+  private bundledDegraded = new Map<string, readonly BundledMcpDegradedState[]>();
+  private readonly bundledBaseTools = new WeakMap<Tool, Tool>();
+  private readonly bundledToolSnapshots = new Map<string, readonly Tool[]>();
   private generationAccess: PluginRuntimeGenerationAccess | undefined;
   private readonly configPath: string;
   private readonly configLockPath: string;
@@ -97,6 +114,22 @@ export class McpManager {
 
   setPluginGenerationAccess(access: PluginRuntimeGenerationAccess): void {
     this.generationAccess = access;
+  }
+
+  bundledServerIdsForPlugin(pluginId: string): readonly string[] {
+    return Object.freeze(
+      [...this.bundledOwners]
+        .filter(([serverId, owner]) =>
+          this.activeBundledServerIds.has(serverId) && owner.pluginId === pluginId)
+        .map(([serverId]) => serverId),
+    );
+  }
+
+  getBundledGenerationDegraded(
+    pluginId: string,
+    generationId: string,
+  ): readonly BundledMcpDegradedState[] {
+    return this.bundledDegraded.get(`${pluginId}\0${generationId}`) ?? [];
   }
 
   // ─── Config Loading ─────────────────────────────────
@@ -254,19 +287,27 @@ export class McpManager {
       .filter((tool) => tool.mcpServerId && predecessorSet.has(tool.mcpServerId))
       .map((tool) => tool.name);
     const records: PreparedBundledMcpRecord[] = [];
+    const degraded: BundledMcpDegradedState[] = [];
     try {
       for (const projection of projections) {
+        if (!projection.owner.activationId) {
+          throw new Error(`bundled MCP activation identity is missing for '${projection.serverId}'`);
+        }
         if (
           projection.owner.pluginId !== owner.pluginId ||
-          projection.owner.generationId !== owner.generationId
+          projection.owner.activationId !== owner.generationId
         ) {
           throw new Error(`bundled MCP owner mismatch for '${projection.serverId}'`);
         }
         if (!trust.isApproved(projection)) continue;
         const existing = this.clients.get(projection.serverId);
         if (existing && this.activeBundledServerIds.has(projection.serverId)) {
-          const tools = this.toolRegistry.listAll().filter((tool) => tool.mcpServerId === projection.serverId);
-          records.push({ projection, client: existing, tools: Object.freeze(tools), reused: true });
+          const baseTools = this.bundledToolSnapshots.get(projection.serverId);
+          if (!baseTools) {
+            throw new Error(`bundled MCP tool snapshot is missing for '${projection.serverId}'`);
+          }
+          const tools = baseTools.map((tool) => this.bindBundledTool(tool, projection.owner));
+          records.push({ projection, client: existing, baseTools, tools: Object.freeze(tools), reused: true });
           continue;
         }
 
@@ -287,13 +328,38 @@ export class McpManager {
           await client.connect();
         } catch (error) {
           await this.disconnectBundledCandidate(client, projection.serverId, "failed preparation");
-          log.warn(`bundled MCP candidate degraded (${projection.serverId}): %s`, scrubSecrets(error instanceof Error ? error.message : String(error)));
+          const message = scrubSecrets(error instanceof Error ? error.message : String(error));
+          degraded.push(Object.freeze({
+            pluginId: owner.pluginId,
+            generationId: owner.generationId,
+            localId: projection.owner.localId,
+            code: "connection_failed",
+            message,
+            retryable: true,
+            lastAttemptAt: new Date().toISOString(),
+          }));
+          log.warn(`bundled MCP candidate degraded (${projection.serverId}): %s`, message);
           continue;
         }
-        const tools = stagingRegistry.listAll().map((tool) => this.bindBundledTool(tool, projection.owner));
-        records.push({ projection, client, tools: Object.freeze(tools), reused: false });
+        const baseTools = Object.freeze(stagingRegistry.listAll());
+        const tools = baseTools.map((tool) => this.bindBundledTool(tool, projection.owner));
+        records.push({ projection, client, baseTools, tools: Object.freeze(tools), reused: false });
       }
       const replacementTools = records.flatMap((record) => [...record.tools]);
+      const governancePublication = this.governance.prepareRuntimeApprovals(
+        predecessorServerIds,
+        records.map((record) => record.projection.approval),
+      );
+      const replacementNames = new Set(replacementTools.map((tool) => tool.name));
+      const permissionPublication = this.permissionManager?.prepareToolModeOverrides(
+        predecessorToolNames.filter((toolName) => !replacementNames.has(toolName)),
+        records.flatMap((record) => record.tools.map((tool) => ({
+          toolName: tool.name,
+          mode: record.projection.approval.toolPermissionMode ?? "strict",
+        }))),
+      );
+      // Reserve the shared ToolRegistry last. All other validation and snapshot
+      // construction has completed, so no later preparation failure can strand it.
       const registryReplacement = this.toolRegistry.reserveMcpReplacement(
         predecessorServerIds,
         replacementTools,
@@ -304,7 +370,10 @@ export class McpManager {
         predecessorServerIds: Object.freeze(predecessorServerIds),
         predecessorToolNames: Object.freeze(predecessorToolNames),
         records: Object.freeze(records),
+        degraded: Object.freeze(degraded),
         registryReplacement,
+        governancePublication,
+        ...(permissionPublication ? { permissionPublication } : {}),
         published: false,
       };
     } catch (error) {
@@ -321,26 +390,21 @@ export class McpManager {
 
   /** Synchronous half of the shared plugin generation publish point. */
   publishBundledGeneration(prepared: PreparedBundledMcpGeneration): void {
-    if (prepared.published) throw new Error("bundled MCP generation is already published");
+    if (prepared.published) return;
     prepared.registryReplacement.publish();
-    this.governance.replaceRuntimeApprovals(
-      prepared.predecessorServerIds,
-      prepared.records.map((record) => record.projection.approval),
-    );
+    prepared.governancePublication.publish();
+    prepared.permissionPublication?.publish();
     for (const serverId of prepared.predecessorServerIds) this.activeBundledServerIds.delete(serverId);
-    const replacementNames = new Set(prepared.records.flatMap((record) => record.tools.map((tool) => tool.name)));
-    for (const toolName of prepared.predecessorToolNames) {
-      if (!replacementNames.has(toolName)) this.permissionManager?.clearToolModeOverride(toolName);
-    }
     for (const record of prepared.records) {
       const serverId = record.projection.serverId;
       this.clients.set(serverId, record.client);
       this.bundledOwners.set(serverId, record.projection.owner);
+      this.bundledToolSnapshots.set(serverId, record.baseTools);
       this.activeBundledServerIds.add(serverId);
-      for (const tool of record.tools) {
-        this.permissionManager?.setToolModeOverride(tool.name, record.projection.approval.toolPermissionMode ?? "strict");
-      }
     }
+    const degradedKey = `${prepared.pluginId}\0${prepared.generationId}`;
+    if (prepared.degraded.length > 0) this.bundledDegraded.set(degradedKey, prepared.degraded);
+    else this.bundledDegraded.delete(degradedKey);
     prepared.published = true;
   }
 
@@ -373,13 +437,19 @@ export class McpManager {
     }
   }
 
-  /** Disconnect predecessor clients that the just-published replacement omitted. */
+  /**
+   * Disconnect omitted clients only when they belong to this same generation.
+   * A predecessor generation remains transport-live until its coordinator
+   * leases drain and exact-generation retirement owns its teardown.
+   */
   async retirePublishedMcpReplacement(prepared: PreparedBundledMcpGeneration): Promise<void> {
     if (!prepared.published) throw new Error("bundled MCP replacement is not published");
     const replacementIds = new Set(prepared.records.map((record) => record.projection.serverId));
     const errors: Error[] = [];
     for (const serverId of prepared.predecessorServerIds) {
       if (replacementIds.has(serverId)) continue;
+      const owner = this.bundledOwners.get(serverId);
+      if (!owner || owner.activationId !== prepared.generationId) continue;
       try { await this.disconnectBundledServer(serverId); } catch (error) {
         errors.push(error instanceof Error ? error : new Error(String(error)));
       }
@@ -390,9 +460,11 @@ export class McpManager {
   /** Retire only MCP clients and tools owned by the selected immutable generation. */
   async disconnectBundledGeneration(pluginId: string, generationId: string): Promise<void> {
     const ids = [...this.bundledOwners]
-      .filter(([, owner]) => owner.pluginId === pluginId && owner.generationId === generationId)
+      .filter(([, owner]) => owner.pluginId === pluginId &&
+        owner.activationId === generationId)
       .map(([serverId]) => serverId);
     for (const serverId of ids) await this.disconnectBundledServer(serverId);
+    this.bundledDegraded.delete(`${pluginId}\0${generationId}`);
   }
 
   private async disconnectBundledServer(serverId: string): Promise<void> {
@@ -409,6 +481,7 @@ export class McpManager {
     }
     this.clients.delete(serverId);
     this.bundledOwners.delete(serverId);
+    this.bundledToolSnapshots.delete(serverId);
     if (wasActive) {
       const toolNames = this.toolRegistry.listAll()
         .filter((tool) => tool.mcpServerId === serverId)
@@ -441,6 +514,7 @@ export class McpManager {
     for (const id of this.bundledOwners.keys()) this.governance.unregisterRuntimeApproval?.(id);
     this.bundledOwners.clear();
     this.activeBundledServerIds.clear();
+    this.bundledDegraded.clear();
     // b3 — teardown path: emit once per retired id AFTER client teardown.
     // Best-effort (may run at shutdown); the sink guards `isDestroyed()` and
     // swallows send errors so a send-after-window-destroy is a no-op.
@@ -843,12 +917,19 @@ export class McpManager {
 
   private bindBundledTool(tool: Tool, owner: PluginMcpOwner): Tool {
     const execute = tool.execute.bind(tool);
-    return Object.freeze({
+    const bound = Object.freeze({
       ...tool,
+      pluginGeneration: Object.freeze({
+        pluginId: owner.pluginId,
+        generationId: owner.activationId,
+      }),
       execute: async (...args: Parameters<Tool["execute"]>) => {
         const access = this.generationAccess;
         if (!access) throw new Error("plugin generation access is not configured for bundled MCP");
-        const lease = await access.acquireExact(owner.pluginId, owner.generationId);
+        const lease = await access.acquireExact(
+          owner.pluginId,
+          owner.activationId,
+        );
         try {
           return await execute(...args);
         } finally {
@@ -856,6 +937,8 @@ export class McpManager {
         }
       },
     });
+    this.bundledBaseTools.set(bound, tool);
+    return bound;
   }
 
   private async withBundledLease<T>(serverId: string, operation: () => Promise<T>): Promise<T> {
@@ -863,7 +946,10 @@ export class McpManager {
     if (!owner) return operation();
     const access = this.generationAccess;
     if (!access) throw new Error("plugin generation access is not configured for bundled MCP");
-    const lease = await access.acquireExact(owner.pluginId, owner.generationId);
+    const lease = await access.acquireExact(
+      owner.pluginId,
+      owner.activationId,
+    );
     try {
       return await operation();
     } finally {

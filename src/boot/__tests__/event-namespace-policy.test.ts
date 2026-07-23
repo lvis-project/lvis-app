@@ -13,7 +13,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginRuntime } from "../../plugins/runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "../../plugins/__tests__/test-helpers.js";
 import {
   canEmitEvent,
   classifySubscription,

@@ -96,24 +96,39 @@ function declarationsFor(manifest: Pick<PluginManifest, "skills" | "hooks" | "mc
   ];
 }
 
+type ContributionManifest = Pick<
+  PluginManifest,
+  "id" | "version" | "skills" | "hooks" | "mcpServers"
+> & Partial<Pick<PluginManifest, "tools" | "emittedEvents">>;
+
 /** Pure declaration validation shared by manifest load, packaging, and install. */
 export function resolvePluginContributionDeclarations(
-  manifest: Pick<PluginManifest, "id" | "version" | "skills" | "hooks" | "mcpServers">,
+  manifest: ContributionManifest,
 ): readonly ResolvedPluginContribution[] {
   const resolved: ResolvedPluginContribution[] = [];
   const pathOwners = new Map<string, string>();
+  const identifierOwners = new Map<string, string>([
+    [manifest.id, `plugin:${manifest.id}`],
+    ...(manifest.tools ?? []).map((tool) => [tool.name, `tool:${tool.name}`] as const),
+    ...(manifest.emittedEvents ?? []).map((event) => [event, `event:${event}`] as const),
+  ]);
   for (const [kind, declarations] of declarationsFor(manifest)) {
     if (declarations.length > MAX_DECLARATIONS_PER_KIND) {
       fail("too_many_declarations", manifest.id, kind);
     }
-    const ids = new Set<string>();
     for (const declaration of declarations) {
       const label = `${kind}:${String(declaration?.id)}`;
       if (!declaration || !LOCAL_ID_RE.test(declaration.id) || declaration.id.length > 128) {
         fail("invalid_local_id", manifest.id, label);
       }
-      if (ids.has(declaration.id)) fail("duplicate_local_id", manifest.id, label);
-      ids.add(declaration.id);
+      const identifierOwner = identifierOwners.get(declaration.id);
+      if (identifierOwner) {
+        const code = /^(?:skill|hook|mcpServer):/.test(identifierOwner)
+          ? "duplicate_local_id"
+          : "reserved_identifier_collision";
+        fail(code, manifest.id, label, identifierOwner);
+      }
+      identifierOwners.set(declaration.id, label);
       const path = normalizePluginContributionPath(manifest.id, label, declaration.path);
       const collisionKey = path.normalize("NFC").toLocaleLowerCase("en-US");
       for (const [existingPath, existingOwner] of pathOwners) {
@@ -144,7 +159,7 @@ function canonicalMemberPath(pluginId: string, rawPath: string): string {
 
 /** Validate declared contribution paths against an archive or installed-tree inventory. */
 export function validatePluginContributionInventory(
-  manifest: Pick<PluginManifest, "id" | "version" | "skills" | "hooks" | "mcpServers">,
+  manifest: ContributionManifest,
   members: readonly PluginArchiveMember[],
 ): readonly ResolvedPluginContribution[] {
   const declarations = resolvePluginContributionDeclarations(manifest);
@@ -162,11 +177,23 @@ export function validatePluginContributionInventory(
     const key = declaration.path.normalize("NFC").toLocaleLowerCase("en-US");
     if (declaration.kind === "skill") {
       const skillFile = `${key}/skill.md`;
+      if (inventory.get(key) === "file") {
+        fail("declared_directory_wrong_kind", manifest.id, `${declaration.kind}:${declaration.localId}`, declaration.path);
+      }
       const hasDirectory = inventory.get(key) === "directory" || [...inventory.keys()].some((entry) => entry.startsWith(`${key}/`));
       if (!hasDirectory) fail("declared_directory_missing", manifest.id, `${declaration.kind}:${declaration.localId}`, declaration.path);
       if (inventory.get(skillFile) !== "file") fail("skill_entry_missing", manifest.id, `${declaration.kind}:${declaration.localId}`, `${declaration.path}/SKILL.md`);
-    } else if (inventory.get(key) !== "file") {
-      fail("declared_file_missing", manifest.id, `${declaration.kind}:${declaration.localId}`, declaration.path);
+    } else {
+      if (inventory.get(key) === "directory") {
+        fail("declared_file_wrong_kind", manifest.id, `${declaration.kind}:${declaration.localId}`, declaration.path);
+      }
+      if (inventory.get(key) !== "file") {
+        fail("declared_file_missing", manifest.id, `${declaration.kind}:${declaration.localId}`, declaration.path);
+      }
+      const undeclaredChild = [...inventory.keys()].find((entry) => entry.startsWith(`${key}/`));
+      if (undeclaredChild) {
+        fail("undeclared_contribution_file", manifest.id, `${declaration.kind}:${declaration.localId}`, undeclaredChild);
+      }
     }
   }
   return declarations;
@@ -204,7 +231,7 @@ async function inventoryInstalledRoot(root: string, pluginId: string): Promise<P
 /** Read verified installed bytes into an immutable generation candidate. */
 export async function materializePluginContributions(
   pluginRoot: string,
-  manifest: Pick<PluginManifest, "id" | "version" | "skills" | "hooks" | "mcpServers">,
+  manifest: ContributionManifest,
 ): Promise<readonly MaterializedPluginContribution[]> {
   const inventory = await inventoryInstalledRoot(pluginRoot, manifest.id);
   const declarations = validatePluginContributionInventory(manifest, inventory);
@@ -273,11 +300,21 @@ export async function materializePluginGenerationRoot(
   const temporaryPayload = resolve(temporaryRoot, "payload");
   try {
     await mkdir(temporaryPayload, { recursive: true, mode: 0o700 });
+    const pluginRootReal = await realpath(pluginRoot);
     for (const entry of files) {
       const path = (entry as { path?: unknown } | null)?.path;
       if (typeof path !== "string") throw new Error(`plugin '${pluginId}' install receipt contains an invalid path`);
       const relativePath = normalizePluginContributionPath(pluginId, `receipt:${path}`, path);
       const source = resolve(pluginRoot, relativePath);
+      const sourceInfo = await lstat(source);
+      if (!sourceInfo.isFile() || sourceInfo.isSymbolicLink() || sourceInfo.nlink > 1) {
+        throw new Error(`plugin '${pluginId}' retained generation source is not a regular unlinked file: ${relativePath}`);
+      }
+      const sourceReal = await realpath(source);
+      const sourceRelative = relative(pluginRootReal, sourceReal);
+      if (sourceRelative.startsWith("..") || isAbsolute(sourceRelative)) {
+        throw new Error(`plugin '${pluginId}' retained generation source escapes plugin root: ${relativePath}`);
+      }
       const destination = resolve(temporaryPayload, relativePath);
       await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
       await copyFile(source, destination);

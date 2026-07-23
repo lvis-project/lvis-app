@@ -7,6 +7,8 @@ import { PluginContributionTrustStore } from "../plugins/plugin-contribution-tru
 export interface PluginMcpOwner {
   pluginId: string;
   pluginVersion: string;
+  /** Unique runtime activation identity; excluded from durable trust keys. */
+  activationId: string;
   generationId: string;
   localId: string;
   fingerprint: string;
@@ -176,7 +178,8 @@ export function preparePluginMcpGeneration(
     projections.push(buildProjection({
       pluginId: generation.pluginId,
       pluginVersion: generation.pluginVersion,
-      generationId: generation.generationId,
+      activationId: generation.generationId,
+      generationId: generation.artifactGenerationId,
       localId: contribution.localId,
       fingerprint,
     }, preparedConfig));

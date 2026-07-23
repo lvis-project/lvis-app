@@ -146,6 +146,7 @@ export function mcpToolToPluginTool(
   tool: DiscoveredMcpTool,
   invoke: PluginMcpInvoke,
   operationGovernance?: PluginToolOperationPolicy,
+  generationId?: string,
 ): Tool {
   const meta = tool._meta ?? {};
   // #885 — the host does NOT trust a plugin's self-declared per-tool category.
@@ -161,6 +162,7 @@ export function mcpToolToPluginTool(
     source: "plugin",
     category,
     pluginId,
+    ...(generationId ? { pluginGeneration: { pluginId, generationId } } : {}),
     operationGovernance,
     pathFields: readPathFields(meta),
     // MCP Apps `_meta.ui.visibility` ∌ "model" ⇒ app-only: the tool IS registered
@@ -189,9 +191,8 @@ export function mcpToolToPluginTool(
       const args = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>;
       try {
         const { text, uiPayload, rawResult } = await invoke(tool.name, args);
-        // Preserve the legacy `metadata.rawResult` / `metadata.uiPayload` channel
-        // (executor.ts + boot.ts read rawResult). rawResult is present iff the
-        // call succeeded, matching buildPluginTool's success-only metadata.
+        // Preserve the host's structured `metadata.rawResult` /
+        // `metadata.uiPayload` channel. rawResult is present only on success.
         const metadata: Record<string, unknown> = {};
         if (uiPayload) metadata.uiPayload = uiPayload;
         if (rawResult) metadata.rawResult = rawResult.value;

@@ -44,10 +44,10 @@ describe("PluginPhase constants", () => {
     }
   });
 
-  it("restart area has six independent failure-mode sub-phases (stop/reload/start × ok/fail)", () => {
+  it("restart area records stop failure and reload/start outcomes", () => {
     const values = Object.values(PluginPhase) as string[];
     const restartPhases = values.filter((v) => v.startsWith("lifecycle:restart:"));
-    const requiredSuffixes = ["stop:ok", "stop:fail", "reload:ok", "reload:fail", "start:ok", "start:fail"];
+    const requiredSuffixes = ["stop:fail", "reload:ok", "reload:fail", "start:ok", "start:fail"];
     for (const suffix of requiredSuffixes) {
       const hasPhase = restartPhases.some((v) => v.endsWith(suffix));
       expect(hasPhase, `missing restart phase ending with :${suffix}`).toBe(true);

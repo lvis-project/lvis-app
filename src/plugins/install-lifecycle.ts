@@ -1,5 +1,6 @@
 import { isAppUpdateInstallRequested } from "../main/app-update-install-intent.js";
 import type { NetworkAccessAcknowledgement, NetworkAccessGrant } from "../shared/network-access.js";
+import type { PluginAccessSpec, PluginManifest } from "./types.js";
 
 const inflightInstallLocks = new Map<string, Promise<unknown>>();
 let pendingPluginInstallOperations = 0;
@@ -48,6 +49,13 @@ class InstalledPluginVersionMismatchError extends Error {
 
 interface PluginInstallRuntime {
   listPluginIds(): string[];
+  activatePreparedArtifact<T>(input: {
+    pluginRoot: string;
+    manifest: PluginManifest;
+    receiptRaw: string;
+    approvedPluginAccess?: PluginAccessSpec;
+    durableCommit(): Promise<T>;
+  }): Promise<{ result: T; retirement: Promise<void> }>;
   addPlugin(pluginId: string): Promise<InstalledPluginStartState>;
   waitForPluginReady(pluginId: string): Promise<void>;
   removePlugin(pluginId: string): Promise<void>;
@@ -63,12 +71,19 @@ interface PluginLifecycleMarketplace {
 interface PluginInstallMarketplace extends PluginLifecycleMarketplace {
   list(): Promise<MarketplaceLifecycleCatalogItem[]>;
   getLiveCatalogVersion(pluginId: string): Promise<string | null>;
-  getInstalledVersion(pluginId: string): Promise<string | null>;
-  quarantinePlugin(pluginId: string, reason: string): Promise<unknown>;
   install(
     pluginId: string,
     onProgress?: (event: MarketplaceInstallerProgressEvent) => void,
-    options?: { networkAccessAcknowledgement?: NetworkAccessAcknowledgement },
+    options?: {
+      networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+      activatePreparedArtifact?: (prepared: {
+        pluginRoot: string;
+        manifest: PluginManifest;
+        receiptRaw: string;
+        approvedPluginAccess?: PluginAccessSpec;
+        durableCommit(): Promise<string>;
+      }) => Promise<{ result: string; retirement: Promise<void> }>;
+    },
   ): Promise<{ pluginId: string; installed: true }>;
 }
 
@@ -162,12 +177,9 @@ export async function installMarketplacePluginWithLifecycle(options: {
       pluginRuntime.listPluginIds().includes(currentCatalogState.pluginId);
     let restorePluginId = resolvedLifecyclePluginId;
     let startLifecycleAttempted = false;
-    let versionVerificationFailed = false;
-    let installedVersionBeforeInstall: string | null = null;
     try {
       if (hadExistingInstall) {
         broadcastInstallProgress?.({ slug: progressSlug, phase: "restarting" });
-        installedVersionBeforeInstall = await pluginMarketplace.getInstalledVersion(currentCatalogState.pluginId);
       }
 
       broadcastInstallProgress?.({ slug: progressSlug, phase: "installing" });
@@ -184,56 +196,32 @@ export async function installMarketplacePluginWithLifecycle(options: {
         }
       }, {
         networkAccessAcknowledgement,
+        activatePreparedArtifact: async (prepared) => {
+          if (expectedVersionForGuard && prepared.manifest.version !== expectedVersionForGuard) {
+            throw new InstalledPluginVersionMismatchError(
+              prepared.manifest.id,
+              expectedVersionForGuard,
+              prepared.manifest.version ?? null,
+            );
+          }
+          broadcastInstallProgress?.({ slug: progressSlug, phase: "preparing" });
+          return pluginRuntime.activatePreparedArtifact(prepared);
+        },
       });
       const installedPluginId = result.pluginId === requestedPluginId ? resolvedLifecyclePluginId : result.pluginId;
       restorePluginId = installedPluginId;
-      try {
-        await assertInstalledMarketplacePluginVersion({
-          pluginMarketplace,
-          pluginId: installedPluginId,
-          expectedVersion,
-        });
-      } catch (err) {
-        versionVerificationFailed = true;
-        try {
-          await rollbackFailedVersionVerification({
-            pluginId: installedPluginId,
-            wasLoadedBeforeStart: hadExistingInstall,
-            installedVersionBeforeInstall,
-            installedVersionAfterFailure: err instanceof InstalledPluginVersionMismatchError
-              ? err.installedVersion
-              : null,
-            pluginRuntime,
-            pluginMarketplace,
-            log,
-          });
-        } catch (rollbackErr) {
-          throw new Error(`install version verification failed and rollback failed for ${installedPluginId}: ${errorMessage(rollbackErr)} (original: ${errorMessage(err)})`);
-        }
-        throw err;
-      }
       startLifecycleAttempted = true;
-      await startInstalledPluginWithLifecycle({
-        pluginId: installedPluginId,
-        source: "marketplace",
-        rollbackMode: "marketplace",
-        wasLoadedBeforeStart: hadExistingInstall,
-        pluginRuntime,
-        pluginMarketplace,
-        broadcastInstallProgress: (payload) =>
-          broadcastInstallProgress?.({ ...payload, slug: progressSlug }),
-        emitPluginInstalled: emitPluginInstalled
-          ? (payload) => emitPluginInstalled({ pluginId: payload.pluginId, source: "marketplace" })
-          : undefined,
-        refreshPluginNotifications,
-        log,
-      });
+      if (!pluginRuntime.listPluginIds().includes(installedPluginId)) {
+        throw new Error(`atomic install committed without active runtime: ${installedPluginId}`);
+      }
+      broadcastInstallProgress?.({ slug: progressSlug, phase: "registering" });
+      emitPluginInstalled?.({ pluginId: installedPluginId, source: "marketplace" });
+      refreshPluginNotifications?.();
       return { ...result, pluginId: installedPluginId };
     } catch (err) {
       if (
         hadExistingInstall &&
         !startLifecycleAttempted &&
-        !versionVerificationFailed &&
         !pluginRuntime.listPluginIds().includes(restorePluginId)
       ) {
         await restoreRuntimePlugin({
@@ -246,101 +234,6 @@ export async function installMarketplacePluginWithLifecycle(options: {
       throw err;
     }
   });
-}
-
-async function rollbackFailedVersionVerification(options: {
-  pluginId: string;
-  wasLoadedBeforeStart: boolean;
-  installedVersionBeforeInstall: string | null;
-  installedVersionAfterFailure: string | null;
-  pluginRuntime: PluginInstallRuntime;
-  pluginMarketplace: PluginInstallMarketplace;
-  log?: InstallLifecycleLogger;
-}): Promise<void> {
-  const {
-    pluginId,
-    wasLoadedBeforeStart,
-    installedVersionBeforeInstall,
-    installedVersionAfterFailure,
-    pluginRuntime,
-    pluginMarketplace,
-    log,
-  } = options;
-
-  if (wasLoadedBeforeStart) {
-    if (
-      installedVersionBeforeInstall !== null &&
-      installedVersionAfterFailure === installedVersionBeforeInstall
-    ) {
-      if (!pluginRuntime.listPluginIds().includes(pluginId)) {
-        await restoreRuntimePlugin({
-          pluginRuntime,
-          pluginId,
-          log,
-          context: "install version verification no-op runtime restore",
-        });
-      }
-      return;
-    }
-    try {
-      await pluginMarketplace.rollbackPlugin(pluginId);
-    } catch (rollbackErr) {
-      await quarantineVersionVerificationFailure({
-        pluginId,
-        reason: `expectedVersion rollback failed: ${errorMessage(rollbackErr)}`,
-        pluginMarketplace,
-      });
-      throw rollbackErr;
-    }
-    if (!pluginRuntime.listPluginIds().includes(pluginId)) {
-      await restoreRuntimePlugin({
-        pluginRuntime,
-        pluginId,
-        log,
-        context: "install version verification rollback runtime restore",
-      });
-    }
-    return;
-  }
-
-  await pluginRuntime.removePlugin(pluginId).catch((rmPluginErr) => {
-    log?.warn(`install version verification rollback removePlugin failed for ${pluginId}: ${errorMessage(rmPluginErr)}`);
-  });
-  try {
-    await pluginMarketplace.uninstall(pluginId);
-  } catch (uninstallErr) {
-    await quarantineVersionVerificationFailure({
-      pluginId,
-      reason: `expectedVersion fresh-install cleanup failed: ${errorMessage(uninstallErr)}`,
-      pluginMarketplace,
-    });
-    throw uninstallErr;
-  }
-}
-
-async function quarantineVersionVerificationFailure(options: {
-  pluginId: string;
-  reason: string;
-  pluginMarketplace: PluginInstallMarketplace;
-}): Promise<void> {
-  const { pluginId, reason, pluginMarketplace } = options;
-  try {
-    await pluginMarketplace.quarantinePlugin(pluginId, reason);
-  } catch (quarantineErr) {
-    throw new Error(`install version verification quarantine failed for ${pluginId}: ${errorMessage(quarantineErr)} (original: ${reason})`);
-  }
-}
-
-async function assertInstalledMarketplacePluginVersion(options: {
-  pluginMarketplace: Pick<PluginInstallMarketplace, "getInstalledVersion">;
-  pluginId: string;
-  expectedVersion?: string;
-}): Promise<void> {
-  const expectedVersion = options.expectedVersion?.trim();
-  if (!expectedVersion) return;
-  const installedVersion = await options.pluginMarketplace.getInstalledVersion(options.pluginId);
-  if (installedVersion === expectedVersion) return;
-  throw new InstalledPluginVersionMismatchError(options.pluginId, expectedVersion, installedVersion);
 }
 
 function assertExpectedVersionMatchesTrustedCatalog(options: {

@@ -6,7 +6,7 @@
  * slot intact for unrelated injectors (e.g. boot's `pythonExecutable`).
  */
 import { describe, it, expect } from "vitest";
-import { PluginRuntime } from "../runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "./test-helpers.js";
 import { buildPluginContext } from "../runtime/sandbox.js";
 
 describe("PluginRuntime wildcard configOverrides (#893)", () => {

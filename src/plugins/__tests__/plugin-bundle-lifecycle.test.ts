@@ -5,13 +5,47 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
-import { SkillOverlay } from "../../main/skill-overlay.js";
 import { SkillStore } from "../../main/skill-store.js";
 import type { PluginManifest } from "../types.js";
-import { PluginBundleLifecycle } from "../plugin-bundle-lifecycle.js";
+import {
+  PluginBundleLifecycle,
+  type PluginBundleLifecycleDeps,
+} from "../plugin-bundle-lifecycle.js";
 import { hashReceiptFiles } from "../plugin-install-receipt.js";
 
 const roots: string[] = [];
+
+function inertLoopbackManager() {
+  const prepared = (pluginId: string, generationId: string) => ({
+    pluginId,
+    generationId,
+    tools: [],
+    registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+    published: false,
+    disconnectPredecessor: false,
+  });
+  return {
+    prepareGeneration: vi.fn(async (manifest: PluginManifest, generationId: string) =>
+      prepared(manifest.id, generationId)),
+    prepareRemoval: vi.fn((pluginId: string, generationId: string) =>
+      prepared(pluginId, generationId)),
+    publishGeneration: vi.fn((candidate: { published: boolean }) => { candidate.published = true; }),
+    postPublishGeneration: vi.fn(),
+    discardGeneration: vi.fn(async () => undefined),
+    retireGeneration: vi.fn(async () => undefined),
+  };
+}
+
+function makeLifecycle(
+  deps: Omit<PluginBundleLifecycleDeps, "loopbackManager" | "revokeOperationGeneration"> &
+    Partial<Pick<PluginBundleLifecycleDeps, "loopbackManager" | "revokeOperationGeneration">>,
+): PluginBundleLifecycle {
+  return new PluginBundleLifecycle({
+    loopbackManager: inertLoopbackManager() as never,
+    revokeOperationGeneration: vi.fn(),
+    ...deps,
+  });
+}
 
 async function fixture(hookContent = JSON.stringify({ hooks: { PreToolUse: [] } })) {
   const root = mkdtempSync(join(tmpdir(), "lvis-bundle-life-"));
@@ -58,6 +92,7 @@ async function fixture(hookContent = JSON.stringify({ hooks: { PreToolUse: [] } 
 
 function runtimeProjection(manifest: PluginManifest, pluginRoot: string) {
   return {
+    activationId: "test-activation",
     manifest,
     pluginRoot,
     instance: { handlers: {} },
@@ -76,6 +111,42 @@ describe("PluginBundleLifecycle", () => {
     );
   });
 
+  it("uses an explicit empty transition instead of fabricating an inactive generation", async () => {
+    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
+    const getRuntimeGenerationProjection = vi.fn(() => undefined as ReturnType<typeof runtimeProjection> | undefined);
+    const prepareRuntimeRemoval = vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() }));
+    const loopbackManager = inertLoopbackManager();
+    const lifecycle = makeLifecycle({
+      pluginRuntime: {
+        getPluginManifest: () => manifest,
+        getPluginRoot: () => pluginRoot,
+        getRuntimeGenerationProjection,
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval,
+        postPublishRuntimeGeneration: vi.fn(),
+        publishRuntimeGeneration: vi.fn(),
+        unpublishRuntimeGeneration: vi.fn(),
+        retireRuntimeGeneration: vi.fn(async () => undefined),
+      },
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: { bundledServerIdsForPlugin: vi.fn(() => []) } as never,
+      loopbackManager: loopbackManager as never,
+    });
+    const durableCommit = vi.fn(async () => "committed");
+
+    await expect(lifecycle.deactivateWithCommit("ep-api", durableCommit)).resolves.toBe("committed");
+    expect(prepareRuntimeRemoval).not.toHaveBeenCalled();
+    expect(loopbackManager.prepareRemoval).not.toHaveBeenCalled();
+
+    getRuntimeGenerationProjection.mockReturnValue(runtimeProjection(manifest, pluginRoot));
+    await expect(lifecycle.deactivateWithCommit("ep-api", durableCommit)).rejects.toThrow(
+      /live projections without an active bundle generation/,
+    );
+    expect(durableCommit).toHaveBeenCalledOnce();
+  });
+
   it("publishes Skills, keeps executable bundles fail-closed, approves exact owners, and tears down", async () => {
     const { root, pluginRoot, cacheRoot, manifest } = await fixture();
     const skillStore = new SkillStore({ userDir: join(root, "user-skills") });
@@ -89,12 +160,13 @@ describe("PluginBundleLifecycle", () => {
     }));
     const publishBundledGeneration = vi.fn((prepared) => { prepared.published = true; });
     const disconnectBundledGeneration = vi.fn(async () => undefined);
-    const lifecycle = new PluginBundleLifecycle({
+    const lifecycle = makeLifecycle({
       pluginRuntime: {
         getPluginManifest: () => manifest,
         getPluginRoot: () => pluginRoot,
         getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
-        prepareRuntimeGeneration: vi.fn(),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
@@ -102,9 +174,9 @@ describe("PluginBundleLifecycle", () => {
       },
       receiptCacheRoot: cacheRoot,
       skillStore,
-      skillOverlay: new SkillOverlay(),
       hookManager,
       mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
         prepareBundledGeneration,
         publishBundledGeneration,
         discardBundledGeneration: vi.fn(async () => undefined),
@@ -133,21 +205,126 @@ describe("PluginBundleLifecycle", () => {
     expect(generationId).toMatch(/^[a-f0-9]{64}$/);
     await lifecycle.deactivate("ep-api");
     await lifecycle.waitForRetirements();
-    expect(prepareBundledGeneration).toHaveBeenCalledTimes(3);
-    expect(publishBundledGeneration).toHaveBeenCalledTimes(3);
+    expect(prepareBundledGeneration).toHaveBeenCalledTimes(2);
+    expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
     expect(skillStore.listCatalogSync()).toEqual([]);
     expect(disconnectBundledGeneration).toHaveBeenCalledWith("ep-api", generationId);
+  });
+
+  it("keeps published MCP trust committed when predecessor retirement exhausts retries", async () => {
+    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
+    const publishBundledGeneration = vi.fn((prepared) => { prepared.published = true; });
+    const discardBundledGeneration = vi.fn(async () => undefined);
+    const retirePublishedMcpReplacement = vi.fn(async () => undefined);
+    const lifecycle = makeLifecycle({
+      pluginRuntime: {
+        getPluginManifest: () => manifest,
+        getPluginRoot: () => pluginRoot,
+        getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        postPublishRuntimeGeneration: vi.fn(),
+        publishRuntimeGeneration: vi.fn(),
+        unpublishRuntimeGeneration: vi.fn(),
+        retireRuntimeGeneration: vi.fn(async () => undefined),
+      },
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration: vi.fn(async ({ pluginId, generationId }) => ({
+          pluginId,
+          generationId,
+          predecessorServerIds: [],
+          predecessorToolNames: [],
+          records: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+        })),
+        publishBundledGeneration,
+        discardBundledGeneration,
+        retirePublishedMcpReplacement,
+        disconnectBundledGeneration: vi.fn(async () => undefined),
+      } as never,
+    });
+    await lifecycle.activate("ep-api");
+    await lifecycle.waitForRetirements();
+    retirePublishedMcpReplacement.mockRejectedValue(new Error("retirement endpoint token=secret"));
+
+    await lifecycle.approveMcpServer("ep-api", "ep");
+    await lifecycle.waitForRetirements();
+
+    const trust = lifecycle.listContributionTrust("ep-api")
+      .find((row) => row.kind === "mcpServer" && row.localId === "ep");
+    expect(trust?.status).toBe("approved");
+    expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
+    expect(discardBundledGeneration).not.toHaveBeenCalled();
+    const healthRaw = await readFile(join(cacheRoot, "plugin-generation-health.json"), "utf8");
+    expect(healthRaw).toContain("mcp-predecessor-retirement");
+    expect(healthRaw).not.toContain("token=secret");
+  });
+
+  it("restores durable MCP trust when a revoke candidate cannot be prepared", async () => {
+    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
+    const prepareBundledGeneration = vi.fn(async ({ pluginId, generationId }) => ({
+      pluginId,
+      generationId,
+      predecessorServerIds: [],
+      predecessorToolNames: [],
+      records: [],
+      registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+      published: false,
+    }));
+    const publishBundledGeneration = vi.fn((prepared) => { prepared.published = true; });
+    const lifecycle = makeLifecycle({
+      pluginRuntime: {
+        getPluginManifest: () => manifest,
+        getPluginRoot: () => pluginRoot,
+        getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        postPublishRuntimeGeneration: vi.fn(),
+        publishRuntimeGeneration: vi.fn(),
+        unpublishRuntimeGeneration: vi.fn(),
+        retireRuntimeGeneration: vi.fn(async () => undefined),
+      },
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration,
+        publishBundledGeneration,
+        discardBundledGeneration: vi.fn(async () => undefined),
+        retirePublishedMcpReplacement: vi.fn(async () => undefined),
+        disconnectBundledGeneration: vi.fn(async () => undefined),
+      } as never,
+    });
+
+    await lifecycle.activate("ep-api");
+    await lifecycle.approveMcpServer("ep-api", "ep");
+    prepareBundledGeneration.mockRejectedValueOnce(new Error("candidate preparation failed"));
+
+    await expect(lifecycle.revokeMcpServer("ep-api", "ep")).rejects.toThrow(
+      "candidate preparation failed",
+    );
+    expect(lifecycle.listContributionTrust("ep-api")).toContainEqual(
+      expect.objectContaining({ kind: "mcpServer", localId: "ep", status: "approved" }),
+    );
+    expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a malformed hidden candidate without replacing the active generation", async () => {
     const valid = await fixture();
     const skillStore = new SkillStore({ userDir: join(valid.root, "user-skills") });
-    const lifecycle = new PluginBundleLifecycle({
+    const lifecycle = makeLifecycle({
       pluginRuntime: {
         getPluginManifest: () => valid.manifest,
         getPluginRoot: () => valid.pluginRoot,
         getRuntimeGenerationProjection: () => runtimeProjection(valid.manifest, valid.pluginRoot),
-        prepareRuntimeGeneration: vi.fn(),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: valid.manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: valid.manifest.id, publish: vi.fn() })),
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
@@ -155,9 +332,9 @@ describe("PluginBundleLifecycle", () => {
       },
       receiptCacheRoot: valid.cacheRoot,
       skillStore,
-      skillOverlay: new SkillOverlay(),
       hookManager: new ScriptHookManager(),
       mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
         prepareBundledGeneration: vi.fn(async () => ({
           predecessorServerIds: [],
           predecessorToolNames: [],
@@ -189,13 +366,23 @@ describe("PluginBundleLifecycle", () => {
     const skillStore = new SkillStore({ userDir: join(root, "user-skills") });
     const publishBundledGeneration = vi.fn((prepared) => { prepared.published = true; });
     const disconnectBundledGeneration = vi.fn(async () => undefined);
-    const loopbackManager = { start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) };
-    const lifecycle = new PluginBundleLifecycle({
+    const revokeOperationGeneration = vi.fn();
+    const loopbackPrepared = (generationId: string) => ({ pluginId: "ep-api", generationId });
+    const loopbackManager = {
+      prepareGeneration: vi.fn(async (_manifest, generationId) => loopbackPrepared(generationId)),
+      prepareRemoval: vi.fn((_pluginId, generationId) => loopbackPrepared(generationId)),
+      publishGeneration: vi.fn(),
+      postPublishGeneration: vi.fn(),
+      discardGeneration: vi.fn(async () => undefined),
+      retireGeneration: vi.fn(async () => undefined),
+    };
+    const lifecycle = makeLifecycle({
       pluginRuntime: {
         getPluginManifest: () => manifest,
         getPluginRoot: () => pluginRoot,
         getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
-        prepareRuntimeGeneration: vi.fn(),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
@@ -203,9 +390,9 @@ describe("PluginBundleLifecycle", () => {
       },
       receiptCacheRoot: cacheRoot,
       skillStore,
-      skillOverlay: new SkillOverlay(),
       hookManager: new ScriptHookManager(),
       mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
         prepareBundledGeneration: vi.fn(async () => ({
           predecessorServerIds: [],
           predecessorToolNames: [],
@@ -219,6 +406,7 @@ describe("PluginBundleLifecycle", () => {
         disconnectBundledGeneration,
       } as never,
       loopbackManager,
+      revokeOperationGeneration,
     });
     await lifecycle.activate("ep-api");
     const generationId = lifecycle.getActive("ep-api")?.generationId;
@@ -232,13 +420,16 @@ describe("PluginBundleLifecycle", () => {
 
     expect(lifecycle.getActive("ep-api")?.generationId).toBe(generationId);
     expect(skillStore.listCatalogSync()).toEqual([]);
-    expect(loopbackManager.stop).toHaveBeenCalledWith("ep-api");
+    expect(loopbackManager.prepareRemoval).toHaveBeenCalledWith("ep-api", generationId, []);
+    expect(loopbackManager.retireGeneration).toHaveBeenCalledWith("ep-api", generationId);
     expect(disconnectBundledGeneration).toHaveBeenCalledWith("ep-api", generationId);
+    expect(revokeOperationGeneration).toHaveBeenCalledWith("ep-api", generationId);
 
     await lifecycle.setContributionsEnabled("ep-api", true);
+    expect(loopbackManager.prepareGeneration).toHaveBeenCalled();
     expect(skillStore.listCatalogSync()).toHaveLength(1);
-    expect(loopbackManager.start).toHaveBeenLastCalledWith(manifest);
-    expect(publishBundledGeneration).toHaveBeenCalledTimes(3);
+    expect(loopbackManager.publishGeneration).toHaveBeenCalled();
+    expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
   });
 
   it("journals a failed retirement and retries exact-generation cleanup", async () => {
@@ -246,12 +437,13 @@ describe("PluginBundleLifecycle", () => {
     const retireRuntimeGeneration = vi.fn()
       .mockRejectedValueOnce(new Error("stop failed"))
       .mockResolvedValue(undefined);
-    const lifecycle = new PluginBundleLifecycle({
+    const lifecycle = makeLifecycle({
       pluginRuntime: {
         getPluginManifest: () => manifest,
         getPluginRoot: () => pluginRoot,
         getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
-        prepareRuntimeGeneration: vi.fn(),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
@@ -259,9 +451,9 @@ describe("PluginBundleLifecycle", () => {
       },
       receiptCacheRoot: cacheRoot,
       skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
-      skillOverlay: new SkillOverlay(),
       hookManager: new ScriptHookManager(),
       mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
         prepareBundledGeneration: vi.fn(async () => ({
           predecessorServerIds: [],
           predecessorToolNames: [],
@@ -283,5 +475,71 @@ describe("PluginBundleLifecycle", () => {
     expect(retireRuntimeGeneration).toHaveBeenCalledTimes(2);
     const journal = JSON.parse(await readFile(join(cacheRoot, "plugin-retirement-journal.json"), "utf8"));
     expect(journal.retirements).toEqual([]);
+  });
+
+  it("durably journals internal runtime and MCP post-commit faults without rolling back the committed generation", async () => {
+    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
+    const lifecycle = makeLifecycle({
+      pluginRuntime: {
+        getPluginManifest: () => manifest,
+        getPluginRoot: () => pluginRoot,
+        getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        postPublishRuntimeGeneration: vi.fn(async () => { throw new Error("runtime restore failed"); }),
+        publishRuntimeGeneration: vi.fn(),
+        unpublishRuntimeGeneration: vi.fn(),
+        retireRuntimeGeneration: vi.fn(async () => undefined),
+      },
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration: vi.fn(async () => ({
+          predecessorServerIds: [],
+          predecessorToolNames: [],
+          records: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+          degraded: [],
+        })),
+        publishBundledGeneration: vi.fn(() => { throw new Error("publication invariant failed"); }),
+        discardBundledGeneration: vi.fn(async () => undefined),
+        retirePublishedMcpReplacement: vi.fn(async () => undefined),
+        disconnectBundledGeneration: vi.fn(async () => undefined),
+      } as never,
+    });
+    const receiptRaw = await readFile(join(cacheRoot, "ep-api", "install-receipt.json"), "utf8");
+    const durableCommit = vi.fn(async () => "committed");
+
+    const committed = await lifecycle.replaceRuntimeWithCommit(
+      runtimeProjection(manifest, pluginRoot),
+      receiptRaw,
+      durableCommit,
+    );
+
+    expect(committed.result).toBe("committed");
+    expect(durableCommit).toHaveBeenCalledOnce();
+    expect(lifecycle.getActive("ep-api")).toBeDefined();
+    const health = JSON.parse(await readFile(join(cacheRoot, "plugin-generation-health.json"), "utf8"));
+    expect(health.faults).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        pluginId: "ep-api",
+        phase: "runtime-post-publish",
+        errorName: "Error",
+        errorCode: null,
+        message: "internal post-commit fault",
+      }),
+      expect.objectContaining({
+        pluginId: "ep-api",
+        phase: "mcp-publication",
+        errorName: "Error",
+        errorCode: null,
+        message: "internal post-commit fault",
+      }),
+    ]));
+    expect(JSON.stringify(health)).not.toContain("runtime restore failed");
+    expect(JSON.stringify(health)).not.toContain("publication invariant failed");
   });
 });

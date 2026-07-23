@@ -22,8 +22,10 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime } from "../runtime.js";
-import { compileLegacyToolSurface } from "./test-helpers.js";
+import {
+  compileLegacyToolSurface,
+  TestPluginRuntime as PluginRuntime,
+} from "./test-helpers.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -13,10 +13,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginRuntime } from "../runtime.js";
 import { PluginPhase } from "../lifecycle-log.js";
 import { mkdtempSync } from "node:fs";
-import { compileLegacyToolSurface } from "./test-helpers.js";
+import {
+  compileLegacyToolSurface,
+  TestPluginRuntime as PluginRuntime,
+} from "./test-helpers.js";
 
 describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
   let testDir: string;

@@ -56,7 +56,6 @@ import {
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
   installMarketplacePluginWithLifecycle,
-  startInstalledPluginWithLifecycle,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
 import {
@@ -612,42 +611,34 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       message: t("mainDialog.installLocalPluginMessage"),
     });
     if (canceled || !filePaths[0]) return null;
-    // Atomic install — same rollback-on-addPlugin-fail contract as the
-    // marketplace install path above. local-dev installs are dev-mode
-    // only but a failed import (e.g. forgot to `bun run build` before
-    // selecting the dir) still left a dangling registry entry pre-fix.
+    // Local-dev uses the same staged generation transaction as marketplace:
+    // candidate import/start happens from immutable bytes before live payload,
+    // receipt, registry, or active pointer publication.
     const pluginId = await pluginMarketplace.resolveLocalInstallPluginId(filePaths[0]);
     return await withPluginInstallLock(pluginId, async () => {
-      const result = await pluginMarketplace.installLocal(filePaths[0]);
       try {
-        await startInstalledPluginWithLifecycle({
-          pluginId: result.pluginId,
-          source: "local-dev",
-          rollbackMode: "local-dev",
-          pluginRuntime,
-          pluginMarketplace,
-          broadcastInstallProgress: (payload) =>
-            broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
-          emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
-          refreshPluginNotifications,
-          log,
+        const result = await pluginMarketplace.installLocal(filePaths[0], {
+          activatePreparedArtifact: (prepared) => pluginRuntime.activatePreparedArtifact<string>(prepared),
         });
+        if (!pluginRuntime.listPluginIds().includes(result.pluginId)) {
+          throw new Error(`atomic local install committed without active runtime: ${result.pluginId}`);
+        }
+        emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "local-dev" });
+        refreshPluginNotifications?.();
+        broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
+          slug: result.pluginId,
+          success: true,
+        });
+        return result;
       } catch (err) {
         const message = errMessage(err) || "addPlugin failed";
         broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
-          slug: result.pluginId,
+          slug: pluginId,
           success: false,
           error: message,
         });
         throw err;
       }
-      // Mirror the marketplace install path's renderer broadcast so
-      // `App.tsx` `onPluginInstallResult` listener fires `refreshViews()`.
-      broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
-        slug: result.pluginId,
-        success: true,
-      });
-      return result;
     });
   });
 
@@ -1133,6 +1124,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   const mcpUiSources = {
     loopback: {
       has: (serverId: string) => deps.pluginLoopbackManager.has(serverId),
+      assertCardGeneration: (serverId: string, generationId: string) =>
+        deps.pluginLoopbackManager.assertCardGeneration(serverId, generationId),
       readUiResource: (serverId: string, uri: string) =>
         deps.pluginLoopbackManager.readUiResource(serverId, uri),
       ...createLoopbackToolCallSource({
@@ -1183,7 +1176,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configRemove, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.removeConfig(serverId);
   });
-  ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string) => {
+  ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string, generationId?: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
     // b1 — install the per-server network gate BEFORE the resource is read. (It is
     // the deny-by-default declared-origin gate now, not the old CDN allowlist.)
@@ -1202,7 +1195,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // the loopback host FIRST, else the external MCP client registry. ONE
     // resolver, shared with the oncalltool seam below — no duplicated backend
     // branch.
-    const backend = resolveMcpUiBackend(serverId, mcpUiSources);
+    const backend = resolveMcpUiBackend(serverId, mcpUiSources, generationId);
 
     // The resource carries its OWN `_meta.ui.csp` — main reads it here and never
     // accepts one from the renderer. A compromised renderer must not be able to
@@ -1250,7 +1243,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // validator (fails closed on an empty frame URL, rejects plugin-ui-shell frames),
   // exactly like `plugins.call` and `mcp.openDetached`. The MCP-app <webview> itself
   // is on the `lvis-mcp-app:` scheme and could never pass either validator.
-  ipcMain.handle(CHANNELS.mcp.callTool, async (e, serverId: unknown, name: unknown, args: unknown) => {
+  ipcMain.handle(CHANNELS.mcp.callTool, async (e, serverId: unknown, name: unknown, args: unknown, generationId?: unknown) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.mcp.callTool, e);
       return UNAUTHORIZED_FRAME;
@@ -1262,7 +1255,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: false, error: "invalid-tool-name", message: "tool name must be a non-empty string" } satisfies McpUiToolCallOutcome;
     }
 
-    const backend = resolveMcpUiBackend(serverId, mcpUiSources);
+    const backend = resolveMcpUiBackend(
+      serverId,
+      mcpUiSources,
+      typeof generationId === "string" ? generationId : undefined,
+    );
 
     // Invariant 2 — the card's server must OWN the tool it asks for.
     const owner = backend.resolveToolOwner(name);
@@ -1294,6 +1291,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
             input,
             appSessionId,
             origin: "mcp-app",
+            ...(grantTarget.expectedGenerationId
+              ? { expectedGenerationId: grantTarget.expectedGenerationId }
+              : {}),
           })
         : undefined;
       const result = await backend.callTool(name, input, {

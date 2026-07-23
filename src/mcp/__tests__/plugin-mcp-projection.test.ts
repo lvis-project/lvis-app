@@ -27,6 +27,9 @@ function generation(version = "1.0.0", generationId = "g1", fingerprint = "a".re
   return {
     pluginId: "ep-api",
     pluginVersion: version,
+    artifactGenerationId: version === "1.0.0" && fingerprint === "a".repeat(64)
+      ? "a".repeat(64)
+      : "b".repeat(64),
     generationId,
     manifestSha256: "1".repeat(64),
     receiptSha256: "2".repeat(64),
@@ -52,6 +55,9 @@ const configPath = join(testDir, "servers.json");
 const registerRuntimeApproval = vi.fn();
 const unregisterRuntimeApproval = vi.fn();
 const replaceRuntimeApprovals = vi.fn();
+const prepareRuntimeApprovals = vi.fn((predecessors, approvals) => ({
+  publish: () => replaceRuntimeApprovals(predecessors, approvals),
+}));
 const scopedRuntimeApproval = vi.fn(() => ({
   applyToolNamespace: (_serverId: string, toolName: string) => toolName,
 }));
@@ -62,6 +68,7 @@ function manager(): McpManager {
       registerRuntimeApproval,
       unregisterRuntimeApproval,
       replaceRuntimeApprovals,
+      prepareRuntimeApprovals,
       scopedRuntimeApproval,
       applyToolNamespace: (_serverId: string, toolName: string) => toolName,
     } as never,
@@ -94,6 +101,19 @@ describe("plugin-owned MCP projections", () => {
     expect(prepared.records).toEqual([]);
     expect(connect).not.toHaveBeenCalled();
     expect(registerRuntimeApproval).not.toHaveBeenCalled();
+  });
+
+  it("rejects a bundled MCP projection without an exact activation identity", async () => {
+    const [projection] = preparePluginMcpGeneration(generation(), testDir);
+    const missingActivation = {
+      ...projection,
+      owner: { ...projection.owner, activationId: undefined },
+    };
+    await expect(manager().prepareBundledGeneration(
+      { pluginId: "ep-api", generationId: "g1" },
+      [missingActivation] as never,
+      new PluginMcpTrustStore(),
+    )).rejects.toThrow(/activation identity is missing/);
   });
 
   it("connects an approved descriptor without persisting it to global config", async () => {
@@ -143,7 +163,10 @@ describe("plugin-owned MCP projections", () => {
   it("tears down only servers owned by the retired generation", async () => {
     const trust = new PluginMcpTrustStore();
     const first = preparePluginMcpGeneration(generation("1.0.0", "g1"), testDir)[0];
-    const second = preparePluginMcpGeneration(generation("1.0.0", "g2"), testDir)[0];
+    const second = preparePluginMcpGeneration(
+      generation("1.0.0", "g2", "b".repeat(64)),
+      testDir,
+    )[0];
     trust.approve(first);
     trust.approve(second);
     const mgr = manager();

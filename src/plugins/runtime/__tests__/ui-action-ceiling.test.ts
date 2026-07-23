@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime } from "../../runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "../../__tests__/test-helpers.js";
 
 const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 

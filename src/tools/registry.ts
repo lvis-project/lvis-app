@@ -65,6 +65,12 @@ export interface PreparedMcpRegistryReplacement {
   cancel(): void;
 }
 
+export interface PreparedPluginRegistryReplacement {
+  readonly replacementTools: readonly Tool[];
+  publish(): void;
+  cancel(): void;
+}
+
 /**
  * Tool-Level Deferral — compress a tool description for the catalog: first
  * sentence (up to the first period) capped at ~100 chars. Keeps the per-turn
@@ -159,16 +165,18 @@ export class ToolRegistry {
    * Populated/updated on every register; may point at a deprecated tool when
    * no active version exists.
    */
-  private readonly tools = new Map<string, Tool>();
+  private tools = new Map<string, Tool>();
   /**
    * `name → (version → tool)` — secondary index that keeps every registered
    * version so legacy callers can pin a specific version via
    * {@link findByNameVersion} while the LLM-facing path sees only the latest.
    */
-  private readonly versioned = new Map<string, Map<string, Tool>>();
+  private versioned = new Map<string, Map<string, Tool>>();
   private denyRules: DenyRule[] = [];
   private generation = 0;
   private readonly reservedMcpToolNames = new Map<string, symbol>();
+  private readonly reservedPluginOwners = new Map<string, symbol>();
+  private readonly reservedMcpOwners = new Map<string, symbol>();
 
   constructor(private readonly parentGeneration?: () => string) {}
 
@@ -184,6 +192,12 @@ export class ToolRegistry {
   register(tool: Tool): void {
     if (this.reservedMcpToolNames.has(tool.name)) {
       throw new Error(`Tool name is reserved by an MCP generation transition: ${tool.name}`);
+    }
+    if (tool.pluginId && this.reservedPluginOwners.has(tool.pluginId)) {
+      throw new Error(`Plugin tool owner is reserved by a generation transition: ${tool.pluginId}`);
+    }
+    if (tool.mcpServerId && this.reservedMcpOwners.has(tool.mcpServerId)) {
+      throw new Error(`MCP tool owner is reserved by a generation transition: ${tool.mcpServerId}`);
     }
     const versionMap = this.addToVersioned(this.versioned, tool);
     this.tools.set(tool.name, this.pickLatest(versionMap));
@@ -220,6 +234,11 @@ export class ToolRegistry {
    */
   replacePluginTools(pluginIds: Iterable<string>, replacementTools: Tool[]): void {
     const targetPluginIds = new Set([...pluginIds].filter((id) => id.length > 0));
+    for (const pluginId of targetPluginIds) {
+      if (this.reservedPluginOwners.has(pluginId)) {
+        throw new Error(`Plugin tool owner is reserved by a generation transition: ${pluginId}`);
+      }
+    }
     if (targetPluginIds.size === 0) {
       if (replacementTools.length > 0) {
         throw new Error("replacePluginTools requires pluginIds for replacement tools");
@@ -230,6 +249,9 @@ export class ToolRegistry {
     for (const tool of replacementTools) {
       if (tool.source !== "plugin" || !tool.pluginId) {
         throw new Error(`replacePluginTools expected plugin-sourced tool: ${tool.name}`);
+      }
+      if (this.reservedMcpToolNames.has(tool.name)) {
+        throw new Error(`Tool name is reserved by a generation transition: ${tool.name}`);
       }
       if (!targetPluginIds.has(tool.pluginId)) {
         throw new Error(
@@ -269,6 +291,9 @@ export class ToolRegistry {
    * given MCP server in one pass. Called by McpManager.killSwitch.
    */
   unregisterByMcp(mcpServerId: string): void {
+    if (this.reservedMcpOwners.has(mcpServerId)) {
+      throw new Error(`MCP tool owner is reserved by a generation transition: ${mcpServerId}`);
+    }
     let changed = false;
     for (const [name, versionMap] of this.versioned) {
       for (const [version, tool] of versionMap) {
@@ -292,7 +317,6 @@ export class ToolRegistry {
     replacementTools: readonly Tool[],
   ): PreparedMcpRegistryReplacement {
     const predecessors = new Set(predecessorServerIds);
-    const token = Symbol("mcp-generation-replacement");
     const names = new Set(replacementTools.map((tool) => tool.name));
     for (const tool of replacementTools) {
       if (tool.source !== "mcp" || !tool.mcpServerId) {
@@ -304,29 +328,39 @@ export class ToolRegistry {
         throw new Error(`MCP replacement tool name is already reserved: ${name}`);
       }
     }
+    const replacementOwners = new Set(replacementTools.map((tool) => tool.mcpServerId!));
+    const reservedOwners = new Set([...predecessors, ...replacementOwners]);
+    for (const owner of reservedOwners) {
+      if (this.reservedMcpOwners.has(owner)) {
+        throw new Error(`MCP tool owner is already reserved: ${owner}`);
+      }
+    }
     const validate = this.cloneVersioned();
     this.removeMcpOwners(validate, predecessors);
     for (const tool of replacementTools) this.addToVersioned(validate, tool);
+    this.buildLatestMap(validate);
+    const token = Symbol("mcp-generation-replacement");
     for (const name of names) this.reservedMcpToolNames.set(name, token);
+    for (const owner of reservedOwners) this.reservedMcpOwners.set(owner, token);
 
     let settled = false;
     const releaseReservations = () => {
       for (const name of names) {
         if (this.reservedMcpToolNames.get(name) === token) this.reservedMcpToolNames.delete(name);
       }
+      for (const owner of reservedOwners) {
+        if (this.reservedMcpOwners.get(owner) === token) this.reservedMcpOwners.delete(owner);
+      }
     };
     return Object.freeze({
       replacementTools: Object.freeze([...replacementTools]),
       publish: () => {
-        if (settled) throw new Error("MCP registry replacement is already settled");
-        const nextVersioned = this.cloneVersioned();
-        this.removeMcpOwners(nextVersioned, predecessors);
-        for (const tool of replacementTools) this.addToVersioned(nextVersioned, tool);
-        const nextTools = this.buildLatestMap(nextVersioned);
-        this.versioned.clear();
-        for (const [name, versionMap] of nextVersioned) this.versioned.set(name, versionMap);
-        this.tools.clear();
-        for (const [name, tool] of nextTools) this.tools.set(name, tool);
+        if (settled) return;
+        const current = this.cloneVersioned();
+        this.removeMcpOwners(current, predecessors);
+        for (const tool of replacementTools) this.addToVersioned(current, tool);
+        this.versioned = current;
+        this.tools = this.buildLatestMap(current);
         this.generation += 1;
         settled = true;
         releaseReservations();
@@ -335,6 +369,93 @@ export class ToolRegistry {
         if (settled) return;
         settled = true;
         releaseReservations();
+      },
+    });
+  }
+
+  /** Prebuild a plugin-owned registry snapshot; publish is assignment-only. */
+  reservePluginReplacement(
+    pluginId: string,
+    replacementTools: readonly Tool[],
+    predecessorMcpServerIds: Iterable<string> = [],
+  ): PreparedPluginRegistryReplacement {
+    if (!pluginId) throw new Error("Plugin registry replacement requires pluginId");
+    if (this.reservedPluginOwners.has(pluginId)) {
+      throw new Error(`Plugin tool owner is already reserved: ${pluginId}`);
+    }
+    for (const tool of replacementTools) {
+      if (tool.source !== "plugin" || tool.pluginId !== pluginId) {
+        throw new Error(`Plugin replacement expected '${pluginId}' tool: ${tool.name}`);
+      }
+    }
+    const nextVersioned = this.cloneVersioned();
+    const mcpPredecessors = new Set(predecessorMcpServerIds);
+    for (const [name, versionMap] of nextVersioned) {
+      for (const [version, tool] of versionMap) {
+        if (
+          (tool.source === "plugin" && tool.pluginId === pluginId) ||
+          (tool.mcpServerId !== undefined && mcpPredecessors.has(tool.mcpServerId))
+        ) {
+          versionMap.delete(version);
+        }
+      }
+      if (versionMap.size === 0) nextVersioned.delete(name);
+    }
+    for (const tool of replacementTools) this.addToVersioned(nextVersioned, tool);
+    this.buildLatestMap(nextVersioned);
+    const token = Symbol("plugin-generation-replacement");
+    const mcpPredecessorOwners = mcpPredecessors;
+    for (const owner of mcpPredecessorOwners) {
+      if (this.reservedMcpOwners.has(owner)) {
+        throw new Error(`MCP tool owner is already reserved: ${owner}`);
+      }
+    }
+    const names = new Set(replacementTools.map((tool) => tool.name));
+    for (const name of names) {
+      if (this.reservedMcpToolNames.has(name)) {
+        throw new Error(`Tool name is already reserved: ${name}`);
+      }
+    }
+    this.reservedPluginOwners.set(pluginId, token);
+    for (const owner of mcpPredecessorOwners) this.reservedMcpOwners.set(owner, token);
+    for (const name of names) this.reservedMcpToolNames.set(name, token);
+    let settled = false;
+    const release = () => {
+      if (this.reservedPluginOwners.get(pluginId) === token) this.reservedPluginOwners.delete(pluginId);
+      for (const owner of mcpPredecessorOwners) {
+        if (this.reservedMcpOwners.get(owner) === token) this.reservedMcpOwners.delete(owner);
+      }
+      for (const name of names) {
+        if (this.reservedMcpToolNames.get(name) === token) this.reservedMcpToolNames.delete(name);
+      }
+    };
+    return Object.freeze({
+      replacementTools: Object.freeze([...replacementTools]),
+      publish: () => {
+        if (settled) return;
+        const current = this.cloneVersioned();
+        for (const [name, versionMap] of current) {
+          for (const [version, tool] of versionMap) {
+            if (
+              (tool.source === "plugin" && tool.pluginId === pluginId) ||
+              (tool.mcpServerId !== undefined && mcpPredecessorOwners.has(tool.mcpServerId))
+            ) {
+              versionMap.delete(version);
+            }
+          }
+          if (versionMap.size === 0) current.delete(name);
+        }
+        for (const tool of replacementTools) this.addToVersioned(current, tool);
+        this.versioned = current;
+        this.tools = this.buildLatestMap(current);
+        this.generation += 1;
+        settled = true;
+        release();
+      },
+      cancel: () => {
+        if (settled) return;
+        settled = true;
+        release();
       },
     });
   }

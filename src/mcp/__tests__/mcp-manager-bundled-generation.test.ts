@@ -46,6 +46,7 @@ function generation(generationId: string): ActivePluginGeneration {
   return {
     pluginId: "ep-api",
     pluginVersion: "1.0.0",
+    artifactGenerationId: "a".repeat(64),
     generationId,
     manifestSha256: "1".repeat(64),
     receiptSha256: "2".repeat(64),
@@ -85,6 +86,7 @@ describe("McpManager bundled generation", () => {
       getActive: vi.fn(() => undefined),
       acquire: vi.fn(async () => { throw new Error("not used"); }),
       acquireExact,
+      runWithLease: vi.fn(async (_lease, operation) => operation()),
     });
 
     const trust = new PluginMcpTrustStore();

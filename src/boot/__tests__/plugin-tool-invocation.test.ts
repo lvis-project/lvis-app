@@ -6,7 +6,8 @@ import {
   isAppOnlyRuntimeInvocation,
   appOnlyRuntimeInvocationRequiresUserAction,
 } from "../plugin-tool-invocation.js";
-import { PluginRuntime, type PluginToolInvocationContext } from "../../plugins/runtime.js";
+import type { PluginToolInvocationContext } from "../../plugins/runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "../../plugins/__tests__/test-helpers.js";
 import {
   currentInvocationOrigin,
   runWithInvocationOrigin,

@@ -52,7 +52,16 @@ const okDelegate: PluginToolDelegate = vi.fn(async (name) => ({
 describe("#885 v6 — loopback plugin tools register write-equivalent (category is host-derived)", () => {
   it("registers the whole plugin, and EVERY tool at the write-equivalent baseline (never silently read)", async () => {
     const registry = new ToolRegistry();
-    const registered = await PluginMcpHost.loopback(MANIFEST, okDelegate, registry).start();
+    const host = PluginMcpHost.loopback(
+      MANIFEST,
+      okDelegate,
+      undefined,
+      "test-generation",
+    );
+    const tools = await host.prepareTools();
+    registry.reservePluginReplacement(MANIFEST.id, tools, []).publish();
+    host.publishPrepared(tools);
+    const registered = tools.map((tool) => tool.name);
     // Category is optional (host-classifies-risk) — the whole plugin still loads.
     expect(registered).toEqual(["mixed_read", "mixed_write", "mixed_undeclared"]);
 

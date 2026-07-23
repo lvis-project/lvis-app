@@ -227,6 +227,47 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("preserves the active local generation when staged candidate start fails", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+    const installedManifestPath = join(pluginsDir, "test-plugin", "plugin.json");
+    const receiptPath = join(cacheRoot, "test-plugin", "install-receipt.json");
+    const before = {
+      manifest: await readFile(installedManifestPath, "utf-8"),
+      receipt: await readFile(receiptPath, "utf-8"),
+      registry: await readFile(registryPath, "utf-8"),
+    };
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "broken staged candidate",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+      "utf-8",
+    );
+    const activatePreparedArtifact = vi.fn(async (prepared: {
+      pluginRoot: string;
+      manifest: { version?: string };
+      durableCommit(): Promise<string>;
+    }) => {
+      expect(prepared.pluginRoot).not.toBe(join(pluginsDir, "test-plugin"));
+      expect(prepared.manifest.version).toBe("2.0.0");
+      throw new Error("candidate start failed");
+    });
+
+    await expect(service.installLocal(sourceDir, { activatePreparedArtifact: activatePreparedArtifact as never }))
+      .rejects.toThrow("candidate start failed");
+
+    expect(activatePreparedArtifact).toHaveBeenCalledOnce();
+    expect(await readFile(installedManifestPath, "utf-8")).toBe(before.manifest);
+    expect(await readFile(receiptPath, "utf-8")).toBe(before.receipt);
+    expect(await readFile(registryPath, "utf-8")).toBe(before.registry);
+  });
+
   it.skipIf(process.platform === "win32")("rejects an unlisted executable symlink in the installed payload", async () => {
     const service = makeService();
     await service.installLocal(sourceDir);
@@ -245,9 +286,9 @@ describe("PluginMarketplaceService.installLocal", () => {
   it("cleans fresh local install dir, registry, and receipt when finalization fails", async () => {
     const service = makeService();
     const store = (service as unknown as {
-      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+      artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
     }).artifactStore;
-    vi.spyOn(store, "writeInstallReceipt").mockImplementationOnce(async () => {
+    vi.spyOn(store, "persistPreparedInstallReceipt").mockImplementationOnce(async () => {
       const registryDuringReceipt = JSON.parse(await readFile(registryPath, "utf-8")) as {
         plugins: Array<{ id: string }>;
       };
@@ -284,9 +325,9 @@ describe("PluginMarketplaceService.installLocal", () => {
       "utf-8",
     );
     const store = (service as unknown as {
-      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+      artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
     }).artifactStore;
-    vi.spyOn(store, "writeInstallReceipt").mockImplementationOnce(async () => {
+    vi.spyOn(store, "persistPreparedInstallReceipt").mockImplementationOnce(async () => {
       const registryDuringReceipt = JSON.parse(await readFile(registryPath, "utf-8")) as {
         plugins: Array<{ id: string; pendingUpdate?: { kind: string } }>;
       };
@@ -330,11 +371,11 @@ describe("PluginMarketplaceService.installLocal", () => {
     );
 
     const internals = service as unknown as {
-      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+      artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
       restoreLocalInstallSnapshot: (...args: unknown[]) => Promise<void>;
       localInstallRollbackSnapshots: Map<string, { backupDir?: string }>;
     };
-    vi.spyOn(internals.artifactStore, "writeInstallReceipt").mockRejectedValueOnce(
+    vi.spyOn(internals.artifactStore, "persistPreparedInstallReceipt").mockRejectedValueOnce(
       new Error("replacement receipt write failed"),
     );
     vi.spyOn(internals, "restoreLocalInstallSnapshot").mockRejectedValueOnce(

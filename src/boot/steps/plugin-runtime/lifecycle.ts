@@ -15,7 +15,6 @@ import { createLogger } from "../../../lib/logger.js";
 import { sendToWindow } from "../../../ipc/safe-send.js";
 import { declaresHostManagedPythonRuntime } from "./manifest.js";
 import type { PluginRuntime, PluginRuntimeOptions } from "../../../plugins/runtime.js";
-import type { PluginLoopbackManager } from "../../../mcp/plugin-loopback-manager.js";
 import type { KeywordEngine } from "../../../core/keyword-engine.js";
 import type { PythonRuntimeBootstrapper } from "../../../main/python-runtime.js";
 import type { LateBindingRefs } from "../plugin-runtime.js";
@@ -26,14 +25,13 @@ const log = createLogger("lvis");
 /** Explicit deps for the lifecycle callbacks. Lazy bindings arrive as getters. */
 export interface LifecycleDeps {
   getPluginRuntime: () => PluginRuntime;
-  getLoopbackManager: () => PluginLoopbackManager;
   keywordEngine: KeywordEngine;
   lateBinding: LateBindingRefs;
   getMainWindow?: () => BrowserWindow | null;
   mainWindow: BrowserWindow;
   pythonRuntime?: PythonRuntimeBootstrapper;
   installLoadedPluginPartitionPolicy: (pluginId: string) => void;
-  getBundleLifecycle?: () => PluginBundleLifecycleHandler | undefined;
+  getBundleLifecycle: () => PluginBundleLifecycleHandler | undefined;
 }
 
 /**
@@ -46,7 +44,6 @@ export function createLifecycleCallbacks(
 ): Pick<PluginRuntimeOptions, "preparePluginStart" | "onDisable" | "onActiveStateChange" | "onEnable"> {
   const {
     getPluginRuntime,
-    getLoopbackManager,
     keywordEngine,
     lateBinding,
     getMainWindow,
@@ -89,9 +86,12 @@ export function createLifecycleCallbacks(
       keywordEngine.unregisterByPlugin(pluginId);
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
-    onActiveStateChange: async (pluginId, enabled) => {
+    onActiveStateChange: async (pluginId, enabled, lifecycleHandled) => {
       const bundleLifecycle = deps.getBundleLifecycle?.();
-      if (bundleLifecycle) {
+      if (!bundleLifecycle) {
+        throw new Error(`plugin generation lifecycle is not bound for active-state change: ${pluginId}`);
+      }
+      if (bundleLifecycle && !lifecycleHandled) {
         if (enabled && !bundleLifecycle.getActive(pluginId)) {
           await bundleLifecycle.activate(pluginId);
         } else if (bundleLifecycle.getActive(pluginId)) {
@@ -101,7 +101,6 @@ export function createLifecycleCallbacks(
       if (!enabled) {
         keywordEngine.unregisterByPlugin(pluginId);
         lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
-        if (!bundleLifecycle) await getLoopbackManager().stop(pluginId);
         return;
       }
       const pluginRuntime = getPluginRuntime();
@@ -110,7 +109,6 @@ export function createLifecycleCallbacks(
         keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
         log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on activation`);
       }
-      if (manifest && !bundleLifecycle) await getLoopbackManager().start(manifest);
     },
     // Symmetric to `onDisable` — re-registers tools after a successful
     // restart/add/reload. Without this every chat-surface tool call hits

@@ -790,14 +790,17 @@ describe("PluginMarketplaceService install()", () => {
     let promotionStarted!: () => void;
     const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
     let pauseOnce = true;
-    vi.spyOn(store, "extractZipWithCommit").mockImplementation(async (slug, zip, commit) =>
-      originalExtract(slug, zip, async (installDir, files) => {
-        if (pauseOnce) {
-          pauseOnce = false;
-          promotionStarted();
-          await promotionGate;
-        }
-        return commit(installDir, files);
+    vi.spyOn(store, "extractZipWithCommit").mockImplementation(async (slug, zip, commit, options) =>
+      originalExtract(slug, zip, commit, {
+        ...options,
+        beforePromote: async (oldDir) => {
+          if (pauseOnce) {
+            pauseOnce = false;
+            promotionStarted();
+            await promotionGate;
+          }
+          await options?.beforePromote?.(oldDir);
+        },
       }),
     );
 
@@ -880,11 +883,14 @@ describe("PluginMarketplaceService install()", () => {
     const promotionGate = new Promise<void>((resolveGate) => { releasePromotion = resolveGate; });
     let promotionStarted!: () => void;
     const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
-    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit) =>
-      originalExtract(slug, zip, async (installDir, files) => {
-        promotionStarted();
-        await promotionGate;
-        return commit(installDir, files);
+    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit, options) =>
+      originalExtract(slug, zip, commit, {
+        ...options,
+        beforePromote: async (oldDir) => {
+          promotionStarted();
+          await promotionGate;
+          await options?.beforePromote?.(oldDir);
+        },
       }),
     );
 
@@ -943,11 +949,14 @@ describe("PluginMarketplaceService install()", () => {
     const promotionGate = new Promise<void>((resolveGate) => { releasePromotion = resolveGate; });
     let promotionStarted!: () => void;
     const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
-    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit) =>
-      originalExtract(slug, zip, async (installDir, files) => {
-        promotionStarted();
-        await promotionGate;
-        return commit(installDir, files);
+    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit, options) =>
+      originalExtract(slug, zip, commit, {
+        ...options,
+        beforePromote: async (oldDir) => {
+          promotionStarted();
+          await promotionGate;
+          await options?.beforePromote?.(oldDir);
+        },
       }),
     );
 
@@ -1010,9 +1019,9 @@ describe("PluginMarketplaceService install()", () => {
 
     const { service } = makeService(fetcher);
     const store = (service as unknown as {
-      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+      artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
     }).artifactStore;
-    vi.spyOn(store, "writeInstallReceipt").mockRejectedValueOnce(new Error("receipt write failed"));
+    vi.spyOn(store, "persistPreparedInstallReceipt").mockRejectedValueOnce(new Error("receipt write failed"));
 
     await expect(service.install("test-plugin")).rejects.toThrow("receipt write failed");
 

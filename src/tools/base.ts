@@ -25,6 +25,11 @@ import type {
 } from "./types.js";
 import type { PluginToolOperationPolicy } from "./plugin-operation-governance.js";
 
+export interface PluginToolGenerationOwner {
+  readonly pluginId: string;
+  readonly generationId: string;
+}
+
 // Re-export governance types so downstream modules can grab the full
 // tool surface from a single import path (tools/base.js).
 export type {
@@ -63,6 +68,8 @@ export interface Tool {
    */
   readonly parallelSafe?: boolean;
   readonly pluginId?: string;
+  /** Exact immutable plugin generation that produced this registry entry. */
+  readonly pluginGeneration?: PluginToolGenerationOwner;
   /**
    * Host-owned plugin worker identity for plugin tools whose side effects are
    * actually routed through a long-lived worker. Paired with `pluginId` so the
@@ -224,6 +231,7 @@ export interface DynamicToolSpec {
   decisionOverride?: ToolDecisionOverride;
   parallelSafe?: boolean;
   pluginId?: string;
+  pluginGeneration?: PluginToolGenerationOwner;
   workerId?: string;
   mcpServerId?: string;
   operationGovernance?: PluginToolOperationPolicy;
@@ -262,6 +270,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     decisionOverride: spec.decisionOverride,
     parallelSafe: spec.parallelSafe,
     pluginId: spec.pluginId,
+    pluginGeneration: spec.pluginGeneration,
     workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,
     operationGovernance: spec.operationGovernance,

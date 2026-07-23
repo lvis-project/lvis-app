@@ -924,14 +924,15 @@ export function buildInternalApiSurface() {
     addConfig: async (config: McpServerConfig) => ipcRenderer.invoke(CHANNELS.mcp.configAdd, config),
     setApiKey: async (id: string, apiKey: string) => ipcRenderer.invoke(CHANNELS.mcp.configSetApiKey, id, apiKey),
     removeConfig: async (id: string) => ipcRenderer.invoke(CHANNELS.mcp.configRemove, id),
-    readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke(CHANNELS.mcp.uiResource, serverId, uri) as Promise<unknown>,
+    readUiResource: async (serverId: string, uri: string, generationId?: string) =>
+      ipcRenderer.invoke(CHANNELS.mcp.uiResource, serverId, uri, generationId) as Promise<unknown>,
     // MCP Apps `oncalltool` — the app calls a tool on ITS OWN server. `serverId` is
     // supplied by the TRUSTED renderer from the card's payload (the app has no
     // channel to name a server), and main re-checks that the tool is actually owned
     // by it. Never resolves to a thrown error: main returns an outcome the bridge
     // handler turns into an MCP-style `CallToolResult`.
-    callTool: async (serverId: string, name: string, args: Record<string, unknown>) =>
-      ipcRenderer.invoke(CHANNELS.mcp.callTool, serverId, name, args) as Promise<unknown>,
+    callTool: async (serverId: string, name: string, args: Record<string, unknown>, generationId?: string) =>
+      ipcRenderer.invoke(CHANNELS.mcp.callTool, serverId, name, args, generationId) as Promise<unknown>,
     // MCP Apps `onmessage` — the app asks for its text to enter the conversation (or the
     // notification surface). BOTH bindings come from the TRUSTED renderer: `serverId`
     // (the card's server) and `sessionId` (the chat session the card belongs to). The

@@ -1,8 +1,12 @@
 import type { MaterializedPluginContribution } from "./plugin-contributions.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 export interface PluginGenerationIdentity {
   pluginId: string;
   pluginVersion: string;
+  /** Stable signed-content identity used by contribution trust decisions. */
+  artifactGenerationId: string;
+  /** Unique runtime activation identity used by leases and retirement. */
   generationId: string;
   manifestSha256: string;
   receiptSha256: string;
@@ -40,8 +44,12 @@ function freezeGeneration<TState>(candidate: ActivePluginGeneration<TState>): Ac
   if (!candidate.pluginId || !candidate.pluginVersion || !candidate.generationId) {
     throw new Error("plugin generation identity must be complete");
   }
-  if (!/^[a-f0-9]{64}$/.test(candidate.manifestSha256) || !/^[a-f0-9]{64}$/.test(candidate.receiptSha256)) {
-    throw new Error("plugin generation manifest and receipt identities must be SHA-256 digests");
+  if (
+    !/^[a-f0-9]{64}$/.test(candidate.artifactGenerationId) ||
+    !/^[a-f0-9]{64}$/.test(candidate.manifestSha256) ||
+    !/^[a-f0-9]{64}$/.test(candidate.receiptSha256)
+  ) {
+    throw new Error("plugin generation artifact, manifest, and receipt identities must be SHA-256 digests");
   }
   return Object.freeze({
     ...candidate,
@@ -60,6 +68,9 @@ function freezeGeneration<TState>(candidate: ActivePluginGeneration<TState>): Ac
 export class PluginGenerationCoordinator<TState = unknown> {
   private readonly plugins = new Map<string, GenerationState<TState>>();
   private readonly retirements = new Set<Promise<void>>();
+  private readonly admittedGenerations = new AsyncLocalStorage<
+    ReadonlyMap<string, ActivePluginGeneration<TState>>
+  >();
 
   private stateFor(pluginId: string): GenerationState<TState> {
     let state = this.plugins.get(pluginId);
@@ -89,6 +100,10 @@ export class PluginGenerationCoordinator<TState = unknown> {
   }
 
   async acquire(pluginId: string): Promise<PluginGenerationLease<TState>> {
+    const admitted = this.admittedGenerations.getStore()?.get(pluginId);
+    if (admitted) {
+      return Object.freeze({ generation: admitted, release: () => undefined });
+    }
     const state = this.stateFor(pluginId);
     while (state.pendingTransitions > 0) {
       await new Promise<void>((resolve) => state.transitionWaiters.push(resolve));
@@ -115,10 +130,35 @@ export class PluginGenerationCoordinator<TState = unknown> {
   }
 
   async acquireExact(pluginId: string, generationId: string): Promise<PluginGenerationLease<TState>> {
+    const admitted = this.admittedGenerations.getStore()?.get(pluginId);
+    if (admitted) {
+      if (admitted.generationId !== generationId) {
+        throw new Error(`plugin '${pluginId}' generation '${generationId}' is not admitted`);
+      }
+      return Object.freeze({ generation: admitted, release: () => undefined });
+    }
     const lease = await this.acquire(pluginId);
     if (lease.generation.generationId === generationId) return lease;
     lease.release();
     throw new Error(`plugin '${pluginId}' generation '${generationId}' is not active`);
+  }
+
+  /**
+   * Carry one already-counted lease through approval, Hook, runtime, MCP, and
+   * audit awaits. Nested exact acquisitions reuse the admitted immutable view,
+   * including after the active pointer advances, so an invocation can never
+   * switch generations midway through its pipeline.
+   */
+  runWithLease<T>(
+    lease: PluginGenerationLease<TState>,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const next = new Map(this.admittedGenerations.getStore() ?? []);
+    next.set(lease.generation.pluginId, lease.generation);
+    return this.admittedGenerations.run(
+      Object.freeze(next) as ReadonlyMap<string, ActivePluginGeneration<TState>>,
+      operation,
+    );
   }
 
   async commit(
@@ -147,13 +187,13 @@ export class PluginGenerationCoordinator<TState = unknown> {
       try {
         predecessor = state.active;
         await durableCommit();
-        // Synchronous in-process projections publish in the same turn as the
-        // pointer assignment. The transition admission barrier remains closed,
-        // and no await/interleaving point exists between these two operations.
-        publish();
-        // Linearization point: no fallible work may be inserted between the
-        // durable commit above and this preallocated pointer assignment.
+        // Linearization point: durable state and the immutable generation
+        // pointer are now inseparable. No projection work may be inserted here.
         state.active = prepared;
+        // Synchronous in-process projections publish in the same turn as the
+        // pointer assignment. Every publication closure was fully prepared and
+        // is assignment-only; the admission barrier remains closed throughout.
+        publish();
       } finally {
         state.pendingTransitions -= 1;
         if (state.pendingTransitions === 0) {
@@ -200,8 +240,8 @@ export class PluginGenerationCoordinator<TState = unknown> {
         if (!active || active.generationId !== expectedGenerationId) {
           throw new Error(`plugin '${pluginId}' generation changed before projection transition`);
         }
-        await prepare();
         await this.waitForDrain(state, expectedGenerationId);
+        await prepare();
         publish();
       } finally {
         state.pendingTransitions -= 1;

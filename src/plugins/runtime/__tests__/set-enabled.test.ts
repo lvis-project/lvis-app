@@ -147,16 +147,16 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.active).toBe(true);
   });
 
-  it("rolls the durable flag back when contribution projection fails", async () => {
+  it("keeps committed state aligned when a post-commit host callback fails", async () => {
     const onActiveStateChange = vi.fn(async () => { throw new Error("MCP projection failed"); });
     const runtime = makeRuntime({ onActiveStateChange });
     await runtime.startAll();
 
     await expect(runtime.setPluginEnabled("se-plugin", false)).rejects.toThrow("MCP projection failed");
 
-    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(true);
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);
   });
 
   /**

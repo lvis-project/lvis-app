@@ -85,6 +85,7 @@ import { setupAuditAndNotification } from "./boot/steps/audit-notification.js";
 import { setupWorkBoard } from "./boot/steps/work-board-setup.js";
 import { setupWorkflowStores } from "./boot/steps/workflow-stores.js";
 import { setupMarketplace } from "./boot/steps/marketplace-setup.js";
+import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { wireReviewerAndPermissions } from "./boot/steps/reviewer-permission-wiring.js";
 import { setupPluginToolExecutor } from "./boot/steps/plugin-tool-executor.js";
 import { wireRationaleHost } from "./boot/steps/rationale-host-wiring.js";
@@ -409,6 +410,7 @@ export async function bootstrap(
     pluginPaths,
     loopbackManager,
     setBundleLifecycleHandler,
+    startPlugins,
   } = await initPluginRuntime({
     projectRoot,
     settingsService,
@@ -433,6 +435,7 @@ export async function bootstrap(
     permissionManager,
     // Idempotency SOT for `hostApi.hasRoutineBySource` (constructed above).
     routinesStore,
+    deferStart: true,
   });
   ctx.pluginRuntime = pluginRuntime;
   ctx.deploymentGuard = deploymentGuard;
@@ -507,23 +510,29 @@ export async function bootstrap(
     pluginRuntime,
     receiptCacheRoot: pluginPaths.cacheRoot,
     skillStore: ctx.skillStore,
-    skillOverlay: ctx.skillOverlay,
     hookManager: ctx.scriptHookManager,
     mcpManager: ctx.mcpManager,
     loopbackManager: ctx.pluginLoopbackManager,
+    revokeOperationGeneration: ctx.revokePluginOperationGeneration,
   });
   ctx.pluginBundleLifecycle = pluginBundleLifecycle;
   pluginRuntime.setGenerationAccess(pluginBundleLifecycle);
   ctx.mcpManager.setPluginGenerationAccess(pluginBundleLifecycle);
   ctx.scriptHookManager.setPluginGenerationAccess(pluginBundleLifecycle);
   setBundleLifecycleHandler?.(pluginBundleLifecycle);
-  for (const pluginId of pluginRuntime.listPluginIds()) {
-    if (!pluginRuntime.isPluginEnabled(pluginId)) continue;
-    await pluginBundleLifecycle.activate(pluginId).catch((error) => {
-      log.error(`plugin bundle boot projection failed (${pluginId}): %s`, (error as Error).message);
-    });
-  }
+  await startPlugins();
   await pluginBundleLifecycle.recoverRetirements();
+
+  // Managed installs/updates must run only after the full Skill/Hook/MCP
+  // generation lifecycle is bound.  This lets signed boot-time candidates be
+  // imported and started before their bytes, receipt, registry, and pointer
+  // become durable, preserving a valid predecessor on candidate failure.
+  await runManagedBootstrap({
+    pluginMarketplace: ctx.pluginMarketplace,
+    pluginRuntime,
+    mainWindow,
+    marketplace: ctx.settingsService.get("marketplace"),
+  });
 
   // §691: OS-level tool sandbox — decided exactly once here at boot.
   await initSandboxGate(ctx);
