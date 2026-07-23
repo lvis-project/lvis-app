@@ -26,7 +26,12 @@ import { enforceMutatingEffects, gateMutatingEffect } from "../../../permissions
 import { recordEffect } from "../../../permissions/effect-ledger.js";
 import { methodEffect } from "../../../permissions/effect-kind.js";
 import type { PluginRegistryEntry } from "../../../plugins/types.js";
+import type { PluginHostApiIncarnation } from "../../../plugins/runtime/index.js";
 import { createPluginStorage } from "../../../plugins/storage.js";
+import {
+  isPluginInstallLockHeld,
+  withPluginInstallLock,
+} from "../../../plugins/install-lifecycle.js";
 import { probePrivateHost } from "../../../plugins/private-host-probe.js";
 import { shouldBlockPluginSecretRead } from "../../../plugins/secret-shape.js";
 import {
@@ -85,6 +90,51 @@ import type { LateBindingRefs } from "../plugin-runtime.js";
 
 const log = createLogger("lvis");
 
+/** Revoke every callable surface of an obsolete HostApi incarnation. */
+function enforceActiveHostApi(
+  pluginId: string,
+  incarnation: PluginHostApiIncarnation,
+  hostApi: PluginHostApi,
+): PluginHostApi {
+  const proxies = new WeakMap<object, object>();
+  const wrap = (target: object, path: string): object => {
+    const existing = proxies.get(target);
+    if (existing) return existing;
+    const proxy = new Proxy(target, {
+      get(currentTarget, property, receiver) {
+        const value = Reflect.get(currentTarget, property, receiver) as unknown;
+        const memberPath = `${path}.${String(property)}`;
+        if (typeof value === "function") {
+          return (...args: unknown[]) => {
+            if (!incarnation.isActive()) {
+              throw new Error(
+                `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
+              );
+            }
+            const result = Reflect.apply(value, currentTarget, args) as unknown;
+            if (
+              memberPath !== "hostApi.config.set"
+              && result !== null
+              && typeof result === "object"
+              && typeof (result as PromiseLike<unknown>).then === "function"
+            ) {
+              return incarnation.trackOperation(Promise.resolve(result));
+            }
+            return result;
+          };
+        }
+        if (value !== null && typeof value === "object") {
+          return wrap(value, memberPath);
+        }
+        return value;
+      },
+    });
+    proxies.set(target, proxy);
+    return proxy;
+  };
+  return wrap(hostApi, "hostApi") as PluginHostApi;
+}
+
 /** Explicit deps the HostApi factory needs. Lazy bindings arrive as getters. */
 export interface CreateHostApiFactoryDeps {
   /** Getter for the mutable `pluginRuntime` binding (assigned after this factory is built). */
@@ -126,7 +176,12 @@ export interface CreateHostApiFactoryDeps {
  */
 export function createHostApiFactory(
   deps: CreateHostApiFactoryDeps,
-): (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi {
+): (
+  pluginId: string,
+  manifest: PluginManifest,
+  pluginDataDir: string,
+  incarnation: PluginHostApiIncarnation,
+) => PluginHostApi {
   const {
     getPluginRuntime,
     lateBinding,
@@ -149,12 +204,79 @@ export function createHostApiFactory(
     routinesStore,
   } = deps;
 
-  return (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
+  return (
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    incarnation: PluginHostApiIncarnation,
+  ): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
+    const hostIncarnation = incarnation;
+    const assertIssuedCapabilityActive = (memberPath: string): void => {
+      if (!hostIncarnation.isActive()) {
+        throw new Error(
+          `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
+        );
+      }
+    };
+    const bindApiKeyResult = (
+      result: Awaited<ReturnType<NonNullable<PluginHostApi["resolveApiKey"]>>>,
+    ): Awaited<ReturnType<NonNullable<PluginHostApi["resolveApiKey"]>>> => {
+      if (!result.ok) return result;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        result.release();
+      };
+      hostIncarnation.registerDisposer(release);
+      return {
+        ...result,
+        bearer: () => {
+          assertIssuedCapabilityActive("hostApi.resolveApiKey().bearer");
+          return result.bearer();
+        },
+        release,
+      };
+    };
+    const bindWorkerHandle = (
+      worker: Awaited<ReturnType<NonNullable<PluginHostApi["spawnWorker"]>>>,
+    ): Awaited<ReturnType<NonNullable<PluginHostApi["spawnWorker"]>>> => {
+      let stopped = false;
+      const stop = () => {
+        if (stopped) return;
+        stopped = true;
+        worker.stop();
+      };
+      hostIncarnation.registerDisposer(stop);
+      return {
+        socketPath: worker.socketPath,
+        pid: worker.pid,
+        stop,
+        onStdout: (listener) => {
+          assertIssuedCapabilityActive("hostApi.spawnWorker().onStdout");
+          worker.onStdout((chunk) => {
+            if (hostIncarnation.isActive()) listener(chunk);
+          });
+        },
+        onStderr: (listener) => {
+          assertIssuedCapabilityActive("hostApi.spawnWorker().onStderr");
+          worker.onStderr((chunk) => {
+            if (hostIncarnation.isActive()) listener(chunk);
+          });
+        },
+        onExit: (listener) => {
+          assertIssuedCapabilityActive("hostApi.spawnWorker().onExit");
+          worker.onExit((info) => {
+            if (hostIncarnation.isActive()) listener(info);
+          });
+        },
+      };
+    };
       // #893 Stage 2 — manifest sha256 pin (Tier-3 whitelist check). The
       // whitelist registry stores `approvedManifestSha256` per pluginId; we
       // compare against the canonicalized JSON of the running manifest so a
@@ -189,7 +311,7 @@ export function createHostApiFactory(
       // DENIED effect is never recorded as a host-observed mutation. The lone
       // verb-derived chokepoint (hostFetch) is gated INLINE in its closure from
       // the single verb snapshot; the wrapper skips it.
-      return enforceMutatingEffects<PluginHostApi>(
+      return enforceActiveHostApi(pluginId, hostIncarnation, enforceMutatingEffects<PluginHostApi>(
         instrumentEffectsByPath<PluginHostApi>({
       storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
         try {
@@ -242,26 +364,45 @@ export function createHostApiFactory(
               `[plugin:${pluginId}] config.set('${key}'): secret fields must be saved via hostApi.setSecret(), not config.set().`,
             );
           }
-          const current = settingsService.getPluginConfig(pluginId) ?? {};
-          // structuredClone so we never accidentally hand the plugin our
-          // internal record reference.
-          const nextRecord = structuredClone({
-            ...current,
-            [key]: value as unknown,
-          });
-          await settingsService.setPluginConfig(pluginId, nextRecord);
-          // Mirror the IPC handler — refresh the runtime's per-plugin
-          // override so the next reload picks up the new value, then emit
-          // the change so existing listeners observe it without waiting
-          // for the reload.
-          pluginRuntime.setConfigOverride(pluginId, nextRecord);
-          emitPluginConfigChange(pluginId, key, value);
-          // US-A3 — targeted restartPlugin (not restartAll) so changing one
-          // plugin's config does not wipe other plugins' in-memory state.
-          // ToolRegistry resync happens automatically via the runtime's
-          // wired `onEnable` callback.
+          const nestedLifecycleMutation =
+            isPluginInstallLockHeld(pluginId) || hostIncarnation.isLifecycleHookActive();
+          await hostIncarnation.trackOperation(withPluginInstallLock(pluginId, async () => {
+            // The HostApi object belongs to this exact manifest incarnation.
+            // A queued write from a stopped/uninstalled instance must not
+            // recreate persisted config for a removed or reinstalled plugin.
+            if (!hostIncarnation.isActive()) {
+              throw new Error(
+                `[plugin:${pluginId}] config.set('${key}'): plugin instance is no longer active`,
+              );
+            }
+            const current = settingsService.getPluginConfig(pluginId) ?? {};
+            // structuredClone so we never accidentally hand the plugin our
+            // internal record reference.
+            const nextRecord = structuredClone({
+              ...current,
+              [key]: value as unknown,
+            });
+            await settingsService.setPluginConfig(pluginId, nextRecord);
+            // Mirror the IPC handler — refresh the runtime's per-plugin
+            // override so the next reload picks up the new value, then emit
+            // the change so existing listeners observe it without waiting
+            // for the reload.
+            pluginRuntime.setConfigOverride(pluginId, nextRecord);
+            emitPluginConfigChange(pluginId, key, value);
+          }));
+          // Lifecycle hooks inherit the owning mutation context. Persist their
+          // write, but never recursively restart the instance whose start/stop
+          // Promise is currently being awaited. A config-triggered replacement
+          // is likewise already the pending restart for this plugin.
+          if (nestedLifecycleMutation || pluginRuntime.isPluginRestartPending?.(pluginId)) return;
           try {
-            await pluginRuntime.restartPlugin(pluginId);
+            const restartResult = await pluginRuntime.restartPlugin(
+              pluginId,
+              { skipPreparation: true },
+            );
+            if (restartResult !== "started") {
+              throw new Error(`runtime reload returned ${restartResult ?? "not-loaded"}`);
+            }
           } catch (err) {
             throw new Error(
               `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
@@ -276,11 +417,12 @@ export function createHostApiFactory(
             pluginId,
             key,
             (_changedKey, value) => {
+              if (!hostIncarnation.isActive()) return;
               callback(value as T | undefined);
             },
           );
           // Auto-cleanup on plugin disable to mirror onEvent semantics.
-          pluginRuntime.registerDisposer(pluginId, unsubscribe);
+          hostIncarnation.registerDisposer(unsubscribe);
           return unsubscribe;
         },
       },
@@ -312,7 +454,7 @@ export function createHostApiFactory(
             });
           } catch { /* audit must not break host */ }
           plog("warn", { pluginId, phase: PluginPhase.CAPABILITY_DENY, capability: requiredCap ?? type, eventType: type, reason: "missing_capability" }, "capability denied");
-          return;
+          throw new Error(`Plugin '${pluginId}' is not allowed to emit undeclared event '${type}'`);
         }
         pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
         plog("debug", { pluginId, phase: PluginPhase.EVENT_EMIT, eventType: type }, "event emitted");
@@ -320,8 +462,10 @@ export function createHostApiFactory(
       },
       onEvent: (type, handler) => {
         pluginRuntime.assertPluginEventAccess(pluginId, type);
-        const unsubscribe = onEvent(type, handler);
-        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        const unsubscribe = onEvent(type, (data) => {
+          if (hostIncarnation.isActive()) handler(data);
+        });
+        hostIncarnation.registerDisposer(unsubscribe);
         plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
         return unsubscribe;
       },
@@ -330,6 +474,7 @@ export function createHostApiFactory(
       },
       onPluginsChanged: (handler) => {
         const dispatchInstalled = (data: unknown) => {
+          if (!hostIncarnation.isActive()) return;
           const payload = data as { pluginId?: string; source?: "marketplace" | "local-dev" } | null | undefined;
           const subjectId = payload?.pluginId;
           if (typeof subjectId !== "string" || subjectId === pluginId) return;
@@ -337,6 +482,7 @@ export function createHostApiFactory(
           handler({ type: "installed", pluginId: subjectId, source });
         };
         const dispatchUninstalled = (data: unknown) => {
+          if (!hostIncarnation.isActive()) return;
           const subjectId = (data as { pluginId?: string } | null | undefined)?.pluginId;
           if (typeof subjectId !== "string" || subjectId === pluginId) return;
           handler({ type: "uninstalled", pluginId: subjectId });
@@ -344,7 +490,7 @@ export function createHostApiFactory(
         const unsubInstalled = onEvent("plugin.installed", dispatchInstalled);
         const unsubUninstalled = onEvent("plugin.uninstalled", dispatchUninstalled);
         const unsubscribe = () => { unsubInstalled(); unsubUninstalled(); };
-        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        hostIncarnation.registerDisposer(unsubscribe);
         return unsubscribe;
       },
       // #893 Stage 2 — Host implementation of the SDK's `resolveApiKey`.
@@ -356,7 +502,7 @@ export function createHostApiFactory(
       // the call here is a thin closure capture of pluginId + manifest +
       // manifestSha256 + the shared audit/settings services.
       resolveApiKey: async (opts) => {
-        return resolveApiKeyImpl(
+        const result = await resolveApiKeyImpl(
           {
             purpose: opts.purpose as ResolveApiKeyPurpose,
             vendor: opts.vendor as ResolveApiKeyVendor | undefined,
@@ -393,6 +539,13 @@ export function createHostApiFactory(
               : {}),
           },
         );
+        if (!hostIncarnation.isActive() && result.ok) {
+          result.release();
+          throw new Error(
+            `[plugin:${pluginId}] hostApi.resolveApiKey: plugin instance is no longer active`,
+          );
+        }
+        return bindApiKeyResult(result);
       },
       getSecret: (key) => {
         // #893 Stage 2 — Four-tier secret access gate:
@@ -723,7 +876,12 @@ export function createHostApiFactory(
         }
       },
       onShutdown: (handler) => {
-        pluginShutdownHandlers.push({ pluginId, handler });
+        const registration = { pluginId, handler };
+        pluginShutdownHandlers.push(registration);
+        hostIncarnation.registerDisposer(() => {
+          const index = pluginShutdownHandlers.indexOf(registration);
+          if (index >= 0) pluginShutdownHandlers.splice(index, 1);
+        });
       },
       // ─── Host-mediated worker spawn ───────────────────────────────────
       // HOST PRIMITIVE — Tool.workerId producer is intentionally NOT wired here.
@@ -733,8 +891,15 @@ export function createHostApiFactory(
       // prove that its call path actually uses this worker before setting
       // Tool.workerId; a plugin-self-claimed worker id is advisory only (#885 v6
       // removed the manifest field — normalize drops any legacy `workerId`).
-      spawnWorker: (workerSpec) => {
-        return spawnWorker({ ...workerSpec, pluginId });
+      spawnWorker: async (workerSpec) => {
+        const worker = await spawnWorker({ ...workerSpec, pluginId });
+        if (!hostIncarnation.isActive()) {
+          worker.stop();
+          throw new Error(
+            `[plugin:${pluginId}] hostApi.spawnWorker: plugin instance is no longer active`,
+          );
+        }
+        return bindWorkerHandle(worker);
       },
       // ─── §B3 External URL viewer + host public preference read ─────────
       // openExternalUrl: follows the Settings → webView.preferredFlow toggle:
@@ -1150,6 +1315,6 @@ export function createHostApiFactory(
       },
         }),
         { pluginId, approvalGate, flagEnabled: hostClassifiesRiskEnabled },
-      );
+      ));
   };
 }

@@ -81,6 +81,8 @@ async function setup() {
       installLocal: vi.fn(async () => ({ pluginId: "local-plugin", installed: true })),
     },
     pluginRuntime: {
+      resolvePluginId: vi.fn((pluginId: string) => pluginId),
+      clearConfigOverride: vi.fn(),
       addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
       waitForPluginReady: vi.fn(async () => undefined),
       removePlugin: vi.fn(async () => undefined),

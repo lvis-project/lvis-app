@@ -28,9 +28,10 @@ test('idle: composer input-bar contains textarea only (no Send/Stop/Guide button
   await expect(buttonsInsideInputBar).toHaveCount(0);
 });
 
-test('idle: BottomActionRow 가 TokenRing + 단축키 hints + Send 표시, 가이드 버튼 미노출', async ({ mainWindow }) => {
-  const row = mainWindow.locator('[data-testid="composer-bottom-action-row"]');
+test('idle: unified InputActionBar 가 TokenRing + Send 를 표시하고 가이드 버튼은 미노출', async ({ mainWindow }) => {
+  const row = mainWindow.locator('[data-testid="input-action-bar"]');
   await expect(row).toBeVisible();
+  await expect(row.locator('[data-testid="iab-status-ring"]')).toBeVisible();
 
   const guideBtn = mainWindow.locator('[data-testid="composer-guide-ghost"]');
   await expect(guideBtn).toHaveCount(0);
@@ -82,13 +83,19 @@ test.describe('renderer debug stream env', () => {
   });
 });
 
-test('InputActionBar trailing: 📎 → 권한 → (승인 optional) → 👤 페르소나 → Thinking 순서', async ({ mainWindow }) => {
+test('InputActionBar: command → persona → attach leading controls and reasoning status are visible', async ({ mainWindow }) => {
   // attach button 존재
   const attachBtn = mainWindow.locator('[data-testid="iab-attach-button"]');
   await expect(attachBtn).toBeVisible();
-  // Thinking 토글 존재 (단순 visibility — 위치 검증만)
-  const thinkingLabel = mainWindow.locator('text=Thinking').first();
-  await expect(thinkingLabel).toBeVisible();
+  const leadingIds = await mainWindow.locator('[data-testid="iab-leading"] [data-testid]').evaluateAll(
+    (nodes) => nodes.map((node) => node.getAttribute('data-testid')),
+  );
+  expect(leadingIds).toEqual([
+    'command-popover-trigger',
+    'iab-assistant-context-button',
+    'iab-attach-button',
+  ]);
+  await expect(mainWindow.locator('[data-testid="reasoning-slider"]')).toBeVisible();
 });
 
 test('큐 항목 수정 (더블클릭) — input 진입 + Enter commit', async ({ mainWindow }) => {

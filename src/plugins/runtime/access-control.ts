@@ -12,6 +12,7 @@
  * their audit trail live in one place.
  */
 import type { PluginAccessSpec } from "../types.js";
+import { classifySubscription } from "../capabilities.js";
 
 type AuditLog = (
   level: "info" | "warn" | "error",
@@ -32,6 +33,15 @@ export function assertEventSubscribeAccess(opts: {
   auditLog?: AuditLog;
 }): void {
   const { callerPluginId, eventType, targetPluginId } = opts;
+  if (classifySubscription(eventType) === "private") {
+    opts.auditLog?.("error", "plugin_private_event_access_denied", {
+      callerPluginId,
+      eventType,
+    });
+    throw new Error(
+      `Plugin '${callerPluginId}' is not allowed to subscribe to private event '${eventType}'`,
+    );
+  }
   if (!targetPluginId || targetPluginId === callerPluginId) return;
   const rule = opts
     .getAccessGrant()
@@ -58,6 +68,15 @@ export function assertEventEmitAccess(opts: {
   auditLog?: AuditLog;
 }): void {
   const { callerPluginId, eventType, ownerPluginId } = opts;
+  if (classifySubscription(eventType) === "private") {
+    opts.auditLog?.("error", "plugin_private_event_emit_denied", {
+      callerPluginId,
+      eventType,
+    });
+    throw new Error(
+      `Plugin '${callerPluginId}' is not allowed to emit private event '${eventType}'`,
+    );
+  }
   if (!ownerPluginId || ownerPluginId === callerPluginId) return;
   opts.auditLog?.("error", "plugin_event_emit_denied", {
     callerPluginId,

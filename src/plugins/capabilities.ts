@@ -205,6 +205,7 @@ export function canEmitEvent(
 ): boolean {
   const prefix = eventType.split(".")[0] ?? "";
   if (HOST_ONLY_EMIT_NAMESPACES.has(prefix)) return false;
+  if (classifySubscription(eventType) === "private") return false;
   if (!requiredCapabilityForEmit(eventType)) return true;
   // Gated event-source namespace — the plugin must have DECLARED an event in
   // this namespace via emittedEvents (its namespace declaration replaces the

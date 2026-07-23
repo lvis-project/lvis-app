@@ -13,6 +13,11 @@ import type {
 
 export type { PluginAccessSpec, PluginManifest, PluginToolHandler, RuntimePlugin };
 
+export type PluginLifecycleHookScope = {
+  active: boolean;
+  depth: number;
+};
+
 /**
  * A fully-loaded plugin: manifest + running instance + registered handlers.
  * #885 v6 — `manifest` is the materialized `PluginManifest` (`parsePluginJson`
@@ -26,6 +31,9 @@ export type LoadedPlugin = {
   methods: Map<string, PluginToolHandler>;
   approvedPluginAccess?: PluginAccessSpec;
   started?: boolean;
+  deactivateHostApi?: () => void;
+  drainHostApiOperations?: () => Promise<void>;
+  lifecycleHookScope?: PluginLifecycleHookScope;
 };
 
 /**
