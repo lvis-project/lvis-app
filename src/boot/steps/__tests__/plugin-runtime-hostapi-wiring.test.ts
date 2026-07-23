@@ -105,7 +105,7 @@ type CreateHostApi = (
     emittedEvents?: string[];
   },
   pluginDataDir: string,
-  incarnation?: {
+  incarnation: {
     registerDisposer: (dispose: () => void) => void;
     isActive: () => boolean;
     isLifecycleHookActive: () => boolean;
@@ -240,7 +240,17 @@ describe("HostApi.config.set round-trip", () => {
   async function createActiveApi(settings: ReturnType<typeof makeSettingsService>) {
     const createHostApi = await initAndGetFactory(settings);
     activeManifest = { id: "plugin-a", config: {} };
-    return createHostApi("plugin-a", activeManifest, mkdtempSync("/tmp/lvis-cfg-set-"));
+    return createHostApi(
+      "plugin-a",
+      activeManifest,
+      mkdtempSync("/tmp/lvis-cfg-set-"),
+      {
+        registerDisposer: vi.fn(),
+        isActive: () =>
+          runtimeTestState.runtime.getPluginManifest("plugin-a") === activeManifest,
+        isLifecycleHookActive: () => false,
+      },
+    );
   }
 
   it("persists via setPluginConfig, refreshes the override, restarts the plugin, and re-reads the value", async () => {
@@ -272,6 +282,7 @@ describe("HostApi.config.set round-trip", () => {
       "plugin-a",
       activeManifest,
       mkdtempSync("/tmp/lvis-cfg-secret-"),
+      activeIncarnation(),
     );
 
     await expect(api.config.set("secretKey", "leak")).rejects.toThrow(/secret fields must be saved via hostApi\.setSecret/);
