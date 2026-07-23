@@ -62,20 +62,20 @@ describe("plugin contribution declarations", () => {
     }))).toThrow(/path_collision/);
   });
 
-  it.each([
-    { override: { id: "bundlehosttest", skills: [{ id: "bundlehosttest", path: "skills/x" }] }, owner: "plugin" },
-    { override: { tools: [{ name: "reserved_tool" }], hooks: [{ id: "reserved_tool", path: "hooks/x.json" }] }, owner: "tool" },
-    { override: { emittedEvents: ["reserved_event"], mcpServers: [{ id: "reserved_event", path: "mcp/x.json" }] }, owner: "event" },
-  ])("rejects contribution IDs reserved by the $owner namespace", ({ override }) => {
-    expect(() => resolvePluginContributionDeclarations(manifest(override as Partial<PluginManifest>)))
-      .toThrow(/reserved_identifier_collision/);
-  });
-
-  it("rejects a contribution ID reused across kinds", () => {
-    expect(() => resolvePluginContributionDeclarations(manifest({
+  it("keeps plugin, tool, event, and each contribution kind in independent namespaces", () => {
+    const resolved = resolvePluginContributionDeclarations(manifest({
+      id: "shared",
+      tools: [{ name: "shared" }],
+      emittedEvents: ["shared"],
       skills: [{ id: "shared", path: "skills/shared" }],
       hooks: [{ id: "shared", path: "hooks/shared.json" }],
-    }))).toThrow(/duplicate_local_id/);
+      mcpServers: [{ id: "shared", path: "mcp/shared.json" }],
+    }));
+    expect(resolved.map(({ kind, localId }) => ({ kind, localId }))).toEqual([
+      { kind: "skill", localId: "shared" },
+      { kind: "hook", localId: "shared" },
+      { kind: "mcpServer", localId: "shared" },
+    ]);
   });
 });
 

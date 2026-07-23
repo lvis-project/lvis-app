@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
-import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import {
+  makeTestPluginPaths,
+  TestPluginMarketplaceService,
+} from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
 
 function manifestSha(manifest: unknown): string {
@@ -80,7 +83,7 @@ describe("PluginMarketplaceService.installLocal", () => {
       cacheRoot,
     });
     const fetcher = new MockMarketplaceFetcher(join(testDir, "marketplace.json"));
-    return new PluginMarketplaceService(paths, fetcher);
+    return new TestPluginMarketplaceService(paths, fetcher);
   }
 
   it("resolves a local plugin id without mutating install storage", async () => {
@@ -353,10 +356,6 @@ describe("PluginMarketplaceService.installLocal", () => {
   it("retains a replacement backup when a transient restore fault requires retry", async () => {
     const service = makeService();
     await service.installLocal(sourceDir);
-    const oldReceipt = await readFile(
-      join(cacheRoot, "test-plugin", "install-receipt.json"),
-      "utf-8",
-    );
     await writeFile(
       join(sourceDir, "plugin.json"),
       JSON.stringify({
@@ -373,7 +372,6 @@ describe("PluginMarketplaceService.installLocal", () => {
     const internals = service as unknown as {
       artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
       restoreLocalInstallSnapshot: (...args: unknown[]) => Promise<void>;
-      localInstallRollbackSnapshots: Map<string, { backupDir?: string }>;
     };
     vi.spyOn(internals.artifactStore, "persistPreparedInstallReceipt").mockRejectedValueOnce(
       new Error("replacement receipt write failed"),
@@ -385,11 +383,11 @@ describe("PluginMarketplaceService.installLocal", () => {
     const error = await service.installLocal(sourceDir).catch((caught) => caught);
     expect(error).toBeInstanceOf(AggregateError);
     expect((error as AggregateError).errors[1]).toMatchObject({ code: "EACCES" });
-    const retained = internals.localInstallRollbackSnapshots.get("test-plugin");
-    expect(retained?.backupDir).toBeTruthy();
-    expect(existsSync(retained!.backupDir!)).toBe(true);
     const hiddenRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ id: string; pendingUpdate?: { kind: string } }>;
+      plugins: Array<{
+        id: string;
+        pendingUpdate?: { kind: string; recoveryBackupDir?: string };
+      }>;
     };
     expect(hiddenRegistry.plugins).toEqual([
       expect.objectContaining({
@@ -397,22 +395,9 @@ describe("PluginMarketplaceService.installLocal", () => {
         pendingUpdate: expect.objectContaining({ kind: "local-dev" }),
       }),
     ]);
-
-    await expect(service.rollbackLocalInstall("test-plugin")).resolves.toEqual({
-      pluginId: "test-plugin",
-      rolledBack: true,
-    });
-    expect(existsSync(retained!.backupDir!)).toBe(false);
-    expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"))
-      .toBe(oldReceipt);
-    const restoredManifest = JSON.parse(
-      await readFile(join(pluginsDir, "test-plugin", "plugin.json"), "utf-8"),
-    ) as { version: string };
-    expect(restoredManifest.version).toBe("1.2.3");
-    const restoredRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ id: string }>;
-    };
-    expect(restoredRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(true);
+    const retainedBackup = hiddenRegistry.plugins[0]?.pendingUpdate?.recoveryBackupDir;
+    expect(retainedBackup).toBeTruthy();
+    expect(existsSync(retainedBackup!)).toBe(true);
   });
 
   it("supersedes a cleaned unresolved pending row with a verified local reinstall", async () => {
@@ -454,104 +439,6 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(repaired.plugins[0]?.pendingUpdate).toBeUndefined();
     expect(repaired.plugins[0]?.pendingCleanup).toBeUndefined();
 
-    await expect(service.rollbackLocalInstall("test-plugin")).rejects.toThrow(
-      "Pending local rollback predecessor remains unresolved",
-    );
-    const hidden = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ pendingUpdate?: unknown }>;
-    };
-    expect(hidden.plugins[0]?.pendingUpdate).toEqual(expect.objectContaining({ kind: "local-dev" }));
-  });
-
-  it("restores the original pending predecessor when verified local retry activation fails", async () => {
-    const service = makeService();
-    await service.installLocal(sourceDir);
-    const installDir = join(pluginsDir, "test-plugin");
-    const oldManifestRaw = await readFile(join(installDir, "plugin.json"), "utf-8");
-    const oldReceiptRaw = await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8");
-    const backupDir = join(pluginsDir, ".cache", "local-install-rollback", "test-plugin-123-456");
-    await mkdir(join(pluginsDir, ".cache", "local-install-rollback"), { recursive: true });
-    await cp(installDir, backupDir, { recursive: true });
-    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<Record<string, unknown>>;
-    };
-    Object.assign(registry.plugins[0]!, {
-      pendingUpdate: {
-        kind: "local-dev",
-        previousManifestFileSha256: createHash("sha256").update(oldManifestRaw).digest("hex"),
-        previousReceiptRaw: oldReceiptRaw,
-        recoveryBackupDir: backupDir,
-        recoveryBackupMode: "copy",
-      },
-    });
-    await writeFile(registryPath, JSON.stringify(registry));
-    await writeFile(join(installDir, "dist", "hostPlugin.js"), "unresolved retry bytes");
-    await writeFile(join(sourceDir, "plugin.json"), JSON.stringify({
-      id: "test-plugin",
-      name: "Test Plugin",
-      version: "2.0.0",
-      description: "verified retry",
-      publisher: "tests",
-      entry: "dist/hostPlugin.js",
-    }));
-
-    await service.installLocal(sourceDir);
-    await expect(service.rollbackLocalInstall("test-plugin")).resolves.toEqual({
-      pluginId: "test-plugin",
-      rolledBack: true,
-    });
-
-    expect(await readFile(join(installDir, "plugin.json"), "utf-8")).toBe(oldManifestRaw);
-    expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8")).toBe(oldReceiptRaw);
-    const restored = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ pendingUpdate?: unknown }>;
-    };
-    expect(restored.plugins[0]?.pendingUpdate).toBeUndefined();
-  });
-
-  it("rollbackLocalInstall restores the previous install receipt with disk and registry state", async () => {
-    const service = makeService();
-    await service.installLocal(sourceDir);
-
-    await writeFile(
-      join(sourceDir, "plugin.json"),
-      JSON.stringify(
-        {
-          id: "test-plugin",
-          name: "Test Plugin",
-          version: "2.0.0",
-          description: "fixture v2",
-          publisher: "tests",
-          entry: "dist/hostPlugin.js",
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
-    await writeFile(
-      join(sourceDir, "dist", "hostPlugin.js"),
-      "export default { version: '2.0.0' };\n",
-      "utf-8",
-    );
-
-    await service.installLocal(sourceDir);
-    await service.rollbackLocalInstall("test-plugin");
-
-    const installDir = join(pluginsDir, "test-plugin");
-    const manifest = JSON.parse(await readFile(join(installDir, "plugin.json"), "utf-8"));
-    expect(manifest.version).toBe("1.2.3");
-    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(manifest));
-
-    const receipt = JSON.parse(
-      await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"),
-    );
-    expect(receipt.version).toBe("1.2.3");
-
-    const { verifyInstallReceipt } = await import("../plugin-install-receipt.js");
-    const result = await verifyInstallReceipt(cacheRoot, "test-plugin", installDir);
-    expect(result.ok).toBe(true);
   });
 
   it("mirrors manifest.pluginAccess into registry approvedPluginAccess (parity with marketplace install)", async () => {

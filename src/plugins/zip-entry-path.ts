@@ -11,7 +11,25 @@
  * Throws:
  *   - on NUL bytes
  *   - on absolute, backslash, drive, empty-segment, dot, or parent syntax
+ *   - on member names that alias or cannot be represented safely on Windows
  */
+const WINDOWS_INVALID_SEGMENT_CHAR_RE = /[<>:"|?*]/u;
+const WINDOWS_RESERVED_BASENAME_RE =
+  /^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])$/iu;
+
+function assertPortableSegment(slug: string, entryName: string, segment: string): void {
+  if (segment.endsWith(".") || segment.endsWith(" ")) {
+    throw new Error(`"${slug}" zip entry has a Windows-ambiguous segment: ${entryName}`);
+  }
+  if (WINDOWS_INVALID_SEGMENT_CHAR_RE.test(segment)) {
+    throw new Error(`"${slug}" zip entry has a Windows-invalid segment: ${entryName}`);
+  }
+  const basename = (segment.split(".", 1)[0] ?? "").replace(/[ .]+$/u, "");
+  if (WINDOWS_RESERVED_BASENAME_RE.test(basename)) {
+    throw new Error(`"${slug}" zip entry uses a reserved Windows device name: ${entryName}`);
+  }
+}
+
 export function sanitizeZipEntryPath(slug: string, entryName: string): string | null {
   if (!entryName) return null;
   if (/[\u0000-\u001f\u007f]/.test(entryName)) {
@@ -34,5 +52,16 @@ export function sanitizeZipEntryPath(slug: string, entryName: string): string | 
   if (!path || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
     throw new Error(`"${slug}" zip entry uses ambiguous or traversal syntax: ${entryName}`);
   }
+  for (const segment of segments) assertPortableSegment(slug, entryName, segment);
   return path;
+}
+
+/**
+ * Deterministic archive-member identity for case-insensitive filesystems.
+ *
+ * Unicode upper-casing catches multi-code-point aliases such as
+ * `Straße`/`STRASSE`; plain lower-casing does not.
+ */
+export function canonicalZipEntryPathIdentity(path: string): string {
+  return path.normalize("NFC").toLocaleUpperCase("en-US");
 }

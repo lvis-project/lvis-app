@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { PluginPaths } from "../plugin-paths.js";
 import { resolvePluginPaths } from "../plugin-paths.js";
-import { PluginMarketplaceService } from "../marketplace.js";
+import {
+  PluginMarketplaceService,
+  type PreparedMarketplacePluginActivation,
+} from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import { PluginRuntime, type PluginRuntimeOptions } from "../runtime.js";
 import type { PluginManifest, Tool } from "../types.js";
@@ -28,6 +31,68 @@ export async function makeTestTreeWritable(root: string): Promise<void> {
   await Promise.all(entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => makeTestTreeWritable(join(root, entry.name))));
+}
+
+/**
+ * Explicit test lifecycle for storage-focused Marketplace tests. Production
+ * code must supply `PluginRuntime.activatePreparedArtifact`; this helper keeps
+ * unit fixtures honest about crossing the same mandatory coordination seam.
+ */
+export const activateAndCommitPreparedPluginForTest: PreparedMarketplacePluginActivation =
+  async (prepared) => ({
+    result: await prepared.durableCommit(),
+    retirement: Promise.resolve(),
+  });
+
+export const preparedActivationOptionsForTest = Object.freeze({
+  activatePreparedArtifact: activateAndCommitPreparedPluginForTest,
+});
+
+/**
+ * Storage/unit-test service with an explicit test lifecycle default. Keeping
+ * this adapter under `__tests__` lets legacy storage fixtures omit repetitive
+ * options without weakening the production method signatures or runtime gate.
+ */
+export class TestPluginMarketplaceService extends PluginMarketplaceService {
+  override install(...args: Parameters<PluginMarketplaceService["install"]>) {
+    const [pluginId, onProgress, options] = args;
+    return super.install(
+      pluginId,
+      onProgress,
+      options ?? preparedActivationOptionsForTest,
+    );
+  }
+
+  override ensureManagedInstalled(
+    ...args: Parameters<PluginMarketplaceService["ensureManagedInstalled"]>
+  ) {
+    return super.ensureManagedInstalled(args[0] ?? preparedActivationOptionsForTest);
+  }
+
+  override installPlugin(...args: Parameters<PluginMarketplaceService["installPlugin"]>) {
+    const [pluginId, version, options] = args;
+    return super.installPlugin(
+      pluginId,
+      version,
+      options ?? preparedActivationOptionsForTest,
+    );
+  }
+
+  override rollbackPlugin(...args: Parameters<PluginMarketplaceService["rollbackPlugin"]>) {
+    const [pluginId, options] = args;
+    return super.rollbackPlugin(
+      pluginId,
+      options ?? preparedActivationOptionsForTest,
+    );
+  }
+
+  override installLocal(...args: Parameters<PluginMarketplaceService["installLocal"]>) {
+    const [sourcePath, options] = args;
+    return super.installLocal(
+      sourcePath,
+      options ?? preparedActivationOptionsForTest,
+    );
+  }
 }
 
 /**
@@ -418,7 +483,7 @@ export function makeTestPluginMarketplaceService(
   rootDir: string,
   fetcher: MarketplaceFetcher,
 ): PluginMarketplaceService {
-  return new PluginMarketplaceService(
+  return new TestPluginMarketplaceService(
     makeTestPluginPaths({ rootDir }),
     fetcher,
   );

@@ -205,6 +205,19 @@ describe("PluginArtifactStore — extractZip", () => {
     }
   });
 
+  it("rejects Unicode case-folding archive member aliases", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const zip = new AdmZip();
+      zip.addFile("skills/Straße/SKILL.md", Buffer.from("one"));
+      zip.addFile("SKILLS/STRASSE/skill.md", Buffer.from("two"));
+      await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/colliding entry/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("rejects unsafe slugs before staging zip contents", async () => {
     const tmp = makeTmpDir();
     try {

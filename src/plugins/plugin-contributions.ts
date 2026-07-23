@@ -3,6 +3,7 @@ import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm 
 import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import type { PluginContributionDeclaration, PluginManifest } from "./types.js";
 import { verifyInstallReceiptRaw } from "./plugin-install-receipt.js";
+import { canonicalZipEntryPathIdentity } from "./zip-entry-path.js";
 
 type PluginContributionKind = "skill" | "hook" | "mcpServer";
 type PluginArchiveMemberKind = "file" | "directory" | "symlink" | "hardlink" | "device" | "other";
@@ -99,7 +100,7 @@ function declarationsFor(manifest: Pick<PluginManifest, "skills" | "hooks" | "mc
 type ContributionManifest = Pick<
   PluginManifest,
   "id" | "version" | "skills" | "hooks" | "mcpServers"
-> & Partial<Pick<PluginManifest, "tools" | "emittedEvents">>;
+>;
 
 /** Pure declaration validation shared by manifest load, packaging, and install. */
 export function resolvePluginContributionDeclarations(
@@ -107,11 +108,7 @@ export function resolvePluginContributionDeclarations(
 ): readonly ResolvedPluginContribution[] {
   const resolved: ResolvedPluginContribution[] = [];
   const pathOwners = new Map<string, string>();
-  const identifierOwners = new Map<string, string>([
-    [manifest.id, `plugin:${manifest.id}`],
-    ...(manifest.tools ?? []).map((tool) => [tool.name, `tool:${tool.name}`] as const),
-    ...(manifest.emittedEvents ?? []).map((event) => [event, `event:${event}`] as const),
-  ]);
+  const localIdsByKind = new Map<PluginContributionKind, Set<string>>();
   for (const [kind, declarations] of declarationsFor(manifest)) {
     if (declarations.length > MAX_DECLARATIONS_PER_KIND) {
       fail("too_many_declarations", manifest.id, kind);
@@ -121,16 +118,12 @@ export function resolvePluginContributionDeclarations(
       if (!declaration || !LOCAL_ID_RE.test(declaration.id) || declaration.id.length > 128) {
         fail("invalid_local_id", manifest.id, label);
       }
-      const identifierOwner = identifierOwners.get(declaration.id);
-      if (identifierOwner) {
-        const code = /^(?:skill|hook|mcpServer):/.test(identifierOwner)
-          ? "duplicate_local_id"
-          : "reserved_identifier_collision";
-        fail(code, manifest.id, label, identifierOwner);
-      }
-      identifierOwners.set(declaration.id, label);
+      const localIds = localIdsByKind.get(kind) ?? new Set<string>();
+      if (localIds.has(declaration.id)) fail("duplicate_local_id", manifest.id, label);
+      localIds.add(declaration.id);
+      localIdsByKind.set(kind, localIds);
       const path = normalizePluginContributionPath(manifest.id, label, declaration.path);
-      const collisionKey = path.normalize("NFC").toLocaleLowerCase("en-US");
+      const collisionKey = canonicalZipEntryPathIdentity(path);
       for (const [existingPath, existingOwner] of pathOwners) {
         if (
           collisionKey === existingPath ||
@@ -166,7 +159,7 @@ export function validatePluginContributionInventory(
   const inventory = new Map<string, PluginArchiveMemberKind>();
   for (const member of members) {
     const path = canonicalMemberPath(manifest.id, member.path);
-    const key = path.normalize("NFC").toLocaleLowerCase("en-US");
+    const key = canonicalZipEntryPathIdentity(path);
     if (inventory.has(key)) fail("member_collision", manifest.id, "archive", path);
     if (member.kind === "symlink" || member.kind === "hardlink" || member.kind === "device" || member.kind === "other") {
       fail("unsupported_member_kind", manifest.id, "archive", path);
@@ -174,9 +167,9 @@ export function validatePluginContributionInventory(
     inventory.set(key, member.kind);
   }
   for (const declaration of declarations) {
-    const key = declaration.path.normalize("NFC").toLocaleLowerCase("en-US");
+    const key = canonicalZipEntryPathIdentity(declaration.path);
     if (declaration.kind === "skill") {
-      const skillFile = `${key}/skill.md`;
+      const skillFile = canonicalZipEntryPathIdentity(`${declaration.path}/SKILL.md`);
       if (inventory.get(key) === "file") {
         fail("declared_directory_wrong_kind", manifest.id, `${declaration.kind}:${declaration.localId}`, declaration.path);
       }

@@ -39,7 +39,10 @@ import {
   type InstallerProgressEvent,
   type MarketplaceHttp,
 } from "./marketplace-installer.js";
-import { sanitizeZipEntryPath } from "./zip-entry-path.js";
+import {
+  canonicalZipEntryPathIdentity,
+  sanitizeZipEntryPath,
+} from "./zip-entry-path.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PublicKeyInput } from "./envelope-verifier.js";
 import type { PluginAccessSpec, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
@@ -641,7 +644,7 @@ export class PluginArtifactStore {
     for (const entry of entries) {
       const safeEntryPath = sanitizeZipEntryPath(safeSlug, entry.entryName);
       if (!safeEntryPath) continue;
-      const memberKey = safeEntryPath.normalize("NFC").toLocaleLowerCase("en-US");
+      const memberKey = canonicalZipEntryPathIdentity(safeEntryPath);
       if (archiveMembers.has(memberKey)) {
         throw new Error(`"${safeSlug}" zip contains colliding entry: ${entry.entryName}`);
       }

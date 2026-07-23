@@ -439,12 +439,16 @@ export class PluginRuntime {
   private readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
   private readonly pendingRestartPreparations = new Map<string, Promise<void>>();
   /**
-   * Hash-only view of the account most recently returned by the manifest's
-   * statusTool. Raw account identifiers never leave the invocation result and
-   * are never persisted by the host. A generation/session write grant fails
-   * closed until the trusted panel has refreshed auth status.
+   * Hash-only view of the current authenticated session. `identityHash`
+   * detects a repeated status probe for the same account without retaining the
+   * raw identifier. `principalHash` includes a random login-session nonce, so
+   * logout/unauthentication followed by same-account reauthentication cannot
+   * revive an unused grant or read snapshot from the prior session.
    */
-  private pluginAccountHashes = new Map<string, string>();
+  private pluginAccountHashes = new Map<string, {
+    identityHash: string;
+    principalHash: string;
+  }>();
   private readonly pluginUiRevisions = new Map<string, number>();
   private nextPluginUiRevision = 0;
   private toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
@@ -2666,7 +2670,7 @@ export class PluginRuntime {
   }
 
   getPluginOperationAccountHash(pluginId: string, generationId: string): string | undefined {
-    return this.pluginAccountHashes.get(`${pluginId}\0${generationId}`);
+    return this.pluginAccountHashes.get(`${pluginId}\0${generationId}`)?.principalHash;
   }
 
   /**
@@ -2679,18 +2683,19 @@ export class PluginRuntime {
     generationId: string,
     toolName: string,
     result: unknown,
-  ): void {
+  ): { invalidatedAccountHash?: string } {
     const active = this.requireGenerationAccess("plugin auth result observation").getActive(pluginId);
-    if (!active || active.generationId !== generationId) return;
+    if (!active || active.generationId !== generationId) return {};
     const manifest = active.state.runtime.manifest;
     const auth = manifest?.auth;
-    if (!auth) return;
+    if (!auth) return {};
     const key = `${pluginId}\0${generationId}`;
     if (toolName === auth.logoutTool) {
+      const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
       this.pluginAccountHashes.delete(key);
-      return;
+      return invalidatedAccountHash ? { invalidatedAccountHash } : {};
     }
-    if (toolName !== auth.statusTool) return;
+    if (toolName !== auth.statusTool) return {};
     const outer = result && typeof result === "object" && !Array.isArray(result)
       ? result as Record<string, unknown>
       : undefined;
@@ -2698,14 +2703,24 @@ export class PluginRuntime {
       ? outer.data as Record<string, unknown>
       : outer;
     if (nested?.authenticated !== true || typeof nested.account !== "string" || !nested.account.trim()) {
+      const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
       this.pluginAccountHashes.delete(key);
-      return;
+      return invalidatedAccountHash ? { invalidatedAccountHash } : {};
     }
-    const accountHash = createHash("sha256")
-      .update("plugin-account/v1\0")
+    const identityHash = createHash("sha256")
+      .update("plugin-account-identity/v1\0")
       .update(nested.account.trim().toLowerCase())
       .digest("hex");
-    this.pluginAccountHashes.set(key, accountHash);
+    const existing = this.pluginAccountHashes.get(key);
+    if (existing?.identityHash === identityHash) return {};
+    const principalHash = createHash("sha256")
+      .update("plugin-account-session/v1\0")
+      .update(identityHash)
+      .update("\0")
+      .update(randomUUID())
+      .digest("hex");
+    this.pluginAccountHashes.set(key, { identityHash, principalHash });
+    return existing ? { invalidatedAccountHash: existing.principalHash } : {};
   }
 
   clearPluginOperationAccount(pluginId: string): void {
