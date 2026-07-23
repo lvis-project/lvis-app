@@ -792,6 +792,11 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
         }
       }
       },
+      (pluginIds) => {
+        for (const discoveredPluginId of pluginIds) {
+          this.cancelPendingRestart(discoveredPluginId);
+        }
+      },
     );
   }
 
