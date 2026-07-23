@@ -175,6 +175,7 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
             path: redactFsPath(res.filePath),
           }),
         });
+        await auditLogger.flush();
         return { ok: true as const, path: res.filePath, bytes: buffer.length };
       } catch (err) {
         log.warn({ err }, "diagnostics export failed");

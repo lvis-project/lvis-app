@@ -44,7 +44,7 @@ function readGateLines(): SandboxGateAuditEntry[] {
 }
 
 describe("AuditLogger.logSandboxGate() — activation telemetry", () => {
-  it("writes one record with platform / onSignal / outcome / reason and stamps timestamp+type", () => {
+  it("writes one record with platform / onSignal / outcome / reason and stamps timestamp+type", async () => {
     const logger = new AuditLogger(auditDir);
     logger.logSandboxGate({
       platform: "darwin",
@@ -52,6 +52,7 @@ describe("AuditLogger.logSandboxGate() — activation telemetry", () => {
       outcome: "activate",
       reason: "deps-present",
     });
+    await logger.flush();
 
     const entries = readGateLines();
     expect(entries).toHaveLength(1);
@@ -65,7 +66,7 @@ describe("AuditLogger.logSandboxGate() — activation telemetry", () => {
     expect(new Date(e.timestamp).toISOString()).toBe(e.timestamp);
   });
 
-  it("captures each terminal outcome shape (degrade / abort / skip)", () => {
+  it("captures each terminal outcome shape (degrade / abort / skip)", async () => {
     const logger = new AuditLogger(auditDir);
     logger.logSandboxGate({
       platform: "linux",
@@ -85,6 +86,7 @@ describe("AuditLogger.logSandboxGate() — activation telemetry", () => {
       outcome: "skip",
       reason: "gate-off",
     });
+    await logger.flush();
 
     const entries = readGateLines();
     expect(entries.map((e) => e.outcome)).toEqual(["degrade", "abort", "skip"]);
