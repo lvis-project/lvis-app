@@ -615,17 +615,25 @@ export abstract class PluginRuntimeState {
     }
   }
 
-  protected cleanupFailedStartRuntimeState(
+  protected async failClosedLoadedPlugin(
     pluginId: string,
-    methods: Map<string, PluginToolHandler>,
-  ): void {
-    for (const method of methods.keys()) {
+    plugin: LoadedPlugin,
+    context: string,
+  ): Promise<void> {
+    this.markFailed(pluginId);
+    plugin.deactivateHostApi?.();
+    for (const method of plugin.methods.keys()) {
       this.methodMap.delete(method);
     }
-    this.plugins.get(pluginId)?.deactivateHostApi?.();
     this.plugins.delete(pluginId);
-    this.runPluginDisposers(pluginId, "start failure cleanup");
+    this.runPluginDisposers(pluginId, context);
     this.onDisable?.(pluginId);
+    await this.stopAfterStartFailure(
+      pluginId,
+      plugin.instance,
+      plugin.lifecycleHookScope,
+    );
+    await this.drainPluginHostApiOperations(pluginId, plugin);
   }
 
   protected runPluginDisposers(pluginId: string, context: string): void {

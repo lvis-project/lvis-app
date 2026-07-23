@@ -24,6 +24,7 @@ import {
 import { createWriteStream } from "node:fs";
 import { chmod, open as openFile, unlink, stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
+import { platform } from "node:process";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
@@ -41,6 +42,16 @@ import { lvisHome } from "../shared/lvis-home.js";
 import { iterateJsonlLines } from "./jsonl-reader.js";
 
 const MAX_PERMISSION_AUDIT_LINE_BYTES = 1024 * 1024;
+
+function fsyncDirectorySync(dir: string): void {
+  if (platform === "win32") return;
+  const fd = openSync(dir, "r");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 function readLastNonEmptyLineSync(filePath: string): string {
   let fd: number;
@@ -669,6 +680,10 @@ export class AuditLogger {
                 try { chmodSync(archivePath, 0o600); } catch { /* best effort */ }
                 const archiveFd = openSync(archivePath, "r");
                 try { fsyncSync(archiveFd); } finally { closeSync(archiveFd); }
+                // The archive must be discoverable after a crash before the
+                // canonical log is truncated. File fsync alone does not make
+                // the newly-created directory entry durable.
+                fsyncDirectorySync(this.auditDir);
                 truncateSync(this.permissionAuditLogFile, boundary);
                 const repairedFd = openSync(this.permissionAuditLogFile, "r+");
                 try { fsyncSync(repairedFd); } finally { closeSync(repairedFd); }

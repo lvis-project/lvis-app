@@ -19,6 +19,7 @@ const currentReentrantOperation = new AsyncLocalStorage<TrackedReentrantOperatio
 const ALL_PLUGIN_LOCK_KEY = "\0all-plugins";
 const PLUGIN_LIFECYCLE_DRAIN_TIMEOUT_MS = 10_000;
 const quarantinedPluginInstallLocks = new Set<string>();
+const pluginLifecycleQuarantineListeners = new Set<(lockKey: string) => void>();
 let exclusiveLifecycleTail: Promise<void> = Promise.resolve();
 let queuedExclusiveLifecycleMutations = 0;
 let activePluginLifecycleMutations = 0;
@@ -138,7 +139,7 @@ async function acquirePluginInstallLock<T>(
 ): Promise<T> {
   while (true) {
     const exclusiveGate = exclusiveLifecycleTail;
-    await exclusiveGate;
+    await waitForPluginLifecycleGate(exclusiveGate, pluginId);
     if (exclusiveGate !== exclusiveLifecycleTail) continue;
     activePluginLifecycleMutations += 1;
     break;
@@ -168,7 +169,7 @@ async function acquirePluginInstallLock<T>(
     }
   };
   try {
-    await prev;
+    await waitForPluginLifecycleGate(prev, pluginId);
     assertAppUpdateInstallNotRequested();
     const token: HeldPluginInstallLock = {
       active: true,
@@ -193,7 +194,7 @@ async function acquirePluginInstallLock<T>(
     } catch (err) {
       drainError = err;
       if (err instanceof PluginLifecycleDrainTimeoutError) {
-        quarantinedPluginInstallLocks.add(pluginId);
+        beginPluginInstallQuarantine(pluginId);
         // Fail the caller within a bounded time, but retain the lock token and
         // queue position until the already-started mutation really settles.
         // Releasing here would allow uninstall cleanup to race that stale
@@ -239,11 +240,8 @@ export async function drainPluginInstallLockOperations(pluginId: string): Promis
 
 /** Serialize a multi-plugin artifact mutation plus its full runtime rebuild. */
 export function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promise<T> {
-  if (quarantinedPluginInstallLocks.size > 0) {
-    return Promise.reject(new PluginLifecycleQuarantinedError(
-      [...quarantinedPluginInstallLocks].sort().join(", "),
-    ));
-  }
+  const quarantineError = getAnyPluginLifecycleQuarantineError();
+  if (quarantineError) return Promise.reject(quarantineError);
   const heldLocks = heldPluginInstallLocks.getStore();
   const heldAllLock = heldLocks?.get(ALL_PLUGIN_LOCK_KEY);
   if (heldAllLock?.active) return trackReentrantOperation(heldAllLock, fn);
@@ -273,27 +271,15 @@ async function acquireAllPluginInstallLocks<T>(
   let releaseExclusive!: () => void;
   const exclusiveDone = new Promise<void>((resolve) => { releaseExclusive = resolve; });
   exclusiveLifecycleTail = previousExclusive.then(() => exclusiveDone);
-  if (!canEnterSynchronously) {
-    await previousExclusive;
-    if (activePluginLifecycleMutations > 0) {
-      await new Promise<void>((resolve) => { resolvePluginLifecycleDrain = resolve; });
-    }
-  }
-
-  pendingPluginInstallOperations += 1;
-  const token: HeldPluginInstallLock = {
-    active: true,
-    pendingReentrantOperations: new Set(),
-    reentrantFailures: [],
-  };
-  const nextHeldLocks = copyActiveHeldLocks(heldLocks);
-  nextHeldLocks.set(ALL_PLUGIN_LOCK_KEY, token);
   let releaseDeferred = false;
   let finalized = false;
+  let operationCounted = false;
   const finalize = () => {
     if (finalized) return;
     finalized = true;
-    pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
+    if (operationCounted) {
+      pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
+    }
     queuedExclusiveLifecycleMutations = Math.max(
       0,
       queuedExclusiveLifecycleMutations - 1,
@@ -301,6 +287,23 @@ async function acquireAllPluginInstallLocks<T>(
     releaseExclusive();
   };
   try {
+    if (!canEnterSynchronously) {
+      await waitForAnyPluginLifecycleGate(previousExclusive);
+      if (activePluginLifecycleMutations > 0) {
+        await waitForAnyPluginLifecycleGate(
+          new Promise<void>((resolve) => { resolvePluginLifecycleDrain = resolve; }),
+        );
+      }
+    }
+    pendingPluginInstallOperations += 1;
+    operationCounted = true;
+    const token: HeldPluginInstallLock = {
+      active: true,
+      pendingReentrantOperations: new Set(),
+      reentrantFailures: [],
+    };
+    const nextHeldLocks = copyActiveHeldLocks(heldLocks);
+    nextHeldLocks.set(ALL_PLUGIN_LOCK_KEY, token);
     assertAppUpdateInstallNotRequested();
     let ownerValue!: T;
     let ownerFailed = false;
@@ -318,7 +321,7 @@ async function acquireAllPluginInstallLocks<T>(
     } catch (err) {
       drainError = err;
       if (err instanceof PluginLifecycleDrainTimeoutError) {
-        quarantinedPluginInstallLocks.add(ALL_PLUGIN_LOCK_KEY);
+        beginPluginInstallQuarantine(ALL_PLUGIN_LOCK_KEY);
         releaseDeferred = true;
         void settleReentrantOperations(token).finally(() => {
           quarantinedPluginInstallLocks.delete(ALL_PLUGIN_LOCK_KEY);
@@ -444,6 +447,63 @@ function getPluginLifecycleQuarantineError(pluginId: string): Error | null {
     return new PluginLifecycleQuarantinedError(pluginId);
   }
   return null;
+}
+
+function getAnyPluginLifecycleQuarantineError(): Error | null {
+  if (quarantinedPluginInstallLocks.size === 0) return null;
+  return new PluginLifecycleQuarantinedError(
+    quarantinedPluginInstallLocks.has(ALL_PLUGIN_LOCK_KEY)
+      ? "all plugins"
+      : [...quarantinedPluginInstallLocks].sort().join(", "),
+  );
+}
+
+function beginPluginInstallQuarantine(lockKey: string): void {
+  quarantinedPluginInstallLocks.add(lockKey);
+  for (const notify of [...pluginLifecycleQuarantineListeners]) notify(lockKey);
+}
+
+async function waitForPluginLifecycleGate(
+  gate: Promise<unknown>,
+  pluginId: string,
+): Promise<void> {
+  await waitForLifecycleGate(gate, (lockKey) =>
+    lockKey === ALL_PLUGIN_LOCK_KEY || lockKey === pluginId,
+  () => getPluginLifecycleQuarantineError(pluginId));
+}
+
+async function waitForAnyPluginLifecycleGate(gate: Promise<unknown>): Promise<void> {
+  await waitForLifecycleGate(
+    gate,
+    () => true,
+    getAnyPluginLifecycleQuarantineError,
+  );
+}
+
+async function waitForLifecycleGate(
+  gate: Promise<unknown>,
+  matches: (lockKey: string) => boolean,
+  currentError: () => Error | null,
+): Promise<void> {
+  const initialError = currentError();
+  if (initialError) throw initialError;
+  let listener: ((lockKey: string) => void) | undefined;
+  const quarantine = new Promise<never>((_, reject) => {
+    listener = (lockKey) => {
+      if (!matches(lockKey)) return;
+      reject(currentError() ?? new PluginLifecycleQuarantinedError(lockKey));
+    };
+    pluginLifecycleQuarantineListeners.add(listener);
+    const racedError = currentError();
+    if (racedError) reject(racedError);
+  });
+  try {
+    await Promise.race([gate, quarantine]);
+  } finally {
+    if (listener) pluginLifecycleQuarantineListeners.delete(listener);
+  }
+  const finalError = currentError();
+  if (finalError) throw finalError;
 }
 
 export function hasPluginInstallInFlight(): boolean {

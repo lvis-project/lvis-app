@@ -176,7 +176,7 @@ export default async function createPlugin() {
     await expect(runtime.call("lc_restart_remove_race_ping")).rejects.toThrow(/not found/);
   });
 
-  it("bounds a replacement start that never settles and keeps the old instance", async () => {
+  it("bounds an uncertain replacement start and fail-closes the old instance", async () => {
     const pluginDir = join(installedDir, "lc-restart-timeout");
     const armPath = join(testDir, "restart-timeout-arm");
     await mkdir(pluginDir, { recursive: true });
@@ -230,8 +230,11 @@ export default async function createPlugin() {
     await writeFile(armPath, "armed", "utf-8");
 
     await expect(runtime.restartPlugin("lc-restart-timeout")).resolves.toBe("failed");
-    expect(runtime.listPluginIds()).toContain("lc-restart-timeout");
-    await expect(runtime.call("lc_restart_timeout_ping")).resolves.toBe("old-still-live");
+    expect(runtime.listPluginIds()).not.toContain("lc-restart-timeout");
+    await expect(runtime.call("lc_restart_timeout_ping")).rejects.toThrow(/not found/);
+    await expect(runtime.restartPlugin("lc-restart-timeout")).rejects.toMatchObject({
+      code: "plugin-lifecycle-quarantined",
+    });
   });
 
   it("revokes and unadvertises the old instance when its stop hook times out", async () => {

@@ -332,26 +332,18 @@ export async function parsePluginJson(
   parsed.installPolicy = normalizeInstallPolicy(parsed);
 
   if (typeof parsed.id !== "string" || parsed.id.length === 0) {
-    fail("id", "must be a non-empty string", `"id": "com.example.meeting-recorder"`);
+    fail("id", "must be a non-empty string", `"id": "meeting-recorder"`);
   }
-  // PR #894 review B8 — reject malformed dotted ids that create ambiguity
-  // in the `plugin.<pluginId>.*` secret namespace, the audit log
-  // `[plugin:${id}]` prefix, and the host-secret allowlist key parser.
-  //   - Leading/trailing dots produce empty segments (`plugin..foo.bar`)
-  //   - Consecutive dots (`..`) make audit log greps unparseable
-  // Reason tag is `manifest_schema` to match the supply-chain audit tag.
-  // Normal dot-segmented ids (`com.example.meeting-recorder`) remain valid
-  // per the SDK schema's "dot-format recommended" convention.
+  // Defence in depth for callers using a partial validator: the authoritative
+  // schema accepts kebab-case only, so every dotted form is invalid.
   if (
     typeof parsed.id === "string" &&
-    (parsed.id.startsWith(".") ||
-      parsed.id.endsWith(".") ||
-      parsed.id.includes(".."))
+    parsed.id.includes(".")
   ) {
     fail(
       "id",
-      `value '${parsed.id}' has malformed dot segments (leading/trailing/consecutive dots) — manifest_schema. Dotted ids are allowed (e.g. 'com.example.foo'), but each segment must be non-empty`,
-      `"id": "com.example.meeting-recorder"`,
+      `value '${parsed.id}' must use kebab-case; dotted ids are not allowed — manifest_schema`,
+      `"id": "meeting-recorder"`,
     );
   }
   // Stable SemVer only — same regex as the SDK schema and the per-plugin
