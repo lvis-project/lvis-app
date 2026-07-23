@@ -204,7 +204,10 @@ vi.mock("../steps/plugin-runtime.js", () => ({
         pluginCallLlmRef: { fn: undefined },
       },
       runPluginShutdownHandlers: vi.fn(async () => {}),
-      pluginPaths: { pluginsRoot: "/tmp/lvis-boot-test/plugins" },
+      pluginPaths: {
+        pluginsRoot: "/tmp/lvis-boot-test/plugins",
+        cacheRoot: "/tmp/lvis-boot-test/plugins/.cache",
+      },
     };
   }),
 }));
@@ -239,7 +242,9 @@ vi.mock("../steps/reviewer-wiring.js", () => ({
 }));
 
 vi.mock("../steps/hook-system-wiring.js", () => ({
-  wireHookSystem: vi.fn(async () => ({ manager: {} })),
+  wireHookSystem: vi.fn(async () => ({
+    manager: { setPluginGenerationAccess: vi.fn() },
+  })),
 }));
 
 vi.mock("../steps/refresh-active-llm-wildcard.js", () => ({
@@ -275,6 +280,7 @@ vi.mock("../../mcp/mcp-manager.js", () => ({
     disconnectAll = vi.fn(async () => {});
     killSwitch = vi.fn(async () => {});
     listServers = vi.fn(() => [] as unknown[]);
+    setPluginGenerationAccess = vi.fn();
   },
 }));
 vi.mock("../../mcp/mcp-elicitation-resolver.js", () => ({
@@ -535,6 +541,7 @@ describe("bootstrap() integration lock", () => {
         "memoryManager",
         "notificationService",
         "personaPromptStore",
+        "pluginBundleLifecycle",
         "pluginLoopbackManager",
         "pluginMarketplace",
         "pluginPaths",
