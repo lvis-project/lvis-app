@@ -165,7 +165,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         this.reportPluginManifestRejected(outcome.plan.manifestPath, outcome.error);
       }
       if (!outcome.ok) continue;
-      const pluginId = outcome.plan.pluginIdHint ?? outcome.manifest.id;
+      // Runtime identity is the literal manifest id. A registry id is only a
+      // deployment alias and must not own tools, events, grants, or HostApi.
+      const pluginId = outcome.manifest.id;
       enabledManifestSnapshots.set(pluginId, {
         manifest: outcome.manifest,
         approvedPluginAccess: outcome.approvedPluginAccess,
@@ -449,7 +451,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   ): Promise<RestartPluginResult> {
     const pending = this.pendingRestarts.get(pluginId);
     if (pending) return pending;
-    const restart = this.restartPluginInternal(pluginId, opts).finally(() => {
+    const generation = this.beginPluginLifecycleOperation(pluginId);
+    const restart = this.restartPluginInternal(pluginId, generation, opts).finally(() => {
       if (this.pendingRestarts.get(pluginId) === restart) {
         this.pendingRestarts.delete(pluginId);
       }
@@ -460,6 +463,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
   protected async restartPluginInternal(
     pluginId: string,
+    generation: number,
     opts: { skipPreparation?: boolean } = {},
   ): Promise<RestartPluginResult> {
     plog("info", { pluginId, phase: PluginPhase.RESTART_REQUEST }, "restart requested");
@@ -468,6 +472,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("warn", { pluginId, phase: PluginPhase.RESTART_REQUEST, reason: "not_loaded" }, "restart no-op — plugin not loaded");
       return undefined;
     }
+    const isCurrent = () => this.isPluginLifecycleOperationCurrent(pluginId, generation);
 
     const loadPlan = await this.resolveManifestLoadPlanInternal();
     const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
@@ -539,6 +544,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
     }
 
+    if (!isCurrent()) return "failed";
+
     const entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
     // Cache-bust: Node ESM loader memoizes by URL — without it
@@ -552,6 +559,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
       return "failed";
     }
+
+    if (!isCurrent()) return "failed";
 
     if (!createPlugin) {
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin after restart");
@@ -579,6 +588,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       return "failed";
     }
 
+    if (!isCurrent()) {
+      await this.stopAfterStartFailure(pluginId, instance);
+      return "failed";
+    }
+
     const methods = buildMethodMap(manifest, instance, (toolName) =>
       plog("warn", { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler after restart"),
     );
@@ -592,11 +606,20 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       throw new Error(`restartPlugin failed for ${pluginId}: ${(err as Error).message}`);
     }
 
+    if (!isCurrent()) {
+      await this.stopAfterStartFailure(pluginId, instance);
+      return "failed";
+    }
+
     try {
       await plugin.instance.stop?.();
       plog("debug", { pluginId, phase: PluginPhase.RESTART_STOP_OK }, "stopped previous instance");
     } catch (err) {
       plog("error", { pluginId, phase: PluginPhase.RESTART_STOP_FAIL, err }, "stop during restart failed");
+    }
+    if (!isCurrent()) {
+      await this.stopAfterStartFailure(pluginId, instance);
+      return "failed";
     }
 
     for (const method of plugin.methods.keys()) {
@@ -707,6 +730,14 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       return "started";
     }
 
+    const activePreparationGeneration = this.pluginLifecycleGenerations.get(pluginId);
+    const lifecycleGeneration =
+      this.preparation.hasPending(pluginId) && activePreparationGeneration !== undefined
+        ? activePreparationGeneration
+        : this.beginPluginLifecycleOperation(pluginId);
+    const shouldCommit = () =>
+      this.isPluginLifecycleOperationCurrent(pluginId, lifecycleGeneration);
+
     const loadPlan = await this.resolveManifestLoadPlanInternal();
     const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
     const snapshot = enabledSnapshots.get(pluginId);
@@ -725,15 +756,23 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
     const { manifest, approvedPluginAccess } = snapshot;
     this.rememberPluginInstallAlias(manifest.id, pluginId);
-    this.knownPluginManifests.set(pluginId, manifest);
-    this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
-    this.rememberToolOwners(pluginId, manifest); // #885 §2.4a MODEL-ONLY (see method)
+    this.knownPluginManifests.set(manifest.id, manifest);
+    this.knownPluginAccessGrants.set(manifest.id, approvedPluginAccess);
+    this.rememberToolOwners(manifest.id, manifest); // #885 §2.4a MODEL-ONLY (see method)
     for (const eventType of getDeclaredEmittedEvents(manifest)) {
-      this.knownEventOwners.set(eventType, pluginId);
+      this.knownEventOwners.set(eventType, manifest.id);
     }
 
-    const startResult = await this.instantiateAndStartSinglePlugin(targetPlan, manifest, approvedPluginAccess);
+    const startResult = await this.instantiateAndStartSinglePlugin(
+      targetPlan,
+      manifest,
+      approvedPluginAccess,
+      { shouldCommit },
+    );
     if (startResult === "deferred") return "preparing";
+    if (startResult === "cancelled") {
+      throw new Error(`addPlugin cancelled for ${pluginId}`);
+    }
 
     // Throw if the plugin landed in failed state — caller (IPC install
     // handler) catches to roll back marketplace state. boot-time `load()`
@@ -746,7 +785,22 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
    * US-A3 — Targeted single-plugin remove for uninstall paths.
    */
   async removePlugin(pluginId: string): Promise<void> {
+    // Invalidate in-flight add/restart continuations before the first await.
+    this.beginPluginLifecycleOperation(pluginId);
     this.preparation.clearFor(pluginId);
+    // A direct runtime caller can overlap remove with a replacement even
+    // though all product IPC paths share the install mutex. Wait for the
+    // invalidated restart to finish its stale-instance cleanup before we run
+    // the plugin's disposer set; otherwise a late start() subscription could
+    // be registered after uninstall has already swept the map.
+    const pendingRestart = this.pendingRestarts.get(pluginId);
+    if (pendingRestart) {
+      try {
+        await pendingRestart;
+      } catch {
+        // Removal still owns the final cleanup after a failed replacement.
+      }
+    }
     this.configStore.delete(pluginId);
     // Plugin may be in one of three states when uninstall is requested:
     //   - loaded (`this.plugins` has it) → run stop + dispose, then clean

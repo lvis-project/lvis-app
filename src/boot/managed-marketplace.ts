@@ -8,8 +8,15 @@ const log = createLogger("lvis");
 
 export function resolveManagedPluginBootstrap(input: {
   marketplace: Pick<MarketplaceSettings, "backend" | "cloudBaseUrl">;
+  e2eTestMode?: boolean;
 }): { enabled: boolean; reason?: string } {
   const { marketplace } = input;
+  if (input.e2eTestMode) {
+    return {
+      enabled: false,
+      reason: "managed plugin bootstrap disabled in isolated E2E test mode",
+    };
+  }
   // The cloud backend is the only marketplace backend; bootstrap is enabled iff
   // a base URL is configured. (The former mock-backend / isPackaged skip branch
   // was dead once the mock backend was removed.)
@@ -77,7 +84,10 @@ export function runManagedBootstrap(input: RunManagedBootstrapInput): Promise<vo
 
 async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<void> {
   const { pluginMarketplace, pluginRuntime, mainWindow, marketplace } = input;
-  const decision = resolveManagedPluginBootstrap({ marketplace });
+  const decision = resolveManagedPluginBootstrap({
+    marketplace,
+    e2eTestMode: process.env.LVIS_E2E === "1" && process.env.NODE_ENV === "test",
+  });
   if (!decision.enabled) {
     log.warn(`boot: managed plugin bootstrap skipped: ${decision.reason}`);
     notifyBootstrapStatus(mainWindow, {

@@ -312,7 +312,7 @@ export function createHostApiFactory(
             });
           } catch { /* audit must not break host */ }
           plog("warn", { pluginId, phase: PluginPhase.CAPABILITY_DENY, capability: requiredCap ?? type, eventType: type, reason: "missing_capability" }, "capability denied");
-          return;
+          throw new Error(`Plugin '${pluginId}' is not allowed to emit undeclared event '${type}'`);
         }
         pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
         plog("debug", { pluginId, phase: PluginPhase.EVENT_EMIT, eventType: type }, "event emitted");

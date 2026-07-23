@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,6 +105,75 @@ export default async function createPlugin() {
     expect(runtime.listPluginIds()).toContain("lc-restart");
     // Tool should still be callable
     await expect(runtime.call("lc_restart_ping")).resolves.toBeDefined();
+  });
+
+  it("does not commit a replacement that finishes after removePlugin invalidates it", async () => {
+    const pluginDir = join(installedDir, "lc-restart-remove-race");
+    const armPath = join(testDir, "restart-arm");
+    const enteredPath = join(testDir, "restart-entered");
+    const releasePath = join(testDir, "restart-release");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `import { access, writeFile } from "node:fs/promises";
+export default async function createPlugin() {
+  return {
+    handlers: { lc_restart_remove_race_ping: async () => "pong" },
+    start: async () => {
+      try {
+        await access(${JSON.stringify(armPath)});
+        await writeFile(${JSON.stringify(enteredPath)}, "entered");
+        while (true) {
+          try { await access(${JSON.stringify(releasePath)}); break; }
+          catch { await new Promise((resolve) => setTimeout(resolve, 5)); }
+        }
+      } catch {}
+    },
+    stop: async () => {},
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "lc-restart-remove-race",
+        name: "Restart Remove Race",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [{ name: "lc_restart_remove_race_ping", description: "restart removal race regression tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        description: "Lifecycle race regression",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "lc-restart-remove-race", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await writeFile(armPath, "armed", "utf-8");
+    const restart = runtime.restartPlugin("lc-restart-remove-race");
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      try { await access(enteredPath); break; }
+      catch { await new Promise((resolve) => setTimeout(resolve, 5)); }
+    }
+    await expect(access(enteredPath)).resolves.toBeUndefined();
+
+    const removal = runtime.removePlugin("lc-restart-remove-race");
+    await writeFile(releasePath, "release", "utf-8");
+
+    await expect(restart).resolves.toBe("failed");
+    await expect(removal).resolves.toBeUndefined();
+    expect(runtime.listPluginIds()).not.toContain("lc-restart-remove-race");
+    await expect(runtime.call("lc_restart_remove_race_ping")).rejects.toThrow(/not found/);
   });
 
   it("restartPlugin re-imports the latest on-disk module (ESM cache-bust)", async () => {

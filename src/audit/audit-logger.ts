@@ -12,6 +12,7 @@ import {
   mkdirSync,
   existsSync,
   openSync,
+  readFileSync,
   readdirSync,
   createReadStream,
   readSync,
@@ -26,6 +27,7 @@ import { withFileLock } from "../lib/with-file-lock.js";
 import {
   computeLineHmac,
   GENESIS_MARKER,
+  verifyChain,
   type SecretStore,
 } from "./hmac-chain.js";
 import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-schema.js";
@@ -497,18 +499,28 @@ export class AuditLogger {
    * verify operation reports `sealMatch: null` for all days.
    */
   setupPermissionAuditChain(secret: string, sealStore?: SecretStore): void {
+    // A failed re-bootstrap must never inherit a prior ready state.
+    this.permissionAuditSecret = null;
+    this.permissionAuditSealStore = null;
+    this.permissionAuditLastSerialized = GENESIS_MARKER;
+    this.permissionAuditChainBootstrapped = false;
+    let lines: string[] = [];
+    try {
+      lines = readFileSync(this.permissionAuditLogFile, "utf-8")
+        .split(/\r?\n/)
+        .filter((line) => line.length > 0);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    const verification = verifyChain(secret, lines);
+    if (!verification.ok) {
+      throw new Error(
+        `permission audit chain invalid at line ${verification.firstBrokenLineIndex + 1}: ${verification.reason}`,
+      );
+    }
+    this.permissionAuditLastSerialized = lines.at(-1) ?? GENESIS_MARKER;
     this.permissionAuditSecret = secret;
     this.permissionAuditSealStore = sealStore ?? null;
-    // Bootstrap from the existing file tail so the next append links to
-    // the real last line without O(n) full-file scans.
-    try {
-      this.permissionAuditLastSerialized = readLastNonEmptyLineSync(this.permissionAuditLogFile);
-    } catch {
-      // If we can't read the existing file, the chain effectively
-      // restarts from genesis. The forensics tooling will detect the
-      // discontinuity at the next verifyChain.
-      this.permissionAuditLastSerialized = GENESIS_MARKER;
-    }
     this.permissionAuditChainBootstrapped = true;
   }
 

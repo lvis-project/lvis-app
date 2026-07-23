@@ -1,5 +1,7 @@
-import { translate, type TranslationVars } from '../../../src/i18n/translate.js';
-import type { Locale } from '../../../src/i18n/locale.js';
+import { interpolate, type TranslationVars } from '../../../src/i18n/translate.js';
+import { messages, type Messages } from '../../../src/i18n/messages/index.js';
+import { ko } from '../../../src/i18n/messages/ko.js';
+import { koMessages } from '../../../src/i18n/messages/generated-locales/ko.js';
 
 /**
  * i18n catalog binding for e2e assertions.
@@ -16,6 +18,10 @@ import type { Locale } from '../../../src/i18n/locale.js';
  */
 export type TestT = (key: string, vars?: TranslationVars) => string;
 
-export function makeTestT(locale: Locale): TestT {
-  return (key, vars) => translate(locale, key, vars);
+export function makeTestT(locale: "en" | "ko"): TestT {
+  // Production keeps non-English catalogs lazy. E2E assertions are synchronous,
+  // so bind the locale that the harness can seed instead of racing the renderer's
+  // dynamic import and accidentally asserting the English fallback.
+  const catalog: Messages = locale === "ko" ? { ...ko, ...koMessages } : messages.en;
+  return (key, vars) => interpolate(catalog[key] ?? messages.en[key] ?? key, vars);
 }

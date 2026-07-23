@@ -826,23 +826,25 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
-      const manifest = pluginRuntime.getPluginManifest(pluginId);
-      const schema = manifest?.configSchema;
-      const stripped = stripSecretFields(schema, asPlainRecord(config));
-      const savedConfig = await settingsService.setPluginConfig(pluginId, stripped);
-      pluginRuntime.setConfigOverride(pluginId, savedConfig);
-      const previous = settingsService.getPluginConfig(pluginId) ?? {};
-      const observed = new Set<string>([
-        ...Object.keys(savedConfig ?? {}),
-        ...Object.keys(previous ?? {}),
-      ]);
-      for (const k of observed) {
-        emitPluginConfigChange(pluginId, k, savedConfig?.[k]);
-      }
-      // `restartPlugin` resolves after the runtime's wired `onEnable`
-      // resyncs ToolRegistry, so no explicit sync is needed here.
-      await pluginRuntime.restartPlugin(pluginId);
-      return { ok: true as const, config: savedConfig };
+      return await withPluginInstallLock(pluginId, async () => {
+        const manifest = pluginRuntime.getPluginManifest(pluginId);
+        const schema = manifest?.configSchema;
+        const stripped = stripSecretFields(schema, asPlainRecord(config));
+        const previous = settingsService.getPluginConfig(pluginId) ?? {};
+        const savedConfig = await settingsService.setPluginConfig(pluginId, stripped);
+        pluginRuntime.setConfigOverride(pluginId, savedConfig);
+        const observed = new Set<string>([
+          ...Object.keys(savedConfig ?? {}),
+          ...Object.keys(previous ?? {}),
+        ]);
+        for (const k of observed) {
+          emitPluginConfigChange(pluginId, k, savedConfig?.[k]);
+        }
+        // Persistence and restart share the install/uninstall mutex so a
+        // config-triggered replacement cannot overlap artifact removal.
+        await pluginRuntime.restartPlugin(pluginId);
+        return { ok: true as const, config: savedConfig };
+      });
     } catch (err) {
       return pluginConfigError("plugin-config-save-failed", (err as Error).message);
     }
