@@ -1010,7 +1010,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         return UNAUTHORIZED_FRAME;
       }
       if (process.env.LVIS_E2E !== "1") {
-        return { ok: false as const, error: "e2e-disabled" };
+        return { ok: false as const, error: "production-disabled" };
       }
       return handlePluginBundleE2eSnapshot(
         deps,

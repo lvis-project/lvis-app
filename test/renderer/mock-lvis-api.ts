@@ -480,7 +480,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     callPluginMethod: vi.fn(async () => ({ ok: true })),
     e2ePluginBundleSnapshot: vi.fn(async () => ({
       ok: false,
-      error: "e2e-disabled",
+      error: "production-disabled",
     })),
     onPluginEvent: vi.fn((eventType: string, handler: (p: unknown) => void) => {
       let set = pluginEventHandlers.get(eventType);
