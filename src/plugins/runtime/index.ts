@@ -308,7 +308,6 @@ export interface PluginRuntimeOptions {
   onActiveStateChange?: (
     pluginId: string,
     enabled: boolean,
-    lifecycleHandled?: boolean,
   ) => Promise<void> | void;
   /**
    * Optional dependency preparation gate. When this returns a Promise, plugin
@@ -340,7 +339,6 @@ export class PluginRuntime {
   private readonly onActiveStateChange?: (
     pluginId: string,
     enabled: boolean,
-    lifecycleHandled?: boolean,
   ) => Promise<void> | void;
   private readonly preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
   private plugins = new Map<string, LoadedPlugin>();
@@ -368,11 +366,9 @@ export class PluginRuntime {
   >();
   private readonly disabledPluginIds = new Set<string>();
   /**
-   * #1176 active/inactive — plugins toggled inactive at runtime via
-   * {@link setPluginEnabled}. Orthogonal to {@link disabledPluginIds} (the
-   * load/unload state): an inactive plugin stays *loaded* but its tools are
-   * hidden from the model's per-turn scope. `enabled !== false` is the active
-   * predicate, so absence from this set means active (migration-safe default).
+   * Plugins toggled inactive at runtime via {@link setPluginEnabled}. Disabled
+   * plugins have no active runtime generation; this set keeps the durable
+   * enabled-state projection explicit for cards and restart planning.
    */
   private readonly inactivePluginIds = new Set<string>();
   private readonly preparation: PreparationTracker;
@@ -727,6 +723,22 @@ export class PluginRuntime {
     }
   }
 
+  /**
+   * Run a host-owned integration against the exact immutable plugin instance
+   * admitted for the duration of the operation. Callers must not retain the
+   * instance beyond the callback: disable, update, rollback, and uninstall all
+   * wait for this lease before retiring the generation.
+   */
+  async withPluginInstanceLease<TPlugin, TResult>(
+    pluginId: string,
+    operation: (instance: TPlugin) => Promise<TResult>,
+  ): Promise<TResult> {
+    return this.withPinnedGeneration(
+      pluginId,
+      async (projection) => operation(projection.instance as TPlugin),
+    );
+  }
+
   // ─── Load Plan & Snapshots ─────────────────────────────────────────────────
 
   private async resolveManifestLoadPlanInternal(): Promise<ManifestLoadPlan[]> {
@@ -840,6 +852,21 @@ export class PluginRuntime {
       // manifest.id once the manifest is parsed so all post-read phases are consistent.
       let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
+      if (!plan.enabled) {
+        const snapshot = enabledManifestSnapshots.get(plan.pluginIdHint ?? "");
+        if (snapshot) {
+          pluginId = snapshot.manifest.id;
+          this.rememberPluginInstallAlias(pluginId, plan.pluginIdHint);
+          this.rememberPluginManifest(pluginId, snapshot.manifest, snapshot.approvedPluginAccess);
+          this.inactivePluginIds.add(pluginId);
+          this.disabledPluginIds.add(pluginId);
+          this.failedPluginIds.delete(pluginId);
+          this.failedPluginStubs.delete(pluginId);
+          this.loadFailureInfo.delete(pluginId);
+          plog("debug", { pluginId, phase: PluginPhase.LOAD_OK, reason: "inactive_pointer" }, "plugin retained as inactive metadata without runtime admission");
+        }
+        continue;
+      }
       if (plan.pluginIdHint) {
         const integrityResult = await this.verifyReceiptAndDevGuard(
           plan.pluginIdHint,
@@ -889,17 +916,7 @@ export class PluginRuntime {
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
       this.loadFailureInfo.delete(manifest.id);
-      // #1176 M1 fix: inactive plugins (enabled=false) are LOADED just like
-      // active ones — only model exposure is gated. Seed inactivePluginIds here
-      // so isPluginEnabled() is correct immediately after boot; the boot
-      // ToolRegistry sync and hostApi.registerKeywords gate suppress inactive
-      // tools/keywords without stop/reload churn.
-      if (!plan.enabled) {
-        this.inactivePluginIds.add(manifest.id);
-      } else {
-        // Ensure a previously-inactive plugin becomes active on re-enable.
-        this.inactivePluginIds.delete(manifest.id);
-      }
+      this.inactivePluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
       this.failedPluginIds.delete(manifest.id);
       // Plugin↔app minimum-version gate — HARD BLOCK at LOAD. A plugin already
@@ -2406,15 +2423,10 @@ export class PluginRuntime {
   }
 
   /**
-   * #1176 — toggle a plugin's active/inactive state. Persists `enabled` to the
-   * registry atomically and updates the in-memory mirror. Deliberately does NOT
-   * unload/reload the plugin: tool exposure is recomputed per turn from
-   * {@link isPluginEnabled}, so a disabled plugin's tools simply vanish from the
-   * next turn's scope (and reappear on re-enable) with no runtime churn.
-   * Active-state changes use `onActiveStateChange`; runtime lifecycle
-   * `onDisable`/`onEnable` remains reserved for actual unload/reload paths.
-   *
-   * @throws if `pluginId` is not a known/loaded plugin.
+   * Atomically move a plugin between an active immutable generation and the
+   * inactive pointer. Disable drains all predecessor leases before reporting
+   * success. Re-enable rebuilds from installed bytes and reverifies the receipt
+   * before its registry commit and generation publication linearize together.
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
     if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
@@ -2431,17 +2443,53 @@ export class PluginRuntime {
       }
     };
     const generationLifecycle = this.requireGenerationLifecycle("plugin enabled-state change");
-    if (!generationLifecycle.getActive(pluginId)) {
-      throw new Error(`cannot change enabled state without an active generation: ${pluginId}`);
+    if (!enabled) {
+      if (!generationLifecycle.getActive(pluginId)) {
+        throw new Error(`cannot disable plugin without an active generation: ${pluginId}`);
+      }
+      await generationLifecycle.deactivateWithCommit(pluginId, persist);
+      this.inactivePluginIds.add(pluginId);
+      this.disabledPluginIds.add(pluginId);
+      await generationLifecycle.waitForRetirements();
+    } else {
+      if (generationLifecycle.getActive(pluginId)) {
+        throw new Error(`cannot re-enable plugin while a generation is active: ${pluginId}`);
+      }
+      if (!this.installReceiptCacheRoot) {
+        throw new Error("plugin re-enable requires installReceiptCacheRoot");
+      }
+      const loadPlan = await this.resolveManifestLoadPlanInternal();
+      const targetPlan = loadPlan.find((plan) =>
+        plan.pluginIdHint === pluginId || this.matchesManifestPath(plan.manifestPath, pluginId));
+      if (!targetPlan) throw new Error(`Plugin not found in registry: ${pluginId}`);
+      const manifest = await this.readManifest(targetPlan.manifestPath);
+      if (manifest.id !== pluginId) {
+        throw new Error(`plugin re-enable manifest identity changed: expected ${pluginId}, got ${manifest.id}`);
+      }
+      const pluginRoot = dirname(targetPlan.manifestPath);
+      const integrity = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
+      if (!integrity.ok) {
+        throw new Error(`plugin re-enable receipt verification failed: ${pluginId}`);
+      }
+      const receiptRaw = await readFile(
+        installReceiptPath(this.installReceiptCacheRoot, pluginId),
+        "utf8",
+      );
+      await this.activatePreparedArtifact({
+        pluginRoot,
+        manifest,
+        receiptRaw,
+        approvedPluginAccess: targetPlan.approvedPluginAccess ?? this.knownPluginAccessGrants.get(pluginId),
+        durableCommit: persist,
+      });
+      this.inactivePluginIds.delete(pluginId);
+      this.disabledPluginIds.delete(pluginId);
     }
-    await generationLifecycle.setContributionsEnabledWithCommit(pluginId, enabled, persist);
-    if (enabled) this.inactivePluginIds.delete(pluginId);
-    else this.inactivePluginIds.add(pluginId);
     // The generation pointer and durable registry are already committed. Keep
     // this runtime view aligned even if a downstream host projection callback
     // reports a post-commit fault; callers must see the error without reviving
     // the predecessor state locally.
-    await this.onActiveStateChange?.(pluginId, enabled, true);
+    await this.onActiveStateChange?.(pluginId, enabled);
   }
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
@@ -2606,10 +2654,6 @@ export class PluginRuntime {
       }
     }
     return result;
-  }
-
-  getPluginInstance<T = unknown>(pluginId: string): T | undefined {
-    return this.plugins.get(pluginId)?.instance as T | undefined;
   }
 
   getPluginEntryDir(pluginId: string): string | undefined {

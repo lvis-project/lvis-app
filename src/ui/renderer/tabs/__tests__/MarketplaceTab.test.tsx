@@ -124,6 +124,40 @@ describe("MarketplaceTab", () => {
     await screen.findByTestId("marketplace:action:groq-provider");
     expect(screen.queryByTestId("marketplace:action:regular-plugin")).toBeNull();
   });
+
+  it("rolls back an installed plugin through the claimed Host marketplace API", async () => {
+    const plugin: MarketplaceItem = {
+      id: "meeting",
+      name: "Meeting",
+      description: "Meeting plugin",
+      packageSpec: "@lvis/plugin-meeting",
+      installed: true,
+      enabled: true,
+      pluginType: "plugin",
+    };
+    const rollbackMarketplacePlugin = vi.fn().mockResolvedValue({
+      ok: true,
+      pluginId: "meeting",
+      rolledBackTo: "1.2.2",
+    });
+    Object.defineProperty(window, "lvisHost", {
+      configurable: true,
+      value: {
+        takePluginMarketplaceApi: () => ({ rollbackMarketplacePlugin }),
+      },
+    });
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([plugin]),
+    });
+    render(<MarketplaceTab {...defaultProps(api)} />);
+
+    fireEvent.click(await screen.findByTestId("marketplace:rollback:meeting"));
+
+    await waitFor(() => {
+      expect(rollbackMarketplacePlugin).toHaveBeenCalledWith("meeting");
+      expect(api.listMarketplacePlugins).toHaveBeenCalledTimes(2);
+    });
+  });
   it("routes an admin-policy plugin install through the consent dialog (#1098)", async () => {
     const adminPlugin: MarketplaceItem = {
       id: "admin-plug",

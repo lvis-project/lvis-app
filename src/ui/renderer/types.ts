@@ -130,7 +130,7 @@ export type PluginCardSummary = {
   loadStatus?: "loaded" | "preparing" | "failed" | "disabled";
   /** Whether the plugin's tools are currently exposed to the model. */
   active?: boolean;
-  /** Whether the plugin instance is loaded and callable even when inactive. */
+  /** Whether an active immutable plugin generation is currently instantiated. */
   runtimeLoaded?: boolean;
   preparationStatus?: {
     phase: string;
@@ -423,7 +423,7 @@ export type ProjectQueryOptions = {
 };
 
 export type PluginMarketplaceActionResult =
-  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
+  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; rolledBackTo?: string; version?: string }
   | { ok: false; error: string; message?: string };
 
 export type PluginMarketplaceInstallOptions = {
@@ -812,8 +812,8 @@ export type LvisApi = {
     | { ok: false; error: string; message?: string }
   >;
   /**
-   * #1176 — toggle a plugin active/inactive. Inactive plugins stay loaded but
-   * their tools are hidden from the model's per-turn scope.
+   * Toggle a plugin active/inactive. Disable retires and unloads the active
+   * generation; re-enable re-verifies the receipt and activates a fresh one.
    */
   setPluginEnabled: (
     pluginId: string,
@@ -1636,6 +1636,7 @@ export type LvisHostMarketplaceApi = {
     id: string,
     options?: PluginMarketplaceUninstallOptions,
   ) => Promise<PluginMarketplaceActionResult>;
+  rollbackMarketplacePlugin?: (id: string) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceSkill?: (slug: string) => Promise<PluginMarketplaceActionResult>;

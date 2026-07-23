@@ -664,7 +664,7 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
   });
 });
 
-describe("operationGovernance host-only cross-field contract", () => {
+describe("colocated operation policy cross-field contract", () => {
   const governed = {
     id: "governed-plugin",
     version: "1.0.0",
@@ -680,7 +680,15 @@ describe("operationGovernance host-only cross-field contract", () => {
           required: ["operation"],
           additionalProperties: false,
         },
-        _meta: { ui: { visibility: ["model", "app"] } },
+        _meta: {
+          ui: { visibility: ["model", "app"] },
+          "lvisai/operationPolicy": {
+            discriminant: "operation",
+            operations: {
+              status: { kind: "read", minimumRisk: "read", appVisible: true },
+            },
+          },
+        },
       },
       {
         name: "domain_write",
@@ -691,27 +699,22 @@ describe("operationGovernance host-only cross-field contract", () => {
           required: ["operation"],
           additionalProperties: false,
         },
-        _meta: { ui: { visibility: ["model", "app"] } },
-      },
-    ],
-    operationGovernance: {
-      domain_read: {
-        discriminant: "operation",
-        appAllowed: ["status"],
-        operations: { status: { kind: "read", minimumRisk: "read" } },
-      },
-      domain_write: {
-        discriminant: "operation",
-        appAllowed: ["save"],
-        operations: {
-          save: {
-            kind: "write",
-            minimumRisk: "network",
-            requiresRead: { tool: "domain_read", operations: ["status"], maxAgeMs: 60000 },
+        _meta: {
+          ui: { visibility: ["model", "app"] },
+          "lvisai/operationPolicy": {
+            discriminant: "operation",
+            operations: {
+              save: {
+                kind: "write",
+                minimumRisk: "network",
+                appVisible: true,
+                requiresRead: { tool: "domain_read", operations: ["status"], maxAgeMs: 60000 },
+              },
+            },
           },
         },
       },
-    },
+    ],
   };
 
   async function parse(value: unknown) {
@@ -726,16 +729,22 @@ describe("operationGovernance host-only cross-field contract", () => {
   }
 
   it("accepts a policy whose operation union exactly matches its tool schema", async () => {
-    await expect(parse(governed)).resolves.toMatchObject({ operationGovernance: governed.operationGovernance });
+    await expect(parse(governed)).resolves.toMatchObject({ tools: governed.tools });
   });
 
-  it("rejects operation drift and app writes without a governed read", async () => {
+  it("rejects operation drift but accepts an app write without an artificial read", async () => {
     const drifted = structuredClone(governed);
     drifted.tools[1].inputSchema.properties.operation.enum = ["save", "delete"];
     await expect(parse(drifted)).rejects.toThrow(/exactly match/);
 
     const noRead = structuredClone(governed);
-    delete (noRead.operationGovernance.domain_write.operations.save as { requiresRead?: unknown }).requiresRead;
-    await expect(parse(noRead)).rejects.toThrow(/require a governed read snapshot/);
+    delete (noRead.tools[1]._meta["lvisai/operationPolicy"].operations.save as { requiresRead?: unknown }).requiresRead;
+    await expect(parse(noRead)).resolves.toMatchObject({ tools: noRead.tools });
+  });
+
+  it("does not let an operation policy expand app visibility", async () => {
+    const modelOnly = structuredClone(governed);
+    modelOnly.tools[1]._meta.ui.visibility = ["model"];
+    await expect(parse(modelOnly)).rejects.toThrow(/cannot expand/);
   });
 });

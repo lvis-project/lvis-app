@@ -1554,6 +1554,7 @@ export const zhMessages: Record<string, string> = {
   "marketplaceTab.processingLabel": "加工…",
   "marketplaceTab.refreshButton": "刷新",
   "marketplaceTab.removeButton": "消除",
+  "marketplaceTab.rollbackButton": "回滚",
   "marketplaceTab.saveButton": "节省",
   "marketplaceTab.serverUrlHelp": "lvis-marketplace REST API 端点。更改为内部主机以进行自托管部署。留空以禁用市场功能。",
   "marketplaceTab.serverUrlLabel": "市场服务器 URL",

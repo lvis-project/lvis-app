@@ -53,11 +53,6 @@
       "minItems": 0,
       "items": { "$ref": "#/definitions/tool" }
     },
-    "operationGovernance": {
-      "type": "object",
-      "description": "Host-only per-tool operation governance. This sidecar is not projected onto MCP tools or plugin inputs.",
-      "additionalProperties": { "$ref": "#/definitions/pluginToolOperationPolicy" }
-    },
     "config": {
       "type": "object"
     },
@@ -804,14 +799,9 @@
     "pluginToolOperationPolicy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["discriminant", "appAllowed", "operations"],
+      "required": ["discriminant", "operations"],
       "properties": {
         "discriminant": { "const": "operation" },
-        "appAllowed": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
-        },
         "operations": {
           "type": "object",
           "minProperties": 1,
@@ -826,6 +816,7 @@
       "properties": {
         "kind": { "enum": ["read", "write"] },
         "minimumRisk": { "enum": ["read", "write", "network", "shell"] },
+        "appVisible": { "type": "boolean" },
         "requiresRead": {
           "type": "object",
           "additionalProperties": false,
@@ -921,6 +912,9 @@
                 "minLength": 1,
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
               }
+            },
+            "lvisai/operationPolicy": {
+              "$ref": "#/definitions/pluginToolOperationPolicy"
             }
           }
         }

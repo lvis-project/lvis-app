@@ -8,12 +8,12 @@ import {
 
 const policy: PluginToolOperationPolicy = {
   discriminant: "operation",
-  appAllowed: ["list", "reserve"],
   operations: {
-    list: { kind: "read", minimumRisk: "read" },
+    list: { kind: "read", minimumRisk: "read", appVisible: true },
     reserve: {
       kind: "write",
       minimumRisk: "network",
+      appVisible: true,
       requiresRead: { tool: "meeting_read", operations: ["availability"], maxAgeMs: 60_000 },
     },
     admin_delete: { kind: "write", minimumRisk: "shell" },
@@ -24,7 +24,7 @@ describe("plugin operation governance", () => {
   it("requires an own top-level string discriminant and default-denies unknown/app-disallowed operations", () => {
     expect(() => resolvePluginOperation(policy, {}, "ui")).toThrow(/top-level string/);
     expect(() => resolvePluginOperation(policy, { operation: "missing" }, "ui")).toThrow(/unknown/);
-    expect(() => resolvePluginOperation(policy, { operation: "admin_delete" }, "ui")).toThrow(/not app-allowed/);
+    expect(() => resolvePluginOperation(policy, { operation: "admin_delete" }, "ui")).toThrow(/not app-visible/);
     expect(resolvePluginOperation(policy, { operation: "admin_delete" }, "model").operation).toBe("admin_delete");
     const inherited = Object.create({ operation: "list" }) as Record<string, unknown>;
     expect(() => resolvePluginOperation(policy, inherited, "ui")).toThrow(/top-level string/);

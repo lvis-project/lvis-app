@@ -172,7 +172,7 @@ export function readInitialAppModeArg(): InitialAppMode | null {
 }
 
 type PluginActionResult =
-  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
+  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; rolledBackTo?: string; version?: string }
   | { ok: false; error: string; message?: string };
 
 function invalidPluginActionResult(): PluginActionResult {
@@ -189,12 +189,13 @@ function normalizePluginActionResult(result: unknown): PluginActionResult {
   }
 
   const payload = result && typeof result === "object"
-    ? result as { pluginId?: unknown; installed?: unknown; uninstalled?: unknown; version?: unknown }
+    ? result as { pluginId?: unknown; installed?: unknown; uninstalled?: unknown; rolledBackTo?: unknown; version?: unknown }
     : {};
   const pluginId = typeof payload.pluginId === "string" ? payload.pluginId.trim() : "";
   const installed = payload.installed === true;
   const uninstalled = payload.uninstalled === true;
-  if (!pluginId || (!installed && !uninstalled)) {
+  const rolledBackTo = typeof payload.rolledBackTo === "string" ? payload.rolledBackTo.trim() : "";
+  if (!pluginId || (!installed && !uninstalled && !rolledBackTo)) {
     return invalidPluginActionResult();
   }
   const normalized: PluginActionResult = {
@@ -206,6 +207,9 @@ function normalizePluginActionResult(result: unknown): PluginActionResult {
   }
   if (uninstalled) {
     normalized.uninstalled = true;
+  }
+  if (rolledBackTo) {
+    normalized.rolledBackTo = rolledBackTo;
   }
   if (typeof payload.version === "string") {
     normalized.version = payload.version;
@@ -1675,6 +1679,8 @@ export function buildLvisHostWorld() {
         options?: { doctorCleanup?: { installFailureKind?: string } },
       ) =>
         normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.uninstall, pluginId, options)),
+      rollbackMarketplacePlugin: async (pluginId: string) =>
+        normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.rollback, pluginId)),
       installMarketplaceAgent: async (slug: string) =>
         normalizeMarketplacePackageActionResult(await ipcRenderer.invoke(CHANNELS.agents.install, slug), "agentId"),
       uninstallMarketplaceAgent: async (slug: string) =>

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { link, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import {
   resolvePluginContributionDeclarations,
   validatePluginContributionInventory,
 } from "../plugin-contributions.js";
+import { makeTestTreeWritable } from "./test-helpers.js";
 
 function manifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
   return {
@@ -129,7 +130,10 @@ describe("plugin contribution inventory", () => {
 
 describe("materializePluginContributions", () => {
   const roots: string[] = [];
-  afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
+  afterEach(async () => Promise.all(roots.splice(0).map(async (root) => {
+    await makeTestTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  })));
 
   it("captures immutable verified bytes and fingerprints", async () => {
     const root = await mkdtemp(join(tmpdir(), "lvis-contributions-"));
@@ -214,5 +218,40 @@ describe("materializePluginContributions", () => {
       "a".repeat(64),
       receiptRaw,
     )).rejects.toThrow(/not a regular unlinked file/);
+  });
+
+  it.skipIf(process.platform === "win32")("seals verified generations and still removes them safely", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lvis-contributions-seal-"));
+    const cacheRoot = await mkdtemp(join(tmpdir(), "lvis-contributions-cache-"));
+    roots.push(root, cacheRoot);
+    const body = "sealed bytes";
+    await writeFile(join(root, "plugin.json"), body);
+    const receiptRaw = JSON.stringify({
+      schemaVersion: 2,
+      pluginId: "bundle-host-test",
+      version: "1.0.0",
+      installSource: "local-dev",
+      artifactSha256: null,
+      signerKeyId: null,
+      installedAt: new Date(0).toISOString(),
+      files: [{ path: "plugin.json", sha256: createHash("sha256").update(body).digest("hex") }],
+    });
+    const generationId = "b".repeat(64);
+    const payloadRoot = await materializePluginGenerationRoot(
+      root,
+      cacheRoot,
+      "bundle-host-test",
+      generationId,
+      receiptRaw,
+    );
+
+    expect((await stat(payloadRoot)).mode & 0o777).toBe(0o500);
+    expect((await stat(join(payloadRoot, "plugin.json"))).mode & 0o777).toBe(0o500);
+    await expect(writeFile(join(payloadRoot, "plugin.json"), "mutated")).rejects.toMatchObject({ code: "EACCES" });
+    expect(await readFile(join(payloadRoot, "plugin.json"), "utf8")).toBe(body);
+
+    const { removeRetainedPluginGeneration } = await import("../plugin-contributions.js");
+    await expect(removeRetainedPluginGeneration(cacheRoot, "bundle-host-test", generationId)).resolves.toBeUndefined();
+    await expect(stat(payloadRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

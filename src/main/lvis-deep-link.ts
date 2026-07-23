@@ -613,7 +613,6 @@ export async function handleLvisUri(url: string) {
         broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
       emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
       refreshPluginNotifications: activeServices.refreshPluginNotifications,
-      log,
     });
     const pluginId = result.pluginId;
     lvisDevLog("[lvis] handleLvisUri: install succeeded", { slug: pluginId });

@@ -12,6 +12,7 @@ import {
   type PluginBundleLifecycleDeps,
 } from "../plugin-bundle-lifecycle.js";
 import { hashReceiptFiles } from "../plugin-install-receipt.js";
+import { makeTestTreeWritable } from "./test-helpers.js";
 
 const roots: string[] = [];
 
@@ -101,7 +102,10 @@ function runtimeProjection(manifest: PluginManifest, pluginRoot: string) {
 }
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => {
+    await makeTestTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }));
 });
 
 describe("PluginBundleLifecycle", () => {
@@ -359,77 +363,6 @@ describe("PluginBundleLifecycle", () => {
     await expect(lifecycle.activate("ep-api")).rejects.toThrow(/not valid JSON/);
     expect(lifecycle.getActive("ep-api")?.generationId).toBe(active?.generationId);
     expect(skillStore.listCatalogSync()).toHaveLength(1);
-  });
-
-  it("drains the active generation and atomically hides then restores bundled contributions", async () => {
-    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
-    const skillStore = new SkillStore({ userDir: join(root, "user-skills") });
-    const publishBundledGeneration = vi.fn((prepared) => { prepared.published = true; });
-    const disconnectBundledGeneration = vi.fn(async () => undefined);
-    const revokeOperationGeneration = vi.fn();
-    const loopbackPrepared = (generationId: string) => ({ pluginId: "ep-api", generationId });
-    const loopbackManager = {
-      prepareGeneration: vi.fn(async (_manifest, generationId) => loopbackPrepared(generationId)),
-      prepareRemoval: vi.fn((_pluginId, generationId) => loopbackPrepared(generationId)),
-      publishGeneration: vi.fn(),
-      postPublishGeneration: vi.fn(),
-      discardGeneration: vi.fn(async () => undefined),
-      retireGeneration: vi.fn(async () => undefined),
-    };
-    const lifecycle = makeLifecycle({
-      pluginRuntime: {
-        getPluginManifest: () => manifest,
-        getPluginRoot: () => pluginRoot,
-        getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
-        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
-        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
-        postPublishRuntimeGeneration: vi.fn(),
-        publishRuntimeGeneration: vi.fn(),
-        unpublishRuntimeGeneration: vi.fn(),
-        retireRuntimeGeneration: vi.fn(async () => undefined),
-      },
-      receiptCacheRoot: cacheRoot,
-      skillStore,
-      hookManager: new ScriptHookManager(),
-      mcpManager: {
-        bundledServerIdsForPlugin: vi.fn(() => []),
-        prepareBundledGeneration: vi.fn(async () => ({
-          predecessorServerIds: [],
-          predecessorToolNames: [],
-          records: [],
-          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
-          published: false,
-        })),
-        publishBundledGeneration,
-        discardBundledGeneration: vi.fn(async () => undefined),
-        retirePublishedMcpReplacement: vi.fn(async () => undefined),
-        disconnectBundledGeneration,
-      } as never,
-      loopbackManager,
-      revokeOperationGeneration,
-    });
-    await lifecycle.activate("ep-api");
-    const generationId = lifecycle.getActive("ep-api")?.generationId;
-
-    const lease = await lifecycle.acquire("ep-api");
-    const disabling = lifecycle.setContributionsEnabled("ep-api", false);
-    await Promise.resolve();
-    expect(skillStore.listCatalogSync()).toHaveLength(1);
-    lease.release();
-    await disabling;
-
-    expect(lifecycle.getActive("ep-api")?.generationId).toBe(generationId);
-    expect(skillStore.listCatalogSync()).toEqual([]);
-    expect(loopbackManager.prepareRemoval).toHaveBeenCalledWith("ep-api", generationId, []);
-    expect(loopbackManager.retireGeneration).toHaveBeenCalledWith("ep-api", generationId);
-    expect(disconnectBundledGeneration).toHaveBeenCalledWith("ep-api", generationId);
-    expect(revokeOperationGeneration).toHaveBeenCalledWith("ep-api", generationId);
-
-    await lifecycle.setContributionsEnabled("ep-api", true);
-    expect(loopbackManager.prepareGeneration).toHaveBeenCalled();
-    expect(skillStore.listCatalogSync()).toHaveLength(1);
-    expect(loopbackManager.publishGeneration).toHaveBeenCalled();
-    expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
   });
 
   it("journals a failed retirement and retries exact-generation cleanup", async () => {

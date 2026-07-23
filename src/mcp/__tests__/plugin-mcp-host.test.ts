@@ -129,6 +129,68 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     ).not.toHaveProperty("csp");
   });
 
+  it("fails preparation when the wire operation policy differs from the signed Tool", async () => {
+    const manifest = structuredClone(MANIFEST);
+    manifest.tools[0]._meta = {
+      ...manifest.tools[0]._meta,
+      "lvisai/operationPolicy": {
+        discriminant: "operation",
+        operations: { read: { kind: "read", minimumRisk: "read", appVisible: true } },
+      },
+    };
+    const registry = new ToolRegistry();
+    const host = testLoopbackHost(
+      manifest,
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      registry,
+    );
+    manifest.tools[0]._meta!["lvisai/operationPolicy"] = {
+      discriminant: "operation",
+      operations: { write: { kind: "write", minimumRisk: "write", appVisible: true } },
+    };
+
+    await expect(host.prepareTools()).rejects.toThrow(/differs from its signed manifest/);
+    expect(registry.findByName("notes_read")).toBeUndefined();
+  });
+
+  it("accepts and registers an unchanged signed operation policy from the loopback wire", async () => {
+    const manifest = structuredClone(MANIFEST);
+    const policy = {
+      discriminant: "operation" as const,
+      operations: {
+        read: {
+          kind: "read" as const,
+          minimumRisk: "read" as const,
+          appVisible: true,
+        },
+      },
+    };
+    manifest.tools[0] = {
+      ...manifest.tools[0],
+      inputSchema: {
+        type: "object",
+        properties: { operation: { const: "read" } },
+        required: ["operation"],
+        additionalProperties: false,
+      },
+      _meta: {
+        ...manifest.tools[0]._meta,
+        ui: { visibility: ["model", "app"] },
+        "lvisai/operationPolicy": policy,
+      },
+    };
+    const registry = new ToolRegistry();
+    const host = testLoopbackHost(
+      manifest,
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      registry,
+    );
+
+    await publishTestHost(host, manifest.id, registry);
+
+    expect(registry.findByName("notes_read")?.operationPolicy).toEqual(policy);
+  });
+
   it("IGNORES the legacy xyz.lvis/rawResult — the dual-read was removed alongside the _meta rename", async () => {
     // rawResult is a DATA channel (not a security field), but the legacy read was
     // removed in the same sweep for consistency: a plugin emitting ONLY the legacy

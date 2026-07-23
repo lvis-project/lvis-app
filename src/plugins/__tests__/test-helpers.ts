@@ -6,7 +6,7 @@
  * so tests pick a single tmp root and the helper derives the rest.
  */
 import { mkdtempSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { PluginPaths } from "../plugin-paths.js";
@@ -20,6 +20,15 @@ import type {
   PluginRuntimeGenerationProjection,
 } from "../plugin-host-generation.js";
 import type { ActivePluginGeneration } from "../plugin-generation-coordinator.js";
+
+/** Restore owner write access before deleting immutable generation fixtures. */
+export async function makeTestTreeWritable(root: string): Promise<void> {
+  await chmod(root, 0o700).catch(() => undefined);
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  await Promise.all(entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => makeTestTreeWritable(join(root, entry.name))));
+}
 
 /**
  * #885 v6 — build a pure MCP `Tool` object from a bare tool name. Tests declare
@@ -379,12 +388,6 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
       await deactivate(pluginId);
       return result;
     },
-    setContributionsEnabled: async () => undefined,
-    setContributionsEnabledWithCommit: async <T>(
-      _pluginId: string,
-      _enabled: boolean,
-      durableCommit: () => Promise<T>,
-    ) => durableCommit(),
     recoverRetirements: async () => undefined,
     waitForRetirements: async () => undefined,
   };

@@ -136,7 +136,7 @@ export class AuditWriter {
     auditDirectory?: string,
     audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
-    const governedTool = this.toolRegistry.findByName(toolName)?.operationGovernance;
+    const governedTool = this.toolRegistry.findByName(toolName)?.operationPolicy;
     const governedOperation = governedTool && typeof input.operation === "string"
       ? input.operation
       : undefined;
@@ -199,7 +199,7 @@ export class AuditWriter {
     hookChain?: HookResult[],
     audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
-    const governedTool = this.toolRegistry.findByName(toolName)?.operationGovernance;
+    const governedTool = this.toolRegistry.findByName(toolName)?.operationPolicy;
     const governedOperation = governedTool && typeof input.operation === "string"
       ? input.operation
       : undefined;

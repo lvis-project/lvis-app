@@ -73,13 +73,13 @@ async function setup() {
             ? {
                 name: "acme_write",
                 pluginId: "acme-cards",
-                operationGovernance: {
+                operationPolicy: {
                   discriminant: "operation",
-                  appAllowed: ["update"],
                   operations: {
                     update: {
                       kind: "write",
                       minimumRisk: "write",
+                      appVisible: true,
                       requiresRead: {
                         tool: "acme_read",
                         operations: ["get"],

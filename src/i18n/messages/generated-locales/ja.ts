@@ -1554,6 +1554,7 @@ export const jaMessages: Record<string, string> = {
   "marketplaceTab.processingLabel": "処理…",
   "marketplaceTab.refreshButton": "リフレッシュ",
   "marketplaceTab.removeButton": "取り除く",
+  "marketplaceTab.rollbackButton": "ロールバック",
   "marketplaceTab.saveButton": "保存",
   "marketplaceTab.serverUrlHelp": "lvis-marketplace REST API エンドポイント。セルフホスト展開の場合は、内部ホストに変更します。マーケットプレイスの機能を無効にするには、空白のままにします。",
   "marketplaceTab.serverUrlLabel": "マーケットプレイスサーバーのURL",

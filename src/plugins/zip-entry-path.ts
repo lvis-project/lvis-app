@@ -6,28 +6,33 @@
  * share the same path-validation rules instead of duplicating them.
  *
  * Returns:
- *   - the normalized POSIX-style relative path on success
- *   - `null` for empty / "." entries (skip without throwing)
+ *   - the exact POSIX-style relative path on success
+ *   - `null` for an empty archive member name
  * Throws:
  *   - on NUL bytes
- *   - on Windows drive-absolute prefixes (`C:`, `Z:`, ...)
- *   - on `..` traversal that survives POSIX normalization
+ *   - on absolute, backslash, drive, empty-segment, dot, or parent syntax
  */
-import { posix } from "node:path";
-
 export function sanitizeZipEntryPath(slug: string, entryName: string): string | null {
-  const normalized = entryName.split("\\").join("/").replace(/^\/+/, "");
-  if (!normalized || normalized === ".") return null;
-  if (normalized.includes("\u0000")) {
-    throw new Error(`"${slug}" zip entry contains NUL byte`);
+  if (!entryName) return null;
+  if (/[\u0000-\u001f\u007f]/.test(entryName)) {
+    throw new Error(`"${slug}" zip entry contains a control character`);
   }
-  if (/^[A-Za-z]:/.test(normalized)) {
+  if (entryName.includes("\\")) {
+    throw new Error(`"${slug}" zip entry uses a backslash path: ${entryName}`);
+  }
+  if (entryName.startsWith("/") || entryName.startsWith("//")) {
+    throw new Error(`"${slug}" zip entry uses an absolute path: ${entryName}`);
+  }
+  if (/^[A-Za-z]:/.test(entryName)) {
     throw new Error(`"${slug}" zip entry uses absolute drive path: ${entryName}`);
   }
-  const collapsed = posix.normalize(normalized);
-  if (!collapsed || collapsed === ".") return null;
-  if (collapsed === ".." || collapsed.startsWith("../")) {
-    throw new Error(`"${slug}" zip entry escapes install root: ${entryName}`);
+  if (entryName !== entryName.normalize("NFC")) {
+    throw new Error(`"${slug}" zip entry is not Unicode NFC: ${entryName}`);
   }
-  return collapsed.endsWith("/") ? collapsed.slice(0, -1) : collapsed;
+  const path = entryName.endsWith("/") ? entryName.slice(0, -1) : entryName;
+  const segments = path.split("/");
+  if (!path || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    throw new Error(`"${slug}" zip entry uses ambiguous or traversal syntax: ${entryName}`);
+  }
+  return path;
 }

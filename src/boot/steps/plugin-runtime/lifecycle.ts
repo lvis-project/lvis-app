@@ -86,17 +86,10 @@ export function createLifecycleCallbacks(
       keywordEngine.unregisterByPlugin(pluginId);
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
-    onActiveStateChange: async (pluginId, enabled, lifecycleHandled) => {
+    onActiveStateChange: async (pluginId, enabled) => {
       const bundleLifecycle = deps.getBundleLifecycle?.();
       if (!bundleLifecycle) {
         throw new Error(`plugin generation lifecycle is not bound for active-state change: ${pluginId}`);
-      }
-      if (bundleLifecycle && !lifecycleHandled) {
-        if (enabled && !bundleLifecycle.getActive(pluginId)) {
-          await bundleLifecycle.activate(pluginId);
-        } else if (bundleLifecycle.getActive(pluginId)) {
-          await bundleLifecycle.setContributionsEnabled(pluginId, enabled);
-        }
       }
       if (!enabled) {
         keywordEngine.unregisterByPlugin(pluginId);

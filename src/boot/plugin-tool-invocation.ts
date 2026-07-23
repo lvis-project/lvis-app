@@ -4,7 +4,6 @@ import {
 } from "../plugins/runtime.js";
 import type { InvocationOrigin } from "../plugins/runtime/origin-chain.js";
 import { isUiOnly, isModelVisible } from "../plugins/runtime/tool-visibility.js";
-import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
 
 type RuntimeManifestView = Pick<PluginRuntime, "listPluginManifests">;
 
@@ -50,12 +49,9 @@ export function isAppOnlyRuntimeInvocation(
   // true` conjunction. A model-visible tool (model-only or dual) is isUiOnly=false
   // → governed (the load-bearing #1554 rule; "model wins" for dual).
   const tool = manifest.tools.find((t) => t.name === toolName);
-  // Governed app-only tools must stay on ToolExecutor. The host-only policy
-  // sidecar closes the trusted-panel bypass without changing MCP visibility.
-  const governance = (manifest as typeof manifest & {
-    operationGovernance?: Record<string, PluginToolOperationPolicy>;
-  }).operationGovernance;
-  if (governance?.[toolName]) return false;
+  // Operation-governed app-only tools must stay on ToolExecutor. The policy is
+  // colocated on the signed Tool; there is no parallel app-action map.
+  if (tool?._meta?.["lvisai/operationPolicy"]) return false;
   return tool != null && isUiOnly(tool);
 }
 

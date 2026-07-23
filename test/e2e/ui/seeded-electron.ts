@@ -1,5 +1,5 @@
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,6 +184,7 @@ export async function launchSeededElectron(opts: {
   settings?: JsonObject;
   userDataPrefix?: string;
   homePrefix?: string;
+  launchEnv?: LaunchEnv;
 }): Promise<SeededElectronContext> {
   const sessionId = opts.sessionId ?? "e2000000-bb11-4cc2-8dd3-eeeeeeeeeeee";
   const userDataDir = mkdtempSync(resolve(tmpdir(), opts.userDataPrefix ?? "lvis-seeded-e2e-user-data-"));
@@ -233,6 +234,7 @@ export async function launchSeededElectron(opts: {
       LVIS_MAIN_ENTRY: MAIN_ENTRY,
       NODE_ENV: "test",
       ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
+      ...(opts.launchEnv ?? {}),
     }),
     timeout: 30_000,
   });
@@ -252,7 +254,15 @@ export async function launchSeededElectron(opts: {
 export async function teardownSeededElectron(ctx: SeededElectronContext): Promise<void> {
   await ctx.app.close().catch(() => {});
   rmSync(ctx.userDataDir, { recursive: true, force: true });
+  makeTreeWritableSync(ctx.tempHome);
   rmSync(ctx.tempHome, { recursive: true, force: true });
+}
+
+function makeTreeWritableSync(root: string): void {
+  try { chmodSync(root, 0o700); } catch { return; }
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.isDirectory()) makeTreeWritableSync(resolve(root, entry.name));
+  }
 }
 
 export async function sendRendererStreamEvent(

@@ -111,6 +111,7 @@ export const CHANNELS = {
   },
   plugins: {
     install: "lvis:plugins:install",
+    rollback: "lvis:plugins:rollback",
     uninstall: "lvis:plugins:uninstall",
     setEnabled: "lvis:plugins:set-enabled",
     installLocal: "lvis:plugins:install-local",

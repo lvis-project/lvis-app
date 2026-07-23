@@ -145,7 +145,7 @@ export function mcpToolToPluginTool(
   pluginId: string,
   tool: DiscoveredMcpTool,
   invoke: PluginMcpInvoke,
-  operationGovernance?: PluginToolOperationPolicy,
+  operationPolicy?: PluginToolOperationPolicy,
   generationId?: string,
 ): Tool {
   const meta = tool._meta ?? {};
@@ -163,7 +163,7 @@ export function mcpToolToPluginTool(
     category,
     pluginId,
     ...(generationId ? { pluginGeneration: { pluginId, generationId } } : {}),
-    operationGovernance,
+    operationPolicy,
     pathFields: readPathFields(meta),
     // MCP Apps `_meta.ui.visibility` ∌ "model" ⇒ app-only: the tool IS registered
     // (that is what puts its card's call under risk → reviewer/approval → audit) but

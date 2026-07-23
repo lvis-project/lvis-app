@@ -2355,6 +2355,11 @@
     {
       "type": "types",
       "file": "src/plugins/types.ts",
+      "name": "PluginToolOperationRule"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/types.ts",
       "name": "PluginUiResourceDecl"
     },
     {
@@ -2746,11 +2751,6 @@
       "type": "types",
       "file": "src/tools/knowledge-search.ts",
       "name": "KnowledgeSearchResultItem"
-    },
-    {
-      "type": "types",
-      "file": "src/tools/knowledge-search.ts",
-      "name": "KnowledgeWorkerClient"
     },
     {
       "type": "types",
