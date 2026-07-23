@@ -5,6 +5,7 @@
  * deploymentGuard?) shape. registry.json lives at the root of pluginsRoot,
  * so tests pick a single tmp root and the helper derives the rest.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdtempSync } from "node:fs";
 import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -349,7 +350,36 @@ export function makeTestPluginRuntime(
  */
 export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginRuntime {
   const active = new Map<string, ActivePluginGeneration<HostPluginGenerationState>>();
+  const lifecycleTails = new Map<string, Promise<void>>();
+  const lifecycleQueueContext = new AsyncLocalStorage<ReadonlyMap<string, object>>();
+  const activeLifecycleQueueTokens = new WeakSet<object>();
   let sequence = 0;
+
+  const runInLifecycleQueue = <T>(
+    pluginId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const current = lifecycleQueueContext.getStore();
+    const currentToken = current?.get(pluginId);
+    if (currentToken && activeLifecycleQueueTokens.has(currentToken)) return operation();
+    const prior = lifecycleTails.get(pluginId) ?? Promise.resolve();
+    const next = prior.then(async () => {
+      const token = {};
+      const inherited = new Map(lifecycleQueueContext.getStore() ?? current ?? []);
+      inherited.set(pluginId, token);
+      activeLifecycleQueueTokens.add(token);
+      try {
+        return await lifecycleQueueContext.run(inherited, operation);
+      } finally {
+        activeLifecycleQueueTokens.delete(token);
+      }
+    });
+    const tail = next.then(() => undefined, () => undefined);
+    lifecycleTails.set(pluginId, tail);
+    return next.finally(() => {
+      if (lifecycleTails.get(pluginId) === tail) lifecycleTails.delete(pluginId);
+    });
+  };
 
   const adoptLegacyProjection = (
     pluginId: string,
@@ -423,6 +453,7 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
   };
 
   const lifecycle = {
+    runInLifecycleQueue,
     getActive: (pluginId: string) => {
       const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
       return generation
@@ -447,21 +478,22 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
     },
     runWithLease: async <T>(_lease: unknown, operation: () => Promise<T>) => operation(),
     replaceRuntime: publish,
-    replaceRuntimeWithCommit: async <T>(
+    replaceRuntimeWithCommit: <T>(
       projection: PluginRuntimeGenerationProjection,
       _receiptRaw: string,
       durableCommit: () => Promise<T>,
-    ) => {
+    ) => runInLifecycleQueue(projection.manifest.id, async () => {
       const result = await durableCommit();
       await publish(projection);
       return { result, retirement: Promise.resolve() };
-    },
-    deactivate,
-    deactivateWithCommit: async <T>(pluginId: string, durableCommit: () => Promise<T>) => {
-      const result = await durableCommit();
-      await deactivate(pluginId);
-      return result;
-    },
+    }),
+    deactivate: (pluginId: string) => runInLifecycleQueue(pluginId, () => deactivate(pluginId)),
+    deactivateWithCommit: <T>(pluginId: string, durableCommit: () => Promise<T>) =>
+      runInLifecycleQueue(pluginId, async () => {
+        const result = await durableCommit();
+        await deactivate(pluginId);
+        return result;
+      }),
     recoverRetirements: async () => undefined,
     waitForRetirements: async () => undefined,
   };
