@@ -120,6 +120,7 @@ type CreateHostApi = (
   pluginDataDir: string,
   incarnation: {
     registerDisposer: (dispose: () => void) => void;
+    trackOperation: <T>(operation: Promise<T>) => Promise<T>;
     isActive: () => boolean;
     isLifecycleHookActive: () => boolean;
   },
@@ -180,6 +181,7 @@ async function buildRealHostApi(): Promise<{
     pluginDataDir,
     {
       registerDisposer: vi.fn(),
+      trackOperation: <T>(operation: Promise<T>) => operation,
       isActive: () => true,
       isLifecycleHookActive: () => false,
     },

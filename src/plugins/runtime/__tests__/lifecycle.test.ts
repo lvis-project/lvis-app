@@ -283,6 +283,9 @@ export default async function createPlugin() {
 
     expect(runtime.listPluginIds()).not.toContain("lc-stop-timeout");
     await expect(runtime.call("lc_stop_timeout_ping")).rejects.toThrow(/failed|not found/i);
+    await expect(runtime.restartPlugin("lc-stop-timeout")).rejects.toMatchObject({
+      code: "plugin-lifecycle-quarantined",
+    });
   }, 10_000);
 
   it("restartPlugin re-imports the latest on-disk module (ESM cache-bust)", async () => {

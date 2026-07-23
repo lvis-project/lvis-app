@@ -76,6 +76,7 @@ type CreateHostApi = (
   pluginDataDir: string,
   incarnation: {
     registerDisposer: (dispose: () => void) => void;
+    trackOperation: <T>(operation: Promise<T>) => Promise<T>;
     isActive: () => boolean;
     isLifecycleHookActive: () => boolean;
   },
@@ -83,6 +84,7 @@ type CreateHostApi = (
 
 const ACTIVE_INCARNATION = {
   registerDisposer: vi.fn(),
+  trackOperation: <T>(operation: Promise<T>) => operation,
   isActive: () => true,
   isLifecycleHookActive: () => false,
 };
