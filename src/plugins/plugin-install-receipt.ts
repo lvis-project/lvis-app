@@ -254,7 +254,7 @@ export async function verifyInstallReceiptRaw(
  * in sync with `ensurePluginDataDir` (runtime/sandbox.ts), which creates the
  * plugin's writable data dir as `<pluginRoot>/data`.
  */
-export const PLUGIN_RUNTIME_DIR_NAMES: ReadonlySet<string> = new Set(["data"]);
+const PLUGIN_RUNTIME_DIR_NAMES: ReadonlySet<string> = new Set(["data"]);
 
 export async function listFilesRecursive(
   root: string,
