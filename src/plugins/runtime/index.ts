@@ -2689,17 +2689,20 @@ export class PluginRuntime {
   }
 
   /**
-   * Claim publication order for any auth lifecycle invocation. Login does not
-   * publish a principal directly, but starting it supersedes older status or
-   * logout probes that would otherwise complete during the new login flow.
-   * The caller must do this before awaiting plugin execution and pass the
-   * returned epoch to {@link observePluginAuthResult}.
+   * Claim publication order for any auth lifecycle invocation. Starting login
+   * or logout immediately removes the current principal, so neither a failed
+   * nor partial transition can retain stale write authority. The caller must
+   * synchronously revoke grants for the returned hash before awaiting plugin
+   * execution and pass the epoch to {@link observePluginAuthResult}.
    */
   beginPluginAuthInvocation(
     pluginId: string,
     generationId: string,
     toolName: string,
-  ): number | undefined {
+  ): {
+    epoch: number;
+    invalidatedAccountHash?: string;
+  } | undefined {
     const active = this.requireGenerationAccess("plugin auth invocation").getActive(pluginId);
     if (!active || active.generationId !== generationId) return undefined;
     const auth = active.state.runtime.manifest?.auth;
@@ -2714,14 +2717,22 @@ export class PluginRuntime {
       return undefined;
     }
     const epoch = ++this.nextPluginAuthInvocationEpoch;
-    this.pluginAuthInvocationEpochs.set(`${pluginId}\0${generationId}`, epoch);
-    return epoch;
+    const key = `${pluginId}\0${generationId}`;
+    this.pluginAuthInvocationEpochs.set(key, epoch);
+    if (toolName !== auth.loginTool && toolName !== auth.logoutTool) {
+      return { epoch };
+    }
+    const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+    this.pluginAccountHashes.delete(key);
+    return invalidatedAccountHash
+      ? { epoch, invalidatedAccountHash }
+      : { epoch };
   }
 
   /**
    * Observe only manifest-declared auth tools after a successful invocation.
-   * The account hash is derived exclusively from statusTool output; login
-   * results cannot mint write authority, and a successful logout burns it.
+   * The account hash is derived exclusively from statusTool output; login and
+   * logout results cannot mint or restore write authority.
    */
   observePluginAuthResult(
     pluginId: string,

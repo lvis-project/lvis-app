@@ -46,7 +46,7 @@ function observe(
     generationId,
     toolName,
     result,
-    epoch,
+    epoch?.epoch,
   );
 }
 
@@ -73,7 +73,7 @@ async function observeDeferred(
     generationId,
     toolName,
     await result,
-    epoch,
+    epoch?.epoch,
   );
 }
 
@@ -121,12 +121,23 @@ describe("PluginRuntime operation account sessions", () => {
       { data: { authenticated: true, account: "person@example.com" } },
     );
     const current = instance.getPluginOperationAccountHash(pluginId, generationId);
+    const invocation = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_logout",
+    );
 
-    expect(observe(
-      instance,
+    expect(invocation).toEqual({
+      epoch: expect.any(Number),
+      invalidatedAccountHash: current,
+    });
+    expect(instance.observePluginAuthResult(
+      pluginId,
+      generationId,
       "auth_logout",
       { success: true },
-    )).toEqual({ invalidatedAccountHash: current });
+      invocation?.epoch,
+    )).toEqual({});
     expect(instance.getPluginOperationAccountHash(pluginId, generationId)).toBeUndefined();
 
     observe(
@@ -137,6 +148,57 @@ describe("PluginRuntime operation account sessions", () => {
     expect(instance.getPluginOperationAccountHash(pluginId, generationId))
       .not.toBe(current);
   });
+
+  it.each(["auth_login", "auth_logout"] as const)(
+    "invalidates the current principal when %s starts and does not restore it from a partial result",
+    (toolName) => {
+      const instance = runtime();
+      observe(
+        instance,
+        "auth_status",
+        { authenticated: true, account: "person@example.com" },
+      );
+      const current = instance.getPluginOperationAccountHash(pluginId, generationId);
+
+      const invocation = instance.beginPluginAuthInvocation(
+        pluginId,
+        generationId,
+        toolName,
+      );
+      expect(invocation).toEqual({
+        epoch: expect.any(Number),
+        invalidatedAccountHash: current,
+      });
+      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+        .toBeUndefined();
+      instance.observePluginAuthResult(
+        pluginId,
+        generationId,
+        toolName,
+        toolName === "auth_login" ? { success: true } : { success: false },
+        invocation?.epoch,
+      );
+      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+        .toBeUndefined();
+
+      const status = instance.beginPluginAuthInvocation(
+        pluginId,
+        generationId,
+        "auth_status",
+      );
+      instance.observePluginAuthResult(
+        pluginId,
+        generationId,
+        "auth_status",
+        { authenticated: true, account: "person@example.com" },
+        status?.epoch,
+      );
+      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+        .toMatch(/^[a-f0-9]{64}$/);
+      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+        .not.toBe(current);
+    },
+  );
 
   it("ignores an older authenticated status that completes after a newer principal", async () => {
     const instance = runtime();
@@ -183,7 +245,7 @@ describe("PluginRuntime operation account sessions", () => {
     }
   });
 
-  it("ignores an older unauthenticated status that completes after a newer login starts", async () => {
+  it("keeps the principal invalid after login starts even when an older status completes", async () => {
     const instance = runtime();
     observe(
       instance,
@@ -207,6 +269,7 @@ describe("PluginRuntime operation account sessions", () => {
     await staleCompletion;
 
     expect(instance.getPluginOperationAccountHash(pluginId, generationId))
-      .toBe(currentPrincipal);
+      .toBeUndefined();
+    expect(currentPrincipal).toMatch(/^[a-f0-9]{64}$/);
   });
 });

@@ -182,4 +182,80 @@ describe("PluginOperationGrantCoordinator", () => {
         message: expect.stringContaining("already reserved"),
       }) });
   });
+
+  it.each(["today", "week"] as const)(
+    "burns a grant when a newer %s read supersedes its reserved revision",
+    (supersedingOperation) => {
+      let now = 50;
+      const coordinator = new PluginOperationGrantCoordinator(() => now);
+      const multiOperationRequiredRead = {
+        ...requiredRead,
+        readOperations: ["today", "week"],
+      } as const;
+      const readRevision = coordinator.recordRead({
+        ...principal,
+        readTool: requiredRead.readTool,
+        readOperation: "today",
+      });
+      const grant = coordinator.issue({
+        ...principal,
+        toolName: "ep_attendance_write",
+        operation: "clock",
+        intentHash: "same-intent",
+        readRevision,
+        expiresAt: 500,
+      }, multiOperationRequiredRead);
+
+      coordinator.recordRead({
+        ...principal,
+        readTool: requiredRead.readTool,
+        readOperation: supersedingOperation,
+      });
+      const expected = {
+        ...principal,
+        toolName: "ep_attendance_write",
+        operation: "clock",
+        intentHash: "same-intent",
+        requiresRead: true,
+      };
+      expect(coordinator.consume(grant.token, expected)).toMatchObject({
+        ok: false,
+        reason: expect.stringContaining("superseded"),
+      });
+      expect(coordinator.consume(grant.token, expected)).toMatchObject({
+        ok: false,
+        reason: expect.stringContaining("already consumed"),
+      });
+    },
+  );
+
+  it("rejects a reserved read that becomes stale before grant consumption", () => {
+    let now = 50;
+    const coordinator = new PluginOperationGrantCoordinator(() => now);
+    const readRevision = coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    });
+    const grant = coordinator.issue({
+      ...principal,
+      toolName: "ep_attendance_write",
+      operation: "clock",
+      intentHash: "same-intent",
+      readRevision,
+      expiresAt: 5_000,
+    }, requiredRead);
+
+    now += requiredRead.maxAgeMs + 1;
+    expect(coordinator.consume(grant.token, {
+      ...principal,
+      toolName: "ep_attendance_write",
+      operation: "clock",
+      intentHash: "same-intent",
+      requiresRead: true,
+    })).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("stale"),
+    });
+  });
 });
