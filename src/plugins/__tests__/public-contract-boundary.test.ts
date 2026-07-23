@@ -1,5 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import {
+  BUNDLE_EVERYTHING_REGEX,
+  HOST_BROWSER_EXTERNAL_MODULES,
+  HOST_EXTERNAL_MODULES,
+} from "../public-contract.js";
 
 const PUBLIC_CONTRACT_URL = new URL("../public-contract.ts", import.meta.url);
 const TYPES_BARREL_URL = new URL("../types.ts", import.meta.url);
@@ -34,5 +39,11 @@ describe("Host-owned public plugin contract boundary", () => {
     expect(contract).not.toMatch(/\bkeywords\??:/);
     expect(contract).not.toContain("registerKeywords");
     expect(barrel).toContain('export * from "./public-contract.js";');
+  });
+
+  it("owns the plugin build-policy ABI mirrored by the SDK", () => {
+    expect(HOST_EXTERNAL_MODULES).toEqual(["electron"]);
+    expect(HOST_BROWSER_EXTERNAL_MODULES).toEqual(["react", "react-dom"]);
+    expect(BUNDLE_EVERYTHING_REGEX.source).toBe(".*");
   });
 });
