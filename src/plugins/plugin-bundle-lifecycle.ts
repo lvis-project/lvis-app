@@ -16,6 +16,7 @@ import {
 import { PluginGenerationCoordinator, type ActivePluginGeneration } from "./plugin-generation-coordinator.js";
 import type { PluginRuntime } from "./runtime.js";
 import type {
+  ActivePluginGenerationSnapshot,
   CommittedPluginGeneration,
   HostPluginGenerationState,
   PluginRuntimeGenerationLifecycle,
@@ -36,6 +37,24 @@ import {
 
 const log = createLogger("plugin-bundle-lifecycle");
 const MAX_RETIREMENT_ATTEMPTS = 3;
+
+function freezeSnapshot(value: unknown): void {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+  for (const nested of Object.values(value)) freezeSnapshot(nested);
+  Object.freeze(value);
+}
+
+function activeGenerationSnapshot(
+  generation: ActivePluginGeneration<HostPluginGenerationState>,
+): ActivePluginGenerationSnapshot {
+  const manifest = structuredClone(generation.state.runtime.manifest);
+  freezeSnapshot(manifest);
+  return Object.freeze({
+    pluginId: generation.pluginId,
+    generationId: generation.generationId,
+    manifest,
+  });
+}
 
 export interface PluginBundleLifecycleHandler extends PluginRuntimeGenerationLifecycle {
   activate(pluginId: string): Promise<void>;
@@ -152,8 +171,9 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     return result;
   }
 
-  getActive(pluginId: string): ActivePluginGeneration<HostPluginGenerationState> | undefined {
-    return this.coordinator.getActive(pluginId);
+  getActive(pluginId: string): ActivePluginGenerationSnapshot | undefined {
+    const generation = this.coordinator.getActive(pluginId);
+    return generation ? activeGenerationSnapshot(generation) : undefined;
   }
 
   acquire(pluginId: string): Promise<PluginGenerationLease<HostPluginGenerationState>> {

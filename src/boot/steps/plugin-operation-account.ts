@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { PluginManifest } from "../../plugins/types.js";
 
 interface PluginOperationAccountResolver {
   getPluginOperationAccountHash(
@@ -17,7 +16,7 @@ interface PluginOperationAccountResolver {
  */
 export function resolvePluginOperationAccountHash(
   resolver: PluginOperationAccountResolver,
-  manifest: PluginManifest | undefined,
+  manifest: { readonly auth?: unknown } | undefined,
   pluginId: string,
   generationId: string,
 ): string | undefined {

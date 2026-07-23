@@ -192,7 +192,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
         activeGeneration?.generationId === context.ownerGenerationId
         ? activeGeneration
         : undefined;
-      const manifest = invocationGeneration?.state.runtime.manifest;
+      const manifest = invocationGeneration?.manifest;
       const accountHash = ownerPluginId && context.ownerGenerationId
         ? resolvePluginOperationAccountHash(
             pluginRuntime,

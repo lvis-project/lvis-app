@@ -423,7 +423,16 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
   };
 
   const lifecycle = {
-    getActive: (pluginId: string) => active.get(pluginId) ?? adoptLegacyProjection(pluginId),
+    getActive: (pluginId: string) => {
+      const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
+      return generation
+        ? {
+            pluginId: generation.pluginId,
+            generationId: generation.generationId,
+            manifest: generation.state.runtime.manifest,
+          }
+        : undefined;
+    },
     acquire: async (pluginId: string) => {
       const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
       if (!generation) throw new Error(`test generation is not active for '${pluginId}'`);
