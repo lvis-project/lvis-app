@@ -89,6 +89,19 @@ describe("plugin app-only runtime invocation", () => {
     ).toBe(true);
   });
 
+  it("keeps governed app-only tools on ToolExecutor instead of the trusted-panel bypass", () => {
+    const manifest = normalize({ uiActions: { meeting_write: {} } });
+    (manifest as PluginManifest & { operationGovernance?: Record<string, unknown> }).operationGovernance = {
+      meeting_write: {
+        discriminant: "operation",
+        appAllowed: ["save"],
+        operations: { save: { kind: "write", minimumRisk: "write", requiresRead: { tool: "meeting_write", operations: ["status"], maxAgeMs: 1_000 } } },
+      },
+    };
+    const runtime = { listPluginManifests: () => [{ pluginId: "meeting", manifest }] } as any;
+    expect(isAppOnlyRuntimeInvocation(runtime, "meeting_write", { origin: "ui", ownerPluginId: "meeting" }, "ui")).toBe(false);
+  });
+
   it("keeps LLM-facing tools on the ToolExecutor path", () => {
     expect(
       isAppOnlyRuntimeInvocation(

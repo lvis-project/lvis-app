@@ -206,6 +206,12 @@ export interface PluginToolInvocationContext {
    * SoT: {@link InvocationOrigin}.
    */
   parentOrigin?: InvocationOrigin;
+  /** Host-owned app-call envelope. The renderer may carry only the opaque token. */
+  appInvocation?: {
+    surface: "trusted-panel" | "mcp-app";
+    sessionId: string;
+    operationGrantToken?: string;
+  };
 }
 
 export type PluginToolInvocationDelegate = (
@@ -1697,7 +1703,7 @@ export class PluginRuntime {
   async callFromUi(
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; appSessionId?: string; operationGrantToken?: string },
   ): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
@@ -1718,6 +1724,15 @@ export class PluginRuntime {
       origin: "ui",
       ownerPluginId: entry.pluginId,
       userAction: options?.userAction === true,
+      ...(options?.appSessionId
+        ? {
+            appInvocation: {
+              surface: "trusted-panel" as const,
+              sessionId: options.appSessionId,
+              ...(options.operationGrantToken ? { operationGrantToken: options.operationGrantToken } : {}),
+            },
+          }
+        : {}),
     });
   }
 

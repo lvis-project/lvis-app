@@ -134,6 +134,16 @@ import {
 } from "./pipeline/rationale-orchestrator.js";
 import type { RationaleExecutorControlOutcome } from "./pipeline/rationale-pr1-contract.js";
 import { canonicalStringify } from "../permissions/user-approval-store.js";
+import {
+  resolvePluginOperation,
+  type PluginOperationInvocationContext,
+  type ResolvedPluginOperation,
+  type GovernedRiskFloor,
+} from "./plugin-operation-governance.js";
+import {
+  PluginOperationGrantCoordinator,
+  type PluginOperationPrincipal,
+} from "../permissions/plugin-operation-grant.js";
 import type { SealedRationaleResumeRequest } from "./pipeline/rationale-resume-contract.js";
 import {
   authorizeRationaleResume,
@@ -275,6 +285,8 @@ export interface ToolPermissionContext {
    * operator perm-hook denies still apply.
    */
   pluginPanelUserAction?: boolean;
+  /** Host-derived app identity and optional opaque one-shot grant. Never copied into tool metadata. */
+  pluginOperation?: PluginOperationInvocationContext;
   /**
    * Recent user-authored turn text. Used only to provide reviewer context
    * and prefill the high-risk approval purpose field; plugin/file origins
@@ -427,6 +439,7 @@ export class ToolExecutor {
    */
   private readonly workspaceRootLifecycleProvider: () => PermissionDirectoryLifecycle | undefined;
   private readonly auditWriter: AuditWriter;
+  private readonly pluginOperationGrants: PluginOperationGrantCoordinator;
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -439,6 +452,7 @@ export class ToolExecutor {
     hostClassifiesRiskProvider?: () => boolean,
     sandboxFsContainedProvider?: (tool: Tool) => boolean,
     workspaceRootLifecycleProvider?: () => PermissionDirectoryLifecycle | undefined,
+    pluginOperationGrants?: PluginOperationGrantCoordinator,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -450,6 +464,7 @@ export class ToolExecutor {
     this.hostClassifiesRiskProvider = hostClassifiesRiskProvider ?? (() => false);
     this.sandboxFsContainedProvider = sandboxFsContainedProvider ?? (() => false);
     this.workspaceRootLifecycleProvider = workspaceRootLifecycleProvider ?? (() => undefined);
+    this.pluginOperationGrants = pluginOperationGrants ?? new PluginOperationGrantCoordinator();
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
     this.auditWriter = new AuditWriter(
       this.auditLogger,
@@ -533,6 +548,7 @@ export class ToolExecutor {
     finalInput: Record<string, unknown>,
     allowedDirectories: readonly string[],
     correlationId: string,
+    operationFloor?: GovernedRiskFloor,
   ): ToolCategory {
     return resolveEnforcedCategoryImpl({
       tool,
@@ -542,7 +558,43 @@ export class ToolExecutor {
       correlationId,
       hostClassifiesRisk: this.hostClassifiesRiskProvider(),
       auditLogger: this.auditLogger,
+      operationFloor,
     });
+  }
+
+  issuePluginOperationGrant(args: {
+    toolName: string;
+    input: Record<string, unknown>;
+    principal: PluginOperationPrincipal;
+    ttlMs?: number;
+  }): { token: string; grantId: string; readRevision: string } {
+    const tool = this.toolRegistry.findByName(args.toolName);
+    if (!tool?.pluginId || !tool.operationGovernance) {
+      throw new Error(`[plugin-operation-policy] governed plugin tool '${args.toolName}' not found`);
+    }
+    if (tool.pluginId !== args.principal.ownerPluginId) {
+      throw new Error("[plugin-operation-policy] owner mismatch");
+    }
+    const resolved = resolvePluginOperation(tool.operationGovernance, args.input, "ui");
+    if (resolved.rule.kind !== "write" || !resolved.rule.requiresRead) {
+      throw new Error("[plugin-operation-policy] only read-backed writes receive app grants");
+    }
+    const readRevision = this.pluginOperationGrants.latestRequiredRead(
+      args.principal,
+      resolved.rule.requiresRead.tool,
+      resolved.rule.requiresRead.operations,
+      resolved.rule.requiresRead.maxAgeMs,
+    );
+    if (!readRevision) throw new Error("[plugin-operation-policy] required read is missing or stale");
+    const issued = this.pluginOperationGrants.issue({
+      ...args.principal,
+      toolName: args.toolName,
+      operation: resolved.operation,
+      intentHash: resolved.intentHash,
+      readRevision,
+      expiresAt: Date.now() + Math.min(Math.max(args.ttlMs ?? 60_000, 1), 300_000),
+    });
+    return { ...issued, readRevision };
   }
 
   private async runScriptHook(
@@ -1111,6 +1163,41 @@ export class ToolExecutor {
     const finalInput = preResult.action === "modify" && preResult.updatedInput
       ? preResult.updatedInput
       : toolUse.input;
+    let resolvedPluginOperation: ResolvedPluginOperation | undefined;
+    let pluginOperationPrincipal: PluginOperationPrincipal | undefined;
+    if (tool.operationGovernance) {
+      const ambientOrigin = currentInvocationOrigin();
+      const operationOrigin = ambientOrigin === undefined ? "model" : ambientOrigin;
+      try {
+        resolvedPluginOperation = resolvePluginOperation(
+          tool.operationGovernance,
+          finalInput,
+          operationOrigin,
+        );
+        if (operationOrigin === "ui" || operationOrigin === "mcp-app") {
+          const hostContext = permissionContext?.pluginOperation;
+          if (!hostContext || !tool.pluginId) {
+            throw new Error("host-derived app operation identity is missing");
+          }
+          pluginOperationPrincipal = {
+            ownerPluginId: tool.pluginId,
+            ownerVersion: hostContext.ownerVersion,
+            generationId: hostContext.generationId,
+            appSessionId: hostContext.appSessionId,
+            accountHash: hostContext.accountHash,
+          };
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const msg = `Plugin operation denied: ${reason}`;
+        const durationMs = Date.now() - startTime;
+        const denied: PermissionCheckResult = { decision: "deny", reason, layer: 0 };
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, denied, Infinity, permissionContext, invocationCategory, executionCwd);
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+      }
+    }
     if (rationaleResumeContext) {
       let inputsMatch = false;
       try {
@@ -1168,6 +1255,7 @@ export class ToolExecutor {
       finalInput,
       invocationAllowedScope.directories,
       effectLedger.correlationId,
+      resolvedPluginOperation?.rule.minimumRisk,
     );
     meta.category = invocationCategory;
     // Freeze the shell substrate before any reviewer, memory, or approval path.
@@ -1807,6 +1895,44 @@ export class ToolExecutor {
               reason: `${fallbackReason}: this shell will run without OS isolation and requires an exact allow-once approval`,
               layer: permissionResult.layer,
               forceModal: true,
+            };
+      }
+
+      // A pre-issued app mutation grant replaces only the ordinary foreground
+      // approval ask. It never overrides hard denies, layer-1/2 asks, forceModal,
+      // operator perm hooks, rate limits, audit, or the final atomic consume.
+      // The bearer is deliberately not validated here: it is consumed exactly
+      // once immediately before dispatch, after every remaining gate passes.
+      if (
+        rationaleResumeContext === undefined &&
+        resolvedPluginOperation?.rule.kind === "write" &&
+        pluginOperationPrincipal !== undefined &&
+        invocationPermissionContext.pluginOperation?.grantToken !== undefined &&
+        permissionResult.decision === "ask" &&
+        permissionResult.layer >= 3 &&
+        permissionResult.forceModal !== true
+      ) {
+        const operationPermHook = await this.runScriptHook(
+          "perm",
+          toolUse.name,
+          source,
+          invocationCategory,
+          finalInput,
+          sessionId,
+          invocationPermissionContext,
+          tool.mcpServerId,
+          tool.pluginId,
+        );
+        permissionResult = operationPermHook.decision === "deny"
+          ? {
+              decision: "deny",
+              reason: operationPermHook.reason,
+              layer: permissionResult.layer,
+            }
+          : {
+              decision: "allow",
+              reason: "pre-issued app operation grant pending atomic consumption",
+              layer: permissionResult.layer,
             };
       }
 
@@ -2720,6 +2846,39 @@ export class ToolExecutor {
       rationaleResumeContext.started = started.value;
     }
 
+    if (
+      resolvedPluginOperation?.rule.kind === "write" &&
+      pluginOperationPrincipal
+    ) {
+      const readRequirement = resolvedPluginOperation.rule.requiresRead;
+      const readRevision = readRequirement
+        ? this.pluginOperationGrants.latestRequiredRead(
+            pluginOperationPrincipal,
+            readRequirement.tool,
+            readRequirement.operations,
+            readRequirement.maxAgeMs,
+          )
+        : undefined;
+      const grantContext = permissionContext?.pluginOperation;
+      const consumed = readRevision
+        ? this.pluginOperationGrants.consume(grantContext?.grantToken, {
+            ...pluginOperationPrincipal,
+            toolName: toolUse.name,
+            operation: resolvedPluginOperation.operation,
+            intentHash: resolvedPluginOperation.intentHash,
+            readRevision,
+          })
+        : { ok: false as const, reason: "required read is missing or stale" };
+      if (!consumed.ok) {
+        const msg = `Plugin operation denied: ${consumed.reason}`;
+        const durationMs = Date.now() - startTime;
+        const denied: PermissionCheckResult = { decision: "deny", reason: consumed.reason, layer: 6 };
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, denied, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd);
+        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+      }
+    }
+
     emitToolStart(callbacks, toolUse.name, finalInput, meta);
 
     // ── Step 6: Execute ─────────────────────────────
@@ -2871,6 +3030,20 @@ export class ToolExecutor {
         image = result.image;
       }
       if (isError) terminationReason = "error";
+      if (
+        !isError &&
+        resolvedPluginOperation?.rule.kind === "read" &&
+        pluginOperationPrincipal
+      ) {
+        this.pluginOperationGrants.recordRead(
+          {
+            ...pluginOperationPrincipal,
+            readTool: toolUse.name,
+            readOperation: resolvedPluginOperation.operation,
+          },
+          rawResult ?? content,
+        );
+      }
     } else {
       terminationReason = outcome.reason;
       content =

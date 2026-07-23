@@ -23,6 +23,7 @@ import type {
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
+import type { PluginToolOperationPolicy } from "./plugin-operation-governance.js";
 
 // Re-export governance types so downstream modules can grab the full
 // tool surface from a single import path (tools/base.js).
@@ -71,6 +72,8 @@ export interface Tool {
    */
   readonly workerId?: string;
   readonly mcpServerId?: string;
+  /** Host-only policy sidecar. It is never serialized onto MCP or passed to plugin input. */
+  readonly operationGovernance?: PluginToolOperationPolicy;
   /**
    * MCP Apps — may this tool's OWN app call it (`_meta.ui.visibility` ∋ `"app"`)?
    *
@@ -223,6 +226,7 @@ export interface DynamicToolSpec {
   pluginId?: string;
   workerId?: string;
   mcpServerId?: string;
+  operationGovernance?: PluginToolOperationPolicy;
   /** MCP Apps app→server `tools/call` gate — see {@link Tool.appInvokable}. */
   appInvokable?: boolean;
   /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
@@ -260,6 +264,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     pluginId: spec.pluginId,
     workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,
+    operationGovernance: spec.operationGovernance,
     appInvokable: spec.appInvokable,
     modelVisible: spec.modelVisible,
     pathFields: spec.pathFields,
