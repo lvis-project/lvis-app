@@ -235,7 +235,10 @@ describe("HostApi.config.set round-trip", () => {
 
     expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { k: "v" });
     expect(runtimeTestState.runtime.setConfigOverride).toHaveBeenCalledWith("plugin-a", { k: "v" });
-    expect(runtimeTestState.runtime.restartPlugin).toHaveBeenCalledWith("plugin-a");
+    expect(runtimeTestState.runtime.restartPlugin).toHaveBeenCalledWith(
+      "plugin-a",
+      { skipPreparation: true },
+    );
     expect(api.config.get("k")).toBe("v");
   });
 
@@ -282,6 +285,51 @@ describe("HostApi.config.set round-trip", () => {
     await expect(write).rejects.toThrow(/plugin instance is no longer active/);
     expect(settings.setPluginConfig).not.toHaveBeenCalled();
     expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("persists config from a lifecycle hook without recursively restarting itself", async () => {
+    const store = new Map<string, Record<string, unknown>>();
+    const settings = makeSettingsService(store);
+    const createHostApi = await initAndGetFactory(settings);
+    activeManifest = { id: "plugin-a", config: {} };
+    const api = createHostApi(
+      "plugin-a",
+      activeManifest,
+      mkdtempSync("/tmp/lvis-cfg-lifecycle-"),
+      {
+        registerDisposer: vi.fn(),
+        isActive: () => true,
+        isLifecycleHookActive: () => true,
+      },
+    );
+
+    await expect(api.config.set("duringStart", true)).resolves.toBeUndefined();
+    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { duringStart: true });
+    expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("does not deadlock when stop-time config.set re-enters the uninstall lock", async () => {
+    const settings = makeSettingsService(new Map());
+    const api = await createActiveApi(settings);
+
+    await expect(withPluginInstallLock("plugin-a", async () => {
+      await api.config.set("duringStop", true);
+    })).resolves.toBeUndefined();
+
+    expect(settings.setPluginConfig).toHaveBeenCalledWith(
+      "plugin-a",
+      { duringStop: true },
+    );
+    expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a non-started runtime reload result after config persistence", async () => {
+    const settings = makeSettingsService(new Map());
+    const api = await createActiveApi(settings);
+    runtimeTestState.runtime.restartPlugin.mockResolvedValueOnce("failed");
+
+    await expect(api.config.set("k", "v")).rejects.toThrow(/runtime reload returned failed/);
+    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { k: "v" });
   });
 });
 

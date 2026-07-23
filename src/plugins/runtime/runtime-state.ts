@@ -36,6 +36,7 @@ import { isModelVisible } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 import type {
+  PluginHostApiIncarnation,
   PluginRuntimeOptions,
   PluginStartPreparationContext,
   PluginToolInvocationDelegate,
@@ -52,7 +53,12 @@ export abstract class PluginRuntimeState {
   protected readonly registryPath?: string;
   protected readonly pluginsRoot?: string;
   protected readonly configStore: ConfigOverrideStore;
-  protected readonly createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
+  protected readonly createHostApi?: (
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    incarnation: PluginHostApiIncarnation,
+  ) => PluginHostApi;
   protected readonly deploymentGuard?: PluginDeploymentGuard;
   protected readonly installReceiptCacheRoot?: string;
   protected readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -98,6 +104,7 @@ export abstract class PluginRuntimeState {
   /** Monotonic generation used to reject stale async add/restart commits. */
   protected readonly pluginLifecycleGenerations = new Map<string, number>();
   protected nextPluginLifecycleGeneration = 0;
+  protected readonly activePluginLifecycleHooks = new Map<string, number>();
   protected readonly pluginUiRevisions = new Map<string, number>();
   protected nextPluginUiRevision = 0;
   protected toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
@@ -189,14 +196,64 @@ export abstract class PluginRuntimeState {
     return ensurePluginDataDir(pluginId, pluginRoot, this.pluginsRoot);
   }
 
-  protected buildHostApi(pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi {
-    const hostApi = this.createHostApi?.(pluginId, manifest, pluginDataDir) ?? createNoopHostApi(pluginId, pluginDataDir);
+  protected buildHostApiIncarnation(
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+  ): {
+    hostApi: PluginHostApi;
+    disposers: Array<() => void>;
+    deactivate: () => void;
+  } {
+    const disposers: Array<() => void> = [];
+    let active = true;
+    const incarnation: PluginHostApiIncarnation = {
+      registerDisposer: (dispose) => {
+        if (active) {
+          disposers.push(dispose);
+          return;
+        }
+        try { dispose(); } catch { /* best-effort stale cleanup */ }
+      },
+      isActive: () => active,
+      isLifecycleHookActive: () =>
+        (this.activePluginLifecycleHooks.get(pluginId) ?? 0) > 0,
+    };
+    const hostApi = this.createHostApi?.(
+      pluginId,
+      manifest,
+      pluginDataDir,
+      incarnation,
+    ) ?? createNoopHostApi(pluginId, pluginDataDir);
     // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
     // objects from test harnesses may omit it.
     if (!hostApi.storage) {
       hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
     }
-    return hostApi;
+    return {
+      hostApi,
+      disposers,
+      deactivate: () => {
+        active = false;
+      },
+    };
+  }
+
+  protected async runPluginLifecycleHook<T>(
+    pluginId: string,
+    hook: () => Promise<T> | T,
+  ): Promise<T> {
+    this.activePluginLifecycleHooks.set(
+      pluginId,
+      (this.activePluginLifecycleHooks.get(pluginId) ?? 0) + 1,
+    );
+    try {
+      return await hook();
+    } finally {
+      const remaining = (this.activePluginLifecycleHooks.get(pluginId) ?? 1) - 1;
+      if (remaining <= 0) this.activePluginLifecycleHooks.delete(pluginId);
+      else this.activePluginLifecycleHooks.set(pluginId, remaining);
+    }
   }
 
   protected markPluginUiRevision(pluginId: string): number {
@@ -294,6 +351,14 @@ export abstract class PluginRuntimeState {
     aliases.add(normalizedAlias);
   }
 
+  protected resolveKnownPluginId(pluginId: string): string {
+    if (this.knownInstallAliases.has(pluginId)) return pluginId;
+    for (const [canonicalId, aliases] of this.knownInstallAliases) {
+      if (aliases.has(pluginId)) return canonicalId;
+    }
+    return pluginId;
+  }
+
   protected getPluginInstallAliases(pluginId: string): string[] | undefined {
     const aliases = this.knownInstallAliases.get(pluginId);
     if (!aliases || aliases.size === 0) return undefined;
@@ -302,19 +367,52 @@ export abstract class PluginRuntimeState {
 
   protected beginPluginLifecycleOperation(pluginId: string): number {
     const generation = ++this.nextPluginLifecycleGeneration;
+    const canonicalId = this.resolveKnownPluginId(pluginId);
+    this.pluginLifecycleGenerations.set(canonicalId, generation);
     this.pluginLifecycleGenerations.set(pluginId, generation);
+    for (const alias of this.knownInstallAliases.get(canonicalId) ?? []) {
+      this.pluginLifecycleGenerations.set(alias, generation);
+    }
     return generation;
   }
 
+  protected adoptPluginLifecycleIdentity(
+    requestedPluginId: string,
+    canonicalPluginId: string,
+    generation: number,
+  ): boolean {
+    const requestedGeneration = this.pluginLifecycleGenerations.get(requestedPluginId);
+    const canonicalGeneration = this.pluginLifecycleGenerations.get(canonicalPluginId);
+    if (requestedGeneration !== generation || (canonicalGeneration !== undefined && canonicalGeneration > generation)) {
+      return false;
+    }
+    this.rememberPluginInstallAlias(canonicalPluginId, requestedPluginId);
+    this.pluginLifecycleGenerations.set(canonicalPluginId, generation);
+    this.pluginLifecycleGenerations.set(requestedPluginId, generation);
+    for (const alias of this.knownInstallAliases.get(canonicalPluginId) ?? []) {
+      this.pluginLifecycleGenerations.set(alias, generation);
+    }
+    return true;
+  }
+
   protected isPluginLifecycleOperationCurrent(pluginId: string, generation: number): boolean {
-    return this.pluginLifecycleGenerations.get(pluginId) === generation;
+    const canonicalId = this.resolveKnownPluginId(pluginId);
+    const keys = new Set([
+      canonicalId,
+      pluginId,
+      ...(this.knownInstallAliases.get(canonicalId) ?? []),
+    ]);
+    return [...keys].every(
+      (key) => this.pluginLifecycleGenerations.get(key) === generation,
+    );
   }
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   waitForPluginReady(pluginId: string): Promise<void> {
-    if (this.plugins.has(pluginId)) return Promise.resolve();
-    return this.preparation.waitForReady(pluginId);
+    const canonicalId = this.resolveKnownPluginId(pluginId);
+    if (this.plugins.has(canonicalId)) return Promise.resolve();
+    return this.preparation.waitForReady(canonicalId);
   }
 
   /**
@@ -327,6 +425,9 @@ export abstract class PluginRuntimeState {
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   protected resetLoadedState(): void {
+    for (const plugin of this.plugins.values()) {
+      plugin.deactivateHostApi?.();
+    }
     for (const [, list] of this.disposers) {
       for (const d of list) {
         try { d(); } catch (err) {
@@ -337,6 +438,7 @@ export abstract class PluginRuntimeState {
     this.disposers.clear();
     this.knownPluginManifests.clear();
     this.knownPluginAccessGrants.clear();
+    this.knownInstallAliases.clear();
     this.knownToolOwners.clear();
     this.knownEventOwners.clear();
     this.plugins.clear();
@@ -350,18 +452,19 @@ export abstract class PluginRuntimeState {
     this.pendingRestarts.clear();
     this.pendingRestartPreparations.clear();
     this.pluginLifecycleGenerations.clear();
+    this.activePluginLifecycleHooks.clear();
     this.loaded = false;
   }
 
   protected async stopAfterStartFailure(
     pluginId: string,
     instance: RuntimePlugin,
-  ): Promise<void> {
-    if (!instance.stop) return;
+  ): Promise<boolean> {
+    if (!instance.stop) return true;
     let timer: NodeJS.Timeout | undefined;
     try {
       await Promise.race([
-        Promise.resolve(instance.stop()),
+        this.runPluginLifecycleHook(pluginId, () => instance.stop!()),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error(`stop timeout (>${START_FAILURE_STOP_TIMEOUT_MS}ms)`)),
@@ -370,8 +473,10 @@ export abstract class PluginRuntimeState {
         }),
       ]);
       plog("debug", { pluginId, phase: PluginPhase.STOP_OK }, "stopped after start failure");
+      return true;
     } catch (err) {
       plog("error", { pluginId, phase: PluginPhase.STOP_FAIL, err }, "stop after start failure failed");
+      return false;
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -384,6 +489,7 @@ export abstract class PluginRuntimeState {
     for (const method of methods.keys()) {
       this.methodMap.delete(method);
     }
+    this.plugins.get(pluginId)?.deactivateHostApi?.();
     this.plugins.delete(pluginId);
     this.runPluginDisposers(pluginId, "start failure cleanup");
     this.onDisable?.(pluginId);
@@ -400,6 +506,16 @@ export abstract class PluginRuntimeState {
       }
     }
     this.disposers.delete(pluginId);
+  }
+
+  protected runDisposerList(disposers: Array<() => void>, context: string): void {
+    for (const dispose of disposers.splice(0)) {
+      try {
+        dispose();
+      } catch (err) {
+        log.error(`disposer failed during ${context}: %s`, (err as Error).message);
+      }
+    }
   }
 
   protected throwIfPluginFailedAfterAdd(pluginId: string): void {

@@ -176,6 +176,64 @@ export default async function createPlugin() {
     await expect(runtime.call("lc_restart_remove_race_ping")).rejects.toThrow(/not found/);
   });
 
+  it("bounds a replacement start that never settles and keeps the old instance", async () => {
+    const pluginDir = join(installedDir, "lc-restart-timeout");
+    const armPath = join(testDir, "restart-timeout-arm");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `import { access } from "node:fs/promises";
+export default async function createPlugin() {
+  return {
+    handlers: { lc_restart_timeout_ping: async () => "old-still-live" },
+    start: async () => {
+      try {
+        await access(${JSON.stringify(armPath)});
+        await new Promise(() => {});
+      } catch {}
+    },
+    stop: async () => {},
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "lc-restart-timeout",
+        name: "Restart Timeout",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        startupTimeoutMs: 50,
+        tools: [{
+          name: "lc_restart_timeout_ping",
+          description: "Restart timeout regression tool",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        }],
+        description: "Lifecycle restart timeout regression.",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "lc-restart-timeout", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await writeFile(armPath, "armed", "utf-8");
+
+    await expect(runtime.restartPlugin("lc-restart-timeout")).resolves.toBe("failed");
+    expect(runtime.listPluginIds()).toContain("lc-restart-timeout");
+    await expect(runtime.call("lc_restart_timeout_ping")).resolves.toBe("old-still-live");
+  });
+
   it("restartPlugin re-imports the latest on-disk module (ESM cache-bust)", async () => {
     // 회귀 가드: Node ESM 로더는 import URL 로 모듈을 메모이즈하므로,
     // `?reload=<ts>` 쿼리 없이 같은 file:// URL 을 다시 import 하면 옛

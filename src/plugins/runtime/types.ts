@@ -26,6 +26,7 @@ export type LoadedPlugin = {
   methods: Map<string, PluginToolHandler>;
   approvedPluginAccess?: PluginAccessSpec;
   started?: boolean;
+  deactivateHostApi?: () => void;
 };
 
 /**

@@ -55,7 +55,7 @@ describe("ToolExecutor permission audit chain", () => {
         : { decision: "allow", reason: "test allow", layer: 3 };
 
     const auditLogger = new AuditLogger(join(testHome, ".lvis", "audit"));
-    auditLogger.setupPermissionAuditChain(SECRET);
+    await auditLogger.setupPermissionAuditChain(SECRET);
     const executor = new ToolExecutor(
       registry,
       undefined,
@@ -102,7 +102,7 @@ describe("ToolExecutor permission audit chain", () => {
     const permissionManager = new PermissionManager(join(testHome, "permissions.json"));
     permissionManager.checkDetailed = () => ({ decision: "allow", reason: "test allow", layer: 3 });
     const auditLogger = new AuditLogger(join(testHome, ".lvis", "audit"));
-    auditLogger.setupPermissionAuditChain(SECRET);
+    await auditLogger.setupPermissionAuditChain(SECRET);
     vi.spyOn(auditLogger, "appendPermissionAuditEntry").mockRejectedValue(new Error("append boom"));
     const executor = new ToolExecutor(
       registry,
@@ -136,7 +136,7 @@ describe("ToolExecutor permission audit chain", () => {
     const permissionManager = new PermissionManager(join(testHome, "permissions.json"));
     permissionManager.checkDetailed = () => ({ decision: "allow", reason: "test allow", layer: 3 });
     const auditLogger = new AuditLogger(join(testHome, ".lvis", "audit"));
-    auditLogger.setupPermissionAuditChain(SECRET);
+    await auditLogger.setupPermissionAuditChain(SECRET);
     vi.spyOn(auditLogger, "assertPermissionAuditWritable").mockImplementation(() => {
       throw new Error("not writable");
     });

@@ -203,6 +203,12 @@ export interface PluginStartPreparationContext {
   reportProgress?: (status: PluginPreparationProgressInput) => void;
 }
 
+export interface PluginHostApiIncarnation {
+  registerDisposer(dispose: () => void): void;
+  isActive(): boolean;
+  isLifecycleHookActive(): boolean;
+}
+
 export interface PluginRuntimeOptions {
   hostRoot: string;
   manifestPaths?: string[];
@@ -210,7 +216,12 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** Plugin-scoped HostApi factory — injected by boot.ts */
-  createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
+  createHostApi?: (
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    incarnation: PluginHostApiIncarnation,
+  ) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -627,6 +638,14 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       this.disposers.set(pluginId, list);
     }
     list.push(dispose);
+  }
+
+  isPluginRestartPending(pluginId: string): boolean {
+    return this.pendingRestarts.has(this.resolveKnownPluginId(pluginId));
+  }
+
+  isPluginUiRevisionCurrent(pluginId: string, revision: number): boolean {
+    return this.pluginUiRevisions.get(pluginId) === revision;
   }
 
   listToolNames(): string[] {

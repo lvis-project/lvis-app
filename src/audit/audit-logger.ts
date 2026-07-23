@@ -12,7 +12,6 @@ import {
   mkdirSync,
   existsSync,
   openSync,
-  readFileSync,
   readdirSync,
   createReadStream,
   readSync,
@@ -25,14 +24,19 @@ import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
 import {
+  computeDailySeal,
   computeLineHmac,
   GENESIS_MARKER,
-  verifyChain,
+  sealKeyName,
+  verifyChainLine,
+  verifyEntryHmac,
   type SecretStore,
 } from "./hmac-chain.js";
 import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-schema.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { iterateJsonlLines } from "./jsonl-reader.js";
+
+const MAX_PERMISSION_AUDIT_LINE_BYTES = 1024 * 1024;
 
 function readLastNonEmptyLineSync(filePath: string): string {
   let fd: number;
@@ -64,6 +68,9 @@ function readLastNonEmptyLineSync(filePath: string): string {
         if (chunk[i] === 0x0a) {
           const lineStart = position + i + 1;
           const lineLen = end - lineStart;
+          if (lineLen > MAX_PERMISSION_AUDIT_LINE_BYTES) {
+            throw new Error("permission audit line exceeds the maximum size");
+          }
           const line = Buffer.allocUnsafe(lineLen);
           readSync(fd, line, 0, lineLen, lineStart);
           return line.toString("utf-8");
@@ -72,6 +79,9 @@ function readLastNonEmptyLineSync(filePath: string): string {
       start = position;
     }
 
+    if (end > MAX_PERMISSION_AUDIT_LINE_BYTES) {
+      throw new Error("permission audit line exceeds the maximum size");
+    }
     const line = Buffer.allocUnsafe(end);
     readSync(fd, line, 0, end, 0);
     return line.toString("utf-8");
@@ -494,31 +504,90 @@ export class AuditLogger {
    * `appendPermissionAuditEntry` calls throw — fail-secure per spec §1: refuse
    * to start the chain rather than silently downgrade.
    *
-   * `sealStore` is optional but required for daily-seal verification
-   * via the `/permission audit verify` slash. When omitted, the
-   * verify operation reports `sealMatch: null` for all days.
+   * `sealStore` is optional for fresh self-authenticated chains, but required
+   * to migrate a historical tail that predates `entryHash`. It also backs
+   * daily-seal verification via `/permission audit verify`.
    */
-  setupPermissionAuditChain(secret: string, sealStore?: SecretStore): void {
+  async setupPermissionAuditChain(secret: string, sealStore?: SecretStore): Promise<void> {
     // A failed re-bootstrap must never inherit a prior ready state.
     this.permissionAuditSecret = null;
     this.permissionAuditSealStore = null;
     this.permissionAuditLastSerialized = GENESIS_MARKER;
     this.permissionAuditChainBootstrapped = false;
-    let lines: string[] = [];
-    try {
-      lines = readFileSync(this.permissionAuditLogFile, "utf-8")
-        .split(/\r?\n/)
-        .filter((line) => line.length > 0);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    }
-    const verification = verifyChain(secret, lines);
-    if (!verification.ok) {
-      throw new Error(
-        `permission audit chain invalid at line ${verification.firstBrokenLineIndex + 1}: ${verification.reason}`,
-      );
-    }
-    this.permissionAuditLastSerialized = lines.at(-1) ?? GENESIS_MARKER;
+    let previousSerialized = GENESIS_MARKER;
+    let lineIndex = 0;
+    let authenticatedRowsStarted = false;
+    await withFileLock(this.permissionAuditLogFile, async () => {
+      try {
+        if (existsSync(this.permissionAuditLogFile)) {
+          const fd = openSync(this.permissionAuditLogFile, "r");
+          try {
+            const { size } = fstatSync(fd);
+            if (size > 0) {
+              const lastByte = Buffer.allocUnsafe(1);
+              readSync(fd, lastByte, 0, 1, size - 1);
+              if (lastByte[0] !== 0x0a) {
+                throw new Error("permission audit chain has an unterminated tail");
+              }
+            }
+          } finally {
+            closeSync(fd);
+          }
+        }
+        for await (const line of iterateJsonlLines(
+          this.permissionAuditLogFile,
+          MAX_PERMISSION_AUDIT_LINE_BYTES,
+        )) {
+          if (line.length === 0) continue;
+          if (Buffer.byteLength(line, "utf-8") > MAX_PERMISSION_AUDIT_LINE_BYTES) {
+            throw new Error(
+              `permission audit chain invalid at line ${lineIndex + 1}: line-too-large`,
+            );
+          }
+          const verification = verifyChainLine(
+            secret,
+            line,
+            previousSerialized,
+            authenticatedRowsStarted,
+          );
+          if (!verification.ok) {
+            throw new Error(
+              `permission audit chain invalid at line ${lineIndex + 1}: ${verification.reason}`,
+            );
+          }
+          authenticatedRowsStarted ||= verification.selfAuthenticated;
+          previousSerialized = line;
+          lineIndex += 1;
+          if (lineIndex % 1_024 === 0) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+      if (previousSerialized !== GENESIS_MARKER && !authenticatedRowsStarted && !sealStore) {
+        throw new Error("legacy permission audit tail requires an external seal store");
+      }
+      if (sealStore) {
+        const sealName = sealKeyName(new Date().toISOString().slice(0, 10));
+        const storedSeal = sealStore.read(sealName, 4 * 1024);
+        if (previousSerialized === GENESIS_MARKER) {
+          if (storedSeal !== null) {
+            throw new Error("permission audit seal exists for an empty active file");
+          }
+        } else {
+          const computedSeal = computeDailySeal(secret, previousSerialized);
+          if (storedSeal === null) {
+            // Upgrade anchor for pre-entryHash chains. Subsequent appends update
+            // this external tail seal atomically with the file-lock owner.
+            sealStore.write(sealName, computedSeal);
+          } else if (storedSeal !== computedSeal) {
+            throw new Error("permission audit active-tail seal mismatch");
+          }
+        }
+      }
+    });
+    this.permissionAuditLastSerialized = previousSerialized;
     this.permissionAuditSecret = secret;
     this.permissionAuditSealStore = sealStore ?? null;
     this.permissionAuditChainBootstrapped = true;
@@ -542,6 +611,23 @@ export class AuditLogger {
   assertPermissionAuditWritable(): void {
     if (!this.isPermissionAuditChainReady()) {
       throw new Error("permission audit chain not initialized");
+    }
+    const secret = this.permissionAuditSecret!;
+    const tail = readLastNonEmptyLineSync(this.permissionAuditLogFile);
+    if (this.permissionAuditSealStore) {
+      const sealName = sealKeyName(new Date().toISOString().slice(0, 10));
+      const storedSeal = this.permissionAuditSealStore.read(sealName, 4 * 1024);
+      if (tail === GENESIS_MARKER) {
+        if (storedSeal !== null) {
+          throw new Error("permission audit seal does not match the empty active file");
+        }
+      } else {
+        if (storedSeal !== computeDailySeal(secret, tail)) {
+          throw new Error("permission audit active-tail seal mismatch");
+        }
+      }
+    } else if (tail !== GENESIS_MARKER && !verifyEntryHmac(secret, tail)) {
+      throw new Error("permission audit active tail is not self-authenticated");
     }
     const fd = openSync(this.permissionAuditLogFile, "a", 0o600);
     try {
@@ -587,14 +673,52 @@ export class AuditLogger {
     const secret = this.permissionAuditSecret;
     return withFileLock(this.permissionAuditLogFile, async () => {
       this.permissionAuditLastSerialized = readLastNonEmptyLineSync(this.permissionAuditLogFile);
+      const sealStore = this.permissionAuditSealStore;
+      const sealName = sealKeyName(new Date().toISOString().slice(0, 10));
+      if (sealStore) {
+        const storedSeal = sealStore.read(sealName, 4 * 1024);
+        if (this.permissionAuditLastSerialized === GENESIS_MARKER) {
+          if (storedSeal !== null) {
+            throw new Error("permission audit seal does not match the empty active file");
+          }
+        } else {
+          const currentSeal = computeDailySeal(secret, this.permissionAuditLastSerialized);
+          if (storedSeal !== currentSeal) {
+            throw new Error("permission audit active-tail seal mismatch before append");
+          }
+        }
+      }
+      if (
+        this.permissionAuditLastSerialized !== GENESIS_MARKER
+        && !verifyEntryHmac(secret, this.permissionAuditLastSerialized)
+        && !sealStore
+      ) {
+        throw new Error("permission audit active tail is not self-authenticated");
+      }
       const prevHash = computeLineHmac(secret, this.permissionAuditLastSerialized);
-      const full = { ...entry, prevHash } as PermissionAuditEntry;
+      const linked = { ...entry, prevHash };
+      const full = {
+        ...linked,
+        entryHash: computeLineHmac(secret, JSON.stringify(linked)),
+      } as PermissionAuditEntry;
       const serialized = JSON.stringify(full);
+      if (Buffer.byteLength(serialized, "utf-8") > MAX_PERMISSION_AUDIT_LINE_BYTES) {
+        throw new Error("permission audit entry exceeds the maximum size");
+      }
       appendFileSync(this.permissionAuditLogFile, serialized + "\n", { encoding: "utf-8", mode: 0o600 });
       try {
         chmodSync(this.permissionAuditLogFile, 0o600);
       } catch {
         // Non-fatal — chmod failure must not block audit writes.
+      }
+      if (sealStore) {
+        try {
+          sealStore.write(sealName, computeDailySeal(secret, serialized));
+        } catch (err) {
+          this.permissionAuditChainBootstrapped = false;
+          this.permissionAuditSecret = null;
+          throw err;
+        }
       }
       this.permissionAuditLastSerialized = serialized;
       return full;
