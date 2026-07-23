@@ -201,7 +201,6 @@ export class BootContext {
     this.mainWindow = inputs.mainWindow;
     this.getMainWindow = inputs.getMainWindow;
     this.dueSoonTimer = undefined;
-    this.rationaleHostService = undefined;
   }
 }
 

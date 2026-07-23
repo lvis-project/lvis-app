@@ -223,8 +223,9 @@ gate while ignoring type-only imports. Shared theme replay state and native
 window event listeners therefore live in leaf modules; compatibility barrels
 may re-export them but native window construction imports the leaves directly.
 
-Menu, tray, and main-window modules coordinate only through the native-window
-coordinator configured once by `main.ts`. Calls before configuration and repeat
+Reverse calls from menu and main-window modules into native window actions go
+through the native-window coordinator configured once by `main.ts`; the tray
+remains the one-way composition owner. Calls before configuration and repeat
 configuration are contract errors. Boot uses a staged `BootContext`, then an
 exhaustive own-property readiness assertion before `assembleAppServices`; a
 missing producer is reported by field name instead of leaking `undefined` into
