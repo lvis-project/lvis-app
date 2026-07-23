@@ -37,6 +37,7 @@
  *     lands; until then `modify` is an attack vector).
  */
 import type { ToolCategory, ToolSource } from "../tools/types.js";
+import type { PluginHookOwner } from "./hook-registry.js";
 import type { TrustOriginWithUnknown } from "../shared/chat-origin.js";
 
 /**
@@ -252,6 +253,8 @@ export interface ScriptHookInvocationResult {
    * Always populated by the runner.
    */
   commandIdentity: string;
+  /** Exact owner/version/generation/fingerprint for plugin-bundled Hooks. */
+  pluginOwner?: PluginHookOwner;
 }
 
 /** Default per-hook timeout — spec §3 Layer 6 v1. */
