@@ -38,6 +38,15 @@ import {
 
 const log = createLogger("plugin-bundle-lifecycle");
 const MAX_RETIREMENT_ATTEMPTS = 3;
+type RetirementPhase =
+  | "operation-authority"
+  | "skills"
+  | "hooks"
+  | "mcp"
+  | "loopback"
+  | "runtime"
+  | "payload"
+  | "health";
 
 function freezeSnapshot(value: unknown): void {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
@@ -117,6 +126,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   private readonly retirementJournal: PluginRetirementJournal;
   private readonly healthJournal: PluginGenerationHealthJournal;
   private readonly retirementTasks = new Set<Promise<void>>();
+  private readonly retirementProgress = new Map<string, Set<RetirementPhase>>();
 
   constructor(private readonly deps: PluginBundleLifecycleDeps) {
     if (typeof deps.receiptCacheRoot !== "string" || deps.receiptCacheRoot.trim().length === 0) {
@@ -183,6 +193,10 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     return generation ? activeGenerationSnapshot(generation) : undefined;
   }
 
+  isExactAdmitted(pluginId: string, generationId: string): boolean {
+    return this.coordinator.isExactAdmitted(pluginId, generationId);
+  }
+
   acquire(pluginId: string): Promise<PluginGenerationLease<HostPluginGenerationState>> {
     return this.coordinator.acquire(pluginId);
   }
@@ -204,6 +218,12 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
 
   async recoverRetirements(): Promise<void> {
     for (const record of this.retirementJournal.list()) {
+      const progressKey = `${record.pluginId}\0${record.generationId}`;
+      if (this.retirementProgress.has(progressKey)) {
+        throw new Error(
+          `cannot recover in-process incomplete plugin retirement '${record.pluginId}:${record.generationId}'`,
+        );
+      }
       const active = this.coordinator.getActive(record.pluginId);
       if (active?.generationId === record.generationId) {
         throw new Error(`retirement journal targets active plugin generation '${record.pluginId}:${record.generationId}'`);
@@ -575,34 +595,76 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
 
   private async retire(generation: ActivePluginGeneration<HostPluginGenerationState>): Promise<void> {
     this.retirementJournal.record(generation.pluginId, generation.generationId);
-    this.deps.revokeOperationGeneration(generation.pluginId, generation.generationId);
+    const progressKey = `${generation.pluginId}\0${generation.generationId}`;
+    const completed = this.retirementProgress.get(progressKey) ?? new Set<RetirementPhase>();
+    this.retirementProgress.set(progressKey, completed);
     const errors: Error[] = [];
-    try { this.deps.skillStore.removePluginGeneration(generation.pluginId, generation.generationId); } catch (error) {
-      errors.push(error instanceof Error ? error : new Error(String(error)));
-    }
-    try { this.deps.hookManager.removePluginGeneration(generation.pluginId, generation.generationId); } catch (error) {
-      errors.push(error instanceof Error ? error : new Error(String(error)));
-    }
+    const runPhase = async (
+      phase: RetirementPhase,
+      operation: () => void | Promise<void>,
+    ): Promise<void> => {
+      if (completed.has(phase)) return;
+      try {
+        await operation();
+        // Update the in-process checkpoint first. If durable journal writing
+        // itself fails, a retry must still not rerun a completed non-idempotent
+        // teardown phase such as plugin stop().
+        completed.add(phase);
+        this.retirementJournal.completePhase(
+          generation.pluginId,
+          generation.generationId,
+          phase,
+        );
+      } catch (error) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    await runPhase("operation-authority", () => {
+      this.deps.revokeOperationGeneration(generation.pluginId, generation.generationId);
+    });
+    await runPhase("skills", () => {
+      this.deps.skillStore.removePluginGeneration(generation.pluginId, generation.generationId);
+    });
+    await runPhase("hooks", () => {
+      this.deps.hookManager.removePluginGeneration(generation.pluginId, generation.generationId);
+    });
     // Current-turn Skill overlays own generation leases. They release at the
     // turn boundary, so coordinator drain itself guarantees the body remains
     // available for every subsequent assistant round of the admitted turn.
-    try { await this.deps.mcpManager.disconnectBundledGeneration(generation.pluginId, generation.generationId); } catch (error) {
-      errors.push(error instanceof Error ? error : new Error(String(error)));
-    }
-    try { await this.deps.loopbackManager.retireGeneration(generation.pluginId, generation.generationId); } catch (error) {
-      errors.push(error instanceof Error ? error : new Error(String(error)));
-    }
-    try { await this.deps.pluginRuntime.retireRuntimeGeneration(generation.state.runtime); } catch (error) {
-      errors.push(error instanceof Error ? error : new Error(String(error)));
-    }
+    await runPhase("mcp", () =>
+      this.deps.mcpManager.disconnectBundledGeneration(
+        generation.pluginId,
+        generation.generationId,
+      ));
+    await runPhase("loopback", () =>
+      this.deps.loopbackManager.retireGeneration(
+        generation.pluginId,
+        generation.generationId,
+      ));
+    await runPhase("runtime", () =>
+      this.deps.pluginRuntime.retireRuntimeGeneration(generation.state.runtime));
     if (errors.length > 0) {
       const aggregate = new AggregateError(errors, `plugin '${generation.pluginId}' generation retirement failed`);
       this.retirementJournal.record(generation.pluginId, generation.generationId, aggregate);
       throw aggregate;
     }
-    await removeRetainedPluginGeneration(this.deps.receiptCacheRoot, generation.pluginId, generation.generationId);
+    await runPhase("payload", () =>
+      removeRetainedPluginGeneration(
+        this.deps.receiptCacheRoot,
+        generation.pluginId,
+        generation.generationId,
+      ));
+    await runPhase("health", () => {
+      this.healthJournal.clearGeneration(generation.pluginId, generation.generationId);
+    });
+    if (errors.length > 0) {
+      const aggregate = new AggregateError(errors, `plugin '${generation.pluginId}' generation retirement failed`);
+      this.retirementJournal.record(generation.pluginId, generation.generationId, aggregate);
+      throw aggregate;
+    }
     this.retirementJournal.complete(generation.pluginId, generation.generationId);
-    this.healthJournal.clearGeneration(generation.pluginId, generation.generationId);
+    this.retirementProgress.delete(progressKey);
   }
 
   private recordPostCommitFault(

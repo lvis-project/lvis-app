@@ -8,6 +8,7 @@ export interface PluginRetirementRecord {
   recordedAt: string;
   attempts: number;
   lastError?: string;
+  completedPhases?: readonly string[];
 }
 
 interface JournalFile {
@@ -25,10 +26,25 @@ export class PluginRetirementJournal {
         throw new Error("unsupported plugin retirement journal");
       }
       for (const record of parsed.retirements) {
-        if (!record?.pluginId || !/^[a-f0-9]{64}$/.test(record.generationId)) {
+        if (
+          !record?.pluginId
+          || !/^[a-f0-9]{64}$/.test(record.generationId)
+          || (
+            record.completedPhases !== undefined
+            && (
+              !Array.isArray(record.completedPhases)
+              || record.completedPhases.some((phase) => typeof phase !== "string" || !phase)
+            )
+          )
+        ) {
           throw new Error("invalid plugin retirement journal record");
         }
-        this.records.set(this.key(record.pluginId, record.generationId), Object.freeze({ ...record }));
+        this.records.set(this.key(record.pluginId, record.generationId), Object.freeze({
+          ...record,
+          ...(record.completedPhases
+            ? { completedPhases: Object.freeze([...record.completedPhases]) }
+            : {}),
+        }));
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -36,7 +52,12 @@ export class PluginRetirementJournal {
   }
 
   list(): readonly PluginRetirementRecord[] {
-    return Object.freeze([...this.records.values()].map((record) => Object.freeze({ ...record })));
+    return Object.freeze([...this.records.values()].map((record) => Object.freeze({
+      ...record,
+      ...(record.completedPhases
+        ? { completedPhases: Object.freeze([...record.completedPhases]) }
+        : {}),
+    })));
   }
 
   record(pluginId: string, generationId: string, error?: unknown): void {
@@ -50,8 +71,27 @@ export class PluginRetirementJournal {
       ...(error !== undefined
         ? { lastError: (error instanceof Error ? error.message : String(error)).slice(0, 1000) }
         : previous?.lastError ? { lastError: previous.lastError } : {}),
+      ...(previous?.completedPhases
+        ? { completedPhases: Object.freeze([...previous.completedPhases]) }
+        : {}),
     };
     this.records.set(key, Object.freeze(next));
+    this.persist();
+  }
+
+  completePhase(pluginId: string, generationId: string, phase: string): void {
+    const key = this.key(pluginId, generationId);
+    const previous = this.records.get(key);
+    if (!previous) {
+      throw new Error(`plugin retirement is not journaled: ${pluginId}:${generationId}`);
+    }
+    const completedPhases = new Set(previous.completedPhases ?? []);
+    if (completedPhases.has(phase)) return;
+    completedPhases.add(phase);
+    this.records.set(key, Object.freeze({
+      ...previous,
+      completedPhases: Object.freeze([...completedPhases]),
+    }));
     this.persist();
   }
 

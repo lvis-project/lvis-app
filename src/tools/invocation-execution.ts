@@ -1,4 +1,5 @@
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
+import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import type { PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ToolExecutionAuditMetadata } from "../audit/audit-schema.js";
@@ -273,24 +274,51 @@ export async function executeAuthorizedToolInvocation(
         requiresRead: readRequirement !== undefined,
       },
     );
-    services.auditLogger.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "plugin-operation",
-      type: "approval",
-      input: JSON.stringify({
-        pluginId: pluginOperationPrincipal.ownerPluginId,
-        toolName: toolUse.name,
-        operation: resolvedPluginOperation.operation,
-        ...(consumed.grantId ? { grantId: consumed.grantId } : {}),
-      }),
-      output: consumed.ok ? "consumed" : `rejected:${consumed.reason}`,
-    });
-    if (!consumed.ok) {
-      const msg = `Plugin operation denied: ${consumed.reason}`;
+    let grantAuditError: unknown;
+    try {
+      const commonGrantAudit = {
+        ts: new Date().toISOString(),
+        auditId: randomUUID(),
+        tool: toolUse.name,
+        source,
+        category: invocationCategory,
+        trustOrigin: invocationPermissionContext.trustOrigin,
+        pluginOperation: {
+          pluginId: pluginOperationPrincipal.ownerPluginId,
+          operation: resolvedPluginOperation.operation,
+          outcome: consumed.ok ? "consumed" : "rejected",
+          ...(consumed.grantId ? { grantId: consumed.grantId } : {}),
+        },
+      } as const;
+      if (consumed.ok) {
+        await services.auditLogger.appendPermissionAuditEntry({
+          ...commonGrantAudit,
+          decision: "allow",
+          layer: 6,
+        });
+      } else {
+        await services.auditLogger.appendPermissionAuditEntry({
+          ...commonGrantAudit,
+          decision: "deny",
+          denyReasons: [{
+            layer: 6,
+            reason: consumed.reason,
+            source: "plugin-operation-grant",
+          }],
+        });
+      }
+    } catch (error) {
+      grantAuditError = error;
+    }
+    if (!consumed.ok || grantAuditError !== undefined) {
+      const reason = consumed.ok
+        ? `permission audit chain failed: ${grantAuditError instanceof Error ? grantAuditError.message : String(grantAuditError)}`
+        : consumed.reason;
+      const msg = `Plugin operation denied: ${reason}`;
       const durationMs = Date.now() - startTime;
       const denied: PermissionCheckResult = {
         decision: "deny",
-        reason: consumed.reason,
+        reason,
         layer: 6,
       };
       callbacks?.onToolEnd?.(

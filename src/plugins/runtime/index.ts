@@ -277,6 +277,8 @@ export interface PluginRuntimeOptions {
 
 
   onEnable?: (pluginId: string) => void;
+  /** Revokes renderer authority whenever a plugin UI generation changes. */
+  onPluginUiRevisionChange?: (pluginId: string) => void;
   /**
    * Fires when the user toggles active/inactive without unloading the runtime.
    * Unlike {@link onDisable}, this MUST NOT unregister plugin tools from the
@@ -412,7 +414,12 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   async callFromUi(
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean; appSessionId?: string; operationGrantToken?: string },
+    options?: {
+      userAction?: boolean;
+      appSessionId?: string;
+      operationGrantToken?: string;
+      expectedGenerationId?: string;
+    },
   ): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
@@ -444,7 +451,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
             }
           : {}),
       });
-    });
+    }, options?.expectedGenerationId);
   }
 
   /**

@@ -481,6 +481,8 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
           }
         : undefined;
     },
+    isExactAdmitted: (pluginId: string, generationId: string) =>
+      active.get(pluginId)?.generationId === generationId,
     acquire: async (pluginId: string) => {
       const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
       if (!generation) throw new Error(`test generation is not active for '${pluginId}'`);

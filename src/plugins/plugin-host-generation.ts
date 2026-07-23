@@ -59,6 +59,8 @@ export interface HostPluginGenerationState {
 
 export interface PluginRuntimeGenerationAccess {
   getActive(pluginId: string): ActivePluginGenerationSnapshot | undefined;
+  /** True only while the current async operation owns a live exact-generation lease. */
+  isExactAdmitted(pluginId: string, generationId: string): boolean;
   acquire(pluginId: string): Promise<PluginGenerationLease<HostPluginGenerationState>>;
   acquireExact(pluginId: string, generationId: string): Promise<PluginGenerationLease<HostPluginGenerationState>>;
   runWithLease<T>(

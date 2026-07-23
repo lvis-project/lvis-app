@@ -84,6 +84,7 @@ describe("McpManager bundled generation", () => {
     });
     manager.setPluginGenerationAccess({
       getActive: vi.fn(() => undefined),
+      isExactAdmitted: vi.fn(() => true),
       acquire: vi.fn(async () => { throw new Error("not used"); }),
       acquireExact,
       runWithLease: vi.fn(async (_lease, operation) => operation()),
