@@ -41,21 +41,28 @@ function jsonResponse(body: unknown, init: { status?: number; ok?: boolean } = {
   } as unknown as Response;
 }
 
-function bytesResponse(bytes: Uint8Array): Response {
-  return {
-    ok: true,
-    status: 200,
-    statusText: "OK",
-    async arrayBuffer() {
-      return bytes.buffer.slice(
-        bytes.byteOffset,
-        bytes.byteOffset + bytes.byteLength,
-      );
+function bytesResponse(
+  bytes: Uint8Array,
+  options: { contentLength?: string; chunks?: number[] } = {},
+): Response {
+  const sizes = options.chunks ?? [bytes.byteLength];
+  let offset = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const size = sizes.shift();
+      if (size === undefined) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(bytes.slice(offset, offset + size));
+      offset += size;
     },
-    async json() {
-      throw new Error("not used");
-    },
-  } as unknown as Response;
+  });
+  const headers = new Headers();
+  if (options.contentLength !== undefined) {
+    headers.set("content-length", options.contentLength);
+  }
+  return new Response(body, { status: 200, headers });
 }
 
 describe("CloudMarketplaceFetcher (public-network path)", () => {
@@ -731,6 +738,55 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     expect(url).toBe(
       "http://127.0.0.1:8000/api/v1/plugins/lvis-plugin-meeting/versions/0.1.0/download",
     );
+  });
+
+  it("rejects an oversized Content-Length before reading the response body", async () => {
+    const payload = new TextEncoder().encode("12345");
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(payload, { contentLength: "6" }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      artifactLimits: { maxCompressedBytes: 5 },
+    });
+
+    await expect(fetcher.downloadArtifact("acme", "1.0.0")).rejects.toMatchObject({
+      code: "ARTIFACT_TOO_LARGE",
+    });
+  });
+
+  it("rejects a streamed body that exceeds a smaller or missing Content-Length", async () => {
+    const payload = new TextEncoder().encode("123456");
+    for (const contentLength of ["2", undefined]) {
+      mockedFetchPublic.mockReset();
+      mockedFetchPublic.mockResolvedValueOnce(
+        bytesResponse(payload, { contentLength, chunks: [3, 3] }),
+      );
+      const fetcher = new CloudMarketplaceFetcher({
+        baseUrl: "https://marketplace.example.com",
+        artifactLimits: { maxCompressedBytes: 5 },
+      });
+
+      await expect(fetcher.downloadArtifact("acme", "1.0.0")).rejects.toMatchObject({
+        code: "ARTIFACT_TOO_LARGE",
+      });
+    }
+  });
+
+  it("allows an artifact exactly at the configured boundary without a progress callback", async () => {
+    const payload = new TextEncoder().encode("12345");
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(payload, { contentLength: "5", chunks: [2, 3] }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      artifactLimits: { maxCompressedBytes: 5 },
+    });
+
+    const result = await fetcher.downloadArtifact("acme", "1.0.0");
+    expect(result.body.toString()).toBe("12345");
   });
 
   it("missing latest_stable_version (null) → packageSpec falls back to slug only", async () => {

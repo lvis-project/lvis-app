@@ -11,11 +11,14 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { PluginArtifactStore } from "../plugin-artifact-store.js";
+import { PluginArtifactStore, type ArtifactStoreOptions } from "../plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 
 /** A store rooted at `{tmpDir}/installed` + `{tmpDir}/cache`, tarball cache off. */
-export function makeStore(tmpDir: string): PluginArtifactStore {
+export function makeStore(
+  tmpDir: string,
+  overrides: Partial<Pick<ArtifactStoreOptions, "artifactLimits">> = {},
+): PluginArtifactStore {
   const fetcher = {
     listPlugins: async () => [],
     getPluginDetail: async () => null,
@@ -28,6 +31,7 @@ export function makeStore(tmpDir: string): PluginArtifactStore {
     fetcher,
     publicKeys: {},
     tarballCacheBase: null,
+    ...overrides,
   });
 }
 
