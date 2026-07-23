@@ -741,6 +741,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * @throws if `pluginId` is not a known/loaded plugin.
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
+    // A restart may own the already-known canonical lock while dependency
+    // preparation is still pending. Cancel it before admission; the retry
+    // callback below only runs after an initial lock has been acquired.
+    this.cancelPendingRestart(this.resolveKnownPluginId(pluginId));
     return withResolvedPluginInstallLocks(
       () => {
         const canonicalPluginId = this.resolveKnownPluginId(pluginId);
