@@ -54,7 +54,7 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 | `PluginHostApi` (generic surface: storage/config/callLlm/resolveApiKey/agentApproval/openAuthWindow/triggerConversation/showOverlay/events/registerKeywords/getInstalledPluginIds/getSecret) | **Split** (no single equivalent; **no host server** — §0) | See §3.5. callLlm→**sampling**; agentApproval/asks→**elicitation**; openAuthWindow/secrets→**authorization** (OAuth) + url-elicitation; showOverlay→**Apps**; storage/config/triggerConversation/events→**host-internal**. |
 | Plugin domain events `${id}.verb.noun` + `pluginAccess.plugins[].events` grants + `assertPluginEventAccess`/`EmitAccess` (`src/plugins/runtime/index.ts:1723-1749`) | **No MCP equivalent** (MCP notifications are server→host list-change/resource-update only; no plugin↔plugin pub/sub) | **Keep host-internal** (§0 hybrid). Surface only `tools`/`resources` list-change via MCP `notifications/*/list_changed`. |
 | Permission categories `read\|write\|shell\|network` (authoritative SOT) (`src/plugins/types.ts:18`) | `ToolAnnotations` (hints, explicitly **untrusted**) + host obtains explicit consent before any `tools/call` | Category stays the authoritative `_meta` SOT; **host policy MUST NOT trust inbound annotations** for permission decisions (matches MCP's own "annotations untrusted unless trusted server"). |
-| Hooks (Layer-6 shell pre/post/perm, deny-only, TOFU lockfile) (`src/hooks/*`, fire points `src/tools/executor.ts:1736/1833/1991`) | **No equivalent** (MCP has no host-side tool-call veto) | Remain a pure host policy layer; re-anchor fire points to the host's `tools/call` boundary (§4). |
+| Hooks (Layer-6 shell pre/post/perm, deny-only, TOFU lockfile) (`src/hooks/*`, fire points in `src/tools/invocation-authorization.ts` and `src/tools/invocation-execution.ts`) | **No equivalent** (MCP has no host-side tool-call veto) | Remain a pure host policy layer; re-anchor fire points to the host's `tools/call` boundary (§4). |
 | MCP client (pins `2024-11-05`, empty `capabilities:{}` `initialize`, no `resultType`) (`src/mcp/mcp-client.ts:116,80-110`) | Stateless `2026-07-28`: no `initialize`; per-request `_meta`; `server/discover`; `resultType`; MRTR; `subscriptions/listen` | Rewrite handshake → stateless request builder + `server/discover` + `resultType` branch + MRTR loop + error mapping + HTTP headers. **Dual-era exception** (§0) only for external servers. |
 | `McpServerApproval.allowedCapabilities` (static per-connection whitelist) (`src/mcp/types.ts:27-97`) | Per-request `clientCapabilities` in `_meta`; server returns missing-capability error | Governance moves from connect-time whitelist → per-request capability declaration + per-request gating; **policy** (deny-by-default, namespace, max-tools) stays host-side. |
 | Long-running routines (host-internal) | **Tasks** extension `io.modelcontextprotocol/tasks` | New: long-running plugin tools opt into Tasks; host polls. _(verify exact Tasks methods — research found conflicting names.)_ |
@@ -242,7 +242,8 @@ tool's hook already sees the authoritative MCP category, no extra wiring. Remain
 #811 work: the `mcp__.*` tool-name matcher + per-request identity in hook stdin +
 the generic-command-hooks milestone, which build on the hook-expansion matcher
 infra (`docs/architecture/hook-runtime-expansion-design.md`) and touch the live
-executor path (`tools/executor.ts` fire points) — a focused effort of its own.
+staged invocation path (`tools/invocation-authorization.ts` and
+`tools/invocation-execution.ts`) — a focused effort of its own.
 
 **`untrusted-stdio-isolation` (4) — experimental serving core DONE; spawner/sandbox/artifact
 gated.** `stdio-framing.ts` (`frameMessage` + `StdioFrameDecoder`, byte-accurate
@@ -441,5 +442,5 @@ RequestMetaObject {
 - `src/mcp/mcp-client.ts` (handshake, `MCP_PROTOCOL_VERSION:116`, `McpInitializeResult:80`, `McpToolCallResult._meta.ui:97`), `src/mcp/mcp-tool-adapter.ts` (`mcpToolToTool`), `src/mcp/types.ts` (`McpServerApproval.allowedCapabilities:27-97`)
 - `src/plugins/types.ts` (`PluginManifest`, `toolSchemas`, `PluginHostApi`, `PluginToolCategory`)
 - `src/plugins/runtime/index.ts` (`assertPluginEventAccess:1723`, `assertPluginEventEmitAccess:1738`, `inferEventOwner`)
-- `src/hooks/script-hook-types.ts` (`ScriptHookStdin`, `ScriptHookStdout`, `modify` forbidden), `src/tools/executor.ts` (hook fire points `1736/1833/1991`)
+- `src/hooks/script-hook-types.ts` (`ScriptHookStdin`, `ScriptHookStdout`, `modify` forbidden), `src/tools/invocation-authorization.ts` and `src/tools/invocation-execution.ts` (hook fire points)
 - `docs/architecture/hook-runtime-expansion-design.md` (#811)
