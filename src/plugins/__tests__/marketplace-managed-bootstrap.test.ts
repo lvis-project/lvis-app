@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 
 import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
@@ -26,10 +25,9 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     // Phase 2b-1: file:-spec catalog entries route through the dev branch.
     // Round-3: LVIS_DEV=1 subsumes the deprecated LVIS_ALLOW_LINKED_PLUGIN_ENTRY.
     process.env.LVIS_DEV = "1";
-    // mkdtempSync (atomic, unpredictable suffix, mode 0700) — the secure temp
-    // pattern; a `tmpdir()`+Date.now()/Math.random() path trips CodeQL
-    // js/insecure-temporary-file.
-    testDir = mkdtempSync(join(tmpdir(), "lvis-managed-"));
+    // Keep injected filesystem roots repository-local so CodeQL does not
+    // propagate an OS-temp path into production registry/artifact sinks.
+    testDir = mkdtempSync(join(process.cwd(), ".lvis-managed-"));
     // Phase 2a: registry.json lives under pluginsRoot (= testDir/plugins
     // when the helper picks defaults). marketplace.json is the dev mock
     // catalog and lives outside that tree so writes never collide with the
