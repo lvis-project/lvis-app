@@ -136,13 +136,25 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       // Claim auth publication order before either dispatch path awaits plugin
       // code. A later status/login/logout invocation supersedes this
       // completion even when the older handler resolves last.
-      const authInvocationEpoch = ownerPluginId && ownerGenerationId
+      const authInvocation = ownerPluginId && ownerGenerationId
         ? pluginRuntime.beginPluginAuthInvocation(
             ownerPluginId,
             ownerGenerationId,
             toolName,
           )
         : undefined;
+      if (
+        ownerPluginId &&
+        ownerGenerationId &&
+        authInvocation?.invalidatedAccountHash
+      ) {
+        pluginSurfaceExecutor.revokePluginOperationAccount(
+          ownerPluginId,
+          ownerGenerationId,
+          authInvocation.invalidatedAccountHash,
+        );
+      }
+      const authInvocationEpoch = authInvocation?.epoch;
       if (isAppOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
         // App-only dispatch path — TRUSTED PANEL ONLY (`effectiveOrigin === "ui"`;
         // an "mcp-app" chain never satisfies the predicate). Routes to the runtime

@@ -44,6 +44,12 @@ export interface PluginOperationGrantExpectation extends PluginOperationPrincipa
 interface ReadSnapshot {
   revision: string;
   recordedAt: number;
+  sequence: number;
+}
+
+interface ReservedReadSnapshot {
+  requirement: PluginRequiredReadReservation;
+  snapshot: ReadSnapshot;
 }
 
 export type GrantConsumeResult =
@@ -63,8 +69,13 @@ function snapshotKey(value: PluginReadSnapshotKey): string {
 }
 
 export class PluginOperationGrantCoordinator {
-  private readonly grants = new Map<string, { id: string; binding: PluginOperationGrantBinding }>();
+  private readonly grants = new Map<string, {
+    id: string;
+    binding: PluginOperationGrantBinding;
+    reservedRead?: ReservedReadSnapshot;
+  }>();
   private readonly snapshots = new Map<string, ReadSnapshot>();
+  private nextReadSequence = 0;
 
   constructor(
     private readonly now: () => number = Date.now,
@@ -75,7 +86,11 @@ export class PluginOperationGrantCoordinator {
   recordRead(key: PluginReadSnapshotKey): string {
     this.trimSnapshots();
     const revision = randomUUID();
-    this.snapshots.set(snapshotKey(key), { revision, recordedAt: this.now() });
+    this.snapshots.set(snapshotKey(key), {
+      revision,
+      recordedAt: this.now(),
+      sequence: ++this.nextReadSequence,
+    });
     return revision;
   }
 
@@ -88,7 +103,7 @@ export class PluginOperationGrantCoordinator {
     let newest: ReadSnapshot | undefined;
     for (const readOperation of readOperations) {
       const candidate = this.snapshots.get(snapshotKey({ ...principal, readTool, readOperation }));
-      if (candidate && (!newest || candidate.recordedAt > newest.recordedAt)) newest = candidate;
+      if (candidate && (!newest || candidate.sequence > newest.sequence)) newest = candidate;
     }
     if (!newest || this.now() - newest.recordedAt > maxAgeMs) return undefined;
     return newest.revision;
@@ -102,19 +117,21 @@ export class PluginOperationGrantCoordinator {
     grantId: string;
   } {
     this.collectExpired();
+    let reservedRead: ReservedReadSnapshot | undefined;
     if (binding.readRevision === null) {
       if (requiredRead) {
         throw new Error("operation grant required read revision is missing");
       }
     } else {
-      if (
-        !requiredRead ||
-        !this.reserveRequiredRead(binding, requiredRead, binding.readRevision)
-      ) {
+      const snapshot = requiredRead
+        ? this.reserveRequiredRead(binding, requiredRead, binding.readRevision)
+        : undefined;
+      if (!requiredRead || !snapshot) {
         throw new Error(
           "operation grant required read is missing, stale, changed, or already reserved",
         );
       }
+      reservedRead = { requirement: requiredRead, snapshot };
     }
     if (this.grants.size >= this.maxGrants) {
       const oldest = this.grants.keys().next().value as string | undefined;
@@ -125,6 +142,7 @@ export class PluginOperationGrantCoordinator {
     this.grants.set(hash(token), {
       id: grantId,
       binding: { ...binding, contractVersion: 1, nonce: randomUUID() },
+      ...(reservedRead ? { reservedRead } : {}),
     });
     return { token, grantId };
   }
@@ -154,6 +172,35 @@ export class PluginOperationGrantCoordinator {
         reason: "operation grant read requirement mismatch",
         grantId: stored.id,
       };
+    }
+    if (binding.readRevision !== null) {
+      if (
+        !stored.reservedRead ||
+        stored.reservedRead.snapshot.revision !== binding.readRevision
+      ) {
+        return {
+          ok: false,
+          reason: "operation grant read revision reservation mismatch",
+          grantId: stored.id,
+        };
+      }
+      if (
+        this.now() - stored.reservedRead.snapshot.recordedAt >
+        stored.reservedRead.requirement.maxAgeMs
+      ) {
+        return {
+          ok: false,
+          reason: "operation grant required read is stale",
+          grantId: stored.id,
+        };
+      }
+      if (this.hasSupersedingRead(binding, stored.reservedRead)) {
+        return {
+          ok: false,
+          reason: "operation grant required read was superseded",
+          grantId: stored.id,
+        };
+      }
     }
     return { ok: true, grantId: stored.id };
   }
@@ -213,7 +260,7 @@ export class PluginOperationGrantCoordinator {
     principal: PluginOperationPrincipal,
     requiredRead: PluginRequiredReadReservation,
     expectedRevision: string,
-  ): boolean {
+  ): ReadSnapshot | undefined {
     let newest:
       | { key: string; snapshot: ReadSnapshot }
       | undefined;
@@ -226,7 +273,7 @@ export class PluginOperationGrantCoordinator {
       const snapshot = this.snapshots.get(key);
       if (
         snapshot &&
-        (!newest || snapshot.recordedAt > newest.snapshot.recordedAt)
+        (!newest || snapshot.sequence > newest.snapshot.sequence)
       ) {
         newest = { key, snapshot };
       }
@@ -236,13 +283,29 @@ export class PluginOperationGrantCoordinator {
       newest.snapshot.revision !== expectedRevision ||
       this.now() - newest.snapshot.recordedAt > requiredRead.maxAgeMs
     ) {
-      return false;
+      return undefined;
     }
     // Reservation and deletion are one synchronous critical section. Once a
     // grant owns this revision, no concurrent approval can mint another grant
     // from the same user-visible read snapshot.
     this.snapshots.delete(newest.key);
-    return true;
+    return newest.snapshot;
+  }
+
+  private hasSupersedingRead(
+    principal: PluginOperationPrincipal,
+    reservedRead: ReservedReadSnapshot,
+  ): boolean {
+    return reservedRead.requirement.readOperations.some((readOperation) => {
+      const snapshot = this.snapshots.get(snapshotKey({
+        ...principal,
+        readTool: reservedRead.requirement.readTool,
+        readOperation,
+      }));
+      return snapshot !== undefined &&
+        snapshot.sequence > reservedRead.snapshot.sequence &&
+        snapshot.revision !== reservedRead.snapshot.revision;
+    });
   }
 
   private trimSnapshots(): void {
