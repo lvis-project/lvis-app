@@ -1135,7 +1135,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       has: (serverId: string) => deps.pluginLoopbackManager.has(serverId),
       readUiResource: (serverId: string, uri: string) =>
         deps.pluginLoopbackManager.readUiResource(serverId, uri),
-      ...createLoopbackToolCallSource(pluginRuntime),
+      ...createLoopbackToolCallSource({
+        runtime: pluginRuntime,
+        findTool: (name) => deps.toolRegistry.findByName(name),
+      }),
     },
     mcpManager: {
       readUiResource: (serverId: string, uri: string) => deps.mcpManager.readUiResource(serverId, uri),
@@ -1279,7 +1282,24 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
     try {
       // Invariants 3 + 4 live inside this call (visibility MUST, then the gate).
-      const result = await backend.callTool(name, asPlainRecord(args));
+      const input = asPlainRecord(args);
+      // The authority-bearing session is minted from Host-owned IPC identity plus
+      // the already-bound server. It is never accepted from the card or renderer.
+      const appSessionId = `mcp-app:${serverId}:${e.sender?.id ?? `${e.processId}:${e.frameId}`}`;
+      const grantTarget = backend.resolveOperationGrantTarget(name, input);
+      const grant = grantTarget
+        ? await deps.requestPluginOperationGrant({
+            pluginId: grantTarget.pluginId,
+            toolName: grantTarget.toolName,
+            input,
+            appSessionId,
+            origin: "mcp-app",
+          })
+        : undefined;
+      const result = await backend.callTool(name, input, {
+        appSessionId,
+        ...(grant ? { operationGrantToken: grant.operationGrantToken } : {}),
+      });
       return { ok: true, result } satisfies McpUiToolCallOutcome;
     } catch (err) {
       // Every rejection — app-visibility denial, permission/consent denial, tool

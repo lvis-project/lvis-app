@@ -204,7 +204,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
   lateBinding.pluginToolInvokerRef.fn = invokePluginTool;
   pluginRuntime.setToolInvocationDelegate(invokePluginTool);
 
-  ctx.requestPluginOperationGrant = async ({ pluginId, toolName, input, appSessionId }) => {
+  ctx.requestPluginOperationGrant = async ({ pluginId, toolName, input, appSessionId, origin = "ui" }) => {
     const manifest = pluginRuntime.getPluginManifest(pluginId);
     const activeGeneration = ctx.pluginBundleLifecycle?.getActive(pluginId);
     const accountHash = pluginRuntime.getPluginOperationAccountHash(pluginId);
@@ -228,6 +228,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       toolName,
       input,
       principal,
+      origin,
     });
     const decision = await approvalGate.requestAndWait({
       id: randomUUID(),
@@ -262,6 +263,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       toolName,
       input,
       principal,
+      origin,
       ttlMs,
     });
     bootAuditLogger.log({
