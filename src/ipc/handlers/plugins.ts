@@ -8,9 +8,16 @@
  */
 import type { IpcDeps } from "../types.js";
 import type { PluginCard } from "../../plugins/runtime/index.js";
+import { filterRegistryByEventAndTool } from "../../hooks/hook-registry.js";
 
 export type PluginBundleE2eSnapshot =
-  | { ok: false; error: "invalid-plugin-id" | "invalid-skill-local-id" }
+  | {
+      ok: false;
+      error:
+        | "invalid-plugin-id"
+        | "invalid-skill-local-id"
+        | "invalid-hook-probe-tool-name";
+    }
   | {
       ok: true;
       pluginId: string;
@@ -38,6 +45,23 @@ export type PluginBundleE2eSnapshot =
         mcpServerId?: string;
         generationId?: string;
       }>;
+      hooks: {
+        probeToolName: string;
+        registered: Array<{
+          id: string;
+          event: "pre";
+          matcher?: string;
+          owner: {
+            pluginId: string;
+            pluginVersion: string;
+            activationId: string;
+            generationId: string;
+            localId: string;
+            fingerprint: string;
+          };
+        }>;
+        matchingPreToolUse: string[];
+      };
     };
 
 const E2E_PLUGIN_ID = /^[a-z][a-z0-9-]{2,127}$/;
@@ -56,6 +80,7 @@ export async function handlePluginBundleE2eSnapshot(
   deps: IpcDeps,
   pluginId: unknown,
   skillLocalId: unknown,
+  hookProbeToolName: unknown,
 ): Promise<PluginBundleE2eSnapshot> {
   if (typeof pluginId !== "string" || !E2E_PLUGIN_ID.test(pluginId)) {
     return { ok: false, error: "invalid-plugin-id" };
@@ -63,10 +88,37 @@ export async function handlePluginBundleE2eSnapshot(
   if (typeof skillLocalId !== "string" || !E2E_LOCAL_ID.test(skillLocalId)) {
     return { ok: false, error: "invalid-skill-local-id" };
   }
+  if (
+    typeof hookProbeToolName !== "string" ||
+    !E2E_LOCAL_ID.test(hookProbeToolName)
+  ) {
+    return { ok: false, error: "invalid-hook-probe-tool-name" };
+  }
+
+  const registeredHookEntries = (deps.scriptHookManager?.hooksOfType("pre") ?? [])
+    .filter((entry) => entry.owner?.pluginId === pluginId);
+  const hooks = {
+    probeToolName: hookProbeToolName,
+    registered: registeredHookEntries
+      .map((entry) => ({
+        id: entry.id,
+        event: entry.event as "pre",
+        ...(entry.matcher !== undefined ? { matcher: entry.matcher } : {}),
+        owner: { ...entry.owner! },
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    matchingPreToolUse: filterRegistryByEventAndTool(
+      registeredHookEntries,
+      "pre",
+      hookProbeToolName,
+    )
+      .map((entry) => entry.id)
+      .sort(),
+  };
 
   const lifecycle = deps.pluginBundleLifecycle;
   if (!lifecycle) {
-    return { ok: true, pluginId, active: null, skill: null, tools: [] };
+    return { ok: true, pluginId, active: null, skill: null, tools: [], hooks };
   }
 
   let lease;
@@ -77,7 +129,7 @@ export async function handlePluginBundleE2eSnapshot(
       error instanceof Error &&
       error.message === `plugin '${pluginId}' has no active generation`
     ) {
-      return { ok: true, pluginId, active: null, skill: null, tools: [] };
+      return { ok: true, pluginId, active: null, skill: null, tools: [], hooks };
     }
     throw error;
   }
@@ -126,6 +178,7 @@ export async function handlePluginBundleE2eSnapshot(
             }
           : null,
       tools,
+      hooks,
     };
   } finally {
     lease.release();

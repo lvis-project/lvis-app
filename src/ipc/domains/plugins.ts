@@ -1004,7 +1004,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle(
     CHANNELS.plugins.e2eBundleSnapshot,
-    async (e, pluginId: unknown, skillLocalId: unknown) => {
+    async (
+      e,
+      pluginId: unknown,
+      skillLocalId: unknown,
+      hookProbeToolName: unknown,
+    ) => {
       if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.plugins.e2eBundleSnapshot, e);
         return UNAUTHORIZED_FRAME;
@@ -1016,6 +1021,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         deps,
         pluginId,
         skillLocalId,
+        hookProbeToolName,
       );
     },
   );
