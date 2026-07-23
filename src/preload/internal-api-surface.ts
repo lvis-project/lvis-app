@@ -7,7 +7,6 @@ import {
   PERMISSIONS,
   ROUTINES_V2,
   SETTINGS,
-  UI,
   WORK_BOARD,
 } from "../contract/app-contract.js";
 import { t } from "../i18n/index.js";
