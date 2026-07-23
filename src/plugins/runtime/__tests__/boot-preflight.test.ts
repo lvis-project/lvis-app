@@ -188,7 +188,6 @@ describe("PluginRuntime boot preflight", () => {
           artifactSha256: string;
         };
       }>;
-      readManifest(path: string): Promise<PluginManifest>;
     };
     internals.verifyReceiptAndDevGuard = async () => ({
       ok: true,
@@ -198,14 +197,67 @@ describe("PluginRuntime boot preflight", () => {
         artifactSha256: "a".repeat(64),
       },
     });
-    internals.readManifest = async () => {
-      throw new SyntaxError("injected manifest parse failure");
+    await expect(runtime.load()).resolves.toBeUndefined();
+
+    expect(auditMessages).toEqual([
+      "plugin_integrity_verified",
+      "plugin_manifest_rejected",
+    ]);
+    expect(runtime.listPluginIds()).toEqual([]);
+    expect(runtime.listPluginCards().find((card) => card.id === pluginId)?.loadStatus).toBe("failed");
+  });
+
+  it("reports staggered manifest failures in plan order", async () => {
+    const pluginIds = ["preflight-0", "preflight-1"];
+    await writeTestPluginRegistry({ registryPath }, pluginIds.map((id) => ({
+      id,
+      manifestPath: join(pluginsRoot, id, "plugin.json"),
+    })));
+    const auditEvents: Array<{ message: string; pluginId: string }> = [];
+    const runtime = new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      installReceiptCacheRoot: join(root, "receipts"),
+      auditLog: (_level, message, data) => {
+        const record = data as { pluginId?: string; manifestPath?: string };
+        const pluginId = record.pluginId ?? record.manifestPath?.split(/[\\/]/).at(-2);
+        if (pluginId) auditEvents.push({ message, pluginId });
+      },
+    });
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(): Promise<{
+        ok: true;
+        verified: {
+          installSource: "marketplace";
+          signerKeyId: string;
+          artifactSha256: string;
+        };
+      }>;
+      readManifest(path: string, options?: { report?: boolean }): Promise<PluginManifest>;
+    };
+    internals.verifyReceiptAndDevGuard = async () => ({
+      ok: true,
+      verified: {
+        installSource: "marketplace",
+        signerKeyId: "test-signer",
+        artifactSha256: "a".repeat(64),
+      },
+    });
+    internals.readManifest = async (path) => {
+      const pluginId = path.split(/[\\/]/).at(-2)!;
+      await new Promise((resolve) => setTimeout(resolve, pluginId === "preflight-0" ? 30 : 5));
+      throw new SyntaxError(`invalid ${pluginId}`);
     };
 
     await expect(runtime.load()).resolves.toBeUndefined();
 
-    expect(auditMessages).toEqual(["plugin_integrity_verified"]);
+    expect(auditEvents).toEqual([
+      { message: "plugin_integrity_verified", pluginId: "preflight-0" },
+      { message: "plugin_manifest_rejected", pluginId: "preflight-0" },
+      { message: "plugin_integrity_verified", pluginId: "preflight-1" },
+      { message: "plugin_manifest_rejected", pluginId: "preflight-1" },
+    ]);
     expect(runtime.listPluginIds()).toEqual([]);
-    expect(runtime.listPluginCards().find((card) => card.id === pluginId)?.loadStatus).toBe("failed");
   });
 });
