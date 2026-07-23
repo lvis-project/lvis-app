@@ -186,6 +186,7 @@ const distRuntimeScriptEntries = resolveBuildAssets(root, "runtime-script")
 
 const requiredEntries = [
   "/dist/src/main/main.js",
+  "/dist/src/main/bundle-manifest.json",
   "/dist/src/renderer.js",
   "/dist/src/preload.cjs",
   ...distRuntimeScriptEntries,
@@ -193,6 +194,59 @@ const requiredEntries = [
 ];
 const missingRequired = requiredEntries.filter((entry) => !entrySet.has(entry));
 if (missingRequired.length > 0) fail("required runtime entries missing from app.asar", missingRequired);
+
+let mainBundleManifest;
+try {
+  mainBundleManifest = JSON.parse(
+    asar.extractFile(appAsar, "dist/src/main/bundle-manifest.json").toString("utf8"),
+  );
+} catch (error) {
+  fail(`main bundle manifest is unreadable: ${error instanceof Error ? error.message : String(error)}`);
+}
+if (mainBundleManifest.schemaVersion !== 1 || mainBundleManifest.entry !== "main.js"
+    || !Array.isArray(mainBundleManifest.files)) {
+  fail("main bundle manifest has an unsupported shape");
+}
+const mainBundleFiles = new Map();
+for (const file of mainBundleManifest.files) {
+  const safePath = typeof file?.path === "string"
+    && /^(?:main\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(file.path)
+    ? file.path
+    : null;
+  if (!safePath || !Number.isInteger(file.bytes) || file.bytes < 0) {
+    fail("main bundle manifest contains an invalid file entry", [JSON.stringify(file)]);
+  }
+  if (mainBundleFiles.has(safePath)) {
+    fail("main bundle manifest contains a duplicate file entry", [safePath]);
+  }
+  mainBundleFiles.set(safePath, file.bytes);
+}
+if (!mainBundleFiles.has(mainBundleManifest.entry)) {
+  fail("main bundle manifest does not list its declared entry", [mainBundleManifest.entry]);
+}
+const expectedMainBundleEntries = [...mainBundleFiles.keys()]
+  .map((path) => `/dist/src/main/${path}`);
+const missingMainBundleEntries = expectedMainBundleEntries.filter((entry) => !entrySet.has(entry));
+if (missingMainBundleEntries.length > 0) {
+  fail("main-process lazy chunks missing from app.asar", missingMainBundleEntries);
+}
+for (const [path, expectedBytes] of mainBundleFiles) {
+  const actualBytes = asar.extractFile(appAsar, `dist/src/main/${path}`).byteLength;
+  if (actualBytes !== expectedBytes) {
+    fail("main bundle packaged byte count differs from build manifest", [
+      `${path}: expected=${expectedBytes} actual=${actualBytes}`,
+    ]);
+  }
+}
+const packagedMainChunkEntries = entries.filter(
+  (entry) => /^\/dist\/src\/main\/chunks\/[a-zA-Z0-9_-]+\.js$/.test(entry),
+);
+const unexpectedMainChunks = packagedMainChunkEntries.filter(
+  (entry) => !mainBundleFiles.has(entry.slice("/dist/src/main/".length)),
+);
+if (unexpectedMainChunks.length > 0) {
+  fail("stale main-process chunks leaked into app.asar", unexpectedMainChunks);
+}
 
 // Lazy renderer chunks — mermaid loads via a webpack dynamic import that
 // swallows load errors (preview-renderers.tsx catch → raw-source fallback), so a

@@ -5,7 +5,6 @@
 import { app } from "electron";
 import { resolve } from "node:path";
 import { t } from "./i18n/index.js";
-import { bootstrap } from "./boot.js";
 import { registerIpcHandlers, unregisterPluginWebview } from "./ipc-bridge.js";
 import {
   installHtmlPreviewPartitionBlock,
@@ -108,6 +107,7 @@ async function main() {
 
 
   createWindow();
+  const bootModulePromise = import("./boot.js");
 
   updateSplashStatus(t("be_main.splashCheckingCerts"));
   await ensureCorporateCaInjected();
@@ -118,7 +118,7 @@ async function main() {
   // still runs until the first explicit update lands.
   updateSplashStatus(t("be_main.splashLoadingSettings"));
 
-
+  const { bootstrap } = await bootModulePromise;
   const services = await bootstrap(projectRoot, getMainWindow()!, () => getMainWindow());
   setServices(services);
 
