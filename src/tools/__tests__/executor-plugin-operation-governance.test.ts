@@ -211,24 +211,56 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(write).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps no-read writes on ordinary approval and ignores forged grant tokens", async () => {
+  it("requires and consumes a one-shot grant for writes without an artificial read", async () => {
     const { executor, permissions, approvalGate, directWrite } = setup();
-    expect(() => executor.issuePluginOperationGrant({
+    const grant = executor.issuePluginOperationGrant({
       toolName: "direct_write",
-      input: { operation: "reserve" },
+      input: { operation: "reserve", target: "room-1" },
       principal,
-    })).toThrow("only read-backed writes receive app grants");
+    });
+    expect(grant.readRevision).toBeNull();
 
     permissions.checkDetailed = () => ({ decision: "ask", reason: "ordinary write ask", layer: 6 });
-    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
+    const [forged] = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll(
-        [{ id: "w", name: "direct_write", input: { operation: "reserve" } }],
+        [{ id: "forged", name: "direct_write", input: { operation: "reserve", target: "room-1" } }],
         options("forged-token"),
       ),
     );
-    expect(result.is_error).toBeFalsy();
-    expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+    expect(forged.is_error).toBe(true);
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+    expect(directWrite).not.toHaveBeenCalled();
+
+    const [first] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "first", name: "direct_write", input: { operation: "reserve", target: "room-1" } }],
+        options(grant.token),
+      ),
+    );
+    expect(first.is_error).toBeFalsy();
     expect(directWrite).toHaveBeenCalledTimes(1);
+
+    const [replay] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "replay", name: "direct_write", input: { operation: "reserve", target: "room-1" } }],
+        options(grant.token),
+      ),
+    );
+    expect(replay.is_error).toBe(true);
+    expect(directWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when an app write without a read prerequisite has no grant", async () => {
+    const { executor, directWrite } = setup();
+    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "missing", name: "direct_write", input: { operation: "reserve" } }],
+        options(),
+      ),
+    );
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain("operation grant missing");
+    expect(directWrite).not.toHaveBeenCalled();
   });
 
   it("does not mint a read receipt from a self-declared read that mutates", async () => {

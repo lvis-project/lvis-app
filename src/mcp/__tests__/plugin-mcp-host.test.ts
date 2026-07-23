@@ -21,6 +21,7 @@ import {
   resolveReviewerSandboxCapability,
   setActiveSandboxCapability,
 } from "../../permissions/sandbox-capability.js";
+import { testLoopbackHost } from "./plugin-mcp-test-helpers.js";
 
 // #885 v6 — the loopback consumes the NORMALIZED pure `Tool[]` (manifest == wire).
 const MANIFEST: PluginManifest = {
@@ -48,16 +49,6 @@ const MANIFEST: PluginManifest = {
     },
   ],
 };
-
-function testLoopbackHost(
-  manifest: PluginManifest,
-  delegate: PluginToolDelegate,
-  _registry: ToolRegistry,
-  uiResources?: Parameters<typeof PluginMcpHost.loopback>[2],
-  generationId = "test-generation",
-): PluginMcpHost {
-  return PluginMcpHost.loopback(manifest, delegate, uiResources, generationId);
-}
 
 async function publishTestHost(
   host: PluginMcpHost,

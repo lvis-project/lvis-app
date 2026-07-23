@@ -1,8 +1,25 @@
 import type { MarketplacePackageType } from "../shared/assistant-context.js";
 import type { MarketplacePackageAsset } from "../shared/marketplace-package-assets.js";
-import type { PluginUiResourceDecl } from "../mcp/types.js";
 
-export type { PluginUiResourceDecl } from "../mcp/types.js";
+/** One signed first-party `ui://` resource declaration. */
+export interface PluginUiResourceDecl {
+  uri: string;
+  csp?: {
+    connectDomains?: string[];
+    resourceDomains?: string[];
+    frameDomains?: string[];
+    baseUriDomains?: string[];
+  };
+  /**
+   * Intentionally narrower than the protocol-wide MCP wire type: the
+   * manifest may declare only features the Host can demonstrably grant.
+   */
+  permissions?: {
+    camera?: Record<string, never>;
+    microphone?: Record<string, never>;
+    geolocation?: Record<string, never>;
+  };
+}
 
 export type InstallPolicy = "admin" | "user";
 

@@ -40,8 +40,8 @@ export default function Page() {
 
       <h2 id="limits">LLM이 직접 변경할 수 없는 것</h2>
       <ul>
-        <li>도구 RiskLevel — 메타로 고정. LLM 결과로 격하할 수 없음.</li>
-        <li>도구 Category (<code>read | write | shell | network | meta</code>) — manifest <code>toolSchemas.&lt;tool&gt;.category</code> 고정.</li>
+        <li>도구 RiskLevel — 호스트 분류와 서명된 operation별 최소 위험도를 LLM 결과로 격하할 수 없음.</li>
+        <li>도구 Category (<code>read | write | shell | network | meta</code>) — 호스트가 순수 MCP <code>Tool</code>과 실행 경로에서 결정하며 플러그인이 별도 side map으로 덮어쓸 수 없음.</li>
         <li>사용자 grant — 사용자만 변경 가능.</li>
       </ul>
 

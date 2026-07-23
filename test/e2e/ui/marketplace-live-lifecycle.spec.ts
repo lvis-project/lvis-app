@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { mergeEvidenceFile } from "../evidence-file.js";
 import {
   approvePendingPlugin,
   buildPluginZip,
@@ -19,18 +20,10 @@ const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
 const PUBLISHER_KEY = process.env.MARKETPLACE_PUBLISHER_KEY ?? "";
 const ADMIN_KEY = process.env.MARKETPLACE_ADMIN_KEY ?? "";
-const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "/tmp/marketplace-live-lifecycle-evidence.json";
+const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "";
 
 function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
-}
-
-function appendEvidence(patch: Record<string, unknown>): void {
-  let current: Record<string, unknown> = {};
-  if (existsSync(EVIDENCE_PATH)) {
-    current = JSON.parse(readFileSync(EVIDENCE_PATH, "utf8")) as Record<string, unknown>;
-  }
-  writeFileSync(EVIDENCE_PATH, `${JSON.stringify({ ...current, ...patch }, null, 2)}\n`, "utf8");
 }
 
 test.skip(!E2E_ENABLED, "set M4_E2E=1 to run the live Marketplace Electron lifecycle");
@@ -91,6 +84,59 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       };
       return api.lvisApi.setPluginEnabled(pluginId, enabled);
     }, { pluginId: slug, enabled });
+    const contributionTrust = () => ctx.page.evaluate(async (pluginId) => {
+      const api = globalThis as unknown as {
+        lvisApi: {
+          listPluginContributionTrust(id: string): Promise<{
+            ok: boolean;
+            rows: Array<Record<string, unknown>>;
+          }>;
+        };
+      };
+      return api.lvisApi.listPluginContributionTrust(pluginId);
+    }, slug);
+    const setContributionTrust = (kind: "hook" | "mcpServer", localId: string) =>
+      ctx.page.evaluate(async ({ pluginId, kind, localId }) => {
+        const api = globalThis as unknown as {
+          lvisApi: {
+            setPluginContributionTrust(input: {
+              pluginId: string;
+              kind: "hook" | "mcpServer";
+              localId: string;
+              approved: boolean;
+            }): Promise<Record<string, unknown>>;
+          };
+        };
+        return api.lvisApi.setPluginContributionTrust({
+          pluginId,
+          kind,
+          localId,
+          approved: true,
+        });
+      }, { pluginId: slug, kind, localId });
+    const runtimeCounts = () => ctx.page.evaluate(async () => {
+      const api = globalThis as unknown as {
+        lvisApi: { getRuntimeCounts(): Promise<{ tools: number; plugins: number; mcps: number }> };
+      };
+      return api.lvisApi.getRuntimeCounts();
+    });
+    const callLifecycleTool = (operation: "get_version" | "hook_probe") =>
+      ctx.page.evaluate(async ({ name, operation }) => {
+        const api = globalThis as unknown as {
+          lvisApi: {
+            callPluginMethod(
+              method: string,
+              payload: Record<string, unknown>,
+            ): Promise<Record<string, unknown>>;
+          };
+        };
+        return api.lvisApi.callPluginMethod(name, { operation });
+      }, { name: `${slug.replace(/-/g, "_")}_read`, operation });
+    const approveExecutableContributions = async () => {
+      await expect(setContributionTrust("hook", "audit")).resolves.toMatchObject({ ok: true });
+      await expect(setContributionTrust("mcpServer", "echo")).resolves.toMatchObject({ ok: true });
+    };
+    const baselineMcpCount = (await runtimeCounts()).mcps;
 
     await packageAction.click();
     await expect.poll(async () => (await cards()).find((card) => card.id === slug)?.version)
@@ -102,7 +148,42 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       active: true,
       runtimeLoaded: true,
     }));
-    transitions.push({ state: "installed", version: "1.0.0" });
+    const v1Pending = await contributionTrust();
+    expect(v1Pending.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "hook",
+        localId: "audit",
+        pluginVersion: "1.0.0",
+        status: "approval_required",
+      }),
+      expect.objectContaining({
+        kind: "mcpServer",
+        localId: "echo",
+        pluginVersion: "1.0.0",
+        status: "approval_required",
+      }),
+    ]));
+    await expect(callLifecycleTool("hook_probe")).resolves.toMatchObject({ ok: true });
+    await approveExecutableContributions();
+    await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount + 1);
+    const v1Approved = await contributionTrust();
+    expect(v1Approved.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "hook", localId: "audit", status: "approved" }),
+      expect.objectContaining({ kind: "mcpServer", localId: "echo", status: "approved" }),
+    ]));
+    for (const row of v1Approved.rows) {
+      expect(row.generationId).toMatch(/^[a-f0-9]{64}$/);
+      expect(row.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    }
+    const hookDeniedV1 = await callLifecycleTool("hook_probe");
+    expect(hookDeniedV1).toMatchObject({ ok: false });
+    expect(JSON.stringify(hookDeniedV1)).toContain("marketplace lifecycle hook probe");
+    transitions.push({
+      state: "installed",
+      version: "1.0.0",
+      hookExecuted: true,
+      mcpConnected: true,
+    });
 
     await publishPlugin(BASE_URL, PUBLISHER_KEY, slug, "2.0.0", v2);
     await ctx.app.evaluate(({ BrowserWindow }, payload) => {
@@ -119,7 +200,20 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     await expect.poll(async () => (await cards()).find((card) => card.id === slug)?.version)
       .toBe("2.0.0");
     expect(await cards()).toContainEqual(expect.objectContaining({ id: slug, version: "2.0.0" }));
-    transitions.push({ state: "updated", version: "2.0.0" });
+    const v2Pending = await contributionTrust();
+    expect(v2Pending.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "hook", pluginVersion: "2.0.0", status: "approval_required" }),
+      expect.objectContaining({ kind: "mcpServer", pluginVersion: "2.0.0", status: "approval_required" }),
+    ]));
+    await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount);
+    await approveExecutableContributions();
+    await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount + 1);
+    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
+    transitions.push({
+      state: "updated",
+      version: "2.0.0",
+      executableTrustReapproved: true,
+    });
 
     const rollbackAction = marketplace.getByTestId(`marketplace:rollback:${slug}`);
     await expect(rollbackAction).toBeVisible();
@@ -134,7 +228,17 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         active: true,
         runtimeLoaded: true,
       });
-    transitions.push({ state: "rolled-back", version: "1.0.0" });
+    await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount + 1);
+    expect((await contributionTrust()).rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "hook", pluginVersion: "1.0.0", status: "approved" }),
+      expect.objectContaining({ kind: "mcpServer", pluginVersion: "1.0.0", status: "approved" }),
+    ]));
+    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
+    transitions.push({
+      state: "rolled-back",
+      version: "1.0.0",
+      executableTrustRestored: true,
+    });
 
     await expect(setEnabled(false)).resolves.toMatchObject({ ok: true, enabled: false });
     expect(await cards()).toContainEqual(expect.objectContaining({
@@ -144,7 +248,15 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       loadStatus: "disabled",
     }));
     expect(await skillNames()).not.toContain(`plugin:${slug}:lifecycle`);
-    transitions.push({ state: "disabled", runtimeLoaded: false });
+    expect((await contributionTrust()).rows).toEqual([]);
+    await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount);
+    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
+    transitions.push({
+      state: "disabled",
+      runtimeLoaded: false,
+      hookRows: 0,
+      mcpConnected: false,
+    });
 
     await expect(setEnabled(true)).resolves.toMatchObject({ ok: true, enabled: true });
     expect(await skillNames()).toContain(`plugin:${slug}:lifecycle`);
@@ -154,7 +266,18 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       active: true,
       runtimeLoaded: true,
     }));
-    transitions.push({ state: "re-enabled", version: "1.0.0" });
+    await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount + 1);
+    expect((await contributionTrust()).rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "hook", status: "approved" }),
+      expect.objectContaining({ kind: "mcpServer", status: "approved" }),
+    ]));
+    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
+    transitions.push({
+      state: "re-enabled",
+      version: "1.0.0",
+      hookExecuted: true,
+      mcpConnected: true,
+    });
 
     await packageAction.click();
     await expect.poll(async () => (await cards()).some((card) => card.id === slug)).toBe(false);
@@ -165,9 +288,28 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       { message: "retired plugin generations must be removed after uninstall" },
     ).toEqual([]);
     expect(existsSync(join(ctx.lvisHome, "plugins", slug))).toBe(false);
-    transitions.push({ state: "uninstalled", retainedGenerations: 0 });
+    const trustRowsAfterUninstall = (await contributionTrust()).rows;
+    const skillsAfterUninstall = await skillNames();
+    const mcpCountAfterUninstall = (await runtimeCounts()).mcps;
+    const retainedGenerations = existsSync(generationRoot)
+      ? readdirSync(generationRoot)
+      : [];
+    const pluginRootExists = existsSync(join(ctx.lvisHome, "plugins", slug));
+    const zeroOrphans =
+      trustRowsAfterUninstall.length === 0 &&
+      !skillsAfterUninstall.includes(`plugin:${slug}:lifecycle`) &&
+      mcpCountAfterUninstall === baselineMcpCount &&
+      retainedGenerations.length === 0 &&
+      !pluginRootExists;
+    expect(zeroOrphans).toBe(true);
+    transitions.push({
+      state: "uninstalled",
+      trustRows: trustRowsAfterUninstall.length,
+      retainedGenerations: retainedGenerations.length,
+      mcpConnected: false,
+    });
 
-    appendEvidence({
+    mergeEvidenceFile(EVIDENCE_PATH, {
       liveLifecycle: {
         hostSha: process.env.HOST_SHA ?? null,
         marketplaceSha: process.env.MARKETPLACE_SHA ?? null,
@@ -176,7 +318,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         approval: { slug: managedSlug, hiddenBeforeApproval: true, state: approval.approval_state },
         artifact: { slug, hashes: { "1.0.0": sha256(v1), "2.0.0": sha256(v2) }, signerId: "poc-v1" },
         transitions,
-        zeroOrphans: true,
+        zeroOrphans,
       },
     });
   } finally {
