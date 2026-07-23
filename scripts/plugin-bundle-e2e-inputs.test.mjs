@@ -29,6 +29,12 @@ function makeRepo(root, files) {
   return git(root, "rev-parse", "HEAD");
 }
 
+function commitFixtureChange(root, message) {
+  git(root, "add", ".");
+  git(root, "commit", "-qm", message);
+  return git(root, "rev-parse", "HEAD");
+}
+
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "bundle-e2e-inputs-"));
   const schema = '{"type":"object"}\n';
@@ -63,6 +69,38 @@ test("proves checkout, consumed SDK, lock resolution, and schema identity", () =
   assert.equal(evidence.refs.sdk, f.sdkSha);
   assert.equal(evidence.sdkLockPrefix, f.sdkSha.slice(0, 12));
   assert.match(evidence.schemaSha256, /^[0-9a-f]{64}$/);
+});
+
+test("rejects dirty tracked, untracked, and submodule-visible checkout state", () => {
+  const f = fixture();
+  writeFileSync(join(f.hostRoot, "untracked.txt"), "not exact\n");
+  assert.throws(
+    () => verifyPluginBundleE2EInputs(f),
+    /Host checkout is dirty/,
+  );
+});
+
+test("rejects a dirty initialized submodule", () => {
+  const f = fixture();
+  const submoduleRoot = `${f.hostRoot}-submodule-source`;
+  makeRepo(submoduleRoot, { "tracked.txt": "clean\n" });
+  git(
+    f.hostRoot,
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    "-q",
+    submoduleRoot,
+    "vendor/fixture",
+  );
+  f.hostSha = commitFixtureChange(f.hostRoot, "add fixture submodule");
+  writeFileSync(join(f.hostRoot, "vendor/fixture/tracked.txt"), "dirty\n");
+
+  assert.throws(
+    () => verifyPluginBundleE2EInputs(f),
+    /Host checkout is dirty/,
+  );
 });
 
 test("CLI honors explicit checkout roots without appending repository names", () => {
@@ -122,6 +160,7 @@ test("rejects an SDK ref that ep-api does not consume", () => {
   const f = fixture();
   const packagePath = join(f.epApiRoot, "package.json");
   writeFileSync(packagePath, '{"dependencies":{"@lvis/plugin-sdk":"github:lvis-project/lvis-plugin-sdk#main"}}\n');
+  f.epApiSha = commitFixtureChange(f.epApiRoot, "change SDK dependency");
   assert.throws(() => verifyPluginBundleE2EInputs(f), /ep-api must consume/);
 });
 
@@ -133,6 +172,7 @@ test("rejects duplicate runtime and build-time SDK declarations", () => {
     dependencies: { "@lvis/plugin-sdk": dependency },
     devDependencies: { "@lvis/plugin-sdk": dependency },
   })}\n`);
+  f.epApiSha = commitFixtureChange(f.epApiRoot, "duplicate SDK dependency");
   assert.throws(() => verifyPluginBundleE2EInputs(f), /exactly one dependency section/);
 });
 
@@ -141,6 +181,10 @@ test("rejects cross-repository schema drift", () => {
   writeFileSync(
     join(f.marketplaceRoot, "schemas/host/plugin-manifest.schema.json"),
     '{"type":"array"}\n',
+  );
+  f.marketplaceSha = commitFixtureChange(
+    f.marketplaceRoot,
+    "change marketplace schema",
   );
   assert.throws(() => verifyPluginBundleE2EInputs(f), /schema digests differ/);
 });
