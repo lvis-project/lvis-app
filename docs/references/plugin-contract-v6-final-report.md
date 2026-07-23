@@ -21,7 +21,7 @@ Out of scope by design: forcing the plugin contract into MCP JSON-RPC wholesale,
 
 ### 2.1 Tool schema — unified, pure MCP shape ✅
 
-`PluginManifest.tools` is a single colocated array of **pure MCP `Tool` objects** — `{ name, title?, description?, inputSchema, outputSchema?, icons?, _meta? }` (`src/plugins/types.ts:200,240`). **Manifest == wire**: the same object the manifest declares is what the loopback MCP `tools/list` serves. The legacy triple (`tools[]` strings + `toolSchemas` map + `uiActions` map) is gone from the host in both directions:
+`PluginManifest.tools` is a single colocated array of **pure MCP `Tool` objects** — `{ name, title?, description?, inputSchema, outputSchema?, icons?, _meta? }` (`src/plugins/public-contract.ts`). **Manifest == wire**: the same object the manifest declares is what the loopback MCP `tools/list` serves. The legacy triple (`tools[]` strings + `toolSchemas` map + `uiActions` map) is gone from the host in both directions:
 
 | Legacy element | Replacement | Where enforced |
 |---|---|---|
@@ -59,8 +59,8 @@ All 7 first-party plugins are pure v6 (verified 2026-07-10): git 0.1.9 (24 tools
 ## 3. Honest divergences from the initial design
 
 1. **The compat window collapsed to ~zero.** (a2) planned a legacy-reading window until a 0.6.0 removal. In practice the reader shipped in 0.5.0 and was deleted in 0.5.1 — because Plugin Doctor made the time-gate unnecessary. The end state is **purer** than the phased plan, reached faster.
-2. **"SDK as optional helper" is partially achieved.** Authors no longer need SDK *runtime* helpers to write a valid manifest (pure MCP tools + a few identity fields), but the host still imports `compileManifestValidator()` from `@lvis/plugin-sdk` — the schema is SDK-canonical. Fully decoupling schema ownership is the on-hold Option A ph2 decision (#1571/#22), deliberately not pre-empted.
-3. **The authoring schema lagged the host.** Until the 0.5.2 schema-collapse (in flight at time of writing: SDK `feat/plugin-v6-schema-collapse`), the SDK schema still advertised the legacy arm the host already hard-rejects — a publish-but-won't-load trap. The collapse removes the legacy `tools` arm, `toolSchemas`, `uiActions`, `ui[].kind:"action"`, and the legacy `allOf` guards, folds `minItems:0`, re-points the `auth` tool references to app-visible tools, and makes `name` optional. The marketplace publish gate follows the SDK `main` schema within ~60s (remote fetch), with server-side legacy branches cleaned in lockstep.
+2. **"SDK as optional helper" is achieved for authority.** Authors may use the SDK package for compile-time types and the pinned publish schema, but the Host imports neither at runtime. The complete public TypeScript contract and JSDoc live in `src/plugins/public-contract.ts`; the manifest schema lives in `schemas/plugin-manifest.schema.json`. The SDK mechanically mirrors both and owns no declaration-selection or documentation policy.
+3. **The authoring schema lag was closed.** The Host-owned schema now matches the pure reader and rejects legacy `tools` strings, `toolSchemas`, `uiActions`, `ui[].kind:"action"`, and parallel operation/action policy fields. The SDK schema is a verbatim generated mirror for plugin and marketplace CI pinned to an SDK tag.
 4. **Two stale catalog entries remain** (hello-world 0.1.1, git 0.1.8 — both legacy shape, both already unloadable on ≥0.5.0). Republish of git 0.1.9 + a pure hello-world reseed closes this; scheduled with the SDK-bump wave.
 
 ## 4. Verdict

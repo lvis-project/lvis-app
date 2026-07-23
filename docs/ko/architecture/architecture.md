@@ -429,7 +429,12 @@ sequenceDiagram
 
 ### 4.3 Input Classification & Routing — 대화 루프 진입 전 단계
 
-이 섹션은 **사용자 입력을 어떤 실행 경로로 보낼지**를 다룬다. Keyword Detecting은 대화가 루프 본문에 들어가기 전에 수행되는 가장 빠른 사전 판단 단계이며, 빌트인 규칙과 플러그인 키워드 그룹을 함께 본다. 실제 턴 내부의 reasoning → tool → assistant 핑퐁은 **§4.5 Conversation Query Loop**를 단일 canonical 경로로 삼는다.
+이 섹션은 **사용자 입력을 어떤 실행 경로로 보낼지**를 다룬다. 현재
+플러그인 `keywords` 경로는 deprecated keyword→Tool schema preload이며
+bundled Skill discovery나 Tool 직접 호출 경로가 아니다. Bundled instruction
+discovery는 `manifest.skills`가 담당한다. 실제 턴 내부의 reasoning → tool
+→ assistant 핑퐁은 **§4.5 Conversation Query Loop**를 단일 canonical
+경로로 삼는다.
 
 ```mermaid
 flowchart TB
@@ -441,7 +446,7 @@ flowchart TB
     ROUTE{"Route Resolver"}
 
     COMMAND["/command 직접 실행"]
-    SKILL["Skill / Task 경로"]
+    SKILL["Deprecated keyword Tool-schema preload"]
     AGENT["Agent Hub Message / A2A<br/>(메시지 보드 · 게시 · 직접 메시지)"]
     CHAT["ConversationLoop.runTurn()<br/>일반 대화 / 도구 루프"]
 
@@ -449,7 +454,7 @@ flowchart TB
     DISAMBIG -->|"Yes"| ROUTE
     DISAMBIG -->|"Ambiguous"| RECOMMEND --> ROUTE
     ROUTE -->|"명시적 명령"| COMMAND
-    ROUTE -->|"스킬 매칭"| SKILL
+    ROUTE -->|"legacy keyword match"| SKILL
     ROUTE -->|"@멘션 / 게시 / A2A"| AGENT
     ROUTE -->|"일반 대화"| CHAT
 ```
@@ -457,13 +462,15 @@ flowchart TB
 | 분류 결과 | 진입 지점 | 설명 |
 | --- | --- | --- |
 | **명령 실행** | Command executor | `/new`, `/compact`, `/load` 같은 즉시 명령 |
-| **스킬/태스크** | Skill / orchestrator | 플러그인 키워드 그룹과 워크플로우를 기준으로 실행 경로 선택 |
+| **Deprecated plugin keyword** | model-visible Tool scope | 일치한 Tool schema를 turn scope에 preload; 직접 호출/Skill discovery 아님 |
 | **에이전트 상호작용** | Agent Hub message board / A2A | 다른 에이전트에게 메시지·게시물·요청을 전달하는 경로. 백그라운드 자율 수행 서버를 뜻하지 않음 |
 | **일반 대화** | `ConversationLoop.runTurn()` | 본 문서의 상세 턴 사이클은 §4.5에 정의 |
 
 **설계 노트**
 
-- 플러그인은 설치/활성화 시 **키워드 그룹**을 동적으로 등록한다.
+- Deprecated `keywords`/`registerKeywords`는 plugin 활성화 시 legacy Tool
+  schema preload 항목을 등록한다. Bundled Skill은 `manifest.skills`에서
+  별도로 발견한다.
 - 동일 입력이 여러 그룹에 걸리면 the LLM backend가 가장 적합한 후보를 추천하고, 확신이 낮으면 사용자에게 확인을 요청한다.
 - Agent Hub는 paperclip의 board와 유사한 **비동기 메시지 보드**이며, 에이전트가 백그라운드에서 자율 실행되는 서버를 의미하지 않는다.
 
@@ -736,7 +743,7 @@ flowchart TB
 | 단계 | 함수 / 컴포넌트 | 설명 | 비고 |
 | --- | --- | --- | --- |
 | **1. 요청 진입** | `window.lvis.chat.send()` → `ipcMain.handle("lvis:chat:send")` | renderer 입력을 main process로 전달 | 채팅 UI의 단일 진입점 |
-| **2. 조기 키워드 감지** | `KeywordEngine.classify()` | 대화 루프 본문에 들어가기 전에 명령/스킬/@멘션/일반 대화를 판단 | 플러그인 keyword group 동적 등록 지원. 다중 후보일 때 the LLM backend 추천/사용자 확인은 목표 설계 |
+| **2. 조기 키워드 감지** | `KeywordEngine.classify()` | 대화 루프 본문 전에 명령/legacy Tool-schema preload/@멘션/일반 대화를 판단 | deprecated plugin keywords는 Tool schema scope만 추가; bundled Skill discovery는 `manifest.skills` |
 | **3. 실행 경로 결정** | `RouteEngine.route()` | `command` / `skill` / `agent-hub` / `llm` 중 하나로 경로 확정 | Agent Hub 경로는 메시지 보드/A2A 상호작용 경로 |
 | **4. 턴 오케스트레이션** | `ConversationLoop.runTurn()` | 한 턴 전체를 관리하고 provider/tool/post-turn 훅을 묶는다 | 턴 경계의 canonical 구현 |
 | **5. 히스토리 적재** | `ConversationHistory.append()` | user 메시지를 인메모리 히스토리에 추가 | assistant/tool_result도 동일 히스토리에 누적 |
@@ -1498,20 +1505,23 @@ artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 
 
 ### 6.1 Keyword Detecting Engine
 
-사용자 입력에서 의도·키워드·엔티티를 감지하는 첫 번째 관문. **Conversation Loop 본문보다 먼저** 실행되며, 빌트인 규칙과 플러그인이 등록한 keyword group을 함께 본다.
+사용자 입력에서 의도·키워드·엔티티를 감지하는 첫 번째 관문.
+**Conversation Loop 본문보다 먼저** 실행된다. 플러그인이 등록한
+deprecated keyword group은 model-visible Tool schema preload 용도이며
+bundled Skill registry와 별개다.
 
 ```mermaid
 flowchart LR
     INPUT["Raw Input"] --> TOKENIZER["Tokenizer<br/>(형태소 분석)"]
 
     TOKENIZER --> CMD_DETECT{"명령어 감지<br/>/command"}
-    TOKENIZER --> SKILL_DETECT{"스킬 키워드 그룹<br/>(builtin + plugin registry)"}
+    TOKENIZER --> SKILL_DETECT{"Legacy Tool preload keyword<br/>(builtin + plugin registry)"}
     TOKENIZER --> MENTION_DETECT{"멘션 감지<br/>@사람, @팀"}
     TOKENIZER --> INTENT_DETECT{"의도 분류<br/>(질문/요청/지시)"}
     TOKENIZER --> ENTITY_EXTRACT["엔티티 추출<br/>(파일명, 날짜, 금액)"]
     SKILL_DETECT --> AMBIG{"후보가 하나인가?"}
     AMBIG -->|"No"| LLM_RECO["the LLM backend Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
-    AMBIG -->|"Yes"| SKILL_RESOLVE["Skill Resolver<br/>(어떤 플러그인?)"]
+    AMBIG -->|"Yes"| SKILL_RESOLVE["Plugin/Tool Scope Resolver"]
 
     CMD_DETECT -->|"매칭"| CMD_EXEC["Command Executor"]
     MENTION_DETECT -->|"매칭"| AGENT_RESOLVE["Agent Resolver<br/>(Agent Hub 라우팅)"]
@@ -1530,15 +1540,17 @@ flowchart LR
 | 순위 | 유형          | 예시 입력               | 처리                              |
 | ---- | ------------- | ----------------------- | --------------------------------- |
 | 1    | 명시적 명령어 | `/meeting start`        | Command Executor 직접 실행        |
-| 2    | 스킬 키워드   | "회의록 작성해줘"       | Skill Resolver → 플러그인 활성화  |
+| 2    | deprecated plugin keyword | "회의록 작성해줘" | 플러그인 scope 활성화 + 일치 Tool schema preload |
 | 3    | 에이전트 멘션 | "@이영희 이거 확인해줘" | Agent Hub 메시지 라우팅           |
 | 4    | 의도 + 엔티티 | "출장 품의 작성해줘"    | Route Engine → the LLM backend + 관련 도구 |
 | 5    | 일반 대화     | "안녕하세요"            | the LLM backend 직접 세션                  |
 
 **확장 설계 노트**
 
-- 플러그인은 manifest/skill 등록 시 **keyword group** 을 동적으로 추가한다.
-- 동일 입력이 여러 스킬 그룹에 걸리면 the LLM backend가 가장 적합한 후보를 추천한다.
+- 플러그인은 deprecated manifest `keywords`/`registerKeywords` 경로로
+  **Tool schema preload group**을 등록한다. Bundled Skill discovery는
+  `manifest.skills`가 담당한다.
+- 동일 입력이 여러 legacy keyword group에 걸리면 the LLM backend가 가장 적합한 후보를 추천한다.
 - 추천 confidence가 낮으면 사용자가 명시적으로 선택하도록 묻는다.
 
 ### 6.2 Agent Route Engine
@@ -3038,8 +3050,8 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
   ],
 
   "keywords": [
-    { "keyword": "회의록", "skillId": "meeting" },
-    { "keyword": "녹음",   "skillId": "meeting" }
+    { "keyword": "회의록", "skillId": "meeting_start" },
+    { "keyword": "녹음",   "skillId": "meeting_start" }
   ],
 
   "toolSchemas": {
@@ -3119,7 +3131,7 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 | `startupTimeoutMs` | integer (1~60000) | `Promise.race` 기반 start() 하드 타임아웃. 초과 시 fail-soft drop. |
 | `eventSubscriptions` | `string[]` | 호스트 이벤트 구독 대상. `memory.private.*` / `settings.apiKey.*` / `audit.*` / `dlp.*` (`PLUGIN_PRIVATE_NAMESPACES`) 는 **거부**. public namespace (`meeting` / `calendar` / `email` / `index`) 는 허용, 그 외는 warn. (2026-05-11: `task` 는 host owner 폐기로 retire. 플러그인-소유 namespace 는 host 가 의도적으로 알지 않으므로 신규 추가 안 함 — open-source-readiness 룰.) |
 | `notificationEvents` | `Array<{ event, titleField?, bodyField? }>` | `registerPluginNotifications()` 가 manifest 만 읽어 OS 알림 핸들러를 자동 배선. |
-| `keywords` | `Array<{ keyword, skillId }>` | boot 시 KeywordEngine 에 등록. |
+| deprecated `keywords` | `Array<{ keyword, skillId }>` | boot 시 legacy KeywordEngine에 등록되어 일치한 model-visible Tool schema를 preload. Tool 직접 호출이나 bundled Skill discovery가 아니며, instruction bundle은 `manifest.skills` 사용. Owner: `lvis-app` plugin runtime. 모든 지원 플러그인 이관 + active manifest 선언 0건이면 `registerKeywords`와 함께 제거. |
 | `ui` | `PluginUiExtension[]` | UI slot 마운트 명세. manifest slot key 는 현재 historical `"sidebar"` 값을 사용하지만, 렌더링 표면은 플러그인 뷰/분리 창 경로가 담당한다. |
 | `publisher` | string | 감사 로그·마켓플레이스 표시. |
 | `configSchema` | `PluginConfigSchema` (선택) | **§9.2 Track B** — VSCode-style 선언형 설정 스키마. JSON Schema draft-07 subset (`toolSchemas` 와 동일 dialect) 으로 `properties` map 을 선언하면 호스트가 `PluginConfigTab` 에 typed form (string / number / boolean / enum / string[] ) 을 자동 렌더링한다. 미선언 시 기존 raw key/value 편집기로 fallback (legacy plugin back-compat 보장). UI 라우팅 hint 는 `format: "secret"` 한 종류 — `setSecret` (Electron `safeStorage` 암호화) 로 라우팅되어 cleartext `settings.json` 에 저장되지 **않는다**. `customPanel` (entry/exportName) 은 escape hatch — schema 필드로 표현하기 어려운 expressive UI 를 plugin 이 자체 React 컴포넌트로 마운트할 수 있다 (UI Slot System §9.3 호환). 상세: `docs/references/plugin-tool-schema-design.md` (track B). |
@@ -3134,7 +3146,7 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
-**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) → cross-field (tool-name regex, `keywords[].skillId ∈ tools[]`, `auth.*Tool ∈ uiActions`, auth tools not in `tools[]`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
+**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → Host-owned AJV schema → cross-field (tool-name regex, deprecated `keywords[].skillId`가 model-visible `tools[]` Tool name인지, auth Tool이 app-only인지, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
 
 부트 preflight는 install receipt 검증을 manifest 파싱보다 먼저 수행한다. Receipt hash와 manifest 검증은 제한된 동시성으로 겹쳐 실행하되, 성공 결과와 실패 상태는 registry 순서대로 반영한다. 무결성 검증에 실패한 payload는 tool/event 소유권이나 dependency capability 계산에 들어가지 않으며, 통과한 manifest는 해당 부트에서 한 번만 파싱한다.
 

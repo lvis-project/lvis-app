@@ -126,6 +126,27 @@ describe("runtime manifest validation hardening", () => {
     ).toBe(true);
   });
 
+  it("1b) keywords[].skillId cannot preload an app-only tool", async () => {
+    await writePlugin("p-kw-app-only", {
+      tools: [],
+      uiActions: { p_kw_status: {} },
+      keywords: [{ keyword: "status", skillId: "p_kw_status" }],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const cap = captureErrors();
+    try {
+      await runtime.load();
+    } finally {
+      cap.restore();
+    }
+    expect(runtime.listPluginIds()).toHaveLength(0);
+    expect(
+      cap.errors.some((e) =>
+        /keywords\[0\]\.skillId.*p_kw_status.*must name a model-visible tool for keyword preload/.test(e),
+      ),
+    ).toBe(true);
+  });
+
   it("2) #885 v6 — a legacy orphan toolSchemas key (not in tools[]) is DROPPED by normalize, not a hard fail", async () => {
     // The old "toolSchemas key ⊆ tools[] ∪ uiActions" hard-fail is DELETED
     // (structurally impossible in the pure shape). A legacy orphan schema — an

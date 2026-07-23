@@ -581,8 +581,9 @@ export async function parsePluginJson(
     // rejected by `exactlyApp` (`model ∉ vis` required). No separate leak guard.
   }
 
-  // #885 v6 — keywords[].skillId must name a MODEL-VISIBLE tool (a skill keyword
-  // maps to an LLM-invocable tool). Replaces the old `parsed.tools.includes(sk)`
+  // #885 v6 — keywords[].skillId must name a MODEL-VISIBLE tool (a keyword
+  // preloads that exact Tool into the model's turn scope). Replaces the old
+  // `parsed.tools.includes(sk)`
   // string membership with a normalized-Tool[] lookup + visibility read. The
   // legacy `toolSchemas` key ⊆ all-declared-tools check is DELETED — structurally
   // impossible now that every tool IS its own object (no separate schema map).
@@ -593,7 +594,7 @@ export async function parsePluginJson(
     if (!tool || !isModelVisible(tool)) {
       fail(
         `keywords[${i}].skillId`,
-        `"${String(sk)}" must name a model-visible tool (a skill keyword maps to an LLM-invocable tool)`,
+        `"${String(sk)}" must name a model-visible tool for keyword preload`,
         `add a tools[] entry '${String(sk)}' whose visibility includes "model", or fix the skillId`,
       );
     }

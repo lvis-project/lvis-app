@@ -1,91 +1,99 @@
 # Plugin Tool Schema Design
 
-This reference defines how plugin tool schemas are interpreted by the LVIS host.
-Korean source history is preserved at
+This reference defines the current plugin Tool contract interpreted by the LVIS
+Host. Korean source history is preserved at
 [docs/ko/references/plugin-tool-schema-design.md](../ko/references/plugin-tool-schema-design.md).
 
-## Contract
+## Sources Of Truth
 
-Plugin tool schemas are both LLM-facing affordances and host-facing security
-metadata. A schema must be precise enough for the model to call the tool and
-strict enough for the host to classify risk before execution.
+`PluginManifest.tools` is one array of pure MCP Tool objects. The manifest Tool
+is projected across the plugin loopback MCP boundary without a parallel schema,
+action, or governance map.
 
-## Required Fields
+- `src/plugins/public-contract.ts` owns the complete public TypeScript contract
+  and JSDoc.
+- `schemas/plugin-manifest.schema.json` owns the accepted manifest shape.
+- `src/plugins/runtime/manifest-validation.ts` owns Host cross-field checks and
+  materialization.
+- `@lvis/plugin-sdk` mechanically mirrors the public module and schema for
+  plugin-author builds; it owns no contract policy.
+
+## Tool Shape
 
 | Field | Purpose |
 | --- | --- |
-| `name` | Stable tool name exposed to the registry. |
-| `description` | English description of what the tool does and when to use it. |
-| `inputSchema` | JSON Schema object used to validate tool input. |
-| `category` | Permission category used by policy and audit. |
-| `pathFields` | Input fields that represent file or directory paths. |
-| `capabilities` | Host capabilities required before the tool may execute. |
+| `name` | Stable Tool name using `^[a-zA-Z_][a-zA-Z0-9_]*$`. |
+| `description` | English description of what the Tool does and when to use it. |
+| `inputSchema` | JSON Schema 2020-12 object used to validate Tool input. |
+| `outputSchema` | Optional structured output schema. |
+| `title` / `icons` | Optional standard MCP display metadata. |
+| `_meta.ui.visibility` | Optional model/app surface declaration; absent uses the SEP-1865 dual default. |
+| `_meta["lvisai/pathFields"]` | Optional input fields that represent file or directory paths. |
+| `_meta["lvisai/operationPolicy"]` | Optional signed restrictions for a discriminated composite Tool. |
 
-## Category Guidance
+`inputSchema.type` must be `"object"`. App-only Tools use
+`_meta.ui.visibility: ["app"]`; model-only Tools use `["model"]`; dual Tools use
+`["model", "app"]`. Empty visibility is invalid.
 
-| Category | Use For |
-| --- | --- |
-| `read` | Reading declared local data without mutation. |
-| `write` | Creating, editing, deleting, or moving local data. |
-| `network` | Sending data to or retrieving data from external services. |
-| `shell` | Running shell commands, scripts, package managers, or process control. |
-| `browser` | Driving browser/webview behavior outside simple display. |
-| `meta` | Host configuration or permission mutations. |
+## Host-Owned Risk
 
-When a tool can both read and write, declare the higher-risk category. Do not
-hide mutation behind a read category.
+Plugins do not declare a per-tool permission category. The Host classifies the
+effective risk from the concrete invocation and routes model/plugin calls
+through its permission, approval, execution, and audit pipeline.
+
+A Tool-local operation policy may raise a minimum risk floor, narrow
+app-visible operations, or require a fresh read before a write. It cannot lower
+risk or grant authority. A plugin must not add a top-level operation policy or
+action allow-list.
 
 ## Path Fields
 
-Tools that accept paths must declare which input fields are paths. The
-permission manager uses these fields to detect workspace scope, out-of-directory
-access, sensitive paths, and sandbox requirements.
+Tools that accept paths declare them in `_meta["lvisai/pathFields"]`. The
+permission manager uses these selectors to detect workspace scope,
+out-of-directory access, sensitive paths, and sandbox requirements. Dotted
+selectors address nested object fields.
 
 Path fields should be explicit. Avoid accepting arbitrary nested payloads that
 may contain paths without declaring them.
+
+## Deprecated Keyword Preload
+
+Each `PluginManifest.keywords[]` entry binds a case-insensitive `keyword` to an
+exact Tool name in `skillId`. The target must exist in `tools[]` and include
+model visibility.
+
+A matching keyword adds that exact Tool schema to the model-visible turn scope.
+It does not invoke the Tool, alias its name, expose an app-only Tool, or discover
+a bundled Skill. Bundled instruction discovery belongs to `manifest.skills`.
+Runtime registrations through the deprecated
+`PluginHostApi.registerKeywords` use the same current-scope membership check
+before preloading.
+
+Owner: `lvis-app` plugin runtime. Remove `keywords` and `registerKeywords` after
+every supported plugin has migrated to bundled `manifest.skills` and no active
+manifest declares `keywords`.
 
 ## Input Schema Rules
 
 - Use `type: "object"` at the top level.
 - Define `properties` for every accepted field.
-- Prefer `required` for fields the tool cannot run without.
+- Prefer `required` for fields the Tool cannot run without.
 - Use enums for closed option sets.
-- Avoid loose `additionalProperties` unless the tool is intentionally a generic
-  key/value editor and policy accepts that risk.
+- Avoid loose `additionalProperties` unless policy accepts the generic payload.
 - Keep descriptions English-first and actionable.
 
-## Permission Interaction
+## Removed Shapes
 
-The host resolves permission from the normalized tool definition. The plugin
-cannot override the decision once the request reaches the executor. Invalid
-schemas, missing categories, or undeclared path behavior can fail closed before
-the user is asked.
-
-## LLM Prompting
-
-The schema is visible to the model. Descriptions should explain:
-
-- what the tool does;
-- when not to call it;
-- required user-visible side effects;
-- whether it sends data outside the local app;
-- what output shape to expect.
-
-Do not put secrets, credentials, private endpoint details, or process-only
-review notes in schema descriptions.
-
-## Compatibility
-
-Schema changes can break existing conversations, plugin tests, and marketplace
-catalog expectations. Treat changes to names, required fields, categories, and
-path fields as compatibility-affecting.
+The Host rejects `uiTool`, `uiTools`, `uiAction`, `uiActions`, top-level
+`operationGovernance`, and top-level `appAllowed`. App/model visibility and
+operation restrictions are colocated on the one Tool object. Do not introduce
+compatibility aliases.
 
 ## Review Checklist
 
-- Category matches the strongest side effect.
+- One pure Tool object owns its schema, visibility, and optional restrictions.
+- No plugin-authored category or parallel action/policy map is present.
 - Path fields cover every input path.
-- Network tools disclose destination and payload class.
-- Shell tools make command execution explicit.
-- Descriptions are English and do not contain implementation-only process
-  labels blocked by naming-gate.
-- Tests cover allow, ask, deny, and manifest-validation behavior for the tool.
+- Network and shell behavior is explicit in the description and implementation.
+- Tests cover schema rejection, cross-field validation, model/app visibility,
+  permission behavior, and keyword preload where declared.
