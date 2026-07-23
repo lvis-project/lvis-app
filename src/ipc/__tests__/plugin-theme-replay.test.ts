@@ -326,6 +326,11 @@ describe("plugin theme IPC handlers", () => {
     handleSpy().mockReset();
     sendSpy.mockReset();
     fromIdSpy.mockReset();
+    fromIdSpy.mockReturnValue({
+      send: sendSpy,
+      isDestroyed: () => false,
+      getType: () => "webview",
+    });
   });
 
   afterEach(() => {
@@ -337,7 +342,7 @@ describe("plugin theme IPC handlers", () => {
   });
 
   it("publishes host.theme.changed through the production theme-notify IPC handler", () => {
-    fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => false });
+    fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => false, getType: () => "webview" });
     registerHandlersWithPlugin(1701);
     const themeNotify = getRegisteredHandler("lvis:host:plugin-theme-notify");
     const payload = {
@@ -365,7 +370,7 @@ describe("plugin theme IPC handlers", () => {
   });
 
   it("republishes cached theme through the production webview-register replay path", () => {
-    fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => false });
+    fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => false, getType: () => "webview" });
     const cached = {
       bundleId: "violet-dark",
       shell: "dark" as const,
@@ -464,6 +469,27 @@ describe("plugin theme IPC handlers", () => {
 
     expect(revokeSession).toHaveBeenCalledTimes(2);
     expect(new Set(revokeSession.mock.calls.map(([appSessionId]) => appSessionId))).toHaveLength(2);
+  });
+
+  it("rejects registration that arrives after the target webview was destroyed", () => {
+    const { root, entryUrl } = createPluginFixture();
+    const { deps } = createDeps(root);
+    registerPluginsHandlers(deps);
+    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const revokeSession = vi.mocked(deps.revokePluginOperationSession);
+    const webContentsId = 2_101;
+
+    unregisterPluginWebview(webContentsId, revokeSession);
+    fromIdSpy.mockReturnValue(undefined);
+
+    expect(registerWebview(rendererEvent(), {
+      webContentsId,
+      pluginId: "meeting",
+      entryUrl,
+    })).toEqual({ ok: false, error: "webview-not-live" });
+
+    unregisterPluginWebview(webContentsId, revokeSession);
+    expect(revokeSession).not.toHaveBeenCalled();
   });
 
   it("rejects host namespace emits through the production plugin emit IPC handler", () => {
