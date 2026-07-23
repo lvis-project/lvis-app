@@ -231,6 +231,7 @@ export function withPluginInstallLocks<T>(
 export async function withResolvedPluginInstallLocks<T>(
   resolvePluginIds: () => readonly string[],
   fn: () => Promise<T>,
+  cancelPendingForDiscoveredIds?: (pluginIds: readonly string[]) => void,
 ): Promise<T> {
   let lockIds = [...new Set(resolvePluginIds())].sort();
   while (true) {
@@ -238,7 +239,11 @@ export async function withResolvedPluginInstallLocks<T>(
       { retry: string[] } | { value: T }
     >(lockIds, async () => {
       const currentIds = [...new Set(resolvePluginIds())].sort();
-      if (currentIds.some((pluginId) => !isPluginInstallLockHeld(pluginId))) {
+      const discoveredIds = currentIds.filter(
+        (pluginId) => !isPluginInstallLockHeld(pluginId),
+      );
+      if (discoveredIds.length > 0) {
+        cancelPendingForDiscoveredIds?.(discoveredIds);
         return {
           retry: [...new Set([...lockIds, ...currentIds])].sort(),
         };
@@ -1001,6 +1006,11 @@ export async function installMarketplacePluginWithLifecycle(options: {
       }
       throw err;
     }
+    },
+    (pluginIds) => {
+      for (const pluginId of pluginIds) {
+        pluginRuntime.cancelPendingRestart(pluginId);
+      }
     },
   );
 }

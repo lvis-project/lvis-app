@@ -390,7 +390,9 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up catalog grant mismatch diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
-    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstalledVersion
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",
@@ -434,7 +436,9 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up manifest validation diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
-    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstalledVersion
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",
