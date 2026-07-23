@@ -1,3 +1,14 @@
+import { randomUUID } from "node:crypto";
+import {
+  closeSync,
+  fsyncSync,
+  openSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
+
 export const KNIP_BASELINE_SCHEMA_VERSION = 1;
 
 export const NON_BASELINE_ISSUE_TYPES = new Set([
@@ -68,4 +79,89 @@ export function countKnipIssuesByType(issues) {
 
 export function formatKnipIssue(issue) {
   return `${issue.type} ${issue.file} ${issue.name}`;
+}
+
+const DEFAULT_ATOMIC_WRITE_RUNTIME = {
+  platform: process.platform,
+  open: openSync,
+  write: (fd, content) => writeFileSync(fd, content, { encoding: "utf8" }),
+  flush: fsyncSync,
+  close: closeSync,
+  replace: renameSync,
+  remove: (path) => rmSync(path, { force: true }),
+  wait: (milliseconds) => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+  },
+};
+
+function replaceStagedBaseline(from, to, runtime) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      runtime.replace(from, to);
+      return;
+    } catch (error) {
+      const retryable = runtime.platform === "win32"
+        && ["EPERM", "EACCES", "EBUSY"].includes(error?.code)
+        && attempt < 3;
+      if (!retryable) throw error;
+      runtime.wait(10 * (attempt + 1));
+    }
+  }
+}
+
+/**
+ * Replace the reviewed baseline without exposing a truncated target. The
+ * staging file is unique, resides on the target filesystem, and is flushed
+ * before rename. Failed updates leave the prior baseline intact and remove the
+ * uncommitted staging file.
+ */
+export function writeKnipBaselineAtomicSync(
+  filePath,
+  content,
+  runtime = DEFAULT_ATOMIC_WRITE_RUNTIME,
+) {
+  const tempPath = join(
+    dirname(filePath),
+    `.${basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  let fd;
+  let committed = false;
+  let operationError;
+  try {
+    fd = runtime.open(tempPath, "wx", 0o644);
+    runtime.write(fd, content);
+    runtime.flush(fd);
+    runtime.close(fd);
+    fd = undefined;
+    replaceStagedBaseline(tempPath, filePath, runtime);
+    committed = true;
+  } catch (error) {
+    operationError = error;
+    throw error;
+  } finally {
+    const cleanupErrors = [];
+    if (fd !== undefined) {
+      try {
+        runtime.close(fd);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (!committed) {
+      try {
+        runtime.remove(tempPath);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      if (operationError !== undefined) {
+        throw new AggregateError(
+          [operationError, ...cleanupErrors],
+          "Knip baseline update and staging cleanup both failed",
+        );
+      }
+      throw cleanupErrors[0];
+    }
+  }
 }

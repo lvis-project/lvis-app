@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   KNIP_BASELINE_SCHEMA_VERSION,
@@ -9,13 +9,45 @@ import {
   countKnipIssuesByType,
   formatKnipIssue,
   normalizeKnipIssues,
+  writeKnipBaselineAtomicSync,
 } from "./lib/knip-baseline.mjs";
 
-const ROOT = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
-const BASELINE_PATH = join(ROOT, "knip-baseline.json");
-const PACKAGE_PATH = join(ROOT, "package.json");
-const KNIP_BINARY = join(ROOT, "node_modules", "knip", "bin", "knip.js");
-const UPDATE_BASELINE = process.argv.includes("--update-baseline");
+const DEFAULT_ROOT = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
+
+function parseOptions(argv) {
+  const options = {
+    root: DEFAULT_ROOT,
+    config: "knip.jsonc",
+    baseline: "knip-baseline.json",
+    knipBinary: join(DEFAULT_ROOT, "node_modules", "knip", "bin", "knip.js"),
+    updateBaseline: false,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--update-baseline") {
+      options.updateBaseline = true;
+      continue;
+    }
+    const value = argv[index + 1];
+    if (["--root", "--config", "--baseline", "--knip-binary"].includes(argument)) {
+      if (!value) throw new Error(`${argument} requires a path`);
+      index += 1;
+      if (argument === "--root") options.root = value;
+      if (argument === "--config") options.config = value;
+      if (argument === "--baseline") options.baseline = value;
+      if (argument === "--knip-binary") options.knipBinary = value;
+      continue;
+    }
+    throw new Error(`unknown argument: ${argument}`);
+  }
+
+  options.root = resolve(options.root);
+  const fromRoot = (path) => isAbsolute(path) ? path : resolve(options.root, path);
+  options.config = fromRoot(options.config);
+  options.baseline = fromRoot(options.baseline);
+  options.knipBinary = fromRoot(options.knipBinary);
+  return options;
+}
 
 function fail(message, details = []) {
   console.error(`[knip-gate] ${message}`);
@@ -31,12 +63,12 @@ function readJson(path, label) {
   }
 }
 
-function runKnip() {
+function runKnip(options) {
   const result = spawnSync(
     process.execPath,
-    [KNIP_BINARY, "--config", "knip.jsonc", "--reporter", "json"],
+    [options.knipBinary, "--config", options.config, "--reporter", "json"],
     {
-      cwd: ROOT,
+      cwd: options.root,
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     },
@@ -61,13 +93,23 @@ function runKnip() {
 }
 
 try {
-  const packageJson = readJson(PACKAGE_PATH, "package.json");
+  const options = parseOptions(process.argv.slice(2));
+  const packageJson = readJson(join(options.root, "package.json"), "package.json");
   const expectedKnipVersion = packageJson.devDependencies?.knip;
   if (typeof expectedKnipVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(expectedKnipVersion)) {
     throw new Error("package.json must pin an exact Knip devDependency version");
   }
+  const installedKnipPackage = readJson(
+    resolve(dirname(options.knipBinary), "..", "package.json"),
+    "installed Knip package.json",
+  );
+  if (installedKnipPackage.version !== expectedKnipVersion) {
+    throw new Error(
+      `installed Knip version ${installedKnipPackage.version} does not match ${expectedKnipVersion}`,
+    );
+  }
 
-  const { report, status, stderr } = runKnip();
+  const { report, status, stderr } = runKnip(options);
   const issues = normalizeKnipIssues(report);
   const nonBaselineIssues = issues.filter((issue) =>
     NON_BASELINE_ISSUE_TYPES.has(issue.type));
@@ -78,16 +120,19 @@ try {
     );
   } else if (status !== 0) {
     fail(`Knip exited with status ${status}`, stderr ? [stderr] : []);
-  } else if (UPDATE_BASELINE) {
+  } else if (options.updateBaseline) {
     const baseline = {
       schemaVersion: KNIP_BASELINE_SCHEMA_VERSION,
       knipVersion: expectedKnipVersion,
       entries: issues,
     };
-    writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`, "utf8");
+    writeKnipBaselineAtomicSync(
+      options.baseline,
+      `${JSON.stringify(baseline, null, 2)}\n`,
+    );
     console.log(`[knip-gate] wrote ${issues.length} entries to knip-baseline.json`);
   } else {
-    const baseline = readJson(BASELINE_PATH, "knip-baseline.json");
+    const baseline = readJson(options.baseline, "knip-baseline.json");
     if (baseline.schemaVersion !== KNIP_BASELINE_SCHEMA_VERSION) {
       throw new Error(`unsupported Knip baseline schema ${baseline.schemaVersion}`);
     }

@@ -12,9 +12,10 @@ Run:
 bun run check:knip
 ```
 
-The command runs the exact `knip@6.23.0` devDependency and compares normalized
-issues with `knip-baseline.json`. The snapshot records issue type, file, and
-symbol name; source line movement does not create false drift.
+The command verifies and runs the exact installed `knip@6.23.0` devDependency,
+then compares normalized issues with `knip-baseline.json`. The snapshot records
+issue type, file, and symbol name; source line movement does not create false
+drift.
 
 The gate fails on:
 
@@ -33,7 +34,9 @@ bun run test:knip-gate
 
 The proof uses an isolated temporary project and removes it afterward, so it
 cannot race with a concurrent repository scan. Only after reviewing intentional
-debt changes should a maintainer run `bun run check:knip:update`.
+debt changes should a maintainer run `bun run check:knip:update`. That command
+flushes a same-directory staging file and atomically replaces the snapshot, so
+an interrupted update cannot truncate the reviewed baseline.
 
 The current snapshot contains 644 accepted findings: 25 files, 235 exports,
 370 types, 7 duplicate-export groups, and 7 dev dependencies. Resolved entries
