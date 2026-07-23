@@ -1,7 +1,7 @@
 /**
  * BootContext — the accumulator threaded through the boot pipeline (C18).
  *
- * `bootstrap()` builds an empty context from its inputs, then hands it to the
+ * `bootstrap()` builds a staged context from its inputs, then hands it to the
  * ordered boot steps under `src/boot/steps/*`. Each step READS the services
  * built by prior steps and WRITES its own outputs back onto the same object.
  * `assembleAppServices(ctx)` reads the fully-populated context at the end to
@@ -13,7 +13,8 @@
  * declared required unless they are genuinely optional in a successful boot
  * (`pythonPath`, the signed-artifact stores, the due-soon timer, release-prep
  * handles) so step bodies can read them without non-null noise; the accumulator
- * pattern initialises them progressively (see {@link createBootContext}).
+ * pattern initialises them progressively, then an exhaustive own-property gate
+ * proves every producer ran before assembly (see {@link createBootContext}).
  */
 import type { BrowserWindow } from "electron";
 import type { LvisHomeDocUpgradeMarker } from "../main/seed-lvis-home-docs.js";
@@ -71,144 +72,245 @@ import type { RemoteA2AActionController } from "../main/remote-a2a-action-contro
 type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
 
-export interface BootContext {
+export interface BootContextInputs {
+  projectRoot: string;
+  mainWindow: BrowserWindow;
+  getMainWindow: () => BrowserWindow | null;
+}
+
+export class BootContext {
   // ── Inputs (available immediately) ─────────────────────────────────────────
-  readonly projectRoot: string;
-  readonly mainWindow: BrowserWindow;
-  readonly getMainWindow: () => BrowserWindow | null;
+  declare readonly projectRoot: string;
+  declare readonly mainWindow: BrowserWindow;
+  declare readonly getMainWindow: () => BrowserWindow | null;
 
   // ── Network fetch surface (setupNetworkFetch) ──────────────────────────────
-  networkFetch: typeof fetch;
-  pluginNetworkFetch: typeof fetch;
-  llmFetch: typeof fetch;
+  declare networkFetch: typeof fetch;
+  declare pluginNetworkFetch: typeof fetch;
+  declare llmFetch: typeof fetch;
 
   // ── Home docs seed ─────────────────────────────────────────────────────────
-  lvisHomeDocUpgradeMarkers: LvisHomeDocUpgradeMarker[];
+  declare lvisHomeDocUpgradeMarkers: LvisHomeDocUpgradeMarker[];
 
   // ── Core services (bootstrapCoreServices) ──────────────────────────────────
-  pythonPath: string | undefined;
-  pythonRuntime: PythonRuntimeBootstrapper;
-  bashAstValidator: BashAstValidator;
-  auditService: AuditService;
-  settingsService: SettingsService;
-  a2aRemoteRuntime: A2ARemoteRuntime | undefined;
-  remoteA2AActionController: RemoteA2AActionController | undefined;
-  memoryManager: MemoryManager;
-  keywordEngine: KeywordEngine;
-  toolRegistry: ToolRegistry;
-  routeEngine: RouteEngine;
+  declare pythonPath: string | undefined;
+  declare pythonRuntime: PythonRuntimeBootstrapper;
+  declare bashAstValidator: BashAstValidator;
+  declare auditService: AuditService;
+  declare settingsService: SettingsService;
+  declare a2aRemoteRuntime: A2ARemoteRuntime | undefined;
+  declare remoteA2AActionController: RemoteA2AActionController | undefined;
+  declare memoryManager: MemoryManager;
+  declare keywordEngine: KeywordEngine;
+  declare toolRegistry: ToolRegistry;
+  declare routeEngine: RouteEngine;
 
   // ── Audit + notification (setupAuditAndNotification) ───────────────────────
-  bootAuditLogger: AuditLogger;
-  notificationService: NotificationService;
+  declare bootAuditLogger: AuditLogger;
+  declare notificationService: NotificationService;
 
   // ── Approval / permission / routines (pre-plugin-runtime) ──────────────────
-  approvalGate: ApprovalGate;
-  permissionManager: PermissionManager;
-  routinesStore: RoutinesStore;
+  declare approvalGate: ApprovalGate;
+  declare permissionManager: PermissionManager;
+  declare routinesStore: RoutinesStore;
 
   // ── Plugin runtime (initPluginRuntime) ─────────────────────────────────────
-  pluginRuntime: PluginRuntime;
-  deploymentGuard: PluginDeploymentGuard;
-  lateBinding: LateBindingRefs;
-  runPluginShutdownHandlers: () => Promise<void>;
-  pluginPaths: PluginPaths;
+  declare pluginRuntime: PluginRuntime;
+  declare deploymentGuard: PluginDeploymentGuard;
+  declare lateBinding: LateBindingRefs;
+  declare runPluginShutdownHandlers: () => Promise<void>;
+  declare pluginPaths: PluginPaths;
 
   // ── Workflow services + stores ─────────────────────────────────────────────
-  routinesScheduler: RoutinesScheduler;
-  workBoardStore: WorkBoardStore;
-  workBoardStorage: WorkBoardStorage;
-  dueSoonTimer: ReturnType<typeof setInterval> | undefined;
-  startWorkBoardDueSoon: () => void;
-  sessionTodoStore: SessionTodoStore;
-  skillStore: SkillStore;
-  agentProfileStore: AgentProfileStore;
-  personaPromptStore: PersonaPromptStore;
-  skillOverlay: SkillOverlay;
-  skillApprovalsStore: SkillApprovalsStore;
-  askUserQuestionGate: AskUserQuestionGate;
-  subAgentRunnerRef: { fn: SubAgentRunner | undefined };
-  idleScheduler: IdleSchedulerService | undefined;
-  knowledgeAvailable: boolean;
+  declare routinesScheduler: RoutinesScheduler;
+  declare workBoardStore: WorkBoardStore;
+  declare workBoardStorage: WorkBoardStorage;
+  declare dueSoonTimer: ReturnType<typeof setInterval> | undefined;
+  declare startWorkBoardDueSoon: () => void;
+  declare sessionTodoStore: SessionTodoStore;
+  declare skillStore: SkillStore;
+  declare agentProfileStore: AgentProfileStore;
+  declare personaPromptStore: PersonaPromptStore;
+  declare skillOverlay: SkillOverlay;
+  declare skillApprovalsStore: SkillApprovalsStore;
+  declare askUserQuestionGate: AskUserQuestionGate;
+  declare subAgentRunnerRef: { fn: SubAgentRunner | undefined };
+  declare idleScheduler: IdleSchedulerService | undefined;
+  declare knowledgeAvailable: boolean;
 
   // ── Marketplace (setupMarketplace) ─────────────────────────────────────────
-  marketplaceFetcher: MarketplaceFetcher;
-  pluginMarketplace: PluginMarketplaceService;
-  refreshMarketplaceFetcherConfig: () => void;
-  refreshActiveLlmWildcard: () => void;
-  refreshSandboxNetworkConfig: () => void;
-  buildSandboxUnionDomains: () => Promise<string[]>;
+  declare marketplaceFetcher: MarketplaceFetcher;
+  declare pluginMarketplace: PluginMarketplaceService;
+  declare refreshMarketplaceFetcherConfig: () => void;
+  declare refreshActiveLlmWildcard: () => void;
+  declare refreshSandboxNetworkConfig: () => void;
+  declare buildSandboxUnionDomains: () => Promise<string[]>;
 
   // ── Prompt / reviewer wiring ───────────────────────────────────────────────
-  systemPromptBuilder: SystemPromptBuilder;
+  declare systemPromptBuilder: SystemPromptBuilder;
   /**
    * MCP-app `ui/update-model-context` slots. ONE instance, two consumers, and that is the
    * whole design: the gated IPC WRITES a card's slot, and the SystemPromptBuilder source
    * READS the active session's slots at turn build. Nothing pushes.
    */
-  mcpAppModelContext: McpAppModelContextStore;
-  rationaleScopeReviewer: RationaleScopeReviewer;
-  rationaleHostService: RationaleHostService | undefined;
-  rewireReviewerAgent: () => void;
+  declare mcpAppModelContext: McpAppModelContextStore;
+  declare rationaleScopeReviewer: RationaleScopeReviewer;
+  declare rationaleHostService: RationaleHostService | undefined;
+  declare rewireReviewerAgent: () => void;
 
   // ── Hooks + plugin tool execution surface ──────────────────────────────────
-  hookRunner: HookRunner;
-  scriptHookManager: ScriptHookManager;
+  declare hookRunner: HookRunner;
+  declare scriptHookManager: ScriptHookManager;
 
   // ── Conversation / agent loop ──────────────────────────────────────────────
-  routineEngine: RoutineEngine;
-  postTurnHookChain: PostTurnHookChain;
-  conversationLoop: ConversationLoop;
+  declare routineEngine: RoutineEngine;
+  declare postTurnHookChain: PostTurnHookChain;
+  declare conversationLoop: ConversationLoop;
   /** Side-chat (workspace rail) — 2nd loop with isolated `~/.lvis/side-chat/` store. */
-  sideChatConversationLoop: ConversationLoop;
-  preferenceRefreshService: PreferenceRefreshService;
-  workBoardEngine: WorkBoardEngine;
-  workBoardReporter: WorkBoardReporter;
+  declare sideChatConversationLoop: ConversationLoop;
+  declare preferenceRefreshService: PreferenceRefreshService;
+  declare workBoardEngine: WorkBoardEngine;
+  declare workBoardReporter: WorkBoardReporter;
 
   // ── Plugin IPC bridges (mutable disposers) ─────────────────────────────────
-  disposePluginNotifications: () => void;
-  disposePluginEventBridge: () => void;
-  pluginEventBridgeWindow: BrowserWindow;
-  replacePluginEventBridge: (win: BrowserWindow) => void;
+  declare disposePluginNotifications: () => void;
+  declare disposePluginEventBridge: () => void;
+  declare pluginEventBridgeWindow: BrowserWindow;
+  declare replacePluginEventBridge: (win: BrowserWindow) => void;
 
   // ── MCP + signed-artifact stores ───────────────────────────────────────────
-  mcpGovernance: McpGovernance;
-  mcpManager: McpManager;
+  declare mcpGovernance: McpGovernance;
+  declare mcpManager: McpManager;
   /** Owns each plugin's loopback MCP host — the loopback-first arm of the render IPC's `ui://` resolver. */
-  pluginLoopbackManager: PluginLoopbackManager;
-  mcpArtifactStore: PluginArtifactStore | undefined;
-  agentArtifactStore: PluginArtifactStore | undefined;
-  skillArtifactStore: PluginArtifactStore | undefined;
+  declare pluginLoopbackManager: PluginLoopbackManager;
+  declare mcpArtifactStore: PluginArtifactStore | undefined;
+  declare agentArtifactStore: PluginArtifactStore | undefined;
+  declare skillArtifactStore: PluginArtifactStore | undefined;
 
   // ── Starred / feedback ─────────────────────────────────────────────────────
-  starredStore: StarredStore;
-  feedbackStore: FeedbackStore;
+  declare starredStore: StarredStore;
+  declare feedbackStore: FeedbackStore;
 
   // ── Post-boot release prep ─────────────────────────────────────────────────
-  telemetry: TelemetryService | undefined;
-  pluginTelemetry: PluginTelemetryClient | undefined;
-  autoUpdaterStop: (() => void) | undefined;
+  declare telemetry: TelemetryService | undefined;
+  declare pluginTelemetry: PluginTelemetryClient | undefined;
+  declare autoUpdaterStop: (() => void) | undefined;
+
+  constructor(inputs: BootContextInputs) {
+    this.projectRoot = inputs.projectRoot;
+    this.mainWindow = inputs.mainWindow;
+    this.getMainWindow = inputs.getMainWindow;
+    this.dueSoonTimer = undefined;
+    this.rationaleHostService = undefined;
+  }
+}
+
+const BOOT_CONTEXT_FIELDS = [
+  "projectRoot",
+  "mainWindow",
+  "getMainWindow",
+  "networkFetch",
+  "pluginNetworkFetch",
+  "llmFetch",
+  "lvisHomeDocUpgradeMarkers",
+  "pythonPath",
+  "pythonRuntime",
+  "bashAstValidator",
+  "auditService",
+  "settingsService",
+  "a2aRemoteRuntime",
+  "remoteA2AActionController",
+  "memoryManager",
+  "keywordEngine",
+  "toolRegistry",
+  "routeEngine",
+  "bootAuditLogger",
+  "notificationService",
+  "approvalGate",
+  "permissionManager",
+  "routinesStore",
+  "pluginRuntime",
+  "deploymentGuard",
+  "lateBinding",
+  "runPluginShutdownHandlers",
+  "pluginPaths",
+  "routinesScheduler",
+  "workBoardStore",
+  "workBoardStorage",
+  "dueSoonTimer",
+  "startWorkBoardDueSoon",
+  "sessionTodoStore",
+  "skillStore",
+  "agentProfileStore",
+  "personaPromptStore",
+  "skillOverlay",
+  "skillApprovalsStore",
+  "askUserQuestionGate",
+  "subAgentRunnerRef",
+  "idleScheduler",
+  "knowledgeAvailable",
+  "marketplaceFetcher",
+  "pluginMarketplace",
+  "refreshMarketplaceFetcherConfig",
+  "refreshActiveLlmWildcard",
+  "refreshSandboxNetworkConfig",
+  "buildSandboxUnionDomains",
+  "systemPromptBuilder",
+  "mcpAppModelContext",
+  "rationaleScopeReviewer",
+  "rationaleHostService",
+  "rewireReviewerAgent",
+  "hookRunner",
+  "scriptHookManager",
+  "routineEngine",
+  "postTurnHookChain",
+  "conversationLoop",
+  "sideChatConversationLoop",
+  "preferenceRefreshService",
+  "workBoardEngine",
+  "workBoardReporter",
+  "disposePluginNotifications",
+  "disposePluginEventBridge",
+  "pluginEventBridgeWindow",
+  "replacePluginEventBridge",
+  "mcpGovernance",
+  "mcpManager",
+  "pluginLoopbackManager",
+  "mcpArtifactStore",
+  "agentArtifactStore",
+  "skillArtifactStore",
+  "starredStore",
+  "feedbackStore",
+  "telemetry",
+  "pluginTelemetry",
+  "autoUpdaterStop",
+] as const satisfies readonly (keyof BootContext)[];
+
+type MissingBootContextField = Exclude<keyof BootContext, typeof BOOT_CONTEXT_FIELDS[number]>;
+const bootContextFieldListIsExhaustive: MissingBootContextField extends never ? true : never = true;
+void bootContextFieldListIsExhaustive;
+
+declare const READY_BOOT_CONTEXT: unique symbol;
+export type ReadyBootContext = BootContext & { readonly [READY_BOOT_CONTEXT]: true };
+
+/**
+ * Convert the mutable boot accumulator into the only context assembly accepts.
+ * Own-property checks distinguish a step that explicitly produced `undefined`
+ * (valid for optional services) from a step that never produced its field.
+ */
+export function assertBootContextReady(ctx: BootContext): asserts ctx is ReadyBootContext {
+  const missing = BOOT_CONTEXT_FIELDS.filter((field) => !Object.hasOwn(ctx, field));
+  if (missing.length > 0) {
+    throw new Error(`boot-context-incomplete: missing ${missing.join(", ")}`);
+  }
 }
 
 /**
- * Build the initial BootContext from the immediately-available inputs. The
- * remaining fields are populated by the ordered boot steps; this factory casts
- * the partial to {@link BootContext} because the accumulator is filled in over
- * the course of `bootstrap()` (the same well-known pattern used for staged
- * dependency graphs — no field is read before its producing step runs).
+ * Build the typed accumulator from the immediately-available inputs. Remaining
+ * fields are declared staged slots and become own properties only when their
+ * producing step assigns them. {@link assertBootContextReady} validates that
+ * every producer ran before the context crosses into service assembly.
  */
-export function createBootContext(inputs: {
-  projectRoot: string;
-  mainWindow: BrowserWindow;
-  getMainWindow: () => BrowserWindow | null;
-}): BootContext {
-  return {
-    projectRoot: inputs.projectRoot,
-    mainWindow: inputs.mainWindow,
-    getMainWindow: inputs.getMainWindow,
-    // Initialised so the shutdown handle can clear it even if the due-soon
-    // scanner was never started.
-    dueSoonTimer: undefined,
-    rationaleHostService: undefined,
-  } as BootContext;
+export function createBootContext(inputs: BootContextInputs): BootContext {
+  return new BootContext(inputs);
 }
