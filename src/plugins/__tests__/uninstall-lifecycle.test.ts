@@ -17,6 +17,7 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
     pluginRuntime: {
       resolvePluginId: vi.fn((requestedPluginId: string) => requestedPluginId),
       resolvePluginInstallId: vi.fn((requestedPluginId: string) => requestedPluginId),
+      resolvePluginInstallIdIfKnown: vi.fn((requestedPluginId: string) => requestedPluginId),
       cancelPendingRestart: vi.fn(),
       clearConfigOverride: vi.fn(),
       getConfigOverride: vi.fn(() => undefined as Record<string, unknown> | undefined),
@@ -77,11 +78,21 @@ describe("uninstallPluginWithLifecycle", () => {
       const cacheRoot = join(root, ".cache");
       await mkdir(join(cacheRoot, "agent-hub"), { recursive: true });
       writeFileSync(join(cacheRoot, "agent-hub", "history.json"), "{}");
-
-      await uninstallPluginWithLifecycle(
+      const deps = makeDeps(
         "agent-hub",
-        makeDeps("agent-hub", cacheRoot, new Error("Plugin not installed: agent-hub")),
+        cacheRoot,
+        new Error("Plugin not installed: agent-hub"),
       );
+      deps.pluginRuntime.resolvePluginInstallIdIfKnown.mockReturnValue(
+        undefined,
+      );
+
+      await expect(
+        uninstallPluginWithLifecycle("agent-hub", deps),
+      ).resolves.toEqual({
+        pluginId: "agent-hub",
+        uninstalled: true,
+      });
 
       expect(existsSync(join(cacheRoot, "agent-hub", "history.json"))).toBe(true);
     } finally {
@@ -230,7 +241,7 @@ describe("uninstallPluginWithLifecycle", () => {
     try {
       const deps = makeDeps("canonical-plugin", join(root, ".cache"));
       deps.pluginRuntime.resolvePluginId.mockReturnValue("canonical-plugin");
-      deps.pluginRuntime.resolvePluginInstallId.mockReturnValue("marketplace-alias");
+      deps.pluginRuntime.resolvePluginInstallIdIfKnown.mockReturnValue("marketplace-alias");
 
       await uninstallPluginWithLifecycle("canonical-plugin", deps);
 
@@ -250,7 +261,7 @@ describe("uninstallPluginWithLifecycle", () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-static-"));
     try {
       const deps = makeDeps("static-plugin", join(root, ".cache"));
-      deps.pluginRuntime.resolvePluginInstallId.mockReturnValue(null);
+      deps.pluginRuntime.resolvePluginInstallIdIfKnown.mockReturnValue(null);
 
       await expect(
         uninstallPluginWithLifecycle("static-plugin", deps),

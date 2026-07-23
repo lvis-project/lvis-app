@@ -130,6 +130,7 @@ interface PluginInstallRuntime {
   listPluginIds(): string[];
   resolvePluginId(pluginId: string): string;
   resolvePluginInstallId(pluginId: string): string | null;
+  resolvePluginInstallIdIfKnown(pluginId: string): string | null | undefined;
   addPlugin(pluginId: string): Promise<InstalledPluginStartState>;
   waitForPluginReady(pluginId: string): Promise<void>;
   removePlugin(
@@ -199,12 +200,160 @@ export function withPluginInstallLocks<T>(
   if (lockKeys.length === 0) {
     throw new Error("plugin lifecycle mutation requires at least one identity");
   }
-  const acquire = (index: number): Promise<T> => {
-    const lockKey = lockKeys[index];
-    if (lockKey === undefined) return fn();
-    return withPluginInstallLock(lockKey, () => acquire(index + 1));
+  if (lockKeys.length === 1) return withPluginInstallLock(lockKeys[0]!, fn);
+  const quarantineError = getPluginLifecycleQuarantineErrorFor(lockKeys);
+  if (quarantineError) return Promise.reject(quarantineError);
+  try {
+    assertAppUpdateInstallNotRequested();
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  const heldLocks = heldPluginInstallLocks.getStore();
+  const heldTokens = lockKeys
+    .map((lockKey) => selectActiveHeldLock(heldLocks, lockKey))
+    .filter((token): token is HeldPluginInstallLock => token !== undefined);
+  if (heldTokens.length === lockKeys.length && new Set(heldTokens).size === 1) {
+    return trackReentrantOperation(heldTokens[0]!, fn);
+  }
+  if (heldTokens.length > 0) {
+    return Promise.reject(
+      new Error("Cannot extend a held plugin lifecycle lock to additional identities"),
+    );
+  }
+  return acquireMultiplePluginInstallLocks(lockKeys, fn, heldLocks);
+}
+
+/**
+ * Resolve alias/canonical lock identities again after admission. An operation
+ * that waited while another mutation temporarily cleared and then restored an
+ * alias must not continue under only its stale pre-wait identity.
+ */
+export async function withResolvedPluginInstallLocks<T>(
+  resolvePluginIds: () => readonly string[],
+  fn: () => Promise<T>,
+): Promise<T> {
+  let lockIds = [...new Set(resolvePluginIds())].sort();
+  while (true) {
+    const outcome = await withPluginInstallLocks<
+      { retry: string[] } | { value: T }
+    >(lockIds, async () => {
+      const currentIds = [...new Set(resolvePluginIds())].sort();
+      if (currentIds.some((pluginId) => !isPluginInstallLockHeld(pluginId))) {
+        return {
+          retry: [...new Set([...lockIds, ...currentIds])].sort(),
+        };
+      }
+      const value: T = await fn();
+      return { value };
+    });
+    if ("value" in outcome) return outcome.value;
+    lockIds = outcome.retry;
+  }
+}
+
+async function acquireMultiplePluginInstallLocks<T>(
+  pluginIds: readonly string[],
+  fn: () => Promise<T>,
+  heldLocks: ReadonlyMap<string, HeldPluginInstallLock> | undefined,
+): Promise<T> {
+  while (true) {
+    if (queuedExclusiveLifecycleMutations === 0) {
+      const quarantineError = getPluginLifecycleQuarantineErrorFor(pluginIds);
+      if (quarantineError) throw quarantineError;
+      // One mutation owns every identity reservation, so the global drain
+      // counter advances once. All queue slots are published below before the
+      // first await, preventing an exclusive mutation from interposing.
+      activePluginLifecycleMutations += 1;
+      break;
+    }
+    await waitForMultiplePluginLifecycleGate(exclusiveLifecycleTail, pluginIds);
+    const quarantineError = getPluginLifecycleQuarantineErrorFor(pluginIds);
+    if (quarantineError) throw quarantineError;
+  }
+
+  pendingPluginInstallOperations += 1;
+  const reservations = pluginIds.map((pluginId) => {
+    const previous = inflightInstallLocks.get(pluginId) ?? Promise.resolve();
+    let release: () => void = () => {};
+    const next = new Promise<void>((resolveNext) => {
+      release = resolveNext;
+    });
+    const tail = previous.then(() => next);
+    inflightInstallLocks.set(pluginId, tail);
+    return { pluginId, previous, release, tail };
+  });
+  let releaseDeferred = false;
+  let finalized = false;
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
+    for (const reservation of reservations) {
+      reservation.release();
+      if (inflightInstallLocks.get(reservation.pluginId) === reservation.tail) {
+        inflightInstallLocks.delete(reservation.pluginId);
+      }
+    }
+    pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
+    activePluginLifecycleMutations = Math.max(0, activePluginLifecycleMutations - 1);
+    if (activePluginLifecycleMutations === 0) {
+      resolvePluginLifecycleDrain?.();
+      resolvePluginLifecycleDrain = null;
+    }
   };
-  return acquire(0);
+
+  try {
+    await Promise.all(
+      reservations.map(({ pluginId, previous }) =>
+        waitForPluginLifecycleGate(previous, pluginId)
+      ),
+    );
+    assertAppUpdateInstallNotRequested();
+    const token: HeldPluginInstallLock = {
+      active: true,
+      pendingReentrantOperations: new Set(),
+    };
+    const nextHeldLocks = copyActiveHeldLocks(heldLocks);
+    for (const pluginId of pluginIds) nextHeldLocks.set(pluginId, token);
+    let ownerValue!: T;
+    let ownerFailed = false;
+    let ownerError: unknown;
+    try {
+      ownerValue = await heldPluginInstallLocks.run(nextHeldLocks, fn);
+    } catch (err) {
+      ownerFailed = true;
+      ownerError = err;
+    }
+    let drainError: unknown;
+    try {
+      await drainReentrantOperations(token);
+      token.active = false;
+    } catch (err) {
+      drainError = err;
+      if (err instanceof PluginLifecycleDrainTimeoutError) {
+        for (const pluginId of pluginIds) beginPluginInstallQuarantine(pluginId);
+        releaseDeferred = true;
+        void settleReentrantOperations(token).finally(() => {
+          for (const pluginId of pluginIds) {
+            quarantinedPluginInstallLocks.delete(pluginId);
+          }
+          token.active = false;
+          finalize();
+        });
+      } else {
+        token.active = false;
+      }
+    }
+    if (ownerFailed) {
+      if (drainError !== undefined) {
+        throw combineLifecycleErrors(ownerError, drainError);
+      }
+      throw ownerError;
+    }
+    if (drainError !== undefined) throw drainError;
+    return ownerValue;
+  } finally {
+    if (!releaseDeferred) finalize();
+  }
 }
 
 async function acquirePluginInstallLock<T>(
@@ -591,6 +740,20 @@ function getPluginLifecycleQuarantineError(pluginId: string): Error | null {
   return null;
 }
 
+function getPluginLifecycleQuarantineErrorFor(
+  pluginIds: readonly string[],
+): Error | null {
+  if (quarantinedPluginInstallLocks.has(ALL_PLUGIN_LOCK_KEY)) {
+    return new PluginLifecycleQuarantinedError("all plugins");
+  }
+  const quarantinedPluginId = pluginIds.find((pluginId) =>
+    quarantinedPluginInstallLocks.has(pluginId)
+  );
+  return quarantinedPluginId
+    ? new PluginLifecycleQuarantinedError(quarantinedPluginId)
+    : null;
+}
+
 function getAnyPluginLifecycleQuarantineError(): Error | null {
   if (quarantinedPluginInstallLocks.size === 0) return null;
   return new PluginLifecycleQuarantinedError(
@@ -612,6 +775,19 @@ async function waitForPluginLifecycleGate(
   await waitForLifecycleGate(gate, (lockKey) =>
     lockKey === ALL_PLUGIN_LOCK_KEY || lockKey === pluginId,
   () => getPluginLifecycleQuarantineError(pluginId));
+}
+
+async function waitForMultiplePluginLifecycleGate(
+  gate: Promise<unknown>,
+  pluginIds: readonly string[],
+): Promise<void> {
+  const pluginIdSet = new Set(pluginIds);
+  await waitForLifecycleGate(
+    gate,
+    (lockKey) =>
+      lockKey === ALL_PLUGIN_LOCK_KEY || pluginIdSet.has(lockKey),
+    () => getPluginLifecycleQuarantineErrorFor(pluginIds),
+  );
 }
 
 async function waitForAnyPluginLifecycleGate(gate: Promise<unknown>): Promise<void> {
@@ -689,8 +865,8 @@ export async function installMarketplacePluginWithLifecycle(options: {
     lifecyclePluginId ?? catalogState.pluginId,
   );
   if (
-    pluginRuntime.listPluginIds().includes(resolvedLifecyclePluginId)
-    && pluginRuntime.resolvePluginInstallId(resolvedLifecyclePluginId) === null
+    pluginRuntime.resolvePluginInstallIdIfKnown(resolvedLifecyclePluginId)
+    === null
   ) {
     throw new Error(
       `Statically configured plugin cannot be replaced from the marketplace: ${resolvedLifecyclePluginId}`,
@@ -702,11 +878,24 @@ export async function installMarketplacePluginWithLifecycle(options: {
   // preparation. Cancel it before this outer lock queues; removePlugin cannot
   // reach its own cancellation boundary until after this callback starts.
   pluginRuntime.cancelPendingRestart(resolvedLifecyclePluginId);
-  return withPluginInstallLocks(
-    [resolvedLifecyclePluginId, catalogState.pluginId],
+  return withResolvedPluginInstallLocks(
+    () => [
+      catalogState.pluginId,
+      pluginRuntime.resolvePluginId(
+        lifecyclePluginId ?? catalogState.pluginId,
+      ),
+    ],
     async () => {
     const currentCatalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
     const currentRuntimePluginId = pluginRuntime.resolvePluginId(currentCatalogState.pluginId);
+    if (
+      pluginRuntime.resolvePluginInstallIdIfKnown(currentRuntimePluginId)
+      === null
+    ) {
+      throw new Error(
+        `Statically configured plugin cannot be replaced from the marketplace: ${currentRuntimePluginId}`,
+      );
+    }
     const expectedVersionForGuard = expectedVersion?.trim();
     if (expectedVersionForGuard) {
       assertExpectedVersionMatchesTrustedCatalog({
@@ -801,7 +990,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
         hadExistingInstall &&
         !startLifecycleAttempted &&
         !versionVerificationFailed &&
-        !pluginRuntime.listPluginIds().includes(restorePluginId)
+        !isPluginLoaded(pluginRuntime, restorePluginId)
       ) {
         await restoreRuntimePlugin({
           pluginRuntime,
@@ -840,7 +1029,7 @@ async function rollbackFailedVersionVerification(options: {
       installedVersionBeforeInstall !== null &&
       installedVersionAfterFailure === installedVersionBeforeInstall
     ) {
-      if (!pluginRuntime.listPluginIds().includes(pluginId)) {
+      if (!isPluginLoaded(pluginRuntime, pluginId)) {
         await restoreRuntimePlugin({
           pluginRuntime,
           pluginId,
@@ -860,7 +1049,7 @@ async function rollbackFailedVersionVerification(options: {
       });
       throw rollbackErr;
     }
-    if (!pluginRuntime.listPluginIds().includes(pluginId)) {
+    if (!isPluginLoaded(pluginRuntime, pluginId)) {
       await restoreRuntimePlugin({
         pluginRuntime,
         pluginId,
@@ -968,7 +1157,7 @@ export async function startInstalledPluginWithLifecycle(options: {
     log,
   } = options;
   const wasLoadedBeforeStart =
-    wasLoadedBeforeStartOverride ?? pluginRuntime.listPluginIds().includes(pluginId);
+    wasLoadedBeforeStartOverride ?? isPluginLoaded(pluginRuntime, pluginId);
   try {
     broadcastInstallProgress?.({ slug: pluginId, phase: "restarting" });
     pluginRuntime.cancelPendingRestart(pluginId);
@@ -1023,7 +1212,7 @@ async function rollbackFailedPluginStart(options: {
     await pluginMarketplace.rollbackPlugin(pluginId).catch((rollbackErr) => {
       log?.warn(`install update rollbackPlugin failed for ${pluginId}: ${errorMessage(rollbackErr)}`);
     });
-    if (!pluginRuntime.listPluginIds().includes(pluginId)) {
+    if (!isPluginLoaded(pluginRuntime, pluginId)) {
       await restoreRuntimePlugin({
         pluginRuntime,
         pluginId,
@@ -1058,6 +1247,15 @@ async function restoreRuntimePlugin(options: {
   } catch (restoreErr) {
     log?.warn(`${context} failed for ${pluginId}: ${errorMessage(restoreErr)}`);
   }
+}
+
+function isPluginLoaded(
+  pluginRuntime: Pick<PluginInstallRuntime, "listPluginIds" | "resolvePluginId">,
+  pluginId: string,
+): boolean {
+  return pluginRuntime.listPluginIds().includes(
+    pluginRuntime.resolvePluginId(pluginId),
+  );
 }
 
 function errorMessage(err: unknown): string {

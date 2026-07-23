@@ -7,8 +7,7 @@ import type { PluginPaths } from "./plugin-paths.js";
 import type { PluginRuntime } from "./runtime.js";
 import {
   drainPluginInstallLockOperations,
-  withPluginInstallLock,
-  withPluginInstallLocks,
+  withResolvedPluginInstallLocks,
 } from "./install-lifecycle.js";
 
 type WarnLogger = { warn: (message: string, ...args: unknown[]) => void };
@@ -22,6 +21,7 @@ export interface PluginUninstallLifecycleDeps {
     | "getPluginManifest"
     | "resolvePluginId"
     | "resolvePluginInstallId"
+    | "resolvePluginInstallIdIfKnown"
     | "clearConfigOverride"
     | "getConfigOverride"
     | "setConfigOverride"
@@ -121,17 +121,34 @@ export async function uninstallPluginWithLifecycle(
   pluginId: string,
   deps: PluginUninstallLifecycleDeps,
 ): Promise<{ pluginId: string; uninstalled: true }> {
-  const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
-  const installPluginId = deps.pluginRuntime.resolvePluginInstallId(pluginId);
-  if (installPluginId === null) {
+  const initialCanonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+  if (deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId) === null) {
     throw new Error(
-      `Statically configured plugin cannot be uninstalled: ${canonicalPluginId}`,
+      `Statically configured plugin cannot be uninstalled: ${initialCanonicalPluginId}`,
     );
   }
-  deps.pluginRuntime.cancelPendingRestart(canonicalPluginId);
-  return withPluginInstallLocks(
-    [canonicalPluginId, installPluginId],
+  deps.pluginRuntime.cancelPendingRestart(initialCanonicalPluginId);
+  return withResolvedPluginInstallLocks(
+    () => {
+      const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+      const installPluginId =
+        deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId);
+      return [
+        pluginId,
+        canonicalPluginId,
+        ...(typeof installPluginId === "string" ? [installPluginId] : []),
+      ];
+    },
     async () => {
+    const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+    const installClaim =
+      deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId);
+    if (installClaim === null) {
+      throw new Error(
+        `Statically configured plugin cannot be uninstalled: ${canonicalPluginId}`,
+      );
+    }
+    const installPluginId = installClaim ?? pluginId;
     const secretKeys = listSecretKeys(
       deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
     );
@@ -191,9 +208,21 @@ export async function cleanupFailedPluginInstallWithLifecycle(
   pluginId: string,
   deps: PluginFailedInstallCleanupLifecycleDeps,
 ): Promise<{ pluginId: string; uninstalled: true }> {
-  const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
-  deps.pluginRuntime.cancelPendingRestart(canonicalPluginId);
-  return withPluginInstallLock(canonicalPluginId, async () => {
+  const initialCanonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+  deps.pluginRuntime.cancelPendingRestart(initialCanonicalPluginId);
+  return withResolvedPluginInstallLocks(
+    () => {
+      const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+      const installPluginId =
+        deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId);
+      return [
+        pluginId,
+        canonicalPluginId,
+        ...(typeof installPluginId === "string" ? [installPluginId] : []),
+      ];
+    },
+    async () => {
+    const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
     const secretKeys = listSecretKeys(
       deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
     );
@@ -208,5 +237,6 @@ export async function cleanupFailedPluginInstallWithLifecycle(
     deps.emitHostEvent?.("plugin.uninstalled", { pluginId: canonicalPluginId });
     deps.refreshPluginNotifications?.();
     return { pluginId, uninstalled: true as const };
-  });
+    },
+  );
 }
