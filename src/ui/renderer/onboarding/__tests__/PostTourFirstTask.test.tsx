@@ -90,6 +90,31 @@ describe("PostTourFirstTask", () => {
     expect(view.queryByTestId("post-tour-first-task")).toBeNull();
   });
 
+  it("surfaces a composer contract failure without dismissing the proposal", () => {
+    const failure = new Error("composer state unavailable");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const onPrefillComposer = vi.fn(() => {
+      throw failure;
+    });
+    const view = render(
+      <I18nProvider locale="en" setLocale={vi.fn()}>
+        <PostTourFirstTask
+          onPrefillComposer={onPrefillComposer}
+          pluginCards={[pluginCard()]}
+          tourCompleted
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(view.getByTestId("post-tour-first-task:accept"));
+    expect(view.getByTestId("post-tour-first-task")).toBeTruthy();
+    expect(view.getByRole("alert").textContent).toContain(failure.message);
+    expect(consoleError).toHaveBeenCalledWith(
+      "[post-tour-first-task] composer prefill failed",
+      failure,
+    );
+  });
+
   it("updates visible copy and composer prefill when the active locale changes", async () => {
     const onPrefillComposer = vi.fn();
     const renderCard = (locale: "en" | "ko") => (
