@@ -5,7 +5,10 @@ import { listSecretKeys } from "./config-schema.js";
 import type { PluginMarketplaceService } from "./marketplace.js";
 import type { PluginPaths } from "./plugin-paths.js";
 import type { PluginRuntime } from "./runtime.js";
-import { withPluginInstallLock } from "./install-lifecycle.js";
+import {
+  drainPluginInstallLockOperations,
+  withPluginInstallLock,
+} from "./install-lifecycle.js";
 
 type WarnLogger = { warn: (message: string, ...args: unknown[]) => void };
 
@@ -109,6 +112,7 @@ export async function uninstallPluginWithLifecycle(
   return withPluginInstallLock(pluginId, async () => {
     const secretKeys = listSecretKeys(deps.pluginRuntime.getPluginManifest(pluginId)?.configSchema);
     await deps.pluginRuntime.removePlugin(pluginId);
+    await drainPluginInstallLockOperations(pluginId);
 
     let result: { pluginId: string; uninstalled: true } | null = null;
     let marketplaceRemoved = false;
@@ -148,6 +152,7 @@ export async function cleanupFailedPluginInstallWithLifecycle(
   return withPluginInstallLock(pluginId, async () => {
     const secretKeys = listSecretKeys(deps.pluginRuntime.getPluginManifest(pluginId)?.configSchema);
     await deps.pluginRuntime.removePlugin(pluginId);
+    await drainPluginInstallLockOperations(pluginId);
     deps.pluginMarketplace.clearInstallFailureDiagnostic(pluginId);
     await bestEffortCleanupPluginState(pluginId, deps, {
       cleanupCache: true,

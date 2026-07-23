@@ -3,9 +3,12 @@ import type { NetworkAccessAcknowledgement, NetworkAccessGrant } from "../shared
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const inflightInstallLocks = new Map<string, Promise<unknown>>();
-const heldPluginInstallLocks = new AsyncLocalStorage<
-  ReadonlyMap<string, { active: boolean }>
->();
+interface HeldPluginInstallLock {
+  active: boolean;
+  pendingReentrantOperations: Set<Promise<unknown>>;
+}
+
+const heldPluginInstallLocks = new AsyncLocalStorage<ReadonlyMap<string, HeldPluginInstallLock>>();
 const ALL_PLUGIN_LOCK_KEY = "\0all-plugins";
 let exclusiveLifecycleTail: Promise<void> = Promise.resolve();
 let queuedExclusiveLifecycleMutations = 0;
@@ -96,8 +99,9 @@ export async function withPluginInstallLock<T>(
 ): Promise<T> {
   assertAppUpdateInstallNotRequested();
   const heldLocks = heldPluginInstallLocks.getStore();
-  if (heldLocks?.get(ALL_PLUGIN_LOCK_KEY)?.active || heldLocks?.get(pluginId)?.active) {
-    return fn();
+  const heldLock = heldLocks?.get(ALL_PLUGIN_LOCK_KEY) ?? heldLocks?.get(pluginId);
+  if (heldLock?.active) {
+    return trackReentrantOperation(heldLock, fn);
   }
   while (true) {
     const exclusiveGate = exclusiveLifecycleTail;
@@ -117,12 +121,16 @@ export async function withPluginInstallLock<T>(
   try {
     await prev;
     assertAppUpdateInstallNotRequested();
-    const token = { active: true };
+    const token: HeldPluginInstallLock = {
+      active: true,
+      pendingReentrantOperations: new Set(),
+    };
     const nextHeldLocks = new Map(heldLocks ?? []);
     nextHeldLocks.set(pluginId, token);
     try {
       return await heldPluginInstallLocks.run(nextHeldLocks, fn);
     } finally {
+      await drainReentrantOperations(token);
       // Detached async resources inherit AsyncLocalStorage. Once the owner
       // exits they must not be treated as re-entrant lock holders.
       token.active = false;
@@ -147,10 +155,23 @@ export function isPluginInstallLockHeld(pluginId: string): boolean {
   return held?.get(ALL_PLUGIN_LOCK_KEY)?.active === true || held?.get(pluginId)?.active === true;
 }
 
+/**
+ * Wait for fire-and-forget mutations that re-entered the currently held lock.
+ * Uninstall calls this immediately after runtime stop so a detached HostApi
+ * write cannot finish after durable plugin state has been deleted.
+ */
+export async function drainPluginInstallLockOperations(pluginId: string): Promise<void> {
+  const held = heldPluginInstallLocks.getStore();
+  const token = held?.get(ALL_PLUGIN_LOCK_KEY) ?? held?.get(pluginId);
+  if (!token?.active) return;
+  await drainReentrantOperations(token);
+}
+
 /** Serialize a multi-plugin artifact mutation plus its full runtime rebuild. */
 export async function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promise<T> {
   const heldLocks = heldPluginInstallLocks.getStore();
-  if (heldLocks?.get(ALL_PLUGIN_LOCK_KEY)?.active) return fn();
+  const heldAllLock = heldLocks?.get(ALL_PLUGIN_LOCK_KEY);
+  if (heldAllLock?.active) return trackReentrantOperation(heldAllLock, fn);
   assertAppUpdateInstallNotRequested();
 
   const previousExclusive = exclusiveLifecycleTail;
@@ -168,13 +189,17 @@ export async function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promis
   }
 
   pendingPluginInstallOperations += 1;
-  const token = { active: true };
+  const token: HeldPluginInstallLock = {
+    active: true,
+    pendingReentrantOperations: new Set(),
+  };
   const nextHeldLocks = new Map(heldLocks ?? []);
   nextHeldLocks.set(ALL_PLUGIN_LOCK_KEY, token);
   try {
     assertAppUpdateInstallNotRequested();
     return await heldPluginInstallLocks.run(nextHeldLocks, fn);
   } finally {
+    await drainReentrantOperations(token);
     token.active = false;
     pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
     queuedExclusiveLifecycleMutations = Math.max(
@@ -182,6 +207,30 @@ export async function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promis
       queuedExclusiveLifecycleMutations - 1,
     );
     releaseExclusive();
+  }
+}
+
+function trackReentrantOperation<T>(
+  token: HeldPluginInstallLock,
+  fn: () => Promise<T>,
+): Promise<T> {
+  let operation: Promise<T>;
+  try {
+    operation = Promise.resolve(fn());
+  } catch (err) {
+    operation = Promise.reject(err);
+  }
+  token.pendingReentrantOperations.add(operation);
+  void operation.then(
+    () => token.pendingReentrantOperations.delete(operation),
+    () => token.pendingReentrantOperations.delete(operation),
+  );
+  return operation;
+}
+
+async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<void> {
+  while (token.pendingReentrantOperations.size > 0) {
+    await Promise.allSettled([...token.pendingReentrantOperations]);
   }
 }
 

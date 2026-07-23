@@ -92,6 +92,36 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(order).toEqual(["outer:start", "inner", "outer:end"]);
   });
 
+  it("keeps the owner lock held until a detached re-entrant mutation settles", async () => {
+    const order: string[] = [];
+    let releaseInner!: () => void;
+    let innerEntered!: () => void;
+    const innerGate = new Promise<void>((resolve) => { releaseInner = resolve; });
+    const innerStarted = new Promise<void>((resolve) => { innerEntered = resolve; });
+    let ownerSettled = false;
+
+    const owner = withPluginInstallLock("p", async () => {
+      order.push("owner:start");
+      void withPluginInstallLock("p", async () => {
+        order.push("inner:start");
+        innerEntered();
+        await innerGate;
+        order.push("inner:end");
+      });
+      await innerStarted;
+      order.push("owner:callback-end");
+    }).then(() => { ownerSettled = true; });
+
+    await innerStarted;
+    await Promise.resolve();
+    expect(ownerSettled).toBe(false);
+    expect(order).toEqual(["owner:start", "inner:start", "owner:callback-end"]);
+
+    releaseInner();
+    await owner;
+    expect(order).toEqual(["owner:start", "inner:start", "owner:callback-end", "inner:end"]);
+  });
+
   it("gives multi-plugin bootstrap exclusive access across per-plugin mutations", async () => {
     const order: string[] = [];
     let releasePlugin!: () => void;
