@@ -29,6 +29,7 @@ function createRoot(): string {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, "export {};\n", "utf-8");
   }
+  write(root, "src/cli/commands.ts", "export const commands = [{ name: 'marketplace:list' }];\n");
   return root;
 }
 
@@ -61,6 +62,7 @@ describe("check-no-inline-channels", () => {
   it.each([
     ["src/plugin-preload.ts", "lvis:plugin:call-tool"],
     ["src/preload/internal-surface.ts", "marketplace:updates-available"],
+    ["src/preload/internal-surface.ts", "marketplace:future-event"],
     ["src/ipc/domains/example.ts", "window:minimize"],
   ])("rejects inline %s wire literals", (rel, channel) => {
     const root = createRoot();
@@ -77,13 +79,24 @@ describe("check-no-inline-channels", () => {
     write(root, "src/plugin-preload.ts", [
       "const direct = `lvis:plugin:event`;",
       "const dynamic = `lvis:plugin:${kind}`;",
+      "const marketplace = `marketplace:${kind}`;",
       "",
     ].join("\n"));
 
     const result = run(root);
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr.match(/src\/plugin-preload\.ts:\d+ inline channel literal/g)).toHaveLength(2);
+    expect(result.stderr.match(/src\/plugin-preload\.ts:\d+ inline channel literal/g)).toHaveLength(3);
+  });
+
+  it("rejects statically concatenated channel literals", () => {
+    const root = createRoot();
+    write(root, "src/plugin-preload.ts", "const channel = 'lvis' + ':plugin:event';\n");
+
+    const result = run(root);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("src/plugin-preload.ts:1 inline channel literal");
   });
 
   it("ignores channel-like text in comments", () => {
@@ -91,6 +104,20 @@ describe("check-no-inline-channels", () => {
     write(root, "src/plugin-preload.ts", "// `lvis:plugin:event` is documented here.\n");
 
     expect(run(root).status).toBe(0);
+  });
+
+  it("distinguishes a CLI command name from a marketplace wire channel", () => {
+    const root = createRoot();
+    expect(run(root).status).toBe(0);
+
+    write(root, "src/cli/commands.ts", [
+      "export const commands = [{ name: 'marketplace:list' }];",
+      "const channel = 'marketplace:raw-wire';",
+      "",
+    ].join("\n"));
+    const result = run(root);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("src/cli/commands.ts:2 inline channel literal");
   });
 
   it("discovers new top-level IPC domain and preload modules", () => {

@@ -724,13 +724,12 @@
         "firstTask": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["locales"],
+          "required": ["priority", "locales"],
           "properties": {
             "priority": {
               "type": "integer",
               "minimum": 0,
-              "maximum": 1000,
-              "default": 100
+              "maximum": 1000
             },
             "locales": {
               "type": "object",
@@ -739,7 +738,8 @@
               "maxProperties": 16,
               "required": ["en"],
               "propertyNames": {
-                "pattern": "^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$"
+                "pattern": "^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$",
+                "maxLength": 35
               },
               "additionalProperties": {
                 "$ref": "#/definitions/pluginFirstTaskCopy"

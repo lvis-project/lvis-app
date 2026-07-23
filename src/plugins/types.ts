@@ -367,8 +367,8 @@ export interface PluginFirstTaskCopy {
 
 export interface PluginOnboardingSpec {
   firstTask?: {
-    /** Lower numbers are proposed first. Defaults to 100. */
-    priority?: number;
+    /** Lower numbers are proposed first. */
+    priority: number;
     /** Normalized lower-case BCP-47 tags; English is the required fallback. */
     locales: Record<string, PluginFirstTaskCopy>;
   };

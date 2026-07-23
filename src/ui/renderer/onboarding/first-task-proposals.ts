@@ -1,8 +1,6 @@
 import type { PluginFirstTaskCopy } from "../../../plugins/types.js";
 import type { PluginCardSummary } from "../types.js";
 
-const DEFAULT_PRIORITY = 100;
-
 export interface FirstTaskProposal extends PluginFirstTaskCopy {
   pluginId: string;
   priority: number;
@@ -36,9 +34,10 @@ export function pickFirstTaskProposal(
       && card.active === true
       && card.onboarding?.firstTask !== undefined)
     .sort((left, right) => {
-      const leftPriority = left.onboarding?.firstTask?.priority ?? DEFAULT_PRIORITY;
-      const rightPriority = right.onboarding?.firstTask?.priority ?? DEFAULT_PRIORITY;
-      return leftPriority - rightPriority || left.id.localeCompare(right.id);
+      const leftPriority = left.onboarding!.firstTask!.priority;
+      const rightPriority = right.onboarding!.firstTask!.priority;
+      return leftPriority - rightPriority
+        || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
     });
 
   const card = candidates[0];
@@ -47,7 +46,7 @@ export function pickFirstTaskProposal(
 
   return {
     pluginId: card.id,
-    priority: firstTask.priority ?? DEFAULT_PRIORITY,
+    priority: firstTask.priority,
     ...resolveCopy(firstTask.locales, locale),
   };
 }
