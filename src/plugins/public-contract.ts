@@ -7,6 +7,27 @@
  * declarations, aliases, or documentation.
  */
 
+/**
+ * Modules supplied by the Host process and therefore excluded from plugin
+ * runtime bundles. The Host owns this value; SDK build helpers consume the
+ * mechanically mirrored constant without adding policy.
+ */
+export const HOST_EXTERNAL_MODULES = ["electron"] as const;
+
+/**
+ * Browser packages tracked by the Host build policy. Current plugin UI bundles
+ * remain self-contained because {@link BUNDLE_EVERYTHING_REGEX} takes
+ * precedence in the build helper; these names are retained as the explicit
+ * Host-owned boundary for a future shared-browser-runtime contract.
+ */
+export const HOST_BROWSER_EXTERNAL_MODULES = ["react", "react-dom"] as const;
+
+/**
+ * Host-owned match-all policy used to bundle every dependency not explicitly
+ * supplied by the Host.
+ */
+export const BUNDLE_EVERYTHING_REGEX = new RegExp(".*");
+
 /** One signed first-party `ui://` resource declaration. */
 export interface PluginUiResourceDecl {
   uri: string;
