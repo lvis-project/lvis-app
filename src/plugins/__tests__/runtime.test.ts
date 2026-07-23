@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
-import { PluginRuntime } from "../runtime.js";
+import { dirname, join, relative } from "node:path";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { PluginPhase } from "../lifecycle-log.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
+import {
+  hashReceiptFiles,
+  writeInstallReceipt,
+} from "../plugin-install-receipt.js";
+import {
+  withAllPluginInstallLocks,
+  withPluginInstallLock,
+} from "../install-lifecycle.js";
+import { uninstallPluginWithLifecycle } from "../uninstall-lifecycle.js";
 import { mkdtempSync } from "node:fs";
 import {
   makeTestPluginEntrySource,
@@ -1677,6 +1686,111 @@ export default async function createPlugin({ hostApi }) {
     );
   });
 
+  it("rejects manifest-id drift when restarting a loaded static plugin", async () => {
+    const canonicalId = "p-static-manifest-stable";
+    const changedId = "p-static-manifest-changed";
+    const manifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-static-manifest-artifact",
+      "static",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      manifestPaths: [manifestPath],
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    await runtime.startAll();
+
+    const changedManifest = JSON.parse(await readFile(manifestPath, "utf-8"));
+    changedManifest.id = changedId;
+    changedManifest.name = changedId;
+    await writeFile(manifestPath, JSON.stringify(changedManifest), "utf-8");
+
+    await expect(runtime.restartPlugin(canonicalId)).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(changedId),
+    });
+    expect(runtime.listPluginIds()).toEqual([canonicalId]);
+    expect(runtime.getPluginManifest(changedId)).toBeUndefined();
+    await expect(
+      runtime.call(`${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
+    ).resolves.toContain(`hi-${canonicalId}`);
+  });
+
+  it("restarts the exact static artifact when plugin roots share a basename", async () => {
+    const firstId = "p-static-root-first";
+    const secondId = "p-static-root-second";
+    const firstManifestPath = await writePluginArtifact(
+      firstId,
+      "p-static-parent-one/shared",
+      "static",
+    );
+    const secondManifestPath = await writePluginArtifact(
+      secondId,
+      "p-static-parent-two/shared",
+      "static",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      manifestPaths: [firstManifestPath, secondManifestPath],
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    await runtime.startAll();
+
+    await expect(runtime.restartPlugin(secondId)).resolves.toBe("started");
+    await expect(
+      runtime.call(`${secondId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
+    ).resolves.toContain(`hi-${secondId}`);
+    await expect(
+      runtime.call(`${firstId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
+    ).resolves.toContain(`hi-${firstId}`);
+  });
+
+  it("re-adds a disabled static plugin without changing its artifact claim", async () => {
+    const canonicalId = "p-static-disable-readd";
+    const manifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-static-disable-readd-artifact",
+      "static",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      manifestPaths: [manifestPath],
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    await runtime.startAll();
+
+    await runtime.disable(canonicalId);
+    expect(runtime.listPluginIds()).toEqual([]);
+    await expect(runtime.addPlugin(canonicalId)).resolves.toBe("started");
+
+    expect(runtime.listPluginIds()).toEqual([canonicalId]);
+    await expect(
+      runtime.call(`${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
+    ).resolves.toContain(`hi-${canonicalId}`);
+  });
+
   it.each([
     ["valid entry first", false],
     ["failed entry first", true],
@@ -1816,6 +1930,47 @@ export default async function createPlugin({ hostApi }) {
     await expect(
       runtime.call(`${existingCanonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`),
     ).resolves.toContain(`hi-${existingCanonicalId}`);
+  });
+
+  it("verifies alias-installed restart receipts with the install identity", async () => {
+    const canonicalId = "p-receipt-canonical";
+    const installAlias = "p-receipt-install-alias";
+    const manifestPath = await writePlugin(canonicalId);
+    const pluginRoot = dirname(manifestPath);
+    const receiptRoot = join(testDir, "receipts");
+    await mkdir(receiptRoot, { recursive: true });
+    await writeInstallReceipt(receiptRoot, {
+      schemaVersion: 2,
+      pluginId: installAlias,
+      version: "1.0.0",
+      installSource: "marketplace",
+      artifactSha256: "a".repeat(64),
+      signerKeyId: "test-signer",
+      installedAt: new Date(0).toISOString(),
+      files: await hashReceiptFiles(pluginRoot, ["entry.mjs", "plugin.json"]),
+    });
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: installAlias, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      installReceiptCacheRoot: receiptRoot,
+    });
+    await runtime.startAll();
+
+    await expect(runtime.restartPlugin(canonicalId)).resolves.toBe("started");
+    expect(runtime.resolvePluginId(installAlias)).toBe(canonicalId);
+    await expect(
+      runtime.call(`${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`),
+    ).resolves.toContain(`hi-${canonicalId}`);
   });
 
   it("rejects incremental double-loading of an existing canonical identity", async () => {
