@@ -1487,6 +1487,96 @@ export default async function createPlugin({ hostApi }) {
     await expect(runtime.waitForPluginReady(alias)).resolves.toBeUndefined();
   });
 
+  it.each([
+    ["canonical entry first", false],
+    ["alias entry first", true],
+  ] as const)(
+    "rejects an ambiguous registry alias namespace before boot (%s)",
+    async (_label, reverseEntries) => {
+      const firstCanonicalId = "p-identity-beta";
+      const secondCanonicalId = "p-identity-gamma";
+      const firstManifestPath = await writePlugin(firstCanonicalId);
+      const secondManifestPath = await writePlugin(secondCanonicalId);
+      const entries = [
+        {
+          id: "p-identity-alpha",
+          manifestPath: firstManifestPath,
+          enabled: true,
+        },
+        {
+          id: firstCanonicalId,
+          manifestPath: secondManifestPath,
+          enabled: true,
+        },
+      ];
+      await writeFile(
+        registryPath,
+        JSON.stringify({
+          version: 1,
+          plugins: reverseEntries ? entries.reverse() : entries,
+        }),
+        "utf-8",
+      );
+      const runtime = makeRuntime();
+
+      await expect(runtime.startAll()).rejects.toMatchObject({
+        code: "plugin-identity-collision",
+        message: expect.stringContaining(firstCanonicalId),
+      });
+      expect(runtime.listPluginIds()).toEqual([]);
+      expect(runtime.getPluginManifest(firstCanonicalId)).toBeUndefined();
+      expect(runtime.getPluginManifest(secondCanonicalId)).toBeUndefined();
+    },
+  );
+
+  it("rejects a newly installed alias collision before restarting the existing plugin", async () => {
+    const existingCanonicalId = "p-runtime-existing-canonical";
+    const conflictingCanonicalId = "p-runtime-conflicting-canonical";
+    const existingManifestPath = await writePlugin(existingCanonicalId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "p-runtime-existing-alias",
+          manifestPath: existingManifestPath,
+          enabled: true,
+        }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    const conflictingManifestPath = await writePlugin(conflictingCanonicalId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "p-runtime-existing-alias",
+            manifestPath: existingManifestPath,
+            enabled: true,
+          },
+          {
+            id: existingCanonicalId,
+            manifestPath: conflictingManifestPath,
+            enabled: true,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin(existingCanonicalId)).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(existingCanonicalId),
+    });
+    expect(runtime.listPluginIds()).toEqual([existingCanonicalId]);
+    expect(runtime.getPluginManifest(conflictingCanonicalId)).toBeUndefined();
+  });
+
   it("canonical removal cancels a deferred add requested through a registry alias", async () => {
     const canonicalId = "p-canonical-pending";
     const alias = "catalog-pending-alias";
