@@ -12,6 +12,10 @@ import { randomBytes } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { PluginMarketplaceItem } from "./types.js";
 import { createLogger } from "../lib/logger.js";
+import {
+  assertCompressedArtifactSize,
+  MarketplaceArtifactLimitError,
+} from "./marketplace-artifact-limits.js";
 const log = createLogger("offline-cache");
 
 // ---------------------------------------------------------------------------
@@ -161,13 +165,29 @@ export async function getCachedTarball(
   slug: string,
   version: string,
   base: string,
+  maxBytes?: number,
 ): Promise<Buffer | null> {
   const { tarballDir, indexFile } = cacheRoots(base);
   const filename = tarballFilename(slug, version);
   const filePath = resolve(tarballDir, filename);
   assertWithinDir(tarballDir, filePath);
   try {
+    if (maxBytes !== undefined) {
+      const metadata = await stat(filePath);
+      assertCompressedArtifactSize(
+        metadata.size,
+        maxBytes,
+        `cached marketplace artifact ${slug}@${version}`,
+      );
+    }
     const buf = await readFile(filePath);
+    if (maxBytes !== undefined) {
+      assertCompressedArtifactSize(
+        buf.byteLength,
+        maxBytes,
+        `cached marketplace artifact ${slug}@${version}`,
+      );
+    }
     // Update LRU timestamp — best-effort, do not throw on failure.
     const index = await readIndex(indexFile);
     const entry = index.entries.find((e) => e.slug === slug && e.version === version);
@@ -176,7 +196,8 @@ export async function getCachedTarball(
       await writeIndex(indexFile, index).catch(() => undefined);
     }
     return buf;
-  } catch {
+  } catch (err) {
+    if (err instanceof MarketplaceArtifactLimitError) throw err;
     return null;
   }
 }

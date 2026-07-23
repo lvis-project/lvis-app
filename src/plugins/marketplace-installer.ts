@@ -20,6 +20,11 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
 import { getCachedTarball, isOfflineCacheEnabled, setCachedTarball } from "./offline-cache.js";
+import {
+  assertCompressedArtifactSize,
+  resolveMarketplaceArtifactLimits,
+  type MarketplaceArtifactLimits,
+} from "./marketplace-artifact-limits.js";
 
 /**
  * Minimal HTTP surface the installer needs. Lets callers inject either
@@ -100,7 +105,8 @@ export interface MarketplaceInstallerOptions {
    */
   expectedArtifactSha256?: string;
 
-
+  /** Shared resource ceilings for downloaded and cached artifacts. */
+  artifactLimits?: Partial<MarketplaceArtifactLimits>;
 
   onProgress?: (event: InstallerProgressEvent) => void;
 }
@@ -176,6 +182,7 @@ export async function installFromMarketplace(
   const nowSec = opts.nowSec ?? (() => Date.now() / 1000);
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   const expectedArtifactSha256 = opts.expectedArtifactSha256?.trim().toLowerCase();
+  const artifactLimits = resolveMarketplaceArtifactLimits(opts.artifactLimits);
   if (expectedArtifactSha256 && !/^[a-f0-9]{64}$/.test(expectedArtifactSha256)) {
     throw new MarketplaceInstallerError(
       "CATALOG_SHA256_INVALID",
@@ -195,8 +202,18 @@ export async function installFromMarketplace(
   let fromCache = false;
 
   if (useCache && cacheBase) {
-    const cached = await getCachedTarball(slug, version, cacheBase);
+    const cached = await getCachedTarball(
+      slug,
+      version,
+      cacheBase,
+      artifactLimits.maxCompressedBytes,
+    );
     if (cached) {
+      assertCompressedArtifactSize(
+        cached.byteLength,
+        artifactLimits.maxCompressedBytes,
+        `cached marketplace artifact ${slug}@${version}`,
+      );
       const cachedSha256 = createHash("sha256").update(cached).digest("hex");
       if (!expectedArtifactSha256 || cachedSha256 === expectedArtifactSha256) {
         body = cached;
@@ -214,7 +231,14 @@ export async function installFromMarketplace(
           opts.onProgress!({ phase: "downloading", bytesDownloaded, bytesTotal });
         }
       : undefined;
-    const downloaded = await downloadWithRetry(opts.http, slug, version, maxRetries, onChunk);
+    const downloaded = await downloadWithRetry(
+      opts.http,
+      slug,
+      version,
+      maxRetries,
+      artifactLimits.maxCompressedBytes,
+      onChunk,
+    );
     body = downloaded.body;
     sha256Header = downloaded.sha256Header;
   }
@@ -352,6 +376,7 @@ async function downloadWithRetry(
   slug: string,
   version: string,
   maxRetries: number,
+  maxArtifactBytes: number,
   onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
 ): Promise<{ body: Buffer; sha256Header: string | null }> {
   let lastErr: Error | null = null;
@@ -365,6 +390,11 @@ async function downloadWithRetry(
       await sleep(backoffMs(attempt));
       continue;
     }
+    assertCompressedArtifactSize(
+      res.body.byteLength,
+      maxArtifactBytes,
+      `downloaded marketplace artifact ${slug}@${version}`,
+    );
     if (res.status === 429) {
       const waitSec = res.retryAfterSeconds ?? Math.pow(2, attempt) * 0.5;
       // Track a diagnosable last error so exhausting retries on 429s does not
