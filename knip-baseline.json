@@ -1575,37 +1575,12 @@
     {
       "type": "types",
       "file": "src/data/settings-store.ts",
-      "name": "AppearanceSettings"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
-      "name": "AppearanceSettingsV1"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
       "name": "AuditSettings"
     },
     {
       "type": "types",
       "file": "src/data/settings-store.ts",
       "name": "ChatSettings"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
-      "name": "ChatThemePreference"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
-      "name": "CodeThemePreference"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
-      "name": "DiagnosticsSettings"
     },
     {
       "type": "types",
@@ -1645,32 +1620,12 @@
     {
       "type": "types",
       "file": "src/data/settings-store.ts",
-      "name": "SystemCloseBehavior"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
-      "name": "ThemePreference"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
       "name": "UpdateSettings"
     },
     {
       "type": "types",
       "file": "src/data/settings-store.ts",
       "name": "WebSearchSettings"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
-      "name": "WebViewPreferredFlow"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
-      "name": "WebViewSettings"
     },
     {
       "type": "types",
