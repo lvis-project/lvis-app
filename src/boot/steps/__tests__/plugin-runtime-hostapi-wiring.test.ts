@@ -376,6 +376,24 @@ describe("HostApi.config.set round-trip", () => {
     expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
   });
 
+  it("reports a detached lifecycle config write failure to the owning mutation", async () => {
+    const settings = makeSettingsService(new Map());
+    settings.setPluginConfig.mockRejectedValueOnce(
+      new Error("config persistence failed"),
+    );
+    const api = await createActiveApi(settings);
+
+    const error = await withPluginInstallLock("plugin-a", async () => {
+      void api.config.set("duringStop", true);
+    }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: "config persistence failed" }),
+    ]);
+    expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
+  });
+
   it("surfaces a non-started runtime reload result after config persistence", async () => {
     const settings = makeSettingsService(new Map());
     const api = await createActiveApi(settings);

@@ -11,6 +11,7 @@ interface HeldPluginInstallLock {
 interface TrackedReentrantOperation {
   parent?: TrackedReentrantOperation;
   branches: Set<TrackedPromiseBranch>;
+  closed: boolean;
 }
 
 interface TrackedPromiseBranch {
@@ -29,7 +30,7 @@ class ObservedReentrantPromise<T> extends Promise<T> {
   constructor(
     private readonly source: Promise<T>,
     private readonly branch: TrackedPromiseBranch,
-    private readonly trackBranch: <U>(promise: Promise<U>) => ObservedReentrantPromise<U>,
+    private readonly trackBranch: <U>(promise: Promise<U>) => Promise<U>,
   ) {
     super((resolve, reject) => {
       void source.then(resolve, reject);
@@ -189,11 +190,24 @@ async function acquirePluginInstallLock<T>(
   heldLocks: ReadonlyMap<string, HeldPluginInstallLock> | undefined,
 ): Promise<T> {
   while (true) {
-    const exclusiveGate = exclusiveLifecycleTail;
-    await waitForPluginLifecycleGate(exclusiveGate, pluginId);
-    if (exclusiveGate !== exclusiveLifecycleTail) continue;
-    activePluginLifecycleMutations += 1;
-    break;
+    // Reserve the per-plugin scheduling slot synchronously whenever no
+    // exclusive mutation is queued. A resolved-Promise await here creates a
+    // TOCTOU window where restartPlugin publishes pending state, then a global
+    // mutation enters and waits on that restart while the restart waits on the
+    // new exclusive tail.
+    if (queuedExclusiveLifecycleMutations === 0) {
+      const quarantineError = getPluginLifecycleQuarantineError(pluginId);
+      if (quarantineError) throw quarantineError;
+      activePluginLifecycleMutations += 1;
+      break;
+    }
+    await waitForPluginLifecycleGate(exclusiveLifecycleTail, pluginId);
+    // A timed-out exclusive owner releases its queue gate before its stale
+    // detached work settles, so the queue count intentionally remains
+    // non-zero. Reject quarantined callers here instead of spinning on the
+    // already-resolved tail.
+    const quarantineError = getPluginLifecycleQuarantineError(pluginId);
+    if (quarantineError) throw quarantineError;
   }
   pendingPluginInstallOperations += 1;
   const prev = inflightInstallLocks.get(pluginId) ?? Promise.resolve();
@@ -326,21 +340,6 @@ async function acquireAllPluginInstallLocks<T>(
   let releaseExclusive!: () => void;
   const exclusiveDone = new Promise<void>((resolve) => { releaseExclusive = resolve; });
   exclusiveLifecycleTail = previousExclusive.then(() => exclusiveDone);
-  if (!canEnterSynchronously) {
-    await previousExclusive;
-    if (activePluginLifecycleMutations > 0) {
-      await new Promise<void>((resolve) => { resolvePluginLifecycleDrain = resolve; });
-    }
-  }
-
-  pendingPluginInstallOperations += 1;
-  const token: HeldPluginInstallLock = {
-    active: true,
-    pendingReentrantOperations: new Set(),
-    reentrantFailures: [],
-  };
-  const nextHeldLocks = copyActiveHeldLocks(heldLocks);
-  nextHeldLocks.set(ALL_PLUGIN_LOCK_KEY, token);
   let releaseDeferred = false;
   let finalized = false;
   let operationCounted = false;
@@ -370,7 +369,6 @@ async function acquireAllPluginInstallLocks<T>(
     const token: HeldPluginInstallLock = {
       active: true,
       pendingReentrantOperations: new Set(),
-      reentrantFailures: [],
     };
     const nextHeldLocks = copyActiveHeldLocks(heldLocks);
     nextHeldLocks.set(ALL_PLUGIN_LOCK_KEY, token);
@@ -427,6 +425,7 @@ function trackReentrantOperation<T>(
 ): Promise<T> {
   const tracked: TrackedReentrantOperation = {
     branches: new Set(),
+    closed: false,
   };
   const parent = currentReentrantOperation.getStore();
   if (parent) tracked.parent = parent;
@@ -434,7 +433,8 @@ function trackReentrantOperation<T>(
     currentReentrantOperation.run(tracked, fn),
   );
   token.pendingReentrantOperations.add(tracked);
-  const trackBranch = <U>(promise: Promise<U>): ObservedReentrantPromise<U> => {
+  const trackBranch = <U>(promise: Promise<U>): Promise<U> => {
+    if (tracked.closed) return promise;
     const branch: TrackedPromiseBranch = {
       promise,
       handled: false,
@@ -452,7 +452,11 @@ function trackReentrantOperation<T>(
         branch.settled = true;
       },
     );
-    return new ObservedReentrantPromise(promise, branch, trackBranch);
+    return new ObservedReentrantPromise(
+      promise,
+      branch,
+      trackBranch,
+    );
   };
   return trackBranch(operation);
 }
@@ -494,7 +498,10 @@ async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<v
         .map((branch) => branch.failure)
     );
   for (const operation of [...token.pendingReentrantOperations]) {
-    if (!excluded.has(operation)) token.pendingReentrantOperations.delete(operation);
+    if (!excluded.has(operation)) {
+      closeTrackedOperation(operation);
+      token.pendingReentrantOperations.delete(operation);
+    }
   }
   if (failures.length > 0) {
     throw new AggregateError(failures, "Detached plugin lifecycle mutation failed");
@@ -514,7 +521,15 @@ async function settleReentrantOperations(token: HeldPluginInstallLock): Promise<
         ),
     );
   }
+  for (const operation of token.pendingReentrantOperations) {
+    closeTrackedOperation(operation);
+  }
   token.pendingReentrantOperations.clear();
+}
+
+function closeTrackedOperation(operation: TrackedReentrantOperation): void {
+  if (operation.closed) return;
+  operation.closed = true;
 }
 
 function selectActiveHeldLock(
