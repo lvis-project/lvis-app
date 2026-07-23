@@ -828,6 +828,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     try {
       return await withPluginInstallLock(pluginId, async () => {
         const manifest = pluginRuntime.getPluginManifest(pluginId);
+        if (!manifest) {
+          throw new Error(`Plugin not found: ${pluginId}`);
+        }
         const schema = manifest?.configSchema;
         const stripped = stripSecretFields(schema, asPlainRecord(config));
         const previous = settingsService.getPluginConfig(pluginId) ?? {};
