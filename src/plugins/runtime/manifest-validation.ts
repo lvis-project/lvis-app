@@ -29,6 +29,7 @@ import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import {
   marketplaceProviderPresetIdFromSecretKey,
 } from "../../shared/marketplace-package-assets.js";
+import { resolvePluginContributionDeclarations } from "../plugin-contributions.js";
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
@@ -411,6 +412,11 @@ export async function parsePluginJson(
   // rejected). From here on all tool checks read `manifest.tools: Tool[]` —
   // never `parsed.tools`.
   const manifest = materializeManifest(parsed);
+
+  // Contribution paths and owner-local IDs are security-bearing cross-field
+  // contracts that JSON Schema alone cannot normalize or collision-check.
+  // Validate them before any runtime or subsystem can observe the manifest.
+  resolvePluginContributionDeclarations(manifest);
 
   // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor
   // requirement — kept as defence-in-depth vs a stale SDK schema, same rationale
