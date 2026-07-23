@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { findRuntimeImportCycles } from "../../scripts/check-import-cycles.mjs";
+
+const cycleChecker = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../scripts/check-import-cycles.mjs",
+);
 
 test("detects runtime cycles while ignoring type-only edges", () => {
   const root = mkdtempSync(join(tmpdir(), "lvis-import-cycles-"));
@@ -24,6 +31,51 @@ test("detects runtime cycles while ignoring type-only edges", () => {
       members: ["a.ts", "b.ts", "c.ts"],
       edges: ["a.ts -> b.ts", "b.ts -> c.ts", "c.ts -> a.ts"],
     }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("detects cycles through package import aliases and self-imports", () => {
+  const packageRoot = mkdtempSync(join(tmpdir(), "lvis-import-alias-cycles-"));
+  const root = join(packageRoot, "src");
+  try {
+    mkdirSync(join(root, "lib"), { recursive: true });
+    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({
+      type: "module",
+      imports: { "#lib/*": "./src/lib/*.ts" },
+    }));
+    writeFileSync(join(root, "entry.ts"), 'import { helper } from "#lib/helper"; export const entry = helper;\n');
+    writeFileSync(join(root, "lib", "helper.ts"), 'import { entry } from "../entry.js"; export const helper = entry;\n');
+    writeFileSync(join(root, "self.ts"), 'import { self } from "./self.js"; export { self };\n');
+
+    assert.deepEqual(findRuntimeImportCycles(root), [
+      {
+        members: ["entry.ts", "lib/helper.ts"],
+        edges: ["entry.ts -> lib/helper.ts", "lib/helper.ts -> entry.ts"],
+      },
+      {
+        members: ["self.ts"],
+        edges: ["self.ts -> self.ts"],
+      },
+    ]);
+  } finally {
+    rmSync(packageRoot, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects a cyclic source tree with a stable diagnostic", () => {
+  const root = mkdtempSync(join(tmpdir(), "lvis-import-cycle-cli-"));
+  try {
+    writeFileSync(join(root, "a.ts"), 'import { b } from "./b.js"; export const a = b;\n');
+    writeFileSync(join(root, "b.ts"), 'import { a } from "./a.js"; export const b = a;\n');
+
+    const result = spawnSync(process.execPath, [cycleChecker, root], { encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^\[import-cycles\] FAIL cycles=1/mu);
+    assert.match(result.stderr, /cycle 1: a\.ts, b\.ts/u);
+    assert.match(result.stderr, /a\.ts -> b\.ts/u);
+    assert.match(result.stderr, /b\.ts -> a\.ts/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
