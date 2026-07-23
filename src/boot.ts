@@ -99,6 +99,7 @@ import { initSandboxGate } from "./boot/steps/sandbox-init.js";
 import { createA2ARemoteRuntime } from "./main/a2a-remote-runtime.js";
 import { createRemoteA2AActionController } from "./main/remote-a2a-action-controller.js";
 import { buildSingleFlightAgentActionApprover } from "./permissions/agent-action-approver.js";
+import { PluginBundleLifecycle } from "./plugins/plugin-bundle-lifecycle.js";
 const log = createLogger("lvis");
 
 export type { AppServices } from "./boot/types.js";
@@ -407,6 +408,7 @@ export async function bootstrap(
     runPluginShutdownHandlers,
     pluginPaths,
     loopbackManager,
+    setBundleLifecycleHandler,
   } = await initPluginRuntime({
     projectRoot,
     settingsService,
@@ -497,6 +499,25 @@ export async function bootstrap(
 
   // §9.5: MCP servers + signed marketplace artifact stores.
   await setupMcp(ctx);
+
+  // Skills, Hook runtime, and external MCP manager now all exist. Bind the
+  // lifecycle callback and replay boot-loaded plugins because initial startAll
+  // intentionally does not emit onEnable.
+  const pluginBundleLifecycle = new PluginBundleLifecycle({
+    pluginRuntime,
+    receiptCacheRoot: pluginPaths.cacheRoot,
+    skillStore: ctx.skillStore,
+    skillOverlay: ctx.skillOverlay,
+    hookManager: ctx.scriptHookManager,
+    mcpManager: ctx.mcpManager,
+  });
+  setBundleLifecycleHandler?.(pluginBundleLifecycle);
+  for (const pluginId of pluginRuntime.listPluginIds()) {
+    if (!pluginRuntime.isPluginEnabled(pluginId)) continue;
+    await pluginBundleLifecycle.activate(pluginId).catch((error) => {
+      log.error(`plugin bundle boot projection failed (${pluginId}): %s`, (error as Error).message);
+    });
+  }
 
   // §691: OS-level tool sandbox — decided exactly once here at boot.
   await initSandboxGate(ctx);
