@@ -63,15 +63,25 @@ describe("PluginRuntime boot preflight", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("bounds concurrent receipt checks, preserves plan order, and parses only accepted manifests once", async () => {
+  it("bounds receipt checks and reports staggered integrity failures in plan order", async () => {
+    const integrityAuditPluginIds: string[] = [];
     const runtime = new PluginRuntime({
       hostRoot,
       pluginsRoot,
       registryPath,
       installReceiptCacheRoot: join(root, "receipts"),
+      auditLog: (_level, message, data) => {
+        if (message === "plugin_integrity_rejected") {
+          integrityAuditPluginIds.push((data as { pluginId: string }).pluginId);
+        }
+      },
     });
     const internals = runtime as unknown as {
-      verifyReceiptAndDevGuard(pluginId: string, pluginRoot: string): Promise<{ ok: true } | { ok: false }>;
+      verifyReceiptAndDevGuard(
+        pluginId: string,
+        pluginRoot: string,
+        options?: { report?: boolean },
+      ): Promise<{ ok: true } | { ok: false; reason: string }>;
       readManifest(path: string): Promise<PluginManifest>;
     };
     let activeReceiptChecks = 0;
@@ -82,10 +92,13 @@ describe("PluginRuntime boot preflight", () => {
     internals.verifyReceiptAndDevGuard = async (pluginId) => {
       activeReceiptChecks += 1;
       maxReceiptChecks = Math.max(maxReceiptChecks, activeReceiptChecks);
-      await new Promise((resolve) => setTimeout(resolve, 15));
+      const delayMs = pluginId === "preflight-1" ? 40 : pluginId === "preflight-2" ? 5 : 15;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
       activeReceiptChecks -= 1;
       verified.push(pluginId);
-      return pluginId === "preflight-2" ? { ok: false } : { ok: true };
+      return pluginId === "preflight-1" || pluginId === "preflight-2"
+        ? { ok: false, reason: `rejected ${pluginId}` }
+        : { ok: true };
     };
     internals.readManifest = async (path) => {
       const id = path.split(/[\\/]/).at(-2)!;
@@ -97,17 +110,58 @@ describe("PluginRuntime boot preflight", () => {
 
     expect(maxReceiptChecks).toBe(4);
     expect(verified).toHaveLength(PLUGIN_COUNT);
+    expect(verified.indexOf("preflight-2")).toBeLessThan(verified.indexOf("preflight-1"));
+    expect(integrityAuditPluginIds).toEqual(["preflight-1", "preflight-2"]);
     expect(runtime.listPluginIds()).toEqual([
       "preflight-0",
-      "preflight-1",
       "preflight-4",
       "preflight-5",
     ]);
+    expect(parseCounts.get("preflight-1")).toBeUndefined();
     expect(parseCounts.get("preflight-2")).toBeUndefined();
-    for (const id of ["preflight-0", "preflight-1", "preflight-3", "preflight-4", "preflight-5"]) {
+    for (const id of ["preflight-0", "preflight-3", "preflight-4", "preflight-5"]) {
       expect(parseCounts.get(id)).toBe(1);
     }
     expect(runtime.resolveToolOwner("rejected_tool")).toBeUndefined();
     expect(runtime.listPluginCards().find((card) => card.id === "preflight-3")?.loadStatus).toBe("failed");
+  });
+
+  it("isolates an unexpected receipt verifier rejection to its plugin", async () => {
+    const rejected: Array<{ pluginId: string; reason: string }> = [];
+    const runtime = new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      installReceiptCacheRoot: join(root, "receipts"),
+      auditLog: (_level, message, data) => {
+        if (message === "plugin_integrity_rejected") {
+          rejected.push(data as { pluginId: string; reason: string });
+          throw new Error("injected audit failure");
+        }
+      },
+    });
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(pluginId: string): Promise<{ ok: true }>;
+      readManifest(path: string): Promise<PluginManifest>;
+    };
+    internals.verifyReceiptAndDevGuard = async (pluginId) => {
+      if (pluginId === "preflight-1") throw new Error("injected verifier failure");
+      return { ok: true };
+    };
+    internals.readManifest = async (path) => manifests.get(path.split(/[\\/]/).at(-2)!)!;
+
+    await expect(runtime.load()).resolves.toBeUndefined();
+
+    expect(runtime.listPluginIds()).toEqual([
+      "preflight-0",
+      "preflight-2",
+      "preflight-3",
+      "preflight-4",
+      "preflight-5",
+    ]);
+    expect(rejected).toEqual([{
+      pluginId: "preflight-1",
+      reason: "install receipt verification failed unexpectedly: injected verifier failure",
+    }]);
   });
 });
