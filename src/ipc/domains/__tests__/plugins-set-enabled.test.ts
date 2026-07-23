@@ -66,14 +66,28 @@ async function setup() {
     approveMcpServer: vi.fn(async () => undefined),
     revokeMcpServer: vi.fn(async () => undefined),
   };
+  let pluginConfig: Record<string, unknown> = { removed: "old", kept: "old" };
+  const setPluginConfig = vi.fn(async (_pluginId: string, config: Record<string, unknown>) => {
+    pluginConfig = { ...config };
+    return pluginConfig;
+  });
+  const restartPlugin = vi.fn(async () => "started" as const);
+  const pluginManifest = { id: "plugin-config" };
   const deps = {
     pluginMarketplace: { list: vi.fn(async () => []) },
     pluginRuntime: {
       listPluginIds: vi.fn((): string[] => ["com.example.meeting"]),
       setPluginEnabled,
       callFromUi,
+      getPluginManifest: vi.fn(() => pluginManifest),
+      setConfigOverride: vi.fn(),
+      restartPlugin,
     },
-    settingsService: { get: vi.fn(() => ({})) },
+    settingsService: {
+      get: vi.fn(() => ({})),
+      getPluginConfig: vi.fn(() => ({ ...pluginConfig })),
+      setPluginConfig,
+    },
     auditLogger: { log: vi.fn() },
     refreshPluginNotifications: vi.fn(),
     getMainWindow: vi.fn(() => appWindows[0]),
@@ -82,7 +96,15 @@ async function setup() {
   };
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, appWindows, setPluginEnabled, callFromUi, pluginBundleLifecycle };
+  return {
+    deps,
+    appWindows,
+    setPluginEnabled,
+    callFromUi,
+    pluginBundleLifecycle,
+    setPluginConfig,
+    restartPlugin,
+  };
 }
 
 beforeEach(() => {
@@ -234,5 +256,89 @@ describe("lvis:plugins:set-enabled", () => {
     for (const win of appWindows) {
       expect(win.webContents.send).not.toHaveBeenCalledWith("lvis:plugins:enabled-changed", expect.anything());
     }
+  });
+});
+
+describe("lvis:plugins:config:set", () => {
+  it("emits undefined for deleted keys captured before persistence", async () => {
+    const { subscribePluginConfigChange } = await import("../../../plugins/config-change-bus.js");
+    await setup();
+    const observed: unknown[] = [];
+    const unsubscribe = subscribePluginConfigChange(
+      "plugin-config",
+      "removed",
+      (_key, value) => { observed.push(value); },
+    );
+    try {
+      const result = await invoke("lvis:plugins:config:set", "plugin-config", { kept: "new" });
+      expect(result).toEqual({ ok: true, config: { kept: "new" } });
+      expect(observed).toEqual([undefined]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("waits for the shared plugin lifecycle lock before saving or restarting", async () => {
+    const { withPluginInstallLock } = await import("../../../plugins/install-lifecycle.js");
+    const { setPluginConfig, restartPlugin } = await setup();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lockEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const held = withPluginInstallLock("plugin-config", async () => {
+      entered();
+      await gate;
+    });
+    await lockEntered;
+
+    const configSet = invoke("lvis:plugins:config:set", "plugin-config", { kept: "new" });
+    await Promise.resolve();
+    expect(setPluginConfig).not.toHaveBeenCalled();
+    expect(restartPlugin).not.toHaveBeenCalled();
+
+    release();
+    await held;
+    await expect(configSet).resolves.toMatchObject({ ok: true });
+    expect(setPluginConfig).toHaveBeenCalledOnce();
+    expect(restartPlugin).toHaveBeenCalledOnce();
+  });
+
+  it("does not recreate config when uninstall removes the plugin before a queued save", async () => {
+    const { withPluginInstallLock } = await import("../../../plugins/install-lifecycle.js");
+    const { deps, setPluginConfig, restartPlugin } = await setup();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lockEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const uninstall = withPluginInstallLock("plugin-config", async () => {
+      entered();
+      await gate;
+    });
+    await lockEntered;
+
+    const configSet = invoke("lvis:plugins:config:set", "plugin-config", { kept: "stale" });
+    await Promise.resolve();
+    expect(setPluginConfig).not.toHaveBeenCalled();
+    deps.pluginRuntime.getPluginManifest.mockReturnValue(null);
+
+    release();
+    await uninstall;
+    await expect(configSet).resolves.toMatchObject({
+      ok: false,
+      error: "plugin-config-save-failed",
+    });
+    expect(setPluginConfig).not.toHaveBeenCalled();
+    expect(restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("reports a saved config whose targeted runtime reload failed", async () => {
+    const { restartPlugin, setPluginConfig } = await setup();
+    restartPlugin.mockResolvedValueOnce("failed");
+
+    const result = await invoke("lvis:plugins:config:set", "plugin-config", { kept: "new" });
+
+    expect(result).toMatchObject({ ok: false, error: "plugin-config-save-failed" });
+    expect(result).toMatchObject({ message: expect.stringContaining("runtime reload returned failed") });
+    expect(setPluginConfig).toHaveBeenCalledOnce();
   });
 });

@@ -167,7 +167,7 @@ async function runParityPair(opts: { deny?: boolean } = {}): Promise<ParityRun> 
     requestAndWait: vi.fn(async (req: { id: string }) => ({ requestId: req.id, choice: "allow-once" as const })),
   };
   const auditLogger = new AuditLogger(auditDir);
-  auditLogger.setupPermissionAuditChain(SECRET);
+  await auditLogger.setupPermissionAuditChain(SECRET);
 
   const metas: ToolCallMeta[] = [];
   const callbacks: ToolExecutorCallbacks = {

@@ -13,7 +13,8 @@ import { test, expect } from "./fixtures";
 const ROLE_BUTTON = '[data-testid="iab-assistant-context-button"]';
 const ACTION_BAR = '[data-testid="input-action-bar"]';
 const TRAILING = '[data-testid="iab-trailing"]';
-const PERMISSION_SLOTS = '[data-testid="iab-permission-slots"]';
+const STATUS_ROW = '[data-testid="iab-status-row"]';
+const PERMISSION = '[data-testid="iab-status-permission"]';
 
 async function resizeWindow(
   app: { evaluate: (fn: (electron: typeof import("electron"), arg: { w: number; h: number }) => unknown, arg: { w: number; h: number }) => Promise<unknown> },
@@ -39,20 +40,22 @@ test("assistant context button stays inside the action bar at narrow width", asy
 
   await mainWindow.locator(ROLE_BUTTON).waitFor({ state: "visible", timeout: 30_000 });
 
-  const geometry = await mainWindow.evaluate(({ roleButton, actionBar, trailing, permissionSlots }) => {
+  const geometry = await mainWindow.evaluate(({ roleButton, actionBar, trailing, statusRow, permission }) => {
     const btn = document.querySelector(roleButton) as HTMLElement | null;
     const bar = document.querySelector(actionBar) as HTMLElement | null;
     const trail = document.querySelector(trailing) as HTMLElement | null;
-    const slots = document.querySelector(permissionSlots) as HTMLElement | null;
-    if (!btn || !bar || !trail || !slots) {
+    const status = document.querySelector(statusRow) as HTMLElement | null;
+    const permissionCell = document.querySelector(permission) as HTMLElement | null;
+    if (!btn || !bar || !trail || !status || !permissionCell) {
       return { ok: false as const };
     }
     const btnRect = btn.getBoundingClientRect();
     const barRect = bar.getBoundingClientRect();
     const trailRect = trail.getBoundingClientRect();
-    const slotRect = slots.getBoundingClientRect();
+    const statusRect = status.getBoundingClientRect();
+    const permissionRect = permissionCell.getBoundingClientRect();
     const trailStyle = getComputedStyle(trail);
-    const slotStyle = getComputedStyle(slots);
+    const permissionStyle = getComputedStyle(permissionCell);
     return {
       ok: true as const,
       vw: window.innerWidth,
@@ -62,15 +65,17 @@ test("assistant context button stays inside the action bar at narrow width", asy
       barLeft: barRect.left,
       barRight: barRect.right,
       trailingRight: trailRect.right,
-      slotWidth: slotRect.width,
+      statusRight: statusRect.right,
+      permissionWidth: permissionRect.width,
       trailingOverflowX: trailStyle.overflowX,
-      slotOverflowX: slotStyle.overflowX,
+      permissionOverflowX: permissionStyle.overflowX,
     };
   }, {
     roleButton: ROLE_BUTTON,
     actionBar: ACTION_BAR,
     trailing: TRAILING,
-    permissionSlots: PERMISSION_SLOTS,
+    statusRow: STATUS_ROW,
+    permission: PERMISSION,
   });
 
   expect(geometry.ok).toBe(true);
@@ -81,7 +86,8 @@ test("assistant context button stays inside the action bar at narrow width", asy
   expect(geometry.buttonRight).toBeLessThanOrEqual(geometry.barRight);
   expect(geometry.buttonRight).toBeLessThanOrEqual(geometry.vw);
   expect(geometry.trailingRight).toBeLessThanOrEqual(geometry.barRight);
-  expect(geometry.slotWidth).toBeGreaterThanOrEqual(0);
+  expect(geometry.statusRight).toBeLessThanOrEqual(geometry.barRight);
+  expect(geometry.permissionWidth).toBeGreaterThan(0);
   expect(geometry.trailingOverflowX).toBe("hidden");
-  expect(geometry.slotOverflowX).toBe("hidden");
+  expect(geometry.permissionOverflowX).toBe("hidden");
 });

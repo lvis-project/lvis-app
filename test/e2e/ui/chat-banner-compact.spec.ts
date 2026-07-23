@@ -28,7 +28,9 @@ test.describe('chat banner + compact pipeline', () => {
 
     await expect(mainWindow.locator('[data-testid="composer-textarea"]').first()).toBeVisible();
     await expect(mainWindow.locator('[data-testid="composer-send-button"]').first()).toBeVisible();
-    await expect(mainWindow.locator('[data-testid="status-bar"]').first()).toBeVisible();
+    // The notifications-only StatusBar intentionally unmounts while empty.
+    // Persistent composer status lives in the unified input action bar.
+    await expect(mainWindow.locator('[data-testid="iab-status-row"]').first()).toBeVisible();
   });
 
   test('/compact slash command produces a system-entry banner response', async ({ mainWindow }) => {
@@ -46,7 +48,7 @@ test.describe('chat banner + compact pipeline', () => {
 
     await input.click();
     await input.fill('/compact');
-    await input.press('Enter');
+    await mainWindow.locator('[data-testid="composer-send-button"]').click();
 
     // manualCompact responds with a system banner whether or not an LLM is
     // configured — "LLM provider 미구성" or "컴팩트 불필요" or success. The
