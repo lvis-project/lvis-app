@@ -13,11 +13,14 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  closeSync,
   existsSync,
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -591,21 +594,36 @@ describe("AuditLogger permission audit chain", () => {
     });
     const activePath = logger.getPermissionAuditLogFile();
     writeFileSync(activePath, `${readFileSync(activePath, "utf-8")}{"partial":`, "utf-8");
-    const originalTornBytes = readFileSync(activePath);
-    const archivePath = join(
-      auditDir,
-      `2026-05-09.permission-audit.torn-unverified-${originalTornBytes.byteLength}-${now.getTime()}.jsonl`,
-    );
-    writeFileSync(archivePath, "existing-forensic-evidence", { mode: 0o600 });
+    const activeDescriptor = openSync(activePath, "r");
+    try {
+      const originalTornBytes = readFileSync(activeDescriptor);
+      const archivePath = join(
+        auditDir,
+        `2026-05-09.permission-audit.torn-unverified-${originalTornBytes.byteLength}-${now.getTime()}.jsonl`,
+      );
+      writeFileSync(archivePath, "existing-forensic-evidence", { mode: 0o600 });
 
-    const rebooted = new AuditLogger(undefined, { now: () => now });
-    await expect(rebooted.setupPermissionAuditChain(SECRET, seals)).rejects.toThrow(
-      /archive already exists/,
-    );
-    expect(rebooted.isPermissionAuditChainReady()).toBe(false);
-    expect(readFileSync(activePath)).toEqual(originalTornBytes);
-    expect(readFileSync(archivePath, "utf-8")).toBe("existing-forensic-evidence");
-    expect(readdirSync(auditDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+      const rebooted = new AuditLogger(undefined, { now: () => now });
+      await expect(rebooted.setupPermissionAuditChain(SECRET, seals)).rejects.toThrow(
+        /archive already exists/,
+      );
+      expect(rebooted.isPermissionAuditChainReady()).toBe(false);
+      const preservedTornBytes = Buffer.alloc(originalTornBytes.byteLength);
+      expect(
+        readSync(
+          activeDescriptor,
+          preservedTornBytes,
+          0,
+          preservedTornBytes.byteLength,
+          0,
+        ),
+      ).toBe(preservedTornBytes.byteLength);
+      expect(preservedTornBytes).toEqual(originalTornBytes);
+      expect(readFileSync(archivePath, "utf-8")).toBe("existing-forensic-evidence");
+      expect(readdirSync(auditDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      closeSync(activeDescriptor);
+    }
   });
 
   it("rejects an oversized audit row without reading the whole file into memory", async () => {
