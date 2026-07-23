@@ -20,7 +20,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -595,7 +594,7 @@ describe("AuditLogger permission audit chain", () => {
     const originalTornBytes = readFileSync(activePath);
     const archivePath = join(
       auditDir,
-      `2026-05-09.permission-audit.torn-unverified-${statSync(activePath).size}-${now.getTime()}.jsonl`,
+      `2026-05-09.permission-audit.torn-unverified-${originalTornBytes.byteLength}-${now.getTime()}.jsonl`,
     );
     writeFileSync(archivePath, "existing-forensic-evidence", { mode: 0o600 });
 
