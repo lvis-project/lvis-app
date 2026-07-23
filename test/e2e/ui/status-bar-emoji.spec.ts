@@ -11,7 +11,7 @@ test('composer status row exposes permission, model, reasoning, and activity sta
 
   const permission = row.locator('[data-testid="iab-status-permission"]');
   await expect(permission).toBeVisible();
-  await expect(permission).toHaveAttribute('data-mode', /^(autopilot|sandbox|ask)$/);
+  await expect(permission).toHaveAttribute('data-mode', /^(default|strict|auto|allow)$/);
   await expect(permission).toHaveAttribute('title', /.+/);
 
   const model = row.locator('[data-testid="iab-status-model"]');
