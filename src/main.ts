@@ -28,6 +28,7 @@ import {
 import { mainDir, distRoot, projectRoot } from "./main/main-paths.js";
 import { applyRuntimeAppIcon, runEarlyBootEnv } from "./main/early-boot-env.js";
 import { ensureCorporateCaInjected } from "./main/corp-ca-runtime.js";
+import { loadMainStartupDependencies } from "./main/startup-dependencies.js";
 import { updateSplashStatus, waitForMinimumBootstrapSplash } from "./main/bootstrap-splash.js";
 import { runAppShutdownCleanup } from "./main/app-shutdown.js";
 import {
@@ -107,10 +108,12 @@ async function main() {
 
 
   createWindow();
-  const bootModulePromise = import("./boot.js");
 
   updateSplashStatus(t("be_main.splashCheckingCerts"));
-  await ensureCorporateCaInjected();
+  const { bootstrap } = await loadMainStartupDependencies(
+    () => import("./boot.js"),
+    ensureCorporateCaInjected,
+  );
 
   // Drive splash status from the real bootstrap pipeline so the text below
   // the wordmark matches what's actually happening rather than cycling
@@ -118,7 +121,6 @@ async function main() {
   // still runs until the first explicit update lands.
   updateSplashStatus(t("be_main.splashLoadingSettings"));
 
-  const { bootstrap } = await bootModulePromise;
   const services = await bootstrap(projectRoot, getMainWindow()!, () => getMainWindow());
   setServices(services);
 

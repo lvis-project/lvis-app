@@ -23,7 +23,17 @@ function resolveOutputImport(outputPath, importPath, outputKeys) {
   return null;
 }
 
-export function analyzeMainBundleMetafile(metafile, { entryPoint }) {
+function outputForEntryPoint(outputs, entryPoint) {
+  const normalizedEntryPoint = normalizedPath(entryPoint);
+  return [...outputs.entries()].find(([, output]) => {
+    if (typeof output.entryPoint !== "string") return false;
+    const candidate = normalizedPath(output.entryPoint);
+    return candidate === normalizedEntryPoint
+      || (!isAbsolute(candidate) && normalizedEntryPoint.endsWith(`/${candidate}`));
+  });
+}
+
+export function analyzeMainBundleMetafile(metafile, { entryPoint, requiredAsyncEntryPoint }) {
   if (!metafile || typeof metafile !== "object" || !metafile.outputs) {
     throw new Error("main bundle metafile is missing outputs");
   }
@@ -31,36 +41,34 @@ export function analyzeMainBundleMetafile(metafile, { entryPoint }) {
   const outputs = new Map(
     Object.entries(metafile.outputs).map(([path, value]) => [normalizedPath(path), value]),
   );
-  const normalizedEntryPoint = normalizedPath(entryPoint);
-  const entry = [...outputs.entries()].find(([, output]) => {
-    if (typeof output.entryPoint !== "string") return false;
-    const candidate = normalizedPath(output.entryPoint);
-    return candidate === normalizedEntryPoint
-      || (!isAbsolute(candidate) && normalizedEntryPoint.endsWith(`/${candidate}`));
-  });
+  const entry = outputForEntryPoint(outputs, entryPoint);
   if (!entry) throw new Error(`main bundle entry output not found for ${entryPoint}`);
+  const requiredAsyncEntry = outputForEntryPoint(outputs, requiredAsyncEntryPoint);
+  if (!requiredAsyncEntry) {
+    throw new Error(`required async entry output not found for ${requiredAsyncEntryPoint}`);
+  }
 
   const outputKeys = new Set(outputs.keys());
   const initial = new Set();
   const pending = [entry[0]];
-  let hasAsyncBoundary = false;
+  let hasRequiredAsyncBoundary = false;
   while (pending.length > 0) {
     const outputPath = pending.pop();
     if (!outputPath || initial.has(outputPath)) continue;
     initial.add(outputPath);
     const output = outputs.get(outputPath);
     for (const imported of output?.imports ?? []) {
-      if (imported.kind === "dynamic-import") {
-        hasAsyncBoundary = true;
-        continue;
-      }
-      if (imported.external === true || imported.kind !== "import-statement") continue;
+      if (imported.external === true) continue;
       const dependency = resolveOutputImport(outputPath, imported.path, outputKeys);
-      if (!dependency) {
+      if (!dependency && (imported.kind === "dynamic-import" || imported.kind === "import-statement")) {
         throw new Error(
-          `main bundle static import '${imported.path}' from '${outputPath}' has no emitted output`,
+          `main bundle import '${imported.path}' from '${outputPath}' has no emitted output`,
         );
       }
+      if (dependency === requiredAsyncEntry[0] && imported.kind === "dynamic-import") {
+        hasRequiredAsyncBoundary = true;
+      }
+      if (imported.kind !== "import-statement") continue;
       pending.push(dependency);
     }
   }
@@ -76,15 +84,15 @@ export function analyzeMainBundleMetafile(metafile, { entryPoint }) {
     asyncBytes: totalBytes - initialBytes,
     initialFiles: initial.size,
     totalFiles: outputs.size,
-    hasAsyncBoundary,
+    hasRequiredAsyncBoundary,
     legacyInitialReduction: 1 - (initialBytes / LEGACY_SINGLE_MAIN_BUNDLE_BYTES),
   };
 }
 
 export function assertMainBundleBudget(measurement, budgets) {
   const failures = [];
-  if (!measurement.hasAsyncBoundary) {
-    failures.push("main entry has no async bundle boundary");
+  if (!measurement.hasRequiredAsyncBoundary) {
+    failures.push("required boot entry has no async bundle boundary");
   }
   for (const key of ["entryBytes", "initialBytes", "totalBytes"]) {
     if (!Number.isFinite(measurement[key]) || measurement[key] < 0) {
