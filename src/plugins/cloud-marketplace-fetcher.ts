@@ -35,6 +35,11 @@ import type {
   SignatureEnvelope,
 } from "./types.js";
 import { parseMcpOAuthMetadata, parseMcpRuntimeSpec } from "./mcp-runtime-spec.js";
+import {
+  assertCompressedArtifactSize,
+  resolveMarketplaceArtifactLimits,
+  type MarketplaceArtifactLimits,
+} from "./marketplace-artifact-limits.js";
 
 /**
  * Allowlist for npm package identifiers. Matches scoped (@scope/name) and
@@ -59,6 +64,8 @@ export interface RealCloudMarketplaceConfig {
    * Intended for local dev/test only - do not enable in production.
    */
   allowPrivateNetwork?: boolean;
+  /** Resource ceilings for untrusted marketplace artifacts. */
+  artifactLimits?: Partial<MarketplaceArtifactLimits>;
 }
 
 /** Loose shape for a catalog row returned by the server. */
@@ -135,7 +142,11 @@ interface ServerAnnouncementRow {
 }
 
 export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp {
-  constructor(private config: RealCloudMarketplaceConfig) {}
+  private readonly artifactLimits: Readonly<MarketplaceArtifactLimits>;
+
+  constructor(private config: RealCloudMarketplaceConfig) {
+    this.artifactLimits = resolveMarketplaceArtifactLimits(config.artifactLimits);
+  }
 
 
 
@@ -205,23 +216,26 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     );
     const retryAfter = parseRetryAfterSeconds(res.headers?.get?.("retry-after") ?? null);
 
-    if (!onChunk || !res.body) {
-      // Fast path: no progress reporting needed or no readable stream available.
-      const arrayBuffer = await res.arrayBuffer();
-      return {
-        body: Buffer.from(arrayBuffer),
-        sha256Header: res.headers?.get?.("x-plugin-sha256") ?? null,
-        status: res.status,
-        retryAfterSeconds: retryAfter ?? undefined,
-      };
+    // Always use the readable stream. Response.arrayBuffer() allocates the
+    // entire attacker-controlled body before code can enforce a ceiling.
+    if (!res.body) {
+      throw new Error("marketplace artifact response has no readable body");
     }
 
-    // Streaming path: accumulate chunks and emit throttled progress callbacks.
     const contentLength = res.headers?.get?.("content-length");
-    const bytesTotal = contentLength ? parseInt(contentLength, 10) : null;
+    const declaredBytes = contentLength && /^\d+$/.test(contentLength)
+      ? Number(contentLength)
+      : null;
+    if (declaredBytes !== null) {
+      assertCompressedArtifactSize(
+        declaredBytes,
+        this.artifactLimits.maxCompressedBytes,
+        `marketplace artifact ${slug}@${version} content-length`,
+      );
+    }
     const validBytesTotal =
-      bytesTotal !== null && Number.isFinite(bytesTotal) && bytesTotal > 0
-        ? bytesTotal
+      declaredBytes !== null && Number.isSafeInteger(declaredBytes) && declaredBytes >= 0
+        ? declaredBytes
         : null;
 
     const chunks: Buffer[] = [];
@@ -236,20 +250,28 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
         const { done, value } = await reader.read();
         if (done) break;
         if (value) {
-          chunks.push(Buffer.from(value));
           bytesDownloaded += value.byteLength;
+          assertCompressedArtifactSize(
+            bytesDownloaded,
+            this.artifactLimits.maxCompressedBytes,
+            `marketplace artifact ${slug}@${version}`,
+          );
+          chunks.push(Buffer.from(value));
           const now = Date.now();
-          if (now - lastEmitMs >= THROTTLE_MS) {
+          if (onChunk && now - lastEmitMs >= THROTTLE_MS) {
             lastEmitMs = now;
             onChunk(bytesDownloaded, validBytesTotal);
           }
         }
       }
+    } catch (err) {
+      await reader.cancel(err).catch(() => undefined);
+      throw err;
     } finally {
       reader.releaseLock();
     }
     // Always emit final progress so the bar reaches 100%.
-    onChunk(bytesDownloaded, validBytesTotal);
+    onChunk?.(bytesDownloaded, validBytesTotal);
 
     return {
       body: Buffer.concat(chunks),

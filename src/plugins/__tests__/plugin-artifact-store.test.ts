@@ -215,6 +215,84 @@ describe("PluginArtifactStore — extractZip", () => {
     }
   });
 
+  it("rejects compressed bytes above the configured ceiling before staging", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp, { artifactLimits: { maxCompressedBytes: 4 } });
+      await expect(store.extractZip("acme", Buffer.alloc(5))).rejects.toMatchObject({
+        code: "ARTIFACT_TOO_LARGE",
+      });
+      expect(existsSync(resolve(tmp, "installed"))).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects too many zip entries and removes the stage directory", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp, { artifactLimits: { maxEntryCount: 1 } });
+      const zip = new AdmZip();
+      zip.addFile("one.txt", Buffer.from("1"));
+      zip.addFile("two.txt", Buffer.from("2"));
+      await expect(store.extractZip("acme", zip.toBuffer())).rejects.toMatchObject({
+        code: "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
+      });
+      const entries = existsSync(resolve(tmp, "installed"))
+        ? await readdir(resolve(tmp, "installed"))
+        : [];
+      expect(entries.filter((name) => name.includes(".stage-"))).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces individual and aggregate uncompressed entry ceilings", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const individualStore = makeStore(tmp, {
+        artifactLimits: { maxEntryUncompressedBytes: 2 },
+      });
+      const individualZip = new AdmZip();
+      individualZip.addFile("large.txt", Buffer.from("123"));
+      await expect(individualStore.extractZip("acme", individualZip.toBuffer()))
+        .rejects.toMatchObject({ code: "ARCHIVE_ENTRY_TOO_LARGE" });
+
+      const aggregateStore = makeStore(tmp, {
+        artifactLimits: { maxEntryUncompressedBytes: 2, maxTotalUncompressedBytes: 3 },
+      });
+      const aggregateZip = new AdmZip();
+      aggregateZip.addFile("one.txt", Buffer.from("12"));
+      aggregateZip.addFile("two.txt", Buffer.from("34"));
+      await expect(aggregateStore.extractZip("acme", aggregateZip.toBuffer()))
+        .rejects.toMatchObject({ code: "ARCHIVE_UNCOMPRESSED_TOO_LARGE" });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("allows zip counts and uncompressed bytes exactly at their boundaries", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp, {
+        artifactLimits: {
+          maxEntryCount: 2,
+          maxEntryUncompressedBytes: 2,
+          maxTotalUncompressedBytes: 4,
+        },
+      });
+      const zip = new AdmZip();
+      zip.addFile("one.txt", Buffer.from("12"));
+      zip.addFile("two.txt", Buffer.from("34"));
+      await expect(store.extractZip("acme", zip.toBuffer())).resolves.toEqual([
+        "one.txt",
+        "two.txt",
+      ]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it.runIf(process.platform !== "win32")(
     "surfaces persistent promoted-directory cleanup failure and retains the old backup",
     async () => {

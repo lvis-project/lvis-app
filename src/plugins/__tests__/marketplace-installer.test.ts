@@ -19,6 +19,7 @@ import {
   type MarketplaceHttp
 } from "../marketplace-installer.js";
 import { verifyEnvelope } from "../envelope-verifier.js";
+import { setCachedTarball } from "../offline-cache.js";
 import type { SignatureEnvelope } from "../types.js";
 
 function freshEd25519() {
@@ -120,6 +121,66 @@ describe("installFromMarketplace — happy path", () => {
       expect(existsSync(out.tarballPath)).toBe(true);
       const persisted = await readFile(out.tarballPath);
       expect(persisted.equals(tarball)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installFromMarketplace — artifact size ceiling", () => {
+  it("rejects an oversized body from an injected MarketplaceHttp implementation", async () => {
+    const tarball = Buffer.from("sixsix");
+    const { privateKey, pubBuf } = freshEd25519();
+    const http = fakeHttp(tarball, makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]));
+    const root = tmpDownloadRoot();
+    try {
+      await expect(installFromMarketplace("acme", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+        artifactLimits: { maxCompressedBytes: 5 },
+      })).rejects.toMatchObject({ code: "ARTIFACT_TOO_LARGE" });
+      expect(http.envelopeCalls).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows a body exactly at the configured boundary", async () => {
+    const tarball = Buffer.from("12345");
+    const { privateKey, pubBuf } = freshEd25519();
+    const http = fakeHttp(tarball, makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]));
+    const root = tmpDownloadRoot();
+    try {
+      const result = await installFromMarketplace("acme", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+        artifactLimits: { maxCompressedBytes: 5 },
+      });
+      expect(result.sha256).toBe(createHash("sha256").update(tarball).digest("hex"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an oversized offline-cache hit before signature or network work", async () => {
+    const tarball = Buffer.from("123456");
+    const { privateKey, pubBuf } = freshEd25519();
+    const http = fakeHttp(tarball, makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]));
+    const root = tmpDownloadRoot();
+    const cacheBase = join(root, "offline-cache");
+    try {
+      await setCachedTarball("acme", "1.0.0", tarball, cacheBase);
+      await expect(installFromMarketplace("acme", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+        cacheBase,
+        artifactLimits: { maxCompressedBytes: 5 },
+      })).rejects.toMatchObject({ code: "ARTIFACT_TOO_LARGE" });
+      expect(http.downloadCalls).toBe(0);
+      expect(http.envelopeCalls).toBe(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

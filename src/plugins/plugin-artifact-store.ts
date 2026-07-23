@@ -29,7 +29,7 @@
  */
 
 import AdmZip from "adm-zip";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -52,6 +52,12 @@ import {
 } from "./plugin-install-receipt.js";
 import { createLogger } from "../lib/logger.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
+import {
+  assertCompressedArtifactSize,
+  MarketplaceArtifactLimitError,
+  resolveMarketplaceArtifactLimits,
+  type MarketplaceArtifactLimits,
+} from "./marketplace-artifact-limits.js";
 export { assertSafeArtifactSlug, SAFE_ARTIFACT_SLUG_RE } from "./plugin-id.js";
 const log = createLogger("plugin-artifact-store");
 
@@ -165,6 +171,8 @@ export interface ArtifactStoreOptions {
    * inside the same `~/.lvis/<topic>/.cache/` tree as the SoT.
    */
   tarballCacheBase?: string | null;
+  /** Resource ceilings shared by download, cache, and zip extraction. */
+  artifactLimits?: Partial<MarketplaceArtifactLimits>;
 }
 
 type VerifiedMarketplaceFetcher = MarketplaceFetcher & MarketplaceHttp;
@@ -182,12 +190,14 @@ export class PluginArtifactStore {
   private readonly fetcher: MarketplaceFetcher;
   private readonly publicKeys: Record<string, PublicKeyInput>;
   private readonly tarballCacheBase: string | null;
+  private readonly artifactLimits: Readonly<MarketplaceArtifactLimits>;
 
   constructor(options: ArtifactStoreOptions) {
     this.installRoot = options.installRoot;
     this.cacheRoot = options.cacheRoot;
     this.fetcher = options.fetcher;
     this.publicKeys = options.publicKeys;
+    this.artifactLimits = resolveMarketplaceArtifactLimits(options.artifactLimits);
     // The store owns the SoT for the tarball cache. `null` disables it
     // (test fetcher); `undefined` falls back to a sibling under cacheRoot.
     // `paths.cacheRoot` lives under the plugin tree's own `.cache/` so
@@ -247,10 +257,29 @@ export class PluginArtifactStore {
       // download header + signature envelope instead of comparing against the
       // latest hash.
       expectedArtifactSha256,
+      artifactLimits: this.artifactLimits,
       onProgress,
     });
+    const handle = await open(verified.tarballPath, "r");
+    let zipBuffer: Buffer;
+    try {
+      const metadata = await handle.stat();
+      assertCompressedArtifactSize(
+        metadata.size,
+        this.artifactLimits.maxCompressedBytes,
+        `verified marketplace artifact ${slug}@${version}`,
+      );
+      zipBuffer = await handle.readFile();
+      assertCompressedArtifactSize(
+        zipBuffer.byteLength,
+        this.artifactLimits.maxCompressedBytes,
+        `verified marketplace artifact ${slug}@${version}`,
+      );
+    } finally {
+      await handle.close();
+    }
     return {
-      zipBuffer: await readFile(verified.tarballPath),
+      zipBuffer,
       artifactSha256: verified.sha256,
       signerKeyId: verified.signerKeyId,
     };
@@ -287,6 +316,11 @@ export class PluginArtifactStore {
     } = {},
   ): Promise<{ files: string[]; result: T }> {
     const safeSlug = assertSafeArtifactSlug(slug);
+    assertCompressedArtifactSize(
+      zipBuffer.byteLength,
+      this.artifactLimits.maxCompressedBytes,
+      `marketplace zip ${safeSlug}`,
+    );
     const installDir = this.installDirFor(safeSlug);
     const stageDir = resolve(this.installRoot, `.${safeSlug}.stage-${randomUUID()}`);
     if (!isWithin(resolve(this.installRoot), stageDir)) {
@@ -304,7 +338,33 @@ export class PluginArtifactStore {
         throw new Error(`invalid zip format for "${safeSlug}": ${(err as Error).message}`);
       }
 
-      for (const entry of zip.getEntries()) {
+      const entries = zip.getEntries();
+      if (entries.length > this.artifactLimits.maxEntryCount) {
+        throw new MarketplaceArtifactLimitError(
+          "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
+          `marketplace zip ${safeSlug} has ${entries.length} entries; maximum allowed is ${this.artifactLimits.maxEntryCount}`,
+        );
+      }
+      let totalUncompressedBytes = 0;
+      let extractedUncompressedBytes = 0;
+      for (const entry of entries) {
+        const declaredBytes = entry.header.size;
+        if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
+          throw new Error(`marketplace zip ${safeSlug} has an invalid entry size: ${entry.entryName}`);
+        }
+        if (declaredBytes > this.artifactLimits.maxEntryUncompressedBytes) {
+          throw new MarketplaceArtifactLimitError(
+            "ARCHIVE_ENTRY_TOO_LARGE",
+            `marketplace zip entry ${entry.entryName} is ${declaredBytes} bytes; maximum allowed is ${this.artifactLimits.maxEntryUncompressedBytes}`,
+          );
+        }
+        totalUncompressedBytes += declaredBytes;
+        if (totalUncompressedBytes > this.artifactLimits.maxTotalUncompressedBytes) {
+          throw new MarketplaceArtifactLimitError(
+            "ARCHIVE_UNCOMPRESSED_TOO_LARGE",
+            `marketplace zip ${safeSlug} expands to more than ${this.artifactLimits.maxTotalUncompressedBytes} bytes`,
+          );
+        }
         const safeEntryPath = sanitizeZipEntryPath(safeSlug, entry.entryName);
         if (!safeEntryPath) continue;
         const targetPath = resolve(stageDir, safeEntryPath);
@@ -316,7 +376,21 @@ export class PluginArtifactStore {
           continue;
         }
         await mkdir(dirname(targetPath), { recursive: true });
-        await writeFile(targetPath, entry.getData());
+        const data = entry.getData();
+        if (data.byteLength > this.artifactLimits.maxEntryUncompressedBytes) {
+          throw new MarketplaceArtifactLimitError(
+            "ARCHIVE_ENTRY_TOO_LARGE",
+            `marketplace zip entry ${entry.entryName} extracted past ${this.artifactLimits.maxEntryUncompressedBytes} bytes`,
+          );
+        }
+        extractedUncompressedBytes += data.byteLength;
+        if (extractedUncompressedBytes > this.artifactLimits.maxTotalUncompressedBytes) {
+          throw new MarketplaceArtifactLimitError(
+            "ARCHIVE_UNCOMPRESSED_TOO_LARGE",
+            `marketplace zip ${safeSlug} extracted past ${this.artifactLimits.maxTotalUncompressedBytes} bytes`,
+          );
+        }
+        await writeFile(targetPath, data);
         extractedFiles.push(safeEntryPath.split("\\").join("/"));
       }
 
