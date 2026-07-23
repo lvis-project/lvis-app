@@ -17,6 +17,7 @@ export interface PluginUninstallLifecycleDeps {
   pluginRuntime: Pick<
     PluginRuntime,
     | "addPlugin"
+    | "waitForPluginReady"
     | "removePlugin"
     | "getPluginManifest"
     | "resolvePluginId"
@@ -39,7 +40,10 @@ export interface PluginUninstallLifecycleDeps {
 
 export interface PluginFailedInstallCleanupLifecycleDeps
   extends Omit<PluginUninstallLifecycleDeps, "pluginMarketplace"> {
-  pluginMarketplace: Pick<PluginMarketplaceService, "clearInstallFailureDiagnostic">;
+  pluginMarketplace: Pick<
+    PluginMarketplaceService,
+    "clearInstallFailureDiagnostic" | "getInstalledVersion"
+  >;
 }
 
 type PluginStateCleanupDeps = Omit<PluginUninstallLifecycleDeps, "pluginMarketplace">;
@@ -180,7 +184,10 @@ export async function uninstallPluginWithLifecycle(
           // when the manifest declares a different canonical runtime id.
           // removePlugin clears the runtime's alias map, so restoration must
           // use the original registry identity.
-          await deps.pluginRuntime.addPlugin(installPluginId);
+          const startState = await deps.pluginRuntime.addPlugin(installPluginId);
+          if (startState === "preparing") {
+            await deps.pluginRuntime.waitForPluginReady(installPluginId);
+          }
         } catch (restoreError) {
           throw new AggregateError(
             [err, restoreError],
@@ -200,6 +207,11 @@ export async function uninstallPluginWithLifecycle(
     deps.refreshPluginNotifications?.();
 
     return result ?? { pluginId, uninstalled: true as const };
+    },
+    (pluginIds) => {
+      for (const discoveredPluginId of pluginIds) {
+        deps.pluginRuntime.cancelPendingRestart(discoveredPluginId);
+      }
     },
   );
 }
@@ -223,6 +235,15 @@ export async function cleanupFailedPluginInstallWithLifecycle(
     },
     async () => {
     const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+    const installPluginId =
+      deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId) ?? pluginId;
+    const installedVersion =
+      await deps.pluginMarketplace.getInstalledVersion(installPluginId);
+    if (installedVersion !== null) {
+      throw new Error(
+        `Failed-install cleanup refused because plugin is installed: ${installPluginId}`,
+      );
+    }
     const secretKeys = listSecretKeys(
       deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
     );
@@ -237,6 +258,11 @@ export async function cleanupFailedPluginInstallWithLifecycle(
     deps.emitHostEvent?.("plugin.uninstalled", { pluginId: canonicalPluginId });
     deps.refreshPluginNotifications?.();
     return { pluginId, uninstalled: true as const };
+    },
+    (pluginIds) => {
+      for (const discoveredPluginId of pluginIds) {
+        deps.pluginRuntime.cancelPendingRestart(discoveredPluginId);
+      }
     },
   );
 }

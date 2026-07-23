@@ -435,12 +435,16 @@ describe("installMarketplacePluginWithLifecycle", () => {
 
     let resolvedCanonicalId = installAlias;
     let mutationEntered = false;
+    const cancelledIds: string[] = [];
     const mutation = withResolvedPluginInstallLocks(
       () => [installAlias, resolvedCanonicalId],
       async () => {
         mutationEntered = true;
         expect(isPluginInstallLockHeld(installAlias)).toBe(true);
         expect(isPluginInstallLockHeld(canonicalPluginId)).toBe(true);
+      },
+      (pluginIds) => {
+        cancelledIds.push(...pluginIds);
       },
     );
     await Promise.resolve();
@@ -451,6 +455,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
     await owner;
     await mutation;
     expect(mutationEntered).toBe(true);
+    expect(cancelledIds).toContain(canonicalPluginId);
   });
 
   it("cancels a pending restart before the outer install lock queues", async () => {
@@ -478,6 +483,29 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(runtime.cancelPendingRestart).toHaveBeenCalledWith("p");
     expect(runtime.cancelPendingRestart.mock.invocationCallOrder[0])
       .toBeLessThan(marketplace.install.mock.invocationCallOrder[0]);
+  });
+
+  it("cancels a canonical restart discovered after install lock admission", async () => {
+    const installAlias = "p";
+    const canonicalPluginId = "p-canonical-runtime";
+    const runtime = makeRuntime();
+    runtime.resolvePluginId
+      .mockReturnValueOnce(installAlias)
+      .mockReturnValueOnce(installAlias)
+      .mockReturnValue(canonicalPluginId);
+    const marketplace = makeMarketplace();
+
+    await expect(installMarketplacePluginWithLifecycle({
+      requestedPluginId: installAlias,
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    })).resolves.toEqual({
+      pluginId: canonicalPluginId,
+      installed: true,
+    });
+
+    expect(runtime.cancelPendingRestart).toHaveBeenCalledWith(installAlias);
+    expect(runtime.cancelPendingRestart).toHaveBeenCalledWith(canonicalPluginId);
   });
 
   it("serializes an alias update with canonical lifecycle mutations", async () => {

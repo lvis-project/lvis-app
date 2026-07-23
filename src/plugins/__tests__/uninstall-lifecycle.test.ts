@@ -3,7 +3,10 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { uninstallPluginWithLifecycle } from "../uninstall-lifecycle.js";
+import {
+  cleanupFailedPluginInstallWithLifecycle,
+  uninstallPluginWithLifecycle,
+} from "../uninstall-lifecycle.js";
 import { withPluginInstallLock } from "../install-lifecycle.js";
 
 function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
@@ -30,6 +33,7 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
         },
       })),
       addPlugin: vi.fn(async () => "started" as const),
+      waitForPluginReady: vi.fn(async () => undefined),
       removePlugin: vi.fn(async () => undefined),
     },
     settingsService: {
@@ -162,6 +166,35 @@ describe("uninstallPluginWithLifecycle", () => {
     }
   });
 
+  it("cancels a canonical restart discovered after uninstall lock admission", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-discovered-restart-"));
+    try {
+      const installAlias = "agent-hub";
+      const canonicalPluginId = "agent-hub-runtime";
+      const deps = makeDeps(installAlias, join(root, ".cache"));
+      deps.pluginRuntime.resolvePluginId
+        .mockReturnValueOnce(installAlias)
+        .mockReturnValueOnce(installAlias)
+        .mockReturnValue(canonicalPluginId);
+
+      await expect(
+        uninstallPluginWithLifecycle(installAlias, deps),
+      ).resolves.toEqual({
+        pluginId: installAlias,
+        uninstalled: true,
+      });
+
+      expect(deps.pluginRuntime.cancelPendingRestart).toHaveBeenCalledWith(
+        installAlias,
+      );
+      expect(deps.pluginRuntime.cancelPendingRestart).toHaveBeenCalledWith(
+        canonicalPluginId,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("drains detached stop-hook mutations before deleting durable plugin state", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-detached-"));
     try {
@@ -280,10 +313,14 @@ describe("uninstallPluginWithLifecycle", () => {
     try {
       const failure = Object.assign(new Error("locked by Windows handle"), { code: "EACCES" });
       const deps = makeDeps("agent-hub", join(root, ".cache"), failure);
+      deps.pluginRuntime.addPlugin.mockResolvedValueOnce("preparing");
 
       await expect(uninstallPluginWithLifecycle("agent-hub", deps)).rejects.toBe(failure);
 
       expect(deps.pluginRuntime.addPlugin).toHaveBeenCalledWith("agent-hub");
+      expect(deps.pluginRuntime.waitForPluginReady).toHaveBeenCalledWith(
+        "agent-hub",
+      );
       expect(deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0])
         .toBeLessThan(deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0]);
       expect(deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0])
@@ -341,6 +378,120 @@ describe("uninstallPluginWithLifecycle", () => {
       const error = await uninstallPluginWithLifecycle("agent-hub", deps).catch((caught) => caught);
       expect(error).toBeInstanceOf(AggregateError);
       expect((error as AggregateError).errors).toEqual([uninstallFailure, restoreFailure]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves uninstall and asynchronous runtime restore failures", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-restore-async-fail-"));
+    try {
+      const uninstallFailure = new Error("uninstall failed");
+      const restoreFailure = new Error("dependency preparation failed");
+      const deps = makeDeps("agent-hub", join(root, ".cache"), uninstallFailure);
+      deps.pluginRuntime.addPlugin.mockResolvedValueOnce("preparing");
+      deps.pluginRuntime.waitForPluginReady.mockRejectedValueOnce(restoreFailure);
+
+      const error = await uninstallPluginWithLifecycle("agent-hub", deps)
+        .catch((caught) => caught);
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toEqual([
+        uninstallFailure,
+        restoreFailure,
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels a canonical restart discovered during failed-install cleanup", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-failed-cleanup-restart-"));
+    try {
+      const installAlias = "agent-hub";
+      const canonicalPluginId = "agent-hub-runtime";
+      const deps = makeDeps(installAlias, join(root, ".cache"));
+      deps.pluginRuntime.resolvePluginId
+        .mockReturnValueOnce(installAlias)
+        .mockReturnValueOnce(installAlias)
+        .mockReturnValue(canonicalPluginId);
+      const cleanupDeps = {
+        ...deps,
+        pluginMarketplace: {
+          getInstalledVersion: vi.fn(async () => null),
+          clearInstallFailureDiagnostic: vi.fn(() => true),
+        },
+      };
+
+      await expect(
+        cleanupFailedPluginInstallWithLifecycle(installAlias, cleanupDeps),
+      ).resolves.toEqual({
+        pluginId: installAlias,
+        uninstalled: true,
+      });
+
+      expect(deps.pluginRuntime.cancelPendingRestart).toHaveBeenCalledWith(
+        installAlias,
+      );
+      expect(deps.pluginRuntime.cancelPendingRestart).toHaveBeenCalledWith(
+        canonicalPluginId,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rechecks marketplace absence inside the failed-install cleanup lock", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-failed-cleanup-proof-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      const cleanupDeps = {
+        ...deps,
+        pluginMarketplace: {
+          getInstalledVersion: vi.fn(async () => "2.0.0"),
+          clearInstallFailureDiagnostic: vi.fn(() => true),
+        },
+      };
+
+      await expect(
+        cleanupFailedPluginInstallWithLifecycle("agent-hub", cleanupDeps),
+      ).rejects.toThrow(
+        "Failed-install cleanup refused because plugin is installed",
+      );
+
+      expect(cleanupDeps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
+      expect(
+        cleanupDeps.pluginMarketplace.clearInstallFailureDiagnostic,
+      ).not.toHaveBeenCalled();
+      expect(cleanupDeps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when the in-lock failed-install absence proof errors", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-failed-cleanup-proof-error-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      const proofFailure = new Error("registry unavailable");
+      const cleanupDeps = {
+        ...deps,
+        pluginMarketplace: {
+          getInstalledVersion: vi.fn(async () => {
+            throw proofFailure;
+          }),
+          clearInstallFailureDiagnostic: vi.fn(() => true),
+        },
+      };
+
+      await expect(
+        cleanupFailedPluginInstallWithLifecycle("agent-hub", cleanupDeps),
+      ).rejects.toBe(proofFailure);
+
+      expect(cleanupDeps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
+      expect(
+        cleanupDeps.pluginMarketplace.clearInstallFailureDiagnostic,
+      ).not.toHaveBeenCalled();
+      expect(cleanupDeps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
