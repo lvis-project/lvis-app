@@ -45,6 +45,7 @@ describe("main bundle budget", () => {
       initialFiles: 2,
       totalFiles: 5,
       hasRequiredAsyncBoundary: true,
+      requiredAsyncEntryIsInitial: false,
     });
   });
 
@@ -75,6 +76,26 @@ describe("main bundle budget", () => {
       entryPoint: "/repo/src/main.ts",
       requiredAsyncEntryPoint: "/repo/src/boot.ts",
     }).hasRequiredAsyncBoundary).toBe(false);
+  });
+
+  it("rejects boot when a dynamic edge is shadowed by a transitive static edge", () => {
+    const metafile = structuredClone(syntheticMetafile);
+    metafile.outputs["/repo/dist/chunks/shared.js"].imports = [
+      { path: "./boot.js", kind: "import-statement" },
+    ];
+    const measurement = analyzeMainBundleMetafile(metafile, {
+      entryPoint: "/repo/src/main.ts",
+      requiredAsyncEntryPoint: "/repo/src/boot.ts",
+    });
+    expect(measurement).toMatchObject({
+      hasRequiredAsyncBoundary: true,
+      requiredAsyncEntryIsInitial: true,
+    });
+    expect(() => assertMainBundleBudget(measurement, {
+      entryBytes: 1_000,
+      initialBytes: 1_000,
+      totalBytes: 1_000,
+    })).toThrow(/boot entry remains statically reachable/);
   });
 
   it("reports the measured legacy initial-load reduction", () => {
