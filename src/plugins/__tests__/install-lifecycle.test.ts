@@ -181,6 +181,30 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect((error as AggregateError).errors).toEqual([ownerFailure, detachedFailure]);
   });
 
+  it("does not report a re-entrant failure that the owner awaited and handled", async () => {
+    const nestedFailure = new Error("expected nested failure");
+    await expect(withPluginInstallLock("p", async () => {
+      const nested = withPluginInstallLock("p", async () => {
+        throw nestedFailure;
+      });
+      expect(nested).toBeInstanceOf(Promise);
+      await nested.catch((caught) => {
+        expect(caught).toBe(nestedFailure);
+      });
+    })).resolves.toBeUndefined();
+  });
+
+  it("preserves an awaited uncaught re-entrant failure identity", async () => {
+    const nestedFailure = new Error("uncaught nested failure");
+    const error = await withPluginInstallLock("p", async () => {
+      await withPluginInstallLock("p", async () => {
+        throw nestedFailure;
+      });
+    }).catch((caught) => caught);
+
+    expect(error).toBe(nestedFailure);
+  });
+
   it("rejects a per-plugin to all-plugin lock upgrade instead of deadlocking", async () => {
     await expect(withPluginInstallLock("p", async () => {
       await withAllPluginInstallLocks(async () => undefined);

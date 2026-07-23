@@ -95,10 +95,15 @@ function makeApi(log: string[]) {
   };
 }
 
-const deps = (gate: ApprovalGate, flag: boolean) => ({
+const deps = (
+  gate: ApprovalGate,
+  flag: boolean,
+  assertActive: () => void = () => {},
+) => ({
   pluginId: "p1",
   approvalGate: gate,
   flagEnabled: () => flag,
+  assertActive,
 });
 
 describe("enforceMutatingEffects — FLAG OFF = zero behaviour change", () => {
@@ -177,6 +182,35 @@ describe("enforceMutatingEffects — FLAG ON + foreground + write → approval A
     });
     expect(requests[0]).toMatchObject({ approvalScope: "storage.write" });
     expect(log).toEqual(["write"]);
+  });
+
+  it("revalidates the HostApi incarnation after approval and before the effect", async () => {
+    const log: string[] = [];
+    let approve!: (decision: ApprovalDecision) => void;
+    const gate = {
+      requestAndWait: (request: Omit<ApprovalRequest, "requireExplicit">) =>
+        new Promise<ApprovalDecision>((resolve) => {
+          approve = resolve;
+        }).then((decision) => ({ ...decision, requestId: request.id })),
+    } as unknown as ApprovalGate;
+    let active = true;
+    const api = enforceMutatingEffects(
+      makeApi(log),
+      deps(gate, true, () => {
+        if (!active) throw new Error("stale HostApi incarnation");
+      }),
+    );
+
+    const call = runWithEffectGateContext(
+      { headless: false, toolName: "t" },
+      () => api.storage.write("stale.txt", "x"),
+    );
+    await Promise.resolve();
+    active = false;
+    approve({ requestId: "ignored", choice: "allow-once" });
+
+    await expect(call).rejects.toThrow("stale HostApi incarnation");
+    expect(log).toEqual([]);
   });
 });
 

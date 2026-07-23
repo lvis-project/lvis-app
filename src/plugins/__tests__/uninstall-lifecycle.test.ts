@@ -210,6 +210,24 @@ describe("uninstallPluginWithLifecycle", () => {
     }
   });
 
+  it("restores an alias-owned registry entry by its requested id after uninstall fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-alias-restore-"));
+    try {
+      const failure = new Error("marketplace registry write failed");
+      const deps = makeDeps("canonical-plugin", join(root, ".cache"), failure);
+      deps.pluginRuntime.resolvePluginId.mockReturnValue("canonical-plugin");
+
+      await expect(
+        uninstallPluginWithLifecycle("marketplace-alias", deps),
+      ).rejects.toBe(failure);
+
+      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("canonical-plugin");
+      expect(deps.pluginRuntime.addPlugin).toHaveBeenCalledWith("marketplace-alias");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("preserves uninstall and runtime restore failures", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-restore-fail-"));
     try {

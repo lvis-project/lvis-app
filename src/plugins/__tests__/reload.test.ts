@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as nodeFs from "node:fs";
-import { PluginRuntime } from "../runtime.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { mkdtempSync } from "node:fs";
 
 // ---------------------------------------------------------------------------
@@ -94,7 +94,8 @@ describe("PluginRuntime.reloadPlugin", () => {
     const manifestPath = await writePlugin("p-reload", "a");
     await writeRegistry([{ id: "p-reload", manifestPath }]);
 
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.startAll();
 
     expect(await runtime.call("p_reload_hello")).toBe("v-a");
@@ -129,6 +130,7 @@ describe("PluginRuntime.reloadPlugin", () => {
 
     const disabled: string[] = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -149,6 +151,7 @@ describe("PluginRuntime.reloadPlugin", () => {
 
     const disabled: string[] = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -171,7 +174,8 @@ describe("PluginRuntime.reloadPlugin", () => {
 
   it("reload on unknown plugin throws", async () => {
     await writeRegistry([]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.startAll();
     await expect(runtime.reloadPlugin("missing")).rejects.toThrow(/not loaded/);
   });
@@ -179,7 +183,8 @@ describe("PluginRuntime.reloadPlugin", () => {
   it("getPluginEntryDir returns dist directory for loaded plugin", async () => {
     const manifestPath = await writePlugin("p-dir", "a");
     await writeRegistry([{ id: "p-dir", manifestPath }]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.startAll();
     const dir = runtime.getPluginEntryDir("p-dir");
     expect(dir).toBe(join(installedDir, "p-dir"));
@@ -190,7 +195,8 @@ describe("PluginRuntime.reloadPlugin", () => {
     const manifestPath = await writePlugin("p-realpath", "a");
     await writeRegistry([{ id: "p-realpath", manifestPath }]);
 
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.startAll();
 
     // Clear call history accumulated during load() so we only observe calls

@@ -13,7 +13,11 @@ import type { PluginPaths } from "../plugin-paths.js";
 import { resolvePluginPaths } from "../plugin-paths.js";
 import { PluginMarketplaceService } from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
-import { PluginRuntime, type PluginRuntimeOptions } from "../runtime.js";
+import {
+  createNoopHostApiForTests,
+  PluginRuntime,
+  type PluginRuntimeOptions,
+} from "../runtime.js";
 import type { PluginManifest, Tool } from "../types.js";
 
 /**
@@ -255,6 +259,7 @@ export function makeTestPluginRuntime(
     hostRoot: fixture.rootDir,
     registryPath: fixture.registryPath,
     pluginsRoot: fixture.pluginsRoot,
+    createHostApi: createNoopHostApiForTests,
     ...options,
   });
 }

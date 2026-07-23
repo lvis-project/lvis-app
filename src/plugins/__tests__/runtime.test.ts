@@ -1056,7 +1056,8 @@ describe("PluginRuntime registry trusted-path", () => {
       JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
       "utf-8",
     );
-    const runtime = new PluginRuntime({ hostRoot, pluginsRoot, registryPath });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot, pluginsRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("cloud-plugin");
   });
@@ -1069,7 +1070,8 @@ describe("PluginRuntime registry trusted-path", () => {
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runtime = new PluginRuntime({ hostRoot, registryPath });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("cloud-plugin");
     expect(warnSpy).toHaveBeenCalledWith(
@@ -1089,7 +1091,8 @@ describe("PluginRuntime registry trusted-path", () => {
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runtime = new PluginRuntime({ hostRoot, pluginsRoot, registryPath });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot, pluginsRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("evil");
     expect(warnSpy).toHaveBeenCalledWith(
@@ -1216,6 +1219,7 @@ export default async function createPlugin({ hostApi }) {
 
   function makeRuntime(): PluginRuntime {
     return new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -1226,6 +1230,7 @@ export default async function createPlugin({ hostApi }) {
     preparePluginStart: ConstructorParameters<typeof PluginRuntime>[0]["preparePluginStart"],
   ): PluginRuntime {
     return new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -2848,6 +2853,131 @@ export default async function createPlugin() {
     await expect(restart).resolves.toBe("failed");
   });
 
+  it("cancels a never-settling restart preparation before same-id reinstall", async () => {
+    const pluginId = "p-cancel-immortal-restart";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    let prepareRestart = false;
+    let entered!: () => void;
+    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const neverSettles = new Promise<void>(() => {});
+    const runtime = makeRuntimeWithPreparation(() => {
+      if (!prepareRestart) return undefined;
+      entered();
+      return neverSettles;
+    });
+    await runtime.startAll();
+    prepareRestart = true;
+
+    const restart = runtime.restartPlugin(pluginId);
+    await preparationEntered;
+    expect(runtime.isPluginRestartPending(pluginId)).toBe(true);
+
+    const removal = runtime.removePlugin(pluginId);
+    await expect(restart).resolves.toBe("failed");
+    await expect(removal).resolves.toBeUndefined();
+    expect(runtime.isPluginRestartPending(pluginId)).toBe(false);
+
+    prepareRestart = false;
+    await expect(runtime.addPlugin(pluginId)).resolves.toBe("started");
+    await expect(
+      runtime.restartPlugin(pluginId, { skipPreparation: true }),
+    ).resolves.toBe("started");
+  });
+
+  it("runs an old instance stop hook once when removal cancels a restart", async () => {
+    const pluginId = "p-remove-during-restart-stop";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    const state = runtime as unknown as {
+      plugins: Map<string, { instance: { stop?: () => Promise<void> } }>;
+    };
+    const oldInstance = state.plugins.get(pluginId)?.instance;
+    expect(oldInstance).toBeDefined();
+    let entered!: () => void;
+    let release!: () => void;
+    const stopEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const stopGate = new Promise<void>((resolve) => { release = resolve; });
+    const stop = vi.fn(async () => {
+      entered();
+      await stopGate;
+    });
+    oldInstance!.stop = stop;
+
+    const restart = runtime.restartPlugin(pluginId, { skipPreparation: true });
+    await stopEntered;
+    const removal = runtime.removePlugin(pluginId);
+    await Promise.resolve();
+    expect(stop).toHaveBeenCalledTimes(1);
+
+    release();
+    await expect(restart).resolves.toBe("failed");
+    await expect(removal).resolves.toBeUndefined();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(runtime.listPluginIds()).not.toContain(pluginId);
+  });
+
+  it("serializes direct restart and reload calls behind config persistence", async () => {
+    const pluginId = "p-lifecycle-config-barrier";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    const assertWaitsForPersistence = async (
+      mutate: () => Promise<unknown>,
+    ): Promise<void> => {
+      let entered!: () => void;
+      let release!: () => void;
+      const persistenceEntered = new Promise<void>((resolve) => { entered = resolve; });
+      const persistenceGate = new Promise<void>((resolve) => { release = resolve; });
+      const persistence = withPluginInstallLock(pluginId, async () => {
+        entered();
+        await persistenceGate;
+      });
+      await persistenceEntered;
+      let settled = false;
+      const mutation = mutate().finally(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      release();
+      await persistence;
+      await mutation;
+    };
+
+    await assertWaitsForPersistence(() =>
+      runtime.restartPlugin(pluginId, { skipPreparation: true })
+    );
+    await assertWaitsForPersistence(() => runtime.reloadPlugin(pluginId));
+    expect(runtime.listPluginIds()).toEqual([pluginId]);
+  });
+
   it("addPlugin restart path prepares dependencies before stopping the loaded plugin", async () => {
     const manifestPath = await writePlugin("p-restart-prep");
     await writeFile(
@@ -3321,7 +3451,8 @@ describe("PluginRuntime lifecycle plog emission", () => {
     // The ctx object is passed as 2nd arg; check the message string + ctx via JSON.
     const calls: unknown[][] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const hasLoadStart = calls.some((args) => {
       const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
@@ -3336,7 +3467,8 @@ describe("PluginRuntime lifecycle plog emission", () => {
     await writeTestPluginRegistry({ registryPath }, [{ id: "plog-ok", manifestPath, enabled: true }]);
     const calls: unknown[][] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const hasLoadOk = calls.some((args) => {
       const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
@@ -3349,7 +3481,8 @@ describe("PluginRuntime lifecycle plog emission", () => {
   it("emits RESTART_REQUEST phase when restartPlugin is called", async () => {
     const manifestPath = await writeFakePlugin("plog-restart");
     await writeTestPluginRegistry({ registryPath }, [{ id: "plog-restart", manifestPath, enabled: true }]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const calls: unknown[][] = [];
     const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
@@ -3365,7 +3498,8 @@ describe("PluginRuntime lifecycle plog emission", () => {
   it("emits RESTART_STOP_OK phase after stop succeeds during restart", async () => {
     const manifestPath = await writeFakePlugin("plog-stop-ok");
     await writeTestPluginRegistry({ registryPath }, [{ id: "plog-stop-ok", manifestPath, enabled: true }]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const calls: unknown[][] = [];
     const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });

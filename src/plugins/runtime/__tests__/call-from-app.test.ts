@@ -39,7 +39,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime, MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE } from "../index.js";
+import { createNoopHostApiForTests, PluginRuntime, MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE } from "../index.js";
 import type { PluginToolInvocationContext } from "../index.js";
 import type { PluginManifest, Tool } from "../../types.js";
 
@@ -93,7 +93,8 @@ const MANIFEST: PluginManifest = {
 const AUTH_TOOL_NAMES = [MANIFEST.auth!.statusTool, MANIFEST.auth!.loginTool, MANIFEST.auth!.logoutTool!];
 
 function runtimeWithPlugin(handlers: Record<string, (p?: unknown) => Promise<unknown>>) {
-  const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
+  const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: HOST_ROOT, manifestPaths: [] });
   const internals = rt as unknown as {
     plugins: Map<string, { manifest: PluginManifest }>;
     methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
