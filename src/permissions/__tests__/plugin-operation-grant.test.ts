@@ -134,6 +134,42 @@ describe("PluginOperationGrantCoordinator", () => {
     next.release();
   });
 
+  it("serializes writes per domain without blocking a different account domain", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const firstAccountDomain = "c".repeat(64);
+    const secondAccountDomain = "d".repeat(64);
+    const firstWrite = await coordinator.acquireExecutionLease(
+      firstAccountDomain,
+      "write",
+    );
+    let sameAccountStarted = false;
+    const sameAccountWrite = coordinator.acquireExecutionLease(
+      firstAccountDomain,
+      "write",
+    ).then((lease) => {
+      sameAccountStarted = true;
+      return lease;
+    });
+    let otherAccountStarted = false;
+    const otherAccountWrite = coordinator.acquireExecutionLease(
+      secondAccountDomain,
+      "write",
+    ).then((lease) => {
+      otherAccountStarted = true;
+      return lease;
+    });
+    await Promise.resolve();
+    expect(sameAccountStarted).toBe(false);
+    expect(otherAccountStarted).toBe(true);
+
+    const otherAccountLease = await otherAccountWrite;
+    otherAccountLease.release();
+    firstWrite.release();
+    const sameAccountLease = await sameAccountWrite;
+    expect(sameAccountStarted).toBe(true);
+    sameAccountLease.release();
+  });
+
   it("records opaque read revisions and consumes a matching grant exactly once", () => {
     let now = 1_000;
     const coordinator = new PluginOperationGrantCoordinator(() => now);
