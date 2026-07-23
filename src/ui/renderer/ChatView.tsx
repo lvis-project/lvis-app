@@ -234,6 +234,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // (§6.10.8). The observed element is the chat-view-root (the parent of the
   // docked/drawer branch) so switching branches does not move the signal.
   const chatViewRootRef = useRef<HTMLDivElement | null>(null);
+  const dockedPanelMotionRef = useRef<HTMLDivElement | null>(null);
   const { isNarrow } = useContainerNarrow(chatViewRootRef);
   const dockedPanelShouldOpen = previewRailVisible && !isNarrow;
   const [dockedPanelPresent, setDockedPanelPresent] = useState(dockedPanelShouldOpen);
@@ -802,6 +803,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       </div>
       {dockedPanelPresent ? (
         <div
+          ref={dockedPanelMotionRef}
           id="chat-side-panel"
           data-testid="chat-side-panel-motion"
           aria-hidden={!dockedPanelExpanded}
@@ -841,6 +843,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             width={sidePanelWidth}
             onWidthChange={handleSidePanelWidthChange}
             onWidthCommit={handleSidePanelWidthCommit}
+            resizeElementRef={dockedPanelMotionRef}
             onClose={() => {
               onSidePanelOpenChange?.(false);
             }}

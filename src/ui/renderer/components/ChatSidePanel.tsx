@@ -591,6 +591,12 @@ export interface ChatSidePanelProps {
   /** Persist width (drag-end / keyboard step). */
   onWidthCommit: (px: number) => void;
   /**
+   * Docked flex slot whose outer width is the persisted panel width. Live drag
+   * writes target this slot so the card can reserve its `mr-2` inset without
+   * overflowing into the chat column.
+   */
+  resizeElementRef?: { current: HTMLElement | null };
+  /**
    * Docked variant applies the persisted width + drag handle. The narrow-screen
    * drawer variant sets this false: the sheet controls width (w-full), so the
    * inline width and left splitter are dropped.
@@ -612,11 +618,11 @@ export function ChatSidePanel({
   width,
   onWidthChange,
   onWidthCommit,
+  resizeElementRef,
   resizable = true,
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
-  const asideRef = useRef<HTMLElement | null>(null);
 
   // ─── Tab-bar horizontal scroll / drag-pan (diagnosis ②) ──────────────────
   const tabScrollElRef = useRef<HTMLDivElement | null>(null);
@@ -770,9 +776,10 @@ export function ChatSidePanel({
 
   return (
     <aside
-      ref={asideRef}
       data-testid="chat-side-panel"
-      style={resizable ? { width: `${width}px` } : undefined}
+      // `width` is the complete docked flex reservation. The floating card's
+      // `mr-2` consumes 0.5rem of that reservation instead of overflowing it.
+      style={resizable ? { width: `calc(${width}px - 0.5rem)` } : undefined}
       className={[
         "min-h-0 min-w-0 backdrop-blur",
         resizable
@@ -801,7 +808,7 @@ export function ChatSidePanel({
           min={SIDE_PANEL_MIN_WIDTH}
           max={resolveSidePanelMaxWidth}
           resetWidth={SIDE_PANEL_DEFAULT_WIDTH}
-          applyElementRef={asideRef}
+          applyElementRef={resizeElementRef}
           ariaLabel={t("chatPreviewRail.resizePanel")}
           data-testid="chat-side-panel-width-splitter"
         />
