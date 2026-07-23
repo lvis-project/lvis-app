@@ -13,6 +13,9 @@ const hostileControl = read("test/control/marketplace-e2e/run-hostile.mjs");
 const evidenceValidator = read("test/control/marketplace-e2e/validate-evidence.mjs");
 const evidenceNormalizer = read("test/control/marketplace-e2e/normalize-evidence.mjs");
 const harnessManifest = read("test/control/marketplace-e2e/create-harness-manifest.mjs");
+const candidateMaterializer = read(
+  "test/control/marketplace-e2e/materialize-candidate-tree.mjs",
+);
 const dependencyVerifier = read(
   "test/control/marketplace-e2e/verify-trusted-dependencies.mjs",
 );
@@ -100,12 +103,12 @@ describe("trusted marketplace E2E workflow", () => {
     expect(afterCredentialProof).not.toContain("PUBLIC_API_TOKEN");
     expect(afterCredentialProof).toContain(".gitmodules must remain inert regular data");
     expect(afterCredentialProof).toContain("sha256sum \"$repo/.gitmodules\"");
-    expect(afterCredentialProof).toContain(
-      "tar -xf .control/snapshots/sdk.tar",
-    );
-    expect(afterCredentialProof).toContain(
-      ".control/contexts/marketplace/vendor/lvis-plugin-sdk",
-    );
+    expect(afterCredentialProof).toContain("materialize-candidate-tree.mjs");
+    expect(afterCredentialProof).toContain("--source-context .control/contexts/sdk");
+    expect(afterCredentialProof).toContain("--destination-root .control/contexts/marketplace");
+    expect(afterCredentialProof).toContain("--destination vendor/lvis-plugin-sdk");
+    expect(afterCredentialProof).not.toContain("tar -xf");
+    expect(afterCredentialProof).not.toContain("git archive");
   });
 
   it("pins every action and the trusted harness to github.workflow_sha", () => {
@@ -123,14 +126,15 @@ describe("trusted marketplace E2E workflow", () => {
     expect(workflow).toContain('test "$(git -C .control/trusted rev-parse HEAD)" = "$CONTROL_SHA"');
   });
 
-  it("seals clean commit, tree, archive, tar digest, and inert gitmodules bindings locally", () => {
+  it("materializes exact Git tree blobs and records deterministic sealed bindings locally", () => {
     for (const proof of [
-      "git -C \"$repo\" archive --format=tar HEAD",
-      "git -C \"$repo\" rev-parse 'HEAD^{tree}'",
-      "archiveSha256",
-      "gitmodulesSha256",
-      "validate_archive \"$archive\"",
-      "Candidate archive contained Git metadata",
+      "materialize_repo host .candidate/host \"$HOST_SHA\"",
+      "materialize_repo marketplace .candidate/marketplace \"$MARKETPLACE_SHA\"",
+      '--allow-gitlink "vendor/lvis-plugin-sdk=$SDK_SHA"',
+      "--manifest \".control/snapshots/${name}.tree.json\"",
+      "--destination-manifest .control/snapshots/marketplace.tree.json",
+      "--evidence .control/snapshots/sdk-overlay.json",
+      "sdkOverlay:$sdkOverlay[0]",
       "input-bindings.json",
       "sdkSchemaSha256",
       "plugin-bundle-e2e-inputs.mjs",
@@ -138,6 +142,50 @@ describe("trusted marketplace E2E workflow", () => {
     ]) {
       expect(workflow).toContain(proof);
     }
+    for (const proof of [
+      '"ls-tree", "-rz", "--full-tree", "-t", "HEAD"',
+      '"cat-file", "--batch"',
+      "archiveSha256",
+      "gitmodulesSha256",
+      'entry.mode === "120000"',
+      'entry.mode === "160000"',
+      "root .dockerignore may filter",
+      "O_NOFOLLOW",
+      "stat.nlink !== 1",
+      "verifyMaterializedTree",
+      "overlayMaterializedTree",
+    ]) {
+      expect(candidateMaterializer).toContain(proof);
+    }
+    expect(evidenceValidator).toContain(
+      'bindings.sdkOverlay.targetPath !== "vendor/lvis-plugin-sdk"',
+    );
+    expect(evidenceValidator).toContain(
+      "bindings.sdkOverlay.gitlinkOid !== bindings.inputs.sdk.commit",
+    );
+    expect(evidenceValidator).toContain(
+      "bindings.sdkOverlay.sdkTree !== bindings.inputs.sdk.tree",
+    );
+    expect(evidenceValidator).toContain(
+      "bindings.sdkOverlay.sdkArchiveSha256 !== bindings.inputs.sdk.archiveSha256",
+    );
+    expect(orchestrate).toContain(
+      "'.sdkOverlay.imageInputArchiveSha256'",
+    );
+    expect(orchestrate).toContain(
+      '--build-arg "CANDIDATE_INPUT_SHA256=$marketplace_input_sha"',
+    );
+    expect(orchestrate).toContain(
+      '"ai.lvis.candidate-input-sha256"',
+    );
+    expect(orchestrate).toContain(
+      '"$observed_marketplace_input_sha" == "$marketplace_input_sha"',
+    );
+    expect(marketplaceDockerfile).toContain(
+      'LABEL ai.lvis.candidate-input-sha256="${CANDIDATE_INPUT_SHA256}"',
+    );
+    expect(candidateMaterializer).not.toContain("git archive");
+    expect(candidateMaterializer).not.toContain("tar -xf");
     const upload = workflow.slice(workflow.indexOf("- name: Upload validated public evidence only"));
     expect(upload).toContain("path: .control/export/validated-summary.json");
     expect(upload).not.toContain("*.json");

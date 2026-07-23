@@ -329,90 +329,37 @@ jobs:
             .control/evidence \
             .control/artifacts
 
-          validate_archive() {
-            local archive="$1"
-            python3 - "$archive" <<'PY'
-          import posixpath
-          import sys
-          import tarfile
-
-          with tarfile.open(sys.argv[1], "r:") as archive:
-              for member in archive:
-                  normalized = posixpath.normpath(member.name)
-                  if (
-                      member.name.startswith("/")
-                      or normalized == ".."
-                      or normalized.startswith("../")
-                      or member.ischr()
-                      or member.isblk()
-                      or member.isfifo()
-                      or member.isdev()
-                      or member.islnk()
-                  ):
-                      raise SystemExit(f"unsafe archive member: {member.name!r}")
-                  if member.issym():
-                      target = posixpath.normpath(
-                          posixpath.join(posixpath.dirname(member.name), member.linkname)
-                      )
-                      if member.linkname.startswith("/") or target.startswith("../"):
-                          raise SystemExit(f"escaping archive symlink: {member.name!r}")
-          PY
-          }
-
-          archive_repo() {
+          materialize_repo() {
             local name="$1"
             local repo="$2"
             local expected="$3"
-            local archive=".control/snapshots/${name}.tar"
-            local context=".control/contexts/${name}"
-            local commit tree archive_sha gitmodules_sha
-            commit="$(git -C "$repo" rev-parse HEAD)"
-            tree="$(git -C "$repo" rev-parse 'HEAD^{tree}')"
-            [[ "$commit" == "$expected" ]]
-            git -C "$repo" archive --format=tar HEAD >"$archive"
-            validate_archive "$archive"
-            archive_sha="$(sha256sum "$archive" | cut -d' ' -f1)"
-            gitmodules_sha=null
-            if [[ -e "$repo/.gitmodules" ]]; then
-              [[ -f "$repo/.gitmodules" && ! -L "$repo/.gitmodules" ]]
-              gitmodules_sha="$(
-                sha256sum "$repo/.gitmodules" | cut -d' ' -f1
-              )"
+            local -a gitlink_args=()
+            if [[ "$name" == marketplace ]]; then
+              gitlink_args=(
+                --allow-gitlink "vendor/lvis-plugin-sdk=$SDK_SHA"
+              )
             fi
-            install -d -m 0700 "$context"
-            tar -xf "$archive" -C "$context"
-            find "$context" -name .git -print -quit | grep -q . && {
-              echo "::error::Candidate archive contained Git metadata"
-              exit 1
-            }
-            jq -n \
-              --arg key "$name" \
-              --arg commit "$commit" \
-              --arg tree "$tree" \
-              --arg archiveSha256 "$archive_sha" \
-              --arg gitmodulesSha256 "$gitmodules_sha" \
-              '{
-                key:$key,
-                value:{
-                  commit:$commit,
-                  tree:$tree,
-                  archiveSha256:$archiveSha256,
-                  gitmodulesSha256:
-                    (if $gitmodulesSha256 == "null"
-                     then null else $gitmodulesSha256 end)
-                }
-              }' \
-              >".control/snapshots/${name}.json"
+            node \
+              .control/trusted/test/control/marketplace-e2e/materialize-candidate-tree.mjs \
+              materialize \
+              --name "$name" \
+              --repo "$repo" \
+              --expected "$expected" \
+              --context ".control/contexts/${name}" \
+              --archive ".control/snapshots/${name}.tar" \
+              --manifest ".control/snapshots/${name}.tree.json" \
+              --evidence ".control/snapshots/${name}.json" \
+              "${gitlink_args[@]}"
           }
 
-          archive_repo host .candidate/host "$HOST_SHA"
-          archive_repo marketplace .candidate/marketplace "$MARKETPLACE_SHA"
-          archive_repo sdk .candidate/sdk "$SDK_SHA"
-          archive_repo ep .candidate/ep "$EP_API_SHA"
+          materialize_repo host .candidate/host "$HOST_SHA"
+          materialize_repo marketplace .candidate/marketplace "$MARKETPLACE_SHA"
+          materialize_repo sdk .candidate/sdk "$SDK_SHA"
+          materialize_repo ep .candidate/ep "$EP_API_SHA"
 
           host_electron_spec="$(
             jq -er '.devDependencies.electron // .dependencies.electron' \
-              .candidate/host/package.json
+              .control/contexts/host/package.json
           )"
           [[ "$host_electron_spec" == "^43.0.0" \
             || "$host_electron_spec" == "43.0.0" ]]
@@ -422,19 +369,23 @@ jobs:
               const match = lock.match(/"electron": \["electron@([^"]+)"/u);
               if (!match) process.exit(1);
               process.stdout.write(match[1]);
-            ' .candidate/host/bun.lock
+            ' .control/contexts/host/bun.lock
           )"
           [[ "$host_electron_lock" == "43.0.0" ]]
 
-          rm -rf .control/contexts/marketplace/vendor/lvis-plugin-sdk
-          install -d -m 0700 \
-            .control/contexts/marketplace/vendor/lvis-plugin-sdk
-          tar -xf .control/snapshots/sdk.tar \
-            -C .control/contexts/marketplace/vendor/lvis-plugin-sdk
+          node \
+            .control/trusted/test/control/marketplace-e2e/materialize-candidate-tree.mjs \
+            overlay \
+            --source-context .control/contexts/sdk \
+            --source-manifest .control/snapshots/sdk.tree.json \
+            --destination-root .control/contexts/marketplace \
+            --destination-manifest .control/snapshots/marketplace.tree.json \
+            --destination vendor/lvis-plugin-sdk \
+            --evidence .control/snapshots/sdk-overlay.json
 
-          sdk_version="$(jq -er '.version' .candidate/sdk/package.json)"
+          sdk_version="$(jq -er '.version' .control/contexts/sdk/package.json)"
           sdk_schema_sha="$(
-            sha256sum .candidate/sdk/schemas/plugin-manifest.schema.json \
+            sha256sum .control/contexts/sdk/schemas/plugin-manifest.schema.json \
               | cut -d' ' -f1
           )"
           jq -n \
@@ -449,6 +400,7 @@ jobs:
             --arg workflowRef "$GITHUB_WORKFLOW_REF" \
             --arg sdkVersion "$sdk_version" \
             --arg sdkSchemaSha256 "$sdk_schema_sha" \
+            --slurpfile sdkOverlay .control/snapshots/sdk-overlay.json \
             '{
               schemaVersion:1,
               repository:"lvis-project/lvis-app",
@@ -458,6 +410,7 @@ jobs:
               workflowRef:$workflowRef,
               sdkVersion:$sdkVersion,
               sdkSchemaSha256:$sdkSchemaSha256,
+              sdkOverlay:$sdkOverlay[0],
               inputs:(map({(.key):.value}) | add)
             }' \
             .control/snapshots/host.json \

@@ -32,6 +32,12 @@ for path in "$control_root" "$contexts_root" "$evidence_root"; do
   [[ -d "$path" && ! -L "$path" ]] || fail "trusted control directory is invalid"
 done
 install -d -m 0700 "$artifacts_root" "$export_root" "$private_logs"
+marketplace_input_sha="$(
+  jq -er '.sdkOverlay.imageInputArchiveSha256' \
+    "$evidence_root/input-bindings.json"
+)"
+[[ "$marketplace_input_sha" =~ ^[0-9a-f]{64}$ ]] \
+  || fail "Marketplace image input digest is invalid"
 
 suffix="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 marketplace_image="lvis-marketplace-e2e:${suffix}"
@@ -100,7 +106,8 @@ build_image() {
 
 build_image \
   marketplace "$control_dir/Dockerfile.marketplace" \
-  "$contexts_root/marketplace" "$marketplace_image"
+  "$contexts_root/marketplace" "$marketplace_image" \
+  --build-arg "CANDIDATE_INPUT_SHA256=$marketplace_input_sha"
 build_image \
   ep "$control_dir/Dockerfile.ep" \
   "$contexts_root/ep" "$ep_image"
@@ -109,6 +116,14 @@ build_image \
   "$contexts_root/host" "$host_image" \
   --build-arg "CONTROL_SHA=$CONTROL_SHA" \
   --build-arg "HOST_SHA=$HOST_SHA"
+
+observed_marketplace_input_sha="$(
+  docker image inspect \
+    --format '{{ index .Config.Labels "ai.lvis.candidate-input-sha256" }}' \
+    "$marketplace_image"
+)"
+[[ "$observed_marketplace_input_sha" == "$marketplace_input_sha" ]] \
+  || fail "Marketplace image input digest label does not match the sealed context"
 
 jq -n \
   --arg marketplace "$(cat "$evidence_root/marketplace-image.iid")" \

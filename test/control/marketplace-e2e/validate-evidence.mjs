@@ -109,6 +109,7 @@ exactKeys(bindings, [
   "workflowRef",
   "sdkVersion",
   "sdkSchemaSha256",
+  "sdkOverlay",
   "inputs",
 ], "sealed input binding");
 if (
@@ -144,6 +145,28 @@ for (const name of ["host", "marketplace", "sdk", "ep"]) {
 }
 if (!sha256.test(bindings.sdkSchemaSha256 ?? "")) {
   throw new Error("sealed SDK schema binding is invalid");
+}
+exactKeys(
+  bindings.sdkOverlay,
+  [
+    "schemaVersion",
+    "targetPath",
+    "gitlinkOid",
+    "sdkTree",
+    "sdkArchiveSha256",
+    "imageInputArchiveSha256",
+  ],
+  "sealed Marketplace SDK overlay",
+);
+if (
+  bindings.sdkOverlay.schemaVersion !== 1
+  || bindings.sdkOverlay.targetPath !== "vendor/lvis-plugin-sdk"
+  || bindings.sdkOverlay.gitlinkOid !== bindings.inputs.sdk.commit
+  || bindings.sdkOverlay.sdkTree !== bindings.inputs.sdk.tree
+  || bindings.sdkOverlay.sdkArchiveSha256 !== bindings.inputs.sdk.archiveSha256
+  || !sha256.test(bindings.sdkOverlay.imageInputArchiveSha256 ?? "")
+) {
+  throw new Error("sealed Marketplace SDK overlay binding is invalid");
 }
 
 exactKeys(harness, ["schemaVersion", "controlSha", "files"], "trusted harness manifest");
@@ -189,6 +212,7 @@ if (
   inputContract.refs.host !== bindings.inputs.host.commit
   || inputContract.refs.marketplace !== bindings.inputs.marketplace.commit
   || inputContract.refs.sdk !== bindings.inputs.sdk.commit
+  || inputContract.refs.sdk !== bindings.sdkOverlay.gitlinkOid
   || inputContract.refs.epApi !== bindings.inputs.ep.commit
   || inputContract.schemaSha256 !== bindings.sdkSchemaSha256
   || inputContract.sdkDependency
