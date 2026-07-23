@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
@@ -111,6 +112,8 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   readonly mcpTrust: PluginMcpTrustStore;
   private readonly coordinator = new PluginGenerationCoordinator<HostPluginGenerationState>();
   private readonly tails = new Map<string, Promise<void>>();
+  private readonly lifecycleQueueContext = new AsyncLocalStorage<ReadonlyMap<string, object>>();
+  private readonly activeLifecycleQueueTokens = new WeakSet<object>();
   private readonly retirementJournal: PluginRetirementJournal;
   private readonly healthJournal: PluginGenerationHealthJournal;
   private readonly retirementTasks = new Set<Promise<void>>();
@@ -141,6 +144,10 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     return this.serialize(pluginId, () => this.activateNow(pluginId));
   }
 
+  runInLifecycleQueue<T>(pluginId: string, operation: () => Promise<T>): Promise<T> {
+    return this.serialize(pluginId, operation);
+  }
+
   replaceRuntime(runtime: PluginRuntimeGenerationProjection): Promise<void> {
     return this.serialize(runtime.manifest.id, async () => {
       await this.replaceRuntimeNow(runtime);
@@ -152,11 +159,10 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     receiptRaw: string,
     durableCommit: () => Promise<T>,
   ): Promise<CommittedPluginGeneration<T>> {
-    let committed!: CommittedPluginGeneration<T>;
-    await this.serialize(runtime.manifest.id, async () => {
-      committed = await this.replaceRuntimeNow(runtime, receiptRaw, durableCommit);
-    });
-    return committed;
+    return this.serialize(
+      runtime.manifest.id,
+      () => this.replaceRuntimeNow(runtime, receiptRaw, durableCommit),
+    );
   }
 
   deactivate(pluginId: string): Promise<void> {
@@ -164,11 +170,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   }
 
   async deactivateWithCommit<T>(pluginId: string, durableCommit: () => Promise<T>): Promise<T> {
-    let result!: T;
-    await this.serialize(pluginId, async () => {
-      result = await this.deactivateNow(pluginId, durableCommit);
-    });
-    return result;
+    return this.serialize(pluginId, () => this.deactivateNow(pluginId, durableCommit));
   }
 
   getActive(pluginId: string): ActivePluginGenerationSnapshot | undefined {
@@ -341,12 +343,27 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     return generation;
   }
 
-  private serialize(pluginId: string, operation: () => Promise<void>): Promise<void> {
+  private serialize<T>(pluginId: string, operation: () => Promise<T>): Promise<T> {
+    const current = this.lifecycleQueueContext.getStore();
+    const currentToken = current?.get(pluginId);
+    if (currentToken && this.activeLifecycleQueueTokens.has(currentToken)) return operation();
+
     const prior = this.tails.get(pluginId) ?? Promise.resolve();
-    const next = prior.catch(() => undefined).then(operation);
-    this.tails.set(pluginId, next);
+    const next = prior.then(async () => {
+      const token = {};
+      const inherited = new Map(this.lifecycleQueueContext.getStore() ?? current ?? []);
+      inherited.set(pluginId, token);
+      this.activeLifecycleQueueTokens.add(token);
+      try {
+        return await this.lifecycleQueueContext.run(inherited, operation);
+      } finally {
+        this.activeLifecycleQueueTokens.delete(token);
+      }
+    });
+    const tail = next.then(() => undefined, () => undefined);
+    this.tails.set(pluginId, tail);
     return next.finally(() => {
-      if (this.tails.get(pluginId) === next) this.tails.delete(pluginId);
+      if (this.tails.get(pluginId) === tail) this.tails.delete(pluginId);
     });
   }
 
