@@ -11,6 +11,39 @@
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 /**
+ * Bound plugin factory execution without abandoning a late-created instance.
+ * The caller revokes the pending HostApi incarnation when this rejects;
+ * `onLateResolution` receives a result that appears after the timeout so it
+ * can be stopped without ever becoming runtime-visible.
+ */
+export async function runPluginFactoryWithTimeout<T>(
+  factory: () => Promise<T> | T,
+  onLateResolution: (value: T) => Promise<void> | void,
+  timeoutMs: number = TOOL_TIMEOUT_POLICY.pluginFactoryMs,
+): Promise<T> {
+  const operation = Promise.resolve().then(factory);
+  let timer: NodeJS.Timeout | undefined;
+  let timedOut = false;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new Error(`plugin factory timeout (>${timeoutMs}ms)`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (timedOut) {
+      void operation.then(
+        (value) => Promise.resolve(onLateResolution(value)).catch(() => undefined),
+        () => undefined,
+      );
+    }
+  }
+}
+
+/**
  * Run a plugin's `start()` lifecycle hook under a host-enforced timeout. The
  * manifest's declared `startupTimeoutMs` is honored when present and clamped
  * to `pluginStartupMaxMs`; an undeclared value falls back to

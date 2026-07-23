@@ -15,6 +15,8 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
       }),
     },
     pluginRuntime: {
+      resolvePluginId: vi.fn((requestedPluginId: string) => requestedPluginId),
+      clearConfigOverride: vi.fn(),
       getPluginManifest: vi.fn(() => ({
         configSchema: {
           properties: {
@@ -148,6 +150,41 @@ describe("uninstallPluginWithLifecycle", () => {
       releaseWrite();
       await uninstall;
       expect(order).toEqual(["write:start", "remove:end", "write:end", "config:delete"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("serializes an install alias under the canonical id and clears late config state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-alias-"));
+    try {
+      const order: string[] = [];
+      const deps = makeDeps("canonical-plugin", join(root, ".cache"));
+      deps.pluginRuntime.resolvePluginId.mockReturnValue("canonical-plugin");
+      deps.pluginRuntime.removePlugin.mockImplementationOnce(async () => {
+        await withPluginInstallLock("canonical-plugin", async () => {
+          order.push("stop-write");
+        });
+        order.push("remove");
+      });
+      deps.pluginRuntime.clearConfigOverride.mockImplementationOnce(() => {
+        order.push("override:clear");
+      });
+      deps.settingsService.deletePluginConfig.mockImplementationOnce(async () => {
+        order.push("settings:clear");
+      });
+
+      await uninstallPluginWithLifecycle("marketplace-alias", deps);
+
+      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("canonical-plugin");
+      expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("marketplace-alias");
+      expect(deps.pluginRuntime.clearConfigOverride).toHaveBeenCalledWith("canonical-plugin");
+      expect(order).toEqual([
+        "stop-write",
+        "remove",
+        "override:clear",
+        "settings:clear",
+      ]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

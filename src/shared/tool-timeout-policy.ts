@@ -31,6 +31,8 @@
  *  - Plugin `instance.start()` falls back to `pluginStartupDefaultMs` when
  *    the manifest doesn't declare `startupTimeoutMs`, and any declared value
  *    is clamped to `pluginStartupMaxMs`.
+ *  - Plugin factory execution is capped by `pluginFactoryMs`; a late factory
+ *    result is never committed and is stopped by the runtime cleanup callback.
  *  - `PluginRuntime.readUiResource` (the plugin hook that serves a declared
  *    `ui://` MCP App card) is capped by `pluginUiResourceReadMs` — a render-path
  *    call, not a tool execution.
@@ -49,6 +51,7 @@ export const TOOL_TIMEOUT_POLICY = {
   shellDefaultMs: 60_000,
   shellMaxMs: 120_000,
   globalCeilingMs: 120_000,
+  pluginFactoryMs: 10_000,
   pluginStartupDefaultMs: 10_000,
   pluginStartupMaxMs: 60_000,
   // Ceiling for `RuntimePlugin.readUiResource` — the plugin hook that serves one
