@@ -22,7 +22,7 @@ import type {
 } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
-import { withPluginInstallLock } from "../install-lifecycle.js";
+import { withResolvedPluginInstallLocks } from "../install-lifecycle.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { updatePluginRegistry } from "../registry.js";
@@ -741,8 +741,18 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * @throws if `pluginId` is not a known/loaded plugin.
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
-    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
-    return withPluginInstallLock(canonicalPluginId, async () => {
+    return withResolvedPluginInstallLocks(
+      () => {
+        const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+        const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+        return [
+          pluginId,
+          canonicalPluginId,
+          ...(typeof installClaim === "string" ? [installClaim] : []),
+        ];
+      },
+      async () => {
+      const canonicalPluginId = this.resolveKnownPluginId(pluginId);
       if (
         !this.knownPluginManifests.has(canonicalPluginId)
         && !this.plugins.has(canonicalPluginId)
@@ -781,7 +791,8 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
           log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, false): %s`, (err as Error).message);
         }
       }
-    });
+      },
+    );
   }
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
@@ -801,6 +812,13 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       throw new Error(`Plugin install provenance unknown: ${pluginId}`);
     }
     return installClaim;
+  }
+
+  /** Registry/static provenance when known; undefined for a fresh identity. */
+  resolvePluginInstallIdIfKnown(
+    pluginId: string,
+  ): string | null | undefined {
+    return this.getPluginInstallClaim(this.resolveKnownPluginId(pluginId));
   }
 
   /** Final uninstall cleanup after stop-hook mutations have drained. */

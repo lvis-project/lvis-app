@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   drainPluginInstallLockOperations,
   hasPluginInstallInFlight,
+  isPluginInstallLockHeld,
   withPluginInstallLock,
+  withPluginInstallLocks,
+  withResolvedPluginInstallLocks,
   withAllPluginInstallLocks,
   installMarketplacePluginWithLifecycle,
   startInstalledPluginWithLifecycle,
@@ -18,6 +21,7 @@ function makeRuntime(initialPluginIds: string[] = []) {
     listPluginIds: vi.fn(() => [...pluginIds]),
     resolvePluginId: vi.fn((pluginId: string) => pluginId),
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
+    resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
     addPlugin: vi.fn(async (pluginId: string) => {
       if (!pluginIds.includes(pluginId)) pluginIds.push(pluginId);
       return "started" as const;
@@ -379,6 +383,76 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(order).toEqual(["plugin", "all:start", "all:end"]);
   });
 
+  it("atomically admits every alias identity before a global mutation", async () => {
+    let releaseMulti!: () => void;
+    let markMultiEntered!: () => void;
+    const multiGate = new Promise<void>((resolve) => {
+      releaseMulti = resolve;
+    });
+    const multiEntered = new Promise<void>((resolve) => {
+      markMultiEntered = resolve;
+    });
+    let allEntered = false;
+
+    const multiMutation = withPluginInstallLocks(
+      ["p-install-alias", "p-runtime-canonical"],
+      async () => {
+        markMultiEntered();
+        await multiGate;
+      },
+    );
+    const allMutation = withAllPluginInstallLocks(async () => {
+      allEntered = true;
+    });
+
+    await multiEntered;
+    expect(allEntered).toBe(false);
+    releaseMulti();
+    await multiMutation;
+    await allMutation;
+    expect(allEntered).toBe(true);
+  });
+
+  it("re-resolves an alias after waiting and retries with its restored canonical lock", async () => {
+    const installAlias = "p-waiting-alias";
+    const canonicalPluginId = "p-restored-canonical";
+    let releaseOwner!: () => void;
+    let markOwnerEntered!: () => void;
+    const ownerGate = new Promise<void>((resolve) => {
+      releaseOwner = resolve;
+    });
+    const ownerEntered = new Promise<void>((resolve) => {
+      markOwnerEntered = resolve;
+    });
+    const owner = withPluginInstallLocks(
+      [installAlias, canonicalPluginId],
+      async () => {
+        markOwnerEntered();
+        await ownerGate;
+      },
+    );
+    await ownerEntered;
+
+    let resolvedCanonicalId = installAlias;
+    let mutationEntered = false;
+    const mutation = withResolvedPluginInstallLocks(
+      () => [installAlias, resolvedCanonicalId],
+      async () => {
+        mutationEntered = true;
+        expect(isPluginInstallLockHeld(installAlias)).toBe(true);
+        expect(isPluginInstallLockHeld(canonicalPluginId)).toBe(true);
+      },
+    );
+    await Promise.resolve();
+    resolvedCanonicalId = canonicalPluginId;
+    expect(mutationEntered).toBe(false);
+
+    releaseOwner();
+    await owner;
+    await mutation;
+    expect(mutationEntered).toBe(true);
+  });
+
   it("cancels a pending restart before the outer install lock queues", async () => {
     let releaseRestart!: () => void;
     let restartEntered!: () => void;
@@ -481,9 +555,37 @@ describe("installMarketplacePluginWithLifecycle", () => {
     });
   });
 
-  it("rejects marketplace replacement of a loaded static plugin before mutation", async () => {
-    const runtime = makeRuntime(["p-static"]);
-    runtime.resolvePluginInstallId.mockReturnValue(null);
+  it("does not restart an alias-owned runtime when pre-stop fails before mutation", async () => {
+    const installAlias = "p-failed-stop-alias";
+    const canonicalPluginId = "p-failed-stop-canonical";
+    const runtime = makeRuntime([canonicalPluginId]);
+    runtime.resolvePluginId.mockImplementation((pluginId: string) =>
+      pluginId === installAlias ? canonicalPluginId : pluginId
+    );
+    runtime.resolvePluginInstallIdIfKnown.mockReturnValue(installAlias);
+    runtime.removePlugin.mockRejectedValueOnce(new Error("stop failed"));
+    const marketplace = makeMarketplace();
+    marketplace.list.mockResolvedValue([{
+      id: installAlias,
+      slug: installAlias,
+      installed: true,
+      version: "2.0.0",
+    }]);
+
+    await expect(installMarketplacePluginWithLifecycle({
+      requestedPluginId: installAlias,
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    })).rejects.toThrow("stop failed");
+
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
+    expect(marketplace.install).not.toHaveBeenCalled();
+    expect(runtime.listPluginIds()).toEqual([canonicalPluginId]);
+  });
+
+  it("rejects marketplace replacement of a known non-loaded static plugin before mutation", async () => {
+    const runtime = makeRuntime();
+    runtime.resolvePluginInstallIdIfKnown.mockReturnValue(null);
     const marketplace = makeMarketplace();
     marketplace.list.mockResolvedValue([{
       id: "p-static",
