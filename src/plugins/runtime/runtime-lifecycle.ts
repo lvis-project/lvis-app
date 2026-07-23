@@ -887,7 +887,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
     const targetIdentity = currentIdentities.find(({ plan }) =>
-      plan.pluginIdHint === pluginId
+      plan.enabled && plan.pluginIdHint === pluginId
     ) ?? currentIdentities.find(({ plan, snapshot }) =>
       !plan.pluginIdHint && plan.enabled && snapshot.manifest.id === pluginId
     );
@@ -1019,14 +1019,21 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.onDisable?.(canonicalPluginId);
   }
 
-  /** Helper: does a manifest path's directory name suggest it owns `pluginId`? */
-  protected matchesManifestPath(manifestPath: string, pluginId: string): boolean {
-    const parent = dirname(manifestPath);
-    const dirName = parent.split(/[\\/]/).pop() ?? "";
-    return dirName === pluginId || dirName === pluginId.replace(/[^a-zA-Z0-9._-]/g, "-");
-  }
-
-  /** Verify installed bytes and reject local-dev receipts outside dev mode. */
+  /**
+   * Verify the install receipt for `pluginId` under `pluginRoot` and enforce
+   * the dev-signer-in-packaged-build guard. Reporting may be deferred so boot
+   * can perform concurrent checks while emitting results in registry order.
+   *
+   * Returns `{ ok: true }` when verification passes (or is not required).
+   * Returns `{ ok: false }` when the plugin must be rejected — the caller is
+   * responsible for calling `markFailed` and deciding the control-flow
+   * (`continue` vs `return`).
+   *
+   * Skips all checks when `installReceiptCacheRoot` is not configured.
+   * Receipt verification now applies to every install source (admin / user /
+   * local-dev) — the legacy dev-link bypass was removed when the dev:link
+   * script was deleted.
+   */
   protected async verifyReceiptAndDevGuard(
     pluginId: string,
     pluginRoot: string,
