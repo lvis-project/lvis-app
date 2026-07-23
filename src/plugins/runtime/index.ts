@@ -234,7 +234,7 @@ export interface PluginRuntimeOptions {
   /**
    * Fires when a plugin's tear-down path runs (`restartPlugin` stop phase,
    * `restartAll` stop phase per plugin, `disable`, `removePlugin`,
-   * `reloadPlugin` stop phase, and `cleanupFailedStartRuntimeState` when a
+   * `reloadPlugin` stop phase, and `failClosedLoadedPlugin` when a
    * fresh start fails mid-`restartAll`). The host wires this to
    * `toolRegistry.unregisterByPlugin` + `keywordEngine.unregisterByPlugin`
    * + `conversationLoop.onPluginDisabled` so transient runtime state stays
@@ -242,7 +242,7 @@ export interface PluginRuntimeOptions {
    *
    * May fire more than once per logical cycle for the same pluginId — e.g.,
    * `restartAll` fires it from its pre-stop fan-out and then again from
-   * `cleanupFailedStartRuntimeState` if that plugin's start fails. Callbacks
+   * `failClosedLoadedPlugin` if that plugin's start fails. Callbacks
    * MUST be idempotent.
    */
   onDisable?: (pluginId: string) => void;

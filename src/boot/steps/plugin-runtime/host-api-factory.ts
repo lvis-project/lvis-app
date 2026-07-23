@@ -259,15 +259,21 @@ export function createHostApiFactory(
         stop,
         onStdout: (listener) => {
           assertIssuedCapabilityActive("hostApi.spawnWorker().onStdout");
-          worker.onStdout(listener);
+          worker.onStdout((chunk) => {
+            if (hostIncarnation.isActive()) listener(chunk);
+          });
         },
         onStderr: (listener) => {
           assertIssuedCapabilityActive("hostApi.spawnWorker().onStderr");
-          worker.onStderr(listener);
+          worker.onStderr((chunk) => {
+            if (hostIncarnation.isActive()) listener(chunk);
+          });
         },
         onExit: (listener) => {
           assertIssuedCapabilityActive("hostApi.spawnWorker().onExit");
-          worker.onExit(listener);
+          worker.onExit((info) => {
+            if (hostIncarnation.isActive()) listener(info);
+          });
         },
       };
     };
@@ -360,7 +366,7 @@ export function createHostApiFactory(
           }
           const nestedLifecycleMutation =
             isPluginInstallLockHeld(pluginId) || hostIncarnation.isLifecycleHookActive();
-          await withPluginInstallLock(pluginId, async () => {
+          await hostIncarnation.trackOperation(withPluginInstallLock(pluginId, async () => {
             // The HostApi object belongs to this exact manifest incarnation.
             // A queued write from a stopped/uninstalled instance must not
             // recreate persisted config for a removed or reinstalled plugin.
@@ -383,7 +389,7 @@ export function createHostApiFactory(
             // for the reload.
             pluginRuntime.setConfigOverride(pluginId, nextRecord);
             emitPluginConfigChange(pluginId, key, value);
-          });
+          }));
           // Lifecycle hooks inherit the owning mutation context. Persist their
           // write, but never recursively restart the instance whose start/stop
           // Promise is currently being awaited. A config-triggered replacement

@@ -1331,6 +1331,96 @@ export default async function createPlugin({ hostApi }) {
     await expect(readFile(stoppedPath, "utf-8")).resolves.toBe("stopped");
   });
 
+  it("revokes a timed-out boot incarnation before a slow peer settles", async () => {
+    const timedId = "p-start-timeout-revoked";
+    const slowId = "p-start-slow-peer";
+    const timedDir = join(installedDir, timedId);
+    const slowDir = join(installedDir, slowId);
+    await mkdir(timedDir, { recursive: true });
+    await mkdir(slowDir, { recursive: true });
+    await writeFile(
+      join(timedDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return { handlers: { p_start_timeout_revoked_ping: async () => "never" }, start: async () => new Promise(() => {}) };
+}\n`,
+      "utf-8",
+    );
+    await writeFile(
+      join(slowDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return { handlers: { p_start_slow_peer_ping: async () => "ok" }, start: async () => new Promise((resolve) => setTimeout(resolve, 250)) };
+}\n`,
+      "utf-8",
+    );
+    const manifestFor = (id: string, tool: string, startupTimeoutMs: number) => ({
+      id,
+      name: id,
+      version: "1.0.0",
+      entry: "entry.mjs",
+      startupTimeoutMs,
+      tools: [{ name: tool, description: `${tool} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+      description: "Boot timeout revocation fixture.",
+      publisher: "Test fixture",
+    });
+    const timedManifestPath = join(timedDir, "plugin.json");
+    const slowManifestPath = join(slowDir, "plugin.json");
+    await writeFile(timedManifestPath, JSON.stringify(manifestFor(timedId, "p_start_timeout_revoked_ping", 30)), "utf-8");
+    await writeFile(slowManifestPath, JSON.stringify(manifestFor(slowId, "p_start_slow_peer_ping", 1_000)), "utf-8");
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: timedId, manifestPath: timedManifestPath, enabled: true },
+        { id: slowId, manifestPath: slowManifestPath, enabled: true },
+      ],
+    }), "utf-8");
+
+    let timedHostApi: { getSecret(key: string): null } | undefined;
+    let timedIncarnation: { isLifecycleHookActive(): boolean } | undefined;
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      createHostApi: (pluginId, _manifest, _pluginDataDir, incarnation) => {
+        const getSecret = (_key: string): null => {
+          if (!incarnation.isActive()) throw new Error("plugin instance is no longer active");
+          return null;
+        };
+        const hostApi = {
+          registerKeywords: () => {},
+          emitEvent: () => {},
+          onEvent: () => () => {},
+          getInstalledPluginIds: () => [],
+          onPluginsChanged: () => () => {},
+          getSecret,
+          callTool: async () => undefined,
+          callLlm: async () => undefined,
+          logEvent: () => {},
+          onShutdown: () => {},
+        };
+        if (pluginId === timedId) {
+          timedHostApi = hostApi;
+          timedIncarnation = incarnation;
+        }
+        return hostApi as unknown as import("../types.js").PluginHostApi;
+      },
+    });
+    let settled = false;
+    const starting = runtime.startAll().finally(() => { settled = true; });
+
+    for (let attempt = 0; attempt < 100 && !timedIncarnation?.isLifecycleHookActive(); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(timedIncarnation?.isLifecycleHookActive()).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(settled).toBe(false);
+    expect(timedHostApi).toBeDefined();
+    expect(() => timedHostApi!.getSecret("late-write")).toThrow(/no longer active/);
+
+    await starting;
+    expect(runtime.listPluginIds()).not.toContain(timedId);
+    expect(runtime.listPluginIds()).toContain(slowId);
+  });
+
   it("restart disposes only the previous HostApi incarnation", async () => {
     const pluginId = "p-incarnation-disposer";
     const manifestPath = await writeHostDisposerPlugin(pluginId);

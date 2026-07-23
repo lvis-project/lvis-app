@@ -205,10 +205,30 @@ describe("installMarketplacePluginWithLifecycle", () => {
       });
       const ownerResult = owner.catch((caught) => caught);
       await started;
+
+      let queuedPluginEntered = false;
+      const queuedPlugin = withPluginInstallLock("p", async () => {
+        queuedPluginEntered = true;
+      });
+      const queuedPluginResult = queuedPlugin.catch((caught) => caught);
+      let queuedAllEntered = false;
+      const queuedAll = withAllPluginInstallLocks(async () => {
+        queuedAllEntered = true;
+      });
+      const queuedAllResult = queuedAll.catch((caught) => caught);
+
       await vi.advanceTimersByTimeAsync(10_001);
       await expect(ownerResult).resolves.toMatchObject({
         code: "plugin-lifecycle-drain-timeout",
       });
+      await expect(queuedPluginResult).resolves.toMatchObject({
+        code: "plugin-lifecycle-quarantined",
+      });
+      await expect(queuedAllResult).resolves.toMatchObject({
+        code: "plugin-lifecycle-quarantined",
+      });
+      expect(queuedPluginEntered).toBe(false);
+      expect(queuedAllEntered).toBe(false);
 
       let nextEntered = false;
       const next = withPluginInstallLock("p", async () => {

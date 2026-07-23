@@ -36,72 +36,13 @@ import {
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 import { PluginRuntimeState, type RestartPluginResult } from "./runtime-state.js";
+import {
+  preflightPluginLoadPlan,
+  type BootPreflightOutcome,
+  type PluginIntegrityCheckResult,
+} from "./runtime-preflight.js";
 
 const log = createLogger("plugin-runtime");
-const BOOT_PREFLIGHT_CONCURRENCY = 4;
-
-type PluginIntegrityCheckResult =
-  | {
-      ok: true;
-      verified?: {
-        installSource: "marketplace" | "local-dev";
-        signerKeyId: string | null;
-        artifactSha256: string | null;
-      };
-    }
-  | {
-      ok: false;
-      reason: string;
-      error?: unknown;
-    };
-
-type BootPreflightOutcome =
-  | {
-      ok: true;
-      plan: ManifestLoadPlan;
-      manifest: PluginManifest;
-      approvedPluginAccess: PluginAccessSpec | undefined;
-      integrityResult?: PluginIntegrityCheckResult;
-    }
-  | {
-      ok: false;
-      plan: ManifestLoadPlan;
-      kind: "integrity";
-      integrityResult: PluginIntegrityCheckResult & { ok: false };
-    }
-  | {
-      ok: false;
-      plan: ManifestLoadPlan;
-      kind: "manifest";
-      error: unknown;
-      integrityResult?: PluginIntegrityCheckResult;
-    };
-
-/**
- * Bounded parallel map whose result positions always match the input order.
- * Receipt hashing is I/O-heavy, so an unbounded Promise.all can make startup
- * slower on large managed fleets even though a small amount of overlap helps.
- */
-async function mapBoundedInOrder<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  mapItem: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  if (items.length === 0) return [];
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const worker = async (): Promise<void> => {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await mapItem(items[index]!, index);
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, () => worker()),
-  );
-  return results;
-}
 
 export class PluginRuntimeLifecycle extends PluginRuntimeState {
   private async importPluginFactoryForLifecycle(
@@ -127,46 +68,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   protected async preflightBootLoadPlan(
     loadPlan: ManifestLoadPlan[],
   ): Promise<BootPreflightOutcome[]> {
-    if (loadPlan.length === 0) return [];
-    // Compile AJV once before concurrent reads. This also prevents parallel
-    // callers from paying duplicate schema-compilation cost.
-    await this.getManifestValidator();
-    return mapBoundedInOrder(
+    return preflightPluginLoadPlan(
       loadPlan,
-      BOOT_PREFLIGHT_CONCURRENCY,
-      async (plan): Promise<BootPreflightOutcome> => {
-        let integrityResult: PluginIntegrityCheckResult | undefined;
-        if (plan.pluginIdHint) {
-          try {
-            integrityResult = await this.verifyReceiptAndDevGuard(
-              plan.pluginIdHint,
-              dirname(plan.manifestPath),
-              { report: false },
-            );
-          } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error);
-            integrityResult = {
-              ok: false,
-              reason: `install receipt verification failed unexpectedly: ${detail}`,
-              error,
-            };
-          }
-          if (!integrityResult.ok) {
-            return { ok: false, plan, kind: "integrity", integrityResult };
-          }
-        }
-        try {
-          const manifest = await this.readManifest(plan.manifestPath, { report: false });
-          return {
-            ok: true,
-            plan,
-            manifest,
-            approvedPluginAccess: plan.approvedPluginAccess,
-            integrityResult,
-          };
-        } catch (error) {
-          return { ok: false, plan, kind: "manifest", error, integrityResult };
-        }
+      {
+        prepare: () => this.getManifestValidator(),
+        verify: (pluginId, pluginRoot) => this.verifyReceiptAndDevGuard(
+          pluginId,
+          pluginRoot,
+          { report: false },
+        ),
+        readManifest: (manifestPath) => this.readManifest(manifestPath, { report: false }),
       },
     );
   }
@@ -449,6 +360,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
             if (err instanceof PluginStartupTimeoutError) {
               this.quarantinePluginLifecycle(id, err.message);
             }
+            // Fail closed immediately. Peer starts may still be running, but
+            // this failed incarnation must not retain HostApi while the batch
+            // waits for them to settle.
+            plugin.deactivateHostApi?.();
             throw err;
           }
         } finally {
@@ -481,14 +396,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("error", { pluginId: id, phase: PluginPhase.START_FAIL, reason }, "plugin start failed");
       const plugin = this.plugins.get(id);
       if (!plugin) continue;
-      this.markFailed(id);
-      await this.stopAfterStartFailure(
-        plugin.manifest.id,
-        plugin.instance,
-        plugin.lifecycleHookScope,
-      );
-      this.cleanupFailedStartRuntimeState(id, plugin.methods);
-      await this.drainPluginHostApiOperations(id, plugin);
+      await this.failClosedLoadedPlugin(id, plugin, "start failure cleanup");
     }
   }
 
@@ -659,6 +567,13 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");
     } catch (err) {
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
+      if (err instanceof PluginImportTimeoutError) {
+        await this.failClosedLoadedPlugin(
+          pluginId,
+          plugin,
+          "restart import timeout",
+        );
+      }
       return "failed";
     }
 
@@ -714,10 +629,14 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       if (err instanceof PluginFactoryTimeoutError) {
         this.quarantinePluginLifecycle(pluginId, err.message);
       }
+      const oldCleanup = err instanceof PluginFactoryTimeoutError
+        ? this.failClosedLoadedPlugin(pluginId, plugin, "restart factory timeout")
+        : null;
       this.runDisposerList(replacementDisposers, "failed restart factory");
       await this.drainPluginHostApiOperations(pluginId, {
         drainHostApiOperations: drainReplacementHostApiOperations,
       });
+      await oldCleanup;
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
       return "failed";
     }
@@ -753,11 +672,15 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
       plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
       deactivateReplacementHostApi();
+      const oldCleanup = err instanceof PluginStartupTimeoutError
+        ? this.failClosedLoadedPlugin(pluginId, plugin, "restart start timeout")
+        : null;
       await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "failed restart start");
       await this.drainPluginHostApiOperations(pluginId, {
         drainHostApiOperations: drainReplacementHostApiOperations,
       });
+      await oldCleanup;
       return "failed";
     }
 
@@ -1079,21 +1002,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     return dirName === pluginId || dirName === pluginId.replace(/[^a-zA-Z0-9._-]/g, "-");
   }
 
-  /**
-   * Verify the install receipt for `pluginId` under `pluginRoot` and enforce
-   * the dev-signer-in-packaged-build guard. Reporting may be deferred so boot
-   * can perform concurrent checks while emitting results in registry order.
-   *
-   * Returns `{ ok: true }` when verification passes (or is not required).
-   * Returns `{ ok: false }` when the plugin must be rejected — the caller is
-   * responsible for calling `markFailed` and deciding the control-flow
-   * (`continue` vs `return`).
-   *
-   * Skips all checks when `installReceiptCacheRoot` is not configured.
-   * Receipt verification now applies to every install source (admin / user /
-   * local-dev) — the legacy dev-link bypass was removed when the dev:link
-   * script was deleted.
-   */
+  /** Verify installed bytes and reject local-dev receipts outside dev mode. */
   protected async verifyReceiptAndDevGuard(
     pluginId: string,
     pluginRoot: string,
@@ -1160,16 +1069,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
   }
 
-  /**
-   * Per-plugin instantiation + start. Used by `addPlugin` for post-boot
-   * fresh-load installs. Boot's `startAll` intentionally bypasses this path
-   * — it runs its own inline start loop and lets registration flow through
-   * PluginLoopbackManager (each plugin runs as an in-process MCP server),
-   * wired in boot/steps/plugin-runtime.ts, which owns the one-shot
-   * ToolRegistry population (see §9.3a). This method fires
-   * `onEnable` on the start-success branch so post-boot installs converge
-   * the host's transient state automatically.
-   */
+  /** Instantiate and start one post-boot plugin without rebuilding its peers. */
   protected async instantiateAndStartSinglePlugin(
     plan: ManifestLoadPlan,
     manifest: PluginManifest,
