@@ -1,15 +1,30 @@
 import AdmZip from "adm-zip";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { installAgentPackageFromMarketplace } from "../agent-installer.js";
 import { installSkillPackageFromMarketplace } from "../../skills/skill-installer.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
-import type { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
+import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { PluginMarketplaceItem } from "../../plugins/types.js";
+
+const TEST_INSTALL_ROOT = resolve(process.cwd(), ".lvis-package");
+const TEST_CACHE_ROOT = resolve(process.cwd(), ".lvis-package-cache");
+const TEST_AGENT_REGISTRY_PATH = resolve(process.cwd(), ".lvis-agent-registry.json");
+const TEST_SKILL_REGISTRY_PATH = resolve(process.cwd(), ".lvis-skill-registry.json");
+
+afterEach(() => {
+  for (const path of [
+    TEST_INSTALL_ROOT,
+    TEST_CACHE_ROOT,
+    TEST_AGENT_REGISTRY_PATH,
+    TEST_SKILL_REGISTRY_PATH,
+  ]) {
+    rmSync(path, { recursive: true, force: true });
+  }
+});
 
 function zipBuffer(files: Record<string, string>): Buffer {
   const zip = new AdmZip();
@@ -44,23 +59,29 @@ function makeFetcher(pluginType: "agent" | "skill"): MarketplaceFetcher {
 function makeStore(buffer: Buffer): PluginArtifactStore & {
   extractZip: ReturnType<typeof vi.fn>;
 } {
-  const installRoot = resolve("/tmp/lvis-package");
-  return {
-    downloadVerifiedArtifact: vi.fn(async () => ({
+  const installRoot = TEST_INSTALL_ROOT;
+  const store = new PluginArtifactStore({
+    installRoot,
+    cacheRoot: TEST_CACHE_ROOT,
+    fetcher: makeFetcher("agent"),
+    publicKeys: {},
+    tarballCacheBase: null,
+  });
+  vi.spyOn(store, "downloadVerifiedArtifact").mockImplementation(async () => ({
       zipBuffer: buffer,
       artifactSha256: "abc123",
       signerKeyId: "test-key",
-    })),
-    extractZip: vi.fn(async () => ["plugin.json"]),
-    installDirFor: vi.fn(() => installRoot),
-    writeInstallReceipt: vi.fn(),
-    appendHistory: vi.fn(),
-  } as unknown as PluginArtifactStore & { extractZip: ReturnType<typeof vi.fn> };
+    }));
+  vi.spyOn(store, "extractZip").mockResolvedValue(["plugin.json"]);
+  vi.spyOn(store, "installDirFor").mockReturnValue(installRoot);
+  vi.spyOn(store, "writeInstallReceipt").mockResolvedValue({} as never);
+  vi.spyOn(store, "appendHistory").mockResolvedValue(undefined);
+  return store as PluginArtifactStore & { extractZip: ReturnType<typeof vi.fn> };
 }
 
 describe("assistant package installers", () => {
   it("end-to-end: installs an agent package and records the marketplace registry entry", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "lvis-agent-package-"));
+    const tmp = mkdtempSync(join(process.cwd(), ".lvis-agent-package-"));
     try {
       const store = makeStore(zipBuffer({
         "plugin.json": JSON.stringify({ id: "reviewer", version: "1.0.0" }),
@@ -98,8 +119,8 @@ describe("assistant package installers", () => {
         id: "reviewer",
         source: "marketplace",
         enabled: true,
-        profilePath: join(resolve("/tmp/lvis-package"), "AGENTS.md"),
-        manifestPath: join(resolve("/tmp/lvis-package"), "plugin.json"),
+        profilePath: join(TEST_INSTALL_ROOT, "AGENTS.md"),
+        manifestPath: join(TEST_INSTALL_ROOT, "plugin.json"),
       });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -107,7 +128,7 @@ describe("assistant package installers", () => {
   });
 
   it("end-to-end: installs a skill package and records the marketplace registry entry", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "lvis-skill-package-"));
+    const tmp = mkdtempSync(join(process.cwd(), ".lvis-skill-package-"));
     try {
       const store = makeStore(zipBuffer({
         "plugin.json": JSON.stringify({ id: "audit", version: "1.0.0" }),
@@ -145,8 +166,8 @@ describe("assistant package installers", () => {
         id: "audit",
         source: "marketplace",
         enabled: true,
-        skillPath: join(resolve("/tmp/lvis-package"), "SKILL.md"),
-        manifestPath: join(resolve("/tmp/lvis-package"), "plugin.json"),
+        skillPath: join(TEST_INSTALL_ROOT, "SKILL.md"),
+        manifestPath: join(TEST_INSTALL_ROOT, "plugin.json"),
       });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -163,7 +184,7 @@ describe("assistant package installers", () => {
       installAgentPackageFromMarketplace("reviewer", {
         fetcher: makeFetcher("agent"),
         store,
-        registryPath: "/tmp/lvis-agent-registry.json",
+        registryPath: TEST_AGENT_REGISTRY_PATH,
       }),
     ).rejects.toThrow(/empty AGENTS\.md body/);
 
@@ -180,7 +201,7 @@ describe("assistant package installers", () => {
       installSkillPackageFromMarketplace("audit", {
         fetcher: makeFetcher("skill"),
         store,
-        registryPath: "/tmp/lvis-skill-registry.json",
+        registryPath: TEST_SKILL_REGISTRY_PATH,
       }),
     ).rejects.toThrow(/empty SKILL\.md body/);
 
@@ -197,7 +218,7 @@ describe("assistant package installers", () => {
       installAgentPackageFromMarketplace("reviewer", {
         fetcher: makeFetcher("agent"),
         store,
-        registryPath: "/tmp/lvis-agent-registry.json",
+        registryPath: TEST_AGENT_REGISTRY_PATH,
       }),
     ).rejects.toThrow(/must match the package slug/);
 
@@ -214,10 +235,82 @@ describe("assistant package installers", () => {
       installSkillPackageFromMarketplace("audit", {
         fetcher: makeFetcher("skill"),
         store,
-        registryPath: "/tmp/lvis-skill-registry.json",
+        registryPath: TEST_SKILL_REGISTRY_PATH,
       }),
     ).rejects.toThrow(/must match the package slug/);
 
     expect(store.extractZip).not.toHaveBeenCalled();
+  });
+
+  it("serializes Agent and Skill artifact lifetimes through the shared process slot", async () => {
+    const tmp = mkdtempSync(join(process.cwd(), ".lvis-assistant-package-slot-"));
+    const agentBuffer = zipBuffer({
+      "plugin.json": JSON.stringify({ id: "reviewer", version: "1.0.0" }),
+      "AGENTS.md": "---\nname: reviewer\n---\nDo reviewer work.\n",
+    });
+    const skillBuffer = zipBuffer({
+      "plugin.json": JSON.stringify({ id: "audit", version: "1.0.0" }),
+      "SKILL.md": "---\nname: audit\n---\nUse audit checks.\n",
+    });
+    const agentStore = makeStore(agentBuffer);
+    const skillStore = makeStore(skillBuffer);
+    let releaseAgent!: () => void;
+    let agentDownloadEntered = false;
+    const agentBlocked = new Promise<void>((resolvePromise) => {
+      releaseAgent = resolvePromise;
+    });
+    vi.mocked(agentStore.downloadVerifiedArtifact).mockImplementationOnce(async () => {
+      agentDownloadEntered = true;
+      await agentBlocked;
+      return { zipBuffer: agentBuffer, artifactSha256: "agent-sha", signerKeyId: "test-key" };
+    });
+    const skillDownload = vi.mocked(skillStore.downloadVerifiedArtifact);
+    try {
+      const agentInstall = installAgentPackageFromMarketplace("reviewer", {
+        fetcher: makeFetcher("agent"),
+        store: agentStore,
+        registryPath: join(tmp, "agents.json"),
+      });
+      await vi.waitFor(() => expect(agentDownloadEntered).toBe(true));
+
+      const skillInstall = installSkillPackageFromMarketplace("audit", {
+        fetcher: makeFetcher("skill"),
+        store: skillStore,
+        registryPath: join(tmp, "skills.json"),
+      });
+      await Promise.resolve();
+      expect(skillDownload).not.toHaveBeenCalled();
+
+      releaseAgent();
+      await expect(Promise.all([agentInstall, skillInstall])).resolves.toHaveLength(2);
+      expect(skillDownload).toHaveBeenCalledOnce();
+    } finally {
+      releaseAgent?.();
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("preflights Agent and Skill ZIPs before inflating root documents", async () => {
+    const agentZip = new AdmZip();
+    agentZip.addFile("plugin.json", Buffer.from("{}"));
+    agentZip.addFile("AGENTS.md", Buffer.alloc(1024 * 1024));
+    const agentStore = makeStore(agentZip.toBuffer());
+    await expect(installAgentPackageFromMarketplace("reviewer", {
+      fetcher: makeFetcher("agent"),
+      store: agentStore,
+      registryPath: TEST_AGENT_REGISTRY_PATH,
+    })).rejects.toMatchObject({ code: "ARCHIVE_COMPRESSION_RATIO_EXCEEDED" });
+    expect(agentStore.extractZip).not.toHaveBeenCalled();
+
+    const skillZip = new AdmZip();
+    skillZip.addFile("plugin.json", Buffer.from("{}"));
+    skillZip.addFile("SKILL.md", Buffer.alloc(1024 * 1024));
+    const skillStore = makeStore(skillZip.toBuffer());
+    await expect(installSkillPackageFromMarketplace("audit", {
+      fetcher: makeFetcher("skill"),
+      store: skillStore,
+      registryPath: TEST_SKILL_REGISTRY_PATH,
+    })).rejects.toMatchObject({ code: "ARCHIVE_COMPRESSION_RATIO_EXCEEDED" });
+    expect(skillStore.extractZip).not.toHaveBeenCalled();
   });
 });

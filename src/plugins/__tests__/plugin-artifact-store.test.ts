@@ -307,6 +307,130 @@ describe("PluginArtifactStore — extractZip", () => {
     }
   });
 
+  it("rejects compressed bytes above the configured ceiling before staging", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp, { artifactLimits: { maxCompressedBytes: 4 } });
+      await expect(store.extractZip("acme", Buffer.alloc(5))).rejects.toMatchObject({
+        code: "ARTIFACT_TOO_LARGE",
+      });
+      expect(existsSync(resolve(tmp, "installed"))).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects too many zip entries and removes the stage directory", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp, { artifactLimits: { maxEntryCount: 1 } });
+      const zip = new AdmZip();
+      zip.addFile("one.txt", Buffer.from("1"));
+      zip.addFile("two.txt", Buffer.from("2"));
+      await expect(store.extractZip("acme", zip.toBuffer())).rejects.toMatchObject({
+        code: "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
+      });
+      const entries = existsSync(resolve(tmp, "installed"))
+        ? await readdir(resolve(tmp, "installed"))
+        : [];
+      expect(entries.filter((name) => name.includes(".stage-"))).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an excessive declared entry count before enumerating central-directory entries", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp, { artifactLimits: { maxEntryCount: 1 } });
+      const zip = new AdmZip().toBuffer();
+      const endOfCentralDirectoryOffset = zip.byteLength - 22;
+      zip.writeUInt16LE(2, endOfCentralDirectoryOffset + 8);
+      zip.writeUInt16LE(2, endOfCentralDirectoryOffset + 10);
+
+      await expect(store.extractZip("acme", zip)).rejects.toMatchObject({
+        code: "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
+      });
+      const entries = existsSync(resolve(tmp, "installed"))
+        ? await readdir(resolve(tmp, "installed"))
+        : [];
+      expect(entries.filter((name) => name.includes(".stage-"))).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a real high-compression archive before inflating the entry", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp, {
+        artifactLimits: { maxCompressionRatio: 10 },
+      });
+      const zip = new AdmZip();
+      zip.addFile("bomb.bin", Buffer.alloc(1024 * 1024));
+      const zipBuffer = zip.toBuffer();
+      expect(zipBuffer.byteLength).toBeLessThan(16 * 1024);
+
+      await expect(store.extractZip("acme", zipBuffer)).rejects.toMatchObject({
+        code: "ARCHIVE_COMPRESSION_RATIO_EXCEEDED",
+      });
+      expect(existsSync(resolve(tmp, "installed", "acme"))).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces individual and aggregate uncompressed entry ceilings", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const individualStore = makeStore(tmp, {
+        artifactLimits: { maxEntryUncompressedBytes: 2 },
+      });
+      const individualZip = new AdmZip();
+      individualZip.addFile("large.txt", Buffer.from("123"));
+      await expect(individualStore.extractZip("acme", individualZip.toBuffer()))
+        .rejects.toMatchObject({ code: "ARCHIVE_ENTRY_TOO_LARGE" });
+
+      const aggregateStore = makeStore(tmp, {
+        artifactLimits: { maxEntryUncompressedBytes: 2, maxTotalUncompressedBytes: 3 },
+      });
+      const aggregateZip = new AdmZip();
+      aggregateZip.addFile("one.txt", Buffer.from("12"));
+      aggregateZip.addFile("two.txt", Buffer.from("34"));
+      await expect(aggregateStore.extractZip("acme", aggregateZip.toBuffer()))
+        .rejects.toMatchObject({ code: "ARCHIVE_UNCOMPRESSED_TOO_LARGE" });
+      const entries = existsSync(resolve(tmp, "installed"))
+        ? await readdir(resolve(tmp, "installed"))
+        : [];
+      expect(entries.filter((name) => name.includes(".stage-"))).toEqual([]);
+      expect(existsSync(resolve(tmp, "installed", "acme"))).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("allows zip counts and uncompressed bytes exactly at their boundaries", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp, {
+        artifactLimits: {
+          maxEntryCount: 2,
+          maxEntryUncompressedBytes: 2,
+          maxTotalUncompressedBytes: 4,
+        },
+      });
+      const zip = new AdmZip();
+      zip.addFile("one.txt", Buffer.from("12"));
+      zip.addFile("two.txt", Buffer.from("34"));
+      await expect(store.extractZip("acme", zip.toBuffer())).resolves.toEqual([
+        "one.txt",
+        "two.txt",
+      ]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it.runIf(process.platform !== "win32")(
     "surfaces persistent promoted-directory cleanup failure and retains the old backup",
     async () => {
@@ -374,6 +498,87 @@ describe("PluginArtifactStore — extractZip", () => {
     },
     10_000,
   );
+});
+
+describe("PluginArtifactStore — process-wide artifact resource slot", () => {
+  it("serializes full artifact lifetimes across independent stores", async () => {
+    const firstTmp = makeTmpDir("artifact-store-slot-a-");
+    const secondTmp = makeTmpDir("artifact-store-slot-b-");
+    try {
+      const firstStore = makeStore(firstTmp);
+      const secondStore = makeStore(secondTmp);
+      let releaseFirst!: () => void;
+      let firstEntered = false;
+      let secondEntered = false;
+      const firstBlocked = new Promise<void>((resolvePromise) => {
+        releaseFirst = resolvePromise;
+      });
+
+      const first = firstStore.withArtifactResourceSlot(async () => {
+        firstEntered = true;
+        await firstBlocked;
+        return "first";
+      });
+      await vi.waitFor(() => expect(firstEntered).toBe(true));
+
+      const second = secondStore.withArtifactResourceSlot(async () => {
+        secondEntered = true;
+        return "second";
+      });
+      await Promise.resolve();
+      expect(secondEntered).toBe(false);
+
+      releaseFirst();
+      await expect(Promise.all([first, second])).resolves.toEqual(["first", "second"]);
+      expect(secondEntered).toBe(true);
+    } finally {
+      rmSync(firstTmp, { recursive: true, force: true });
+      rmSync(secondTmp, { recursive: true, force: true });
+    }
+  });
+
+  it("releases the slot after rejection so the next operation can run", async () => {
+    const tmp = makeTmpDir("artifact-store-slot-reject-");
+    try {
+      const store = makeStore(tmp);
+      const failure = new Error("inspection failed");
+      await expect(store.withArtifactResourceSlot(async () => {
+        throw failure;
+      })).rejects.toBe(failure);
+      await expect(store.withArtifactResourceSlot(async () => "next")).resolves.toBe("next");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("aborts a queued waiter without releasing the active slot early", async () => {
+    const tmp = makeTmpDir("artifact-store-slot-abort-");
+    try {
+      const store = makeStore(tmp);
+      let releaseFirst!: () => void;
+      let thirdEntered = false;
+      const first = store.withArtifactResourceSlot(
+        () => new Promise<void>((resolvePromise) => { releaseFirst = resolvePromise; }),
+      );
+      await vi.waitFor(() => expect(releaseFirst).toBeTypeOf("function"));
+
+      const controller = new AbortController();
+      const second = store.withArtifactResourceSlot(async () => "second", controller.signal);
+      const third = store.withArtifactResourceSlot(async () => {
+        thirdEntered = true;
+        return "third";
+      });
+      controller.abort();
+      await expect(second).rejects.toMatchObject({ name: "AbortError" });
+      expect(thirdEntered).toBe(false);
+
+      releaseFirst();
+      await first;
+      await expect(third).resolves.toBe("third");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("assertSafeArtifactSlug", () => {

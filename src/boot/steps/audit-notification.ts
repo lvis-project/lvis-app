@@ -46,6 +46,21 @@ export async function setupAuditAndNotification(ctx: BootContext): Promise<void>
     permissionAuditSecretStore,
   );
 
+  // §14.2 Audit rotation must share the runtime writer instance. A separate
+  // maintenance logger cannot drain records queued by the host/plugin paths.
+  const runAuditMaintenance = () => {
+    const auditCfg = ctx.settingsService.get("audit");
+    void bootAuditLogger.rotateAndPrune({
+      maxBytes: auditCfg.auditRotationMaxBytes,
+      retentionDays: auditCfg.auditRetentionDays,
+    }).catch((err: unknown) => {
+      log.warn({ err }, "rotateAndPrune failed");
+    });
+  };
+  runAuditMaintenance();
+  const auditMaintenanceTimer = setInterval(runAuditMaintenance, 60 * 60 * 1000);
+  auditMaintenanceTimer.unref?.();
+
   // Issue #260 — system notification service. Constructed up-front so
   // turn-end, routine, ask-user, approval, plugin, and system cues can call .fire().
   // Live mainWindow getter avoids a stale handle after Electron close+reopen.
@@ -87,7 +102,7 @@ export async function setupAuditAndNotification(ctx: BootContext): Promise<void>
     .then((persisted) => {
       if (persisted !== null) seedPluginAuthPartitions(persisted);
     })
-    .catch((err) => {
+    .catch(async (err) => {
       const msg = (err as Error).message;
       bootAuditLogger.log({
         timestamp: new Date().toISOString(),
@@ -96,6 +111,7 @@ export async function setupAuditAndNotification(ctx: BootContext): Promise<void>
         input: "plugin-auth-partition-store: load failed at boot",
         output: msg,
       });
+      await bootAuditLogger.flush();
       throw err;
     });
   wirePluginAuthPartitionPersistence({
