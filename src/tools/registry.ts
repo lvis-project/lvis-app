@@ -59,6 +59,12 @@ export interface ToolCatalogEntry {
   mcpServerId?: string;
 }
 
+export interface PreparedMcpRegistryReplacement {
+  readonly replacementTools: readonly Tool[];
+  publish(): void;
+  cancel(): void;
+}
+
 /**
  * Tool-Level Deferral — compress a tool description for the catalog: first
  * sentence (up to the first period) capped at ~100 chars. Keeps the per-turn
@@ -162,6 +168,7 @@ export class ToolRegistry {
   private readonly versioned = new Map<string, Map<string, Tool>>();
   private denyRules: DenyRule[] = [];
   private generation = 0;
+  private readonly reservedMcpToolNames = new Map<string, symbol>();
 
   constructor(private readonly parentGeneration?: () => string) {}
 
@@ -175,6 +182,9 @@ export class ToolRegistry {
    *   (semver compare) and is not deprecated.
    */
   register(tool: Tool): void {
+    if (this.reservedMcpToolNames.has(tool.name)) {
+      throw new Error(`Tool name is reserved by an MCP generation transition: ${tool.name}`);
+    }
     const versionMap = this.addToVersioned(this.versioned, tool);
     this.tools.set(tool.name, this.pickLatest(versionMap));
     this.generation += 1;
@@ -270,6 +280,63 @@ export class ToolRegistry {
       this.syncLatest(name, versionMap);
     }
     if (changed) this.generation += 1;
+  }
+
+  /**
+   * Validate and reserve an exact MCP owner replacement without mutating the
+   * live registry. publish() performs one synchronous map swap and cannot be
+   * interleaved with another registration for a reserved replacement name.
+   */
+  reserveMcpReplacement(
+    predecessorServerIds: Iterable<string>,
+    replacementTools: readonly Tool[],
+  ): PreparedMcpRegistryReplacement {
+    const predecessors = new Set(predecessorServerIds);
+    const token = Symbol("mcp-generation-replacement");
+    const names = new Set(replacementTools.map((tool) => tool.name));
+    for (const tool of replacementTools) {
+      if (tool.source !== "mcp" || !tool.mcpServerId) {
+        throw new Error(`MCP replacement expected an MCP-owned tool: ${tool.name}`);
+      }
+    }
+    for (const name of names) {
+      if (this.reservedMcpToolNames.has(name)) {
+        throw new Error(`MCP replacement tool name is already reserved: ${name}`);
+      }
+    }
+    const validate = this.cloneVersioned();
+    this.removeMcpOwners(validate, predecessors);
+    for (const tool of replacementTools) this.addToVersioned(validate, tool);
+    for (const name of names) this.reservedMcpToolNames.set(name, token);
+
+    let settled = false;
+    const releaseReservations = () => {
+      for (const name of names) {
+        if (this.reservedMcpToolNames.get(name) === token) this.reservedMcpToolNames.delete(name);
+      }
+    };
+    return Object.freeze({
+      replacementTools: Object.freeze([...replacementTools]),
+      publish: () => {
+        if (settled) throw new Error("MCP registry replacement is already settled");
+        const nextVersioned = this.cloneVersioned();
+        this.removeMcpOwners(nextVersioned, predecessors);
+        for (const tool of replacementTools) this.addToVersioned(nextVersioned, tool);
+        const nextTools = this.buildLatestMap(nextVersioned);
+        this.versioned.clear();
+        for (const [name, versionMap] of nextVersioned) this.versioned.set(name, versionMap);
+        this.tools.clear();
+        for (const [name, tool] of nextTools) this.tools.set(name, tool);
+        this.generation += 1;
+        settled = true;
+        releaseReservations();
+      },
+      cancel: () => {
+        if (settled) return;
+        settled = true;
+        releaseReservations();
+      },
+    });
   }
 
   /**
@@ -503,6 +570,20 @@ export class ToolRegistry {
       clone.set(name, new Map(versionMap));
     }
     return clone;
+  }
+
+  private removeMcpOwners(
+    index: Map<string, Map<string, Tool>>,
+    serverIds: ReadonlySet<string>,
+  ): void {
+    for (const [name, versionMap] of index) {
+      for (const [version, tool] of versionMap) {
+        if (tool.source === "mcp" && tool.mcpServerId && serverIds.has(tool.mcpServerId)) {
+          versionMap.delete(version);
+        }
+      }
+      if (versionMap.size === 0) index.delete(name);
+    }
   }
 
   private addToVersioned(index: Map<string, Map<string, Tool>>, tool: Tool): Map<string, Tool> {

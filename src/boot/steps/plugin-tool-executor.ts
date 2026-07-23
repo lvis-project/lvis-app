@@ -117,13 +117,40 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
         // direct `pluginRuntime.callDeclaredAppOnlyTool(...)` call. The
         // user-activation gate + the #1556 nested-origin error live in
         // `dispatchAppOnlyRuntimeInvocation`.
-        return dispatchAppOnlyRuntimeInvocation(
+        const result = await dispatchAppOnlyRuntimeInvocation(
           pluginRuntime,
           toolName,
           toPluginToolInput(payload),
           context,
         );
+        if (context.ownerPluginId) {
+          pluginRuntime.observePluginAuthResult(context.ownerPluginId, toolName, result);
+        }
+        return result;
       }
+
+      const ownerPluginId = context.ownerPluginId;
+      const appInvocation = context.appInvocation;
+      const activeGeneration = ownerPluginId
+        ? ctx.pluginBundleLifecycle?.getActive(ownerPluginId)
+        : undefined;
+      const manifest = ownerPluginId
+        ? pluginRuntime.getPluginManifest(ownerPluginId)
+        : undefined;
+      const accountHash = ownerPluginId
+        ? pluginRuntime.getPluginOperationAccountHash(ownerPluginId)
+        : undefined;
+      const pluginOperation = appInvocation && ownerPluginId && manifest && activeGeneration && accountHash
+        ? {
+            ownerVersion: manifest.version,
+            generationId: activeGeneration.generationId,
+            appSessionId: appInvocation.sessionId,
+            accountHash,
+            ...(appInvocation.operationGrantToken
+              ? { grantToken: appInvocation.operationGrantToken }
+              : {}),
+          }
+        : undefined;
 
       const [result] = await pluginSurfaceExecutor.executeAll(
         [{
@@ -149,6 +176,10 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             // chain never carries `userAction` (callFromApp does not accept one),
             // and the explicit origin check keeps that true even if it ever did.
             pluginPanelUserAction: effectiveOrigin === "ui" && context.userAction === true,
+            ...(pluginOperation ? { pluginOperation } : {}),
+            ...(context.expectedMcpServerId
+              ? { expectedMcpServerId: context.expectedMcpServerId }
+              : {}),
           }),
         },
       );
@@ -159,13 +190,98 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
         throw new Error(result.content);
       }
       if (Object.prototype.hasOwnProperty.call(result, "rawResult")) {
+        if (ownerPluginId) {
+          pluginRuntime.observePluginAuthResult(ownerPluginId, toolName, result.rawResult);
+        }
         return result.rawResult;
+      }
+      if (ownerPluginId) {
+        pluginRuntime.observePluginAuthResult(ownerPluginId, toolName, result.content);
       }
       return result.content;
     });
   };
   lateBinding.pluginToolInvokerRef.fn = invokePluginTool;
   pluginRuntime.setToolInvocationDelegate(invokePluginTool);
+
+  ctx.requestPluginOperationGrant = async ({ pluginId, toolName, input, appSessionId }) => {
+    const manifest = pluginRuntime.getPluginManifest(pluginId);
+    const activeGeneration = ctx.pluginBundleLifecycle?.getActive(pluginId);
+    const accountHash = pluginRuntime.getPluginOperationAccountHash(pluginId);
+    if (!manifest || !activeGeneration) {
+      throw new Error("[plugin-operation-policy] active plugin generation is missing");
+    }
+    if (activeGeneration.pluginVersion !== manifest.version) {
+      throw new Error("[plugin-operation-policy] runtime and bundle version mismatch");
+    }
+    if (!accountHash) {
+      throw new Error("[plugin-operation-policy] fresh authenticated account status is required");
+    }
+    const principal = {
+      ownerPluginId: pluginId,
+      ownerVersion: manifest.version,
+      generationId: activeGeneration.generationId,
+      appSessionId,
+      accountHash,
+    };
+    const inspected = pluginSurfaceExecutor.inspectPluginOperationGrant({
+      toolName,
+      input,
+      principal,
+    });
+    const decision = await approvalGate.requestAndWait({
+      id: randomUUID(),
+      category: "tool",
+      kind: "tool",
+      allowedChoices: ["allow-once", "deny-once"],
+      toolName,
+      toolCategory: "write",
+      args: { operation: inspected.operation },
+      reason: `Plugin '${pluginId}' requests one execution of '${inspected.operation}'`,
+      source: "plugin",
+      sourcePluginId: pluginId,
+      approvalScope: `operation:${inspected.operation}`,
+      trustOrigin: "user-keyboard",
+      createdAt: Date.now(),
+      forceExplicit: true,
+      isReadOnly: false,
+      mode: "default",
+    });
+    if (decision.choice !== "allow-once") {
+      bootAuditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "plugin-operation",
+        type: "approval",
+        input: JSON.stringify({ pluginId, toolName, operation: inspected.operation }),
+        output: "denied",
+      });
+      throw new Error("[plugin-operation-policy] operation grant denied");
+    }
+    const ttlMs = 60_000;
+    const issued = pluginSurfaceExecutor.issuePluginOperationGrant({
+      toolName,
+      input,
+      principal,
+      ttlMs,
+    });
+    bootAuditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "plugin-operation",
+      type: "approval",
+      input: JSON.stringify({
+        pluginId,
+        toolName,
+        operation: inspected.operation,
+        grantId: issued.grantId,
+      }),
+      output: "issued",
+    });
+    return {
+      operationGrantToken: issued.token,
+      grantId: issued.grantId,
+      expiresAt: Date.now() + ttlMs,
+    };
+  };
 
   ctx.hookRunner = hookRunner;
   ctx.scriptHookManager = scriptHookManager;

@@ -10,6 +10,7 @@ import type {
   PluginToolHandler,
   RuntimePlugin,
 } from "../types.js";
+import type { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
 
 export type { PluginAccessSpec, PluginManifest, PluginToolHandler, RuntimePlugin };
 
@@ -25,6 +26,7 @@ export type LoadedPlugin = {
   instance: RuntimePlugin;
   methods: Map<string, PluginToolHandler>;
   approvedPluginAccess?: PluginAccessSpec;
+  hostEffects?: HostApiGenerationScope;
   started?: boolean;
 };
 

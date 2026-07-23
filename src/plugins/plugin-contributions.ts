@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
-import { isAbsolute, posix, relative, resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
+import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import type { PluginContributionDeclaration, PluginManifest } from "./types.js";
+import { verifyInstallReceiptRaw } from "./plugin-install-receipt.js";
 
 export type PluginContributionKind = "skill" | "hook" | "mcpServer";
 export type PluginArchiveMemberKind = "file" | "directory" | "symlink" | "hardlink" | "device" | "other";
@@ -224,4 +225,84 @@ export async function materializePluginContributions(
     output.push(Object.freeze({ ...declaration, fingerprint, files: Object.freeze(files) }));
   }
   return Object.freeze(output);
+}
+
+/**
+ * Copy only receipt-covered package bytes into a generation-addressed cache.
+ * The resulting root never includes the plugin's mutable `data/` directory and
+ * is verified against the exact receipt before it becomes executable input for
+ * bundled Hook or stdio MCP projections.
+ */
+export async function materializePluginGenerationRoot(
+  pluginRoot: string,
+  cacheRoot: string,
+  pluginId: string,
+  generationId: string,
+  receiptRaw: string,
+): Promise<string> {
+  if (!/^[a-f0-9]{64}$/.test(generationId)) throw new Error("plugin generation id must be a SHA-256 digest");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(receiptRaw) as unknown;
+  } catch (error) {
+    throw new Error(`plugin '${pluginId}' install receipt is not valid JSON: ${(error as Error).message}`);
+  }
+  const files = (parsed as { files?: unknown } | null)?.files;
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error(`plugin '${pluginId}' install receipt has no payload files`);
+  }
+
+  const generationsRoot = resolve(cacheRoot, pluginId, "generations");
+  const finalRoot = resolve(generationsRoot, generationId);
+  const finalPayload = resolve(finalRoot, "payload");
+  try {
+    const existing = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
+    if (existing.ok) return finalPayload;
+    await lstat(finalRoot);
+    throw new Error(`plugin '${pluginId}' retained generation failed verification: ${existing.reason}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  await mkdir(generationsRoot, { recursive: true, mode: 0o700 });
+  const temporaryRoot = resolve(generationsRoot, `.${generationId}.${randomUUID()}.tmp`);
+  const temporaryPayload = resolve(temporaryRoot, "payload");
+  try {
+    await mkdir(temporaryPayload, { recursive: true, mode: 0o700 });
+    for (const entry of files) {
+      const path = (entry as { path?: unknown } | null)?.path;
+      if (typeof path !== "string") throw new Error(`plugin '${pluginId}' install receipt contains an invalid path`);
+      const relativePath = normalizePluginContributionPath(pluginId, `receipt:${path}`, path);
+      const source = resolve(pluginRoot, relativePath);
+      const destination = resolve(temporaryPayload, relativePath);
+      await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+      await copyFile(source, destination);
+    }
+    const verified = await verifyInstallReceiptRaw(receiptRaw, pluginId, temporaryPayload);
+    if (!verified.ok) throw new Error(`plugin '${pluginId}' retained generation verification failed: ${verified.reason}`);
+    try {
+      await rename(temporaryRoot, finalRoot);
+    } catch (error) {
+      if (!(["EEXIST", "ENOTEMPTY"] as Array<string | undefined>).includes((error as NodeJS.ErrnoException).code)) {
+        throw error;
+      }
+      const raced = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
+      if (!raced.ok) throw new Error(`plugin '${pluginId}' concurrent retained generation failed verification: ${raced.reason}`);
+    }
+    return finalPayload;
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+export async function removeRetainedPluginGeneration(
+  cacheRoot: string,
+  pluginId: string,
+  generationId: string,
+): Promise<void> {
+  if (!/^[a-f0-9]{64}$/.test(generationId)) throw new Error("plugin generation id must be a SHA-256 digest");
+  const generationsRoot = resolve(cacheRoot, pluginId, "generations");
+  const target = resolve(generationsRoot, generationId);
+  if (dirname(target) !== generationsRoot) throw new Error("retained plugin generation path escaped cache root");
+  await rm(target, { recursive: true, force: true });
 }

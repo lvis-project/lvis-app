@@ -287,6 +287,8 @@ export interface ToolPermissionContext {
   pluginPanelUserAction?: boolean;
   /** Host-derived app identity and optional opaque one-shot grant. Never copied into tool metadata. */
   pluginOperation?: PluginOperationInvocationContext;
+  /** Host-owned stale-card binding checked against the final resolved registry Tool. */
+  expectedMcpServerId?: string;
   /**
    * Recent user-authored turn text. Used only to provide reviewer context
    * and prefill the high-risk approval purpose field; plugin/file origins
@@ -568,6 +570,23 @@ export class ToolExecutor {
     principal: PluginOperationPrincipal;
     ttlMs?: number;
   }): { token: string; grantId: string; readRevision: string } {
+    const inspected = this.inspectPluginOperationGrant(args);
+    const issued = this.pluginOperationGrants.issue({
+      ...args.principal,
+      toolName: args.toolName,
+      operation: inspected.operation,
+      intentHash: inspected.intentHash,
+      readRevision: inspected.readRevision,
+      expiresAt: Date.now() + Math.min(Math.max(args.ttlMs ?? 60_000, 1), 300_000),
+    });
+    return { ...issued, readRevision: inspected.readRevision };
+  }
+
+  inspectPluginOperationGrant(args: {
+    toolName: string;
+    input: Record<string, unknown>;
+    principal: PluginOperationPrincipal;
+  }): { operation: string; intentHash: string; readRevision: string } {
     const tool = this.toolRegistry.findByName(args.toolName);
     if (!tool?.pluginId || !tool.operationGovernance) {
       throw new Error(`[plugin-operation-policy] governed plugin tool '${args.toolName}' not found`);
@@ -586,15 +605,7 @@ export class ToolExecutor {
       resolved.rule.requiresRead.maxAgeMs,
     );
     if (!readRevision) throw new Error("[plugin-operation-policy] required read is missing or stale");
-    const issued = this.pluginOperationGrants.issue({
-      ...args.principal,
-      toolName: args.toolName,
-      operation: resolved.operation,
-      intentHash: resolved.intentHash,
-      readRevision,
-      expiresAt: Date.now() + Math.min(Math.max(args.ttlMs ?? 60_000, 1), 300_000),
-    });
-    return { ...issued, readRevision };
+    return { operation: resolved.operation, intentHash: resolved.intentHash, readRevision };
   }
 
   private async runScriptHook(
@@ -1006,6 +1017,17 @@ export class ToolExecutor {
       await auditCurrentToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, t("be_executor.toolNotFoundAudit"), true, startTime, { decision: "deny", reason: t("be_executor.toolNotFoundAudit"), layer: 0 }, Infinity, permissionContext);
       callbacks?.onToolEnd?.(toolUse.name, t("be_executor.toolNotFound", { name: toolUse.name }), true, meta, undefined, durationMs);
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: t("be_executor.toolNotFound", { name: toolUse.name }), is_error: true, durationMs });
+    }
+    if (
+      permissionContext?.expectedMcpServerId &&
+      tool.mcpServerId !== permissionContext.expectedMcpServerId
+    ) {
+      const durationMs = Date.now() - startTime;
+      const reason = `MCP tool owner changed: expected '${permissionContext.expectedMcpServerId}', got '${tool.mcpServerId ?? "unknown"}'`;
+      const denied: PermissionCheckResult = { decision: "deny", reason, layer: 0 };
+      await auditCurrentToolCall(sessionId, toolUse.name, tool.source, trustFromSource(tool.source), toolUse.input, reason, true, startTime, denied, Infinity, permissionContext);
+      callbacks?.onToolEnd?.(toolUse.name, reason, true, meta, undefined, durationMs);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: reason, is_error: true, durationMs });
     }
     source = tool.source;
     trust = trustFromSource(source);
@@ -2869,6 +2891,18 @@ export class ToolExecutor {
             readRevision,
           })
         : { ok: false as const, reason: "required read is missing or stale" };
+      this.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "plugin-operation",
+        type: "approval",
+        input: JSON.stringify({
+          pluginId: pluginOperationPrincipal.ownerPluginId,
+          toolName: toolUse.name,
+          operation: resolvedPluginOperation.operation,
+          ...(consumed.grantId ? { grantId: consumed.grantId } : {}),
+        }),
+        output: consumed.ok ? "consumed" : `rejected:${consumed.reason}`,
+      });
       if (!consumed.ok) {
         const msg = `Plugin operation denied: ${consumed.reason}`;
         const durationMs = Date.now() - startTime;

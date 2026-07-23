@@ -1512,6 +1512,15 @@ export type PluginToolHandler = (payload?: unknown) => Promise<unknown> | unknow
 
 export interface RuntimePlugin {
   start?: () => Promise<void> | void;
+  /**
+   * Runs only after this plugin's immutable Host generation is the active
+   * pointer. Network discovery, persisted-session recovery, timers, and other
+   * externally observable startup work belong here rather than in `start`,
+   * which may execute while a replacement candidate is still hidden.
+   * Failures are reported as degraded post-publish startup and never roll the
+   * already-committed generation pointer back.
+   */
+  onPublished?: () => Promise<void> | void;
   stop?: () => Promise<void> | void;
   handlers: Record<string, PluginToolHandler>;
   /**

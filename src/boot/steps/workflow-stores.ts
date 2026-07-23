@@ -104,6 +104,11 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
         log.warn("skill_load emit failed: %s", (err as Error).message);
       }
     },
+    acquirePluginSkillGeneration: async (owner) => {
+      const lifecycle = ctx.pluginBundleLifecycle;
+      if (!lifecycle) throw new Error("plugin generation lifecycle is not ready");
+      return lifecycle.acquireExact(owner.pluginId, owner.generationId);
+    },
     networkFetch,
   };
 

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { ActivePluginGeneration } from "../plugins/plugin-generation-coordinator.js";
 import type { McpServerApproval, McpServerConfig } from "./types.js";
+import { anchorBundledCommand } from "../plugins/plugin-bundled-command.js";
+import { PluginContributionTrustStore } from "../plugins/plugin-contribution-trust.js";
 
 export interface PluginMcpOwner {
   pluginId: string;
@@ -17,24 +19,24 @@ export interface PreparedPluginMcpProjection {
   approval: McpServerApproval;
 }
 
-function trustKey(owner: PluginMcpOwner): string {
-  return [owner.pluginId, owner.pluginVersion, owner.localId, owner.fingerprint].join("|");
-}
-
 /** Exact static-descriptor approval. A new generation may restore identical bytes. */
 export class PluginMcpTrustStore {
-  private readonly approved = new Set<string>();
+  private readonly store: PluginContributionTrustStore;
+
+  constructor(path?: string) {
+    this.store = new PluginContributionTrustStore("mcpServer", path);
+  }
 
   approve(projection: PreparedPluginMcpProjection): void {
-    this.approved.add(trustKey(projection.owner));
+    this.store.approve(projection.owner);
   }
 
   isApproved(projection: PreparedPluginMcpProjection): boolean {
-    return this.approved.has(trustKey(projection.owner));
+    return this.store.isApproved(projection.owner);
   }
 
   revoke(projection: PreparedPluginMcpProjection): void {
-    this.approved.delete(trustKey(projection.owner));
+    this.store.revoke(projection.owner);
   }
 }
 
@@ -137,6 +139,7 @@ function buildProjection(owner: PluginMcpOwner, raw: unknown): PreparedPluginMcp
 /** Static parse/fingerprint preparation. It performs no spawn, network, discovery, or registration. */
 export function preparePluginMcpGeneration(
   generation: ActivePluginGeneration,
+  payloadRoot = process.cwd(),
 ): readonly PreparedPluginMcpProjection[] {
   const projections: PreparedPluginMcpProjection[] = [];
   for (const contribution of generation.contributions) {
@@ -150,13 +153,31 @@ export function preparePluginMcpGeneration(
     } catch (error) {
       throw new Error(`plugin MCP '${contribution.localId}' is not valid JSON: ${(error as Error).message}`);
     }
+    const parsed = parseStaticConfig(raw, `plugin MCP '${contribution.localId}'`);
+    let fingerprint = contribution.fingerprint;
+    let preparedRaw: unknown = raw;
+    if (parsed.transport === "stdio") {
+      const anchored = anchorBundledCommand(
+        payloadRoot,
+        contribution.path,
+        [parsed.command!, ...(parsed.args ?? [])],
+        contribution.fingerprint,
+        `plugin MCP '${contribution.localId}'`,
+      );
+      fingerprint = anchored.fingerprint;
+      preparedRaw = {
+        ...(raw as Record<string, unknown>),
+        command: anchored.command[0]!,
+        args: anchored.command.slice(1),
+      };
+    }
     projections.push(buildProjection({
       pluginId: generation.pluginId,
       pluginVersion: generation.pluginVersion,
       generationId: generation.generationId,
       localId: contribution.localId,
-      fingerprint: contribution.fingerprint,
-    }, raw));
+      fingerprint,
+    }, preparedRaw));
   }
   return Object.freeze(projections);
 }

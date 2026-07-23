@@ -50,6 +50,7 @@ import { redactForLLM } from "../audit/dlp-filter.js";
 import { createLogger } from "../lib/logger.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { PluginHookTrustStore, PreparedPluginHookProjection } from "./plugin-hook-projection.js";
+import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
 
 const log = createLogger("script-hook-manager");
 
@@ -142,6 +143,11 @@ export class ScriptHookManager {
   private registry: HookRegistryEntry[] = [];
   private readonly pluginRegistries = new Map<string, readonly HookRegistryEntry[]>();
   private generation = 0;
+  private generationAccess: PluginRuntimeGenerationAccess | undefined;
+
+  setPluginGenerationAccess(access: PluginRuntimeGenerationAccess): void {
+    this.generationAccess = access;
+  }
 
   /**
    * Replace the trusted hook list with legacy `.sh` hooks only. Retained for
@@ -323,7 +329,8 @@ export class ScriptHookManager {
       // decision is OBSERVE-ONLY, so the caller ignores it. (Chain-stop just
       // avoids running later hooks once one already signaled deny — the audit
       // captures every result up to that point, same as PostToolUse.)
-      return await runHookChain(entries.map(toRunnable), stdinPayload, options);
+      return await this.runWithGenerationLeases(entries, (activeEntries) =>
+        runHookChain(activeEntries.map(toRunnable), stdinPayload, options));
     } catch (err) {
       // Fail-soft: a lifecycle dispatch must NEVER break the turn. Log + return
       // an empty observe result so the caller continues unaffected.
@@ -392,7 +399,8 @@ export class ScriptHookManager {
       // All fail-closed cases (timeout/nonzero-exit/bad-json/spawn-error) are
       // already collapsed to a deny RESULT by runOneHookScript, so the chain's
       // returned decision is authoritative — the caller refuses on deny.
-      return await runHookChain(entries.map(toRunnable), stdinPayload, options);
+      return await this.runWithGenerationLeases(entries, (activeEntries) =>
+        runHookChain(activeEntries.map(toRunnable), stdinPayload, options));
     } catch (err) {
       // FAIL-CLOSED: a blocking event must DENY (refuse the turn) on an
       // unexpected dispatch error — NOT allow. (Contrast runLifecycleEvent,
@@ -440,7 +448,42 @@ export class ScriptHookManager {
     // Each entry runs with its own timeout: config entries carry a per-entry
     // (already-clamped) `timeoutMs`; `.sh` entries fall back to the default /
     // caller-supplied option.
-    return runHookChain(entries.map(toRunnable), stdinPayload, options);
+    return this.runWithGenerationLeases(entries, (activeEntries) =>
+      runHookChain(activeEntries.map(toRunnable), stdinPayload, options));
+  }
+
+  private async runWithGenerationLeases<T>(
+    entries: readonly HookRegistryEntry[],
+    operation: (activeEntries: HookRegistryEntry[]) => Promise<T>,
+  ): Promise<T> {
+    const access = this.generationAccess;
+    if (!access) return operation([...entries]);
+    const leases = new Map<
+      string,
+      Awaited<ReturnType<PluginRuntimeGenerationAccess["acquireExact"]>>
+    >();
+    const activeOwnerKeys = new Set<string>();
+    for (const entry of entries) {
+      const owner = entry.owner;
+      if (!owner) continue;
+      const key = `${owner.pluginId}\0${owner.generationId}`;
+      if (activeOwnerKeys.has(key)) continue;
+      try {
+        leases.set(key, await access.acquireExact(owner.pluginId, owner.generationId));
+        activeOwnerKeys.add(key);
+      } catch {
+        // Registry snapshot raced an exact generation transition; skip stale hooks.
+      }
+    }
+    const activeEntries = entries.filter((entry) => {
+      const owner = entry.owner;
+      return !owner || activeOwnerKeys.has(`${owner.pluginId}\0${owner.generationId}`);
+    });
+    try {
+      return await operation(activeEntries);
+    } finally {
+      for (const lease of leases.values()) lease.release();
+    }
   }
 }
 
