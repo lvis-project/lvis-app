@@ -1,12 +1,31 @@
 import type { MarketplacePackageType } from "../shared/assistant-context.js";
 import type { MarketplacePackageAsset } from "../shared/marketplace-package-assets.js";
 import type { PluginUiResourceDecl } from "../mcp/types.js";
-import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
-export type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
 
 export type { PluginUiResourceDecl } from "../mcp/types.js";
 
 export type InstallPolicy = "admin" | "user";
+
+/** Host-enforced minimum risk for one discriminated plugin operation. */
+export type GovernedRiskFloor = "read" | "write" | "network" | "shell";
+
+/** Host-only rule for one member of a plugin tool's operation union. */
+export interface PluginToolOperationRule {
+  kind: "read" | "write";
+  minimumRisk: GovernedRiskFloor;
+  requiresRead?: {
+    tool: string;
+    operations: string[];
+    maxAgeMs: number;
+  };
+}
+
+/** Host-only operation sidecar. It is never projected onto MCP wire tools. */
+export interface PluginToolOperationPolicy {
+  discriminant: "operation";
+  appAllowed: string[];
+  operations: Record<string, PluginToolOperationRule>;
+}
 
 
 

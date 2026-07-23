@@ -1,24 +1,17 @@
 import { createHash } from "node:crypto";
 import { canonicalStringify } from "../shared/canonical-json.js";
 import type { ToolCategory } from "./types.js";
+import type {
+  GovernedRiskFloor,
+  PluginToolOperationPolicy,
+  PluginToolOperationRule,
+} from "../plugins/types.js";
 
-export type GovernedRiskFloor = "read" | "write" | "network" | "shell";
-
-export interface PluginToolOperationRule {
-  kind: "read" | "write";
-  minimumRisk: GovernedRiskFloor;
-  requiresRead?: {
-    tool: string;
-    operations: string[];
-    maxAgeMs: number;
-  };
-}
-
-export interface PluginToolOperationPolicy {
-  discriminant: "operation";
-  appAllowed: string[];
-  operations: Record<string, PluginToolOperationRule>;
-}
+export type {
+  GovernedRiskFloor,
+  PluginToolOperationPolicy,
+  PluginToolOperationRule,
+} from "../plugins/types.js";
 
 export interface ResolvedPluginOperation {
   operation: string;
