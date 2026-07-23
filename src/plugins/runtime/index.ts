@@ -79,17 +79,34 @@ const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
 const BOOT_PREFLIGHT_CONCURRENCY = 4;
 
+type PluginIntegrityCheckResult =
+  | {
+      ok: true;
+      verified?: {
+        installSource: "marketplace" | "local-dev";
+        signerKeyId: string | null;
+        artifactSha256: string | null;
+      };
+    }
+  | {
+      ok: false;
+      reason: string;
+      error?: unknown;
+    };
+
 type BootPreflightOutcome =
   | {
       ok: true;
       plan: ManifestLoadPlan;
       manifest: PluginManifest;
       approvedPluginAccess: PluginAccessSpec | undefined;
+      integrityResult?: PluginIntegrityCheckResult;
     }
   | {
       ok: false;
       plan: ManifestLoadPlan;
       kind: "integrity";
+      integrityResult: PluginIntegrityCheckResult & { ok: false };
     }
   | {
       ok: false;
@@ -584,13 +601,24 @@ export class PluginRuntime {
       loadPlan,
       BOOT_PREFLIGHT_CONCURRENCY,
       async (plan): Promise<BootPreflightOutcome> => {
+        let integrityResult: PluginIntegrityCheckResult | undefined;
         if (plan.pluginIdHint) {
-          const integrityResult = await this.verifyReceiptAndDevGuard(
-            plan.pluginIdHint,
-            dirname(plan.manifestPath),
-          );
+          try {
+            integrityResult = await this.verifyReceiptAndDevGuard(
+              plan.pluginIdHint,
+              dirname(plan.manifestPath),
+              { report: false },
+            );
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            integrityResult = {
+              ok: false,
+              reason: `install receipt verification failed unexpectedly: ${detail}`,
+              error,
+            };
+          }
           if (!integrityResult.ok) {
-            return { ok: false, plan, kind: "integrity" };
+            return { ok: false, plan, kind: "integrity", integrityResult };
           }
         }
         try {
@@ -600,6 +628,7 @@ export class PluginRuntime {
             plan,
             manifest,
             approvedPluginAccess: plan.approvedPluginAccess,
+            integrityResult,
           };
         } catch (error) {
           return { ok: false, plan, kind: "manifest", error };
@@ -618,6 +647,13 @@ export class PluginRuntime {
     const preflight = await this.preflightBootLoadPlan(loadPlan);
     const enabledManifestSnapshots = new Map<string, ManifestSnapshot>();
     for (const outcome of preflight) {
+      if (
+        outcome.plan.pluginIdHint
+        && "integrityResult" in outcome
+        && outcome.integrityResult
+      ) {
+        this.reportPluginIntegrityResult(outcome.plan.pluginIdHint, outcome.integrityResult);
+      }
       if (!outcome.ok) continue;
       const pluginId = outcome.plan.pluginIdHint ?? outcome.manifest.id;
       enabledManifestSnapshots.set(pluginId, {
@@ -1278,8 +1314,8 @@ export class PluginRuntime {
 
   /**
    * Verify the install receipt for `pluginId` under `pluginRoot` and enforce
-   * the dev-signer-in-packaged-build guard. Emits all relevant audit log
-   * entries so callers cannot forget them.
+   * the dev-signer-in-packaged-build guard. Reporting may be deferred so boot
+   * can perform concurrent checks while emitting results in registry order.
    *
    * Returns `{ ok: true }` when verification passes (or is not required).
    * Returns `{ ok: false }` when the plugin must be rejected — the caller is
@@ -1294,7 +1330,8 @@ export class PluginRuntime {
   private async verifyReceiptAndDevGuard(
     pluginId: string,
     pluginRoot: string,
-  ): Promise<{ ok: true } | { ok: false }> {
+    options: { report?: boolean } = {},
+  ): Promise<PluginIntegrityCheckResult> {
     if (!this.installReceiptCacheRoot) {
       return { ok: true };
     }
@@ -1304,12 +1341,9 @@ export class PluginRuntime {
       pluginRoot,
     );
     if (!receiptResult.ok) {
-      log.error({ pluginId, reason: receiptResult.reason }, `${pluginId} rejected — install receipt integrity failed`);
-      this.auditLog?.("error", "plugin_integrity_rejected", {
-        pluginId,
-        reason: receiptResult.reason,
-      });
-      return { ok: false };
+      const result = { ok: false as const, reason: receiptResult.reason };
+      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
+      return result;
     }
     const { installSource, signerKeyId, artifactSha256 } = receiptResult.receipt;
     // Policy gate: local-dev receipts are only valid in unpackaged dev builds.
@@ -1317,17 +1351,46 @@ export class PluginRuntime {
     // policy (packaged vs dev) is enforced here in the runtime layer.
     if (installSource === "local-dev" && !isDevModeUnlocked()) {
       const reason = "local-dev install rejected in packaged build";
-      log.error({ pluginId, reason }, `${pluginId} rejected — ${reason}`);
-      this.auditLog?.("error", "plugin_integrity_rejected", { pluginId, reason });
-      return { ok: false };
+      const result = { ok: false as const, reason };
+      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
+      return result;
     }
-    this.auditLog?.("info", "plugin_integrity_verified", {
-      pluginId,
-      installSource,
-      artifactSha256,
-      signerKeyId,
-    });
-    return { ok: true };
+    const result: PluginIntegrityCheckResult = {
+      ok: true,
+      verified: { installSource, artifactSha256, signerKeyId },
+    };
+    if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
+    return result;
+  }
+
+  private reportPluginIntegrityResult(
+    pluginId: string,
+    result: PluginIntegrityCheckResult,
+  ): void {
+    if (!result.ok) {
+      log.error(
+        { pluginId, reason: result.reason, ...(result.error === undefined ? {} : { err: result.error }) },
+        `${pluginId} rejected — install receipt integrity failed`,
+      );
+      try {
+        this.auditLog?.("error", "plugin_integrity_rejected", {
+          pluginId,
+          reason: result.reason,
+        });
+      } catch (error) {
+        log.error({ pluginId, err: error }, "plugin integrity rejection audit failed");
+      }
+      return;
+    }
+    if (!result.verified) return;
+    try {
+      this.auditLog?.("info", "plugin_integrity_verified", {
+        pluginId,
+        ...result.verified,
+      });
+    } catch (error) {
+      log.error({ pluginId, err: error }, "plugin integrity verification audit failed");
+    }
   }
 
   /**
