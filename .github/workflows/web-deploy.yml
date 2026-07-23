@@ -1,0 +1,36 @@
+name: Web Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-deploy.yml'
+  repository_dispatch:
+    types: [deploy-web]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  deploy:
+    if: github.repository == 'lvis-project/lvis-app'
+    runs-on: ubuntu-latest
+    environment: web-production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 77a8f0e860cd23f37141248fd4e6935f
+        run: bunx wrangler pages deploy out --project-name=lvisai-xyz --branch=main --commit-dirty=true
