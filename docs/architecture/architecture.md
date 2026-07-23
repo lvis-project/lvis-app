@@ -178,6 +178,9 @@ Key boundaries:
   is not a manifest field — the host classifies the effective category per
   invocation;
 - plugin UI can render in host slots but cannot bypass permission review;
+- optional `manifest.onboarding.firstTask` copy is inert, localized metadata:
+  the host may prefill the visible composer, but it never auto-submits or invokes
+  a tool, and undeclared or unusable plugins produce no proposal;
 - marketplace metadata should not override local policy or managed-plugin rules.
 - plugin replacements keep the prior registry row in a strict `pendingUpdate`
   state from the pre-promotion boundary through registry commit. Runtime and

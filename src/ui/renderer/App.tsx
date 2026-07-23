@@ -919,7 +919,7 @@ export function App() {
         tourCompleted={tourCompleted}
         onTourComplete={onTourComplete}
         onTourDismiss={onTourDismiss}
-        installedPluginIds={pluginCards.map((c) => c.id)}
+        pluginCards={pluginCards}
         onComposerSeedText={setQuestion}
       />
     </AppProviders>

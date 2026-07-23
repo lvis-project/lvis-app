@@ -646,8 +646,8 @@ export function buildInternalApiSurface() {
     };
   }>) => void) => {
     const listener = (_event: unknown, updates: Parameters<typeof handler>[0]) => handler(updates);
-    ipcRenderer.on("marketplace:updates-available", listener);
-    return () => ipcRenderer.removeListener("marketplace:updates-available", listener);
+    ipcRenderer.on(CHANNELS.marketplace.updatesAvailable, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.marketplace.updatesAvailable, listener);
   },
 
   // ─── Marketplace announcements ───────────────────
@@ -1686,20 +1686,20 @@ export function buildLvisPlatformWorld() {
 
 export function buildLvisWindowWorld() {
   return {
-  minimize: () => ipcRenderer.invoke("window:minimize"),
-  toggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
-  close: () => ipcRenderer.invoke("window:close"),
+  minimize: () => ipcRenderer.invoke(CHANNELS.window.minimize),
+  toggleMaximize: () => ipcRenderer.invoke(CHANNELS.window.toggleMaximize),
+  close: () => ipcRenderer.invoke(CHANNELS.window.close),
   syncTitleBarTheme: (color: string, symbolColor: string) =>
-    ipcRenderer.invoke("window:syncTitleBarTheme", { color, symbolColor }),
+    ipcRenderer.invoke(CHANNELS.window.syncTitleBarTheme, { color, symbolColor }),
   onMaximizedChanged: (handler: (maximized: boolean) => void) => {
     const listener = (_event: unknown, maximized: boolean) => handler(maximized);
-    ipcRenderer.on("window:maximizedChanged", listener);
-    return () => ipcRenderer.removeListener("window:maximizedChanged", listener);
+    ipcRenderer.on(CHANNELS.window.maximizedChanged, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.window.maximizedChanged, listener);
   },
   onFullscreenChanged: (handler: (fullscreen: boolean) => void) => {
     const listener = (_event: unknown, fullscreen: boolean) => handler(fullscreen);
-    ipcRenderer.on("window:fullscreenChanged", listener);
-    return () => ipcRenderer.removeListener("window:fullscreenChanged", listener);
+    ipcRenderer.on(CHANNELS.window.fullscreenChanged, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.window.fullscreenChanged, listener);
   },
   };
 }

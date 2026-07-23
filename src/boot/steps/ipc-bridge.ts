@@ -15,6 +15,7 @@ import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import { onEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 const log = createLogger("lvis");
 
 /** True if the event type is a high-frequency transcript stream event. */
@@ -105,7 +106,7 @@ export function registerPluginEventBridge(
     const guardedSend = (data: unknown) => {
       if (win.isDestroyed()) return;
       try {
-        win.webContents.send("lvis:plugin:event", type, data);
+        win.webContents.send(CHANNELS.pluginBridge.event, type, data);
       } catch (e) {
         log.warn(`boot: ${type} send failed: %s`, (e as Error).message);
       }

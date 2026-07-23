@@ -2,11 +2,12 @@
 /**
  * check-no-inline-channels.mjs — #1409 C2 + C11 + M1 CI guard
  *
- * EVERY `src/ipc/domains/*.ts` IPC domain AND the preload bundle
- * (`src/preload.ts` + `src/preload/*.ts`) must reference channel names ONLY
- * through the `src/contract/` SOT (`CHANNELS.*`), never as raw `"lvis:..."`
- * string literals. This scans those files and fails the build if an inline
- * channel literal reappears (regression guard for the C2 + C11 + M1 sweeps).
+ * EVERY `src/ipc/domains/*.ts` IPC domain, host/plugin preload entry, selected
+ * main-side producer, and external-surface consumer must reference Electron
+ * wire channels ONLY through the `src/contract/` SOT (`CHANNELS.*`). The guard
+ * rejects actual string, template, and statically concatenated literals in
+ * the `lvis:`, `marketplace:`, and `window:` namespaces while ignoring comments
+ * and documentation.
  *
  * The domain directory is read dynamically (M1: cluster-review finding —
  * previously only the C2-swept chat/plugins/settings domains were guarded, so
@@ -21,12 +22,18 @@
  * automatically. Run standalone with `node scripts/check-no-inline-channels.mjs`.
  */
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import ts from "typescript";
+
+const rootArgIndex = process.argv.indexOf("--root");
+const ROOT = rootArgIndex >= 0
+  ? resolve(process.argv[rootArgIndex + 1] ?? "")
+  : process.cwd();
 
 /** Read the top-level `.ts` modules of a directory (subdirs like `__tests__/`
  *  are excluded by the `.endsWith(".ts")` filter). */
 const tsModulesIn = (dir) =>
-  readdirSync(join(process.cwd(), dir))
+  readdirSync(join(ROOT, dir))
     .filter((f) => f.endsWith(".ts"))
     .map((f) => `${dir}/${f}`);
 
@@ -43,15 +50,55 @@ const TARGETS = [
   ...tsModulesIn("src/api"),
   ...tsModulesIn("src/sdk"),
   ...tsModulesIn("src/cli"),
+  // Separate sandboxed plugin-webview preload entry. This is not under
+  // src/preload/, so it must be listed explicitly.
+  "src/plugin-preload.ts",
+  // Main-side producers paired with the preload/domain consumers above.
+  "src/boot/plugins.ts",
+  "src/boot/steps/ipc-bridge.ts",
+  "src/boot/steps/post-boot.ts",
 ];
 
-// A quoted channel literal: an opening quote immediately followed by `lvis:`.
-// Unquoted `lvis:...` in comments/JSDoc (e.g. "Covers: lvis:chat:*") is ignored.
-const INLINE_CHANNEL = /["']lvis:/;
+function isCliCommandName(node, rel) {
+  if (rel !== "src/cli/commands.ts" || !ts.isPropertyAssignment(node.parent)) return false;
+  const propertyName = node.parent.name;
+  if (!(ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName))
+      || propertyName.text !== "name") return false;
+
+  const command = node.parent.parent;
+  if (!ts.isObjectLiteralExpression(command) || !ts.isArrayLiteralExpression(command.parent)) {
+    return false;
+  }
+  const array = command.parent;
+  const initializer = ts.isAsExpression(array.parent) ? array.parent : array;
+  const declaration = initializer.parent;
+  return ts.isVariableDeclaration(declaration)
+    && ts.isIdentifier(declaration.name)
+    && declaration.name.text === "CLI_COMMANDS";
+}
+
+function isInlineChannel(value, node, rel) {
+  return value.startsWith("lvis:")
+    || (value.startsWith("marketplace:") && !isCliCommandName(node, rel))
+    || value.startsWith("window:");
+}
+
+function staticText(node) {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
+  }
+  if (ts.isTemplateExpression(node)) return node.head.text;
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticText(node.left);
+    const right = staticText(node.right);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
+  return undefined;
+}
 
 let violations = 0;
 for (const rel of TARGETS) {
-  const abs = join(process.cwd(), rel);
+  const abs = join(ROOT, rel);
   let content;
   try {
     content = readFileSync(abs, "utf8");
@@ -59,16 +106,21 @@ for (const rel of TARGETS) {
     console.error(`[no-inline-channels] cannot read ${rel}: ${err.message}`);
     process.exit(1);
   }
+  const source = ts.createSourceFile(rel, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const lines = content.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (INLINE_CHANNEL.test(lines[i])) {
+  const visit = (node) => {
+    const value = staticText(node);
+    if (value !== undefined && isInlineChannel(value, node, rel)) {
+      const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
       console.error(
-        `[no-inline-channels] ${rel}:${i + 1} inline channel literal — use CHANNELS.* from src/contract/`,
+        `[no-inline-channels] ${rel}:${line + 1} inline channel literal — use CHANNELS.* from src/contract/`,
       );
-      console.error(`    ${lines[i].trim()}`);
+      console.error(`    ${lines[line]?.trim() ?? ""}`);
       violations += 1;
     }
-  }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
 }
 
 if (violations > 0) {
