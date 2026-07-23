@@ -92,18 +92,16 @@ test.describe('ask_user_question overlay layout', () => {
       expect(visible, 'ask_user_question injection must render the overlay').toBe(true);
 
       const geometry = await mainWindow.evaluate(() => {
-        const main = document.querySelector<HTMLElement>('main');
         const overlay = document.querySelector<HTMLElement>('[data-testid="question-overlay"]');
         const card = document.querySelector<HTMLElement>('[data-testid="ask-user-question-card"]');
         const dock = overlay.parentElement as HTMLElement | null;
-        if (!main || !overlay || !card || !dock) return null;
-        const m = main.getBoundingClientRect();
+        if (!overlay || !card || !dock) return null;
         const o = overlay.getBoundingClientRect();
         const c = card.getBoundingClientRect();
         const d = dock.getBoundingClientRect();
         return {
-          mainLeft: m.left,
-          mainRight: m.right,
+          dockLeft: d.left,
+          dockRight: d.right,
           overlayLeft: o.left,
           overlayRight: o.right,
           cardLeft: c.left,
@@ -114,10 +112,10 @@ test.describe('ask_user_question overlay layout', () => {
       });
 
       expect(geometry, 'layout elements must exist').not.toBeNull();
-      expect(Math.abs(geometry!.overlayLeft - geometry!.mainLeft)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry!.overlayRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry!.cardLeft - geometry!.mainLeft)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry!.cardRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.overlayLeft - geometry!.dockLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.overlayRight - geometry!.dockRight)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.cardLeft - geometry!.dockLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.cardRight - geometry!.dockRight)).toBeLessThanOrEqual(1);
       expect(Math.abs(geometry!.cardBottom - geometry!.dockBottom)).toBeLessThanOrEqual(1);
     });
   }

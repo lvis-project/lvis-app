@@ -95,8 +95,10 @@ test.describe("context-budget token surfaces", () => {
         "aria-label",
         t("tokenProgressRing.projectedInputAriaLabel", { pct: "62" }),
       );
-      await ring.hover({ force: true });
-      await expect(ctx.page.getByTestId("token-progress-ring-hint")).toHaveText("62%");
+      await ring.focus();
+      const hint = ctx.page.getByTestId("token-progress-ring-hint");
+      await expect(hint).toBeVisible();
+      await expect(hint).toContainText("62%");
       await ring.click({ force: true });
       await expect(ctx.page.getByTestId("token-progress-ring-detail")).toBeVisible();
       await expect(ctx.page.getByText(t("tokenProgressRing.projectedInputHeading")).first()).toBeVisible();

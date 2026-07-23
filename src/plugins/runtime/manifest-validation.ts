@@ -202,7 +202,8 @@ export async function parsePluginJson(
   } catch (err) {
     throw new Error(
       `Invalid plugin manifest '<unknown>' at '${path}': JSON parse error (${(err as Error).message}). ` +
-      `Example: {"id":"com.example.sample","name":"Sample","version":"1.0.0","entry":"dist/index.js","tools":["sample_ping"]}`,
+      `Example: {"id":"sample-plugin","name":"Sample","version":"1.0.0","entry":"dist/index.js",` +
+      `"description":"Sample plugin.","tools":[{"name":"sample_ping","inputSchema":{"type":"object","properties":{}}}]}`,
     );
   }
   const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
