@@ -56,6 +56,7 @@ import {
   type NetworkAccessAcknowledgement,
 } from "../shared/network-access.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { materializePluginContributions } from "./plugin-contributions.js";
 const log = createLogger("marketplace");
 
 import {
@@ -1613,6 +1614,13 @@ export class PluginMarketplaceService {
       installedAt?: string;
     },
   ): Promise<void> {
+    const pluginRoot = this.artifactStore.installDirFor(pluginId);
+    const manifestRaw = await readFile(resolve(pluginRoot, "plugin.json"), "utf-8");
+    const manifest = JSON.parse(manifestRaw) as PluginManifest;
+    // Resolve every declared contribution against the promoted, verified tree
+    // before receipt publication. The returned immutable snapshot becomes the
+    // lifecycle candidate input in the generation integration milestone.
+    await materializePluginContributions(pluginRoot, manifest);
     await this.artifactStore.writeInstallReceipt(pluginId, opts);
   }
 
