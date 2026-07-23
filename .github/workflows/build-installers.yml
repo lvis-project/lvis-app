@@ -24,7 +24,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -88,7 +88,7 @@ jobs:
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -103,9 +103,9 @@ jobs:
             echo "Checkout HEAD does not equal immutable event source SHA" >&2
             exit 1
           fi
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Restore package manager and installer caches
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.0.0
         with:
           path: |
             ~/.bun/install/cache
@@ -119,7 +119,7 @@ jobs:
       # Key is pinned to uv-targets.mjs so version bumps invalidate the cache. Saves
       # ~30s per matrix job on cold runners and avoids re-downloading from GitHub releases.
       - name: Restore uv runtime cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.0.0
         with:
           path: resources/uv
           key: ${{ runner.os }}-uv-${{ hashFiles('scripts/uv-targets.mjs', 'scripts/fetch-uv.mjs') }}
@@ -202,7 +202,7 @@ jobs:
             node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
           fi
       - name: Upload installers
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: lvis-${{ matrix.target }}-installers
           # Include `.blockmap` (electron-updater differential update sidecar)
@@ -247,7 +247,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -298,7 +298,7 @@ jobs:
             exit 1
           fi
       - name: Download all platform installers
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: release-staging
           pattern: lvis-*-installers
@@ -306,7 +306,7 @@ jobs:
       - name: List downloaded assets
         run: ls -la release-staging/
       - name: Attach assets to GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           # `tag_name` defaults to the pushed tag (github.ref_name) since
           # this job runs only on tag push events.
