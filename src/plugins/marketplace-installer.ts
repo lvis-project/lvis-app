@@ -412,89 +412,161 @@ async function downloadWithRetry(
 ): Promise<{ body: Buffer; sha256Header: string | null }> {
   let lastErr: Error | null = null;
   const retryDeadline = Date.now() + MAX_DOWNLOAD_RETRY_ELAPSED_MS;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    if (signal?.aborted) {
-      throw new MarketplaceArtifactLimitError(
-        "ARTIFACT_DOWNLOAD_ABORTED",
-        `marketplace artifact download aborted for ${slug}@${version}`,
-      );
-    }
-    let res: Awaited<ReturnType<MarketplaceHttp["downloadArtifact"]>>;
-    try {
-      res = signal
-        ? await http.downloadArtifact(slug, version, onChunk, { signal })
-        : await http.downloadArtifact(slug, version, onChunk);
-    } catch (err) {
-      if (err instanceof MarketplaceArtifactLimitError) throw err;
+  const retryController = new AbortController();
+  const abortFromCaller = () => retryController.abort(signal?.reason);
+  if (signal?.aborted) abortFromCaller();
+  else signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const deadlineTimer = setTimeout(
+    () => retryController.abort(new Error("marketplace download retry deadline exceeded")),
+    MAX_DOWNLOAD_RETRY_ELAPSED_MS,
+  );
+
+  try {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (signal?.aborted) {
         throw new MarketplaceArtifactLimitError(
           "ARTIFACT_DOWNLOAD_ABORTED",
           `marketplace artifact download aborted for ${slug}@${version}`,
         );
       }
-      if (!(err instanceof MarketplaceTransientDownloadError)) throw err;
-      lastErr = err;
-      if (attempt + 1 >= maxRetries) break;
-      await sleepWithinRetryDeadline(
-        backoffMs(attempt),
-        retryDeadline,
-        signal,
-        slug,
-        version,
+      if (Date.now() >= retryDeadline || retryController.signal.aborted) {
+        throw retryDeadlineExceededError(slug, version);
+      }
+      let res: Awaited<ReturnType<MarketplaceHttp["downloadArtifact"]>>;
+      try {
+        const download = http.downloadArtifact(slug, version, onChunk, {
+          signal: retryController.signal,
+        });
+        res = await settleWithinRetryDeadline(
+          download,
+          retryController.signal,
+          signal,
+          slug,
+          version,
+        );
+      } catch (err) {
+        if (signal?.aborted) {
+          throw new MarketplaceArtifactLimitError(
+            "ARTIFACT_DOWNLOAD_ABORTED",
+            `marketplace artifact download aborted for ${slug}@${version}`,
+          );
+        }
+        if (Date.now() >= retryDeadline || retryController.signal.aborted) {
+          throw retryDeadlineExceededError(slug, version);
+        }
+        if (err instanceof MarketplaceArtifactLimitError) throw err;
+        if (!(err instanceof MarketplaceTransientDownloadError)) throw err;
+        lastErr = err;
+        if (attempt + 1 >= maxRetries) break;
+        await sleepWithinRetryDeadline(
+          backoffMs(attempt),
+          retryDeadline,
+          signal,
+          slug,
+          version,
+        );
+        continue;
+      }
+      if (Date.now() >= retryDeadline || retryController.signal.aborted) {
+        throw retryDeadlineExceededError(slug, version);
+      }
+      assertCompressedArtifactSize(
+        res.body.byteLength,
+        maxArtifactBytes,
+        `downloaded marketplace artifact ${slug}@${version}`,
       );
-      continue;
+      if (res.status === 429) {
+        const requestedWaitSec = res.retryAfterSeconds ?? Math.pow(2, attempt) * 0.5;
+        const waitSec = Math.min(requestedWaitSec, MAX_RETRY_AFTER_SECONDS);
+        // Track a diagnosable last error so exhausting retries on 429s does not
+        // surface as "unknown error" in the RETRY_EXHAUSTED message.
+        lastErr = new MarketplaceInstallerError(
+          "RATE_LIMITED",
+          `marketplace returned 429 for ${slug}@${version} (retry-after=${waitSec}s)`,
+        );
+        if (attempt + 1 >= maxRetries) break;
+        await sleepWithinRetryDeadline(
+          Math.max(0, waitSec * 1000),
+          retryDeadline,
+          signal,
+          slug,
+          version,
+        );
+        continue;
+      }
+      if (res.status >= 500) {
+        lastErr = new MarketplaceInstallerError(
+          "SERVER_ERROR",
+          `marketplace returned ${res.status} for ${slug}@${version}`,
+        );
+        if (attempt + 1 >= maxRetries) break;
+        await sleepWithinRetryDeadline(
+          backoffMs(attempt),
+          retryDeadline,
+          signal,
+          slug,
+          version,
+        );
+        continue;
+      }
+      if (res.status >= 400) {
+        throw new MarketplaceInstallerError(
+          "CLIENT_ERROR",
+          `marketplace returned ${res.status} for ${slug}@${version}`,
+        );
+      }
+      return { body: res.body, sha256Header: res.sha256Header };
     }
-    assertCompressedArtifactSize(
-      res.body.byteLength,
-      maxArtifactBytes,
-      `downloaded marketplace artifact ${slug}@${version}`,
+    throw new MarketplaceInstallerError(
+      "RETRY_EXHAUSTED",
+      `download failed after ${maxRetries} attempts: ${lastErr?.message ?? "unknown error"}`,
     );
-    if (res.status === 429) {
-      const requestedWaitSec = res.retryAfterSeconds ?? Math.pow(2, attempt) * 0.5;
-      const waitSec = Math.min(requestedWaitSec, MAX_RETRY_AFTER_SECONDS);
-      // Track a diagnosable last error so exhausting retries on 429s does not
-      // surface as "unknown error" in the RETRY_EXHAUSTED message.
-      lastErr = new MarketplaceInstallerError(
-        "RATE_LIMITED",
-        `marketplace returned 429 for ${slug}@${version} (retry-after=${waitSec}s)`,
-      );
-      if (attempt + 1 >= maxRetries) break;
-      await sleepWithinRetryDeadline(
-        Math.max(0, waitSec * 1000),
-        retryDeadline,
-        signal,
-        slug,
-        version,
-      );
-      continue;
-    }
-    if (res.status >= 500) {
-      lastErr = new MarketplaceInstallerError(
-        "SERVER_ERROR",
-        `marketplace returned ${res.status} for ${slug}@${version}`,
-      );
-      if (attempt + 1 >= maxRetries) break;
-      await sleepWithinRetryDeadline(
-        backoffMs(attempt),
-        retryDeadline,
-        signal,
-        slug,
-        version,
-      );
-      continue;
-    }
-    if (res.status >= 400) {
-      throw new MarketplaceInstallerError(
-        "CLIENT_ERROR",
-        `marketplace returned ${res.status} for ${slug}@${version}`,
-      );
-    }
-    return { body: res.body, sha256Header: res.sha256Header };
+  } finally {
+    clearTimeout(deadlineTimer);
+    signal?.removeEventListener("abort", abortFromCaller);
   }
-  throw new MarketplaceInstallerError(
+}
+
+function retryDeadlineExceededError(slug: string, version: string): MarketplaceInstallerError {
+  return new MarketplaceInstallerError(
     "RETRY_EXHAUSTED",
-    `download failed after ${maxRetries} attempts: ${lastErr?.message ?? "unknown error"}`,
+    `download retry deadline exceeded for ${slug}@${version}`,
   );
+}
+
+async function settleWithinRetryDeadline<T>(
+  operation: Promise<T>,
+  retrySignal: AbortSignal,
+  callerSignal: AbortSignal | undefined,
+  slug: string,
+  version: string,
+): Promise<T> {
+  if (retrySignal.aborted) {
+    if (callerSignal?.aborted) {
+      throw new MarketplaceArtifactLimitError(
+        "ARTIFACT_DOWNLOAD_ABORTED",
+        `marketplace artifact download aborted for ${slug}@${version}`,
+      );
+    }
+    throw retryDeadlineExceededError(slug, version);
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      if (callerSignal?.aborted) {
+        reject(new MarketplaceArtifactLimitError(
+          "ARTIFACT_DOWNLOAD_ABORTED",
+          `marketplace artifact download aborted for ${slug}@${version}`,
+        ));
+      } else {
+        reject(retryDeadlineExceededError(slug, version));
+      }
+    };
+    retrySignal.addEventListener("abort", onAbort, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      retrySignal.removeEventListener("abort", onAbort);
+    });
+  });
 }
 
 function backoffMs(attempt: number): number {

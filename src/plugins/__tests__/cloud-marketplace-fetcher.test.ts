@@ -8,7 +8,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Mock must be declared BEFORE the import under test so vi.mock hoists correctly.
@@ -912,7 +911,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     const fetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
     });
-    const downloadRoot = mkdtempSync(join(tmpdir(), "marketplace-protocol-integration-"));
+    const downloadRoot = mkdtempSync(join(process.cwd(), ".marketplace-protocol-integration-"));
     try {
       await expect(installFromMarketplace("acme", "1.0.0", {
         http: fetcher,
@@ -937,7 +936,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
       baseUrl: "https://marketplace.example.com",
       artifactLimits: { maxCompressedBytes: 5 },
     });
-    const downloadRoot = mkdtempSync(join(tmpdir(), "marketplace-limit-integration-"));
+    const downloadRoot = mkdtempSync(join(process.cwd(), ".marketplace-limit-integration-"));
     try {
       await expect(installFromMarketplace("acme", "1.0.0", {
         http: fetcher,
