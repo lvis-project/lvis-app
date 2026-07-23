@@ -5,13 +5,19 @@ import { listSecretKeys } from "./config-schema.js";
 import type { PluginMarketplaceService } from "./marketplace.js";
 import type { PluginPaths } from "./plugin-paths.js";
 import type { PluginRuntime } from "./runtime.js";
-import { withPluginInstallLock } from "./install-lifecycle.js";
+import {
+  drainPluginInstallLockOperations,
+  withPluginInstallLock,
+} from "./install-lifecycle.js";
 
 type WarnLogger = { warn: (message: string, ...args: unknown[]) => void };
 
 export interface PluginUninstallLifecycleDeps {
   pluginMarketplace: Pick<PluginMarketplaceService, "uninstall">;
-  pluginRuntime: Pick<PluginRuntime, "addPlugin" | "removePlugin" | "getPluginManifest">;
+  pluginRuntime: Pick<
+    PluginRuntime,
+    "addPlugin" | "removePlugin" | "getPluginManifest" | "resolvePluginId" | "clearConfigOverride"
+  >;
   settingsService?: Partial<Pick<SettingsService, "deletePluginConfig" | "deletePluginSecrets">>;
   pluginPaths?: Pick<PluginPaths, "cacheRoot">;
   clearAuthPartitionService?: (partition: string) => Promise<void>;
@@ -106,9 +112,13 @@ export async function uninstallPluginWithLifecycle(
   pluginId: string,
   deps: PluginUninstallLifecycleDeps,
 ): Promise<{ pluginId: string; uninstalled: true }> {
-  return withPluginInstallLock(pluginId, async () => {
-    const secretKeys = listSecretKeys(deps.pluginRuntime.getPluginManifest(pluginId)?.configSchema);
-    await deps.pluginRuntime.removePlugin(pluginId);
+  const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+  return withPluginInstallLock(canonicalPluginId, async () => {
+    const secretKeys = listSecretKeys(
+      deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
+    );
+    await deps.pluginRuntime.removePlugin(canonicalPluginId);
+    await drainPluginInstallLockOperations(canonicalPluginId);
 
     let result: { pluginId: string; uninstalled: true } | null = null;
     let marketplaceRemoved = false;
@@ -119,22 +129,23 @@ export async function uninstallPluginWithLifecycle(
       const message = (err as Error).message ?? "uninstall failed";
       if (!isMissingPluginError(message)) {
         try {
-          await deps.pluginRuntime.addPlugin(pluginId);
+          await deps.pluginRuntime.addPlugin(canonicalPluginId);
         } catch (restoreError) {
           throw new AggregateError(
             [err, restoreError],
-            `plugin uninstall and runtime restore both failed: ${pluginId}`,
+            `plugin uninstall and runtime restore both failed: ${canonicalPluginId}`,
           );
         }
         throw err;
       }
     }
 
-    await bestEffortCleanupPluginState(pluginId, deps, {
+    deps.pluginRuntime.clearConfigOverride(canonicalPluginId);
+    await bestEffortCleanupPluginState(canonicalPluginId, deps, {
       cleanupCache: marketplaceRemoved,
       secretKeys,
     });
-    deps.emitHostEvent?.("plugin.uninstalled", { pluginId });
+    deps.emitHostEvent?.("plugin.uninstalled", { pluginId: canonicalPluginId });
     deps.refreshPluginNotifications?.();
 
     return result ?? { pluginId, uninstalled: true as const };
@@ -145,15 +156,20 @@ export async function cleanupFailedPluginInstallWithLifecycle(
   pluginId: string,
   deps: PluginFailedInstallCleanupLifecycleDeps,
 ): Promise<{ pluginId: string; uninstalled: true }> {
-  return withPluginInstallLock(pluginId, async () => {
-    const secretKeys = listSecretKeys(deps.pluginRuntime.getPluginManifest(pluginId)?.configSchema);
-    await deps.pluginRuntime.removePlugin(pluginId);
+  const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+  return withPluginInstallLock(canonicalPluginId, async () => {
+    const secretKeys = listSecretKeys(
+      deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
+    );
+    await deps.pluginRuntime.removePlugin(canonicalPluginId);
+    await drainPluginInstallLockOperations(canonicalPluginId);
     deps.pluginMarketplace.clearInstallFailureDiagnostic(pluginId);
-    await bestEffortCleanupPluginState(pluginId, deps, {
+    deps.pluginRuntime.clearConfigOverride(canonicalPluginId);
+    await bestEffortCleanupPluginState(canonicalPluginId, deps, {
       cleanupCache: true,
       secretKeys,
     });
-    deps.emitHostEvent?.("plugin.uninstalled", { pluginId });
+    deps.emitHostEvent?.("plugin.uninstalled", { pluginId: canonicalPluginId });
     deps.refreshPluginNotifications?.();
     return { pluginId, uninstalled: true as const };
   });

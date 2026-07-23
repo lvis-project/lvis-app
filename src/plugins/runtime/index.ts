@@ -28,7 +28,12 @@ import { updatePluginRegistry } from "../registry.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
 import { sessionContext } from "../../engine/session-context.js";
-import { runStartWithTimeout, SessionActivationTracker } from "./lifecycle-timeout.js";
+import {
+  runPluginImportWithTimeout,
+  runPluginFactoryWithTimeout,
+  runStartWithTimeout,
+  SessionActivationTracker,
+} from "./lifecycle-timeout.js";
 
 import {
   readEnabledManifestSnapshots,
@@ -59,7 +64,7 @@ const log = createLogger("plugin-runtime");
  */
 export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
-export { runStartWithTimeout };
+export { runPluginFactoryWithTimeout, runPluginImportWithTimeout, runStartWithTimeout };
 export type { PluginPerfStats };
 
 export type { InstallPolicy };
@@ -203,6 +208,13 @@ export interface PluginStartPreparationContext {
   reportProgress?: (status: PluginPreparationProgressInput) => void;
 }
 
+export interface PluginHostApiIncarnation {
+  registerDisposer(dispose: () => void): void;
+  trackOperation<T>(operation: Promise<T>): Promise<T>;
+  isActive(): boolean;
+  isLifecycleHookActive(): boolean;
+}
+
 export interface PluginRuntimeOptions {
   hostRoot: string;
   manifestPaths?: string[];
@@ -210,14 +222,19 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** Plugin-scoped HostApi factory — injected by boot.ts */
-  createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
+  createHostApi?: (
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    incarnation: PluginHostApiIncarnation,
+  ) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   /**
    * Fires when a plugin's tear-down path runs (`restartPlugin` stop phase,
    * `restartAll` stop phase per plugin, `disable`, `removePlugin`,
-   * `reloadPlugin` stop phase, and `cleanupFailedStartRuntimeState` when a
+   * `reloadPlugin` stop phase, and `failClosedLoadedPlugin` when a
    * fresh start fails mid-`restartAll`). The host wires this to
    * `toolRegistry.unregisterByPlugin` + `keywordEngine.unregisterByPlugin`
    * + `conversationLoop.onPluginDisabled` so transient runtime state stays
@@ -225,7 +242,7 @@ export interface PluginRuntimeOptions {
    *
    * May fire more than once per logical cycle for the same pluginId — e.g.,
    * `restartAll` fires it from its pre-stop fan-out and then again from
-   * `cleanupFailedStartRuntimeState` if that plugin's start fails. Callbacks
+   * `failClosedLoadedPlugin` if that plugin's start fails. Callbacks
    * MUST be idempotent.
    */
   onDisable?: (pluginId: string) => void;
@@ -629,6 +646,14 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     list.push(dispose);
   }
 
+  isPluginRestartPending(pluginId: string): boolean {
+    return this.pendingRestarts.has(this.resolveKnownPluginId(pluginId));
+  }
+
+  isPluginUiRevisionCurrent(pluginId: string, revision: number): boolean {
+    return this.pluginUiRevisions.get(pluginId) === revision;
+  }
+
   listToolNames(): string[] {
     return [...this.methodMap.keys()].sort();
   }
@@ -730,6 +755,16 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
     return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
+  }
+
+  /** Canonical lifecycle identity for a marketplace/install alias. */
+  resolvePluginId(pluginId: string): string {
+    return this.resolveKnownPluginId(pluginId);
+  }
+
+  /** Final uninstall cleanup after stop-hook mutations have drained. */
+  clearConfigOverride(pluginId: string): void {
+    this.configStore.delete(this.resolveKnownPluginId(pluginId));
   }
 
   getApprovedPluginAccess(pluginId: string): PluginAccessSpec | undefined {
