@@ -1215,14 +1215,16 @@ export default async function createPlugin({ hostApi }) {
 
   async function waitUntil<T>(fn: () => Promise<T> | T): Promise<T> {
     let lastErr: unknown;
-    for (let i = 0; i < 25; i += 1) {
+    const deadline = Date.now() + 2_000;
+    do {
       try {
         return await fn();
       } catch (err) {
         lastErr = err;
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (Date.now() >= deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
-    }
+    } while (Date.now() < deadline);
     throw lastErr;
   }
 
