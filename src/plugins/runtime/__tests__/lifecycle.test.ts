@@ -176,43 +176,42 @@ export default async function createPlugin() {
     await expect(runtime.call("lc_restart_remove_race_ping")).rejects.toThrow(/not found/);
   });
 
-  it("bounds an uncertain replacement start and fail-closes the old instance", async () => {
-    const pluginDir = join(installedDir, "lc-restart-timeout");
-    const armPath = join(testDir, "restart-timeout-arm");
+  it.each(["import", "factory", "start"] as const)(
+    "fail-closes an uncertain %s replacement and quarantines its identity",
+    async (uncertainPhase) => {
+    const pluginId = `lc-restart-${uncertainPhase}-timeout`;
+    const toolName = `lc_restart_${uncertainPhase}_timeout_ping`;
+    const pluginDir = join(installedDir, pluginId);
     await mkdir(pluginDir, { recursive: true });
     const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(
-      join(pluginDir, "entry.mjs"),
-      `import { access } from "node:fs/promises";
-export default async function createPlugin() {
+    const entryPath = join(pluginDir, "entry.mjs");
+    const healthyEntry = `export default async function createPlugin() {
   return {
-    handlers: { lc_restart_timeout_ping: async () => "old-still-live" },
-    start: async () => {
-      try {
-        await access(${JSON.stringify(armPath)});
-        await new Promise(() => {});
-      } catch {}
-    },
+    handlers: { ${toolName}: async () => "healthy" },
+    start: async () => {},
     stop: async () => {},
   };
-}`,
+}`;
+    await writeFile(
+      entryPath,
+      healthyEntry,
       "utf-8",
     );
     await writeFile(
       manifestPath,
       JSON.stringify({
-        id: "lc-restart-timeout",
-        name: "Restart Timeout",
+        id: pluginId,
+        name: `Restart ${uncertainPhase} Timeout`,
         version: "1.0.0",
         entry: "entry.mjs",
         startupTimeoutMs: 50,
         tools: [{
-          name: "lc_restart_timeout_ping",
-          description: "Restart timeout regression tool",
+          name: toolName,
+          description: `${uncertainPhase} timeout regression tool`,
           inputSchema: { type: "object", properties: {} },
           _meta: { ui: { visibility: ["model", "app"] } },
         }],
-        description: "Lifecycle restart timeout regression.",
+        description: `Lifecycle restart ${uncertainPhase} timeout regression.`,
         publisher: "Test",
       }),
       "utf-8",
@@ -221,21 +220,75 @@ export default async function createPlugin() {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "lc-restart-timeout", manifestPath, enabled: true }],
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
       }),
       "utf-8",
     );
-    const runtime = makeRuntime();
+    const issuedHostApis: ReturnType<typeof createNoopHostApiForTests>[] = [];
+    const runtime = makeTestPluginRuntime(
+      {
+        rootDir: testDir,
+        registryPath,
+        pluginsRoot: installedDir,
+      },
+      {
+        createHostApi: (id, manifest, pluginDataDir, incarnation) => {
+          const hostApi = createNoopHostApiForTests(
+            id,
+            manifest,
+            pluginDataDir,
+            incarnation,
+          );
+          const getSecret = hostApi.getSecret.bind(hostApi);
+          hostApi.getSecret = (key) => {
+            if (!incarnation.isActive()) {
+              throw new Error("plugin instance is no longer active");
+            }
+            return getSecret(key);
+          };
+          issuedHostApis.push(hostApi);
+          return hostApi;
+        },
+      },
+    );
     await runtime.startAll();
-    await writeFile(armPath, "armed", "utf-8");
+    const oldHostApi = issuedHostApis[0];
+    expect(oldHostApi).toBeDefined();
+    expect(oldHostApi!.getSecret("plugin.test.key")).toBeNull();
+    await expect(runtime.call(toolName)).resolves.toBe("healthy");
 
-    await expect(runtime.restartPlugin("lc-restart-timeout")).resolves.toBe("failed");
-    expect(runtime.listPluginIds()).not.toContain("lc-restart-timeout");
-    await expect(runtime.call("lc_restart_timeout_ping")).rejects.toThrow(/not found/);
-    await expect(runtime.restartPlugin("lc-restart-timeout")).rejects.toMatchObject({
+    const uncertainEntry = uncertainPhase === "import"
+      ? `await new Promise(() => {});
+export default async function createPlugin() {
+  return {
+    handlers: { ${toolName}: async () => "unreachable" },
+    stop: async () => {},
+  };
+}`
+      : uncertainPhase === "factory"
+        ? `export default async function createPlugin() {
+  await new Promise(() => {});
+}`
+        : `export default async function createPlugin() {
+  return {
+    handlers: { ${toolName}: async () => "replacement" },
+    start: async () => new Promise(() => {}),
+    stop: async () => {},
+  };
+}`;
+    await writeFile(entryPath, uncertainEntry, "utf-8");
+
+    await expect(runtime.restartPlugin(pluginId)).resolves.toBe("failed");
+    expect(() => oldHostApi!.getSecret("plugin.test.key"))
+      .toThrow(/plugin instance is no longer active/);
+    expect(runtime.listPluginIds()).not.toContain(pluginId);
+    await expect(runtime.call(toolName)).rejects.toThrow(/not found/);
+
+    await writeFile(entryPath, healthyEntry, "utf-8");
+    await expect(runtime.restartPlugin(pluginId)).rejects.toMatchObject({
       code: "plugin-lifecycle-quarantined",
     });
-  });
+  }, 20_000);
 
   it("revokes and unadvertises the old instance when its stop hook times out", async () => {
     const pluginDir = join(installedDir, "lc-stop-timeout");
