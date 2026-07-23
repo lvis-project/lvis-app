@@ -91,6 +91,7 @@ function createDeps(pluginRoot: string): {
     auditLogger: { log: vi.fn() },
     postTurnHookChain: {},
     knowledgeAvailable: false,
+    revokePluginOperationSession: vi.fn(),
     refreshPluginNotifications: vi.fn(),
     notificationService: {},
     getMainWindow: () => null,
@@ -436,6 +437,33 @@ describe("plugin theme IPC handlers", () => {
 
     expect(revokedSessions).toHaveLength(webContentsIds.length);
     expect(new Set(revokedSessions)).toHaveLength(webContentsIds.length);
+  });
+
+  it("revokes the replaced session before re-registering the same webview", () => {
+    const { root, entryUrl } = createPluginFixture();
+    const { deps } = createDeps(root);
+    registerPluginsHandlers(deps);
+    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const revokeSession = vi.mocked(deps.revokePluginOperationSession);
+    const webContentsId = 2_100;
+
+    expect(registerWebview(rendererEvent(), {
+      webContentsId,
+      pluginId: "meeting",
+      entryUrl,
+    })).toEqual({ ok: true });
+    expect(registerWebview(rendererEvent(), {
+      webContentsId,
+      pluginId: "meeting",
+      entryUrl,
+    })).toEqual({ ok: true });
+
+    expect(revokeSession).toHaveBeenCalledTimes(1);
+    unregisterPluginWebview(webContentsId, revokeSession);
+    unregisterPluginWebview(webContentsId, revokeSession);
+
+    expect(revokeSession).toHaveBeenCalledTimes(2);
+    expect(new Set(revokeSession.mock.calls.map(([appSessionId]) => appSessionId))).toHaveLength(2);
   });
 
   it("rejects host namespace emits through the production plugin emit IPC handler", () => {
