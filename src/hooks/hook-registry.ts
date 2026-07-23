@@ -8,10 +8,10 @@
  * every future downstream consumer (trust diff, runner, audit, trust-review UI)
  * sees a single representation regardless of origin.
  *
- * Nothing imports this yet. `DiscoveredHook` and `ScriptHookManager` are left
- * UNCHANGED (back-compat); this module is additive. The boot / runner / trust
- * wiring that actually drives the registry lands in a separate cluster-reviewed
- * PR.
+ * `ScriptHookManager` consumes this registry for both user/global Hooks and
+ * exact-generation plugin-owned Hook projections. Plugin entries carry an
+ * activation identity for leasing while durable trust remains tied to the
+ * reviewed artifact version and fingerprint.
  *
  * Normalization rules (design §4.1):
  *   - A legacy `.sh` `DiscoveredHook` → `{ source: "sh", command: [<abs .sh
@@ -37,6 +37,8 @@ export type HookRegistryEntry = ShHookRegistryEntry | ConfigHookRegistryEntry;
 export interface PluginHookOwner {
   pluginId: string;
   pluginVersion: string;
+  /** Unique runtime activation identity; excluded from durable trust keys. */
+  activationId: string;
   generationId: string;
   localId: string;
   fingerprint: string;

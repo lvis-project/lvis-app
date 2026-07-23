@@ -13,6 +13,7 @@ import type {
 import type { HostApiGenerationScope } from "./plugin-host-effect-scope.js";
 
 export interface PluginRuntimeGenerationProjection {
+  readonly activationId: string;
   readonly manifest: PluginManifest;
   readonly pluginRoot: string;
   readonly instance: RuntimePlugin;
@@ -20,6 +21,17 @@ export interface PluginRuntimeGenerationProjection {
   readonly approvedPluginAccess?: PluginAccessSpec;
   readonly disposers?: readonly (() => void)[];
   readonly hostEffects?: HostApiGenerationScope;
+}
+
+export interface PreparedPluginRuntimeGenerationPublication {
+  readonly pluginId: string;
+  publish(): void;
+}
+
+export interface CommittedPluginGeneration<T> {
+  readonly result: T;
+  /** Settles only after every predecessor lease drains and retirement finishes. */
+  readonly retirement: Promise<void>;
 }
 
 /** Immutable Host view shared by runtime, Skill, Hook, MCP and operation policy. */
@@ -34,13 +46,27 @@ export interface PluginRuntimeGenerationAccess {
   getActive(pluginId: string): ActivePluginGeneration<HostPluginGenerationState> | undefined;
   acquire(pluginId: string): Promise<PluginGenerationLease<HostPluginGenerationState>>;
   acquireExact(pluginId: string, generationId: string): Promise<PluginGenerationLease<HostPluginGenerationState>>;
+  runWithLease<T>(
+    lease: PluginGenerationLease<HostPluginGenerationState>,
+    operation: () => Promise<T>,
+  ): Promise<T>;
 }
 
 export interface PluginRuntimeGenerationLifecycle extends PluginRuntimeGenerationAccess {
   replaceRuntime(runtime: PluginRuntimeGenerationProjection): Promise<void>;
+  replaceRuntimeWithCommit<T>(
+    runtime: PluginRuntimeGenerationProjection,
+    receiptRaw: string,
+    durableCommit: () => Promise<T>,
+  ): Promise<CommittedPluginGeneration<T>>;
   deactivate(pluginId: string): Promise<void>;
   deactivateWithCommit<T>(pluginId: string, durableCommit: () => Promise<T>): Promise<T>;
   setContributionsEnabled(pluginId: string, enabled: boolean): Promise<void>;
+  setContributionsEnabledWithCommit<T>(
+    pluginId: string,
+    enabled: boolean,
+    durableCommit: () => Promise<T>,
+  ): Promise<T>;
   recoverRetirements(): Promise<void>;
   waitForRetirements(): Promise<void>;
 }

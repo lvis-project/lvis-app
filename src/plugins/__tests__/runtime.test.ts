@@ -9,9 +9,16 @@ import { mkdtempSync } from "node:fs";
 import {
   makeTestPluginEntrySource,
   makeTestPluginRuntime,
+  bindTestPluginRuntimeGeneration,
   writeTestPlugin,
   writeTestPluginRegistry,
 } from "./test-helpers.js";
+
+function makeGenerationBoundRuntime(
+  options: ConstructorParameters<typeof PluginRuntime>[0],
+): PluginRuntime {
+  return bindTestPluginRuntimeGeneration(new PluginRuntime(options));
+}
 
 /**
  * Phase 1.5 F-round §F5: direct unit tests for `PluginRuntime.disable()`.
@@ -91,7 +98,7 @@ describe("PluginRuntime.disable", () => {
     const manifestPath = await writeFakePlugin("p-user");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-user", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     expect(runtime.listPluginIds()).toContain("p-user");
     expect(runtime.listToolNames()).toContain("p_user_hello");
@@ -110,7 +117,7 @@ describe("PluginRuntime.disable", () => {
     const manifestPath = await writeFakePlugin("p-managed", "admin");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Admin plugin/);
 
@@ -127,7 +134,7 @@ describe("PluginRuntime.disable", () => {
     const manifestPath = await writeFakePlugin("p-managed", "admin");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     await runtime.disable("p-managed", "it-admin");
 
@@ -141,7 +148,7 @@ describe("PluginRuntime.disable", () => {
     const manifestPath = await writeFakePlugin("p-existing");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-existing", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     await expect(runtime.disable("p-missing")).rejects.toThrow(/not found/i);
 
@@ -175,7 +182,7 @@ describe("PluginRuntime.disable", () => {
     await writeTestPluginRegistry({ registryPath }, [{ id: pluginId, manifestPath, enabled: true }]);
 
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     expect(runtime.listPluginIds()).toContain("example-plugin");
     expect(runtime.listToolNames()).toContain("com_example_test_hello");
@@ -432,20 +439,6 @@ describe("PluginRuntime.disable", () => {
     await expect(runtime.callFromUi("uio_upload_chunk")).resolves.toBe("ui-only-ok");
   });
 
-  it("registerDisposer callbacks fire on disable() and not thereafter", async () => {
-    const manifestPath = await writeFakePlugin("p-disposer");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "p-disposer", manifestPath, enabled: true }]);
-    const runtime = makeRuntime();
-    await runtime.load();
-
-    let calls = 0;
-    const dispose = () => { calls += 1; };
-    runtime.registerDisposer("p-disposer", dispose);
-
-    await runtime.disable("p-disposer");
-    expect(calls).toBe(1);
-  });
-
   it("exposes capability/manifest/ipc binding metadata from loaded plugins", async () => {
     const pluginDir = join(installedDir, "meta-plugin");
     await mkdir(pluginDir, { recursive: true });
@@ -514,7 +507,7 @@ describe("PluginRuntime.disable", () => {
       let injectedHostApi: Record<string, unknown> | undefined;
 
       const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
-      const runtime = new PluginRuntime({
+      const runtime = makeGenerationBoundRuntime({
         hostRoot: testDir,
         registryPath,
         deploymentGuard: guard,
@@ -561,7 +554,7 @@ describe("PluginRuntime.disable", () => {
       await writeTestPluginRegistry({ registryPath }, [{ id: "calltool-delegate", manifestPath, enabled: true }]);
 
       const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
-      const runtime = new PluginRuntime({
+      const runtime = makeGenerationBoundRuntime({
         hostRoot: testDir,
         registryPath,
         deploymentGuard: guard,
@@ -826,7 +819,7 @@ describe("PluginRuntime.disable", () => {
     ]);
 
     let runtime!: PluginRuntime;
-    runtime = new PluginRuntime({
+    runtime = makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -875,7 +868,7 @@ describe("PluginRuntime.disable", () => {
     ]);
 
     let runtime!: PluginRuntime;
-    runtime = new PluginRuntime({
+    runtime = makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -887,7 +880,11 @@ describe("PluginRuntime.disable", () => {
         getSecret: () => null,
       } as unknown as import("../types.js").PluginHostApi),
     });
-    await expect(runtime.load()).rejects.toThrow(/not allowed/i);
+    await expect(runtime.load()).resolves.toBeUndefined();
+    expect(runtime.listPluginIds()).not.toContain("calendar");
+    expect(runtime.listPluginCards()).toContainEqual(
+      expect.objectContaining({ id: "calendar", loadStatus: "failed" }),
+    );
   });
 
   it("blocks plugins from emitting events owned by another plugin", async () => {
@@ -1047,7 +1044,7 @@ describe("PluginRuntime registry trusted-path", () => {
       JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
       "utf-8",
     );
-    const runtime = new PluginRuntime({ hostRoot, pluginsRoot, registryPath });
+    const runtime = makeGenerationBoundRuntime({ hostRoot, pluginsRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("cloud-plugin");
   });
@@ -1060,7 +1057,7 @@ describe("PluginRuntime registry trusted-path", () => {
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runtime = new PluginRuntime({ hostRoot, registryPath });
+    const runtime = makeGenerationBoundRuntime({ hostRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("cloud-plugin");
     expect(warnSpy).toHaveBeenCalledWith(
@@ -1080,7 +1077,7 @@ describe("PluginRuntime registry trusted-path", () => {
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runtime = new PluginRuntime({ hostRoot, pluginsRoot, registryPath });
+    const runtime = makeGenerationBoundRuntime({ hostRoot, pluginsRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("evil");
     expect(warnSpy).toHaveBeenCalledWith(
@@ -1198,7 +1195,7 @@ export default async function createPlugin({ hostApi }) {
   }
 
   function makeRuntime(): PluginRuntime {
-    return new PluginRuntime({
+    return makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -1208,7 +1205,7 @@ export default async function createPlugin({ hostApi }) {
   function makeRuntimeWithPreparation(
     preparePluginStart: ConstructorParameters<typeof PluginRuntime>[0]["preparePluginStart"],
   ): PluginRuntime {
-    return new PluginRuntime({
+    return makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -1234,7 +1231,7 @@ export default async function createPlugin({ hostApi }) {
     disabled: string[],
   ): PluginRuntime {
     let runtime: PluginRuntime;
-    runtime = new PluginRuntime({
+    runtime = makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -1375,7 +1372,7 @@ export default async function createPlugin({ hostApi }) {
 
     await runtime.load();
 
-    await expect(runtime.call("p_start_guard_ping")).rejects.toThrow(/still starting/);
+    await expect(runtime.call("p_start_guard_ping")).rejects.toThrow(/not found|not active/);
 
     await runtime.startAll();
 
@@ -2354,7 +2351,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
     // The ctx object is passed as 2nd arg; check the message string + ctx via JSON.
     const calls: unknown[][] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const hasLoadStart = calls.some((args) => {
       const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
@@ -2369,7 +2366,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
     await writeTestPluginRegistry({ registryPath }, [{ id: "plog-ok", manifestPath, enabled: true }]);
     const calls: unknown[][] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const hasLoadOk = calls.some((args) => {
       const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
@@ -2382,7 +2379,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
   it("emits RESTART_REQUEST phase when restartPlugin is called", async () => {
     const manifestPath = await writeFakePlugin("plog-restart");
     await writeTestPluginRegistry({ registryPath }, [{ id: "plog-restart", manifestPath, enabled: true }]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const calls: unknown[][] = [];
     const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
@@ -2395,19 +2392,4 @@ describe("PluginRuntime lifecycle plog emission", () => {
     spyLog.mockRestore();
   });
 
-  it("emits RESTART_STOP_OK phase after stop succeeds during restart", async () => {
-    const manifestPath = await writeFakePlugin("plog-stop-ok");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-stop-ok", manifestPath, enabled: true }]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    await runtime.load();
-    const calls: unknown[][] = [];
-    const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    await runtime.restartPlugin("plog-stop-ok");
-    const hasStopOk = calls.some((args) => {
-      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
-      return flat.includes(PluginPhase.RESTART_STOP_OK) || flat.includes("stopped previous instance");
-    });
-    expect(hasStopOk).toBe(true);
-    spyLog.mockRestore();
-  });
 });

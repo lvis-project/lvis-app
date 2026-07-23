@@ -95,6 +95,12 @@ export interface PluginSkillOwner {
   fingerprint: string;
 }
 
+export interface PreparedPluginSkillGeneration {
+  readonly pluginId: string;
+  readonly generationId: string;
+  publish(): void;
+}
+
 interface SkillCatalogRecord extends SkillCatalogEntry {
   baseName: string;
   filePath: string;
@@ -141,7 +147,7 @@ export interface SkillStoreOptions {
 
 export class SkillStore {
   private readonly userDir: string;
-  private readonly pluginSkills = new Map<string, LoadedSkill>();
+  private pluginSkills = new Map<string, LoadedSkill>();
 
   constructor(opts: SkillStoreOptions = {}) {
     this.userDir = opts.userDir ?? USER_SKILLS_DIR;
@@ -222,17 +228,66 @@ export class SkillStore {
     return loaded[0] ?? null;
   }
 
+  /** Resolve a plugin Skill only from an already-admitted immutable generation. */
+  loadPluginGeneration(generation: ActivePluginGeneration, selector: string): LoadedSkill | null {
+    const prefix = `plugin:${generation.pluginId}:`;
+    if (!selector.startsWith(prefix)) return null;
+    const localId = selector.slice(prefix.length);
+    const contribution = generation.contributions.find(
+      (entry) => entry.kind === "skill" && entry.localId === localId,
+    );
+    return contribution ? materializedSkill(generation, contribution) : null;
+  }
+
   /** Publish materialized Skill bytes for exactly one active plugin generation. */
   publishPluginGeneration(generation: ActivePluginGeneration): void {
-    this.removePlugin(generation.pluginId);
+    this.preparePluginGeneration(generation).publish();
+  }
+
+  /** Parse and prebuild the complete Skill snapshot before durable commit. */
+  preparePluginGeneration(generation: ActivePluginGeneration): PreparedPluginSkillGeneration {
+    const next = new Map(this.pluginSkills);
+    for (const [selector, skill] of next) {
+      if (skill.pluginOwner?.pluginId === generation.pluginId) next.delete(selector);
+    }
     for (const contribution of generation.contributions) {
       if (contribution.kind !== "skill") continue;
       const skill = materializedSkill(generation, contribution);
-      if (this.pluginSkills.has(skill.name)) {
+      if (next.has(skill.name)) {
         throw new Error(`duplicate plugin Skill selector: ${skill.name}`);
       }
-      this.pluginSkills.set(skill.name, skill);
+      next.set(skill.name, skill);
     }
+    let published = false;
+    return Object.freeze({
+      pluginId: generation.pluginId,
+      generationId: generation.generationId,
+      publish: () => {
+        if (published) return;
+        this.pluginSkills = next;
+        published = true;
+      },
+    });
+  }
+
+  /** Prebuild exact plugin catalog removal; leased overlays keep their body. */
+  preparePluginRemoval(pluginId: string, generationId: string): PreparedPluginSkillGeneration {
+    const next = new Map(this.pluginSkills);
+    for (const [selector, skill] of next) {
+      if (skill.pluginOwner?.pluginId === pluginId && skill.pluginOwner.generationId === generationId) {
+        next.delete(selector);
+      }
+    }
+    let published = false;
+    return Object.freeze({
+      pluginId,
+      generationId,
+      publish: () => {
+        if (published) return;
+        this.pluginSkills = next;
+        published = true;
+      },
+    });
   }
 
   /** Remove one retired generation without touching user/global skill files. */

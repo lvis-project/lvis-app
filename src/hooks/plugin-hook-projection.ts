@@ -68,7 +68,8 @@ export function preparePluginHookGeneration(
     const owner: PluginHookOwner = Object.freeze({
       pluginId: generation.pluginId,
       pluginVersion: generation.pluginVersion,
-      generationId: generation.generationId,
+      activationId: generation.generationId,
+      generationId: generation.artifactGenerationId,
       localId: contribution.localId,
       fingerprint: commandFingerprints.length === 0
         ? contribution.fingerprint

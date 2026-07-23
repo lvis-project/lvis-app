@@ -38,9 +38,9 @@ describe("runManagedBootstrap concurrency", () => {
           releaseEnsure = () => resolve(ensureResult);
         }),
     );
-    const restartAll = vi.fn(async () => undefined);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const pluginRuntime = { restartAll } as unknown as PluginRuntime;
+    const activatePreparedArtifact = vi.fn();
+    const pluginRuntime = { activatePreparedArtifact } as unknown as PluginRuntime;
 
     const input = {
       pluginMarketplace,
@@ -54,7 +54,7 @@ describe("runManagedBootstrap concurrency", () => {
 
     // Three concurrent callers — the first kicks off ensureManagedInstalled,
     // the next two await the same in-flight promise instead of starting
-    // fresh runs that would race on the registry write + restartAll.
+    // fresh runs that would race on the generation transaction.
     const promises = [
       runManagedBootstrap(input),
       runManagedBootstrap(input),
@@ -66,15 +66,17 @@ describe("runManagedBootstrap concurrency", () => {
     await Promise.all(promises);
 
     expect(ensureManagedInstalled).toHaveBeenCalledTimes(1);
-    expect(restartAll).toHaveBeenCalledTimes(1);
+    expect(ensureManagedInstalled).toHaveBeenCalledWith({
+      activatePreparedArtifact: expect.any(Function),
+    });
   });
 
-  it("triggers a single restartAll when a managed plugin was auto-updated (nothing freshly installed)", async () => {
+  it("passes the atomic activation seam when a managed plugin is auto-updated", async () => {
     const ensureResult = { installed: [], updated: ["meeting"], failed: [] };
     const ensureManagedInstalled = vi.fn(async () => ensureResult);
-    const restartAll = vi.fn(async () => undefined);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const pluginRuntime = { restartAll } as unknown as PluginRuntime;
+    const activatePreparedArtifact = vi.fn();
+    const pluginRuntime = { activatePreparedArtifact } as unknown as PluginRuntime;
 
     await runManagedBootstrap({
       pluginMarketplace,
@@ -86,15 +88,17 @@ describe("runManagedBootstrap concurrency", () => {
       },
     });
 
-    // The auto-updated plugin must be reloaded even though `installed` is empty.
-    expect(restartAll).toHaveBeenCalledTimes(1);
+    expect(ensureManagedInstalled).toHaveBeenCalledWith({
+      activatePreparedArtifact: expect.any(Function),
+    });
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
   });
 
   it("a fresh call after the in-flight settles starts a new run", async () => {
     const ensureResult = { installed: [], failed: [] };
     const ensureManagedInstalled = vi.fn(async () => ensureResult);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const pluginRuntime = { restartAll: vi.fn() } as unknown as PluginRuntime;
+    const pluginRuntime = { activatePreparedArtifact: vi.fn() } as unknown as PluginRuntime;
 
     const input = {
       pluginMarketplace,

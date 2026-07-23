@@ -10,11 +10,11 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginRuntime } from "../../runtime.js";
 import { buildImportUrl } from "../sandbox.js";
-import { ToolRegistry } from "../../../tools/registry.js";
-import { PluginLoopbackManager } from "../../../mcp/plugin-loopback-manager.js";
-import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
+import {
+  makeTestPluginRuntime,
+  TestPluginRuntime,
+} from "../../__tests__/test-helpers.js";
 
 describe("PluginRuntime lifecycle — restartPlugin", () => {
   let testDir: string;
@@ -322,12 +322,9 @@ export default async function createPlugin() {
     await expect(runtime.disable("does-not-exist")).rejects.toThrow("Plugin not loaded");
   });
 
-  // Lifecycle callback contract: every post-boot transition into the
-  // `loaded + started` state must fire `onEnable` so the host can re-sync
-  // ToolRegistry, mirroring the existing `onDisable` tear-down hook.
-  // Without `onEnable` the bug from PR #760 returns — `onDisable` wipes
-  // plugin tools from ToolRegistry during the stop phase but nothing
-  // re-registers them after start.
+  // Lifecycle callback contract: every successful post-boot replacement fires
+  // `onEnable` only after the new generation is published. The coordinated
+  // publication path does not expose a transient disabled projection.
   async function setupLifecyclePluginFixture(pluginId: string) {
     const pluginDir = join(installedDir, pluginId);
     await mkdir(pluginDir, { recursive: true });
@@ -417,7 +414,7 @@ export default async function createPlugin() {
     await writeLifecycleRegistry([alpha, beta]);
 
     const enabled: string[] = [];
-    const runtime = new PluginRuntime({
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -432,11 +429,11 @@ export default async function createPlugin() {
     expect([...enabled].sort()).toEqual(["lc-fanout-alpha", "lc-fanout-beta"]);
   });
 
-  it("restartPlugin fires onDisable then onEnable around the restart cycle", async () => {
+  it("restartPlugin publishes only the replacement enable callback", async () => {
     await setupLifecyclePluginFixture("lc-restart-pair");
 
     const events: Array<{ type: "disable" | "enable"; pluginId: string }> = [];
-    const runtime = new PluginRuntime({
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -448,10 +445,7 @@ export default async function createPlugin() {
 
     await runtime.restartPlugin("lc-restart-pair");
 
-    expect(events).toEqual([
-      { type: "disable", pluginId: "lc-restart-pair" },
-      { type: "enable", pluginId: "lc-restart-pair" },
-    ]);
+    expect(events).toEqual([{ type: "enable", pluginId: "lc-restart-pair" }]);
     await expect(runtime.call("lc_restart_pair_ping")).resolves.toBe("ok");
   });
 
@@ -462,7 +456,7 @@ export default async function createPlugin() {
     await setupLifecyclePluginFixture("lc-add-fresh");
 
     const enableCalls: string[] = [];
-    const runtime = new PluginRuntime({
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -477,11 +471,11 @@ export default async function createPlugin() {
     await expect(runtime.call("lc_add_fresh_ping")).resolves.toBe("ok");
   });
 
-  it("reloadPlugin fires onEnable after a successful module re-import + start", async () => {
+  it("reloadPlugin publishes only the replacement enable callback", async () => {
     await setupLifecyclePluginFixture("lc-reload-pair");
 
     const events: Array<{ type: "disable" | "enable"; pluginId: string }> = [];
-    const runtime = new PluginRuntime({
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -493,124 +487,7 @@ export default async function createPlugin() {
 
     await runtime.reloadPlugin("lc-reload-pair");
 
-    expect(events).toEqual([
-      { type: "disable", pluginId: "lc-reload-pair" },
-      { type: "enable", pluginId: "lc-reload-pair" },
-    ]);
-  });
-
-  // Boot-wiring integration test: real PluginRuntime + real ToolRegistry +
-  // a real `onEnable -> syncPluginToolRegistryForPlugin` callback. Asserts that
-  // restartPlugin's `onEnable` actually re-populates ToolRegistry end-to-end,
-  // not just that the callback was called (the other lifecycle tests assert
-  // the callback contract; this one pins the boot WIRING that turns the
-  // callback into a registry resync). If anyone removes the `onEnable`
-  // wiring from `src/boot/steps/plugin-runtime.ts`, this test fails.
-  it("boot wiring: onEnable → targeted ToolRegistry sync re-registers tools after restartPlugin", async () => {
-    const pluginId = "lc-bootwiring";
-    const toolName = "lc_bootwiring_ping";
-    const pluginDir = join(installedDir, pluginId);
-    await mkdir(pluginDir, { recursive: true });
-    const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(
-      join(pluginDir, "entry.mjs"),
-      `export default async function createPlugin() {
-  return { handlers: { ${toolName}: async () => "ok" }, start: async () => {}, stop: async () => {} };
-}`,
-      "utf-8",
-    );
-    await writeFile(
-      manifestPath,
-      JSON.stringify({
-        id: pluginId,
-        name: pluginId,
-        version: "1.0.0",
-        entry: "entry.mjs",
-        tools: [
-          {
-            name: toolName,
-            description: "lifecycle integration test",
-            inputSchema: { type: "object", properties: {}, additionalProperties: false },
-            _meta: { ui: { visibility: ["model", "app"] } },
-          },
-        ],
-        description: "x",
-        publisher: "x",
-      }),
-      "utf-8",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-
-    const toolRegistry = new ToolRegistry();
-    // Mirror the production boot wiring: registration goes through the loopback
-    // manager (legacy-removal flag-day). onEnable's start is async, so the test
-    // tracks the last start promise to await it deterministically.
-    let runtime!: PluginRuntime;
-    let loopbackManager!: PluginLoopbackManager;
-    let lastEnable: Promise<unknown> = Promise.resolve();
-    runtime = new PluginRuntime({
-      hostRoot: testDir,
-      registryPath,
-      pluginsRoot: installedDir,
-      onDisable: (id) => { lastEnable = loopbackManager.stop(id); },
-      onEnable: (id) => {
-        const m = runtime.getPluginManifest(id);
-        if (m) lastEnable = loopbackManager.start(m);
-      },
-    });
-    loopbackManager = new PluginLoopbackManager(runtime, toolRegistry);
-    await runtime.startAll();
-
-    // Boot's `loopbackManager.syncAll(...)` initially populates the registry.
-    await loopbackManager.syncAll(runtime.listPluginManifests());
-    expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
-
-    // Restart removes the tool via onDisable (manager.stop), then re-registers
-    // via onEnable (manager.start). Without the wiring this test fails.
-    await runtime.restartPlugin(pluginId);
-    await lastEnable;
-
-    expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
-  });
-
-  it("config-save restart path preserves bystander plugin tools", async () => {
-    const alpha = await writeLifecyclePlugin("lc-config-alpha");
-    const beta = await writeLifecyclePlugin("lc-config-beta");
-    await writeLifecycleRegistry([alpha, beta]);
-
-    const toolRegistry = new ToolRegistry();
-    let runtime!: PluginRuntime;
-    let loopbackManager!: PluginLoopbackManager;
-    let lastEnable: Promise<unknown> = Promise.resolve();
-    runtime = new PluginRuntime({
-      hostRoot: testDir,
-      registryPath,
-      pluginsRoot: installedDir,
-      onDisable: (id) => { lastEnable = loopbackManager.stop(id); },
-      onEnable: (id) => {
-        const m = runtime.getPluginManifest(id);
-        if (m) lastEnable = loopbackManager.start(m);
-      },
-    });
-    loopbackManager = new PluginLoopbackManager(runtime, toolRegistry);
-    await runtime.startAll();
-    await loopbackManager.syncAll(runtime.listPluginManifests());
-    const betaBefore = toolRegistry.findByName(beta.toolName);
-    expect(betaBefore?.pluginId).toBe(beta.pluginId);
-
-    runtime.setConfigOverride(alpha.pluginId, { mode: "after-save" });
-    await runtime.restartPlugin(alpha.pluginId);
-    await lastEnable;
-
-    expect(toolRegistry.findByName(alpha.toolName)?.pluginId).toBe(alpha.pluginId);
-    expect(toolRegistry.findByName(beta.toolName)).toBe(betaBefore);
+    expect(events).toEqual([{ type: "enable", pluginId: "lc-reload-pair" }]);
   });
 
   it("addPlugin failure path (start throws) does NOT fire onEnable", async () => {
@@ -655,7 +532,7 @@ export default async function createPlugin() {
     );
 
     const enableCalls: string[] = [];
-    const runtime = new PluginRuntime({
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,

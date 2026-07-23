@@ -311,9 +311,12 @@ export function createHostApiFactory(
         if (hostEffects) {
           const generationToken = hostEffects.token;
           const prepared = keywords.map((keyword) => ({ ...keyword }));
-          hostEffects.stagePublish(() => {
-            keywordEngine.publishPluginGeneration(pluginId, generationToken, prepared);
-          });
+          const publication = keywordEngine.preparePluginGeneration(
+            pluginId,
+            generationToken,
+            prepared,
+          );
+          hostEffects.stagePublish(publication.publish);
           hostEffects.onSupersede(() => {
             keywordEngine.removePluginGeneration(pluginId, generationToken);
           });

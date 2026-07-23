@@ -243,6 +243,70 @@ describe("PluginArtifactStore — extractZip", () => {
     }
   });
 
+  it("leaves the live payload untouched when staged candidate preparation fails", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      const durableCommit = vi.fn(async () => undefined);
+
+      await expect(store.extractZipWithCommit("acme", zip.toBuffer(), durableCommit, {
+        coordinateCommit: async () => {
+          throw new Error("candidate import failed");
+        },
+      })).rejects.toThrow("candidate import failed");
+
+      expect(durableCommit).not.toHaveBeenCalled();
+      expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf8")).version).toBe("old");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("retains the predecessor backup until coordinated generation retirement settles", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installRoot = resolve(tmp, "installed");
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      let releaseRetirement!: () => void;
+      const retirement = new Promise<void>((resolveRetirement) => { releaseRetirement = resolveRetirement; });
+      let durableFinished!: () => void;
+      const durableFinishedPromise = new Promise<void>((resolveDurable) => { durableFinished = resolveDurable; });
+
+      const installing = store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
+        durableFinished();
+        return "committed";
+      }, {
+        coordinateCommit: async ({ durableCommit }) => ({
+          result: await durableCommit(),
+          retirement,
+        }),
+      });
+      await durableFinishedPromise;
+      const backupBeforeDrain = (await readdir(installRoot)).filter((name) => name.startsWith(".acme.old-"));
+      expect(backupBeforeDrain).toHaveLength(1);
+      let installSettled = false;
+      void installing.finally(() => { installSettled = true; });
+      await Promise.resolve();
+      expect(installSettled).toBe(false);
+
+      releaseRetirement();
+      await expect(installing).resolves.toMatchObject({ result: "committed", predecessorRetired: true });
+      expect((await readdir(installRoot)).filter((name) => name.startsWith(".acme.old-"))).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it.runIf(process.platform !== "win32")(
     "surfaces persistent promoted-directory cleanup failure and retains the old backup",
     async () => {

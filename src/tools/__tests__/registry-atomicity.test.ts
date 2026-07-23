@@ -14,6 +14,18 @@ function tool(name: string, serverId: string): Tool {
   });
 }
 
+function pluginTool(name: string, pluginId: string): Tool {
+  return createDynamicTool({
+    name,
+    description: `${name} from ${pluginId}`,
+    source: "plugin",
+    category: "read",
+    pluginId,
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => ({ output: pluginId, isError: false }),
+  });
+}
+
 describe("ToolRegistry MCP generation replacement", () => {
   it("keeps the predecessor live until one exact synchronous publish", () => {
     const registry = new ToolRegistry();
@@ -51,5 +63,39 @@ describe("ToolRegistry MCP generation replacement", () => {
     )).toThrow(/collision/);
     expect(registry.findByName("mcp_ep_read")?.mcpServerId).toBe("server-g1");
     expect(registry.findByName("collision")?.source).toBe("builtin");
+  });
+
+  it("blocks an unrelated bulk plugin replacement from stealing a reserved MCP name", () => {
+    const registry = new ToolRegistry();
+    registry.register(tool("mcp_ep_read", "server-g1"));
+    const prepared = registry.reserveMcpReplacement(
+      ["server-g1"],
+      [tool("mcp_ep_read", "server-g2")],
+    );
+
+    expect(() => registry.replacePluginTools(
+      ["racer"],
+      [pluginTool("mcp_ep_read", "racer")],
+    )).toThrow(/reserved/);
+
+    prepared.publish();
+    expect(registry.findByName("mcp_ep_read")?.mcpServerId).toBe("server-g2");
+  });
+
+  it("blocks an unrelated bulk plugin replacement from stealing a reserved plugin name", () => {
+    const registry = new ToolRegistry();
+    registry.register(pluginTool("plugin_ep_read", "ep-api"));
+    const prepared = registry.reservePluginReplacement(
+      "ep-api",
+      [pluginTool("plugin_ep_read", "ep-api")],
+    );
+
+    expect(() => registry.replacePluginTools(
+      ["racer"],
+      [pluginTool("plugin_ep_read", "racer")],
+    )).toThrow(/reserved/);
+
+    prepared.publish();
+    expect(registry.findByName("plugin_ep_read")?.pluginId).toBe("ep-api");
   });
 });

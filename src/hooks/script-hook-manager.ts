@@ -82,6 +82,12 @@ export interface HookDispatchResult {
   results: ScriptHookInvocationResult[];
 }
 
+export interface PreparedPluginHookGenerationPublication {
+  readonly pluginId: string;
+  readonly generationId: string;
+  publish(): void;
+}
+
 /**
  * Event-specific payload fields for a lifecycle dispatch (#811 milestone-2,
  * design §5). The manager wraps these with the common `{ event, sessionId,
@@ -141,7 +147,7 @@ export interface UserPromptSubmitPayload {
 
 export class ScriptHookManager {
   private registry: HookRegistryEntry[] = [];
-  private readonly pluginRegistries = new Map<string, readonly HookRegistryEntry[]>();
+  private pluginRegistries = new Map<string, readonly HookRegistryEntry[]>();
   private generation = 0;
   private generationAccess: PluginRuntimeGenerationAccess | undefined;
 
@@ -177,8 +183,41 @@ export class ScriptHookManager {
     projections: readonly PreparedPluginHookProjection[],
     trust: PluginHookTrustStore,
   ): void {
-    const pluginIds = new Set(projections.map((projection) => projection.owner.pluginId));
-    for (const pluginId of pluginIds) this.removePlugin(pluginId);
+    this.preparePluginGeneration(projections, trust).publish();
+  }
+
+  preparePluginGeneration(
+    projections: readonly PreparedPluginHookProjection[],
+    trust: PluginHookTrustStore,
+    owner?: { pluginId: string; generationId: string },
+  ): PreparedPluginHookGenerationPublication {
+    for (const projection of projections) {
+      if (!projection.owner.activationId) {
+        throw new Error(`plugin Hook activation identity is missing for '${projection.owner.localId}'`);
+      }
+    }
+    const inferred = projections[0]?.owner;
+    const pluginId = owner?.pluginId ?? inferred?.pluginId;
+    const generationId = owner?.generationId ?? inferred?.generationId;
+    if (!pluginId || !generationId) {
+      throw new Error("plugin Hook generation identity is required");
+    }
+    const next = new Map(this.pluginRegistries);
+    const generations = new Set(
+      projections.map((projection) =>
+        `${projection.owner.pluginId}\0${projection.owner.activationId}`),
+    );
+    generations.add(`${pluginId}\0${generationId}`);
+    for (const identity of generations) {
+      const [targetPluginId, targetGenerationId] = identity.split("\0");
+      for (const [key, entries] of next) {
+        if (entries.some((entry) =>
+          entry.owner?.pluginId === targetPluginId &&
+          entry.owner.activationId === targetGenerationId)) {
+          next.delete(key);
+        }
+      }
+    }
     for (const projection of projections) {
       if (!trust.isApproved(projection)) continue;
       const entries: ConfigHookRegistryEntry[] = projection.entries.map((entry) => ({
@@ -190,14 +229,25 @@ export class ScriptHookManager {
         timeoutMs: entry.timeoutMs,
         owner: projection.owner,
       }));
-      this.pluginRegistries.set(pluginProjectionKey(projection), Object.freeze(entries));
+      next.set(pluginProjectionKey(projection), Object.freeze(entries));
     }
-    this.generation += 1;
+    let published = false;
+    return Object.freeze({
+      pluginId,
+      generationId,
+      publish: () => {
+        if (published) return;
+        this.pluginRegistries = next;
+        this.generation += 1;
+        published = true;
+      },
+    });
   }
 
   removePluginGeneration(pluginId: string, generationId: string): void {
     for (const [key, entries] of this.pluginRegistries) {
-      if (entries.some((entry) => entry.owner?.pluginId === pluginId && entry.owner.generationId === generationId)) {
+      if (entries.some((entry) => entry.owner?.pluginId === pluginId &&
+        entry.owner.activationId === generationId)) {
         this.pluginRegistries.delete(key);
       }
     }
@@ -471,25 +521,18 @@ export class ScriptHookManager {
       string,
       Awaited<ReturnType<PluginRuntimeGenerationAccess["acquireExact"]>>
     >();
-    const activeOwnerKeys = new Set<string>();
-    for (const entry of entries) {
-      const owner = entry.owner;
-      if (!owner) continue;
-      const key = `${owner.pluginId}\0${owner.generationId}`;
-      if (activeOwnerKeys.has(key)) continue;
-      try {
-        leases.set(key, await access.acquireExact(owner.pluginId, owner.generationId));
-        activeOwnerKeys.add(key);
-      } catch {
-        // Registry snapshot raced an exact generation transition; skip stale hooks.
-      }
-    }
-    const activeEntries = entries.filter((entry) => {
-      const owner = entry.owner;
-      return !owner || activeOwnerKeys.has(`${owner.pluginId}\0${owner.generationId}`);
-    });
+    const acquiredOwnerKeys = new Set<string>();
     try {
-      return await operation(activeEntries);
+      for (const entry of entries) {
+        const owner = entry.owner;
+        if (!owner) continue;
+        const activationId = owner.activationId;
+        const key = `${owner.pluginId}\0${activationId}`;
+        if (acquiredOwnerKeys.has(key)) continue;
+        leases.set(key, await access.acquireExact(owner.pluginId, activationId));
+        acquiredOwnerKeys.add(key);
+      }
+      return await operation([...entries]);
     } finally {
       for (const lease of leases.values()) lease.release();
     }

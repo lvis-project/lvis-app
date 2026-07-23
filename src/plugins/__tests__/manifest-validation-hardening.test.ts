@@ -13,9 +13,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginRuntime } from "../runtime.js";
 import { mkdtempSync } from "node:fs";
-import { compileLegacyToolSurface } from "./test-helpers.js";
+import {
+  compileLegacyToolSurface,
+  TestPluginRuntime as PluginRuntime,
+} from "./test-helpers.js";
 
 describe("runtime manifest validation hardening", () => {
   let testDir: string;

@@ -11,8 +11,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PluginRuntime } from "../runtime.js";
-import { compileLegacyToolSurface } from "./test-helpers.js";
+import {
+  compileLegacyToolSurface,
+  TestPluginRuntime as PluginRuntime,
+} from "./test-helpers.js";
 
 function writePlugin(root: string, id: string, opts: {
   name: string;

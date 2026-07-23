@@ -283,6 +283,7 @@ export interface ConversationLoopDeps {
 
   pluginRuntime?: {
     listPluginIds(): string[];
+    getGenerationAccess?(): import("../../plugins/plugin-host-generation.js").PluginRuntimeGenerationAccess | undefined;
     /**
      * #1176 — whether a loaded plugin is active (its tools may be exposed).
      * `enabled !== false` in the registry; absent → active (migration-safe).

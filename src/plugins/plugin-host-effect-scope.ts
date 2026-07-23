@@ -55,10 +55,18 @@ export class HostApiGenerationScope {
   }
 
   publish(): void {
+    this.preparePublish()();
+  }
+
+  /** Validate before commit and return an assignment-safe publication closure. */
+  preparePublish(): () => void {
     if (!this.binding) throw new Error(`plugin '${this.pluginId}' generation scope is not bound`);
     if (this.state !== "preparing") throw new Error(`plugin '${this.pluginId}' generation scope cannot publish from ${this.state}`);
-    for (const action of this.publishActions) action();
-    this.state = "published";
+    return () => {
+      if (this.state !== "preparing") return;
+      for (const action of this.publishActions) action();
+      this.state = "published";
+    };
   }
 
   resume(): void {

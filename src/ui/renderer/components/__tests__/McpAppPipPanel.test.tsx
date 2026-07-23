@@ -107,7 +107,7 @@ describe("McpAppPipPanel — renders the current pip occupant", () => {
       moveCard("card-2", { kind: "pip" }, { payload: payload("gitlab"), originSessionId: "sess-2" });
     });
 
-    await waitFor(() => expect(readUiResource).toHaveBeenCalledWith("gitlab", "ui://card/1"));
+    await waitFor(() => expect(readUiResource).toHaveBeenCalledWith("gitlab", "ui://card/1", undefined));
     // Exactly one <webview> at any moment — the swap is atomic (single-slot).
     await waitFor(() => expect(webviewNodes(container)).toHaveLength(1));
   });
