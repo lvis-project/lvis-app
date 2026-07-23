@@ -54,9 +54,10 @@ function readLogLines(): AuditEntry[] {
 }
 
 describe("AuditLogger.log() — format invariants", () => {
-  it("writes a valid ISO-8601 timestamp", () => {
+  it("writes a valid ISO-8601 timestamp", async () => {
     const logger = new AuditLogger();
     logger.log({ timestamp: "2026-04-20T12:00:00.000Z", sessionId: "s1", type: "turn" });
+    await logger.flush();
     const entries = readLogLines();
     expect(entries.length).toBeGreaterThanOrEqual(1);
     const entry = entries.find((e) => e.sessionId === "s1" && e.type === "turn");
@@ -64,27 +65,29 @@ describe("AuditLogger.log() — format invariants", () => {
     expect(new Date(entry!.timestamp).toISOString()).toBe("2026-04-20T12:00:00.000Z");
   });
 
-  it("preserves sessionId verbatim", () => {
+  it("preserves sessionId verbatim", async () => {
     const logger = new AuditLogger();
     logger.log({ timestamp: new Date().toISOString(), sessionId: "sess-abc-123", type: "tool_call" });
+    await logger.flush();
     const entries = readLogLines();
     const entry = entries.find((e) => e.type === "tool_call");
     expect(entry?.sessionId).toBe("sess-abc-123");
   });
 
-  it("stores the exact type field", () => {
+  it("stores the exact type field", async () => {
     const logger = new AuditLogger();
     const types: AuditEntry["type"][] = ["turn", "tool_call", "approval", "warn", "error", "mcp_connect", "kill_switch", "dlp", "info"];
     for (const t of types) {
       logger.log({ timestamp: new Date().toISOString(), sessionId: "s", type: t });
     }
+    await logger.flush();
     const entries = readLogLines();
     for (const t of types) {
       expect(entries.some((e) => e.type === t)).toBe(true);
     }
   });
 
-  it("stores dlp payload when type is dlp", () => {
+  it("stores dlp payload when type is dlp", async () => {
     const logger = new AuditLogger();
     logger.log({
       timestamp: new Date().toISOString(),
@@ -92,6 +95,7 @@ describe("AuditLogger.log() — format invariants", () => {
       type: "dlp",
       dlp: { byKind: { EMAIL: 2 }, totalRedactions: 2, turnId: "t1" },
     });
+    await logger.flush();
     const entries = readLogLines();
     const dlpEntry = entries.find((e) => e.type === "dlp");
     expect(dlpEntry?.dlp?.byKind?.EMAIL).toBe(2);
@@ -99,10 +103,11 @@ describe("AuditLogger.log() — format invariants", () => {
     expect(dlpEntry?.dlp?.turnId).toBe("t1");
   });
 
-  it("writes each entry on its own newline-terminated line (JSONL format)", () => {
+  it("writes each entry on its own newline-terminated line (JSONL format)", async () => {
     const logger = new AuditLogger();
     logger.log({ timestamp: "2026-04-20T00:00:00Z", sessionId: "a", type: "turn" });
     logger.log({ timestamp: "2026-04-20T00:01:00Z", sessionId: "b", type: "warn" });
+    await logger.flush();
     const files = readdirSync(auditDir).filter((f) => f.endsWith(".jsonl"));
     const raw = readFileSync(join(auditDir, files[0]), "utf-8");
     const lines = raw.split("\n").filter(Boolean);
@@ -113,14 +118,15 @@ describe("AuditLogger.log() — format invariants", () => {
     expect(lines.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("does not throw when the audit dir is temporarily missing (swallow error)", () => {
+  it("does not throw when the audit dir is temporarily missing (swallow error)", async () => {
     const logger = new AuditLogger();
     rmSync(auditDir, { recursive: true, force: true });
     // Must not throw — audit failure must not propagate
     expect(() => logger.log({ timestamp: new Date().toISOString(), sessionId: "s", type: "turn" })).not.toThrow();
+    await expect(logger.flush()).resolves.toBeUndefined();
   });
 
-  it("stores toolCalls array when present", () => {
+  it("stores toolCalls array when present", async () => {
     const logger = new AuditLogger();
     logger.log({
       timestamp: new Date().toISOString(),
@@ -128,13 +134,14 @@ describe("AuditLogger.log() — format invariants", () => {
       type: "tool_call",
       toolCalls: [{ name: "bash", isError: false }],
     });
+    await logger.flush();
     const entries = readLogLines();
     const entry = entries.find((e) => e.type === "tool_call");
     expect(entry?.toolCalls?.[0]?.name).toBe("bash");
     expect(entry?.toolCalls?.[0]?.isError).toBe(false);
   });
 
-  it("stores tokenUsage when present", () => {
+  it("stores tokenUsage when present", async () => {
     const logger = new AuditLogger();
     logger.log({
       timestamp: new Date().toISOString(),
@@ -142,6 +149,7 @@ describe("AuditLogger.log() — format invariants", () => {
       type: "turn",
       tokenUsage: { inputTokens: 100, outputTokens: 200 },
     });
+    await logger.flush();
     const entries = readLogLines();
     const entry = entries.find((e) => e.tokenUsage !== undefined);
     expect(entry?.tokenUsage?.inputTokens).toBe(100);
@@ -166,7 +174,7 @@ describe("AuditLogger.isShadowChannelWritable() — shadow dataset detectability
 });
 
 describe("AuditLogger.logTurn() — helper correctness", () => {
-  it("writes a turn entry with truncated input/output (500 chars max)", () => {
+  it("writes a turn entry with truncated input/output (500 chars max)", async () => {
     const logger = new AuditLogger();
     const longStr = "A".repeat(1000);
     logger.logTurn({
@@ -176,24 +184,27 @@ describe("AuditLogger.logTurn() — helper correctness", () => {
       toolCalls: [],
       route: "chat",
     });
+    await logger.flush();
     const entries = readLogLines();
     const entry = entries.find((e) => e.type === "turn");
     expect(entry?.input?.length).toBeLessThanOrEqual(500);
     expect(entry?.output?.length).toBeLessThanOrEqual(500);
   });
 
-  it("writes the route field", () => {
+  it("writes the route field", async () => {
     const logger = new AuditLogger();
     logger.logTurn({ sessionId: "s", input: "hi", output: "hello", toolCalls: [], route: "meeting" });
+    await logger.flush();
     const entries = readLogLines();
     const entry = entries.find((e) => e.type === "turn");
     expect(entry?.route).toBe("meeting");
   });
 
-  it("writes toolCalls array verbatim", () => {
+  it("writes toolCalls array verbatim", async () => {
     const logger = new AuditLogger();
     const toolCalls = [{ name: "bash", isError: true }, { name: "read_file", isError: false }];
     logger.logTurn({ sessionId: "s", input: "x", output: "y", toolCalls, route: "r" });
+    await logger.flush();
     const entries = readLogLines();
     const entry = entries.find((e) => e.type === "turn");
     expect(entry?.toolCalls).toHaveLength(2);
@@ -201,11 +212,12 @@ describe("AuditLogger.logTurn() — helper correctness", () => {
     expect(entry?.toolCalls?.[0]?.isError).toBe(true);
   });
 
-  it("generates a timestamp that parses as a valid date", () => {
+  it("generates a timestamp that parses as a valid date", async () => {
     const before = Date.now();
     const logger = new AuditLogger();
     logger.logTurn({ sessionId: "s", input: "x", output: "y", toolCalls: [], route: "r" });
     const after = Date.now();
+    await logger.flush();
     const entries = readLogLines();
     const entry = entries.find((e) => e.type === "turn");
     const ts = new Date(entry!.timestamp).getTime();

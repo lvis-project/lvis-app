@@ -269,6 +269,7 @@ export async function buildDiagnosticsBundle(
 
   // ── audit/<date>.jsonl (redactAuditPayload + line redactForLLM) ──
   try {
+    await opts.auditLogger.flush();
     const { entries } = await opts.auditLogger.search({
       dateFrom: win.from,
       dateTo: win.to,
