@@ -86,6 +86,11 @@ async function setup() {
                         maxAgeMs: 60_000,
                       },
                     },
+                    reserve: {
+                      kind: "write",
+                      minimumRisk: "write",
+                      appVisible: true,
+                    },
                   },
                 },
               }
@@ -284,6 +289,38 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
     expect(callFromApp).toHaveBeenCalledWith(
       "acme_write",
       { operation: "update", employeeId: "E-7" },
+      {
+        appSessionId: "mcp-app:acme-cards:0:0",
+        operationGrantToken: "host-one-shot-token",
+        expectedGenerationId: LOOPBACK_GENERATION,
+      },
+    );
+  });
+
+  it("mints and forwards a one-shot grant for a no-read write", async () => {
+    const { callFromApp, requestPluginOperationGrant } = await setup();
+    const input = { operation: "reserve", roomId: "R-9" };
+
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_write",
+      input,
+      LOOPBACK_GENERATION,
+    );
+
+    expect(result).toEqual({ ok: true, result: "plugin-result" });
+    expect(requestPluginOperationGrant).toHaveBeenCalledWith({
+      pluginId: "acme-cards",
+      toolName: "acme_write",
+      input,
+      appSessionId: "mcp-app:acme-cards:0:0",
+      origin: "mcp-app",
+      expectedGenerationId: LOOPBACK_GENERATION,
+    });
+    expect(callFromApp).toHaveBeenCalledWith(
+      "acme_write",
+      input,
       {
         appSessionId: "mcp-app:acme-cards:0:0",
         operationGrantToken: "host-one-shot-token",
