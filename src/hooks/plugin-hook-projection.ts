@@ -1,36 +1,40 @@
+import { createHash } from "node:crypto";
 import { parseHookConfig, type HookConfigEntry } from "./hook-config.js";
 import type { PluginHookOwner } from "./hook-registry.js";
 import type { ActivePluginGeneration } from "../plugins/plugin-generation-coordinator.js";
+import { anchorBundledCommand } from "../plugins/plugin-bundled-command.js";
+import { PluginContributionTrustStore } from "../plugins/plugin-contribution-trust.js";
 
 export interface PreparedPluginHookProjection {
   owner: PluginHookOwner;
   entries: readonly HookConfigEntry[];
 }
 
-function trustKey(owner: PluginHookOwner): string {
-  return [owner.pluginId, owner.pluginVersion, owner.localId, owner.fingerprint].join("|");
-}
-
 /** Exact-version/fingerprint trust records. Records never transfer to a new version. */
 export class PluginHookTrustStore {
-  private readonly approved = new Set<string>();
+  private readonly store: PluginContributionTrustStore;
+
+  constructor(path?: string) {
+    this.store = new PluginContributionTrustStore("hook", path);
+  }
 
   approve(projection: PreparedPluginHookProjection): void {
-    this.approved.add(trustKey(projection.owner));
+    this.store.approve(projection.owner);
   }
 
   isApproved(projection: PreparedPluginHookProjection): boolean {
-    return this.approved.has(trustKey(projection.owner));
+    return this.store.isApproved(projection.owner);
   }
 
   revoke(projection: PreparedPluginHookProjection): void {
-    this.approved.delete(trustKey(projection.owner));
+    this.store.revoke(projection.owner);
   }
 }
 
 /** Parse/fingerprint-only preparation. It performs no spawn or hook registration. */
 export function preparePluginHookGeneration(
   generation: ActivePluginGeneration,
+  payloadRoot: string,
 ): readonly PreparedPluginHookProjection[] {
   const projections: PreparedPluginHookProjection[] = [];
   for (const contribution of generation.contributions) {
@@ -48,14 +52,29 @@ export function preparePluginHookGeneration(
     if (parsed.errors.length > 0) {
       throw new Error(`plugin Hook '${contribution.localId}' is invalid: ${parsed.errors.join("; ")}`);
     }
+    const anchoredEntries: HookConfigEntry[] = [];
+    const commandFingerprints: string[] = [];
+    for (const entry of parsed.entries) {
+      const anchored = anchorBundledCommand(
+        payloadRoot,
+        contribution.path,
+        entry.command,
+        contribution.fingerprint,
+        `plugin Hook '${contribution.localId}'`,
+      );
+      commandFingerprints.push(anchored.fingerprint);
+      anchoredEntries.push(Object.freeze({ ...entry, command: [...anchored.command] }));
+    }
     const owner: PluginHookOwner = Object.freeze({
       pluginId: generation.pluginId,
       pluginVersion: generation.pluginVersion,
       generationId: generation.generationId,
       localId: contribution.localId,
-      fingerprint: contribution.fingerprint,
+      fingerprint: commandFingerprints.length === 0
+        ? contribution.fingerprint
+        : createHash("sha256").update(commandFingerprints.sort().join("\0")).digest("hex"),
     });
-    projections.push(Object.freeze({ owner, entries: Object.freeze(parsed.entries.map((entry) => Object.freeze({ ...entry }))) }));
+    projections.push(Object.freeze({ owner, entries: Object.freeze(anchoredEntries) }));
   }
   return Object.freeze(projections);
 }

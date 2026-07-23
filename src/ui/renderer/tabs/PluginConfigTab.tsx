@@ -9,7 +9,13 @@ import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/p
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight, InstallPhase, InstallProgressPayload } from "../hooks/use-plugin-marketplace.js";
-import type { LvisApi, MarketplaceItem, PluginCardSummary, PluginMarketplaceUninstallOptions } from "../types.js";
+import type {
+  LvisApi,
+  MarketplaceItem,
+  PluginCardSummary,
+  PluginContributionTrustRow,
+  PluginMarketplaceUninstallOptions,
+} from "../types.js";
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginUninstallDialog } from "../dialogs/PluginUninstallDialog.js";
@@ -215,6 +221,8 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   // would otherwise dominate the detail panel. Reset to collapsed on
   // plugin switch.
   const [toolsExpanded, setToolsExpanded] = useState(false);
+  const [contributionTrust, setContributionTrust] = useState<PluginContributionTrustRow[]>([]);
+  const [trustUpdating, setTrustUpdating] = useState<string | null>(null);
   useEffect(() => {
     setToolsExpanded(false);
   }, [selectedId]);
@@ -245,6 +253,53 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
     setBanner({ type, msg });
     bannerTimerRef.current = setTimeout(() => setBanner(null), DEFAULT_TOAST_TTL_MS);
   }, []);
+
+  const refreshContributionTrust = useCallback(async (pluginId: string | null): Promise<void> => {
+    if (!pluginId) {
+      setContributionTrust([]);
+      return;
+    }
+    try {
+      const trustApi = getApi();
+      if (typeof trustApi.listPluginContributionTrust !== "function") {
+        setContributionTrust([]);
+        return;
+      }
+      const result = await trustApi.listPluginContributionTrust(pluginId);
+      setContributionTrust(result.ok ? result.rows : []);
+    } catch {
+      setContributionTrust([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshContributionTrust(selectedId);
+  }, [refreshContributionTrust, selectedId]);
+
+  const handleContributionTrust = useCallback(async (
+    row: PluginContributionTrustRow,
+    approved: boolean,
+  ): Promise<void> => {
+    const key = `${row.kind}:${row.localId}`;
+    setTrustUpdating(key);
+    try {
+      const result = await getApi().setPluginContributionTrust({
+        pluginId: row.pluginId,
+        localId: row.localId,
+        kind: row.kind,
+        approved,
+      });
+      if (!result.ok) {
+        showBanner("error", result.message ?? t("pluginConfigTab.contributionTrustError"));
+        return;
+      }
+      await refreshContributionTrust(row.pluginId);
+    } catch (error) {
+      showBanner("error", (error as Error).message ?? t("pluginConfigTab.contributionTrustError"));
+    } finally {
+      setTrustUpdating(null);
+    }
+  }, [refreshContributionTrust, showBanner]);
 
   useEffect(() => {
     return () => {
@@ -997,6 +1052,49 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                       state={authStatuses.get(selectedPlugin.id) ?? { kind: "loading" }}
                       onRefresh={() => refreshAuthStatus(selectedPlugin.id)}
                     />
+                  </>
+                )}
+
+                {contributionTrust.length > 0 && (
+                  <>
+                    <Separator />
+                    <div className="space-y-2" data-testid={`plugin-config:contribution-trust:${selectedPlugin.id}`}>
+                      <div>
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          {t("pluginConfigTab.contributionTrustLabel")}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {t("pluginConfigTab.contributionTrustDescription")}
+                        </p>
+                      </div>
+                      {contributionTrust.map((row) => {
+                        const approved = row.status === "approved";
+                        const key = `${row.kind}:${row.localId}`;
+                        return (
+                          <div key={key} className="flex items-center justify-between gap-3 rounded border border-border/(--opacity-medium) px-2 py-1.5">
+                            <div className="min-w-0">
+                              <p className="truncate font-mono text-[11px] font-semibold">
+                                {row.kind === "hook" ? "Hook" : "MCP"} · {row.localId}
+                              </p>
+                              <p className="truncate font-mono text-[9px] text-muted-foreground" title={row.fingerprint}>
+                                {row.fingerprint.slice(0, 12)} · v{row.pluginVersion}
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant={approved ? "outline" : "default"}
+                              className="h-7 px-2 text-xs"
+                              disabled={trustUpdating === key}
+                              onClick={() => void handleContributionTrust(row, !approved)}
+                            >
+                              {approved
+                                ? t("pluginConfigTab.contributionTrustRevoke")
+                                : t("pluginConfigTab.contributionTrustApprove")}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </>
                 )}
 

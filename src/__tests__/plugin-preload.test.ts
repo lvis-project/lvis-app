@@ -56,12 +56,39 @@ beforeEach(() => {
 // ─── Positive / negative contract tests ───────────────────────────────────────
 
 describe("plugin-preload bridge", () => {
-  it("exposes window.lvisPlugin with callTool, emitEvent, onEvent", () => {
+  it("exposes window.lvisPlugin with calls, one-shot grants, and events", () => {
     expect(exposed.has("lvisPlugin")).toBe(true);
     const bridge = exposed.get("lvisPlugin") as Record<string, unknown>;
     expect(typeof bridge.callTool).toBe("function");
+    expect(typeof bridge.requestOperationGrant).toBe("function");
     expect(typeof bridge.emitEvent).toBe("function");
     expect(typeof bridge.onEvent).toBe("function");
+  });
+
+  it("requests a host-owned operation grant and forwards only its opaque bearer", async () => {
+    const bridge = exposed.get("lvisPlugin") as {
+      requestOperationGrant: (name: string, args: unknown) => Promise<{ operationGrantToken: string }>;
+      callTool: (name: string, args: unknown, options?: { operationGrantToken?: string }) => Promise<unknown>;
+    };
+    mockInvoke
+      .mockResolvedValueOnce({ ok: true, result: { operationGrantToken: "opaque", grantId: "g", expiresAt: 9 } })
+      .mockResolvedValueOnce({ ok: true, result: "saved" });
+    const input = { operation: "save", employee: "not-authority" };
+    const grant = await bridge.requestOperationGrant("domain_write", input);
+    await bridge.callTool("domain_write", input, grant);
+    expect(mockInvoke).toHaveBeenNthCalledWith(
+      1,
+      "lvis:plugin:request-operation-grant",
+      "domain_write",
+      input,
+    );
+    expect(mockInvoke).toHaveBeenNthCalledWith(
+      2,
+      "lvis:plugin:call-tool",
+      "domain_write",
+      input,
+      { userAction: false, operationGrantToken: "opaque" },
+    );
   });
 
   it("does NOT expose window.lvisApi (host-level API)", () => {

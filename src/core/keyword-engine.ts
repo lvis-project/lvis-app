@@ -24,14 +24,32 @@ export interface SkillKeyword {
   pluginId?: string;
 }
 
+type RegisteredSkillKeyword = SkillKeyword & { generationToken?: object };
+
 // ─── Engine ─────────────────────────────────────────
 
 export class KeywordEngine {
-  private skillKeywords: SkillKeyword[] = [];
+  private skillKeywords: RegisteredSkillKeyword[] = [];
 
 
   registerKeywords(keywords: SkillKeyword[]): void {
     this.skillKeywords.push(...keywords);
+  }
+
+  /** Atomically replace one plugin generation's routing entries. */
+  publishPluginGeneration(pluginId: string, generationToken: object, keywords: SkillKeyword[]): void {
+    const next = keywords.map((keyword) => ({ ...keyword, pluginId, generationToken }));
+    this.skillKeywords = [
+      ...this.skillKeywords.filter((keyword) => keyword.pluginId !== pluginId),
+      ...next,
+    ];
+  }
+
+  /** Remove only entries still owned by this exact generation. */
+  removePluginGeneration(pluginId: string, generationToken: object): void {
+    this.skillKeywords = this.skillKeywords.filter(
+      (keyword) => keyword.pluginId !== pluginId || keyword.generationToken !== generationToken,
+    );
   }
 
 

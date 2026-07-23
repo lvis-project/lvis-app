@@ -51,6 +51,21 @@ async function setup() {
     if (pluginId === "ghost") throw new Error("Plugin not found: ghost");
   });
   const callFromUi = vi.fn(async () => ({ ok: true }));
+  const pluginBundleLifecycle = {
+    listContributionTrust: vi.fn(() => [{
+      kind: "hook",
+      pluginId: "com.example.meeting",
+      pluginVersion: "1.0.0",
+      generationId: "a".repeat(64),
+      localId: "policy",
+      fingerprint: "b".repeat(64),
+      status: "approval_required",
+    }]),
+    approveHook: vi.fn(async () => undefined),
+    revokeHook: vi.fn(async () => undefined),
+    approveMcpServer: vi.fn(async () => undefined),
+    revokeMcpServer: vi.fn(async () => undefined),
+  };
   const deps = {
     pluginMarketplace: { list: vi.fn(async () => []) },
     pluginRuntime: {
@@ -63,10 +78,11 @@ async function setup() {
     refreshPluginNotifications: vi.fn(),
     getMainWindow: vi.fn(() => appWindows[0]),
     getAppWindows: vi.fn(() => appWindows),
+    pluginBundleLifecycle,
   };
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, appWindows, setPluginEnabled, callFromUi };
+  return { deps, appWindows, setPluginEnabled, callFromUi, pluginBundleLifecycle };
 }
 
 beforeEach(() => {
@@ -103,6 +119,24 @@ describe("lvis:plugins:call", () => {
       appSessionId: "plugin-ui:0:0",
       operationGrantToken: "opaque-token",
     });
+  });
+});
+
+describe("plugin bundled contribution trust IPC", () => {
+  it("lists quarantined exact identities and approves only the requested capability", async () => {
+    const { pluginBundleLifecycle } = await setup();
+    const listed = await invoke("lvis:plugins:contribution-trust:list", "com.example.meeting");
+    expect(listed).toEqual({ ok: true, rows: [expect.objectContaining({ localId: "policy", status: "approval_required" })] });
+
+    const updated = await invoke("lvis:plugins:contribution-trust:set", {
+      pluginId: "com.example.meeting",
+      localId: "policy",
+      kind: "hook",
+      approved: true,
+    });
+    expect(updated).toEqual(expect.objectContaining({ ok: true, approved: true }));
+    expect(pluginBundleLifecycle.approveHook).toHaveBeenCalledWith("com.example.meeting", "policy");
+    expect(pluginBundleLifecycle.approveMcpServer).not.toHaveBeenCalled();
   });
 });
 

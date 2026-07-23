@@ -154,6 +154,8 @@ interface PluginWebviewBinding {
   pluginId: string;
   entryUrl: string;
   assetEntryUrl: string;
+  /** Host-minted authority scope; never accepted from the renderer/plugin. */
+  appSessionId: string;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
@@ -696,6 +698,55 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   // read-only, sender guard optional
   ipcMain.handle(CHANNELS.plugins.cards, () => handlePluginCards(deps));
+
+  ipcMain.handle(CHANNELS.plugins.contributionTrustList, (e, pluginId?: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.plugins.contributionTrustList, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (pluginId !== undefined && (typeof pluginId !== "string" || pluginId.length === 0)) {
+      return { ok: false, error: "invalid-plugin-id" };
+    }
+    return {
+      ok: true,
+      rows: deps.pluginBundleLifecycle?.listContributionTrust(pluginId as string | undefined) ?? [],
+    };
+  });
+
+  ipcMain.handle(CHANNELS.plugins.contributionTrustSet, async (e, input: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.plugins.contributionTrustSet, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const value = asPlainRecord(input);
+    const pluginId = value.pluginId;
+    const localId = value.localId;
+    const kind = value.kind;
+    const approved = value.approved;
+    if (
+      typeof pluginId !== "string" || !pluginId ||
+      typeof localId !== "string" || !localId ||
+      (kind !== "hook" && kind !== "mcpServer") ||
+      typeof approved !== "boolean"
+    ) {
+      return { ok: false, error: "invalid-contribution-trust-request" };
+    }
+    const lifecycle = deps.pluginBundleLifecycle;
+    if (!lifecycle) return { ok: false, error: "plugin-bundle-lifecycle-unavailable" };
+    try {
+      if (kind === "hook") {
+        if (approved) await lifecycle.approveHook(pluginId, localId);
+        else await lifecycle.revokeHook(pluginId, localId);
+      } else if (approved) {
+        await lifecycle.approveMcpServer(pluginId, localId);
+      } else {
+        await lifecycle.revokeMcpServer(pluginId, localId);
+      }
+      return { ok: true, pluginId, localId, kind, approved };
+    } catch (error) {
+      return { ok: false, error: "contribution-trust-update-failed", message: errMessage(error) };
+    }
+  });
 
   ipcMain.handle(CHANNELS.runtime.counts, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.counts, e); return UNAUTHORIZED_FRAME; }
@@ -1796,7 +1847,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // URL construction cannot throw.
     const entrySearch = new URL(entryUrl).search;
     const versionedAssetEntryUrl = entrySearch ? `${assetEntryUrl}${entrySearch}` : assetEntryUrl;
-    const binding = { pluginId, entryUrl, assetEntryUrl: versionedAssetEntryUrl };
+    const binding = {
+      pluginId,
+      entryUrl,
+      assetEntryUrl: versionedAssetEntryUrl,
+      appSessionId: `plugin-ui:${webContentsId}:${randomUUID()}`,
+    };
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
@@ -1900,7 +1956,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     e,
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; operationGrantToken?: string },
   ) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
@@ -1926,10 +1982,47 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     try {
       const result = await pluginRuntime.callFromUi(method, payload, {
         userAction: options?.userAction === true,
+        appSessionId: binding.appSessionId,
+        ...(typeof options?.operationGrantToken === "string"
+          ? { operationGrantToken: options.operationGrantToken }
+          : {}),
       });
       return { ok: true, result };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.pluginBridge.requestOperationGrant, async (
+    e,
+    method: unknown,
+    payload: unknown,
+  ) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.requestOperationGrant, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof method !== "string" || !method.trim()) {
+      return { ok: false as const, error: "invalid-method" };
+    }
+    const ownerPluginId = pluginRuntime.resolveToolOwner(method);
+    if (ownerPluginId !== binding.pluginId) {
+      return { ok: false as const, error: "cross-plugin-call-denied" };
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { ok: false as const, error: "invalid-operation-input" };
+    }
+    try {
+      const result = await deps.requestPluginOperationGrant({
+        pluginId: binding.pluginId,
+        toolName: method,
+        input: payload as Record<string, unknown>,
+        appSessionId: binding.appSessionId,
+      });
+      return { ok: true as const, result };
+    } catch (error) {
+      return { ok: false as const, error: errMessage(error) };
     }
   });
 

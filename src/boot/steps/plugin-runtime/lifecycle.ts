@@ -53,7 +53,6 @@ export function createLifecycleCallbacks(
     mainWindow,
     pythonRuntime,
     installLoadedPluginPartitionPolicy,
-    getBundleLifecycle,
   } = deps;
 
   return {
@@ -87,25 +86,22 @@ export function createLifecycleCallbacks(
       })();
     },
     onDisable: (pluginId) => {
-      const loopbackManager = getLoopbackManager();
       keywordEngine.unregisterByPlugin(pluginId);
-      // legacy-removal flag-day: the loopback manager owns every plugin's tools —
-      // stopping its host unregisters them.
-      void loopbackManager.stop(pluginId).catch((err) =>
-        log.error(`loopback plugin stop failed (${pluginId}): %s`, (err as Error).message),
-      );
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
-      void getBundleLifecycle?.()?.deactivate(pluginId).catch((err) =>
-        log.error(`plugin bundle deactivation failed (${pluginId}): %s`, (err as Error).message),
-      );
     },
-    onActiveStateChange: (pluginId, enabled) => {
+    onActiveStateChange: async (pluginId, enabled) => {
+      const bundleLifecycle = deps.getBundleLifecycle?.();
+      if (bundleLifecycle) {
+        if (enabled && !bundleLifecycle.getActive(pluginId)) {
+          await bundleLifecycle.activate(pluginId);
+        } else if (bundleLifecycle.getActive(pluginId)) {
+          await bundleLifecycle.setContributionsEnabled(pluginId, enabled);
+        }
+      }
       if (!enabled) {
         keywordEngine.unregisterByPlugin(pluginId);
         lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
-        void getBundleLifecycle?.()?.deactivate(pluginId).catch((err) =>
-          log.error(`plugin bundle inactive cleanup failed (${pluginId}): %s`, (err as Error).message),
-        );
+        if (!bundleLifecycle) await getLoopbackManager().stop(pluginId);
         return;
       }
       const pluginRuntime = getPluginRuntime();
@@ -114,9 +110,7 @@ export function createLifecycleCallbacks(
         keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
         log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on activation`);
       }
-      void getBundleLifecycle?.()?.activate(pluginId).catch((err) =>
-        log.error(`plugin bundle reactivation failed (${pluginId}): %s`, (err as Error).message),
-      );
+      if (manifest && !bundleLifecycle) await getLoopbackManager().start(manifest);
     },
     // Symmetric to `onDisable` — re-registers tools after a successful
     // restart/add/reload. Without this every chat-surface tool call hits
@@ -124,7 +118,6 @@ export function createLifecycleCallbacks(
     // a sync exception is logged but does not become `runtime reload failed`.
     onEnable: (pluginId) => {
       const pluginRuntime = getPluginRuntime();
-      const loopbackManager = getLoopbackManager();
       // `restartAll()` is also the managed-marketplace first-sync path:
       // ensureManagedInstalled() writes the registry, then restartAll() loads
       // the new plugin without emitting plugin.installed. Register the
@@ -134,12 +127,6 @@ export function createLifecycleCallbacks(
       // legacy-removal flag-day: ALL plugins register through the loopback manager
       // (server/discover → tools/list → reverse projection from `_meta`) — the
       // legacy `pluginToolsForRegistration` direct path is gone.
-      const enabledManifest = pluginRuntime.getPluginManifest(pluginId);
-      if (enabledManifest) {
-        void loopbackManager.start(enabledManifest).catch((err) =>
-          log.error(`loopback plugin start failed (${pluginId}): %s`, (err as Error).message),
-        );
-      }
       // Runtime restart/reload can reach loaded+started after a prior teardown.
       // registerKeywords usually runs through hostApi during start(); keep this
       // guarded manifest replay as the lifecycle safety net without duplicating
@@ -154,9 +141,6 @@ export function createLifecycleCallbacks(
         keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
         log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on enable`);
       }
-      void getBundleLifecycle?.()?.activate(pluginId).catch((err) =>
-        log.error(`plugin bundle activation failed (${pluginId}): %s`, (err as Error).message),
-      );
       // Best-effort renderer refresh signal. Runtime/tool registry state is
       // already updated; a closed window must not make reload fail —
       // sendToWindow owns the isDestroyed guard + send try/catch.

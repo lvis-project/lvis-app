@@ -8,6 +8,8 @@
  */
 
 import { basename, dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { ValidateFunction } from "ajv";
 import type {
   InstallPolicy,
@@ -74,6 +76,12 @@ import { isModelVisible } from "./tool-visibility.js";
 import type { InvocationOrigin } from "./origin-chain.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
+import type {
+  PluginRuntimeGenerationAccess,
+  PluginRuntimeGenerationLifecycle,
+  PluginRuntimeGenerationProjection,
+} from "../plugin-host-generation.js";
+import { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
 
@@ -209,6 +217,8 @@ export interface PluginToolInvocationContext {
     sessionId: string;
     operationGrantToken?: string;
   };
+  /** Exact foreign MCP owner captured from the card; rechecked after executor lookup. */
+  expectedMcpServerId?: string;
 }
 
 export type PluginToolInvocationDelegate = (
@@ -241,7 +251,12 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** Plugin-scoped HostApi factory — injected by boot.ts */
-  createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
+  createHostApi?: (
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    hostEffects?: HostApiGenerationScope,
+  ) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -270,7 +285,7 @@ export interface PluginRuntimeOptions {
    * execution registry: auth/config/UI calls remain runtime-callable while
    * model exposure is gated by ConversationLoop scope.
    */
-  onActiveStateChange?: (pluginId: string, enabled: boolean) => void;
+  onActiveStateChange?: (pluginId: string, enabled: boolean) => Promise<void> | void;
   /**
    * Optional dependency preparation gate. When this returns a Promise, plugin
    * loading/start is deferred without blocking app boot; calls into the
@@ -287,13 +302,18 @@ export class PluginRuntime {
   private readonly registryPath?: string;
   private readonly pluginsRoot?: string;
   private readonly configStore: ConfigOverrideStore;
-  private readonly createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
+  private readonly createHostApi?: (
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    hostEffects?: HostApiGenerationScope,
+  ) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly installReceiptCacheRoot?: string;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
   private readonly onEnable?: (pluginId: string) => void;
-  private readonly onActiveStateChange?: (pluginId: string, enabled: boolean) => void;
+  private readonly onActiveStateChange?: (pluginId: string, enabled: boolean) => Promise<void> | void;
   private readonly preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
@@ -330,9 +350,19 @@ export class PluginRuntime {
   private readonly preparation: PreparationTracker;
   private readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
   private readonly pendingRestartPreparations = new Map<string, Promise<void>>();
+  /**
+   * Hash-only view of the account most recently returned by the manifest's
+   * statusTool. Raw account identifiers never leave the invocation result and
+   * are never persisted by the host. A generation/session write grant fails
+   * closed until the trusted panel has refreshed auth status.
+   */
+  private readonly pluginAccountHashes = new Map<string, string>();
   private readonly pluginUiRevisions = new Map<string, number>();
   private nextPluginUiRevision = 0;
   private toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
+  private generationAccess: PluginRuntimeGenerationAccess | undefined;
+  private generationLifecycle: PluginRuntimeGenerationLifecycle | undefined;
+  private readonly pinnedGenerations = new AsyncLocalStorage<ReadonlyMap<string, string>>();
   private loaded = false;
   /** §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
   private manifestValidator: ValidateFunction | null = null;
@@ -396,14 +426,19 @@ export class PluginRuntime {
     return ensurePluginDataDir(pluginId, pluginRoot, this.pluginsRoot);
   }
 
-  private buildHostApi(pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi {
-    const hostApi = this.createHostApi?.(pluginId, manifest, pluginDataDir) ?? createNoopHostApi(pluginId, pluginDataDir);
+  private buildHostApi(
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    hostEffects?: HostApiGenerationScope,
+  ): PluginHostApi {
+    const hostApi = this.createHostApi?.(pluginId, manifest, pluginDataDir, hostEffects) ?? createNoopHostApi(pluginId, pluginDataDir);
     // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
     // objects from test harnesses may omit it.
     if (!hostApi.storage) {
       hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
     }
-    return hostApi;
+    return hostEffects ? hostEffects.wrapHostApi(hostApi) : hostApi;
   }
 
   private markPluginUiRevision(pluginId: string): number {
@@ -421,6 +456,131 @@ export class PluginRuntime {
     url.searchParams.set("lvisPluginVersion", manifest.version ?? "0");
     url.searchParams.set("lvisRuntimeRevision", String(this.getPluginUiRevision(pluginId)));
     return url.href;
+  }
+
+  setGenerationAccess(access: PluginRuntimeGenerationAccess): void {
+    this.generationAccess = access;
+    if ("replaceRuntime" in access && typeof access.replaceRuntime === "function") {
+      this.generationLifecycle = access as PluginRuntimeGenerationLifecycle;
+    }
+  }
+
+  getRuntimeGenerationProjection(pluginId: string): PluginRuntimeGenerationProjection | undefined {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) return undefined;
+    return Object.freeze({
+      manifest: plugin.manifest,
+      pluginRoot: plugin.pluginRoot,
+      instance: plugin.instance,
+      methods: new Map(plugin.methods),
+      ...(plugin.approvedPluginAccess ? { approvedPluginAccess: plugin.approvedPluginAccess } : {}),
+      disposers: Object.freeze([...(this.disposers.get(pluginId) ?? [])]),
+      ...(plugin.hostEffects ? { hostEffects: plugin.hostEffects } : {}),
+    });
+  }
+
+  prepareRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): void {
+    const pluginId = runtime.manifest.id;
+    for (const toolName of runtime.methods.keys()) {
+      const owner = this.methodMap.get(toolName)?.pluginId;
+      if (owner && owner !== pluginId) throw new Error(`Duplicate plugin method registered: ${toolName}`);
+    }
+  }
+
+  async postPublishRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): Promise<void> {
+    for (const error of runtime.hostEffects?.postPublish() ?? []) {
+      log.error(`generation post-publish signal failed for ${runtime.manifest.id}: %s`, error.message);
+    }
+    try {
+      await runtime.instance.onPublished?.();
+    } catch (error) {
+      log.error(`generation post-publish startup degraded for ${runtime.manifest.id}: %s`, (error as Error).message);
+      this.auditLog?.("warn", "plugin_post_publish_startup_degraded", {
+        pluginId: runtime.manifest.id,
+        version: runtime.manifest.version,
+        error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+      });
+    }
+  }
+
+  /** Synchronous publish half of the host generation linearization point. */
+  publishRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): void {
+    const pluginId = runtime.manifest.id;
+    this.plugins.get(pluginId)?.hostEffects?.supersede();
+    runtime.hostEffects?.publish();
+    for (const [toolName, entry] of [...this.methodMap]) {
+      if (entry.pluginId === pluginId) this.methodMap.delete(toolName);
+    }
+    for (const [toolName, handler] of runtime.methods) {
+      this.methodMap.set(toolName, { pluginId, handler });
+    }
+    this.plugins.set(pluginId, {
+      manifest: runtime.manifest,
+      pluginRoot: runtime.pluginRoot,
+      instance: runtime.instance,
+      methods: new Map(runtime.methods),
+      approvedPluginAccess: runtime.approvedPluginAccess,
+      hostEffects: runtime.hostEffects,
+      started: true,
+    });
+    this.disposers.set(pluginId, [...(runtime.disposers ?? [])]);
+    this.rememberPluginManifest(pluginId, runtime.manifest, runtime.approvedPluginAccess);
+    this.markPluginUiRevision(pluginId);
+    this.failedPluginIds.delete(pluginId);
+    this.loadFailureInfo.delete(pluginId);
+    this.disabledPluginIds.delete(pluginId);
+  }
+
+  /** Synchronous inactive-pointer publish. Resource teardown is lease-drained. */
+  unpublishRuntimeGeneration(pluginId: string): void {
+    this.plugins.get(pluginId)?.hostEffects?.supersede();
+    for (const [toolName, entry] of [...this.methodMap]) {
+      if (entry.pluginId === pluginId) this.methodMap.delete(toolName);
+    }
+    this.plugins.delete(pluginId);
+    this.disposers.delete(pluginId);
+    this.pluginUiRevisions.delete(pluginId);
+    this.pluginAccountHashes.delete(pluginId);
+  }
+
+  async retireRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): Promise<void> {
+    const errors: Error[] = [];
+    try {
+      await runtime.instance.stop?.();
+    } catch (error) {
+      log.error(`generation stop failed for ${runtime.manifest.id}: %s`, (error as Error).message);
+      errors.push(error instanceof Error ? error : new Error(String(error)));
+    }
+    errors.push(...(runtime.hostEffects?.retire() ?? []));
+    for (const dispose of runtime.disposers ?? []) {
+      try { dispose(); } catch (error) {
+        log.error(`generation disposer failed for ${runtime.manifest.id}: %s`, (error as Error).message);
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, `plugin '${runtime.manifest.id}' generation retirement failed`);
+  }
+
+  private async withPinnedGeneration<T>(
+    pluginId: string,
+    operation: (projection: PluginRuntimeGenerationProjection | undefined) => Promise<T>,
+  ): Promise<T> {
+    const access = this.generationAccess;
+    if (!access) return operation(undefined);
+    const pinned = this.pinnedGenerations.getStore()?.get(pluginId);
+    const lease = pinned
+      ? await access.acquireExact(pluginId, pinned)
+      : await access.acquire(pluginId);
+    const next = new Map(this.pinnedGenerations.getStore() ?? []);
+    next.set(pluginId, lease.generation.generationId);
+    try {
+      return await this.pinnedGenerations.run(
+        Object.freeze(next) as ReadonlyMap<string, string>,
+        () => operation(lease.generation.state.runtime),
+      );
+    } finally {
+      lease.release();
+    }
   }
 
   // ─── Load Plan & Snapshots ─────────────────────────────────────────────────
@@ -787,6 +947,23 @@ export class PluginRuntime {
   }
 
   async restartAll(): Promise<void> {
+    if (this.generationLifecycle) {
+      const loadPlan = await this.resolveManifestLoadPlanInternal();
+      const snapshots = await this.readSnapshotsInternal(loadPlan);
+      const targetIds = new Set(snapshots.keys());
+      for (const pluginId of [...this.plugins.keys()]) {
+        if (!targetIds.has(pluginId)) await this.removePlugin(pluginId);
+      }
+      for (const pluginId of targetIds) {
+        if (this.plugins.has(pluginId)) {
+          const result = await this.restartPlugin(pluginId);
+          if (result === "failed") throw new Error(`restartAll failed for ${pluginId}`);
+        } else {
+          await this.addPlugin(pluginId);
+        }
+      }
+      return;
+    }
     const loadedPluginIds = [...this.plugins.keys()];
     await this.stopAll();
     for (const pluginId of loadedPluginIds) {
@@ -928,7 +1105,8 @@ export class PluginRuntime {
     }
 
     const pluginDataDir = this.ensureDataDir(pluginId, pluginRoot);
-    const hostApi = this.buildHostApi(pluginId, manifest, pluginDataDir);
+    const hostEffects = this.generationLifecycle ? new HostApiGenerationScope(pluginId) : undefined;
+    const hostApi = this.buildHostApi(pluginId, manifest, pluginDataDir, hostEffects);
 
     let instance: RuntimePlugin;
     try {
@@ -944,6 +1122,7 @@ export class PluginRuntime {
         }),
       );
     } catch (err) {
+      hostEffects?.discard();
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
       return "failed";
     }
@@ -956,9 +1135,33 @@ export class PluginRuntime {
       await instance.start?.();
       plog("debug", { pluginId, phase: PluginPhase.RESTART_START_OK }, "restart complete");
     } catch (err) {
+      hostEffects?.discard();
       plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
       await this.stopAfterStartFailure(pluginId, instance);
       throw new Error(`restartPlugin failed for ${pluginId}: ${(err as Error).message}`);
+    }
+
+    if (this.generationLifecycle) {
+      if (manifest.keywords && manifest.keywords.length > 0) {
+        hostApi.registerKeywords(manifest.keywords);
+      }
+      const candidate: PluginRuntimeGenerationProjection = Object.freeze({
+        manifest,
+        pluginRoot,
+        instance,
+        methods: new Map(methods),
+        ...(approvedPluginAccess ? { approvedPluginAccess } : {}),
+        ...(hostEffects ? { hostEffects } : {}),
+      });
+      try {
+        await this.generationLifecycle.replaceRuntime(candidate);
+      } catch (error) {
+        hostEffects?.discard();
+        await this.stopAfterStartFailure(pluginId, instance);
+        throw error;
+      }
+      this.onEnable?.(pluginId);
+      return "started";
     }
 
     try {
@@ -1133,25 +1336,30 @@ export class PluginRuntime {
     // marketplace registry.
     const plugin = this.plugins.get(pluginId);
     if (plugin) {
-      try {
-        await plugin.instance.stop?.();
-      } catch (err) {
-        log.error(`stop during removePlugin failed: %s`, (err as Error).message);
-      }
-
-      for (const method of plugin.methods.keys()) {
-        this.methodMap.delete(method);
-      }
-      this.plugins.delete(pluginId);
-
-      const pluginDisposers = this.disposers.get(pluginId);
-      if (pluginDisposers) {
-        for (const d of pluginDisposers) {
-          try { d(); } catch (err) {
-            log.error(`disposer failed during removePlugin: %s`, (err as Error).message);
-          }
+      if (this.generationLifecycle) {
+        await this.generationLifecycle.deactivate(pluginId);
+        await this.generationLifecycle.waitForRetirements();
+      } else {
+        try {
+          await plugin.instance.stop?.();
+        } catch (err) {
+          log.error(`stop during removePlugin failed: %s`, (err as Error).message);
         }
-        this.disposers.delete(pluginId);
+
+        for (const method of plugin.methods.keys()) {
+          this.methodMap.delete(method);
+        }
+        this.plugins.delete(pluginId);
+
+        const pluginDisposers = this.disposers.get(pluginId);
+        if (pluginDisposers) {
+          for (const d of pluginDisposers) {
+            try { d(); } catch (err) {
+              log.error(`disposer failed during removePlugin: %s`, (err as Error).message);
+            }
+          }
+          this.disposers.delete(pluginId);
+        }
       }
     } else if (
       !this.knownPluginManifests.has(pluginId) &&
@@ -1180,6 +1388,23 @@ export class PluginRuntime {
     this.pluginUiRevisions.delete(pluginId);
 
     this.onDisable?.(pluginId);
+  }
+
+  async removePluginWithCommit<T>(
+    pluginId: string,
+    durableCommit: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.generationLifecycle || !this.plugins.has(pluginId)) {
+      const result = await durableCommit();
+      await this.removePlugin(pluginId);
+      return result;
+    }
+    const result = await this.generationLifecycle.deactivateWithCommit(pluginId, durableCommit);
+    await this.generationLifecycle.waitForRetirements();
+    // The inactive pointer is already published. This call purges only the
+    // durable runtime tracking maps and fires the host cleanup callback.
+    await this.removePlugin(pluginId);
+    return result;
   }
 
   /** Helper: does a manifest path's directory name suggest it owns `pluginId`? */
@@ -1337,7 +1562,8 @@ export class PluginRuntime {
     }
 
     const pluginDataDir = this.ensureDataDir(manifest.id, pluginRoot);
-    const hostApi = this.buildHostApi(manifest.id, manifest, pluginDataDir);
+    const hostEffects = this.generationLifecycle ? new HostApiGenerationScope(manifest.id) : undefined;
+    const hostApi = this.buildHostApi(manifest.id, manifest, pluginDataDir, hostEffects);
 
     let instance: RuntimePlugin;
     try {
@@ -1353,6 +1579,7 @@ export class PluginRuntime {
         }),
       );
     } catch (err) {
+      hostEffects?.discard();
       log.error(`${manifest.id} createPlugin failed: %s`, (err as Error).message);
       this.markFailed(manifest.id);
       return "failed";
@@ -1372,6 +1599,7 @@ export class PluginRuntime {
     }
 
     if (opts.shouldCommit && !opts.shouldCommit()) {
+      hostEffects?.discard();
       await this.stopAfterStartFailure(manifest.id, instance);
       return "cancelled";
     }
@@ -1384,24 +1612,51 @@ export class PluginRuntime {
         startupMs = Date.now() - startedAt;
       } catch (err) {
         if (opts.shouldCommit && !opts.shouldCommit()) {
+          hostEffects?.discard();
           await this.stopAfterStartFailure(manifest.id, instance);
           return "cancelled";
         }
         log.error(`start during addPlugin failed: %s`, (err as Error).message);
         this.markFailed(manifest.id);
+        hostEffects?.discard();
         await this.stopAfterStartFailure(manifest.id, instance);
         return "failed";
       }
     }
     if (opts.shouldCommit && !opts.shouldCommit()) {
+      hostEffects?.discard();
       await this.stopAfterStartFailure(manifest.id, instance);
       return "cancelled";
     }
     for (const toolName of methods.keys()) {
       if (this.methodMap.has(toolName)) {
+        hostEffects?.discard();
         await this.stopAfterStartFailure(manifest.id, instance);
         throw new Error(`Duplicate plugin method registered: ${toolName}`);
       }
+    }
+    if (this.generationLifecycle) {
+      if (manifest.keywords && manifest.keywords.length > 0) {
+        hostApi.registerKeywords(manifest.keywords);
+      }
+      const candidate: PluginRuntimeGenerationProjection = Object.freeze({
+        manifest,
+        pluginRoot,
+        instance,
+        methods: new Map(methods),
+        ...(approvedPluginAccess ? { approvedPluginAccess } : {}),
+        ...(hostEffects ? { hostEffects } : {}),
+      });
+      try {
+        await this.generationLifecycle.replaceRuntime(candidate);
+      } catch (error) {
+        hostEffects?.discard();
+        await this.stopAfterStartFailure(manifest.id, instance);
+        throw error;
+      }
+      this.perf.recordStartup(manifest.id, startupMs);
+      this.onEnable?.(manifest.id);
+      return "started";
     }
     for (const [toolName, handler] of methods) {
       this.methodMap.set(toolName, { pluginId: manifest.id, handler });
@@ -1433,6 +1688,13 @@ export class PluginRuntime {
    * I2 — Plugin live-reload (dev only).
    */
   async reloadPlugin(pluginId: string): Promise<void> {
+    if (this.generationLifecycle) {
+      const result = await this.restartPlugin(pluginId, { skipPreparation: true });
+      if (result !== "started") {
+        throw new Error(`reloadPlugin failed for ${pluginId}: ${result ?? "not-loaded"}`);
+      }
+      return;
+    }
     const plugin = this.plugins.get(pluginId);
     if (!plugin) {
       throw new Error(`Plugin not loaded: ${pluginId}`);
@@ -1544,6 +1806,16 @@ export class PluginRuntime {
       });
     }
 
+    if (this.generationLifecycle) {
+      await this.generationLifecycle.deactivate(pluginId);
+      await this.generationLifecycle.waitForRetirements();
+      this.disabledPluginIds.add(pluginId);
+      this.failedPluginIds.delete(pluginId);
+      this.pluginUiRevisions.delete(pluginId);
+      this.onDisable?.(pluginId);
+      return;
+    }
+
     try {
       await plugin.instance.stop?.();
     } catch (err) {
@@ -1588,17 +1860,21 @@ export class PluginRuntime {
       throw new Error(`Plugin method not found: ${method}`);
     }
     const { pluginId } = entry;
-    this.throwIfPluginNotStarted(pluginId);
-    const stats = this.perf.beginCall(pluginId);
-    const t0 = Date.now();
-    try {
-      return await entry.handler(payload);
-    } catch (err) {
-      stats.errorCount += 1;
-      throw err;
-    } finally {
-      stats.totalExecMs += Date.now() - t0;
-    }
+    return this.withPinnedGeneration(pluginId, async (projection) => {
+      this.throwIfPluginNotStarted(pluginId);
+      const handler = projection?.methods.get(method) ?? entry.handler;
+      if (!handler) throw new Error(`Plugin method not found in active generation: ${method}`);
+      const stats = this.perf.beginCall(pluginId);
+      const t0 = Date.now();
+      try {
+        return await handler(payload);
+      } catch (err) {
+        stats.errorCount += 1;
+        throw err;
+      } finally {
+        stats.totalExecMs += Date.now() - t0;
+      }
+    });
   }
 
   resolveToolOwner(method: string): string | undefined {
@@ -1707,29 +1983,32 @@ export class PluginRuntime {
       this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
-    const plugin = this.plugins.get(entry.pluginId);
-    this.throwIfPluginNotStarted(entry.pluginId);
-    assertUiActionInvokable({
-      method,
-      pluginId: entry.pluginId,
-      uiInvokable: plugin ? declaredUiInvokableMethods(plugin.manifest) : [],
-    });
-    if (!this.toolInvocationDelegate) {
-      throw new Error("Plugin tool executor is not wired; UI plugin call denied");
-    }
-    return this.toolInvocationDelegate(method, payload, {
-      origin: "ui",
-      ownerPluginId: entry.pluginId,
-      userAction: options?.userAction === true,
-      ...(options?.appSessionId
-        ? {
-            appInvocation: {
-              surface: "trusted-panel" as const,
-              sessionId: options.appSessionId,
-              ...(options.operationGrantToken ? { operationGrantToken: options.operationGrantToken } : {}),
-            },
-          }
-        : {}),
+    return this.withPinnedGeneration(entry.pluginId, async (projection) => {
+      const plugin = this.plugins.get(entry.pluginId);
+      this.throwIfPluginNotStarted(entry.pluginId);
+      const manifest = projection?.manifest ?? plugin?.manifest;
+      assertUiActionInvokable({
+        method,
+        pluginId: entry.pluginId,
+        uiInvokable: manifest ? declaredUiInvokableMethods(manifest) : [],
+      });
+      if (!this.toolInvocationDelegate) {
+        throw new Error("Plugin tool executor is not wired; UI plugin call denied");
+      }
+      return this.toolInvocationDelegate(method, payload, {
+        origin: "ui",
+        ownerPluginId: entry.pluginId,
+        userAction: options?.userAction === true,
+        ...(options?.appSessionId
+          ? {
+              appInvocation: {
+                surface: "trusted-panel" as const,
+                sessionId: options.appSessionId,
+                ...(options.operationGrantToken ? { operationGrantToken: options.operationGrantToken } : {}),
+              },
+            }
+          : {}),
+      });
     });
   }
 
@@ -1785,35 +2064,51 @@ export class PluginRuntime {
    *    contained to this method — `assertUiActionInvokable`, the `"ui"` panel path,
    *    and `isAppOnlyRuntimeInvocation` are untouched.
    */
-  async callFromApp(method: string, payload?: unknown): Promise<unknown> {
+  async callFromApp(
+    method: string,
+    payload?: unknown,
+    options?: { appSessionId?: string; operationGrantToken?: string },
+  ): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
       this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
-    const plugin = this.plugins.get(entry.pluginId);
-    this.throwIfPluginNotStarted(entry.pluginId);
-    assertUiActionInvokable({
-      method,
-      pluginId: entry.pluginId,
-      uiInvokable: plugin ? declaredUiInvokableMethods(plugin.manifest) : [],
-    });
-    const auth = plugin?.manifest.auth;
-    if (auth && (method === auth.statusTool || method === auth.loginTool || method === auth.logoutTool)) {
-      throw new Error(
-        `[${MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE}] Tool '${method}' is this plugin's manifest-declared ` +
-          `auth tool and is reserved for the plugin's own trusted panel: a card cannot invoke it. ` +
-          `auth.loginTool opens a credentialed auth window, and an untrusted card must never be able ` +
-          `to summon one, gated or not.`,
-      );
-    }
-    if (!this.toolInvocationDelegate) {
-      throw new Error("Plugin tool executor is not wired; MCP App plugin call denied");
-    }
-    return this.toolInvocationDelegate(method, payload, {
-      origin: "mcp-app",
-      ownerPluginId: entry.pluginId,
-      userAction: false,
+    return this.withPinnedGeneration(entry.pluginId, async (projection) => {
+      const plugin = this.plugins.get(entry.pluginId);
+      this.throwIfPluginNotStarted(entry.pluginId);
+      const manifest = projection?.manifest ?? plugin?.manifest;
+      assertUiActionInvokable({
+        method,
+        pluginId: entry.pluginId,
+        uiInvokable: manifest ? declaredUiInvokableMethods(manifest) : [],
+      });
+      const auth = manifest?.auth;
+      if (auth && (method === auth.statusTool || method === auth.loginTool || method === auth.logoutTool)) {
+        throw new Error(
+          `[${MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE}] Tool '${method}' is this plugin's manifest-declared ` +
+            `auth tool and is reserved for the plugin's own trusted panel: a card cannot invoke it. ` +
+            `auth.loginTool opens a credentialed auth window, and an untrusted card must never be able ` +
+            `to summon one, gated or not.`,
+        );
+      }
+      if (!this.toolInvocationDelegate) {
+        throw new Error("Plugin tool executor is not wired; MCP App plugin call denied");
+      }
+      return this.toolInvocationDelegate(method, payload, {
+        origin: "mcp-app",
+        ownerPluginId: entry.pluginId,
+        userAction: false,
+        ...(options?.appSessionId
+          ? {
+              appInvocation: {
+                surface: "mcp-app" as const,
+                sessionId: options.appSessionId,
+                ...(options.operationGrantToken ? { operationGrantToken: options.operationGrantToken } : {}),
+              },
+            }
+          : {}),
+      });
     });
   }
 
@@ -1866,26 +2161,27 @@ export class PluginRuntime {
       );
     }
 
-    const plugin = this.plugins.get(pluginId);
-    if (!plugin) {
-      throw new Error(`Plugin '${pluginId}' is not loaded; cannot serve '${uri}'.`);
-    }
-    const readUiResource = plugin.instance.readUiResource;
-    if (typeof readUiResource !== "function") {
-      throw new Error(
-        `Plugin '${pluginId}' declares ui:// resources but does not implement readUiResource(); cannot serve '${uri}'.`,
+    const html = await this.withPinnedGeneration(pluginId, async (projection) => {
+      const plugin = this.plugins.get(pluginId);
+      const instance = projection?.instance ?? plugin?.instance;
+      if (!instance) {
+        throw new Error(`Plugin '${pluginId}' is not loaded; cannot serve '${uri}'.`);
+      }
+      const readUiResource = instance.readUiResource;
+      if (typeof readUiResource !== "function") {
+        throw new Error(
+          `Plugin '${pluginId}' declares ui:// resources but does not implement readUiResource(); cannot serve '${uri}'.`,
+        );
+      }
+      const outcome = await runWithCeiling(
+        async () => readUiResource.call(instance, uri),
+        ceilingMs,
+        undefined,
+        `${pluginId}.readUiResource`,
       );
-    }
-
-    const outcome = await runWithCeiling(
-      async () => readUiResource.call(plugin.instance, uri),
-      ceilingMs,
-      undefined,
-      `${pluginId}.readUiResource`,
-    );
-    if (!outcome.ok) throw outcome.error;
-
-    const html = outcome.value;
+      if (!outcome.ok) throw outcome.error;
+      return outcome.value;
+    });
     if (typeof html !== "string") {
       throw new Error(
         `Plugin '${pluginId}' readUiResource('${uri}') returned ${typeof html}, expected the card HTML as a string.`,
@@ -2035,6 +2331,8 @@ export class PluginRuntime {
     if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
       throw new Error(`Plugin not found: ${pluginId}`);
     }
+    const previouslyEnabled = !this.inactivePluginIds.has(pluginId);
+    if (previouslyEnabled === enabled) return;
     if (this.registryPath) {
       await updatePluginRegistry(this.registryPath, (registry) => {
         const entry = registry.plugins.find((p) => p.id === pluginId);
@@ -2044,25 +2342,63 @@ export class PluginRuntime {
         entry.enabled = enabled;
       });
     }
-    if (enabled) {
-      this.inactivePluginIds.delete(pluginId);
-      try {
-        this.onActiveStateChange?.(pluginId, true);
-      } catch (err) {
-        log.error(`onActiveStateChange failed during setPluginEnabled(${pluginId}, true): %s`, (err as Error).message);
+    try {
+      await this.onActiveStateChange?.(pluginId, enabled);
+    } catch (error) {
+      if (this.registryPath) {
+        await updatePluginRegistry(this.registryPath, (registry) => {
+          const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+          if (!entry) throw new Error(`Plugin not found in registry: ${pluginId}`);
+          entry.enabled = previouslyEnabled;
+        });
       }
-    } else {
-      this.inactivePluginIds.add(pluginId);
-      try {
-        this.onActiveStateChange?.(pluginId, false);
-      } catch (err) {
-        log.error(`onActiveStateChange failed during setPluginEnabled(${pluginId}, false): %s`, (err as Error).message);
-      }
+      throw error;
     }
+    if (enabled) this.inactivePluginIds.delete(pluginId);
+    else this.inactivePluginIds.add(pluginId);
   }
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
     return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
+  }
+
+  getPluginOperationAccountHash(pluginId: string): string | undefined {
+    return this.pluginAccountHashes.get(pluginId);
+  }
+
+  /**
+   * Observe only manifest-declared auth tools after a successful invocation.
+   * The account hash is derived exclusively from statusTool output; login
+   * results cannot mint write authority, and a successful logout burns it.
+   */
+  observePluginAuthResult(pluginId: string, toolName: string, result: unknown): void {
+    const manifest = this.getPluginManifest(pluginId);
+    const auth = manifest?.auth;
+    if (!auth) return;
+    if (toolName === auth.logoutTool) {
+      this.pluginAccountHashes.delete(pluginId);
+      return;
+    }
+    if (toolName !== auth.statusTool) return;
+    const outer = result && typeof result === "object" && !Array.isArray(result)
+      ? result as Record<string, unknown>
+      : undefined;
+    const nested = outer?.data && typeof outer.data === "object" && !Array.isArray(outer.data)
+      ? outer.data as Record<string, unknown>
+      : outer;
+    if (nested?.authenticated !== true || typeof nested.account !== "string" || !nested.account.trim()) {
+      this.pluginAccountHashes.delete(pluginId);
+      return;
+    }
+    const accountHash = createHash("sha256")
+      .update("plugin-account/v1\0")
+      .update(nested.account.trim().toLowerCase())
+      .digest("hex");
+    this.pluginAccountHashes.set(pluginId, accountHash);
+  }
+
+  clearPluginOperationAccount(pluginId: string): void {
+    this.pluginAccountHashes.delete(pluginId);
   }
 
   getApprovedPluginAccess(pluginId: string): PluginAccessSpec | undefined {

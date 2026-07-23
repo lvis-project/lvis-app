@@ -58,12 +58,28 @@ function setup() {
   const permissions = new PermissionManager("/tmp/nonexistent-operation-governance.json");
   permissions.checkDetailed = () => ({ decision: "allow", reason: "test", layer: 3 });
   const approvalGate = { requestAndWait: vi.fn(async () => ({ choice: "allow-once" })) };
+  const auditLogger = {
+    log: vi.fn(),
+    logShadow: vi.fn(),
+    isPermissionAuditChainReady: vi.fn(() => false),
+    isShadowChannelWritable: vi.fn(() => true),
+    getPermissionShadowLogFile: vi.fn(() => "/tmp/shadow"),
+  };
   return {
-    executor: new ToolExecutor(registry, undefined, permissions, undefined, approvalGate as never),
+    executor: new ToolExecutor(
+      registry,
+      undefined,
+      permissions,
+      undefined,
+      approvalGate as never,
+      undefined,
+      auditLogger as never,
+    ),
     permissions,
     approvalGate,
     read,
     write,
+    auditLogger,
   };
 }
 
@@ -133,5 +149,22 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(result.is_error).toBeFalsy();
     expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
     expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps governed input, result, bearer, and account identity out of audit rows", async () => {
+    const { executor, auditLogger } = setup();
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll([{
+        id: "r",
+        name: "domain_read",
+        input: { operation: "status", employeeName: "Sensitive Person" },
+      }], options("bearer-must-not-log")),
+    );
+    const serialized = JSON.stringify(auditLogger.log.mock.calls);
+    expect(serialized).toContain("status");
+    expect(serialized).not.toContain("Sensitive Person");
+    expect(serialized).not.toContain("bearer-must-not-log");
+    expect(serialized).not.toContain(principal.accountHash);
+    expect(serialized).not.toContain("fresh");
   });
 });

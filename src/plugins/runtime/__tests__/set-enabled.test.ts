@@ -9,7 +9,7 @@
  *     onActiveStateChange(true).
  *   - an unknown plugin id throws.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,7 +63,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
   function makeRuntime(opts: {
     onDisable?: (id: string) => void;
     onEnable?: (id: string) => void;
-    onActiveStateChange?: (id: string, enabled: boolean) => void;
+    onActiveStateChange?: (id: string, enabled: boolean) => Promise<void> | void;
   } = {}) {
     return makeTestPluginRuntime({ rootDir: testDir, registryPath, pluginsRoot: installedDir }, opts);
   }
@@ -145,6 +145,18 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.loadStatus).toBe("loaded");
     expect(card?.runtimeLoaded).toBe(true);
     expect(card?.active).toBe(true);
+  });
+
+  it("rolls the durable flag back when contribution projection fails", async () => {
+    const onActiveStateChange = vi.fn(async () => { throw new Error("MCP projection failed"); });
+    const runtime = makeRuntime({ onActiveStateChange });
+    await runtime.startAll();
+
+    await expect(runtime.setPluginEnabled("se-plugin", false)).rejects.toThrow("MCP projection failed");
+
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(true);
   });
 
   /**

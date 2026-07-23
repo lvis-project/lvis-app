@@ -10,6 +10,7 @@
  *
  * Exposed to plugins:
  *   - callTool(name, args)       → host runtime; cross-plugin call denied
+ *   - requestOperationGrant(...) → host-confirmed, one-shot write authority
  *   - emitEvent(type, data)      → host event bus, capability-gated
  *   - onEvent(type, handler)     → host events scoped to this plugin
  *   - getEntryUrl()              → canonical entry URL from main
@@ -94,12 +95,27 @@ function hasActiveUserActivation(): boolean {
 }
 
 contextBridge.exposeInMainWorld("lvisPlugin", {
-  callTool: async (name: string, args?: unknown): Promise<unknown> =>
+  callTool: async (
+    name: string,
+    args?: unknown,
+    options?: { operationGrantToken?: string },
+  ): Promise<unknown> =>
     unwrapEnvelope(
       await ipcRenderer.invoke("lvis:plugin:call-tool", name, args, {
         userAction: hasActiveUserActivation(),
+        ...(typeof options?.operationGrantToken === "string"
+          ? { operationGrantToken: options.operationGrantToken }
+          : {}),
       }),
     ),
+
+  requestOperationGrant: async (
+    name: string,
+    args: unknown,
+  ): Promise<{ operationGrantToken: string; grantId: string; expiresAt: number }> =>
+    unwrapEnvelope(
+      await ipcRenderer.invoke("lvis:plugin:request-operation-grant", name, args),
+    ) as { operationGrantToken: string; grantId: string; expiresAt: number },
 
   emitEvent: async (type: string, data?: unknown): Promise<void> => {
     unwrapEnvelope(await ipcRenderer.invoke("lvis:plugin:emit-event", type, data));
