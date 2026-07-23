@@ -219,6 +219,14 @@ async function inspectOne(
       }
     });
   await setMode(page, mode);
+  // Optional: simulate the real chat-mode window, which is much narrower than
+  // the default 1600px capture viewport, to check the plugin UIs stay responsive
+  // (no inner box escaping its container) at the width users actually see.
+  if (process.env.LVIS_SCREENSHOT_NARROW) {
+    const w = Number(process.env.LVIS_SCREENSHOT_NARROW) || 460;
+    await page.setViewportSize({ width: w, height: 900 });
+    await page.waitForTimeout(500);
+  }
   const windowsBefore = app.windows().length;
   const urlsBefore = urls();
   const open = await openPlugin(page, plugin.label);
@@ -248,6 +256,25 @@ async function inspectOne(
   await page.waitForTimeout(3_000); // let the panel settle (a worker-backed plugin
   // can restart once after its runtime provisions, remounting the webview)
 
+  // Opt-in: index the seeded fixtures folder so the 문서 list has real document
+  // rows (to check them for overflow at the panel width), then re-clear modals.
+  if (plugin.id === "local-indexer" && process.env.LVIS_SCREENSHOT_SCAN) {
+    const gp = app.windows().find((w) => {
+      try { return w.url().includes("plugin-ui-shell.html"); } catch { return false; }
+    });
+    if (gp) {
+      const start = gp.getByRole("button", { name: /인덱싱 시작/ }).first();
+      if (await start.count()) {
+        await start.click().catch(() => {});
+        await page.waitForTimeout(600);
+        await clearMountApprovalModals(page); // approve index_scan
+        await page.waitForTimeout(9_000); // let the worker index the 2 md files
+        await clearMountApprovalModals(page); // approve any follow-up reads
+        await page.waitForTimeout(1_500);
+      }
+    }
+  }
+
   const windowsAfter = app.windows().length;
   const urlsAfter = urls();
   const layout = await collectLayout(page);
@@ -272,7 +299,31 @@ async function inspectOne(
     let gi = 0;
     for (const gp of guestPages) {
       try {
-        await gp.screenshot({ path: path.join(OUT_DIR, `guest-${mode}-${plugin.id}-${gi}.png`) }).catch(() => {});
+        await gp.evaluate(() => {
+          const sc = document.querySelector(".wrap") ?? document.querySelector(".view");
+          if (sc) (sc as HTMLElement).scrollTop = 0;
+        }).catch(() => {});
+        await gp.waitForTimeout(200);
+        await gp.screenshot({ path: path.join(OUT_DIR, `guest-${mode}-${plugin.id}-${gi}.png`), fullPage: true }).catch(() => {});
+        // The plugin content scrolls inside its own container (.wrap / .view), so
+        // fullPage misses anything below the fold. Scroll that container to the
+        // bottom and capture again to see the tail (e.g. the indexer 문서 section).
+        await gp.evaluate(() => {
+          const sc = document.querySelector(".wrap") ?? document.querySelector(".view") ?? document.scrollingElement;
+          if (sc) (sc as HTMLElement).scrollTop = (sc as HTMLElement).scrollHeight;
+        }).catch(() => {});
+        await gp.waitForTimeout(400);
+        await gp.screenshot({ path: path.join(OUT_DIR, `guest-${mode}-${plugin.id}-bottom.png`) }).catch(() => {});
+        // Meeting: also capture the 회의록 (records) tab, which the default view
+        // does not show.
+        if (plugin.id === "meeting") {
+          const rec = gp.locator(".nav-btn", { hasText: "회의록" }).first();
+          if (await rec.count()) {
+            await rec.click().catch(() => {});
+            await gp.waitForTimeout(900);
+            await gp.screenshot({ path: path.join(OUT_DIR, `guest-${mode}-meeting-records.png`), fullPage: true }).catch(() => {});
+          }
+        }
         gi++;
         measured.push(
           await gp.evaluate(() => {
@@ -282,14 +333,31 @@ async function inspectOne(
               const r = el.getBoundingClientRect();
               return { x: Math.round(r.x), w: Math.round(r.width) };
             };
+            // Find any element whose right edge escapes the plugin content
+            // container (.wrap / .mc-inner / root) — i.e. an inner box spilling
+            // out of the outer box — reported in guest coords with the spill.
+            const container = document.querySelector(".wrap") ?? document.querySelector(".mc-inner")
+              ?? document.querySelector(".lvis-meeting-ui") ?? document.querySelector(".lvis-local-indexer-ui");
+            const cr = container?.getBoundingClientRect();
+            const overflowers: string[] = [];
+            if (container && cr) {
+              for (const el of Array.from(container.querySelectorAll("*"))) {
+                const er = el.getBoundingClientRect();
+                if (er.width === 0 || er.height === 0) continue;
+                const spill = Math.round(Math.max(er.right - cr.right, cr.left - er.left));
+                if (spill > 3) {
+                  const cls = (el as HTMLElement).className?.toString().split(/\s+/).slice(0, 2).join(".");
+                  overflowers.push(`${el.tagName.toLowerCase()}.${cls}[+${spill}]`);
+                }
+              }
+            }
+            const rectOf2 = (sel: string) => rectOf(sel);
             return {
               innerWidth: window.innerWidth,
               bodyScrollWidth: document.body.scrollWidth,
               overflow: document.body.scrollWidth > window.innerWidth + 1,
-              // Outermost content wrapper of each plugin UI, in guest coords —
-              // its x/width shows whether the panel content is capped + centered
-              // (both plugins should be) or stretching to the full webview.
-              wrap: rectOf(".wrap") ?? rectOf(".mc-inner") ?? rectOf(".lvis-meeting-ui") ?? rectOf("body > *"),
+              wrap: rectOf2(".wrap") ?? rectOf2(".mc-inner") ?? rectOf2(".lvis-meeting-ui") ?? rectOf2("body > *"),
+              overflowers: overflowers.slice(0, 12),
             };
           }),
         );
