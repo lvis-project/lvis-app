@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PluginHostApiIncarnation } from "../index.js";
-import { PluginRuntime } from "../index.js";
+import { PluginRuntime, type PluginRuntimeOptions } from "../index.js";
 import { createNoopHostApi } from "../sandbox.js";
 import type { PluginManifest } from "../../types.js";
 
@@ -26,6 +26,34 @@ class IncarnationTestRuntime extends PluginRuntime {
 }
 
 describe("pending HostApi incarnation lifecycle", () => {
+  it("rejects missing HostApi composition instead of silently installing a noop", () => {
+    expect(() => new PluginRuntime({
+      hostRoot: "/tmp/lvis-incarnation-host",
+    } as PluginRuntimeOptions)).toThrow(/requires an explicit createHostApi factory/);
+  });
+
+  it("rejects an incomplete explicit HostApi instead of backfilling storage", () => {
+    const runtime = new IncarnationTestRuntime({
+      hostRoot: "/tmp/lvis-incarnation-host",
+      createHostApi: () => ({}) as import("../../types.js").PluginHostApi,
+    });
+    const manifest = {
+      id: "plugin-a",
+      name: "Plugin A",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      description: "test",
+      publisher: "test",
+      tools: [],
+    } satisfies PluginManifest;
+
+    expect(() => runtime.buildPending(
+      "plugin-a",
+      manifest,
+      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+    )).toThrow(/incomplete HostApi without storage: plugin-a/);
+  });
+
   it("revokes a factory-pending incarnation immediately on generation invalidation", () => {
     let captured!: PluginHostApiIncarnation;
     const runtime = new IncarnationTestRuntime({
@@ -56,6 +84,38 @@ describe("pending HostApi incarnation lifecycle", () => {
 
     expect(captured.isActive()).toBe(false);
     expect(() => pending.commit()).toThrow(/Cannot commit inactive HostApi incarnation/);
+  });
+
+  it("releases resources registered by a pending incarnation immediately and once", () => {
+    let captured!: PluginHostApiIncarnation;
+    let disposeCalls = 0;
+    const runtime = new IncarnationTestRuntime({
+      hostRoot: "/tmp/lvis-incarnation-host",
+      createHostApi: (pluginId, _manifest, pluginDataDir, incarnation) => {
+        captured = incarnation;
+        incarnation.registerDisposer(() => {
+          disposeCalls += 1;
+        });
+        return createNoopHostApi(pluginId, pluginDataDir);
+      },
+    });
+    const manifest = {
+      id: "plugin-a", name: "Plugin A", version: "1.0.0", entry: "entry.mjs",
+      description: "test", publisher: "test", tools: [],
+    } satisfies PluginManifest;
+    const pending = runtime.buildPending(
+      "plugin-a",
+      manifest,
+      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+    );
+
+    runtime.invalidate("plugin-a");
+
+    expect(captured.isActive()).toBe(false);
+    expect(disposeCalls).toBe(1);
+    expect(pending.disposers).toEqual([]);
+    pending.deactivate();
+    expect(disposeCalls).toBe(1);
   });
 
   it("does not revoke an incarnation after it has committed", () => {

@@ -22,6 +22,7 @@ import type {
 } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
+import { withResolvedPluginInstallLocks } from "../install-lifecycle.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { updatePluginRegistry } from "../registry.js";
@@ -65,6 +66,7 @@ const log = createLogger("plugin-runtime");
 export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
 export { runPluginFactoryWithTimeout, runPluginImportWithTimeout, runStartWithTimeout };
+export { createNoopHostApiForTests } from "./sandbox.js";
 export type { PluginPerfStats };
 
 export type { InstallPolicy };
@@ -222,7 +224,7 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** Plugin-scoped HostApi factory — injected by boot.ts */
-  createHostApi?: (
+  createHostApi: (
     pluginId: string,
     manifest: PluginManifest,
     pluginDataDir: string,
@@ -266,6 +268,21 @@ export interface PluginRuntimeOptions {
 }
 
 export class PluginRuntime extends PluginRuntimeLifecycle {
+  /** Release a same-plugin lifecycle lock held by dependency preparation. */
+  cancelPendingRestart(pluginId: string): void {
+    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    this.pendingRestartPreparations.delete(canonicalPluginId);
+  }
+
+  /** Release all pending per-plugin restarts before queuing a global mutation. */
+  cancelAllPendingRestarts(): void {
+    for (const cancellation of this.pendingRestartCancellations.values()) {
+      cancellation.cancel();
+    }
+    this.pendingRestartPreparations.clear();
+  }
+
   setToolInvocationDelegate(delegate: PluginToolInvocationDelegate): void {
     this.toolInvocationDelegate = delegate;
   }
@@ -673,7 +690,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * per-turn `resolveToolScope` gate read it without touching disk.
    */
   isPluginEnabled(pluginId: string): boolean {
-    return !this.inactivePluginIds.has(pluginId);
+    return !this.inactivePluginIds.has(this.resolveKnownPluginId(pluginId));
   }
 
   /**
@@ -724,33 +741,67 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * @throws if `pluginId` is not a known/loaded plugin.
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
-    if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
-      throw new Error(`Plugin not found: ${pluginId}`);
-    }
-    if (this.registryPath) {
-      await updatePluginRegistry(this.registryPath, (registry) => {
-        const entry = registry.plugins.find((p) => p.id === pluginId);
-        if (!entry) {
-          throw new Error(`Plugin not found in registry: ${pluginId}`);
+    // A restart may own the already-known canonical lock while dependency
+    // preparation is still pending. Cancel it before admission; the retry
+    // callback below only runs after an initial lock has been acquired.
+    this.cancelPendingRestart(this.resolveKnownPluginId(pluginId));
+    return withResolvedPluginInstallLocks(
+      () => {
+        const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+        const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+        return [
+          pluginId,
+          canonicalPluginId,
+          ...(typeof installClaim === "string" ? [installClaim] : []),
+        ];
+      },
+      async () => {
+      const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+      if (
+        !this.knownPluginManifests.has(canonicalPluginId)
+        && !this.plugins.has(canonicalPluginId)
+      ) {
+        throw new Error(`Plugin not found: ${pluginId}`);
+      }
+      const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+      if (installClaim === undefined) {
+        throw new Error(`Plugin install provenance unknown: ${pluginId}`);
+      }
+      if (this.registryPath) {
+        // Static manifests have no registry row, so their active toggle is
+        // session-local. Registry installs persist through their raw install id.
+        if (installClaim !== null) {
+          await updatePluginRegistry(this.registryPath, (registry) => {
+            const entry = registry.plugins.find(({ id }) => id === installClaim);
+            if (!entry) {
+              throw new Error(`Plugin not found in registry: ${installClaim}`);
+            }
+            entry.enabled = enabled;
+          });
         }
-        entry.enabled = enabled;
-      });
-    }
-    if (enabled) {
-      this.inactivePluginIds.delete(pluginId);
-      try {
-        this.onActiveStateChange?.(pluginId, true);
-      } catch (err) {
-        log.error(`onActiveStateChange failed during setPluginEnabled(${pluginId}, true): %s`, (err as Error).message);
       }
-    } else {
-      this.inactivePluginIds.add(pluginId);
-      try {
-        this.onActiveStateChange?.(pluginId, false);
-      } catch (err) {
-        log.error(`onActiveStateChange failed during setPluginEnabled(${pluginId}, false): %s`, (err as Error).message);
+      if (enabled) {
+        this.inactivePluginIds.delete(canonicalPluginId);
+        try {
+          this.onActiveStateChange?.(canonicalPluginId, true);
+        } catch (err) {
+          log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, true): %s`, (err as Error).message);
+        }
+      } else {
+        this.inactivePluginIds.add(canonicalPluginId);
+        try {
+          this.onActiveStateChange?.(canonicalPluginId, false);
+        } catch (err) {
+          log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, false): %s`, (err as Error).message);
+        }
       }
-    }
+      },
+      (pluginIds) => {
+        for (const discoveredPluginId of pluginIds) {
+          this.cancelPendingRestart(discoveredPluginId);
+        }
+      },
+    );
   }
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
@@ -760,6 +811,23 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   /** Canonical lifecycle identity for a marketplace/install alias. */
   resolvePluginId(pluginId: string): string {
     return this.resolveKnownPluginId(pluginId);
+  }
+
+  /** Raw registry identity for a canonical/alias plugin id; null for static roots. */
+  resolvePluginInstallId(pluginId: string): string | null {
+    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+    if (installClaim === undefined) {
+      throw new Error(`Plugin install provenance unknown: ${pluginId}`);
+    }
+    return installClaim;
+  }
+
+  /** Registry/static provenance when known; undefined for a fresh identity. */
+  resolvePluginInstallIdIfKnown(
+    pluginId: string,
+  ): string | null | undefined {
+    return this.getPluginInstallClaim(this.resolveKnownPluginId(pluginId));
   }
 
   /** Final uninstall cleanup after stop-hook mutations have drained. */

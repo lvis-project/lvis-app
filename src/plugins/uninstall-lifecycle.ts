@@ -7,7 +7,7 @@ import type { PluginPaths } from "./plugin-paths.js";
 import type { PluginRuntime } from "./runtime.js";
 import {
   drainPluginInstallLockOperations,
-  withPluginInstallLock,
+  withResolvedPluginInstallLocks,
 } from "./install-lifecycle.js";
 
 type WarnLogger = { warn: (message: string, ...args: unknown[]) => void };
@@ -16,7 +16,17 @@ export interface PluginUninstallLifecycleDeps {
   pluginMarketplace: Pick<PluginMarketplaceService, "uninstall">;
   pluginRuntime: Pick<
     PluginRuntime,
-    "addPlugin" | "removePlugin" | "getPluginManifest" | "resolvePluginId" | "clearConfigOverride"
+    | "addPlugin"
+    | "waitForPluginReady"
+    | "removePlugin"
+    | "getPluginManifest"
+    | "resolvePluginId"
+    | "resolvePluginInstallId"
+    | "resolvePluginInstallIdIfKnown"
+    | "clearConfigOverride"
+    | "getConfigOverride"
+    | "setConfigOverride"
+    | "cancelPendingRestart"
   >;
   settingsService?: Partial<Pick<SettingsService, "deletePluginConfig" | "deletePluginSecrets">>;
   pluginPaths?: Pick<PluginPaths, "cacheRoot">;
@@ -30,7 +40,10 @@ export interface PluginUninstallLifecycleDeps {
 
 export interface PluginFailedInstallCleanupLifecycleDeps
   extends Omit<PluginUninstallLifecycleDeps, "pluginMarketplace"> {
-  pluginMarketplace: Pick<PluginMarketplaceService, "clearInstallFailureDiagnostic">;
+  pluginMarketplace: Pick<
+    PluginMarketplaceService,
+    "clearInstallFailureDiagnostic" | "getInstalledVersion"
+  >;
 }
 
 type PluginStateCleanupDeps = Omit<PluginUninstallLifecycleDeps, "pluginMarketplace">;
@@ -112,24 +125,69 @@ export async function uninstallPluginWithLifecycle(
   pluginId: string,
   deps: PluginUninstallLifecycleDeps,
 ): Promise<{ pluginId: string; uninstalled: true }> {
-  const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
-  return withPluginInstallLock(canonicalPluginId, async () => {
+  const initialCanonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+  if (deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId) === null) {
+    throw new Error(
+      `Statically configured plugin cannot be uninstalled: ${initialCanonicalPluginId}`,
+    );
+  }
+  deps.pluginRuntime.cancelPendingRestart(initialCanonicalPluginId);
+  return withResolvedPluginInstallLocks(
+    () => {
+      const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+      const installPluginId =
+        deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId);
+      return [
+        pluginId,
+        canonicalPluginId,
+        ...(typeof installPluginId === "string" ? [installPluginId] : []),
+      ];
+    },
+    async () => {
+    const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+    const installClaim =
+      deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId);
+    if (installClaim === null) {
+      throw new Error(
+        `Statically configured plugin cannot be uninstalled: ${canonicalPluginId}`,
+      );
+    }
+    const installPluginId = installClaim ?? pluginId;
     const secretKeys = listSecretKeys(
       deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
     );
-    await deps.pluginRuntime.removePlugin(canonicalPluginId);
+    await deps.pluginRuntime.removePlugin(canonicalPluginId, {
+      preserveConfigOverride: true,
+    });
     await drainPluginInstallLockOperations(canonicalPluginId);
+    // stop() may persist a final config value. Snapshot only after it has
+    // settled, while removePlugin has intentionally retained the override.
+    const runtimeConfigOverride =
+      deps.pluginRuntime.getConfigOverride(canonicalPluginId);
 
     let result: { pluginId: string; uninstalled: true } | null = null;
     let marketplaceRemoved = false;
     try {
-      result = await deps.pluginMarketplace.uninstall(pluginId);
+      result = await deps.pluginMarketplace.uninstall(installPluginId);
       marketplaceRemoved = true;
     } catch (err) {
       const message = (err as Error).message ?? "uninstall failed";
       if (!isMissingPluginError(message)) {
         try {
-          await deps.pluginRuntime.addPlugin(canonicalPluginId);
+          if (runtimeConfigOverride) {
+            deps.pluginRuntime.setConfigOverride(
+              canonicalPluginId,
+              runtimeConfigOverride,
+            );
+          }
+          // Registry snapshots are keyed by the marketplace/requested id even
+          // when the manifest declares a different canonical runtime id.
+          // removePlugin clears the runtime's alias map, so restoration must
+          // use the original registry identity.
+          const startState = await deps.pluginRuntime.addPlugin(installPluginId);
+          if (startState === "preparing") {
+            await deps.pluginRuntime.waitForPluginReady(installPluginId);
+          }
         } catch (restoreError) {
           throw new AggregateError(
             [err, restoreError],
@@ -149,15 +207,43 @@ export async function uninstallPluginWithLifecycle(
     deps.refreshPluginNotifications?.();
 
     return result ?? { pluginId, uninstalled: true as const };
-  });
+    },
+    (pluginIds) => {
+      for (const discoveredPluginId of pluginIds) {
+        deps.pluginRuntime.cancelPendingRestart(discoveredPluginId);
+      }
+    },
+  );
 }
 
 export async function cleanupFailedPluginInstallWithLifecycle(
   pluginId: string,
   deps: PluginFailedInstallCleanupLifecycleDeps,
 ): Promise<{ pluginId: string; uninstalled: true }> {
-  const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
-  return withPluginInstallLock(canonicalPluginId, async () => {
+  const initialCanonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+  deps.pluginRuntime.cancelPendingRestart(initialCanonicalPluginId);
+  return withResolvedPluginInstallLocks(
+    () => {
+      const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+      const installPluginId =
+        deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId);
+      return [
+        pluginId,
+        canonicalPluginId,
+        ...(typeof installPluginId === "string" ? [installPluginId] : []),
+      ];
+    },
+    async () => {
+    const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+    const installPluginId =
+      deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId) ?? pluginId;
+    const installedVersion =
+      await deps.pluginMarketplace.getInstalledVersion(installPluginId);
+    if (installedVersion !== null) {
+      throw new Error(
+        `Failed-install cleanup refused because plugin is installed: ${installPluginId}`,
+      );
+    }
     const secretKeys = listSecretKeys(
       deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
     );
@@ -172,5 +258,11 @@ export async function cleanupFailedPluginInstallWithLifecycle(
     deps.emitHostEvent?.("plugin.uninstalled", { pluginId: canonicalPluginId });
     deps.refreshPluginNotifications?.();
     return { pluginId, uninstalled: true as const };
-  });
+    },
+    (pluginIds) => {
+      for (const discoveredPluginId of pluginIds) {
+        deps.pluginRuntime.cancelPendingRestart(discoveredPluginId);
+      }
+    },
+  );
 }

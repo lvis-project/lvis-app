@@ -92,6 +92,9 @@ jobs:
       - name: Run deterministic Knip gate
         working-directory: lvis-app
         run: bun run check:knip && bun run test:knip-gate
+      - name: Typecheck
+        working-directory: lvis-app
+        run: bun run typecheck
       # Postinstall leaves native modules on Electron's ABI. The shared Vitest
       # runner uses ELECTRON_RUN_AS_NODE, so tests and the desktop runtime consume
       # that same binary without an in-place Node-ABI rebuild.

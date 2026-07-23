@@ -7,7 +7,10 @@
  */
 
 // resolvePluginEntryPath is used by unit tests and internal entry-path guards.
-export { resolvePluginEntryPath } from "./runtime/sandbox.js";
+export {
+  createNoopHostApiForTests,
+  resolvePluginEntryPath,
+} from "./runtime/sandbox.js";
 
 // Main class + interfaces
 export {

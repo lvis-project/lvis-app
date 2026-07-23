@@ -103,7 +103,7 @@ export function ensurePluginDataDir(
 }
 
 /**
- * Noop HostApi — used when no createHostApi factory is provided.
+ * Noop HostApi — test harnesses must inject this explicitly.
  * `storage` is real so plugins can read/write their own data even in
  * test/noop contexts.
  */
@@ -148,6 +148,15 @@ export function createNoopHostApi(
       respond: async () => {},
     },
   };
+}
+
+/** Explicit factory adapter for isolated runtime test harnesses. */
+export function createNoopHostApiForTests(
+  pluginId: string,
+  _manifest: PluginManifest,
+  pluginDataDir: string,
+): PluginHostApi {
+  return createNoopHostApi(pluginId, pluginDataDir);
 }
 
 /**
