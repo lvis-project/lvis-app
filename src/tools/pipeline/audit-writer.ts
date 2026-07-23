@@ -136,13 +136,24 @@ export class AuditWriter {
     auditDirectory?: string,
     audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
+    const governedTool = this.toolRegistry.findByName(toolName)?.operationGovernance;
+    const governedOperation = governedTool && typeof input.operation === "string"
+      ? input.operation
+      : undefined;
+    // Operation-governed tools may carry attendance, identity, or reservation
+    // payloads. Their audit contract is metadata-only: operation + outcome.
+    // The bearer/account hash are held in ToolPermissionContext and are never
+    // serialized here.
+    const auditSafeInput = governedTool
+      ? { operation: governedOperation ?? "<invalid>" }
+      : input;
     const tool = this.toolRegistry.findByName(toolName);
     const entry = permissionAuditAskEntryFromToolCall({
       toolName,
       tool,
       source,
       category,
-      input,
+      input: auditSafeInput,
       permission,
       trustOrigin: auditTrustOrigin(permissionContext),
       cwd,
@@ -188,6 +199,16 @@ export class AuditWriter {
     hookChain?: HookResult[],
     audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
+    const governedTool = this.toolRegistry.findByName(toolName)?.operationGovernance;
+    const governedOperation = governedTool && typeof input.operation === "string"
+      ? input.operation
+      : undefined;
+    const auditSafeInput = governedTool
+      ? { operation: governedOperation ?? "<invalid>" }
+      : input;
+    const auditSafeOutput = governedTool
+      ? (isError ? "governed operation failed" : "governed operation completed")
+      : output;
     // ── #811 m2: PermissionDenied (NON-BLOCKING) ──
     // `auditToolCall` is the single chokepoint every tool-deny path funnels
     // through, so firing here observes the deny EXACTLY ONCE where it is
@@ -213,14 +234,14 @@ export class AuditWriter {
       );
     }
     try {
-      const inputText = JSON.stringify(input);
+      const inputText = JSON.stringify(auditSafeInput);
       const auditInput = maskSensitiveData(inputText).masked;
       this.auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: sessionId ?? "unknown",
         type: "tool_call",
         input: auditInput.slice(0, 500),
-        output: output.slice(0, 1024),
+        output: auditSafeOutput.slice(0, 1024),
         toolCalls: [{
           name: toolName,
           isError,
@@ -251,7 +272,7 @@ export class AuditWriter {
       tool,
       source,
       category,
-      input,
+      input: auditSafeInput,
       permission,
       rateLimitRemaining,
       trustOrigin: auditTrustOrigin(permissionContext),

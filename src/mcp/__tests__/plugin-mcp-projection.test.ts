@@ -1,5 +1,5 @@
 import { mkdtempSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,7 +59,7 @@ function manager(): McpManager {
       unregisterRuntimeApproval,
       applyToolNamespace: (_serverId: string, toolName: string) => toolName,
     } as never,
-    { unregisterByMcp } as never,
+    { unregisterByMcp, listAll: vi.fn(() => []) } as never,
     configPath,
   );
 }
@@ -68,6 +68,8 @@ beforeEach(async () => {
   vi.clearAllMocks();
   connect.mockResolvedValue(undefined);
   await writeFile(configPath, JSON.stringify({ servers: [] }), "utf8");
+  await mkdir(join(testDir, "mcp"), { recursive: true });
+  await writeFile(join(testDir, "mcp", "server.mjs"), "process.exit(0)", "utf8");
 });
 
 afterAll(async () => {
@@ -145,6 +147,28 @@ describe("plugin-owned MCP projections", () => {
       }],
     };
     expect(() => preparePluginMcpGeneration(candidate)).toThrow(/unsupported fields: id/);
+  });
+
+  it("anchors bundled stdio scripts and includes their bytes in the trust fingerprint", () => {
+    const base = generation();
+    const contribution = base.contributions[0];
+    const stdio: ActivePluginGeneration = {
+      ...base,
+      contributions: [{
+        ...contribution,
+        files: [{
+          ...contribution.files[0],
+          content: JSON.stringify({ transport: "stdio", command: "node", args: ["./server.mjs"] }),
+        }],
+      }],
+    };
+    const [projection] = preparePluginMcpGeneration(stdio, testDir);
+    expect(projection.config).toMatchObject({
+      command: "node",
+      args: [expect.stringMatching(/\/mcp\/server\.mjs$/)],
+    });
+    expect(projection.owner.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(projection.owner.fingerprint).not.toBe(contribution.fingerprint);
   });
 
   it("installs and removes the ephemeral governance rule without changing managed policy", async () => {

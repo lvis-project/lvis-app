@@ -40,9 +40,24 @@ describe("PluginGenerationCoordinator", () => {
     expect(newLease.generation.generationId).toBe("g2");
     expect(retire).not.toHaveBeenCalled();
     oldLease.release();
-    await transition;
+    const published = await transition;
+    await published.retired;
     expect(retire).toHaveBeenCalledWith(expect.objectContaining({ generationId: "g1" }));
     newLease.release();
+  });
+
+  it("publishes without waiting for predecessor retirement and rejects stale exact leases", async () => {
+    const coordinator = new PluginGenerationCoordinator<{ label: string }>();
+    await coordinator.commit(generation("g1"), async () => undefined);
+    const oldLease = await coordinator.acquireExact("bundle-host-test", "g1");
+    const retire = vi.fn(async () => undefined);
+    const published = await coordinator.commit(generation("g2"), async () => undefined, retire);
+    expect(coordinator.getActive("bundle-host-test")?.generationId).toBe("g2");
+    expect(retire).not.toHaveBeenCalled();
+    await expect(coordinator.acquireExact("bundle-host-test", "g1")).rejects.toThrow(/not active/);
+    oldLease.release();
+    await published.retired;
+    expect(retire).toHaveBeenCalledTimes(1);
   });
 
   it("supports an inactive pointer transition without admitting new invocations", async () => {
@@ -61,5 +76,27 @@ describe("PluginGenerationCoordinator", () => {
     lease.release();
     await coordinator.commit(generation("g2"), async () => undefined);
     expect(coordinator.getActive("bundle-host-test")?.generationId).toBe("g2");
+  });
+
+  it("quiesces existing leases before an in-place projection transition", async () => {
+    const coordinator = new PluginGenerationCoordinator<{ label: string }>();
+    await coordinator.commit(generation("g1"), async () => undefined);
+    const oldLease = await coordinator.acquire("bundle-host-test");
+    const publish = vi.fn();
+    const transition = coordinator.quiesce(
+      "bundle-host-test",
+      "g1",
+      async () => undefined,
+      publish,
+    );
+    const waitingLease = coordinator.acquire("bundle-host-test");
+    await Promise.resolve();
+    expect(publish).not.toHaveBeenCalled();
+    oldLease.release();
+    await transition;
+    expect(publish).toHaveBeenCalledTimes(1);
+    const nextLease = await waitingLease;
+    expect(nextLease.generation.generationId).toBe("g1");
+    nextLease.release();
   });
 });

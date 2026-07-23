@@ -120,7 +120,11 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
     // The NAMESPACED registry name (the gated `Tool`), the app's args, and the
     // APP origin (never "ui" — a card is not the plugin's trusted panel) that is
     // never marked user-initiated.
-    expect(invoker).toHaveBeenCalledWith("mcp_gh_query", { q: "x" }, { origin: "mcp-app", userAction: false });
+    expect(invoker).toHaveBeenCalledWith("mcp_gh_query", { q: "x" }, {
+      origin: "mcp-app",
+      userAction: false,
+      expectedMcpServerId: "github",
+    });
   });
 
   it("runs an APP-ONLY tool through the same GATED delegate — parity with the plugin arm", async () => {
@@ -133,7 +137,14 @@ describe("external tool-call source — the SPEC MUST (visibility) and the gate"
     expect(invoker).toHaveBeenCalledWith("mcp_gh_list_rows", { page: 2 }, {
       origin: "mcp-app",
       userAction: false,
+      expectedMcpServerId: "github",
     });
+  });
+
+  it("rechecks the exact server owner at invocation time", async () => {
+    const { source, invoker } = externalSource([externalTool("replacement", "query", ["app"])]);
+    await expect(source.callTool("github", "query", {})).rejects.toThrow(/owner changed/);
+    expect(invoker).not.toHaveBeenCalled();
   });
 
   it("denies the call when the executor is not wired yet", async () => {

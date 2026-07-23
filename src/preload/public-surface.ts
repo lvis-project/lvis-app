@@ -166,6 +166,14 @@ export function buildPublicSurface() {
   },
   listMarketplacePlugins: async () => ipcRenderer.invoke(CHANNELS.plugins.marketplaceList),
   listPluginCards: async () => ipcRenderer.invoke(CHANNELS.plugins.cards),
+  listPluginContributionTrust: async (pluginId?: string) =>
+    ipcRenderer.invoke(CHANNELS.plugins.contributionTrustList, pluginId),
+  setPluginContributionTrust: async (input: {
+    pluginId: string;
+    localId: string;
+    kind: "hook" | "mcpServer";
+    approved: boolean;
+  }) => ipcRenderer.invoke(CHANNELS.plugins.contributionTrustSet, input),
   // ─── Plugin Performance (Observability) ──────────
   plugins: {
     getPerfStats: async () => ipcRenderer.invoke(CHANNELS.plugins.perfStats),

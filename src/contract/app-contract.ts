@@ -125,6 +125,8 @@ export const CHANNELS = {
     configSecretListKeys: "lvis:plugins:config:secret:list-keys",
     perfStats: "lvis:plugins:perf-stats",
     call: "lvis:plugins:call",
+    contributionTrustList: "lvis:plugins:contribution-trust:list",
+    contributionTrustSet: "lvis:plugins:contribution-trust:set",
     // Lifecycle event channels (main → renderer). Not registered via ipcMain.
     installProgress: "lvis:plugins:install-progress",
     installResult: "lvis:plugins:install-result",
@@ -256,6 +258,7 @@ export const CHANNELS = {
     getEntryUrl: "lvis:plugin:get-entry-url",
     getTheme: "lvis:plugin:get-theme",
     callTool: "lvis:plugin:call-tool",
+    requestOperationGrant: "lvis:plugin:request-operation-grant",
     configGet: "lvis:plugin:config:get",
     configSet: "lvis:plugin:config:set",
     storageGet: "lvis:plugin:storage:get",

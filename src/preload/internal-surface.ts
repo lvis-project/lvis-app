@@ -544,6 +544,14 @@ export function buildInternalApiSurface() {
   // ({ ok, pluginId, enabled } | { ok:false, error, message }).
   setPluginEnabled: async (pluginId: string, enabled: boolean) =>
     ipcRenderer.invoke(CHANNELS.plugins.setEnabled, pluginId, enabled),
+  listPluginContributionTrust: async (pluginId?: string) =>
+    ipcRenderer.invoke(CHANNELS.plugins.contributionTrustList, pluginId),
+  setPluginContributionTrust: async (input: {
+    pluginId: string;
+    localId: string;
+    kind: "hook" | "mcpServer";
+    approved: boolean;
+  }) => ipcRenderer.invoke(CHANNELS.plugins.contributionTrustSet, input),
   callPluginMethod: async (
     method: string,
     payload?: unknown,

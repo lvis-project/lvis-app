@@ -22,7 +22,7 @@ import {
   createAgentStatusTool,
 } from "../tools/agent-spawn.js";
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
-import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
+import { createSkillLoadTool, type SkillLoadEvent, type SkillLoadToolDeps } from "../tools/skill-load.js";
 import { createSkillListTool } from "../tools/skill-list.js";
 import { createAgentListTool } from "../tools/agent-list.js";
 import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.js";
@@ -172,6 +172,7 @@ export interface WorkflowToolDeps {
   networkFetch?: typeof fetch;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
+  acquirePluginSkillGeneration?: NonNullable<SkillLoadToolDeps["acquirePluginGeneration"]>;
 }
 
 export function registerBuiltinTools(
@@ -241,6 +242,7 @@ export function registerBuiltinTools(
         approvals: workflowDeps.skillApprovalsStore,
         getApprovalGate: workflowDeps.getApprovalGate,
         emit: workflowDeps.emitSkillLoad,
+        acquirePluginGeneration: workflowDeps.acquirePluginSkillGeneration,
       }),
     );
     builtins.push(createSkillListTool(workflowDeps.skillStore));

@@ -22,6 +22,11 @@ export interface PluginGenerationLease<TState = unknown> {
   release(): void;
 }
 
+export interface PublishedPluginGenerationTransition {
+  /** Completes after predecessor leases drain and exact-generation cleanup finishes. */
+  readonly retired: Promise<void>;
+}
+
 interface GenerationState<TState> {
   active?: ActivePluginGeneration<TState>;
   pendingTransitions: number;
@@ -54,6 +59,7 @@ function freezeGeneration<TState>(candidate: ActivePluginGeneration<TState>): Ac
  */
 export class PluginGenerationCoordinator<TState = unknown> {
   private readonly plugins = new Map<string, GenerationState<TState>>();
+  private readonly retirements = new Set<Promise<void>>();
 
   private stateFor(pluginId: string): GenerationState<TState> {
     let state = this.plugins.get(pluginId);
@@ -72,6 +78,14 @@ export class PluginGenerationCoordinator<TState = unknown> {
 
   getActive(pluginId: string): ActivePluginGeneration<TState> | undefined {
     return this.stateFor(pluginId).active;
+  }
+
+  listActive(): readonly ActivePluginGeneration<TState>[] {
+    return Object.freeze(
+      [...this.plugins.values()]
+        .map((state) => state.active)
+        .filter((generation): generation is ActivePluginGeneration<TState> => Boolean(generation)),
+    );
   }
 
   async acquire(pluginId: string): Promise<PluginGenerationLease<TState>> {
@@ -100,12 +114,20 @@ export class PluginGenerationCoordinator<TState = unknown> {
     });
   }
 
+  async acquireExact(pluginId: string, generationId: string): Promise<PluginGenerationLease<TState>> {
+    const lease = await this.acquire(pluginId);
+    if (lease.generation.generationId === generationId) return lease;
+    lease.release();
+    throw new Error(`plugin '${pluginId}' generation '${generationId}' is not active`);
+  }
+
   async commit(
     candidate: ActivePluginGeneration<TState> | undefined,
     durableCommit: () => Promise<void>,
     retire?: (predecessor: ActivePluginGeneration<TState>) => Promise<void>,
     pluginId = candidate?.pluginId,
-  ): Promise<void> {
+    publish: () => void = () => undefined,
+  ): Promise<PublishedPluginGenerationTransition> {
     if (!pluginId) throw new Error("pluginId is required for an inactive generation transition");
     if (candidate && candidate.pluginId !== pluginId) throw new Error("candidate plugin identity mismatch");
     const prepared = candidate ? freezeGeneration(candidate) : undefined;
@@ -125,6 +147,10 @@ export class PluginGenerationCoordinator<TState = unknown> {
       try {
         predecessor = state.active;
         await durableCommit();
+        // Synchronous in-process projections publish in the same turn as the
+        // pointer assignment. The transition admission barrier remains closed,
+        // and no await/interleaving point exists between these two operations.
+        publish();
         // Linearization point: no fallible work may be inserted between the
         // durable commit above and this preallocated pointer assignment.
         state.active = prepared;
@@ -135,13 +161,61 @@ export class PluginGenerationCoordinator<TState = unknown> {
         }
       }
 
-      if (predecessor && predecessor.generationId !== prepared?.generationId) {
-        await this.waitForDrain(state, predecessor.generationId);
-        await retire?.(predecessor);
+    } finally {
+      releaseTail();
+    }
+    const retired = predecessor && predecessor.generationId !== prepared?.generationId
+      ? (async () => {
+          await this.waitForDrain(state, predecessor.generationId);
+          await retire?.(predecessor);
+        })()
+      : Promise.resolve();
+    this.retirements.add(retired);
+    void retired.finally(() => this.retirements.delete(retired)).catch(() => undefined);
+    return Object.freeze({ retired });
+  }
+
+  /**
+   * Run an in-place projection transition for the current immutable runtime
+   * generation. New admissions are blocked and every already-admitted lease is
+   * drained before `publish` runs, so resources may be hidden or re-exposed
+   * without replacing (and therefore stopping) the runtime instance.
+   */
+  async quiesce(
+    pluginId: string,
+    expectedGenerationId: string,
+    prepare: () => Promise<void>,
+    publish: () => void,
+  ): Promise<void> {
+    const state = this.stateFor(pluginId);
+    const priorTail = state.transitionTail;
+    let releaseTail!: () => void;
+    state.transitionTail = new Promise<void>((resolve) => { releaseTail = resolve; });
+    state.pendingTransitions += 1;
+    await priorTail;
+
+    try {
+      try {
+        const active = state.active;
+        if (!active || active.generationId !== expectedGenerationId) {
+          throw new Error(`plugin '${pluginId}' generation changed before projection transition`);
+        }
+        await prepare();
+        await this.waitForDrain(state, expectedGenerationId);
+        publish();
+      } finally {
+        state.pendingTransitions -= 1;
+        if (state.pendingTransitions === 0) {
+          for (const resolve of state.transitionWaiters.splice(0)) resolve();
+        }
       }
     } finally {
       releaseTail();
     }
+  }
+
+  async waitForRetirements(): Promise<void> {
+    await Promise.all([...this.retirements]);
   }
 
   private async waitForDrain(state: GenerationState<TState>, generationId: string): Promise<void> {

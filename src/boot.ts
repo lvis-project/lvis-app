@@ -510,7 +510,12 @@ export async function bootstrap(
     skillOverlay: ctx.skillOverlay,
     hookManager: ctx.scriptHookManager,
     mcpManager: ctx.mcpManager,
+    loopbackManager: ctx.pluginLoopbackManager,
   });
+  ctx.pluginBundleLifecycle = pluginBundleLifecycle;
+  pluginRuntime.setGenerationAccess(pluginBundleLifecycle);
+  ctx.mcpManager.setPluginGenerationAccess(pluginBundleLifecycle);
+  ctx.scriptHookManager.setPluginGenerationAccess(pluginBundleLifecycle);
   setBundleLifecycleHandler?.(pluginBundleLifecycle);
   for (const pluginId of pluginRuntime.listPluginIds()) {
     if (!pluginRuntime.isPluginEnabled(pluginId)) continue;
@@ -518,6 +523,7 @@ export async function bootstrap(
       log.error(`plugin bundle boot projection failed (${pluginId}): %s`, (error as Error).message);
     });
   }
+  await pluginBundleLifecycle.recoverRetirements();
 
   // §691: OS-level tool sandbox — decided exactly once here at boot.
   await initSandboxGate(ctx);

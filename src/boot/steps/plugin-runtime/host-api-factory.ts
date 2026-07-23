@@ -21,6 +21,7 @@ import { normalizeAllowedHosts } from "../../../main/host-allow-list.js";
 import { evaluateHostFetch } from "../../../main/host-fetch-guard.js";
 import type { AuditLogger } from "../../../audit/audit-logger.js";
 import type { PluginRuntime } from "../../../plugins/runtime.js";
+import type { HostApiGenerationScope } from "../../../plugins/plugin-host-effect-scope.js";
 import { instrumentEffectsByPath } from "../../../permissions/hostapi-effect-recorder.js";
 import { enforceMutatingEffects, gateMutatingEffect } from "../../../permissions/effect-enforcement.js";
 import { recordEffect } from "../../../permissions/effect-ledger.js";
@@ -126,7 +127,12 @@ export interface CreateHostApiFactoryDeps {
  */
 export function createHostApiFactory(
   deps: CreateHostApiFactoryDeps,
-): (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi {
+): (
+  pluginId: string,
+  manifest: PluginManifest,
+  pluginDataDir: string,
+  hostEffects?: HostApiGenerationScope,
+) => PluginHostApi {
   const {
     getPluginRuntime,
     lateBinding,
@@ -149,7 +155,12 @@ export function createHostApiFactory(
     routinesStore,
   } = deps;
 
-  return (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
+  return (
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    hostEffects?: HostApiGenerationScope,
+  ): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
@@ -276,11 +287,16 @@ export function createHostApiFactory(
             pluginId,
             key,
             (_changedKey, value) => {
-              callback(value as T | undefined);
+              if (hostEffects) {
+                void hostEffects.wrapCallback(callback)(value as T | undefined);
+              } else {
+                callback(value as T | undefined);
+              }
             },
           );
           // Auto-cleanup on plugin disable to mirror onEvent semantics.
-          pluginRuntime.registerDisposer(pluginId, unsubscribe);
+          if (hostEffects) hostEffects.registerDisposer(unsubscribe);
+          else pluginRuntime.registerDisposer(pluginId, unsubscribe);
           return unsubscribe;
         },
       },
@@ -292,15 +308,23 @@ export function createHostApiFactory(
           log.debug(`plugin:${pluginId} skipping keyword registration — plugin inactive`);
           return;
         }
-        keywordEngine.registerKeywords(
-          keywords.map((k) => ({ ...k, pluginId })),
-        );
+        if (hostEffects) {
+          const generationToken = hostEffects.token;
+          const prepared = keywords.map((keyword) => ({ ...keyword }));
+          hostEffects.stagePublish(() => {
+            keywordEngine.publishPluginGeneration(pluginId, generationToken, prepared);
+          });
+          hostEffects.onSupersede(() => {
+            keywordEngine.removePluginGeneration(pluginId, generationToken);
+          });
+        } else {
+          keywordEngine.registerKeywords(keywords.map((k) => ({ ...k, pluginId })));
+        }
         log.info(`plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
         plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
-        const manifest = pluginRuntime?.getPluginManifest(pluginId);
-        const declaredEmittedEvents = manifest ? getDeclaredEmittedEvents(manifest) : [];
+        const declaredEmittedEvents = getDeclaredEmittedEvents(manifest);
         if (!canEmitEvent(type, declaredEmittedEvents)) {
           const requiredCap = requiredCapabilityForEmit(type);
           try {
@@ -320,8 +344,10 @@ export function createHostApiFactory(
       },
       onEvent: (type, handler) => {
         pluginRuntime.assertPluginEventAccess(pluginId, type);
-        const unsubscribe = onEvent(type, handler);
-        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        const guardedHandler = hostEffects ? hostEffects.wrapCallback(handler) : handler;
+        const unsubscribe = onEvent(type, (data) => { void guardedHandler(data); });
+        if (hostEffects) hostEffects.registerDisposer(unsubscribe);
+        else pluginRuntime.registerDisposer(pluginId, unsubscribe);
         plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
         return unsubscribe;
       },
@@ -341,10 +367,13 @@ export function createHostApiFactory(
           if (typeof subjectId !== "string" || subjectId === pluginId) return;
           handler({ type: "uninstalled", pluginId: subjectId });
         };
-        const unsubInstalled = onEvent("plugin.installed", dispatchInstalled);
-        const unsubUninstalled = onEvent("plugin.uninstalled", dispatchUninstalled);
+        const guardedInstalled = hostEffects ? hostEffects.wrapCallback(dispatchInstalled) : dispatchInstalled;
+        const guardedUninstalled = hostEffects ? hostEffects.wrapCallback(dispatchUninstalled) : dispatchUninstalled;
+        const unsubInstalled = onEvent("plugin.installed", (data) => { void guardedInstalled(data); });
+        const unsubUninstalled = onEvent("plugin.uninstalled", (data) => { void guardedUninstalled(data); });
         const unsubscribe = () => { unsubInstalled(); unsubUninstalled(); };
-        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        if (hostEffects) hostEffects.registerDisposer(unsubscribe);
+        else pluginRuntime.registerDisposer(pluginId, unsubscribe);
         return unsubscribe;
       },
       // #893 Stage 2 — Host implementation of the SDK's `resolveApiKey`.
@@ -723,7 +752,17 @@ export function createHostApiFactory(
         }
       },
       onShutdown: (handler) => {
-        pluginShutdownHandlers.push({ pluginId, handler });
+        const entry = {
+          pluginId,
+          handler: hostEffects ? hostEffects.wrapCallback(handler) : handler,
+        };
+        pluginShutdownHandlers.push(entry);
+        const unsubscribe = () => {
+          const index = pluginShutdownHandlers.indexOf(entry);
+          if (index >= 0) pluginShutdownHandlers.splice(index, 1);
+        };
+        if (hostEffects) hostEffects.registerDisposer(unsubscribe);
+        else pluginRuntime.registerDisposer(pluginId, unsubscribe);
       },
       // ─── Host-mediated worker spawn ───────────────────────────────────
       // HOST PRIMITIVE — Tool.workerId producer is intentionally NOT wired here.
