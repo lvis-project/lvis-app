@@ -22,6 +22,7 @@ import type { SignatureEnvelope, VerifyResult } from "./types.js";
 import { getCachedTarball, isOfflineCacheEnabled, setCachedTarball } from "./offline-cache.js";
 import {
   assertCompressedArtifactSize,
+  MarketplaceArtifactLimitError,
   resolveMarketplaceArtifactLimits,
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
@@ -45,6 +46,7 @@ export interface MarketplaceHttp {
     slug: string,
     version: string,
     onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
+    options?: MarketplaceArtifactDownloadOptions,
   ): Promise<{
     body: Buffer;
     sha256Header: string | null;
@@ -53,6 +55,11 @@ export interface MarketplaceHttp {
   }>;
   /** GET `/api/v1/plugins/{slug}/download.sig?version=X`. */
   fetchSignatureEnvelope(slug: string, version: string): Promise<SignatureEnvelope>;
+}
+
+export interface MarketplaceArtifactDownloadOptions {
+  /** Cancels the request, body stream, and retry waits. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -107,6 +114,8 @@ export interface MarketplaceInstallerOptions {
 
   /** Shared resource ceilings for downloaded and cached artifacts. */
   artifactLimits?: Partial<MarketplaceArtifactLimits>;
+  /** Optional cancellation propagated through request, body read, and retry waits. */
+  signal?: AbortSignal;
 
   onProgress?: (event: InstallerProgressEvent) => void;
 }
@@ -130,6 +139,7 @@ export class MarketplaceInstallerError extends Error {
 
 const DEFAULT_MAX_SKEW_SEC = 72 * 3600;
 const DEFAULT_MAX_RETRIES = 3;
+const MAX_RETRY_AFTER_SECONDS = 30;
 
 /**
  * Encodes an untrusted marketplace version into a flat filename component.
@@ -238,6 +248,7 @@ export async function installFromMarketplace(
       maxRetries,
       artifactLimits.maxCompressedBytes,
       onChunk,
+      opts.signal,
     );
     body = downloaded.body;
     sha256Header = downloaded.sha256Header;
@@ -378,16 +389,32 @@ async function downloadWithRetry(
   maxRetries: number,
   maxArtifactBytes: number,
   onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
+  signal?: AbortSignal,
 ): Promise<{ body: Buffer; sha256Header: string | null }> {
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (signal?.aborted) {
+      throw new MarketplaceArtifactLimitError(
+        "ARTIFACT_DOWNLOAD_ABORTED",
+        `marketplace artifact download aborted for ${slug}@${version}`,
+      );
+    }
     let res: Awaited<ReturnType<MarketplaceHttp["downloadArtifact"]>>;
     try {
-      res = await http.downloadArtifact(slug, version, onChunk);
+      res = signal
+        ? await http.downloadArtifact(slug, version, onChunk, { signal })
+        : await http.downloadArtifact(slug, version, onChunk);
     } catch (err) {
+      if (err instanceof MarketplaceArtifactLimitError) throw err;
+      if (signal?.aborted) {
+        throw new MarketplaceArtifactLimitError(
+          "ARTIFACT_DOWNLOAD_ABORTED",
+          `marketplace artifact download aborted for ${slug}@${version}`,
+        );
+      }
       lastErr = err as Error;
       // Network errors: retry with backoff like 429.
-      await sleep(backoffMs(attempt));
+      await sleep(backoffMs(attempt), signal, slug, version);
       continue;
     }
     assertCompressedArtifactSize(
@@ -396,14 +423,15 @@ async function downloadWithRetry(
       `downloaded marketplace artifact ${slug}@${version}`,
     );
     if (res.status === 429) {
-      const waitSec = res.retryAfterSeconds ?? Math.pow(2, attempt) * 0.5;
+      const requestedWaitSec = res.retryAfterSeconds ?? Math.pow(2, attempt) * 0.5;
+      const waitSec = Math.min(requestedWaitSec, MAX_RETRY_AFTER_SECONDS);
       // Track a diagnosable last error so exhausting retries on 429s does not
       // surface as "unknown error" in the RETRY_EXHAUSTED message.
       lastErr = new MarketplaceInstallerError(
         "RATE_LIMITED",
         `marketplace returned 429 for ${slug}@${version} (retry-after=${waitSec}s)`,
       );
-      await sleep(Math.max(0, waitSec * 1000));
+      await sleep(Math.max(0, waitSec * 1000), signal, slug, version);
       continue;
     }
     if (res.status >= 500) {
@@ -411,7 +439,7 @@ async function downloadWithRetry(
         "SERVER_ERROR",
         `marketplace returned ${res.status} for ${slug}@${version}`,
       );
-      await sleep(backoffMs(attempt));
+      await sleep(backoffMs(attempt), signal, slug, version);
       continue;
     }
     if (res.status >= 400) {
@@ -432,6 +460,25 @@ function backoffMs(attempt: number): number {
   return Math.pow(2, attempt) * 500;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+function sleep(ms: number, signal: AbortSignal | undefined, slug: string, version: string): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new MarketplaceArtifactLimitError(
+      "ARTIFACT_DOWNLOAD_ABORTED",
+      `marketplace artifact download aborted for ${slug}@${version}`,
+    ));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new MarketplaceArtifactLimitError(
+        "ARTIFACT_DOWNLOAD_ABORTED",
+        `marketplace artifact download aborted for ${slug}@${version}`,
+      ));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }

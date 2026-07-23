@@ -21,7 +21,10 @@ import {
   fetchPublicHttpResponse,
   NetworkGuardError,
 } from "../core/network-guard.js";
-import type { MarketplaceHttp } from "./marketplace-installer.js";
+import type {
+  MarketplaceArtifactDownloadOptions,
+  MarketplaceHttp,
+} from "./marketplace-installer.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
 import { isMarketplaceAnnouncementLevel } from "../shared/marketplace-announcements.js";
@@ -37,7 +40,9 @@ import type {
 import { parseMcpOAuthMetadata, parseMcpRuntimeSpec } from "./mcp-runtime-spec.js";
 import {
   assertCompressedArtifactSize,
+  MarketplaceArtifactLimitError,
   resolveMarketplaceArtifactLimits,
+  type MarketplaceArtifactLimitProvider,
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
 
@@ -66,6 +71,8 @@ export interface RealCloudMarketplaceConfig {
   allowPrivateNetwork?: boolean;
   /** Resource ceilings for untrusted marketplace artifacts. */
   artifactLimits?: Partial<MarketplaceArtifactLimits>;
+  /** Deadline for consuming one artifact body after response headers. Default 120s. */
+  artifactReadTimeoutMs?: number;
 }
 
 /** Loose shape for a catalog row returned by the server. */
@@ -141,15 +148,21 @@ interface ServerAnnouncementRow {
   endsAt?: unknown;
 }
 
-export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp {
+export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp, MarketplaceArtifactLimitProvider {
   private readonly artifactLimits: Readonly<MarketplaceArtifactLimits>;
+  private readonly artifactReadTimeoutMs: number;
 
   constructor(private config: RealCloudMarketplaceConfig) {
     this.artifactLimits = resolveMarketplaceArtifactLimits(config.artifactLimits);
+    this.artifactReadTimeoutMs = config.artifactReadTimeoutMs ?? 120_000;
+    if (!Number.isSafeInteger(this.artifactReadTimeoutMs) || this.artifactReadTimeoutMs <= 0) {
+      throw new RangeError("artifactReadTimeoutMs must be a positive safe integer");
+    }
   }
 
-
-
+  getArtifactLimits(): Readonly<MarketplaceArtifactLimits> {
+    return this.artifactLimits;
+  }
 
   updateAllowPrivateNetwork(value: boolean): void {
     this.config = { ...this.config, allowPrivateNetwork: value };
@@ -202,6 +215,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     slug: string,
     version: string,
     onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
+    options?: MarketplaceArtifactDownloadOptions,
   ): Promise<{
     body: Buffer;
     sha256Header: string | null;
@@ -212,9 +226,22 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       "GET",
       `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download`,
       { accept: "application/octet-stream" },
-      { allowNonOk: true },
+      { allowNonOk: true, signal: options?.signal },
     );
     const retryAfter = parseRetryAfterSeconds(res.headers?.get?.("retry-after") ?? null);
+
+    // Status handling does not consume response content. Cancel it immediately
+    // so an error page cannot spend the artifact byte/time budget or retain a
+    // socket until the installer decides whether to retry.
+    if (res.status >= 400) {
+      await res.body?.cancel().catch(() => undefined);
+      return {
+        body: Buffer.alloc(0),
+        sha256Header: res.headers?.get?.("x-plugin-sha256") ?? null,
+        status: res.status,
+        retryAfterSeconds: retryAfter ?? undefined,
+      };
+    }
 
     // Always use the readable stream. Response.arrayBuffer() allocates the
     // entire attacker-controlled body before code can enforce a ceiling.
@@ -226,13 +253,6 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     const declaredBytes = contentLength && /^\d+$/.test(contentLength)
       ? Number(contentLength)
       : null;
-    if (declaredBytes !== null) {
-      assertCompressedArtifactSize(
-        declaredBytes,
-        this.artifactLimits.maxCompressedBytes,
-        `marketplace artifact ${slug}@${version} content-length`,
-      );
-    }
     const validBytesTotal =
       declaredBytes !== null && Number.isSafeInteger(declaredBytes) && declaredBytes >= 0
         ? declaredBytes
@@ -245,9 +265,38 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     const THROTTLE_MS = 100;
 
     const reader = res.body.getReader();
+    let terminalError: MarketplaceArtifactLimitError | null = null;
+    const cancelWith = (error: MarketplaceArtifactLimitError): void => {
+      if (terminalError) return;
+      terminalError = error;
+      void reader.cancel(error).catch(() => undefined);
+    };
+    const timeout = setTimeout(() => {
+      cancelWith(new MarketplaceArtifactLimitError(
+        "ARTIFACT_DOWNLOAD_TIMEOUT",
+        `marketplace artifact ${slug}@${version} body exceeded ${this.artifactReadTimeoutMs}ms deadline`,
+      ));
+    }, this.artifactReadTimeoutMs);
+    const onAbort = () => {
+      cancelWith(new MarketplaceArtifactLimitError(
+        "ARTIFACT_DOWNLOAD_ABORTED",
+        `marketplace artifact download aborted for ${slug}@${version}`,
+      ));
+    };
+    if (options?.signal?.aborted) onAbort();
+    else options?.signal?.addEventListener("abort", onAbort, { once: true });
     try {
+      if (terminalError) throw terminalError;
+      if (declaredBytes !== null) {
+        assertCompressedArtifactSize(
+          declaredBytes,
+          this.artifactLimits.maxCompressedBytes,
+          `marketplace artifact ${slug}@${version} content-length`,
+        );
+      }
       for (;;) {
         const { done, value } = await reader.read();
+        if (terminalError) throw terminalError;
         if (done) break;
         if (value) {
           bytesDownloaded += value.byteLength;
@@ -268,6 +317,8 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       await reader.cancel(err).catch(() => undefined);
       throw err;
     } finally {
+      clearTimeout(timeout);
+      options?.signal?.removeEventListener("abort", onAbort);
       reader.releaseLock();
     }
     // Always emit final progress so the bar reaches 100%.
@@ -295,7 +346,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     method: string,
     path: string,
     extraHeaders: Record<string, string> = {},
-    options: { allowNonOk?: boolean } = {},
+    options: { allowNonOk?: boolean; signal?: AbortSignal } = {},
   ): Promise<Response> {
     const base = this.config.baseUrl.replace(/\/$/, "");
     const url = `${base}${path}`;
@@ -314,6 +365,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
         method,
         headers,
         timeoutMs,
+        signal: options.signal,
         allowPrivateNetworks: privateNetworkScope,
         allowLoopback: privateNetworkScope,
       });
