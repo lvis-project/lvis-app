@@ -151,6 +151,7 @@ async function collectLayout(page: Page): Promise<unknown> {
       };
     };
     const vw = { w: window.innerWidth, h: window.innerHeight };
+    const webviewCount = document.querySelectorAll("webview").length;
     const webview = document.querySelector("webview");
     const back = document.querySelector('[data-testid="plugin-page-back"]');
     // The plugin host page shell is the closest ancestor of the back button
@@ -189,6 +190,7 @@ async function collectLayout(page: Page): Promise<unknown> {
       chatViewRoot: box(chatRoot),
       contentText,
       diagnostics: {
+        webviewCount,
         webviewPresent: webview !== null,
         webviewZeroSize: webviewBox ? webviewBox.w === 0 || webviewBox.h === 0 : null,
         webviewWithinShell: within(webviewBox, shellBox),
@@ -243,11 +245,62 @@ async function inspectOne(
   // Approve the panel's mount-time read calls so the modals clear and the panel
   // loads its real empty state (layout metrics are read off the DOM either way).
   const approvalModalsCleared = await clearMountApprovalModals(page);
-  await page.waitForTimeout(600); // let the panel repaint after the last approval
+  await page.waitForTimeout(3_000); // let the panel settle (a worker-backed plugin
+  // can restart once after its runtime provisions, remounting the webview)
 
   const windowsAfter = app.windows().length;
   const urlsAfter = urls();
   const layout = await collectLayout(page);
+
+  // Measure INSIDE the webview guest: its layout-viewport width reveals whether
+  // the guest reflows to the <webview> element width or stays pinned to the
+  // window width (which would right-shift/clip plugin content when the host
+  // panel is narrower than the window).
+  let guest: unknown = null;
+  try {
+    // app.windows() can include STALE plugin-ui-shell guests (a worker-backed
+    // plugin restarts once after provisioning). Measure ALL of them so a stale
+    // instance doesn't masquerade as the visible one.
+    const guestPages = app.windows().filter((w) => {
+      try {
+        return w.url().includes("plugin-ui-shell.html");
+      } catch {
+        return false;
+      }
+    });
+    const measured = [];
+    let gi = 0;
+    for (const gp of guestPages) {
+      try {
+        await gp.screenshot({ path: path.join(OUT_DIR, `guest-${mode}-${plugin.id}-${gi}.png`) }).catch(() => {});
+        gi++;
+        measured.push(
+          await gp.evaluate(() => {
+            const rectOf = (sel: string) => {
+              const el = document.querySelector(sel);
+              if (!el) return null;
+              const r = el.getBoundingClientRect();
+              return { x: Math.round(r.x), w: Math.round(r.width) };
+            };
+            return {
+              innerWidth: window.innerWidth,
+              bodyScrollWidth: document.body.scrollWidth,
+              overflow: document.body.scrollWidth > window.innerWidth + 1,
+              // Outermost content wrapper of each plugin UI, in guest coords —
+              // its x/width shows whether the panel content is capped + centered
+              // (both plugins should be) or stretching to the full webview.
+              wrap: rectOf(".wrap") ?? rectOf(".mc-inner") ?? rectOf(".lvis-meeting-ui") ?? rectOf("body > *"),
+            };
+          }),
+        );
+      } catch {
+        measured.push({ error: true });
+      }
+    }
+    guest = { count: guestPages.length, guests: measured };
+  } catch {
+    guest = null;
+  }
 
   await page.screenshot({ path: path.join(OUT_DIR, `inspect-${mode}-${plugin.id}.png`) });
 
@@ -264,6 +317,7 @@ async function inspectOne(
       webviewAttached,
       approvalModalsCleared,
     },
+    guest,
     layout,
   };
 }
