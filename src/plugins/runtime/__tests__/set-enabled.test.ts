@@ -154,6 +154,36 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(changes).toEqual([{ id: "se-plugin", enabled: false }]);
   });
 
+  it("cancels a pending restart before toggle lock admission", async () => {
+    let prepareRestart = false;
+    let markPreparationEntered!: () => void;
+    const preparationEntered = new Promise<void>((resolve) => {
+      markPreparationEntered = resolve;
+    });
+    const neverSettles = new Promise<void>(() => {});
+    const runtime = makeTestPluginRuntime(
+      { rootDir: testDir, registryPath, pluginsRoot: installedDir },
+      {
+        preparePluginStart: ({ pluginId }) => {
+          if (!prepareRestart || pluginId !== "se-plugin") return undefined;
+          markPreparationEntered();
+          return neverSettles;
+        },
+      },
+    );
+    await runtime.startAll();
+    prepareRestart = true;
+
+    const restart = runtime.restartPlugin("se-plugin");
+    await preparationEntered;
+
+    await expect(runtime.setPluginEnabled("se-plugin", false))
+      .resolves.toBeUndefined();
+    await expect(restart).resolves.toBe("failed");
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    expect(runtime.isPluginRestartPending("se-plugin")).toBe(false);
+  });
+
   it("persists a canonical card toggle through its registry install alias", async () => {
     const installAlias = "se-install-alias";
     await writeFile(
