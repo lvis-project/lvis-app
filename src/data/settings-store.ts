@@ -1,5 +1,5 @@
 import { safeStorage } from "electron";
-import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { isIP } from "node:net";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
@@ -75,6 +75,7 @@ import {
 import { projectRootKey } from "../shared/project-identity.js";
 import { LOG_RETENTION_DAYS, clampLogRetentionDays } from "../shared/log-retention.js";
 import { createLogger } from "../lib/logger.js";
+import { SecretDocumentStore, type SecretPolicy } from "./secret-document-store.js";
 const log = createLogger("settings");
 
 export type { LLMVendor, LLMVendorSettings };
@@ -622,6 +623,8 @@ export interface MarketplaceSettings {
 
 export interface SettingsServiceOptions {
   userDataPath: string;
+  /** Host-owned policy derived from Electron app.isPackaged, never NODE_ENV. */
+  secretPolicy?: SecretPolicy;
   /**
    * BCP-47 locale tag from the host OS (e.g. `app.getPreferredSystemLanguages()[0]`).
    * Used only on a fresh install (no settings file) to seed the UI language from the
@@ -780,6 +783,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 export class SettingsService {
   private readonly settingsPath: string;
   private readonly secretsPath: string;
+  private readonly secretStore: SecretDocumentStore;
   private settings: AppSettings;
 
   constructor(options: SettingsServiceOptions) {
@@ -787,7 +791,11 @@ export class SettingsService {
     mkdirSync(dir, { recursive: true });
     this.settingsPath = settingsFilePath(options.userDataPath);
     this.secretsPath = resolve(dir, "lvis-secrets.json");
-    this.migrateSecretsMode();
+    this.secretStore = new SecretDocumentStore({
+      path: this.secretsPath,
+      policy: options.secretPolicy ?? "packaged",
+      encryption: safeStorage,
+    });
     const loaded = this.loadSettings() as AppSettings & { __needsV2WriteBack?: boolean };
     const needsWriteBack = loaded.__needsV2WriteBack === true;
     delete (loaded as { __needsV2WriteBack?: boolean }).__needsV2WriteBack;
@@ -801,23 +809,8 @@ export class SettingsService {
 
 
 
-  private migrateSecretsMode(): void {
-    if (process.platform === "win32") return;
-    let fd: number | null = null;
-    try {
-      fd = openSync(this.secretsPath, "r");
-      const st = fstatSync(fd);
-      if ((st.mode & 0o777) !== 0o600) {
-        fchmodSync(fd, 0o600);
-      }
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-      log.warn("secrets mode migration failed: %s", (err as Error).message);
-    } finally {
-      if (fd !== null) {
-        try { closeSync(fd); } catch { /* ignore */ }
-      }
-    }
+  async migrateSecrets(): Promise<boolean> {
+    return this.secretStore.migrate();
   }
 
   getAll(): AppSettings {
@@ -1176,24 +1169,15 @@ export class SettingsService {
     previousSettings: AppSettings,
     providerIds: readonly string[],
   ): Promise<void> {
-    const secrets = providerIds.map((providerId) => {
-      const key = marketplaceProviderPresetSecretKey(providerId);
-      return { key, value: this.getSecret(key) };
-    });
     try {
       await this.deleteMarketplaceProviderPresetSecrets(providerIds);
     } catch (err) {
+      // SecretDocumentStore.deleteMany is one locked atomic mutation: a
+      // rejected call leaves the previous secret document intact, so only
+      // the settings write performed immediately before this call needs to
+      // be rolled back. Avoid reading individual secrets here; encrypted
+      // reads correctly fail closed when safeStorage is unavailable.
       this.settings = previousSettings;
-      for (const { key, value } of secrets) {
-        if (value !== null) {
-          await this.setSecret(key, value).catch((restoreErr: Error) => {
-            log.warn(
-              "provider preset secret restore after deletion failure failed: %s",
-              restoreErr.message,
-            );
-          });
-        }
-      }
       await this.saveSettings().catch((rollbackErr: Error) => {
         log.warn(
           "settings rollback after provider preset secret deletion failure failed: %s",
@@ -1205,9 +1189,8 @@ export class SettingsService {
   }
 
   private async deleteMarketplaceProviderPresetSecrets(providerIds: readonly string[]): Promise<void> {
-    for (const providerId of providerIds) {
-      await this.deleteSecret(marketplaceProviderPresetSecretKey(providerId));
-    }
+    if (providerIds.length === 0) return;
+    await this.secretStore.deleteMany(providerIds.map(marketplaceProviderPresetSecretKey));
   }
 
   async replaceLlm(llm: LLMSettings): Promise<AppSettings> {
@@ -1243,70 +1226,36 @@ export class SettingsService {
 
   /** Encrypt and store a secret value such as an API key. */
   async setSecret(key: string, value: string): Promise<void> {
-    const secrets = this.loadSecrets();
-    if (safeStorage.isEncryptionAvailable()) {
-      secrets[key] = safeStorage.encryptString(value).toString("base64");
-    } else {
-      // Encryption may be unavailable in development or headless environments.
-      secrets[key] = `plain:${value}`;
-    }
-    await this.saveSecrets(secrets);
+    await this.secretStore.set(key, value);
   }
 
   /** Decrypt and return a stored secret value. */
   getSecret(key: string): string | null {
-    const secrets = this.loadSecrets();
-    const stored = secrets[key];
-    if (!stored) return null;
-
-    if (stored.startsWith("plain:")) {
-      return stored.slice(6);
-    }
-
-    if (!safeStorage.isEncryptionAvailable()) {
-      return null;
-    }
-
     try {
-      return safeStorage.decryptString(Buffer.from(stored, "base64"));
+      return this.secretStore.get(key);
     } catch (err) {
-      // Round-3 §7: surface decrypt failures as a warning so a corrupted
-      // keychain entry doesn't masquerade as "no value set". Error semantics
-      // are preserved (still returns null) — only the diagnostic surface
-      // is added.
-      log.warn(`decryptString failed for key=${key}: %s`, (err as Error).message);
-      return null;
+      log.warn("secret read failed: %s", (err as Error).message);
+      throw err;
     }
   }
 
   /** Security-sensitive consumers that must reject legacy `plain:` secret entries. */
   getEncryptedSecret(key: string): string | null {
-    const stored = this.loadSecrets()[key];
-    if (!stored || stored.startsWith("plain:") || !safeStorage.isEncryptionAvailable()) return null;
-    try { return safeStorage.decryptString(Buffer.from(stored, "base64")); } catch { return null; }
+    return this.secretStore.getEncrypted(key);
   }
 
   async deleteSecret(key: string): Promise<void> {
-    const secrets = this.loadSecrets();
-    delete secrets[key];
-    await this.saveSecrets(secrets);
+    await this.secretStore.delete(key);
   }
 
   async deletePluginSecrets(pluginId: string, keys: Iterable<string>): Promise<number> {
     const safePluginId = sanitizePluginConfigPluginId(pluginId);
-    const secrets = this.loadSecrets();
-    let deleted = 0;
+    const storageKeys: string[] = [];
     for (const key of keys) {
       const safeKey = sanitizePluginConfigKey(key);
-      const storageKey = `plugin.${safePluginId}.${safeKey}`;
-      if (!(storageKey in secrets)) continue;
-      delete secrets[storageKey];
-      deleted += 1;
+      storageKeys.push(`plugin.${safePluginId}.${safeKey}`);
     }
-    if (deleted > 0) {
-      await this.saveSecrets(secrets);
-    }
-    return deleted;
+    return this.secretStore.deleteMany(storageKeys);
   }
 
   // Historical note: hasApiKey() only checked the single `llm.apiKey` key,
@@ -1428,26 +1377,6 @@ export class SettingsService {
     });
   }
 
-  private loadSecrets(): Record<string, string> {
-    if (!existsSync(this.secretsPath)) return {};
-    try {
-      return JSON.parse(readFileSync(this.secretsPath, "utf-8")) as Record<string, string>;
-    } catch {
-      return {};
-    }
-  }
-
-  private async saveSecrets(secrets: Record<string, string>): Promise<void> {
-    mkdirSync(dirname(this.secretsPath), { recursive: true });
-    await withFileLock(this.secretsPath, async () => {
-
-
-      writeFileSync(this.secretsPath, JSON.stringify(secrets, null, 2), {
-        encoding: "utf-8",
-        mode: 0o600,
-      });
-    });
-  }
 }
 
 /**

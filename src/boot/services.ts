@@ -113,7 +113,9 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   const settingsService = new SettingsService({
     userDataPath: app.getPath("userData"),
     systemLocale: app.getPreferredSystemLanguages()[0],
+    secretPolicy: app.isPackaged ? "packaged" : "development",
   });
+  await settingsService.migrateSecrets();
 
   // Set the main-process UI locale from persisted settings (or system-detected
   // locale on fresh install) so dialog titles, native menus, tray, and
