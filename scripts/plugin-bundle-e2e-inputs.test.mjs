@@ -82,6 +82,9 @@ test("CLI honors explicit checkout roots without appending repository names", ()
         SDK_SHA: f.sdkSha,
         MARKETPLACE_SHA: f.marketplaceSha,
         EP_API_SHA: f.epApiSha,
+        // The workflow itself writes consolidated evidence. This child test
+        // proves stdout mode and must not inherit the parent's evidence sink.
+        BUNDLE_E2E_EVIDENCE_PATH: "",
       },
     },
   );
