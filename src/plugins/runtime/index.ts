@@ -441,19 +441,27 @@ export class PluginRuntime {
     return this.manifestValidatorPromise;
   }
 
-  private async readManifest(path: string): Promise<PluginManifest> {
+  private async readManifest(
+    path: string,
+    options: { report?: boolean } = {},
+  ): Promise<PluginManifest> {
     const validator = await this.getManifestValidator();
     try {
       return await parsePluginJson(path, validator);
     } catch (err) {
-      // Supply-chain visibility — manifest schema reject / cross-field violation /
+      if (options.report !== false) this.reportPluginManifestRejected(path, err);
+      throw err;
+    }
+  }
 
-
+  private reportPluginManifestRejected(path: string, error: unknown): void {
+    try {
       this.auditLog?.("error", "plugin_manifest_rejected", {
         manifestPath: path,
-        error: err instanceof Error ? err.message.slice(0, 500) : String(err),
+        error: error instanceof Error ? error.message.slice(0, 500) : String(error),
       });
-      throw err;
+    } catch (auditError) {
+      log.error({ manifestPath: path, err: auditError }, "plugin manifest rejection audit failed");
     }
   }
 
@@ -623,7 +631,7 @@ export class PluginRuntime {
           }
         }
         try {
-          const manifest = await this.readManifest(plan.manifestPath);
+          const manifest = await this.readManifest(plan.manifestPath, { report: false });
           return {
             ok: true,
             plan,
@@ -654,6 +662,9 @@ export class PluginRuntime {
         && outcome.integrityResult
       ) {
         this.reportPluginIntegrityResult(outcome.plan.pluginIdHint, outcome.integrityResult);
+      }
+      if (!outcome.ok && outcome.kind === "manifest") {
+        this.reportPluginManifestRejected(outcome.plan.manifestPath, outcome.error);
       }
       if (!outcome.ok) continue;
       const pluginId = outcome.plan.pluginIdHint ?? outcome.manifest.id;
