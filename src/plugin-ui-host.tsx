@@ -358,12 +358,21 @@ export function PluginUiHostView({
   // Default: inline plugin views use the shared page shell. The webview is
   // already its own framed surface, so host-level Card/border chrome creates a
   // visible box-inside-box regression across every plugin view.
+  //
+  // `maxWidth="reading"` caps the panel at the chat conversation column width
+  // (max-w-[58rem], ~928px) instead of the default 6xl (~1152px). These sidebar
+  // plugins were authored for the ~800px detached window they used to open in
+  // (chat mode, pre-inline); at the full main-pane width their own layouts
+  // stretch (e.g. the meeting tab bar spreads edge to edge). Aligning to the
+  // chat reading column keeps an inline plugin panel visually consistent with
+  // the conversation beside it and within the width the plugin UIs expect.
   return (
     <PageShell
       title={view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}
       description={view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
       onBack={onBack}
       backTestId="plugin-page-back"
+      maxWidth="reading"
       contentClassName="flex min-h-0 flex-1 flex-col px-2 pb-2"
     >
       {authErrorBanner}
