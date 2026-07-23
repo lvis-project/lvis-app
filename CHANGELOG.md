@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.5.9 — 2026-07-23
+
+Re-ships the v0.5.8 plugin-integrity fixes with a working Windows installer. Public tags remain unsigned.
+
+### Build
+
+- **Windows installers build again.** The packaged-footprint audit read the main bundle manifest from the app archive with POSIX separators, but electron-builder keys asar entries with the OS separator on Windows, so every lookup missed its backslash-keyed entry and the release build failed with a spurious "bundle manifest not found." The audit now resolves entries with the archive's own separator; macOS and Linux are unaffected. (v0.5.8's release build failed this audit and was never published; v0.5.9 carries the same fixes.)
+
+## v0.5.8 — 2026-07-23
+
+Fixes a v0.5.7 regression where stateful and Python-backed plugins could stop loading after first use, and lands the startup-bundle split with hardened version resolution. Public tags remain unsigned.
+
+### Plugin integrity
+
+- **Plugins no longer fail their integrity check after first run.** v0.5.7's strict install-receipt scan treated a plugin's own runtime state as unlisted payload and dropped the plugin to the Doctor picker. Validation now excludes a plugin's writable `data/` directory and Python bytecode cache (`__pycache__/*.pyc`) — runtime artifacts that were never part of the signed install — at a single chokepoint, while still rejecting any other unlisted file, including a non-bytecode file hidden inside a `__pycache__/` directory.
+
+### Startup and boot
+
+- **Smaller initial load.** The main-process bundle is split so startup pulls in only the statically reachable boot path. Version resolution was made depth-agnostic so the split cannot leave the app reporting an unknown version — which would otherwise fail-closed every version-gated plugin.
+- **Boot composition is bounded and acyclic.** Plugin preflight is time-bounded and skips healthy re-scans, and boot ordering is enforced as an acyclic typed composition.
+
 ## v0.5.7 — 2026-07-23
 
 Hardens local state and plugin lifecycle recovery, self-heals Electron native-module ABI drift, and adds a strict declarative first-task contract for plugins. Public tags remain unsigned.

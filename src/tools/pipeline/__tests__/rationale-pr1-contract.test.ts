@@ -646,7 +646,14 @@ describe("ticket/action-bound lifecycle truth table", () => {
 
 describe("invocation audit and sealed resume", () => {
   it("maps versioned security phases to the executor source in strict order", () => {
-    const source = readFileSync(new URL("../../executor.ts", import.meta.url), "utf8")
+    const source = [
+      "../../executor-implementation.ts",
+      "../../invocation-runner.ts",
+      "../../invocation-authorization.ts",
+      "../../invocation-execution.ts",
+    ]
+      .map((relativePath) => readFileSync(new URL(relativePath, import.meta.url), "utf8"))
+      .join("\n")
       .replace(/\r\n/g, "\n");
     expect(FOREGROUND_RATIONALE_PRODUCTION_ENABLED).toBe(true);
     expect(RATIONALE_SECURITY_SUFFIX_VERSION).toBe(2);
@@ -676,19 +683,19 @@ describe("invocation audit and sealed resume", () => {
     ]);
     const sourceMarkers = [
       ["current-invocation-scope-revalidate", "createInvocationContext(permissionContext, executionCwd)"],
-      ["current-policy-mode-revalidate", "policyMode: this.permissionManager?.getMode?.()"],
-      ["current-permission-revalidate", "this.permissionManager.checkDetailed("],
-      ["current-sandbox-capability-revalidate", "        !this.sandboxFsContainedProvider(tool)\n      ) {"],
-      ["permission-request-hook", "const permHook = await this.runScriptHook("],
+      ["current-policy-mode-revalidate", "policyMode: services.permissionManager?.getMode?.()"],
+      ["current-permission-revalidate", "services.permissionManager.checkDetailed("],
+      ["current-sandbox-capability-revalidate", "!services.sandboxFsContainedProvider(tool)"],
+      ["permission-request-hook", "const permHook = await runScriptHook("],
       ["permission-ask-audit", "await auditCurrentPermissionAsk("],
-      ["script-pre-tool-use", "const scriptPre = await this.runScriptHook("],
-      ["rate-limit", "this.rateLimiter.check(toolUse.name, trust)"],
-      ["permission-audit-writable-fail-closed", "this.auditLogger.assertPermissionAuditWritable()"],
-      ["tool-start-emit-boundary", "    emitToolStart(callbacks, toolUse.name, finalInput, meta);\n\n    // ── Step 6: Execute"],
+      ["script-pre-tool-use", "const scriptPre = await runScriptHook("],
+      ["rate-limit", "services.rateLimiter.check(toolUse.name, trust)"],
+      ["permission-audit-writable-fail-closed", "services.auditLogger.assertPermissionAuditWritable()"],
+      ["tool-start-emit-boundary", "  emitToolStart(callbacks, toolUse.name, finalInput, meta);\n\n  // ── Step 6: Execute"],
       ["during-execute-effect-gate-context", "runWithEffectGateContext("],
       ["tool-execute", "() => tool.execute(finalInput, ctx)"],
       ["effect-shadow-reconciliation", "const effectSummary = effectLedger.summary()"],
-      ["post-tool-use-hooks", "const postFeedback = await this.hookRunner.runPostHooks("],
+      ["post-tool-use-hooks", "const postFeedback = await services.hookRunner.runPostHooks("],
       ["post-failure-lifecycle", "\"PostToolUseFailure\","],
       ["post-exec-dlp-display-audit", "const dlpResult = maskSensitiveData(content)"],
       ["tool-end-emit", "callbacks?.onToolEnd?.(toolUse.name, displayContent"],
@@ -718,22 +725,22 @@ describe("invocation audit and sealed resume", () => {
         phase: "approval-allow-once-cas-consume",
         beforePhase: "permission-ask-audit",
         afterPhase: "script-pre-tool-use",
-        lowerSourceMarker: "          permissionResult = {\n            decision: \"allow\",\n            reason: `user approved approval request (${decision.choice})`,",
-        upperSourceMarker: "const scriptPre = await this.runScriptHook(",
+        lowerSourceMarker: "permissionResult = {\n          decision: \"allow\",\n          reason: `user approved approval request (${decision.choice})`,",
+        upperSourceMarker: "const scriptPre = await runScriptHook(",
       },
       {
         phase: "host-invocation-start-cas",
         beforePhase: "permission-audit-writable-fail-closed",
         afterPhase: "tool-start-emit-boundary",
-        lowerSourceMarker: "this.auditLogger.assertPermissionAuditWritable()",
-        upperSourceMarker: "    emitToolStart(callbacks, toolUse.name, finalInput, meta);\n\n    // ── Step 6: Execute",
+        lowerSourceMarker: "services.auditLogger.assertPermissionAuditWritable()",
+        upperSourceMarker: "  emitToolStart(callbacks, toolUse.name, finalInput, meta);\n\n  // ── Step 6: Execute",
       },
       {
         phase: "invocation-audit-terminal",
         beforePhase: "final-permission-audit",
         afterPhase: null,
         lowerSourceMarker: "await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent",
-        upperSourceMarker: "    return withHostShellExecutionPlan({\n      tool_use_id: toolUse.id,",
+        upperSourceMarker: "  return withHostShellExecutionPlan({\n    tool_use_id: toolUse.id,",
       },
     ] as const;
     for (const slot of virtualInsertionSlots) {
