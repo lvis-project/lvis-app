@@ -39,7 +39,8 @@ import {
   showMainWindow,
 } from "./main/main-window.js";
 import { detachedWindowOptionsForViewKey, refreshApplicationMenu } from "./main/app-menu.js";
-import { ensureTray, showOrCreateMainWindow } from "./main/app-tray.js";
+import { ensureTray, refreshTrayMenu, showOrCreateMainWindow } from "./main/app-tray.js";
+import { configureNativeWindowCoordinator } from "./main/native-window-coordinator.js";
 import { readStartupLaunchState } from "./main/startup-launch.js";
 import { reconcileOsIntegrationOnBoot } from "./main/reconcile-os-integration.js";
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
@@ -95,6 +96,13 @@ function parsePluginSmokeFlag(argv: readonly string[]): string[] | null {
 const pluginSmokeIds = parsePluginSmokeFlag(process.argv);
 
 async function main() {
+  configureNativeWindowCoordinator({
+    showOrCreateMainWindow,
+    refreshNativeChrome: () => {
+      refreshApplicationMenu();
+      refreshTrayMenu();
+    },
+  });
   // Initialise WindowManager before createWindow so registerMainWindow() can
   // be called synchronously inside createWindow().
   const preloadPath = resolve(mainDir, "..", "preload.cjs");

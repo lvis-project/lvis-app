@@ -29,11 +29,17 @@ import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUn
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWindow } from "../safe-send.js";
-import { BUNDLE_IDS } from "../../shared/theme-bundles.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
-import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
+import {
+  cloneThemePayload,
+  getLastThemePayload,
+  recordValidatedTheme,
+  resetLastThemePayloadForTests,
+  validateThemePayload,
+  type SafeThemePayload,
+} from "../../shared/plugin-theme-cache.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 import { installMcpAppPartitionPolicy } from "../../main/html-preview-partition.js";
 import { createMcpAppProxySession, disposeMcpAppProxySession } from "../../main/mcp-app-protocol.js";
@@ -71,6 +77,13 @@ import { handlePluginCards, handleMarketplaceList } from "../handlers/plugins.js
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
 const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
+
+export {
+  getLastThemePayload,
+  recordValidatedTheme,
+  validateThemePayload,
+};
+export type { SafeThemePayload };
 
 type MarketplacePingResult = { configured: boolean; online: boolean };
 
@@ -157,64 +170,6 @@ interface PluginWebviewBinding {
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
-export type SafeThemePayload = {
-  /** v2: bundle identifier (e.g. "tokyo-night", "violet-dark"). */
-  bundleId: string;
-  /** v2: shell polarity derived from the active bundle. */
-  shell: "light" | "dark";
-  colorScheme?: "light" | "dark";
-  reducedMotion?: boolean;
-  tokens?: Record<string, string>;
-};
-
-/**
- * Last validated `host.theme.changed` payload broadcast to plugin webviews.
- *
- * Why: a plugin webview that registers AFTER the renderer's last
- * `notifyPluginTheme` call would otherwise miss the active theme entirely
- * (stuck on the SDK's `:root` fallback) until the user toggles a theme.
- * On register we replay this cached payload to the freshly attached wc so
- * the plugin paints with the right tokens from first frame.
- *
- * Null until the renderer's first broadcast — pre-broadcast registrations
- * still fall through to the SDK fallback (acceptable boot window). Renderer
- * always re-broadcasts on its own mount, so this gap closes within milliseconds.
- */
-let lastThemePayload: SafeThemePayload | null = null;
-
-function cloneThemePayload(payload: SafeThemePayload): SafeThemePayload {
-  const clone: SafeThemePayload = {
-    bundleId: payload.bundleId,
-    shell: payload.shell,
-  };
-  if (payload.colorScheme) clone.colorScheme = payload.colorScheme;
-  if (typeof payload.reducedMotion === "boolean") clone.reducedMotion = payload.reducedMotion;
-  if (payload.tokens) {
-    clone.tokens = Object.freeze({ ...payload.tokens }) as Record<string, string>;
-  }
-  return Object.freeze(clone);
-}
-
-/** @internal — read access to the cached theme payload (tests + replay). */
-export function getLastThemePayload(): SafeThemePayload | null {
-  return lastThemePayload ? cloneThemePayload(lastThemePayload) : null;
-}
-
-/**
- * Validate a theme payload and, on success, record it as the new replay cache.
- * Invalid payloads leave the existing cache untouched. The IPC handler uses
- * this so the validate + cache step stays atomic under unit test.
- */
-export function recordValidatedTheme(payload: unknown):
-  | { ok: true; safe: SafeThemePayload }
-  | { ok: false; error: string } {
-  const result = validateThemePayload(payload);
-  if (!result.ok) return result;
-  const safe = cloneThemePayload(result.safe);
-  lastThemePayload = safe;
-  return { ok: true, safe };
-}
-
 /**
  * Publish a host-owned theme change on the plugin event bus. Plugin webviews
  * still receive the direct IPC fanout below; host plugins that own detached
@@ -252,7 +207,7 @@ export function replayThemeToWebview(webContentsId: number): SafeThemePayload | 
 
 /** @internal — test-only reset to keep cross-test state clean. */
 export function __resetLastThemePayloadForTests(): void {
-  lastThemePayload = null;
+  resetLastThemePayloadForTests();
 }
 
 /**
@@ -294,56 +249,6 @@ function clearPendingEntryUrl(webContentsId: number): void {
   for (const resolve of resolvers) resolve({ ok: false, error: "not-registered" });
 }
 
-
-// §C3: single source from src/shared/theme-bundles.ts — no manual sync needed.
-const ALLOWED_BUNDLE_IDS = new Set<string>(BUNDLE_IDS);
-const ALLOWED_SHELLS = new Set(["light", "dark"]);
-// Host SoT: runtime validation stays in-app so main-process code never depends
-// on SDK runtime values. The SDK republishes the same contract for plugin
-// authors via sync-from-host.
-const PLUGIN_TOKEN_NAMES: Set<string> = new Set(LVIS_TOKEN_NAMES);
-// Allowlist-based value guard: only HSL colors, hex colors, dimension values,
-// font-weight integers, and motion timing values pass.
-// Blocklist patterns (url(), expression(), Unicode-escaped equivalents) would all fail this check.
-// Hex: only valid CSS lengths — 3 (#RGB), 4 (#RGBA), 6 (#RRGGBB), 8 (#RRGGBBAA).
-// 5- and 7-char hex are not valid CSS and would be silently ignored by browsers.
-// [1-9]00: font-weight values (100-900). \d+ms: motion timing (150ms, 200ms).
-const _SAFE_TOKEN_VALUE = /^(hsl\(\s*-?\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*\)|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})|\d+(?:\.\d+)?(?:rem|em|px|%)|[1-9]00|\d+(?:\.\d+)?ms)$/;
-
-export function validateThemePayload(payload: unknown):
-  | { ok: true; safe: SafeThemePayload }
-  | { ok: false; error: string } {
-  if (!payload || typeof payload !== "object") return { ok: false, error: "invalid-payload" };
-  const p = payload as Record<string, unknown>;
-  if (typeof p.bundleId !== "string" || !ALLOWED_BUNDLE_IDS.has(p.bundleId)) return { ok: false, error: "invalid-bundle-id" };
-  if (typeof p.shell !== "string" || !ALLOWED_SHELLS.has(p.shell)) return { ok: false, error: "invalid-shell" };
-  const safe: SafeThemePayload = {
-    bundleId: p.bundleId,
-    shell: p.shell as "light" | "dark",
-  };
-  if (!p.tokens || typeof p.tokens !== "object" || Array.isArray(p.tokens)) {
-    return { ok: false, error: "missing-tokens" };
-  }
-  const safeTokens: Record<string, string> = {};
-  for (const [k, v] of Object.entries(p.tokens as Record<string, unknown>)) {
-    if (PLUGIN_TOKEN_NAMES.has(k) && typeof v === "string" && _SAFE_TOKEN_VALUE.test(v)) {
-      safeTokens[k] = v;
-    }
-  }
-  safe.tokens = safeTokens;
-  // `fonts` is intentionally dropped. SDK v5+ removed the channel
-  // (`LvisThemePayload.fonts` is `@deprecated No longer emitted by the host`)
-  // and the renderer's `notifyPluginTheme` bridge no longer surfaces a
-  // `fonts` field. Any inbound `fonts` is silently ignored — letterforms
-  // come from each host-owned shell's `font-family` mirror of HOST_FONT_STACK.
-  if (typeof p.colorScheme === "string" && (p.colorScheme === "light" || p.colorScheme === "dark")) {
-    safe.colorScheme = p.colorScheme;
-  }
-  if (typeof p.reducedMotion === "boolean") {
-    safe.reducedMotion = p.reducedMotion;
-  }
-  return { ok: true, safe };
-}
 
 export function unregisterPluginWebview(webContentsId: number): void {
   pluginWebviewRegistry.delete(webContentsId);
