@@ -11,7 +11,7 @@
  * straight to the runtime and is reachable from the trusted panel ORIGIN ALONE.
  * Installs the delegate on the late-binding ref + the plugin runtime.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { BrowserWindow as BrowserWindowValue } from "electron";
 import { createHookRunner } from "../conversation.js";
 import { wireHookSystem } from "./hook-system-wiring.js";
@@ -47,6 +47,18 @@ function toPluginToolInput(payload: unknown): Record<string, unknown> {
 function pluginInvocationSessionId(context: PluginToolInvocationContext): string {
   const subject = context.callerPluginId ?? context.ownerPluginId ?? "host";
   return `plugin-${context.origin}-${subject}`;
+}
+
+function unauthenticatedOperationAccountHash(
+  pluginId: string,
+  generationId: string,
+): string {
+  return createHash("sha256")
+    .update("plugin-operation-unauthenticated/v1\0")
+    .update(pluginId)
+    .update("\0")
+    .update(generationId)
+    .digest("hex");
 }
 
 export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
@@ -201,13 +213,19 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             context.ownerGenerationId,
           )
         : undefined;
-      const pluginOperation = appInvocation && ownerPluginId && manifest && invocationGeneration && accountHash
+      const invocationSessionId = pluginInvocationSessionId(context);
+      const pluginOperation = ownerPluginId && manifest && invocationGeneration
         ? {
             ownerVersion: manifest.version,
             generationId: invocationGeneration.generationId,
-            appSessionId: appInvocation.sessionId,
-            accountHash,
-            ...(appInvocation.operationGrantToken
+            appSessionId: appInvocation?.sessionId ?? invocationSessionId,
+            accountHash: accountHash ??
+              unauthenticatedOperationAccountHash(
+                ownerPluginId,
+                invocationGeneration.generationId,
+              ),
+            appGrantRequired: appInvocation !== undefined,
+            ...(appInvocation?.operationGrantToken
               ? { grantToken: appInvocation.operationGrantToken }
               : {}),
           }
@@ -220,7 +238,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           input: toPluginToolInput(payload),
         }],
         {
-          sessionId: pluginInvocationSessionId(context),
+          sessionId: invocationSessionId,
           permissionContext: pluginSurfacePermissionScope.createPermissionContext(context, {
             // headless follows the *effective* chain origin (#664 P2):
             // a UI-rooted chain keeps `headless: false` even after one or

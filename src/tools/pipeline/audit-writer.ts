@@ -195,7 +195,7 @@ export class AuditWriter {
     category?: ToolCategory,
     cwd?: string,
     auditDirectory?: string,
-    terminationReason?: "ok" | "ceiling" | "user-abort" | "error",
+    terminationReason?: "ok" | "ceiling" | "user-abort" | "error" | "indeterminate",
     hookChain?: HookResult[],
     audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {

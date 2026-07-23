@@ -90,6 +90,35 @@ describe("runWithCeiling — executor global ceiling helper", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("exposes the actual late settlement when an interrupted task ignores the signal", async () => {
+    let releaseTask!: (value: string) => void;
+    const task = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseTask = resolve;
+        }),
+    );
+    const promise = runWithCeiling(task, 500, undefined, "late-write");
+
+    await vi.advanceTimersByTimeAsync(600);
+    const outcome = await promise;
+    expect(outcome.ok).toBe(false);
+    expect(outcome.settlement).toBeDefined();
+
+    let settled = false;
+    void outcome.settlement?.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseTask("late-success");
+    await expect(outcome.settlement).resolves.toEqual({
+      ok: true,
+      value: "late-success",
+    });
+  });
+
   it("returns ok=false reason='error' for ordinary task failures (not timeout, not user abort)", async () => {
     const task = () => Promise.reject(new Error("internal tool error"));
     const outcome = await runWithCeiling(task, 5_000, undefined, "broken-tool");

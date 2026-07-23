@@ -42,6 +42,7 @@ import {
 } from "./plugin-operation-governance.js";
 import {
   PluginOperationGrantCoordinator,
+  pluginOperationExecutionDomain,
   type PluginOperationPrincipal,
 } from "../permissions/plugin-operation-grant.js";
 import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
@@ -187,6 +188,7 @@ export class ToolExecutor {
       operation: string;
       intentHash: string;
       readRevision: string | null;
+      operationDomain: string;
       requiredRead?: {
         readTool: string;
         readOperations: readonly string[];
@@ -195,14 +197,20 @@ export class ToolExecutor {
     };
     ttlMs?: number;
   }): { token: string; grantId: string; readRevision: string | null } {
-    const issued = this.pluginOperationGrants.issue({
-      ...args.principal,
-      toolName: args.toolName,
-      operation: args.inspected.operation,
-      intentHash: args.inspected.intentHash,
-      readRevision: args.inspected.readRevision,
-      expiresAt: Date.now() + Math.min(Math.max(args.ttlMs ?? 60_000, 1), 300_000),
-    }, args.inspected.requiredRead);
+    const issued = this.pluginOperationGrants.issue(
+      {
+        ...args.principal,
+        toolName: args.toolName,
+        operation: args.inspected.operation,
+        intentHash: args.inspected.intentHash,
+        readRevision: args.inspected.readRevision,
+        expiresAt:
+          Date.now() +
+          Math.min(Math.max(args.ttlMs ?? 60_000, 1), 300_000),
+      },
+      args.inspected.operationDomain,
+      args.inspected.requiredRead,
+    );
     return { ...issued, readRevision: args.inspected.readRevision };
   }
 
@@ -215,6 +223,7 @@ export class ToolExecutor {
     operation: string;
     intentHash: string;
     readRevision: string | null;
+    operationDomain: string;
     requiredRead?: {
       readTool: string;
       readOperations: readonly string[];
@@ -248,6 +257,12 @@ export class ToolExecutor {
     if (resolved.rule.kind !== "write") {
       throw new Error("[plugin-operation-policy] only writes receive app grants");
     }
+    const operationDomain = pluginOperationExecutionDomain(
+      args.principal,
+      args.toolName,
+      resolved.operation,
+      this.toolRegistry.listAll(),
+    );
     let readRevision: string | null = null;
     let requiredRead:
       | {
@@ -262,6 +277,7 @@ export class ToolExecutor {
         resolved.rule.requiresRead.tool,
         resolved.rule.requiresRead.operations,
         resolved.rule.requiresRead.maxAgeMs,
+        operationDomain,
       );
       if (!latest) {
         throw new Error("[plugin-operation-policy] required read is missing or stale");
@@ -278,6 +294,7 @@ export class ToolExecutor {
       operation: resolved.operation,
       intentHash: resolved.intentHash,
       readRevision,
+      operationDomain,
       ...(requiredRead ? { requiredRead } : {}),
       approvalArgs,
     };
