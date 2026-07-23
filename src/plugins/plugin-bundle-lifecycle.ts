@@ -144,24 +144,6 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     return this.serialize(pluginId, () => this.deactivateNow(pluginId));
   }
 
-  setContributionsEnabled(pluginId: string, enabled: boolean): Promise<void> {
-    return this.serialize(pluginId, () => this.setContributionsEnabledNow(pluginId, enabled));
-  }
-
-  async setContributionsEnabledWithCommit<T>(
-    pluginId: string,
-    enabled: boolean,
-    durableCommit: () => Promise<T>,
-  ): Promise<T> {
-    let result!: T;
-    await this.serialize(pluginId, async () => {
-      await this.setContributionsEnabledNow(pluginId, enabled, async () => {
-        result = await durableCommit();
-      });
-    });
-    return result;
-  }
-
   async deactivateWithCommit<T>(pluginId: string, durableCommit: () => Promise<T>): Promise<T> {
     let result!: T;
     await this.serialize(pluginId, async () => {
@@ -515,63 +497,6 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     this.deps.loopbackManager.postPublishGeneration(preparedLoopback);
     this.trackRetirement(active, published.retired);
     return result;
-  }
-
-  private async setContributionsEnabledNow(
-    pluginId: string,
-    enabled: boolean,
-    durableCommit?: () => Promise<void>,
-  ): Promise<void> {
-    const generation = this.requireActive(pluginId);
-    const predecessorMcpServerIds = this.deps.mcpManager.bundledServerIdsForPlugin(pluginId);
-    const preparedSkills = enabled
-      ? this.deps.skillStore.preparePluginGeneration(generation)
-      : this.deps.skillStore.preparePluginRemoval(pluginId, generation.generationId);
-    const preparedHooks = this.deps.hookManager.preparePluginGeneration(
-      enabled ? generation.state.hooks : [],
-      this.hookTrust,
-      { pluginId, generationId: generation.generationId },
-    );
-    const preparedLoopback = enabled
-      ? await this.deps.loopbackManager.prepareGeneration(
-          generation.state.runtime.manifest,
-          generation.generationId,
-          predecessorMcpServerIds,
-        )
-      : this.deps.loopbackManager.prepareRemoval(
-          pluginId,
-          generation.generationId,
-          predecessorMcpServerIds,
-        );
-    try {
-      await this.coordinator.quiesce(
-        pluginId,
-        generation.generationId,
-        durableCommit ?? (async () => undefined),
-        () => {
-          this.deps.loopbackManager.publishGeneration(preparedLoopback);
-          if (enabled) {
-            generation.state.runtime.hostEffects?.resume();
-            preparedSkills.publish();
-            preparedHooks.publish();
-          } else {
-            generation.state.runtime.hostEffects?.supersede();
-            preparedSkills.publish();
-            preparedHooks.publish();
-          }
-        },
-      );
-    } catch (error) {
-      await this.deps.loopbackManager.discardGeneration(preparedLoopback);
-      throw error;
-    }
-    this.deps.loopbackManager.postPublishGeneration(preparedLoopback);
-    if (enabled) await this.projectApprovedMcp(generation);
-    if (!enabled) {
-      this.deps.revokeOperationGeneration(pluginId, generation.generationId);
-      await this.deps.mcpManager.disconnectBundledGeneration(pluginId, generation.generationId);
-      await this.deps.loopbackManager.retireGeneration(pluginId, generation.generationId);
-    }
   }
 
   /**

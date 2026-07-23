@@ -60,8 +60,8 @@ function operationGrantTarget(
   tool: Tool | undefined,
   args: Record<string, unknown>,
 ): McpOperationGrantTarget | undefined {
-  if (!tool?.pluginId || !tool.operationGovernance) return undefined;
-  const resolved = resolvePluginOperation(tool.operationGovernance, args, "mcp-app");
+  if (!tool?.pluginId || !tool.operationPolicy) return undefined;
+  const resolved = resolvePluginOperation(tool.operationPolicy, args, "mcp-app");
   return resolved.rule.kind === "write" && resolved.rule.requiresRead
     ? { pluginId: tool.pluginId, toolName: tool.name }
     : undefined;

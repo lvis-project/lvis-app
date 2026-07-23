@@ -56,6 +56,7 @@ import {
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
   installMarketplacePluginWithLifecycle,
+  rollbackMarketplacePluginWithLifecycle,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
 import {
@@ -482,7 +483,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
         emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
         refreshPluginNotifications,
-        log,
       });
     } catch (err) {
       const message = errMessage(err) || "addPlugin failed";
@@ -503,6 +503,20 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, { slug: lifecycleSlug, success: true });
     return result;
+  });
+
+  ipcMain.handle(CHANNELS.plugins.rollback, async (e, pluginId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.plugins.rollback, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const normalizedPluginId = typeof pluginId === "string" ? pluginId.trim() : "";
+    if (!normalizedPluginId) throw new Error("pluginId is required for rollback");
+    return rollbackMarketplacePluginWithLifecycle({
+      pluginId: normalizedPluginId,
+      pluginRuntime,
+      pluginMarketplace,
+    });
   });
 
   ipcMain.handle(CHANNELS.plugins.uninstall, async (e, pluginId: string, rawOptions?: unknown) => {
@@ -567,10 +581,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  // #1176 — toggle a plugin's active/inactive state. Persists `enabled` to the
-  // registry and broadcasts a lifecycle event so the renderer refreshes its
-  // plugin cards. The plugin stays loaded; only its per-turn tool exposure is
-  // gated (PluginRuntime.setPluginEnabled does not unload/reload).
+  // Toggle through the immutable generation lifecycle. Disable publishes an
+  // inactive pointer and drains teardown; re-enable reverifies installed bytes
+  // before atomically publishing a new generation.
   ipcMain.handle(
     CHANNELS.plugins.setEnabled,
     async (e, pluginId: unknown, enabled: unknown) => {

@@ -80,7 +80,7 @@ export interface Tool {
   readonly workerId?: string;
   readonly mcpServerId?: string;
   /** Host-only policy sidecar. It is never serialized onto MCP or passed to plugin input. */
-  readonly operationGovernance?: PluginToolOperationPolicy;
+  readonly operationPolicy?: PluginToolOperationPolicy;
   /**
    * MCP Apps — may this tool's OWN app call it (`_meta.ui.visibility` ∋ `"app"`)?
    *
@@ -234,7 +234,7 @@ export interface DynamicToolSpec {
   pluginGeneration?: PluginToolGenerationOwner;
   workerId?: string;
   mcpServerId?: string;
-  operationGovernance?: PluginToolOperationPolicy;
+  operationPolicy?: PluginToolOperationPolicy;
   /** MCP Apps app→server `tools/call` gate — see {@link Tool.appInvokable}. */
   appInvokable?: boolean;
   /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
@@ -273,7 +273,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     pluginGeneration: spec.pluginGeneration,
     workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,
-    operationGovernance: spec.operationGovernance,
+    operationPolicy: spec.operationPolicy,
     appInvokable: spec.appInvokable,
     modelVisible: spec.modelVisible,
     pathFields: spec.pathFields,

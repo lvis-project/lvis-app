@@ -86,16 +86,21 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
     expect(result).toEqual({ output: "ran files_read", isError: false });
   });
 
-  it("attaches host-only operation policy without putting it on the MCP wire", () => {
-    const projected = manifestToolsToMcpTools(MANIFEST)[0];
+  it("attaches the validated signed operation policy carried by the MCP Tool", () => {
     const policy = {
       discriminant: "operation" as const,
-      appAllowed: ["read"],
-      operations: { read: { kind: "read" as const, minimumRisk: "read" as const } },
+      operations: { read: { kind: "read" as const, minimumRisk: "read" as const, appVisible: true } },
+    };
+    const projected = {
+      ...manifestToolsToMcpTools(MANIFEST)[0],
+      _meta: {
+        ...manifestToolsToMcpTools(MANIFEST)[0]._meta,
+        "lvisai/operationPolicy": policy,
+      },
     };
     const tool = mcpToolToPluginTool(PLUGIN_ID, projected, invoke, policy);
-    expect(tool.operationGovernance).toEqual(policy);
-    expect(projected._meta).not.toHaveProperty("operationGovernance");
+    expect(tool.operationPolicy).toEqual(policy);
+    expect(projected._meta["lvisai/operationPolicy"]).toEqual(policy);
   });
 
   it("surfaces a thrown invoke as an isError result (not a throw)", async () => {

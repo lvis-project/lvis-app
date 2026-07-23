@@ -20,6 +20,7 @@ import type { ValidateFunction } from "ajv";
 import manifestSchema from "../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 import type {
   PluginManifest,
+  PluginToolOperationPolicy,
   InstallPolicy,
   Tool,
 } from "../types.js";
@@ -443,22 +444,22 @@ export async function parsePluginJson(
     byName.set(name, tool);
   }
 
-  // Host-only operation-governance sidecar. This metadata is deliberately not
-  // part of Tool._meta (manifest==wire); validate its relationship to the MCP
-  // input union before any runtime projection can occur.
-  for (const [toolName, policy] of Object.entries(manifest.operationGovernance ?? {})) {
-    const tool = byName.get(toolName);
-    if (!tool) {
-      fail(`operationGovernance.${toolName}`, "references a tool not declared in tools[]", `declare tools[] entry '${toolName}' or remove the policy`);
-    }
+  // Signed operation restrictions are colocated on each pure MCP Tool. This
+  // preserves manifest==wire and prevents a second tool-name keyed action map.
+  const operationPolicies = new Map<string, PluginToolOperationPolicy>();
+  for (const [toolName, tool] of byName) {
+    const policy = tool._meta?.["lvisai/operationPolicy"];
+    if (!policy) continue;
+    operationPolicies.set(toolName, policy);
+    const policyPath = `tools.${toolName}._meta.lvisai/operationPolicy`;
     if (policy.discriminant !== "operation") {
-      fail(`operationGovernance.${toolName}.discriminant`, "must equal 'operation'", `"discriminant": "operation"`);
+      fail(`${policyPath}.discriminant`, "must equal 'operation'", `"discriminant": "operation"`);
     }
     const operationNames = Object.keys(policy.operations ?? {});
     if (operationNames.length === 0) {
-      fail(`operationGovernance.${toolName}.operations`, "must declare at least one operation", `"operations": { "list": { "kind": "read", "minimumRisk": "read" } }`);
+      fail(`${policyPath}.operations`, "must declare at least one operation", `"operations": { "list": { "kind": "read", "minimumRisk": "read" } }`);
     }
-    const inputSchema = tool!.inputSchema as { required?: unknown; properties?: Record<string, unknown> };
+    const inputSchema = tool.inputSchema as { required?: unknown; properties?: Record<string, unknown> };
     if (!Array.isArray(inputSchema.required) || !inputSchema.required.includes("operation")) {
       fail(`tools.${toolName}.inputSchema.required`, "must require the top-level operation discriminant", `"required": ["operation"]`);
     }
@@ -476,31 +477,25 @@ export async function parsePluginJson(
       schemaOperations.length !== operationNames.length ||
       [...schemaOperations].sort().some((name, index) => name !== [...operationNames].sort()[index])
     ) {
-      fail(`tools.${toolName}.inputSchema.properties.operation`, "enum/const must exactly match operationGovernance operations", `use exactly ${JSON.stringify(operationNames.sort())}`);
+      fail(`tools.${toolName}.inputSchema.properties.operation`, "enum/const must exactly match lvisai/operationPolicy operations", `use exactly ${JSON.stringify(operationNames.sort())}`);
     }
-    const visibility = toolVisibility(tool!);
-    for (const operation of policy.appAllowed) {
-      const rule = policy.operations[operation];
-      if (!rule) {
-        fail(`operationGovernance.${toolName}.appAllowed`, `unknown operation '${operation}'`, `choose from ${JSON.stringify(operationNames)}`);
-      }
-      if (!visibility.includes("app")) {
-        fail(`operationGovernance.${toolName}.appAllowed`, "appAllowed requires tool visibility including 'app'", `set tools[]. _meta.ui.visibility to include "app"`);
-      }
-      if (rule.kind === "write" && !rule.requiresRead) {
-        fail(`operationGovernance.${toolName}.operations.${operation}.requiresRead`, "app-allowed writes require a governed read snapshot", `"requiresRead": { "tool": "${toolName}", "operations": ["status"], "maxAgeMs": 60000 }`);
+    const visibility = toolVisibility(tool);
+    for (const [operation, rule] of Object.entries(policy.operations)) {
+      if (rule.appVisible === true && !visibility.includes("app")) {
+        fail(`${policyPath}.operations.${operation}.appVisible`, "cannot expand a Tool that is not app-visible", `set tools[]. _meta.ui.visibility to include "app" or remove appVisible`);
       }
     }
     for (const [operation, rule] of Object.entries(policy.operations)) {
       if (!rule.requiresRead) continue;
       const readTool = byName.get(rule.requiresRead.tool);
-      const readPolicy = manifest.operationGovernance?.[rule.requiresRead.tool];
+      const readPolicy = operationPolicies.get(rule.requiresRead.tool) ??
+        readTool?._meta?.["lvisai/operationPolicy"];
       if (!readTool || !readPolicy) {
-        fail(`operationGovernance.${toolName}.operations.${operation}.requiresRead.tool`, "must reference a governed declared tool", `reference a tool present in operationGovernance`);
+        fail(`${policyPath}.operations.${operation}.requiresRead.tool`, "must reference a declared Tool with lvisai/operationPolicy", `reference a governed tool in tools[]`);
       }
       for (const readOperation of rule.requiresRead.operations) {
         if (readPolicy!.operations[readOperation]?.kind !== "read") {
-          fail(`operationGovernance.${toolName}.operations.${operation}.requiresRead.operations`, `'${readOperation}' must reference a read operation`, `choose a kind='read' operation from '${rule.requiresRead.tool}'`);
+          fail(`${policyPath}.operations.${operation}.requiresRead.operations`, `'${readOperation}' must reference a read operation`, `choose a kind='read' operation from '${rule.requiresRead.tool}'`);
         }
       }
     }

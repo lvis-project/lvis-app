@@ -621,7 +621,7 @@ export class ToolExecutor {
     approvalArgs: Record<string, unknown>;
   } {
     const tool = this.toolRegistry.findByName(args.toolName);
-    if (!tool?.pluginId || !tool.operationGovernance) {
+    if (!tool?.pluginId || !tool.operationPolicy) {
       throw new Error(`[plugin-operation-policy] governed plugin tool '${args.toolName}' not found`);
     }
     if (tool.pluginId !== args.principal.ownerPluginId) {
@@ -642,7 +642,7 @@ export class ToolExecutor {
     if (!activeGeneration || activeGeneration.generationId !== args.principal.generationId) {
       throw new Error("[plugin-operation-policy] principal generation is not active");
     }
-    const resolved = resolvePluginOperation(tool.operationGovernance, args.input, args.origin ?? "ui");
+    const resolved = resolvePluginOperation(tool.operationPolicy, args.input, args.origin ?? "ui");
     if (resolved.rule.kind !== "write" || !resolved.rule.requiresRead) {
       throw new Error("[plugin-operation-policy] only read-backed writes receive app grants");
     }
@@ -1286,12 +1286,12 @@ export class ToolExecutor {
       : toolUse.input;
     let resolvedPluginOperation: ResolvedPluginOperation | undefined;
     let pluginOperationPrincipal: PluginOperationPrincipal | undefined;
-    if (tool.operationGovernance) {
+    if (tool.operationPolicy) {
       const ambientOrigin = currentInvocationOrigin();
       const operationOrigin = ambientOrigin === undefined ? "model" : ambientOrigin;
       try {
         resolvedPluginOperation = resolvePluginOperation(
-          tool.operationGovernance,
+          tool.operationPolicy,
           finalInput,
           operationOrigin,
         );
@@ -3163,19 +3163,6 @@ export class ToolExecutor {
         image = result.image;
       }
       if (isError) terminationReason = "error";
-      if (
-        !isError &&
-        resolvedPluginOperation?.rule.kind === "read" &&
-        pluginOperationPrincipal
-      ) {
-        this.pluginOperationGrants.recordRead(
-          {
-            ...pluginOperationPrincipal,
-            readTool: toolUse.name,
-            readOperation: resolvedPluginOperation.operation,
-          },
-        );
-      }
     } else {
       terminationReason = outcome.reason;
       content =
@@ -3205,6 +3192,22 @@ export class ToolExecutor {
         kind: "callTool-child",
         effect: CHOKEPOINT_EFFECT["callTool-child"],
         target: tool.name,
+      });
+    }
+    // A signed `kind:"read"` declaration is never sufficient by itself. Mint
+    // a read receipt only after the Host-observed effect ledger confirms that
+    // this in-process plugin invocation completed without a mutating effect.
+    if (
+      !isError &&
+      tool.source === "plugin" &&
+      resolvedPluginOperation?.rule.kind === "read" &&
+      pluginOperationPrincipal &&
+      !effectSummary.hasMutatingEffect
+    ) {
+      this.pluginOperationGrants.recordRead({
+        ...pluginOperationPrincipal,
+        readTool: toolUse.name,
+        readOperation: resolvedPluginOperation.operation,
       });
     }
     // Emit the EFFECT shadow record for plugin/MCP invocations (builtins never

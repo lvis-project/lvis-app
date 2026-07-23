@@ -318,6 +318,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:plugins:install-local",
         "lvis:plugins:marketplace:list",
         "lvis:plugins:perf-stats",
+        "lvis:plugins:rollback",
         "lvis:plugins:set-enabled",
         "lvis:plugins:ui:list",
         "lvis:plugins:ui:read-module",

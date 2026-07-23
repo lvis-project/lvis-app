@@ -103,6 +103,36 @@ describe("plugin-server-projection — normalized Tool[] → MCP tools/list (#88
     }
   });
 
+  it("carries the signed operationPolicy verbatim on the owning Tool", () => {
+    const manifest = structuredClone(BASE_MANIFEST);
+    const policy = {
+      discriminant: "operation" as const,
+      operations: {
+        status: {
+          kind: "read" as const,
+          minimumRisk: "read" as const,
+          appVisible: true,
+        },
+      },
+    };
+    manifest.tools[3] = {
+      ...manifest.tools[3],
+      inputSchema: {
+        type: "object",
+        properties: { operation: { const: "status" } },
+        required: ["operation"],
+        additionalProperties: false,
+      },
+      _meta: {
+        ...manifest.tools[3]._meta,
+        "lvisai/operationPolicy": policy,
+      },
+    };
+
+    const projected = manifestToolsToMcpTools(manifest)[3];
+    expect(projected._meta["lvisai/operationPolicy"]).toEqual(policy);
+  });
+
   it("no longer reads a legacy xyz.lvis/pathFields manifest — the dual-read is removed (fail-closed)", () => {
     // The `_meta` namespace rename removed the transitional legacy read. A tool that
     // (illegally, post-rename) carries ONLY the legacy key contributes NO

@@ -590,6 +590,24 @@ describe("plugins IPC lifecycle broadcast", () => {
     expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalled();
   });
 
+  it("routes marketplace rollback through the atomic runtime activation seam", async () => {
+    const { deps, runActivation } = await setup();
+    deps.pluginMarketplace.rollbackPlugin.mockImplementationOnce(async (...args: unknown[]) => {
+      await runActivation(args, "agent-hub");
+      return { pluginId: "agent-hub", rolledBackTo: "0.0.1" };
+    });
+
+    await expect(invoke("lvis:plugins:rollback", "agent-hub")).resolves.toEqual({
+      pluginId: "agent-hub",
+      rolledBackTo: "0.0.1",
+    });
+    expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith(
+      "agent-hub",
+      { activatePreparedArtifact: expect.any(Function) },
+    );
+    expect(deps.pluginRuntime.activatePreparedArtifact).toHaveBeenCalledOnce();
+  });
+
   it("broadcasts idempotent uninstall success when marketplace entry is already gone", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginMarketplace.uninstall.mockRejectedValueOnce(new Error("Plugin not installed: agent-hub"));

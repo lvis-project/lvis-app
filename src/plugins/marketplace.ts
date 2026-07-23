@@ -848,8 +848,9 @@ export class PluginMarketplaceService {
     // S14 — capability preflight. `requires.capabilities[]` is a separate
     // contract from plugin-id `dependencies[]`: any installed plugin that
     // advertises a matching `capabilities[]` tag satisfies the requirement.
-    if (plugin.requires && plugin.requires.capabilities.length > 0) {
-      const result = resolveDependencies(plugin.requires.capabilities, await getInstalledManifests());
+    const requiredCapabilities = plugin.requires?.capabilities ?? [];
+    if (requiredCapabilities.length > 0) {
+      const result = resolveDependencies(requiredCapabilities, await getInstalledManifests());
       if (!result.ok) {
         throw new MissingDependenciesError(result.missing);
       }
@@ -1250,7 +1251,10 @@ export class PluginMarketplaceService {
    * Throws when no prior version is available.
    * Guarded by per-plugin mutex to avoid racing with installPlugin.
    */
-  async rollbackPlugin(pluginId: string): Promise<{ pluginId: string; rolledBackTo: string }> {
+  async rollbackPlugin(
+    pluginId: string,
+    options: { activatePreparedArtifact?: PreparedMarketplacePluginActivation } = {},
+  ): Promise<{ pluginId: string; rolledBackTo: string }> {
     return this.withPluginLock(pluginId, async () => {
       const currentVersion = await this.getInstalledVersion(pluginId);
       const priorVersion = await this.artifactStore.findRollbackTarget(
@@ -1282,9 +1286,9 @@ export class PluginMarketplaceService {
       const registrySnapshot = await this.artifactStore.readCachedRegistryEntrySnapshot(pluginId, priorVersion);
       const existingEntry = await this.getRawRegistryEntry(pluginId);
       let pendingEntry: PluginRegistryEntry | null = null;
-      try {
-        await this.installArtifact(plugin, priorVersion, undefined, {
+      const installOutcome = await this.installArtifact(plugin, priorVersion, undefined, {
           validateCatalogMetadata: false,
+          activatePreparedArtifact: options.activatePreparedArtifact,
           beforePromote: async (recoveryBackupDir) => {
             pendingEntry = await this.markMarketplaceRegistryEntryPending(existingEntry, recoveryBackupDir);
           },
@@ -1307,16 +1311,15 @@ export class PluginMarketplaceService {
               else registry.plugins.push(nextEntry);
             });
           },
-        });
-      } catch (err) {
-        await this.restoreMarketplaceRegistryEntryAfterFailure(pendingEntry, existingEntry, err);
-      }
+        }).catch((err) => this.restoreMarketplaceRegistryEntryAfterFailure(pendingEntry, existingEntry, err));
       await this.artifactStore.appendHistory(pluginId, {
         version: priorVersion,
         installedAt: new Date().toISOString(),
       });
       this.clearInstallReceiptValidationForPlugin(pluginId);
-      await this.discardSupersededPendingBackup(existingEntry);
+      if (installOutcome.predecessorRetired) {
+        await this.discardSupersededPendingBackup(existingEntry);
+      }
       return { pluginId, rolledBackTo: priorVersion };
     });
   }

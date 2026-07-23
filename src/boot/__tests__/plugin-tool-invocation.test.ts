@@ -92,11 +92,12 @@ describe("plugin app-only runtime invocation", () => {
 
   it("keeps governed app-only tools on ToolExecutor instead of the trusted-panel bypass", () => {
     const manifest = normalize({ uiActions: { meeting_write: {} } });
-    (manifest as PluginManifest & { operationGovernance?: Record<string, unknown> }).operationGovernance = {
-      meeting_write: {
+    const tool = manifest.tools.find((candidate) => candidate.name === "meeting_write");
+    tool!._meta = {
+      ...tool!._meta,
+      "lvisai/operationPolicy": {
         discriminant: "operation",
-        appAllowed: ["save"],
-        operations: { save: { kind: "write", minimumRisk: "write", requiresRead: { tool: "meeting_write", operations: ["status"], maxAgeMs: 1_000 } } },
+        operations: { save: { kind: "write", minimumRisk: "write", appVisible: true } },
       },
     };
     const runtime = { listPluginManifests: () => [{ pluginId: "meeting", manifest }] } as any;

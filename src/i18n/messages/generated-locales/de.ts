@@ -1554,6 +1554,7 @@ export const deMessages: Record<string, string> = {
   "marketplaceTab.processingLabel": "Verarbeitung…",
   "marketplaceTab.refreshButton": "Aktualisieren",
   "marketplaceTab.removeButton": "Entfernen",
+  "marketplaceTab.rollbackButton": "Rollback",
   "marketplaceTab.saveButton": "Speichern",
   "marketplaceTab.serverUrlHelp": "Der lvis-marketplace-REST-API-Endpunkt. Wechseln Sie zu einem internen Host für selbstgehostete Bereitstellungen. Lassen Sie das Feld leer, um Marktplatzfunktionen zu deaktivieren.",
   "marketplaceTab.serverUrlLabel": "Marketplace-Server-URL",

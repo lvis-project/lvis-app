@@ -87,14 +87,16 @@ describe("PluginRuntime.readUiResource — fail-closed runtime gates (parity wit
     expect(hook).not.toHaveBeenCalled();
   });
 
-  it("registry-disabled + session-activated → SERVES (same Gate-4 relaxation as tools/call)", async () => {
-    const rt = runtimeWithCardPlugin({ readUiResource: () => "<h1>routine card</h1>" });
+  it("registry-disabled + session-activated → refused after the generation is unloaded", async () => {
+    const hook = vi.fn(() => "<h1>routine card</h1>");
+    const rt = runtimeWithCardPlugin({ readUiResource: hook });
     await rt.setPluginEnabled(PLUGIN_ID, false);
     rt.setSessionActivated("routine-session-A", PLUGIN_ID);
 
     await expect(
       sessionContext.run({ sessionId: "routine-session-A" }, () => rt.readUiResource(PLUGIN_ID, URI)),
-    ).resolves.toBe("<h1>routine card</h1>");
+    ).rejects.toThrow(/generation is not active/i);
+    expect(hook).not.toHaveBeenCalled();
   });
 
   it("integrity-disabled plugin → refused WITHOUT invoking the hook", async () => {

@@ -9,11 +9,15 @@ import type {
   HostPluginGenerationState,
   PluginRuntimeGenerationProjection,
 } from "../plugin-host-generation.js";
+import { makeTestTreeWritable } from "./test-helpers.js";
 
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => {
+    await makeTestTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }));
 });
 
 describe("PluginRuntime immutable generation root", () => {

@@ -35,6 +35,7 @@ import type { Tool } from "../tools/base.js";
 import type { PluginManifest } from "../plugins/types.js";
 import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
 import type { McpUiPayload, McpUiResourceMeta, McpUiResourceRead } from "./types.js";
+import { canonicalStringify } from "../shared/canonical-json.js";
 
 const log = createLogger("plugin-mcp-host");
 
@@ -82,7 +83,7 @@ export class PluginMcpHost {
   constructor(
     private readonly pluginId: string,
     private readonly transport: McpTransport,
-    private readonly operationGovernance: Record<string, PluginToolOperationPolicy> = {},
+    private readonly signedOperationPolicies: Record<string, PluginToolOperationPolicy> = {},
     private readonly generationId: string,
   ) {
     if (typeof generationId !== "string" || generationId.trim().length === 0) {
@@ -105,7 +106,12 @@ export class PluginMcpHost {
     return new PluginMcpHost(
       manifest.id,
       new LoopbackTransport(server),
-      (manifest as PluginManifest & { operationGovernance?: Record<string, PluginToolOperationPolicy> }).operationGovernance,
+      Object.fromEntries(
+        manifest.tools.flatMap((tool) => {
+          const policy = tool._meta?.["lvisai/operationPolicy"];
+          return policy ? [[tool.name, policy] as const] : [];
+        }),
+      ),
       generationId,
     );
   }
@@ -146,6 +152,16 @@ export class PluginMcpHost {
       const list = (await this.request("tools/list", {})) as { tools?: DiscoveredMcpTool[] };
       const tools: Tool[] = [];
       for (const tool of list.tools ?? []) {
+        const signedPolicy = this.signedOperationPolicies[tool.name];
+        const wirePolicy = tool._meta?.["lvisai/operationPolicy"];
+        if (
+          canonicalStringify(wirePolicy ?? null) !==
+          canonicalStringify(signedPolicy ?? null)
+        ) {
+          throw new Error(
+            `[plugin-mcp-host] plugin '${this.pluginId}' tool '${tool.name}' operation policy differs from its signed manifest`,
+          );
+        }
         // Build FIRST — a structural hard failure THROWS here and aborts the
         // whole build (rollback). A missing/invalid lvisai/category no longer
         // hard-fails (host-classifies-risk: default-strict write-equivalent);
@@ -155,7 +171,7 @@ export class PluginMcpHost {
           this.pluginId,
           tool,
           (name, args) => this.invoke(name, args),
-          this.operationGovernance?.[tool.name],
+          signedPolicy,
           this.generationId,
         );
 
