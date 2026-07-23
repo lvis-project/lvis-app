@@ -123,6 +123,18 @@ describe("lvis:plugins:call", () => {
 });
 
 describe("plugin bundled contribution trust IPC", () => {
+  it("fails closed when the required bundle lifecycle service is unavailable", async () => {
+    const { deps } = await setup();
+    deps.pluginBundleLifecycle = undefined as never;
+
+    const listed = await invoke("lvis:plugins:contribution-trust:list", "com.example.meeting");
+
+    expect(listed).toEqual({
+      ok: false,
+      error: "plugin-bundle-lifecycle-unavailable",
+    });
+  });
+
   it("lists quarantined exact identities and approves only the requested capability", async () => {
     const { pluginBundleLifecycle } = await setup();
     const listed = await invoke("lvis:plugins:contribution-trust:list", "com.example.meeting");
