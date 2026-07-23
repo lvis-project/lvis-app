@@ -30,7 +30,7 @@ const log = createLogger("lvis");
  * metacharacters into the resolved file path.
  */
 export const SKILL_NAME_ALLOWLIST = /^[a-zA-Z0-9_-]+$/;
-export const PLUGIN_SKILL_SELECTOR_ALLOWLIST = /^plugin:[a-z][a-z0-9-]{2,127}:[a-zA-Z_][a-zA-Z0-9_]*$/;
+const PLUGIN_SKILL_SELECTOR_ALLOWLIST = /^plugin:[a-z][a-z0-9-]{2,127}:[a-zA-Z_][a-zA-Z0-9_]*$/;
 export const SKILL_SELECTOR_ALLOWLIST = /^(?:[a-zA-Z0-9_-]+|plugin:[a-z][a-z0-9-]{2,127}:[a-zA-Z_][a-zA-Z0-9_]*)$/;
 
 /** C2(e): skills with a body larger than this are refused at load time. */
@@ -87,7 +87,7 @@ export interface SkillCatalogEntry {
   pluginOwner?: PluginSkillOwner;
 }
 
-export interface PluginSkillOwner {
+interface PluginSkillOwner {
   pluginId: string;
   pluginVersion: string;
   generationId: string;

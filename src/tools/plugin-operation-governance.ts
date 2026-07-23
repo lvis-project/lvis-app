@@ -4,14 +4,14 @@ import type { ToolCategory } from "./types.js";
 import type {
   GovernedRiskFloor,
   PluginToolOperationPolicy,
-  PluginToolOperationRule,
 } from "../plugins/types.js";
 
 export type {
   GovernedRiskFloor,
   PluginToolOperationPolicy,
-  PluginToolOperationRule,
 } from "../plugins/types.js";
+
+type PluginToolOperationRule = PluginToolOperationPolicy["operations"][string];
 
 export interface ResolvedPluginOperation {
   operation: string;
@@ -27,7 +27,7 @@ export interface PluginOperationInvocationContext {
   grantToken?: string;
 }
 
-export class PluginOperationPolicyError extends Error {
+class PluginOperationPolicyError extends Error {
   constructor(message: string) {
     super(`[plugin-operation-policy] ${message}`);
     this.name = "PluginOperationPolicyError";
