@@ -75,6 +75,7 @@ export class PluginOperationGrantCoordinator {
     reservedRead?: ReservedReadSnapshot;
   }>();
   private readonly snapshots = new Map<string, ReadSnapshot>();
+  private readonly latestReadSequences = new Map<string, number>();
   private nextReadSequence = 0;
 
   constructor(
@@ -86,11 +87,14 @@ export class PluginOperationGrantCoordinator {
   recordRead(key: PluginReadSnapshotKey): string {
     this.trimSnapshots();
     const revision = randomUUID();
-    this.snapshots.set(snapshotKey(key), {
+    const keyString = snapshotKey(key);
+    const sequence = ++this.nextReadSequence;
+    this.snapshots.set(keyString, {
       revision,
       recordedAt: this.now(),
-      sequence: ++this.nextReadSequence,
+      sequence,
     });
+    this.latestReadSequences.set(keyString, sequence);
     return revision;
   }
 
@@ -212,6 +216,9 @@ export class PluginOperationGrantCoordinator {
     for (const [key] of this.snapshots) {
       if (key.startsWith(`${ownerPluginId}\0`) && key.includes(`\0${generationId}\0`)) this.snapshots.delete(key);
     }
+    for (const [key] of this.latestReadSequences) {
+      if (key.startsWith(`${ownerPluginId}\0`) && key.includes(`\0${generationId}\0`)) this.latestReadSequences.delete(key);
+    }
   }
 
   revokeSession(appSessionId: string): void {
@@ -220,6 +227,9 @@ export class PluginOperationGrantCoordinator {
     }
     for (const [key] of this.snapshots) {
       if (key.includes(`\0${appSessionId}\0`)) this.snapshots.delete(key);
+    }
+    for (const [key] of this.latestReadSequences) {
+      if (key.includes(`\0${appSessionId}\0`)) this.latestReadSequences.delete(key);
     }
   }
 
@@ -247,6 +257,15 @@ export class PluginOperationGrantCoordinator {
         key.includes(accountMarker)
       ) {
         this.snapshots.delete(key);
+      }
+    }
+    for (const [key] of this.latestReadSequences) {
+      if (
+        key.startsWith(principalPrefix) &&
+        key.includes(generationMarker) &&
+        key.includes(accountMarker)
+      ) {
+        this.latestReadSequences.delete(key);
       }
     }
   }
@@ -297,14 +316,13 @@ export class PluginOperationGrantCoordinator {
     reservedRead: ReservedReadSnapshot,
   ): boolean {
     return reservedRead.requirement.readOperations.some((readOperation) => {
-      const snapshot = this.snapshots.get(snapshotKey({
+      const latestSequence = this.latestReadSequences.get(snapshotKey({
         ...principal,
         readTool: reservedRead.requirement.readTool,
         readOperation,
       }));
-      return snapshot !== undefined &&
-        snapshot.sequence > reservedRead.snapshot.sequence &&
-        snapshot.revision !== reservedRead.snapshot.revision;
+      return latestSequence !== undefined &&
+        latestSequence > reservedRead.snapshot.sequence;
     });
   }
 

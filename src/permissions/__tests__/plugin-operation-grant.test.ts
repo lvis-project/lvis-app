@@ -229,6 +229,53 @@ describe("PluginOperationGrantCoordinator", () => {
     },
   );
 
+  it.each(["today", "week"] as const)(
+    "burns the older grant after a newer %s read is reserved by another grant",
+    (supersedingOperation) => {
+      const coordinator = new PluginOperationGrantCoordinator(() => 50);
+      const multiOperationRequiredRead = {
+        ...requiredRead,
+        readOperations: ["today", "week"],
+      } as const;
+      const issue = (readRevision: string) => coordinator.issue({
+        ...principal,
+        toolName: "ep_attendance_write",
+        operation: "clock",
+        intentHash: "same-intent",
+        readRevision,
+        expiresAt: 500,
+      }, multiOperationRequiredRead);
+      const firstRead = coordinator.recordRead({
+        ...principal,
+        readTool: requiredRead.readTool,
+        readOperation: "today",
+      });
+      const firstGrant = issue(firstRead);
+      const secondRead = coordinator.recordRead({
+        ...principal,
+        readTool: requiredRead.readTool,
+        readOperation: supersedingOperation,
+      });
+      const secondGrant = issue(secondRead);
+      const expected = {
+        ...principal,
+        toolName: "ep_attendance_write",
+        operation: "clock",
+        intentHash: "same-intent",
+        requiresRead: true,
+      };
+
+      expect(coordinator.consume(firstGrant.token, expected)).toMatchObject({
+        ok: false,
+        reason: expect.stringContaining("superseded"),
+      });
+      expect(coordinator.consume(secondGrant.token, expected)).toEqual({
+        ok: true,
+        grantId: secondGrant.grantId,
+      });
+    },
+  );
+
   it("rejects a reserved read that becomes stale before grant consumption", () => {
     let now = 50;
     const coordinator = new PluginOperationGrantCoordinator(() => now);
