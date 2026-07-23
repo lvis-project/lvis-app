@@ -68,7 +68,7 @@ function operationGrantTarget(
 }
 
 /** The `PluginRuntime` subset the loopback (first-party plugin) source needs. */
-export interface PluginToolCallRuntime {
+interface PluginToolCallRuntime {
   /** `method → owning pluginId` (a loopback server's id IS its pluginId). */
   resolveToolOwner(method: string): string | undefined;
   /**

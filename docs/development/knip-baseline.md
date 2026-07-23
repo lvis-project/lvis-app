@@ -38,8 +38,8 @@ debt changes should a maintainer run `bun run check:knip:update`. That command
 flushes a same-directory staging file and atomically replaces the snapshot, so
 an interrupted update cannot truncate the reviewed baseline.
 
-The current snapshot contains 644 accepted findings: 25 files, 235 exports,
-370 types, 7 duplicate-export groups, and 7 dev dependencies. Resolved entries
+The current snapshot contains 640 accepted findings: 25 files, 234 exports,
+367 types, 7 duplicate-export groups, and 7 dev dependencies. Resolved entries
 do not fail the gate; the command asks maintainers to shrink the snapshot.
 
 `vitest.config.ts` remains the runtime assertion boundary. Knip reads the pure

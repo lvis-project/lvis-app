@@ -1,7 +1,7 @@
 import type { MaterializedPluginContribution } from "./plugin-contributions.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export interface PluginGenerationIdentity {
+interface PluginGenerationIdentity {
   pluginId: string;
   pluginVersion: string;
   /** Stable signed-content identity used by contribution trust decisions. */

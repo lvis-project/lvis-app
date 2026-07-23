@@ -25,7 +25,7 @@ import type {
 } from "./types.js";
 import type { PluginToolOperationPolicy } from "./plugin-operation-governance.js";
 
-export interface PluginToolGenerationOwner {
+interface PluginToolGenerationOwner {
   readonly pluginId: string;
   readonly generationId: string;
 }

@@ -4,15 +4,15 @@ import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import type { PluginContributionDeclaration, PluginManifest } from "./types.js";
 import { verifyInstallReceiptRaw } from "./plugin-install-receipt.js";
 
-export type PluginContributionKind = "skill" | "hook" | "mcpServer";
-export type PluginArchiveMemberKind = "file" | "directory" | "symlink" | "hardlink" | "device" | "other";
+type PluginContributionKind = "skill" | "hook" | "mcpServer";
+type PluginArchiveMemberKind = "file" | "directory" | "symlink" | "hardlink" | "device" | "other";
 
 export interface PluginArchiveMember {
   path: string;
   kind: PluginArchiveMemberKind;
 }
 
-export interface PluginContributionIdentity {
+interface PluginContributionIdentity {
   ownerPluginId: string;
   ownerVersion: string;
   kind: PluginContributionKind;
@@ -23,7 +23,7 @@ export interface ResolvedPluginContribution extends PluginContributionIdentity {
   path: string;
 }
 
-export interface MaterializedContributionFile {
+interface MaterializedContributionFile {
   path: string;
   content: string;
   sha256: string;

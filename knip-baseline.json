@@ -604,11 +604,6 @@
     },
     {
       "type": "exports",
-      "file": "src/permissions/effect-kind.ts",
-      "name": "pathEffectClass"
-    },
-    {
-      "type": "exports",
       "file": "src/permissions/evaluation-context.ts",
       "name": "PERMISSION_EVALUATION_CONTEXT_VERSION"
     },
@@ -1790,11 +1785,6 @@
     {
       "type": "types",
       "file": "src/hooks/hook-registry.ts",
-      "name": "ConfigHookRegistryEntry"
-    },
-    {
-      "type": "types",
-      "file": "src/hooks/hook-registry.ts",
       "name": "ShHookRegistryEntry"
     },
     {
@@ -2315,17 +2305,7 @@
     {
       "type": "types",
       "file": "src/plugins/runtime/types.ts",
-      "name": "PluginManifest"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/runtime/types.ts",
       "name": "PluginToolHandler"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/runtime/types.ts",
-      "name": "RuntimePlugin"
     },
     {
       "type": "types",
