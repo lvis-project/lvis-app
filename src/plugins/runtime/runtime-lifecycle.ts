@@ -35,7 +35,15 @@ import {
 } from "./plugin-loader.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
-import { PluginRuntimeState, type RestartPluginResult } from "./runtime-state.js";
+import {
+  withAllPluginInstallLocks,
+  withPluginInstallLock,
+} from "../install-lifecycle.js";
+import {
+  PluginRuntimeState,
+  type PendingRestartCancellation,
+  type RestartPluginResult,
+} from "./runtime-state.js";
 import {
   preflightPluginLoadPlan,
   type BootPreflightOutcome,
@@ -423,6 +431,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   }
 
   async restartAll(): Promise<void> {
+    // An individual restart may own its plugin lock while waiting on a
+    // never-settling dependency preparation. Cancel before the global lock
+    // waits for per-plugin mutations to drain.
+    for (const cancellation of this.pendingRestartCancellations.values()) {
+      cancellation.cancel();
+    }
+    return withAllPluginInstallLocks(() => this.restartAllLocked());
+  }
+
+  private async restartAllLocked(): Promise<void> {
     const lifecycleIds = new Set([
       ...this.plugins.keys(),
       ...this.pendingRestarts.keys(),
@@ -463,10 +481,39 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.assertPluginLifecycleAvailable(canonicalPluginId);
     const pending = this.pendingRestarts.get(canonicalPluginId);
     if (pending) return pending;
-    const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
-    const restart = this.restartPluginInternal(canonicalPluginId, generation, opts).finally(() => {
+    let resolveCancellation!: () => void;
+    const cancellation: PendingRestartCancellation = {
+      generation: 0,
+      cancelled: false,
+      promise: new Promise<void>((resolve) => {
+        resolveCancellation = resolve;
+      }),
+      cancel() {
+        if (this.cancelled) return;
+        this.cancelled = true;
+        resolveCancellation();
+      },
+    };
+    this.pendingRestartCancellations.set(canonicalPluginId, cancellation);
+    const restart = withPluginInstallLock(canonicalPluginId, async () => {
+      const generation = this.beginPluginLifecycleOperation(
+        canonicalPluginId,
+        cancellation,
+      );
+      cancellation.generation = generation;
+      if (cancellation.cancelled) return "failed";
+      return this.restartPluginInternal(
+        canonicalPluginId,
+        generation,
+        cancellation,
+        opts,
+      );
+    }).finally(() => {
       if (this.pendingRestarts.get(canonicalPluginId) === restart) {
         this.pendingRestarts.delete(canonicalPluginId);
+      }
+      if (this.pendingRestartCancellations.get(canonicalPluginId) === cancellation) {
+        this.pendingRestartCancellations.delete(canonicalPluginId);
       }
     });
     this.pendingRestarts.set(canonicalPluginId, restart);
@@ -476,6 +523,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   protected async restartPluginInternal(
     pluginId: string,
     generation: number,
+    cancellation: PendingRestartCancellation,
     opts: { skipPreparation?: boolean } = {},
   ): Promise<RestartPluginResult> {
     plog("info", { pluginId, phase: PluginPhase.RESTART_REQUEST }, "restart requested");
@@ -484,7 +532,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("warn", { pluginId, phase: PluginPhase.RESTART_REQUEST, reason: "not_loaded" }, "restart no-op — plugin not loaded");
       return undefined;
     }
-    const isCurrent = () => this.isPluginLifecycleOperationCurrent(pluginId, generation);
+    const isCurrent = () =>
+      !cancellation.cancelled
+      && this.isPluginLifecycleOperationCurrent(pluginId, generation);
 
     const loadPlan = await this.resolveManifestLoadPlanInternal();
     if (!isCurrent()) return "failed";
@@ -559,7 +609,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
       if (preparation) {
         try {
-          await preparation;
+          const outcome = await Promise.race([
+            preparation.then(() => "prepared" as const),
+            cancellation.promise.then(() => "cancelled" as const),
+          ]);
+          if (outcome === "cancelled") return "failed";
         } catch (err) {
           plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
           return "failed";
@@ -936,6 +990,19 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
    */
   async removePlugin(pluginId: string): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    // A restart can be waiting on an intentionally non-cancellable dependency
+    // preparation while it owns the lifecycle lock. Signal cancellation before
+    // queuing removal so that restart can settle and release the lock.
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    return withPluginInstallLock(canonicalPluginId, () =>
+      this.removePluginLocked(pluginId, canonicalPluginId)
+    );
+  }
+
+  private async removePluginLocked(
+    pluginId: string,
+    canonicalPluginId: string,
+  ): Promise<void> {
     // Invalidate in-flight add/restart continuations before the first await.
     this.beginPluginLifecycleOperation(canonicalPluginId);
     this.preparation.clearFor(canonicalPluginId);
@@ -1363,6 +1430,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   async reloadPlugin(pluginId: string): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    return withPluginInstallLock(canonicalPluginId, () =>
+      this.reloadPluginLocked(pluginId, canonicalPluginId)
+    );
+  }
+
+  private async reloadPluginLocked(
+    pluginId: string,
+    canonicalPluginId: string,
+  ): Promise<void> {
     const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
     const isCurrent = () =>
       this.isPluginLifecycleOperationCurrent(canonicalPluginId, generation);
@@ -1538,6 +1615,17 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
    */
   async disable(pluginId: string, actor: Actor = "user"): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    return withPluginInstallLock(canonicalPluginId, () =>
+      this.disableLocked(pluginId, canonicalPluginId, actor)
+    );
+  }
+
+  private async disableLocked(
+    pluginId: string,
+    canonicalPluginId: string,
+    actor: Actor,
+  ): Promise<void> {
     if (this.deploymentGuard) {
       const result = await this.deploymentGuard.canDisable(pluginId, actor);
       if (!result.allowed) {

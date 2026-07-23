@@ -10,7 +10,7 @@ import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginRuntime } from "../../runtime.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import { buildImportUrl } from "../sandbox.js";
 import { ToolRegistry } from "../../../tools/registry.js";
 import { PluginLoopbackManager } from "../../../mcp/plugin-loopback-manager.js";
@@ -602,6 +602,7 @@ export default async function createPlugin() {
 
     const enabled: string[] = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -621,6 +622,7 @@ export default async function createPlugin() {
 
     const events: Array<{ type: "disable" | "enable"; pluginId: string }> = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -647,6 +649,7 @@ export default async function createPlugin() {
 
     const enableCalls: string[] = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -666,6 +669,7 @@ export default async function createPlugin() {
 
     const events: Array<{ type: "disable" | "enable"; pluginId: string }> = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -740,6 +744,7 @@ export default async function createPlugin() {
     let loopbackManager!: PluginLoopbackManager;
     let lastEnable: Promise<unknown> = Promise.resolve();
     runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -774,6 +779,7 @@ export default async function createPlugin() {
     let loopbackManager!: PluginLoopbackManager;
     let lastEnable: Promise<unknown> = Promise.resolve();
     runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -840,6 +846,7 @@ export default async function createPlugin() {
 
     const enableCalls: string[] = [];
     const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,

@@ -129,7 +129,11 @@ export async function uninstallPluginWithLifecycle(
       const message = (err as Error).message ?? "uninstall failed";
       if (!isMissingPluginError(message)) {
         try {
-          await deps.pluginRuntime.addPlugin(canonicalPluginId);
+          // Registry snapshots are keyed by the marketplace/requested id even
+          // when the manifest declares a different canonical runtime id.
+          // removePlugin clears the runtime's alias map, so restoration must
+          // use the original registry identity.
+          await deps.pluginRuntime.addPlugin(pluginId);
         } catch (restoreError) {
           throw new AggregateError(
             [err, restoreError],

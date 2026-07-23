@@ -6,12 +6,53 @@ const inflightInstallLocks = new Map<string, Promise<unknown>>();
 interface HeldPluginInstallLock {
   active: boolean;
   pendingReentrantOperations: Set<TrackedReentrantOperation>;
-  reentrantFailures: unknown[];
 }
 
 interface TrackedReentrantOperation {
   promise: Promise<unknown>;
   parent?: TrackedReentrantOperation;
+  observed: boolean;
+  settled: boolean;
+  rejected: boolean;
+  failure?: unknown;
+}
+
+class ObservedReentrantPromise<T> extends Promise<T> {
+  static get [Symbol.species](): PromiseConstructor {
+    return Promise;
+  }
+
+  constructor(
+    operation: Promise<T>,
+    private readonly observe: () => void,
+  ) {
+    super((resolve, reject) => {
+      void operation.then(resolve, reject);
+    });
+    // True detached failures are reported to the owning lifecycle mutation,
+    // not to the process unhandled-rejection channel.
+    void Promise.prototype.then.call(this, undefined, () => undefined);
+  }
+
+  override then<TResult1 = T, TResult2 = never>(
+    onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2> {
+    this.observe();
+    return super.then(onfulfilled, onrejected);
+  }
+
+  override catch<TResult = never>(
+    onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
+  ): Promise<T | TResult> {
+    this.observe();
+    return super.catch(onrejected);
+  }
+
+  override finally(onfinally?: (() => void) | null): Promise<T> {
+    this.observe();
+    return super.finally(onfinally);
+  }
 }
 
 const heldPluginInstallLocks = new AsyncLocalStorage<ReadonlyMap<string, HeldPluginInstallLock>>();
@@ -174,7 +215,6 @@ async function acquirePluginInstallLock<T>(
     const token: HeldPluginInstallLock = {
       active: true,
       pendingReentrantOperations: new Set(),
-      reentrantFailures: [],
     };
     const nextHeldLocks = copyActiveHeldLocks(heldLocks);
     nextHeldLocks.set(pluginId, token);
@@ -271,6 +311,21 @@ async function acquireAllPluginInstallLocks<T>(
   let releaseExclusive!: () => void;
   const exclusiveDone = new Promise<void>((resolve) => { releaseExclusive = resolve; });
   exclusiveLifecycleTail = previousExclusive.then(() => exclusiveDone);
+  if (!canEnterSynchronously) {
+    await previousExclusive;
+    if (activePluginLifecycleMutations > 0) {
+      await new Promise<void>((resolve) => { resolvePluginLifecycleDrain = resolve; });
+    }
+  }
+
+  pendingPluginInstallOperations += 1;
+  const token: HeldPluginInstallLock = {
+    active: true,
+    pendingReentrantOperations: new Set(),
+    reentrantFailures: [],
+  };
+  const nextHeldLocks = copyActiveHeldLocks(heldLocks);
+  nextHeldLocks.set(ALL_PLUGIN_LOCK_KEY, token);
   let releaseDeferred = false;
   let finalized = false;
   let operationCounted = false;
@@ -355,7 +410,12 @@ function trackReentrantOperation<T>(
   token: HeldPluginInstallLock,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const tracked = {} as TrackedReentrantOperation;
+  const tracked: TrackedReentrantOperation = {
+    promise: Promise.resolve(),
+    observed: false,
+    settled: false,
+    rejected: false,
+  };
   const parent = currentReentrantOperation.getStore();
   if (parent) tracked.parent = parent;
   const operation = Promise.resolve().then(() =>
@@ -364,13 +424,24 @@ function trackReentrantOperation<T>(
   tracked.promise = operation;
   token.pendingReentrantOperations.add(tracked);
   void operation.then(
-    () => token.pendingReentrantOperations.delete(tracked),
+    () => {
+      tracked.settled = true;
+    },
     (err) => {
-      token.pendingReentrantOperations.delete(tracked);
-      token.reentrantFailures.push(err);
+      tracked.rejected = true;
+      tracked.failure = err;
+      tracked.settled = true;
     },
   );
-  return operation;
+  // A plain rejected Promise cannot tell the owner whether its caller awaited
+  // and handled the failure or deliberately detached it. Return a Promise-like
+  // observer so `await`, `.then`, `.catch`, and `.finally` mark consumption.
+  // The underlying operation already has a rejection observer above, avoiding
+  // process-level unhandled-rejection noise for true fire-and-forget calls.
+  const observe = () => {
+    tracked.observed = true;
+  };
+  return new ObservedReentrantPromise(operation, observe);
 }
 
 async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<void> {
@@ -383,7 +454,7 @@ async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<v
   const deadline = Date.now() + PLUGIN_LIFECYCLE_DRAIN_TIMEOUT_MS;
   while (true) {
     const pending = [...token.pendingReentrantOperations]
-      .filter((operation) => !excluded.has(operation));
+      .filter((operation) => !operation.settled && !excluded.has(operation));
     if (pending.length === 0) break;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) throw new PluginLifecycleDrainTimeoutError();
@@ -399,18 +470,26 @@ async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<v
       if (timer) clearTimeout(timer);
     }
   }
-  if (token.reentrantFailures.length > 0) {
-    const failures = token.reentrantFailures.splice(0);
+  const failures = [...token.pendingReentrantOperations]
+    .filter((operation) => !excluded.has(operation) && !operation.observed && operation.rejected)
+    .map((operation) => operation.failure);
+  for (const operation of [...token.pendingReentrantOperations]) {
+    if (!excluded.has(operation)) token.pendingReentrantOperations.delete(operation);
+  }
+  if (failures.length > 0) {
     throw new AggregateError(failures, "Detached plugin lifecycle mutation failed");
   }
 }
 
 async function settleReentrantOperations(token: HeldPluginInstallLock): Promise<void> {
-  while (token.pendingReentrantOperations.size > 0) {
+  while ([...token.pendingReentrantOperations].some((operation) => !operation.settled)) {
     await Promise.allSettled(
-      [...token.pendingReentrantOperations].map((operation) => operation.promise),
+      [...token.pendingReentrantOperations]
+        .filter((operation) => !operation.settled)
+        .map((operation) => operation.promise),
     );
   }
+  token.pendingReentrantOperations.clear();
 }
 
 function selectActiveHeldLock(

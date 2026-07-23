@@ -65,6 +65,7 @@ const log = createLogger("plugin-runtime");
 export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
 export { runPluginFactoryWithTimeout, runPluginImportWithTimeout, runStartWithTimeout };
+export { createNoopHostApiForTests } from "./sandbox.js";
 export type { PluginPerfStats };
 
 export type { InstallPolicy };
@@ -222,7 +223,7 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** Plugin-scoped HostApi factory — injected by boot.ts */
-  createHostApi?: (
+  createHostApi: (
     pluginId: string,
     manifest: PluginManifest,
     pluginDataDir: string,
