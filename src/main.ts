@@ -408,7 +408,11 @@ app.on("web-contents-created", (_event, contents) => {
   // where the underlying renderer process crashes (sandbox kill, OOM,
   // GPU lost) — Electron does not always emit `destroyed` synchronously
   // afterwards, so we clear the binding eagerly.
-  const dropBinding = () => unregisterPluginWebview(contents.id);
+  const dropBinding = () => {
+    const services = getServices();
+    if (!services) return;
+    unregisterPluginWebview(contents.id, services.revokePluginOperationSession);
+  };
   contents.on("destroyed", dropBinding);
   contents.on("render-process-gone", dropBinding);
 

@@ -256,7 +256,12 @@ function clearPendingEntryUrl(webContentsId: number): void {
 }
 
 
-export function unregisterPluginWebview(webContentsId: number): void {
+export function unregisterPluginWebview(
+  webContentsId: number,
+  revokeSession: (appSessionId: string) => void,
+): void {
+  const binding = pluginWebviewRegistry.get(webContentsId);
+  if (binding) revokeSession(binding.appSessionId);
   pluginWebviewRegistry.delete(webContentsId);
   clearPendingEntryUrl(webContentsId);
 }

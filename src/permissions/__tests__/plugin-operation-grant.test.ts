@@ -154,6 +154,96 @@ describe("PluginOperationGrantCoordinator", () => {
     ).toBeUndefined();
   });
 
+  it("bounds grant, snapshot, and watermark state across many revoked sessions without weakening supersession", () => {
+    const coordinator = new PluginOperationGrantCoordinator(() => 50);
+    const sessionCount = 128;
+    const coordinatorState = coordinator as unknown as {
+      grants: Map<string, unknown>;
+      snapshots: Map<string, unknown>;
+      latestReadSequences: Map<string, number>;
+    };
+
+    for (let index = 0; index < sessionCount; index += 1) {
+      const sessionPrincipal = {
+        ...principal,
+        appSessionId: `window-${index}`,
+      };
+      const readRevision = coordinator.recordRead({
+        ...sessionPrincipal,
+        readTool: requiredRead.readTool,
+        readOperation: "today",
+      });
+      coordinator.issue({
+        ...sessionPrincipal,
+        toolName: "ep_attendance_write",
+        operation: "clock",
+        intentHash: `intent-${index}`,
+        readRevision,
+        expiresAt: 100,
+      }, requiredRead);
+      coordinator.recordRead({
+        ...sessionPrincipal,
+        readTool: requiredRead.readTool,
+        readOperation: "week",
+      });
+    }
+
+    expect(coordinatorState.grants.size).toBe(sessionCount);
+    expect(coordinatorState.snapshots.size).toBe(sessionCount);
+    expect(coordinatorState.latestReadSequences.size).toBe(sessionCount * 2);
+
+    for (let index = 0; index < sessionCount; index += 1) {
+      coordinator.revokeSession(`window-${index}`);
+    }
+
+    expect(coordinatorState.grants.size).toBe(0);
+    expect(coordinatorState.snapshots.size).toBe(0);
+    expect(coordinatorState.latestReadSequences.size).toBe(0);
+
+    const firstRead = coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    });
+    const firstGrant = coordinator.issue({
+      ...principal,
+      toolName: "ep_attendance_write",
+      operation: "clock",
+      intentHash: "surviving-session",
+      readRevision: firstRead,
+      expiresAt: 500,
+    }, requiredRead);
+    const secondRead = coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    });
+    const secondGrant = coordinator.issue({
+      ...principal,
+      toolName: "ep_attendance_write",
+      operation: "clock",
+      intentHash: "surviving-session",
+      readRevision: secondRead,
+      expiresAt: 500,
+    }, requiredRead);
+    const expected = {
+      ...principal,
+      toolName: "ep_attendance_write",
+      operation: "clock",
+      intentHash: "surviving-session",
+      requiresRead: true,
+    };
+
+    expect(coordinator.consume(firstGrant.token, expected)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("superseded"),
+    });
+    expect(coordinator.consume(secondGrant.token, expected)).toEqual({
+      ok: true,
+      grantId: secondGrant.grantId,
+    });
+  });
+
   it("atomically reserves one read revision for only one concurrent grant", async () => {
     const coordinator = new PluginOperationGrantCoordinator(() => 50);
     const readRevision = coordinator.recordRead({
