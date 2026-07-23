@@ -28,7 +28,7 @@ Sub-agents are in-process child `ConversationLoop`s (`src/engine/subagent-runner
 
 - **There are no parked loops.** Every stop today is terminate-and-return; the only in-flight block is the approval gate (bounded 300s, auto-deny — `tool-timeout-policy.ts` `approvalGateUserWaitMs`). Budget suspension is a finished `runTurn` flagged `incomplete` + a `resumeId` that re-hydrates history on demand.
 - `resume(continuationInstructions)` already functions as "reply to a suspended agent" (`subagent-runner.ts:1033`) with frozen tool scope.
-- The race-safe injection seam for pushing into a **running** parent exists: `ConversationLoop.queueGuidance()` (`conversation-loop.ts:245`), drained at round boundaries (`query-loop.ts:269-327`, bounded by GUIDE_MAX_*). Those bounds have no time-based TTL; D6 remains the only TTL policy.
+- The race-safe injection seam for pushing into a **running** parent is `ConversationLoop.queueGuidance()` in `conversation-loop.ts`; `engine/turn/query-loop.ts` drains it at round boundaries under the shared `GUIDE_MAX_*` limits. Those bounds have no time-based TTL; D6 remains the only TTL policy.
 
 ## State model (D4/D5) — transition table
 

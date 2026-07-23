@@ -52,7 +52,7 @@ delegated to any closed-source agent implementation.
 | Concept | LVIS location |
 |---|---|
 | In-memory message array | `src/engine/conversation-history.ts:13` — `private messages: GenericMessage[]` |
-| Full re-transmit per turn | `ConversationHistory.getMessages()` called by `conversation-loop.ts` |
+| Full re-transmit per turn | `ConversationHistory.getMessages()` consumed by `engine/turn/run-turn.ts` and `engine/turn/query-loop.ts` |
 | Threshold check | `src/engine/auto-compact.ts` — `shouldCompact()` (80% default) |
 | Full compact (Stage 2) | `src/engine/auto-compact.ts` — `compactMessages()` |
 | Microcompact (Stage 1) | `src/engine/auto-compact.ts` — `microcompactMessages()` (added in this PR) |
@@ -62,7 +62,7 @@ delegated to any closed-source agent implementation.
 
 ## Shipped
 
-- **Reactive recovery**: `conversation-loop.ts` catches both thrown errors and `{type:"error"}` stream events from providers, runs `compactMessages(..., "reactive")`, and retries once per turn. Implemented in PR #30.
+- **Reactive recovery**: `engine/turn/query-loop.ts` detects thrown and streamed context-limit failures and calls the preflight recovery owned by `engine/turn/compaction.ts`, with a bounded retry policy. Implemented in PR #30 and later extracted without changing the contract.
 - **Carryover metadata**: `extractCarryover()` in `auto-compact.ts` captures goals/artifacts/decisions into `MessageMeta.carryover` on each compact boundary. `ConversationCarryover` exported from `src/engine/llm/types.ts`. Implemented in PR #31.
 
 ## Deferred (future PRs)

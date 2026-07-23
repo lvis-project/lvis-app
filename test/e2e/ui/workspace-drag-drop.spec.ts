@@ -170,7 +170,7 @@ test.describe("workspace drag-drop add-root (#1458)", () => {
       prep.ackToken as string,
     );
     expect(done.ok).toBe(true);
-    expect(done.added).toBe(dropTarget);
+    expect(done.added).toBe(canonicalDrop);
 
     const after = await page.evaluate(() => window.lvis.workspace.listRoots());
     expect((after.roots ?? []).some((r) => r.path === canonicalDrop)).toBe(true);

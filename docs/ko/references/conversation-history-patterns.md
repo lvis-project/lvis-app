@@ -52,7 +52,7 @@ delegated to any closed-source agent implementation.
 | Concept | LVIS location |
 |---|---|
 | In-memory message array | `src/engine/conversation-history.ts:13` — `private messages: GenericMessage[]` |
-| Full re-transmit per turn | `ConversationHistory.getMessages()` called by `conversation-loop.ts` |
+| Full re-transmit per turn | `ConversationHistory.getMessages()`를 `engine/turn/run-turn.ts`와 `engine/turn/query-loop.ts`가 소비 |
 | Threshold check | `src/engine/auto-compact.ts` — `shouldCompact()` (80% default) |
 | Full compact (Stage 2) | `src/engine/auto-compact.ts` — `compactMessages()` |
 | Microcompact (Stage 1) | `src/engine/auto-compact.ts` — `microcompactMessages()` (added in this PR) |
@@ -62,7 +62,7 @@ delegated to any closed-source agent implementation.
 
 ## Shipped
 
-- **Reactive recovery**: `conversation-loop.ts` catches both thrown errors and `{type:"error"}` stream events from providers, runs `compactMessages(..., "reactive")`, and retries once per turn. Implemented in PR #30.
+- **Reactive recovery**: `engine/turn/query-loop.ts`가 throw 및 stream context-limit 실패를 감지하고 `engine/turn/compaction.ts`가 소유한 preflight recovery를 제한된 재시도 정책으로 호출한다. PR #30 구현 후 계약 변경 없이 추출됐다.
 - **Carryover metadata**: `extractCarryover()` in `auto-compact.ts` captures goals/artifacts/decisions into `MessageMeta.carryover` on each compact boundary. `ConversationCarryover` exported from `src/engine/llm/types.ts`. Implemented in PR #31.
 
 ## Deferred (future PRs)

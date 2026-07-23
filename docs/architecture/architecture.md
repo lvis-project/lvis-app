@@ -270,6 +270,22 @@ exhaustive own-property readiness assertion before `assembleAppServices`; a
 missing producer is reported by field name instead of leaking `undefined` into
 the running application.
 
+## Current Large-Module Ownership
+
+The remaining high-churn surfaces keep one state owner while delegating focused
+implementation units:
+
+| Stable surface | Focused owners |
+|---|---|
+| `engine/turn/query-loop.ts` | `intercepted-meta-gate.ts` owns cross-agent meta-tool approval; `tool-scope.ts`, `knowledge-cap.ts`, and `compaction.ts` own their respective policies |
+| `plugins/runtime/index.ts` | invocation/query facade over `runtime-lifecycle.ts` and the single shared state owner in `runtime-state.ts` |
+| `preload/internal-surface.ts` | stable world builders and first-frame primes; `internal-api-surface.ts` owns the internal renderer API object |
+| `data/settings-store.ts` | persistence/service facade over `settings-defaults.ts` and pure normalization in `settings-normalization.ts` |
+| `ui/renderer/components/ChatSidePanel.tsx` | panel/tab composition over preview, layout, and workspace components in `chat-side-panel-*.tsx` |
+
+Every implementation unit remains below 1,600 lines. The split does not add a
+second state store, runtime alias, IPC channel, or policy path.
+
 ## Tool Governance
 
 All tool execution flows through the registry and executor:
