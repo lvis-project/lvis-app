@@ -3036,6 +3036,26 @@ export default async function createPlugin() {
     await expect(runtime.addPlugin("ghost")).rejects.toThrow(/not found in registry/);
   });
 
+  it("does not cold-add an inactive registry entry", async () => {
+    const pluginId = "p-inactive-cold-add";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: false }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+
+    await expect(runtime.addPlugin(pluginId)).rejects.toThrow(
+      /not found in registry or disabled/,
+    );
+    expect(runtime.listPluginIds()).toEqual([]);
+    expect(runtime.listToolNames()).not.toContain("p_inactive_cold_add_ping");
+  });
+
   it("addPlugin surfaces the manifest read error when registry entry exists but manifest is invalid (update-banner regression)", async () => {
     // Regression test for: addPlugin() throws "not found in registry" instead of the
     // real manifest-validation error when the newly installed manifest fails AJV validation.
