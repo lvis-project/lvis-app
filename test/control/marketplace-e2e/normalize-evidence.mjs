@@ -32,8 +32,8 @@ const expected = new Map([
   ["control-harness-manifest.json", { uid: 0, gid: 0, mode: 0o444 }],
   ["image-digests.json", { uid: 0, gid: 0, mode: 0o444 }],
   ["input-contract.json", { uid: 0, gid: 0, mode: 0o444 }],
-  ["host-lifecycle.json", { uid: 10001, gid: 10001, mode: 0o600 }],
   ["hostile-containment.json", { uid: 10002, gid: 10002, mode: 0o600 }],
+  ["host-attestation.json", { uid: 10003, gid: 10003, mode: 0o600 }],
   ["container-exits.json", { uid: 10003, gid: 10003, mode: 0o600 }],
 ]);
 const names = await readdir(root);

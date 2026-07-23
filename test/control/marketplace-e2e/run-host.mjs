@@ -7,8 +7,8 @@ const evidencePath = process.env.BUNDLE_E2E_EVIDENCE_PATH;
 if (candidateRoot !== "/candidate/app") {
   throw new Error("CANDIDATE_APP_ROOT must be exactly /candidate/app");
 }
-if (evidencePath !== "/evidence/host-lifecycle.json") {
-  throw new Error("evidence must use the isolated evidence volume");
+if (evidencePath !== "/tmp/private-evidence.json") {
+  throw new Error("raw test evidence must stay in container-private tmpfs");
 }
 if (process.getuid?.() === 0) {
   throw new Error("trusted Host control must run as a non-root user");
@@ -66,6 +66,12 @@ async function run(label, command, args, extraEnv = {}) {
 
 await run("harness-integrity", "node", [
   "/trusted/control/verify-harness.mjs",
+  "/trusted/control/harness-manifest.json",
+  process.env.CONTROL_SHA,
+]);
+await run("trusted-dependency-closure", "node", [
+  "/trusted/control/verify-trusted-dependencies.mjs",
+  "/trusted/control/trusted-dependencies.json",
   "/trusted/control/harness-manifest.json",
   process.env.CONTROL_SHA,
 ]);

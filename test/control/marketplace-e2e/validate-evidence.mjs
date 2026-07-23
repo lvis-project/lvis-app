@@ -33,7 +33,7 @@ const required = new Set([
   "control-harness-manifest.json",
   "image-digests.json",
   "input-contract.json",
-  "host-lifecycle.json",
+  "host-attestation.json",
   "hostile-containment.json",
   "container-exits.json",
 ]);
@@ -51,13 +51,6 @@ function exactKeys(value, keys, label) {
   ) {
     throw new Error(`${label} contains missing or unknown fields`);
   }
-}
-
-function safeCount(value, label, maximum = 100_000) {
-  if (!Number.isSafeInteger(value) || value < 0 || value > maximum) {
-    throw new Error(`${label} is not a bounded non-negative integer`);
-  }
-  return value;
 }
 
 async function validateFiles() {
@@ -94,7 +87,7 @@ const [
   harness,
   images,
   inputContract,
-  evidence,
+  hostAttestation,
   hostile,
   exits,
 ] = await Promise.all([
@@ -102,7 +95,7 @@ const [
   readJson("control-harness-manifest.json"),
   readJson("image-digests.json"),
   readJson("input-contract.json"),
-  readJson("host-lifecycle.json"),
+  readJson("host-attestation.json"),
   readJson("hostile-containment.json"),
   readJson("container-exits.json"),
 ]);
@@ -158,7 +151,7 @@ if (
   harness.schemaVersion !== 1
   || harness.controlSha !== bindings.controlSha
   || !Array.isArray(harness.files)
-  || harness.files.length < 6
+  || harness.files.length < 8
 ) {
   throw new Error("trusted harness binding is invalid");
 }
@@ -169,6 +162,7 @@ for (const file of harness.files) {
     || !/^[a-zA-Z0-9._/-]+$/.test(file.source)
     || typeof file.destination !== "string"
     || (!file.destination.startsWith("/candidate/app/test/e2e/")
+      && !file.destination.startsWith("/candidate/app/src/shared/")
       && !file.destination.startsWith("/trusted/control/")
       && !file.destination.startsWith("/trusted/runner/"))
     || !["100644", "100755"].includes(file.gitMode)
@@ -183,20 +177,6 @@ for (const file of harness.files) {
 exactKeys(images, ["marketplace", "ep", "host"], "image digests");
 for (const name of ["marketplace", "ep", "host"]) {
   if (!imageId.test(images[name] ?? "")) throw new Error(`invalid ${name} image digest`);
-}
-exactKeys(
-  exits,
-  ["host", "marketplace", "hostile", "hostImage", "marketplaceImage"],
-  "container exits",
-);
-if (
-  exits.host !== 0
-  || exits.marketplace !== 0
-  || exits.hostile !== 0
-  || exits.hostImage !== images.host
-  || exits.marketplaceImage !== images.marketplace
-) {
-  throw new Error("container exit or image replay binding is invalid");
 }
 
 exactKeys(
@@ -220,202 +200,41 @@ if (
 }
 
 exactKeys(
-  evidence,
-  ["actualEpAttendance", "containmentRehearsal", "liveLifecycle"],
-  "Host lifecycle evidence",
+  hostAttestation,
+  ["schemaVersion", "refs", "images", "hostExit", "phases"],
+  "Host attestation",
 );
-for (const section of ["liveLifecycle", "actualEpAttendance"]) {
-  const value = evidence[section];
-  if (
-    !isObject(value)
-    || value.hostSha !== bindings.inputs.host.commit
-    || value.marketplaceSha !== bindings.inputs.marketplace.commit
-    || value.sdkSha !== bindings.inputs.sdk.commit
-    || value.epApiSha !== bindings.inputs.ep.commit
-  ) {
-    throw new Error(`${section} refs do not match sealed inputs`);
-  }
-}
-
-const lifecycle = evidence.liveLifecycle;
 exactKeys(
-  lifecycle,
+  hostAttestation.refs,
+  ["host", "marketplace", "sdk", "epApi", "control"],
+  "Host attestation refs",
+);
+exactKeys(hostAttestation.images, ["host", "marketplace"], "Host attestation images");
+exactKeys(
+  hostAttestation.phases,
   [
-    "hostSha",
-    "marketplaceSha",
-    "sdkSha",
-    "epApiSha",
-    "approval",
-    "artifact",
-    "transitions",
-    "zeroOrphans",
+    "harnessIntegrity",
+    "trustedDependencyClosure",
+    "marketplaceTransport",
+    "marketplaceLifecycle",
+    "attendanceReadWriteReadback",
+    "reverseContainment",
   ],
-  "atomic lifecycle",
-);
-exactKeys(lifecycle.approval, ["slug", "hiddenBeforeApproval", "state"], "approval proof");
-exactKeys(lifecycle.artifact, ["slug", "hashes", "signerId"], "lifecycle artifact");
-const expectedTransitions = [
-  "installed",
-  "updated",
-  "rolled-back",
-  "disabled",
-  "re-enabled",
-  "uninstalled",
-];
-if (
-  lifecycle.zeroOrphans !== true
-  || lifecycle.approval.hiddenBeforeApproval !== true
-  || lifecycle.approval.state !== "approved"
-  || !Array.isArray(lifecycle.transitions)
-  || lifecycle.transitions.length !== expectedTransitions.length
-  || JSON.stringify(lifecycle.transitions.map(({ state }) => state))
-    !== JSON.stringify(expectedTransitions)
-  || !lifecycle.transitions.every((transition) => isObject(transition))
-) {
-  throw new Error("atomic Marketplace lifecycle evidence is incomplete");
-}
-
-const attendance = evidence.actualEpAttendance;
-exactKeys(
-  attendance,
-  [
-    "hostSha",
-    "marketplaceSha",
-    "sdkSha",
-    "epApiSha",
-    "artifact",
-    "marketplace",
-    "provider",
-    "install",
-    "attendance",
-    "retirement",
-  ],
-  "attendance evidence",
-);
-exactKeys(
-  attendance.marketplace,
-  [
-    "target",
-    "approvalState",
-    "installMode",
-    "pluginYankedBeforeUninstall",
-    "productionWriteExecuted",
-  ],
-  "attendance Marketplace proof",
-);
-exactKeys(
-  attendance.provider,
-  [
-    "target",
-    "productionCredentialsUsed",
-    "requestCount",
-    "authReads",
-    "calendarReads",
-    "calendarWrites",
-  ],
-  "attendance provider proof",
-);
-exactKeys(
-  attendance.attendance,
-  [
-    "date",
-    "before",
-    "missingGrantRejected",
-    "forgedGrantRejected",
-    "explicitConfirmation",
-    "grantId",
-    "writeStatus",
-    "providerVerified",
-    "readback",
-  ],
-  "attendance read-write-readback proof",
-);
-exactKeys(
-  attendance.retirement,
-  ["disabled", "uninstalled", "hookAndMcpAbsenceMatchesExactManifest", "zeroOrphans"],
-  "attendance retirement proof",
-);
-const providerRequestCount = safeCount(attendance.provider.requestCount, "provider request count");
-const providerAuthReads = safeCount(attendance.provider.authReads, "provider auth reads");
-const providerCalendarReads = safeCount(
-  attendance.provider.calendarReads,
-  "provider calendar reads",
-);
-const providerCalendarWrites = safeCount(
-  attendance.provider.calendarWrites,
-  "provider calendar writes",
+  "Host attestation phases",
 );
 if (
-  attendance.marketplace.target !== "loopback:8765"
-  || attendance.marketplace.approvalState !== "approved"
-  || attendance.marketplace.installMode !== "host-managed-bootstrap"
-  || attendance.marketplace.pluginYankedBeforeUninstall !== true
-  || attendance.marketplace.productionWriteExecuted !== false
-  || attendance.provider.target !== "loopback"
-  || attendance.provider.productionCredentialsUsed !== false
-  || providerRequestCount < providerAuthReads + providerCalendarReads + providerCalendarWrites
-  || providerCalendarReads < 2
-  || providerCalendarWrites < 1
-  || attendance.attendance.missingGrantRejected !== true
-  || attendance.attendance.forgedGrantRejected !== true
-  || attendance.attendance.explicitConfirmation !== true
-  || attendance.attendance.providerVerified !== true
-  || attendance.retirement.hookAndMcpAbsenceMatchesExactManifest !== true
-  || attendance.retirement.zeroOrphans !== true
+  hostAttestation.schemaVersion !== 1
+  || hostAttestation.refs.host !== bindings.inputs.host.commit
+  || hostAttestation.refs.marketplace !== bindings.inputs.marketplace.commit
+  || hostAttestation.refs.sdk !== bindings.inputs.sdk.commit
+  || hostAttestation.refs.epApi !== bindings.inputs.ep.commit
+  || hostAttestation.refs.control !== bindings.controlSha
+  || hostAttestation.images.host !== images.host
+  || hostAttestation.images.marketplace !== images.marketplace
+  || hostAttestation.hostExit !== 0
+  || Object.values(hostAttestation.phases).some((value) => value !== true)
 ) {
-  throw new Error("attendance read-write-readback or retirement evidence is incomplete");
-}
-
-const containment = evidence.containmentRehearsal;
-exactKeys(
-  containment,
-  [
-    "target",
-    "slug",
-    "priorVersion",
-    "affectedVersion",
-    "orderedActions",
-    "versionYank",
-    "afterVersionYank",
-    "pluginYank",
-    "afterPluginYank",
-    "correctiveSdk",
-    "hostRollbackBlockedBeforeContainment",
-    "hostRollbackAllowed",
-    "productionWriteExecuted",
-  ],
-  "containment rehearsal",
-);
-exactKeys(
-  containment.correctiveSdk,
-  [
-    "baseSha",
-    "baseVersion",
-    "proposedVersion",
-    "schemaSha256",
-    "builtLocally",
-    "remoteWriteExecuted",
-    "existingTagMoved",
-  ],
-  "corrective SDK proof",
-);
-if (
-  containment.target !== "loopback:8765"
-  || containment.productionWriteExecuted !== false
-  || containment.versionYank !== 200
-  || containment.pluginYank !== 200
-  || containment.hostRollbackBlockedBeforeContainment !== true
-  || containment.hostRollbackAllowed !== true
-  || JSON.stringify(containment.orderedActions)
-    !== JSON.stringify(["version-yank", "plugin-yank", "corrective-sdk", "host-decision"])
-  || containment.correctiveSdk.baseSha !== bindings.inputs.sdk.commit
-  || containment.correctiveSdk.baseVersion !== bindings.sdkVersion
-  || containment.correctiveSdk.schemaSha256 !== bindings.sdkSchemaSha256
-  || containment.correctiveSdk.builtLocally !== true
-  || containment.correctiveSdk.remoteWriteExecuted !== false
-  || containment.correctiveSdk.existingTagMoved !== false
-) {
-  throw new Error("containment evidence is not fail-closed");
+  throw new Error("Host attestation does not match trusted exit facts");
 }
 
 exactKeys(
@@ -433,6 +252,7 @@ exactKeys(
     "hostMarkerWriteBlocked",
     "sealedInputMutationBlocked",
     "internalMarketplaceReachable",
+    "externalDnsBlocked",
     "externalEgressBlocked",
   ],
   "hostile containment",
@@ -450,9 +270,25 @@ if (
   || hostile.hostMarkerWriteBlocked !== true
   || hostile.sealedInputMutationBlocked !== true
   || hostile.internalMarketplaceReachable !== true
+  || hostile.externalDnsBlocked !== true
   || hostile.externalEgressBlocked !== true
 ) {
   throw new Error("hostile containment rehearsal did not prove isolation");
+}
+
+exactKeys(
+  exits,
+  ["host", "marketplace", "hostile", "hostImage", "marketplaceImage"],
+  "container exits",
+);
+if (
+  exits.host !== 0
+  || exits.marketplace !== 0
+  || exits.hostile !== 0
+  || exits.hostImage !== images.host
+  || exits.marketplaceImage !== images.marketplace
+) {
+  throw new Error("container exit or image replay binding is invalid");
 }
 
 if (await realpath(exportRoot) !== exportRoot) {
@@ -484,14 +320,14 @@ const summary = {
     epApi: bindings.inputs.ep.commit,
   },
   checks: {
-    lifecycleTransitions: expectedTransitions.length,
-    zeroLifecycleOrphans: true,
-    attendanceReadVerified: true,
-    attendanceWriteVerified: true,
-    attendanceProviderVerified: true,
-    zeroAttendanceOrphans: true,
+    harnessIntegrityVerified: true,
+    trustedDependencyClosureVerified: true,
+    marketplaceTransportVerified: true,
+    marketplaceLifecycleVerified: true,
+    attendanceReadWriteReadbackVerified: true,
     reverseContainmentVerified: true,
     hostileIsolationVerified: true,
+    externalDnsBlocked: true,
     containerExitsVerified: true,
   },
   digests: {
@@ -499,7 +335,7 @@ const summary = {
     harnessManifest: await digest("control-harness-manifest.json"),
     imageDigests: await digest("image-digests.json"),
     inputContract: await digest("input-contract.json"),
-    hostLifecycle: await digest("host-lifecycle.json"),
+    hostAttestation: await digest("host-attestation.json"),
     hostileContainment: await digest("hostile-containment.json"),
     containerExits: await digest("container-exits.json"),
   },

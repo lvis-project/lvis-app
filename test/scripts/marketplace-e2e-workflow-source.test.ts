@@ -13,7 +13,18 @@ const hostileControl = read("test/control/marketplace-e2e/run-hostile.mjs");
 const evidenceValidator = read("test/control/marketplace-e2e/validate-evidence.mjs");
 const evidenceNormalizer = read("test/control/marketplace-e2e/normalize-evidence.mjs");
 const harnessManifest = read("test/control/marketplace-e2e/create-harness-manifest.mjs");
+const dependencyVerifier = read(
+  "test/control/marketplace-e2e/verify-trusted-dependencies.mjs",
+);
+const trustedRunnerPackage = read("test/control/marketplace-e2e/runner-package.json");
+const trustedRunnerDependencies = (JSON.parse(trustedRunnerPackage) as {
+  dependencies: Record<string, string>;
+}).dependencies;
+const hostAttestationWriter = read(
+  "test/control/marketplace-e2e/write-host-attestation.mjs",
+);
 const seededElectron = read("test/e2e/ui/seeded-electron.ts");
+const attendance = read("test/e2e/ui/ep-attendance-live.spec.ts");
 const containment = read("test/e2e/marketplace-containment-rehearsal.test.ts");
 
 function count(source: string, needle: string): number {
@@ -162,12 +173,23 @@ describe("trusted marketplace E2E workflow", () => {
       ["EP", epDockerfile],
     ] as const) {
       expect(source).toContain("COPY --from=candidate");
-      expect(source).toContain("RUN --network=none");
-      const candidateRun = source.indexOf("RUN --network=none");
-      const firstTrustedCopy = source.indexOf("COPY --from=control");
-      expect(candidateRun, `${name} candidate RUN`).toBeGreaterThan(-1);
-      expect(firstTrustedCopy, `${name} trusted copy`).toBeGreaterThan(candidateRun);
+      const candidateStart = source.indexOf(" AS candidate-build");
+      const candidateStage = source.slice(
+        candidateStart,
+        source.indexOf("\nFROM ", candidateStart + 1),
+      );
+      expect(candidateStart, `${name} candidate stage`).toBeGreaterThan(-1);
+      expect(candidateStage).toContain("RUN --network=none");
+      expect(candidateStage).not.toContain("COPY --from=control");
     }
+    expect(hostDockerfile).toContain("FROM ${PLAYWRIGHT_IMAGE} AS native-toolchain");
+    expect(hostDockerfile).toContain("build-essential");
+    expect(hostDockerfile).toContain("node-gyp install");
+    expect(hostDockerfile).toContain("--target=43.0.0");
+    expect(hostDockerfile).toContain("--devdir=/root/.electron-gyp");
+    expect(hostDockerfile).toContain("/root/.electron-gyp/43.0.0");
+    expect(hostDockerfile).toContain("--force --sequential");
+    expect(workflow).toContain('[[ "$host_electron_lock" == "43.0.0" ]]');
     expect(orchestrate).toContain(
       '--build-context "candidate=$candidate_context"',
     );
@@ -191,6 +213,41 @@ describe("trusted marketplace E2E workflow", () => {
     expect(harnessManifest).toContain('"ls-tree", "-r", "-z"');
     expect(harnessManifest).toContain("test/e2e/ui/ep-attendance-live.spec.ts");
     expect(harnessManifest).toContain("test/e2e/ui/marketplace-live-lifecycle.spec.ts");
+    expect(harnessManifest).toContain("src/shared/llm-vendor-defaults.ts");
+    expect(harnessManifest).toContain("src/shared/theme-bundles.ts");
+    expect(hostDockerfile).toContain(
+      "src/shared/llm-vendor-defaults.ts /candidate/app/src/shared/llm-vendor-defaults.ts",
+    );
+    expect(hostDockerfile).toContain(
+      "src/shared/theme-bundles.ts /candidate/app/src/shared/theme-bundles.ts",
+    );
+    for (const dependency of [
+      "@modelcontextprotocol/ext-apps",
+      "@playwright/test",
+      "adm-zip",
+      "electron",
+      "esbuild",
+      "node-gyp",
+      "playwright",
+      "vitest",
+    ]) {
+      expect(trustedRunnerPackage).toContain(`"${dependency}"`);
+      expect(hostDockerfile).toContain(`/trusted/runner/node_modules/${dependency}`);
+    }
+    expect(trustedRunnerDependencies).toEqual({
+      "@modelcontextprotocol/ext-apps": "1.7.4",
+      "@playwright/test": "1.60.0",
+      "adm-zip": "0.6.0",
+      electron: "43.0.0",
+      esbuild: "0.28.0",
+      "node-gyp": "12.3.0",
+      playwright: "1.60.0",
+      vitest: "4.1.6",
+    });
+    expect(hostControl).toContain("trusted-dependency-closure");
+    expect(dependencyVerifier).toContain("createRequire(pathToFileURL(candidateTest))");
+    expect(dependencyVerifier).toContain("await realpath(requireFromTrustedTest.resolve(entry.name))");
+    expect(dependencyVerifier).toContain("manifestHash !== entry.packageJsonSha256");
     expect(hostControl).toContain("harness-integrity");
     expect(seededElectron).toContain("CANDIDATE_APP_ROOT");
     expect(seededElectron).toContain("CANDIDATE_APP_ROOT must be an absolute path");
@@ -222,14 +279,33 @@ describe("trusted marketplace E2E workflow", () => {
       orchestrate.indexOf('--name "$host_container"'),
       orchestrate.indexOf("host_exit=$?"),
     );
+    expect(hostileRun).toContain("type=volume,src=$evidence_volume,dst=/evidence");
+    expect(hostRun).toContain("type=volume,src=$artifacts_volume,dst=/artifacts,readonly");
+    expect(hostRun).not.toContain("$evidence_volume");
+    expect(hostRun).not.toContain("/evidence");
+    expect(hostRun).toContain("BUNDLE_E2E_EVIDENCE_PATH=/tmp/private-evidence.json");
     for (const run of [hostileRun, hostRun]) {
-      expect(run).toContain("type=volume");
       expect(run).not.toContain("type=bind");
       expect(run).not.toContain("/var/run/docker.sock");
     }
+    expect(orchestrate).toContain("--dns 127.0.0.1");
+    expect(orchestrate).toContain("--dns-option timeout:1");
+    expect(orchestrate).toContain("--dns-option attempts:1");
+    expect(orchestrate).toContain('--add-host "marketplace:$marketplace_ip"');
+    expect(orchestrate).toContain("address.is_private");
+    expect(orchestrate).toContain("address.is_link_local");
+    const marketplaceRun = orchestrate.slice(
+      orchestrate.indexOf('docker run -d \\\n  --name "$marketplace_container"'),
+      orchestrate.indexOf("marketplace_network_count="),
+    );
+    expect(marketplaceRun).toContain("--dns 127.0.0.1");
+    expect(marketplaceRun).toContain("--dns-option timeout:1");
+    expect(marketplaceRun).toContain("--dns-option attempts:1");
     expect(hostileControl).toContain("CapEff:");
     expect(hostileControl).toContain("/var/run/docker.sock");
     expect(hostileControl).toContain("externalEgressBlocked");
+    expect(hostileControl).toContain("externalDnsBlocked");
+    expect(hostileControl).toContain(".invalid");
     expect(hostileControl).toContain("internalMarketplaceReachable");
     expect(hostileControl).toContain("rootReadOnly");
     for (const proof of [
@@ -280,8 +356,9 @@ describe("trusted marketplace E2E workflow", () => {
     expect(evidenceDockerfile).toContain("--chown=0:0 --chmod=0444");
     expect(evidenceDockerfile).toContain("USER 10003:10003");
     expect(evidenceNormalizer).toContain(
-      '["host-lifecycle.json", { uid: 10001, gid: 10001, mode: 0o600 }]',
+      '["host-attestation.json", { uid: 10003, gid: 10003, mode: 0o600 }]',
     );
+    expect(evidenceNormalizer).not.toContain("host-lifecycle.json");
     expect(evidenceNormalizer).toContain(
       '["hostile-containment.json", { uid: 10002, gid: 10002, mode: 0o600 }]',
     );
@@ -299,8 +376,7 @@ describe("trusted marketplace E2E workflow", () => {
       "stat.mode",
       "replay binding",
       "container exit or image replay binding",
-      "attendance read-write-readback",
-      "containment evidence is not fail-closed",
+      "Host attestation does not match trusted exit facts",
       "externalEgressBlocked",
       "flag: \"wx\"",
     ]) {
@@ -308,16 +384,17 @@ describe("trusted marketplace E2E workflow", () => {
     }
     expect(evidenceValidator).toContain('resolve(exportRoot, "validated-summary.json")');
     expect(evidenceValidator).toContain('exportedNames.length !== 1');
-    expect(evidenceValidator).toContain("attendanceReadVerified: true");
-    expect(evidenceValidator).toContain("attendanceWriteVerified: true");
-    expect(evidenceValidator).not.toContain("attendanceCalendarReads:");
-    expect(evidenceValidator).not.toContain("attendanceCalendarWrites:");
+    expect(evidenceValidator).toContain("attendanceReadWriteReadbackVerified: true");
+    expect(evidenceValidator).toContain("hostAttestation: await digest");
+    expect(evidenceValidator).not.toContain("host-lifecycle.json");
+    expect(hostAttestationWriter).toContain("process.getuid?.() !== 10003");
+    expect(orchestrate).toContain("/trusted/control/write-host-attestation.mjs");
     for (const raw of [
       "input-bindings.json",
       "control-harness-manifest.json",
       "image-digests.json",
       "input-contract.json",
-      "host-lifecycle.json",
+      "host-attestation.json",
       "hostile-containment.json",
       "container-exits.json",
     ]) {
@@ -338,7 +415,7 @@ describe("trusted marketplace E2E workflow", () => {
       "zeroOrphans",
     ]) {
       expect(
-        `${workflow}\n${hostControl}\n${containment}\n${evidenceValidator}`,
+        `${workflow}\n${hostControl}\n${attendance}\n${containment}\n${evidenceValidator}`,
       ).toContain(proof);
     }
   });

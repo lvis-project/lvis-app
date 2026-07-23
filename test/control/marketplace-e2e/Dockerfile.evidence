@@ -16,6 +16,7 @@ COPY --from=evidence --chown=0:0 --chmod=0444 \
   /evidence/
 COPY --from=control --chmod=0555 \
   test/control/marketplace-e2e/normalize-evidence.mjs \
+  test/control/marketplace-e2e/write-host-attestation.mjs \
   test/control/marketplace-e2e/write-container-exits.mjs \
   test/control/marketplace-e2e/validate-evidence.mjs \
   /trusted/control/

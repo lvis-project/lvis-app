@@ -217,6 +217,9 @@ docker run -d \
   --name "$marketplace_container" \
   --network "$network" \
   --network-alias marketplace \
+  --dns 127.0.0.1 \
+  --dns-option timeout:1 \
+  --dns-option attempts:1 \
   --user 10001:10001 \
   --read-only \
   --cap-drop ALL \
@@ -230,6 +233,41 @@ docker run -d \
   "$marketplace_image" \
   >"$private_logs/marketplace-container-id.log" 2>&1 \
   || fail "Marketplace runtime failed to start"
+
+marketplace_network_count="$(
+  docker inspect --format '{{len .NetworkSettings.Networks}}' "$marketplace_container"
+)"
+[[ "$marketplace_network_count" == 1 ]] \
+  || fail "Marketplace runtime must attach to exactly one internal network"
+marketplace_ip="$(
+  docker inspect \
+    --format "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" \
+    "$marketplace_container"
+)"
+python3 - "$marketplace_ip" <<'PY' \
+  || fail "Marketplace runtime IP is not a private non-loopback IPv4 address"
+import ipaddress
+import sys
+
+address = ipaddress.ip_address(sys.argv[1])
+if (
+    address.version != 4
+    or not address.is_private
+    or address.is_loopback
+    or address.is_link_local
+    or address.is_unspecified
+    or address.is_multicast
+):
+    raise SystemExit(1)
+PY
+dns_isolation_flags=(
+  --dns 127.0.0.1
+  --dns-option timeout:1
+  --dns-option attempts:1
+  --add-host "marketplace:$marketplace_ip"
+)
+host_runtime_flags+=("${dns_isolation_flags[@]}")
+hostile_runtime_flags+=("${dns_isolation_flags[@]}")
 
 marketplace_ready=false
 for _ in $(seq 1 60); do
@@ -263,7 +301,6 @@ set +e
 docker run \
   --name "$host_container" \
   "${host_runtime_flags[@]}" \
-  --mount "type=volume,src=$evidence_volume,dst=/evidence" \
   --mount "type=volume,src=$artifacts_volume,dst=/artifacts,readonly" \
   --env M4_E2E=1 \
   --env MARKETPLACE_URL=http://127.0.0.1:8765 \
@@ -273,7 +310,7 @@ docker run \
   --env MARKETPLACE_UPSTREAM_PORT=8765 \
   --env CANDIDATE_APP_ROOT=/candidate/app \
   --env PLAYWRIGHT_OUTPUT_DIR=/tmp/test-results \
-  --env BUNDLE_E2E_EVIDENCE_PATH=/evidence/host-lifecycle.json \
+  --env BUNDLE_E2E_EVIDENCE_PATH=/tmp/private-evidence.json \
   --env "HOST_SHA=$HOST_SHA" \
   --env "MARKETPLACE_SHA=$MARKETPLACE_SHA" \
   --env "SDK_SHA=$SDK_SHA" \
@@ -295,6 +332,33 @@ observed_host_image="$(
 [[ "$observed_host_exit" == 0 ]] || fail "Host container exit code was not zero"
 [[ "$observed_host_image" == "$(jq -r '.host' "$evidence_root/image-digests.json")" ]] \
   || fail "Host container image does not match the built digest"
+observed_marketplace_image="$(
+  docker inspect --format '{{.Image}}' "$marketplace_container"
+)"
+[[ "$observed_marketplace_image" \
+  == "$(jq -r '.marketplace' "$evidence_root/image-digests.json")" ]] \
+  || fail "running Marketplace image does not match the built digest"
+
+docker run --rm \
+  --network none \
+  --user 10003:10003 \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --mount "type=volume,src=$evidence_volume,dst=/evidence" \
+  --env HOST_EXIT=0 \
+  --env "HOST_IMAGE=$observed_host_image" \
+  --env "MARKETPLACE_IMAGE=$observed_marketplace_image" \
+  --env "HOST_SHA=$HOST_SHA" \
+  --env "MARKETPLACE_SHA=$MARKETPLACE_SHA" \
+  --env "SDK_SHA=$SDK_SHA" \
+  --env "EP_API_SHA=$EP_API_SHA" \
+  --env "CONTROL_SHA=$CONTROL_SHA" \
+  --entrypoint node \
+  "$evidence_image" \
+  /trusted/control/write-host-attestation.mjs \
+  >"$private_logs/host-attestation-write.log" 2>&1 \
+  || fail "trusted Host attestation write failed"
 
 docker stop --time 20 "$marketplace_container" \
   >"$private_logs/marketplace-stop.log" 2>&1 \

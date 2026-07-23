@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { lookup } from "node:dns/promises";
 import {
   access,
   lstat,
@@ -119,6 +120,14 @@ if (!sudoDenied) throw new Error("passwordless sudo unexpectedly succeeded");
 const internalHealth = await fetch("http://marketplace:8765/api/v1/health");
 if (!internalHealth.ok) throw new Error("internal Marketplace network is unreachable");
 
+let externalDnsBlocked = false;
+try {
+  await lookup(`lvis-e2e-dns-${process.pid}-${Date.now()}.invalid`, { all: true });
+} catch {
+  externalDnsBlocked = true;
+}
+if (!externalDnsBlocked) throw new Error("external DNS resolution is available");
+
 const externalEgressBlocked = await new Promise((resolve) => {
   const socket = net.connect({ host: "1.1.1.1", port: 443 });
   let settled = false;
@@ -149,6 +158,7 @@ await writeFile(
     hostMarkerWriteBlocked: true,
     sealedInputMutationBlocked: true,
     internalMarketplaceReachable: true,
+    externalDnsBlocked,
     externalEgressBlocked: true,
   }, null, 2)}\n`,
   { flag: "wx", mode: 0o600 },

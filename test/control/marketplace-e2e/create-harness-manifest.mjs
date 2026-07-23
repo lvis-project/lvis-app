@@ -18,14 +18,20 @@ const dirty = execFileSync("git", ["-C", controlRoot, "status", "--porcelain=v1"
 if (dirty) throw new Error("trusted control checkout is dirty");
 
 const fixed = [
+  "src/shared/llm-vendor-defaults.ts",
+  "src/shared/theme-bundles.ts",
   "scripts/run-vitest-under-electron.mjs",
   "scripts/normalize-electron-node-runtime.mjs",
+  "test/control/marketplace-e2e/runner-package.json",
+  "test/control/marketplace-e2e/runner-bun.lock",
+  "test/control/marketplace-e2e/trusted-dependencies.json",
   "test/control/marketplace-e2e/vitest.control.config.ts",
   "test/control/marketplace-e2e/playwright.control.config.ts",
   "test/control/marketplace-e2e/loopback-proxy.mjs",
   "test/control/marketplace-e2e/run-host.mjs",
   "test/control/marketplace-e2e/run-hostile.mjs",
   "test/control/marketplace-e2e/verify-harness.mjs",
+  "test/control/marketplace-e2e/verify-trusted-dependencies.mjs",
 ];
 const tree = execFileSync(
   "git",
@@ -58,8 +64,16 @@ const files = entries.map(({ source, gitMode }) => {
   let destination;
   if (source.startsWith("test/e2e/")) {
     destination = `/candidate/app/${source}`;
+  } else if (source.startsWith("src/shared/")) {
+    destination = `/candidate/app/${source}`;
   } else if (source.startsWith("scripts/")) {
     destination = `/trusted/runner/${source}`;
+  } else if (source.endsWith("/runner-package.json")) {
+    destination = "/trusted/runner/package.json";
+  } else if (source.endsWith("/runner-bun.lock")) {
+    destination = "/trusted/runner/bun.lock";
+  } else if (source.endsWith("/trusted-dependencies.json")) {
+    destination = "/trusted/control/trusted-dependencies.json";
   } else if (
     source.endsWith("/vitest.control.config.ts")
     || source.endsWith("/playwright.control.config.ts")

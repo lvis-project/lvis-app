@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "name": "@modelcontextprotocol/ext-apps",
+      "version": "1.7.4",
+      "packageJsonSha256": "5f238c430e0c3a62f8be2a918a05da0d09ccf369b695d85237afd92a81f194df"
+    },
+    {
+      "name": "@playwright/test",
+      "version": "1.60.0",
+      "packageJsonSha256": "cf92117ef1d8cbf1e4b2dffb63a0da552c0173bd6052f0f45711c0f00b79dc99"
+    },
+    {
+      "name": "adm-zip",
+      "version": "0.6.0",
+      "packageJsonSha256": "76a6fc3e9bf811c9ada1173b7a7c0621d36329c29c221428f46f75762d3aeb5a"
+    },
+    {
+      "name": "electron",
+      "version": "43.0.0",
+      "packageJsonSha256": "c00faae87b1a71e1efee71a42003458170c47d226acb8bff1f61b5a8407ddb7a"
+    },
+    {
+      "name": "esbuild",
+      "version": "0.28.0",
+      "packageJsonSha256": "4316bc9a54bbf659d5760f299910d1824045178557e0aea6a1e3c64148fe8a50"
+    },
+    {
+      "name": "node-gyp",
+      "version": "12.3.0",
+      "packageJsonSha256": "d19b594bcbf958f80ec6863a44be2c5bd3ad84077c1de5f57b18168014fa97bd"
+    },
+    {
+      "name": "playwright",
+      "version": "1.60.0",
+      "packageJsonSha256": "8be9edc5642a8c761b677e7af8b9937f36c0443a91e14765877716d70034e5bf"
+    },
+    {
+      "name": "vitest",
+      "version": "4.1.6",
+      "packageJsonSha256": "16e78981f0c4f0b28c7056c06c0d87ee7c65821c721915df941996437a4267a9"
+    }
+  ]
+}

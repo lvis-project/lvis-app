@@ -5,7 +5,15 @@ ARG PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad90
 
 FROM ${BUN_IMAGE} AS bun-tool
 
-FROM ${PLAYWRIGHT_IMAGE} AS dependencies
+FROM ${PLAYWRIGHT_IMAGE} AS native-toolchain
+USER root
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential \
+      python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM native-toolchain AS dependencies
 USER root
 COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /deps
@@ -13,21 +21,7 @@ COPY --from=candidate package.json bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile --ignore-scripts
 
-FROM ${PLAYWRIGHT_IMAGE} AS candidate-build
-USER root
-COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
-WORKDIR /candidate/app
-COPY --from=candidate . .
-COPY --from=dependencies /deps/node_modules ./node_modules
-# Only candidate application code is present. Candidate scripts execute in a
-# disposable BuildKit namespace with no network, tokens, trusted harness, or
-# sibling repository sources.
-RUN --network=none ./node_modules/.bin/electron-rebuild \
-      --force --only better-sqlite3,node-pty \
-    && bun run build \
-    && test -s dist/src/main/main.js
-
-FROM ${PLAYWRIGHT_IMAGE} AS trusted-runner
+FROM native-toolchain AS trusted-runner
 USER root
 COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /trusted/runner
@@ -35,6 +29,33 @@ COPY --from=control test/control/marketplace-e2e/runner-package.json package.jso
 COPY --from=control test/control/marketplace-e2e/runner-bun.lock bun.lock
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile
+
+FROM trusted-runner AS trusted-electron-headers
+USER root
+RUN mkdir -p /root/.electron-gyp \
+    && /trusted/runner/node_modules/.bin/node-gyp install \
+      --ensure \
+      --target=43.0.0 \
+      --dist-url=https://www.electronjs.org/headers \
+      --devdir=/root/.electron-gyp
+
+FROM native-toolchain AS candidate-build
+USER root
+COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
+WORKDIR /candidate/app
+COPY --from=candidate . .
+COPY --from=dependencies /deps/node_modules ./node_modules
+COPY --from=trusted-electron-headers \
+  /root/.electron-gyp/43.0.0 /root/.electron-gyp/43.0.0
+# Only candidate application code is present. Candidate scripts execute in a
+# disposable BuildKit namespace with no network, tokens, trusted harness, or
+# sibling repository sources.
+RUN --network=none \
+    test "$(node -p 'require("./node_modules/electron/package.json").version')" = "43.0.0" \
+    && ./node_modules/.bin/electron-rebuild \
+      --force --sequential --only better-sqlite3,node-pty \
+    && bun run build \
+    && test -s dist/src/main/main.js
 
 FROM ${PLAYWRIGHT_IMAGE} AS runtime
 ARG CONTROL_SHA
@@ -52,19 +73,46 @@ COPY --from=candidate-build /candidate/app /candidate/app
 RUN rm -rf /candidate/app/test/e2e /candidate/app/.trusted \
     && mkdir -p /candidate/app/test/e2e /candidate/app/.trusted \
     && rm -rf \
+      /candidate/app/node_modules/@modelcontextprotocol/ext-apps \
       /candidate/app/node_modules/@playwright/test \
+      /candidate/app/node_modules/adm-zip \
+      /candidate/app/node_modules/electron \
+      /candidate/app/node_modules/esbuild \
+      /candidate/app/node_modules/node-gyp \
       /candidate/app/node_modules/playwright \
       /candidate/app/node_modules/playwright-core \
       /candidate/app/node_modules/vitest \
+    && mkdir -p /candidate/app/node_modules/@modelcontextprotocol \
+    && ln -s /trusted/runner/node_modules/@modelcontextprotocol/ext-apps \
+      /candidate/app/node_modules/@modelcontextprotocol/ext-apps \
     && ln -s /trusted/runner/node_modules/@playwright/test \
       /candidate/app/node_modules/@playwright/test \
+    && ln -s /trusted/runner/node_modules/adm-zip \
+      /candidate/app/node_modules/adm-zip \
+    && ln -s /trusted/runner/node_modules/electron \
+      /candidate/app/node_modules/electron \
+    && ln -s /trusted/runner/node_modules/esbuild \
+      /candidate/app/node_modules/esbuild \
+    && ln -s /trusted/runner/node_modules/node-gyp \
+      /candidate/app/node_modules/node-gyp \
     && ln -s /trusted/runner/node_modules/playwright \
       /candidate/app/node_modules/playwright \
     && ln -s /trusted/runner/node_modules/playwright-core \
       /candidate/app/node_modules/playwright-core \
     && ln -s /trusted/runner/node_modules/vitest \
       /candidate/app/node_modules/vitest
+RUN test ! -L /candidate/app/src \
+    && test ! -L /candidate/app/src/shared \
+    && rm -f \
+      /candidate/app/src/shared/llm-vendor-defaults.js \
+      /candidate/app/src/shared/llm-vendor-defaults.ts \
+      /candidate/app/src/shared/theme-bundles.js \
+      /candidate/app/src/shared/theme-bundles.ts
 COPY --from=control --chown=10001:10001 test/e2e /candidate/app/test/e2e
+COPY --from=control --chown=10001:10001 \
+  src/shared/llm-vendor-defaults.ts /candidate/app/src/shared/llm-vendor-defaults.ts
+COPY --from=control --chown=10001:10001 \
+  src/shared/theme-bundles.ts /candidate/app/src/shared/theme-bundles.ts
 COPY --from=control --chown=10001:10001 \
   scripts/run-vitest-under-electron.mjs /trusted/runner/scripts/run-vitest-under-electron.mjs
 COPY --from=control --chown=10001:10001 \
@@ -81,13 +129,27 @@ COPY --from=control --chown=10001:10001 \
   test/control/marketplace-e2e/run-hostile.mjs /trusted/control/run-hostile.mjs
 COPY --from=control --chown=10001:10001 \
   test/control/marketplace-e2e/verify-harness.mjs /trusted/control/verify-harness.mjs
+COPY --from=control --chown=10001:10001 \
+  test/control/marketplace-e2e/verify-trusted-dependencies.mjs \
+  /trusted/control/verify-trusted-dependencies.mjs
+COPY --from=control --chown=10001:10001 \
+  test/control/marketplace-e2e/trusted-dependencies.json \
+  /trusted/control/trusted-dependencies.json
 COPY --from=evidence --chown=10001:10001 \
   control-harness-manifest.json /trusted/control/harness-manifest.json
-RUN chmod -R a-w /candidate/app/test/e2e /trusted \
+RUN chmod -R a-w \
+      /candidate/app/test/e2e \
+      /candidate/app/src/shared/llm-vendor-defaults.ts \
+      /candidate/app/src/shared/theme-bundles.ts \
+      /trusted \
     && test -n "${CONTROL_SHA}" \
     && test -n "${HOST_SHA}" \
     && node /trusted/control/verify-harness.mjs \
-      /trusted/control/harness-manifest.json "${CONTROL_SHA}"
+      /trusted/control/harness-manifest.json "${CONTROL_SHA}" \
+    && node /trusted/control/verify-trusted-dependencies.mjs \
+      /trusted/control/trusted-dependencies.json \
+      /trusted/control/harness-manifest.json \
+      "${CONTROL_SHA}"
 LABEL org.lvis.control-sha="${CONTROL_SHA}" \
       org.lvis.host-sha="${HOST_SHA}"
 USER 10001:10001
