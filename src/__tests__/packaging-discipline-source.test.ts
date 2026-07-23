@@ -18,7 +18,7 @@ describe("installer smoke and packaging discipline", () => {
     expect(workflow).toContain("xvfb-run -a");
     expect(workflow).toContain("sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb");
     expect(workflow).toContain(
-      "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.0.0",
+      "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
     );
     expect(workflow).toContain("~/.bun/install/cache");
     expect(workflow).toContain("ELECTRON_BUILDER_CACHE");
