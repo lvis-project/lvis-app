@@ -90,6 +90,17 @@ import type { LateBindingRefs } from "../plugin-runtime.js";
 
 const log = createLogger("lvis");
 
+function assertActiveHostApi(
+  pluginId: string,
+  incarnation: PluginHostApiIncarnation,
+  memberPath: string,
+): void {
+  if (incarnation.isActive()) return;
+  throw new Error(
+    `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
+  );
+}
+
 /** Revoke every callable surface of an obsolete HostApi incarnation. */
 function enforceActiveHostApi(
   pluginId: string,
@@ -106,11 +117,7 @@ function enforceActiveHostApi(
         const memberPath = `${path}.${String(property)}`;
         if (typeof value === "function") {
           return (...args: unknown[]) => {
-            if (!incarnation.isActive()) {
-              throw new Error(
-                `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
-              );
-            }
+            assertActiveHostApi(pluginId, incarnation, memberPath);
             const result = Reflect.apply(value, currentTarget, args) as unknown;
             if (
               memberPath !== "hostApi.config.set"
@@ -824,11 +831,10 @@ export function createHostApiFactory(
         // AFTER the capability + SSRF gates so only an egress that would actually
         // happen can prompt. Origin-only target (no path/query that can carry tokens).
         //
-        // Flag-OFF short-circuit BEFORE the await: when `hostClassifiesRisk` is
-        // OFF (disabled/unset; the shipped default is ON) the gate is skipped
-        // entirely — not even an awaited
-        // already-resolved Promise (one microtask tick) — so the flag-OFF egress
-        // path is byte-for-byte today's behaviour with ZERO extra work.
+        // Flag-OFF short-circuit BEFORE the approval await: when
+        // `hostClassifiesRisk` is OFF, the gate is skipped entirely. The
+        // synchronous incarnation recheck remains mandatory because upstream
+        // capability/SSRF validation can itself cross async boundaries.
         if (hostClassifiesRiskEnabled()) {
           await gateMutatingEffect({
             pluginId,
@@ -839,6 +845,7 @@ export function createHostApiFactory(
             flagEnabled: hostClassifiesRiskEnabled,
           });
         }
+        assertActiveHostApi(pluginId, hostIncarnation, "hostApi.hostFetch");
         // The host-observed effect for this egress was recorded above from the
         // SAME verb snapshot that drives `decision` and pins the wire below, so
         // the recorded effect == decision.effect == the wire verb (no divergence).
@@ -1314,7 +1321,13 @@ export function createHostApiFactory(
         return routinesStore.list().some((r) => r.source === source);
       },
         }),
-        { pluginId, approvalGate, flagEnabled: hostClassifiesRiskEnabled },
+        {
+          pluginId,
+          approvalGate,
+          flagEnabled: hostClassifiesRiskEnabled,
+          assertActive: () =>
+            assertActiveHostApi(pluginId, hostIncarnation, "hostApi.approvedEffect"),
+        },
       ));
   };
 }

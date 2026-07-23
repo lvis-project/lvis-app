@@ -23,7 +23,6 @@ import {
 } from "./snapshots.js";
 import {
   buildImportUrl,
-  createNoopHostApi,
   ensurePluginDataDir,
   resolveEntryPath,
 } from "./sandbox.js";
@@ -53,13 +52,20 @@ const HOST_API_OPERATION_DRAIN_TIMEOUT_MS = 10_000;
 
 export type RestartPluginResult = "started" | "deferred" | "failed" | undefined;
 
+export interface PendingRestartCancellation {
+  generation: number;
+  cancelled: boolean;
+  readonly promise: Promise<void>;
+  cancel(): void;
+}
+
 export abstract class PluginRuntimeState {
   protected readonly hostRoot: string;
   protected readonly manifestPaths: string[];
   protected readonly registryPath?: string;
   protected readonly pluginsRoot?: string;
   protected readonly configStore: ConfigOverrideStore;
-  protected readonly createHostApi?: (
+  protected readonly createHostApi: (
     pluginId: string,
     manifest: PluginManifest,
     pluginDataDir: string,
@@ -108,6 +114,7 @@ export abstract class PluginRuntimeState {
   protected readonly preparation: PreparationTracker;
   protected readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
   protected readonly pendingRestartPreparations = new Map<string, Promise<void>>();
+  protected readonly pendingRestartCancellations = new Map<string, PendingRestartCancellation>();
   /** Monotonic generation used to reject stale async add/restart commits. */
   protected readonly pluginLifecycleGenerations = new Map<string, number>();
   /**
@@ -118,6 +125,8 @@ export abstract class PluginRuntimeState {
   protected readonly quarantinedPluginLifecycles = new Map<string, string>();
   /** HostApi incarnations whose plugin factory has not committed an instance. */
   private readonly pendingHostApiIncarnations = new Map<string, Set<() => void>>();
+  /** A RuntimePlugin instance's stop hook must execute at most once. */
+  private readonly pluginStopOperations = new WeakMap<RuntimePlugin, Promise<boolean>>();
   protected nextPluginLifecycleGeneration = 0;
   protected readonly pluginUiRevisions = new Map<string, number>();
   protected nextPluginUiRevision = 0;
@@ -135,6 +144,11 @@ export abstract class PluginRuntimeState {
   ): Promise<SinglePluginStartResult>;
 
   constructor(options: PluginRuntimeOptions) {
+    if (typeof options.createHostApi !== "function") {
+      throw new Error(
+        "PluginRuntime requires an explicit createHostApi factory; test harnesses may inject createNoopHostApiForTests",
+      );
+    }
     this.hostRoot = resolve(options.hostRoot);
     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));
     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
@@ -237,10 +251,19 @@ export abstract class PluginRuntimeState {
       pending = false;
     };
     deactivate = () => {
+      if (!active && !pending) return;
       active = false;
       lifecycleHookScope.active = false;
       lifecycleHookScope.depth = 0;
-      if (pending) forgetPending();
+      if (pending) {
+        forgetPending();
+        // A factory may never settle after invalidation. Pending incarnations
+        // have not transferred their disposer list into `this.disposers`, so
+        // invalidation itself owns immediate cleanup. Splicing makes every late
+        // factory/error continuation's cleanup idempotent.
+        const pendingDisposers = disposers.splice(0);
+        this.runDisposerList(pendingDisposers, "pending HostApi invalidation");
+      }
     };
     let pendingForPlugin = this.pendingHostApiIncarnations.get(pluginId);
     if (!pendingForPlugin) {
@@ -270,12 +293,12 @@ export abstract class PluginRuntimeState {
         lifecycleHookScope.active && lifecycleHookScope.depth > 0,
     };
     try {
-      const hostApi = this.createHostApi?.(
+      const hostApi = this.createHostApi(
         pluginId,
         manifest,
         pluginDataDir,
         incarnation,
-      ) ?? createNoopHostApi(pluginId, pluginDataDir);
+      );
       // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
       // objects from test harnesses may omit it.
       if (!hostApi.storage) {
@@ -608,7 +631,10 @@ export abstract class PluginRuntimeState {
     );
   }
 
-  protected beginPluginLifecycleOperation(pluginId: string): number {
+  protected beginPluginLifecycleOperation(
+    pluginId: string,
+    preserveRestartCancellation?: PendingRestartCancellation,
+  ): number {
     const generation = ++this.nextPluginLifecycleGeneration;
     const canonicalId = this.resolveKnownPluginId(pluginId);
     const lifecycleIds = new Set([
@@ -617,6 +643,8 @@ export abstract class PluginRuntimeState {
       ...(this.knownInstallAliases.get(canonicalId) ?? []),
     ]);
     for (const lifecycleId of lifecycleIds) {
+      const cancellation = this.pendingRestartCancellations.get(lifecycleId);
+      if (cancellation !== preserveRestartCancellation) cancellation?.cancel();
       for (const deactivate of this.pendingHostApiIncarnations.get(lifecycleId) ?? []) {
         deactivate();
       }
@@ -734,11 +762,27 @@ export abstract class PluginRuntimeState {
     this.preparation.clear();
     this.pendingRestarts.clear();
     this.pendingRestartPreparations.clear();
+    for (const cancellation of this.pendingRestartCancellations.values()) {
+      cancellation.cancel();
+    }
+    this.pendingRestartCancellations.clear();
     this.pluginLifecycleGenerations.clear();
     this.loaded = false;
   }
 
-  protected async stopAfterStartFailure(
+  protected stopAfterStartFailure(
+    pluginId: string,
+    instance: RuntimePlugin,
+    lifecycleHookScope?: PluginLifecycleHookScope,
+  ): Promise<boolean> {
+    const pending = this.pluginStopOperations.get(instance);
+    if (pending) return pending;
+    const stop = this.stopPluginInstance(pluginId, instance, lifecycleHookScope);
+    this.pluginStopOperations.set(instance, stop);
+    return stop;
+  }
+
+  private async stopPluginInstance(
     pluginId: string,
     instance: RuntimePlugin,
     lifecycleHookScope?: PluginLifecycleHookScope,
