@@ -113,6 +113,7 @@ type BootPreflightOutcome =
       plan: ManifestLoadPlan;
       kind: "manifest";
       error: unknown;
+      integrityResult?: PluginIntegrityCheckResult;
     };
 
 /**
@@ -631,7 +632,7 @@ export class PluginRuntime {
             integrityResult,
           };
         } catch (error) {
-          return { ok: false, plan, kind: "manifest", error };
+          return { ok: false, plan, kind: "manifest", error, integrityResult };
         }
       },
     );
