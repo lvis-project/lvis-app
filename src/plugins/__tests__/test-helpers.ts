@@ -428,6 +428,14 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
     return generation;
   };
 
+  const runRuntimeRetirement = async (
+    projection: PluginRuntimeGenerationProjection,
+  ): Promise<void> => {
+    for (const step of runtime.prepareRuntimeRetirement(projection)) {
+      await step.run();
+    }
+  };
+
   const publish = async (
     projection: PluginRuntimeGenerationProjection,
   ): Promise<{ retirement: Promise<void> }> => {
@@ -452,7 +460,7 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
       },
     });
     const retirement = predecessor && predecessor.state.runtime !== projection
-      ? trackRetirement(runtime.retireRuntimeGeneration(predecessor.state.runtime))
+      ? trackRetirement(runRuntimeRetirement(predecessor.state.runtime))
       : Promise.resolve();
     return { retirement };
   };
@@ -464,7 +472,7 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
     runtime.prepareRuntimeRemoval(pluginId).publish();
     active.delete(pluginId);
     const retirement = predecessor
-      ? trackRetirement(runtime.retireRuntimeGeneration(predecessor.state.runtime))
+      ? trackRetirement(runRuntimeRetirement(predecessor.state.runtime))
       : Promise.resolve();
     return { retirement };
   };
