@@ -5,8 +5,22 @@ ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.6.14-python3.12-bookworm-slim@sha256:5c8edeb
 FROM ${UV_IMAGE} AS dependencies
 WORKDIR /deps/server
 COPY --from=candidate server/pyproject.toml server/uv.lock ./
+COPY --from=control \
+  test/control/marketplace-e2e/verify-marketplace-python-inputs.py \
+  /trusted/verify-marketplace-python-inputs.py
+RUN --network=none python3 /trusted/verify-marketplace-python-inputs.py \
+    /deps/server/pyproject.toml /deps/server/uv.lock
 RUN --mount=type=cache,id=lvis-m4-marketplace-candidate-uv,target=/root/.cache/uv \
-    uv sync --frozen --all-groups --no-install-project
+    uv sync --locked --all-groups \
+      --no-build \
+      --no-config \
+      --no-sources \
+      --no-install-project \
+      --no-install-workspace \
+      --no-python-downloads \
+      --default-index https://pypi.org/simple \
+      --keyring-provider disabled \
+      --link-mode copy
 
 FROM ${UV_IMAGE} AS candidate-build
 WORKDIR /candidate/marketplace

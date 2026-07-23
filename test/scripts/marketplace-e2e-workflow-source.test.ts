@@ -16,6 +16,9 @@ const harnessManifest = read("test/control/marketplace-e2e/create-harness-manife
 const dependencyVerifier = read(
   "test/control/marketplace-e2e/verify-trusted-dependencies.mjs",
 );
+const marketplacePythonInputVerifier = read(
+  "test/control/marketplace-e2e/verify-marketplace-python-inputs.py",
+);
 const trustedRunnerPackage = read("test/control/marketplace-e2e/runner-package.json");
 const trustedRunnerDependencies = (JSON.parse(trustedRunnerPackage) as {
   dependencies: Record<string, string>;
@@ -236,6 +239,57 @@ describe("trusted marketplace E2E workflow", () => {
     expect(trustedRunner).toContain("RUN bun install --frozen-lockfile");
     expect(trustedRunner).not.toContain("--mount=type=cache");
     expect(trustedRunner).not.toContain("/root/.bun/install/cache");
+  });
+
+  it("installs Marketplace dependencies only from pre-built registry wheels", () => {
+    const dependenciesStart = marketplaceDockerfile.indexOf(
+      "FROM ${UV_IMAGE} AS dependencies",
+    );
+    const dependenciesStage = marketplaceDockerfile.slice(
+      dependenciesStart,
+      marketplaceDockerfile.indexOf("\nFROM ", dependenciesStart + 1),
+    );
+    const verifyInputs = dependenciesStage.indexOf(
+      "RUN --network=none python3 /trusted/verify-marketplace-python-inputs.py",
+    );
+    const sync = dependenciesStage.indexOf("uv sync");
+
+    expect(dependenciesStart).toBeGreaterThan(-1);
+    expect(verifyInputs).toBeGreaterThan(-1);
+    expect(sync).toBeGreaterThan(verifyInputs);
+    for (const flag of [
+      "--locked",
+      "--no-build",
+      "--no-config",
+      "--no-sources",
+      "--no-install-project",
+      "--no-install-workspace",
+      "--no-python-downloads",
+      "--default-index https://pypi.org/simple",
+      "--keyring-provider disabled",
+      "--link-mode copy",
+    ]) {
+      expect(dependenciesStage).toContain(flag);
+    }
+    expect(dependenciesStage).not.toContain("--frozen");
+    expect(marketplacePythonInputVerifier).toContain(
+      'if source == {"editable": "."}:',
+    );
+    expect(marketplacePythonInputVerifier).toContain(
+      'set(source) != {"registry"}',
+    );
+    expect(marketplacePythonInputVerifier).toContain(
+      "must provide at least one pre-built wheel",
+    );
+    expect(marketplacePythonInputVerifier).toContain(
+      "tool.uv.sources is forbidden",
+    );
+    expect(marketplacePythonInputVerifier).toContain(
+      'url != "https://pypi.org/simple"',
+    );
+    expect(marketplacePythonInputVerifier).toContain(
+      'parsed.hostname != "files.pythonhosted.org"',
+    );
   });
 
   it("removes candidate tests before overlaying and digest-verifying the full trusted closure", () => {
