@@ -83,13 +83,13 @@ function setup() {
   };
 }
 
-function options(grantToken?: string) {
+function options(grantToken?: string, principalOverride = principal) {
   return {
     sessionId: "s",
     permissionContext: {
       trustOrigin: "plugin-emitted" as const,
-      allowedPluginIds: new Set([principal.ownerPluginId]),
-      pluginOperation: { ...principal, grantToken },
+      allowedPluginIds: new Set([principalOverride.ownerPluginId]),
+      pluginOperation: { ...principalOverride, grantToken },
     },
   };
 }
@@ -149,6 +149,42 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(result.is_error).toBeFalsy();
     expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
     expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds an MCP-App grant to its Host session and burns it on a cross-session attempt", async () => {
+    const { executor, write } = setup();
+    await runWithInvocationOrigin("mcp-app", undefined, () =>
+      executor.executeAll([{ id: "r", name: "domain_read", input: { operation: "status" } }], options()),
+    );
+    const grant = executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 3 },
+      principal,
+      origin: "mcp-app",
+    });
+    const otherSession = { ...principal, appSessionId: "window-foreign" };
+    await runWithInvocationOrigin("mcp-app", undefined, () =>
+      executor.executeAll(
+        [{ id: "r-other", name: "domain_read", input: { operation: "status" } }],
+        options(undefined, otherSession),
+      ),
+    );
+    const [mismatch] = await runWithInvocationOrigin("mcp-app", undefined, () =>
+      executor.executeAll(
+        [{ id: "w1", name: "domain_write", input: { operation: "save", value: 3 } }],
+        options(grant.token, otherSession),
+      ),
+    );
+    expect(mismatch.is_error).toBe(true);
+
+    const [burned] = await runWithInvocationOrigin("mcp-app", undefined, () =>
+      executor.executeAll(
+        [{ id: "w2", name: "domain_write", input: { operation: "save", value: 3 } }],
+        options(grant.token),
+      ),
+    );
+    expect(burned.is_error).toBe(true);
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("keeps governed input, result, bearer, and account identity out of audit rows", async () => {
