@@ -164,4 +164,48 @@ describe("PluginRuntime boot preflight", () => {
       reason: "install receipt verification failed unexpectedly: injected verifier failure",
     }]);
   });
+
+  it("reports verified integrity before an accepted manifest later fails to parse", async () => {
+    const pluginId = "preflight-0";
+    await writeTestPluginRegistry({ registryPath }, [{
+      id: pluginId,
+      manifestPath: join(pluginsRoot, pluginId, "plugin.json"),
+    }]);
+    const auditMessages: string[] = [];
+    const runtime = new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      installReceiptCacheRoot: join(root, "receipts"),
+      auditLog: (_level, message) => auditMessages.push(message),
+    });
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(): Promise<{
+        ok: true;
+        verified: {
+          installSource: "marketplace";
+          signerKeyId: string;
+          artifactSha256: string;
+        };
+      }>;
+      readManifest(path: string): Promise<PluginManifest>;
+    };
+    internals.verifyReceiptAndDevGuard = async () => ({
+      ok: true,
+      verified: {
+        installSource: "marketplace",
+        signerKeyId: "test-signer",
+        artifactSha256: "a".repeat(64),
+      },
+    });
+    internals.readManifest = async () => {
+      throw new SyntaxError("injected manifest parse failure");
+    };
+
+    await expect(runtime.load()).resolves.toBeUndefined();
+
+    expect(auditMessages).toEqual(["plugin_integrity_verified"]);
+    expect(runtime.listPluginIds()).toEqual([]);
+    expect(runtime.listPluginCards().find((card) => card.id === pluginId)?.loadStatus).toBe("failed");
+  });
 });
