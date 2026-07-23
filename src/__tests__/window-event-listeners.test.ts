@@ -107,4 +107,19 @@ describe("registerWindowEventListeners", () => {
     expect(win1._sendSpy).not.toHaveBeenCalled();
     expect(win2._sendSpy).toHaveBeenCalledWith("window:maximizedChanged", true);
   });
+
+  it("locks the backwards-compatible runtime facade exports", async () => {
+    const bridge = await import("../ipc-bridge.js");
+
+    expect(Object.keys(bridge).sort()).toEqual([
+      "UNAUTHORIZED_FRAME",
+      "auditUnauthorized",
+      "getLastThemePayload",
+      "registerIpcHandlers",
+      "registerWindowEventListeners",
+      "unregisterPluginWebview",
+      "validatePluginFrame",
+      "validateSender",
+    ]);
+  });
 });
