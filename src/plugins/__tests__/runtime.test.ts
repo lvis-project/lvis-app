@@ -1121,10 +1121,14 @@ describe("PluginRuntime addPlugin/removePlugin (US-A3)", () => {
     vi.restoreAllMocks();
   });
 
-  async function writePlugin(id: string): Promise<string> {
-    const pluginDir = join(installedDir, id);
+  async function writePluginArtifact(
+    id: string,
+    artifactDirectory = id,
+    toolSuffix = "ping",
+  ): Promise<string> {
+    const pluginDir = join(installedDir, artifactDirectory);
     await mkdir(pluginDir, { recursive: true });
-    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`;
+    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_${toolSuffix}`;
     await writeFile(
       join(pluginDir, "entry.mjs"),
       `let started = 0;
@@ -1142,6 +1146,10 @@ export default async function createPlugin(ctx) {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;
+  }
+
+  async function writePlugin(id: string): Promise<string> {
+    return writePluginArtifact(id);
   }
 
   async function writeStartFailingPlugin(id: string): Promise<{ manifestPath: string; stoppedPath: string }> {
@@ -1530,6 +1538,94 @@ export default async function createPlugin({ hostApi }) {
   );
 
   it.each([
+    ["first artifact first", false],
+    ["second artifact first", true],
+  ] as const)(
+    "rejects two registry artifacts claiming one canonical identity (%s)",
+    async (_label, reverseEntries) => {
+      const canonicalId = "p-duplicate-canonical";
+      const firstManifestPath = await writePluginArtifact(
+        canonicalId,
+        "p-duplicate-artifact-one",
+        "first",
+      );
+      const secondManifestPath = await writePluginArtifact(
+        canonicalId,
+        "p-duplicate-artifact-two",
+        "second",
+      );
+      const entries = [
+        {
+          id: "p-duplicate-alias-one",
+          manifestPath: firstManifestPath,
+          enabled: true,
+        },
+        {
+          id: "p-duplicate-alias-two",
+          manifestPath: secondManifestPath,
+          enabled: true,
+        },
+      ];
+      await writeFile(
+        registryPath,
+        JSON.stringify({
+          version: 1,
+          plugins: reverseEntries ? entries.reverse() : entries,
+        }),
+        "utf-8",
+      );
+      const runtime = makeRuntime();
+
+      await expect(runtime.startAll()).rejects.toMatchObject({
+        code: "plugin-identity-collision",
+        message: expect.stringContaining(canonicalId),
+      });
+      expect(runtime.listPluginIds()).toEqual([]);
+      expect(runtime.listToolNames()).toEqual([]);
+    },
+  );
+
+  it("rejects a static and registry artifact claiming one canonical identity", async () => {
+    const canonicalId = "p-static-registry-canonical";
+    const staticManifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-static-canonical-artifact",
+      "static",
+    );
+    const registryManifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-registry-canonical-artifact",
+      "registry",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "p-static-registry-alias",
+          manifestPath: registryManifestPath,
+          enabled: true,
+        }],
+      }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      manifestPaths: [staticManifestPath],
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+
+    await expect(runtime.startAll()).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(canonicalId),
+    });
+    expect(runtime.listPluginIds()).toEqual([]);
+    expect(runtime.listToolNames()).toEqual([]);
+  });
+
+  it.each([
     ["valid entry first", false],
     ["failed entry first", true],
   ] as const)(
@@ -1618,6 +1714,148 @@ export default async function createPlugin({ hostApi }) {
     });
     expect(runtime.listPluginIds()).toEqual([existingCanonicalId]);
     expect(runtime.getPluginManifest(conflictingCanonicalId)).toBeUndefined();
+  });
+
+  it("rejects a direct restart when a raw registry id targets another manifest", async () => {
+    const existingCanonicalId = "p-restart-existing-canonical";
+    const conflictingCanonicalId = "p-restart-conflicting-canonical";
+    const existingManifestPath = await writePlugin(existingCanonicalId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "p-restart-existing-alias",
+          manifestPath: existingManifestPath,
+          enabled: true,
+        }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    const conflictingManifestPath = await writePlugin(conflictingCanonicalId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "p-restart-existing-alias",
+            manifestPath: existingManifestPath,
+            enabled: true,
+          },
+          {
+            id: existingCanonicalId,
+            manifestPath: conflictingManifestPath,
+            enabled: true,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.restartPlugin(existingCanonicalId)).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(existingCanonicalId),
+    });
+    expect(runtime.listPluginIds()).toEqual([existingCanonicalId]);
+    await expect(
+      runtime.call(`${existingCanonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`),
+    ).resolves.toContain(`hi-${existingCanonicalId}`);
+  });
+
+  it("rejects incremental double-loading of an existing canonical identity", async () => {
+    const canonicalId = "p-incremental-duplicate-canonical";
+    const firstManifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-incremental-artifact-one",
+      "first",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "p-incremental-alias-one",
+          manifestPath: firstManifestPath,
+          enabled: true,
+        }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    const secondManifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-incremental-artifact-two",
+      "second",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "p-incremental-alias-one",
+            manifestPath: firstManifestPath,
+            enabled: true,
+          },
+          {
+            id: "p-incremental-alias-two",
+            manifestPath: secondManifestPath,
+            enabled: true,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin("p-incremental-alias-two")).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(canonicalId),
+    });
+    expect(runtime.listPluginIds()).toEqual([canonicalId]);
+    expect(runtime.listToolNames()).not.toContain(
+      `${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_second`,
+    );
+  });
+
+  it("rejects reusing a disabled plugin alias as a new canonical identity", async () => {
+    const originalCanonicalId = "p-disabled-original-canonical";
+    const alias = "p-disabled-reused-alias";
+    const originalManifestPath = await writePlugin(originalCanonicalId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: alias, manifestPath: originalManifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await runtime.disable(alias);
+
+    const replacementManifestPath = await writePlugin(alias);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: alias, manifestPath: replacementManifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin(alias)).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(alias),
+    });
+    expect(runtime.resolvePluginId(alias)).toBe(originalCanonicalId);
+    expect(runtime.listPluginIds()).toEqual([]);
+    expect(runtime.getPluginManifest(alias)).toBeUndefined();
   });
 
   it("canonical removal cancels a deferred add requested through a registry alias", async () => {
