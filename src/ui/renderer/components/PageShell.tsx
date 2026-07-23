@@ -13,7 +13,7 @@ export interface PageShellProps {
   backLabel?: string;
   backTestId?: string;
   padded?: boolean;
-  maxWidth?: "none" | "5xl" | "6xl" | "7xl";
+  maxWidth?: "none" | "reading" | "5xl" | "6xl" | "7xl";
   className?: string;
   contentClassName?: string;
   headerClassName?: string;
@@ -22,6 +22,10 @@ export interface PageShellProps {
 
 const maxWidthClass: Record<NonNullable<PageShellProps["maxWidth"]>, string> = {
   none: "max-w-none",
+  // Matches ChatView's conversation column (max-w-[58rem]) so a paned view —
+  // e.g. an inline plugin panel — lines up with the chat reading column instead
+  // of sprawling to the full main-pane width.
+  reading: "max-w-[58rem]",
   "5xl": "max-w-5xl",
   "6xl": "max-w-6xl",
   "7xl": "max-w-7xl",
