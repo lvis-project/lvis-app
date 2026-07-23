@@ -3,6 +3,7 @@ import { test as base, expect } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   buildE2eBaseSettings,
@@ -13,6 +14,77 @@ import { seedRealPlugins } from './plugin-seed.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../..');
+
+/**
+ * Recursively hardlink a directory tree.
+ *
+ * Hardlinks — not a copy (633 MB per venv) and not a junction: near-instant,
+ * no extra disk, and safe when the destination's parent (the isolated profile)
+ * is recursively removed at teardown. `fs.rmSync` deletes the hardlink entries
+ * but the SOURCE keeps its own directory entries, so the inodes survive and the
+ * real provisioned venv is never wiped — unlike a junction, which `fs.rmSync`
+ * can traverse into and delete the target contents of. Falls back to a copy per
+ * file across volumes (EXDEV) or if the link cannot be created.
+ */
+function hardlinkTree(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      hardlinkTree(s, d);
+    } else if (entry.isFile()) {
+      try {
+        fs.linkSync(s, d);
+      } catch {
+        fs.copyFileSync(s, d);
+      }
+    }
+  }
+}
+
+/**
+ * Opt-in real-Python reuse (`LVIS_SCREENSHOT_REAL_PYTHON=1`).
+ *
+ * A worker-backed plugin (local-indexer) only registers its live sidebar view
+ * after its Python worker starts healthily, and the isolated profile has an
+ * empty runtime cache — so without this it degrades to a Doctor entry. For each
+ * seeded plugin that shipped a `python-requirements.lock` (plugin-seed copies it
+ * only under this opt-in), find the venv the host ALREADY provisioned for that
+ * exact lock under the REAL `~/.lvis/runtime` and hardlink it into the isolated
+ * runtime at the path the host derives from the lock hash. The host's
+ * PythonRuntimeBootstrapper then hits the `.ready` sentinel (no network, no
+ * build) and the worker starts for real. No-op with a warning when no matching
+ * venv exists — the capture then shows the Doctor entry, same as without the
+ * opt-in. Machine-local by nature (relies on a prior real provisioning).
+ */
+function reuseRealPythonRuntime(lvisHomeForTest: string, seededIds: readonly string[]): void {
+  const realEnvsRoot = path.join(os.homedir(), '.lvis', 'runtime', 'python-envs');
+  if (!fs.existsSync(realEnvsRoot)) {
+    console.warn(`[screenshots] real-python: no provisioned runtime at ${realEnvsRoot}`);
+    return;
+  }
+  const realDirs = fs.readdirSync(realEnvsRoot);
+  for (const id of seededIds) {
+    const lockPath = path.join(lvisHomeForTest, 'plugins', id, 'python-requirements.lock');
+    if (!fs.existsSync(lockPath)) continue;
+    const lockHash = createHash('sha256').update(fs.readFileSync(lockPath)).digest('hex').slice(0, 24);
+    const match = realDirs.find(
+      (d) => d.endsWith(`-py312-${lockHash}`) && fs.existsSync(path.join(realEnvsRoot, d, 'venv', '.ready')),
+    );
+    if (!match) {
+      console.warn(
+        `[screenshots] real-python: no ready venv for ${id} (lock ${lockHash}) — plugin will show a Doctor entry`,
+      );
+      continue;
+    }
+    const srcVenv = path.join(realEnvsRoot, match, 'venv');
+    const destVenv = path.join(lvisHomeForTest, 'runtime', 'python-envs', match, 'venv');
+    hardlinkTree(srcVenv, destVenv);
+    // eslint-disable-next-line no-console
+    console.log(`[screenshots] real-python: linked venv for ${id} -> ${destVenv}`);
+  }
+}
 
 /**
  * Fixed capture viewport. Chosen independently of any single existing
@@ -128,6 +200,11 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
         console.warn(
           `[screenshots] requested plugins not seeded (bundle missing): ${result.missing.join(', ')}`,
         );
+      }
+      // Opt-in: make a worker-backed plugin's live panel capturable by reusing
+      // the machine's pre-provisioned Python venv (see reuseRealPythonRuntime).
+      if (process.env.LVIS_SCREENSHOT_REAL_PYTHON === '1') {
+        reuseRealPythonRuntime(lvisHomeForTest, result.seeded);
       }
     }
 
