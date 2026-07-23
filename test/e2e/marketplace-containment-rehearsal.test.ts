@@ -3,30 +3,25 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mergeEvidenceFile } from "./evidence-file.js";
-import { buildPluginZip, publishPlugin } from "./marketplace-e2e-fixture.js";
+import {
+  buildPluginZip,
+  postMarketplace,
+  publishPlugin,
+  requireExactLoopbackMarketplaceOrigin,
+} from "./marketplace-e2e-fixture.js";
 
 const E2E_ENABLED = process.env.M4_E2E === "1";
-const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
 const PUBLISHER_KEY = process.env.MARKETPLACE_PUBLISHER_KEY ?? "";
 const ADMIN_KEY = process.env.MARKETPLACE_ADMIN_KEY ?? "";
 const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "";
-
-function requireLoopbackTarget(): void {
-  const url = new URL(BASE_URL);
-  if (!(["127.0.0.1", "localhost", "::1"].includes(url.hostname) && url.port === "8765")) {
-    throw new Error(`containment rehearsal refuses non-loopback target ${url.origin}`);
-  }
-}
 
 async function request(path: string, init?: RequestInit): Promise<number> {
   return (await fetch(`${BASE_URL}${path}`, init)).status;
 }
 
 async function adminPost(path: string): Promise<number> {
-  return request(path, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${ADMIN_KEY}` },
-  });
+  return (await postMarketplace(BASE_URL, ADMIN_KEY, path)).status;
 }
 
 function isAbsent(status: number): boolean {
@@ -46,7 +41,7 @@ function absentStatus(status: number): "not-found" | "gone" {
 
 describe.skipIf(!E2E_ENABLED)("Marketplace loopback reverse containment", () => {
   it("contains ep-api before allowing a Host rollback decision", async () => {
-    requireLoopbackTarget();
+    requireExactLoopbackMarketplaceOrigin(BASE_URL);
     if (!PUBLISHER_KEY || !ADMIN_KEY) {
       throw new Error("loopback publisher and admin keys are required");
     }

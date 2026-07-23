@@ -14,7 +14,9 @@ import { expect, test, type Page } from "@playwright/test";
 import { mergeEvidenceFile } from "../evidence-file.js";
 import {
   approvePendingPlugin,
+  postMarketplace,
   publishPlugin,
+  requireExactLoopbackMarketplaceOrigin,
 } from "../marketplace-e2e-fixture.js";
 import {
   buildE2eBaseSettings,
@@ -60,6 +62,23 @@ type BundleSnapshot = {
     pluginId?: string;
     generationId?: string;
   }>;
+  hooks: {
+    probeToolName: string;
+    registered: Array<{
+      id: string;
+      event: "pre";
+      matcher?: string;
+      owner: {
+        pluginId: string;
+        pluginVersion: string;
+        activationId: string;
+        generationId: string;
+        localId: string;
+        fingerprint: string;
+      };
+    }>;
+    matchingPreToolUse: string[];
+  };
 };
 
 type GuestResult<T = unknown> =
@@ -75,13 +94,6 @@ type FakeAttendanceProvider = {
   current: { workStartHm: string; workEndHm: string };
   close(): Promise<void>;
 };
-
-function requireLoopbackMarketplace(): void {
-  const url = new URL(BASE_URL);
-  if (!(["127.0.0.1", "localhost", "::1"].includes(url.hostname) && url.port === "8765")) {
-    throw new Error(`EP attendance E2E refuses non-loopback Marketplace ${url.origin}`);
-  }
-}
 
 function jsonResponse(
   response: ServerResponse,
@@ -220,21 +232,30 @@ function inspectExactEpBundle(): {
 }
 
 async function adminPost(path: string): Promise<Response> {
-  return fetch(`${BASE_URL}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${ADMIN_KEY}` },
-  });
+  return postMarketplace(BASE_URL, ADMIN_KEY, path);
 }
 
 async function bundleSnapshot(page: Page): Promise<BundleSnapshot> {
-  return page.evaluate(async ({ pluginId, skillLocalId }) => {
+  return page.evaluate(async ({ pluginId, skillLocalId, hookProbeToolName }) => {
     const api = globalThis as unknown as {
       lvisApi: {
-        e2ePluginBundleSnapshot(id: string, localId: string): Promise<BundleSnapshot>;
+        e2ePluginBundleSnapshot(
+          id: string,
+          localId: string,
+          hookProbeToolName: string,
+        ): Promise<BundleSnapshot>;
       };
     };
-    return api.lvisApi.e2ePluginBundleSnapshot(pluginId, skillLocalId);
-  }, { pluginId: EP_PLUGIN_ID, skillLocalId: ATTENDANCE_SKILL_ID });
+    return api.lvisApi.e2ePluginBundleSnapshot(
+      pluginId,
+      skillLocalId,
+      hookProbeToolName,
+    );
+  }, {
+    pluginId: EP_PLUGIN_ID,
+    skillLocalId: ATTENDANCE_SKILL_ID,
+    hookProbeToolName: "ep_attendance_write",
+  });
 }
 
 async function setPluginEnabled(page: Page, enabled: boolean): Promise<unknown> {
@@ -370,7 +391,7 @@ async function invokeGuestTool<T>(
     if (options.approval === "forbid") {
       const deny = page.getByTestId("deny-button");
       if (await deny.isVisible().catch(() => false)) await deny.click();
-      throw new Error(`${toolName} reached approval before rejecting missing or forged authority`);
+      throw new Error(`${toolName} reached a forbidden approval`);
     }
     await approveVisibleToolDialog(
       page,
@@ -422,7 +443,7 @@ test.skip(!builtMainExists(), "build the Electron app before running this spec")
 
 test("exact EP attendance bundle reads, confirms one write, verifies readback, and retires", async ({}, testInfo) => {
   testInfo.setTimeout(180_000);
-  requireLoopbackMarketplace();
+  requireExactLoopbackMarketplaceOrigin(BASE_URL);
   if (!PUBLISHER_KEY || !ADMIN_KEY) {
     throw new Error("MARKETPLACE_PUBLISHER_KEY and MARKETPLACE_ADMIN_KEY are required");
   }
@@ -520,6 +541,11 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       expect.objectContaining({ name: "ep_attendance_read", pluginId: EP_PLUGIN_ID }),
       expect.objectContaining({ name: "ep_attendance_write", pluginId: EP_PLUGIN_ID }),
     ]));
+    expect(installed.hooks).toMatchObject({
+      probeToolName: "ep_attendance_write",
+      registered: [],
+      matchingPreToolUse: [],
+    });
     const installedCounts = await runtimeCounts(ctx.page);
     const trustRows = await ctx.page.evaluate(async () => {
       const api = globalThis as unknown as {
@@ -629,8 +655,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       writeArgs,
       {
         operationGrantToken: grant.value.operationGrantToken,
-        approval: "allow-if-requested",
-        approvalReason: "Execute the already confirmed EP attendance write.",
+        approval: "forbid",
       },
     );
     expect(write).toMatchObject({
@@ -641,6 +666,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
         providerEvidence: { verification: { verified: true } },
       },
     });
+    await expect(ctx.page.getByTestId("tool-approval-dialog")).toBeHidden();
     expect(fake.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
 
     const after = await invokeGuestTool<{
@@ -675,6 +701,10 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       active: null,
       skill: null,
       tools: [],
+      hooks: {
+        registered: [],
+        matchingPreToolUse: [],
+      },
     });
     const disabledCounts = await runtimeCounts(ctx.page);
     expect(disabledCounts.plugins).toBe(installedCounts.plugins - 1);
@@ -702,6 +732,10 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       active: null,
       skill: null,
       tools: [],
+      hooks: {
+        registered: [],
+        matchingPreToolUse: [],
+      },
     });
     const generationRoot = join(
       ctx.lvisHome,
@@ -755,7 +789,9 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
           artifactGenerationId: installed.active?.artifactGenerationId,
           skillFingerprint: installed.skill?.owner.fingerprint,
           toolCount: installed.tools.length,
-          hookTrustRows: 0,
+          hookTrustRows: trustRows.rows.length,
+          hookRegistryRows: installed.hooks.registered.length,
+          hookMatches: installed.hooks.matchingPreToolUse.length,
           mcpRuntimeDelta: 0,
         },
         attendance: {
@@ -773,22 +809,29 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
           disabled: {
             skillRetired: disabled.skill === null,
             toolsRetired: disabled.tools.length === 0,
+            hookRegistryRows: disabled.hooks.registered.length,
+            hookMatches: disabled.hooks.matchingPreToolUse.length,
             runtimeRetired: disabledCounts.plugins === installedCounts.plugins - 1,
             mcpCountStable: disabledCounts.mcps === installedCounts.mcps,
           },
           uninstalled: {
             skillRetired: uninstalled.skill === null,
             toolsRetired: uninstalled.tools.length === 0,
+            hookRegistryRows: uninstalled.hooks.registered.length,
+            hookMatches: uninstalled.hooks.matchingPreToolUse.length,
             runtimeRetired: uninstalledCounts.plugins === disabledCounts.plugins,
             retainedGenerations: retainedGenerations.length,
             pluginRootExists: existsSync(join(ctx.lvisHome, "plugins", EP_PLUGIN_ID)),
           },
           hookAndMcpAbsenceMatchesExactManifest:
-            bundle.contributionCounts.hooks === 0 &&
-            bundle.contributionCounts.mcpServers === 0,
+            bundle.contributionCounts.hooks === installed.hooks.registered.length &&
+            bundle.contributionCounts.mcpServers ===
+              installedCounts.mcps - disabledCounts.mcps,
           zeroOrphans:
             uninstalled.skill === null &&
             uninstalled.tools.length === 0 &&
+            uninstalled.hooks.registered.length === 0 &&
+            uninstalled.hooks.matchingPreToolUse.length === 0 &&
             retainedGenerations.length === 0 &&
             !existsSync(join(ctx.lvisHome, "plugins", EP_PLUGIN_ID)),
         },

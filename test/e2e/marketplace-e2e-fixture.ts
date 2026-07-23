@@ -2,6 +2,58 @@ import AdmZip from "adm-zip";
 import type { MarketplaceHttp } from "../../src/plugins/marketplace-installer.js";
 import type { SignatureEnvelope } from "../../src/plugins/types.js";
 
+export const EXACT_LOOPBACK_MARKETPLACE_ORIGIN = "http://127.0.0.1:8765";
+
+/**
+ * Mutating Marketplace E2E requests are destructive by design. Keep them
+ * pinned to the one ephemeral server started by marketplace-e2e.yml.
+ */
+export function requireExactLoopbackMarketplaceOrigin(baseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new Error(`Marketplace E2E refuses invalid target ${JSON.stringify(baseUrl)}`);
+  }
+  if (
+    url.origin !== EXACT_LOOPBACK_MARKETPLACE_ORIGIN ||
+    url.pathname !== "/" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    throw new Error(
+      `Marketplace E2E refuses target ${url.origin}; expected exact loopback origin ` +
+      EXACT_LOOPBACK_MARKETPLACE_ORIGIN,
+    );
+  }
+  return EXACT_LOOPBACK_MARKETPLACE_ORIGIN;
+}
+
+export async function postMarketplace(
+  baseUrl: string,
+  apiKey: string,
+  path: string,
+  init: Omit<RequestInit, "method"> = {},
+): Promise<Response> {
+  const origin = requireExactLoopbackMarketplaceOrigin(baseUrl);
+  if (!path.startsWith("/") || path.startsWith("//")) {
+    throw new Error(`Marketplace E2E refuses non-root-relative POST path ${JSON.stringify(path)}`);
+  }
+  const endpoint = new URL(path, `${origin}/`);
+  if (endpoint.origin !== origin) {
+    throw new Error(`Marketplace E2E refuses cross-origin POST target ${endpoint.origin}`);
+  }
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${apiKey}`);
+  return fetch(endpoint, {
+    ...init,
+    method: "POST",
+    headers,
+  });
+}
+
 /** Deterministic plugin bundle used by the installer and live Electron lanes. */
 export function buildPluginZip(
   slug: string,
@@ -161,15 +213,14 @@ export async function publishPlugin(
   version: string,
   zipBytes: Buffer,
 ): Promise<Record<string, unknown>> {
+  requireExactLoopbackMarketplaceOrigin(baseUrl);
   const form = new FormData();
   form.append(
     "file",
     new Blob([zipBytes], { type: "application/zip" }),
     `${slug}-${version}.zip`,
   );
-  const res = await fetch(`${baseUrl}/api/v1/plugins/${slug}/versions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
+  const res = await postMarketplace(baseUrl, apiKey, `/api/v1/plugins/${slug}/versions`, {
     body: form,
   });
   if (res.status !== 201) {
@@ -185,18 +236,20 @@ export async function approvePendingPlugin(
   slug: string,
   version: string,
 ): Promise<Record<string, unknown>> {
+  const origin = requireExactLoopbackMarketplaceOrigin(baseUrl);
   const headers = { Authorization: `Bearer ${adminKey}` };
-  const pending = await fetch(`${baseUrl}/api/v1/admin/publishes/pending`, { headers });
+  const pending = await fetch(`${origin}/api/v1/admin/publishes/pending`, { headers });
   if (!pending.ok) throw new Error(`pending publishes returned ${pending.status}`);
   const rows = await pending.json() as Array<{ id?: unknown; slug?: unknown; version?: unknown }>;
   const row = rows.find((item) => item.slug === slug && item.version === version);
   if (!row || (typeof row.id !== "number" && typeof row.id !== "string")) {
     throw new Error(`pending publish not found: ${slug}@${version}`);
   }
-  const approved = await fetch(`${baseUrl}/api/v1/admin/publishes/${row.id}/approve`, {
-    method: "POST",
-    headers,
-  });
+  const approved = await postMarketplace(
+    origin,
+    adminKey,
+    `/api/v1/admin/publishes/${row.id}/approve`,
+  );
   if (!approved.ok) {
     throw new Error(`approve failed: status=${approved.status} body=${await approved.text()}`);
   }
