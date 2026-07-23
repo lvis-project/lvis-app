@@ -8,14 +8,16 @@
  * copying `makeStore` into each suite trips the `--fail-on-duplicates` gate.
  */
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { PluginArtifactStore } from "../plugin-artifact-store.js";
+import { PluginArtifactStore, type ArtifactStoreOptions } from "../plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 
 /** A store rooted at `{tmpDir}/installed` + `{tmpDir}/cache`, tarball cache off. */
-export function makeStore(tmpDir: string): PluginArtifactStore {
+export function makeStore(
+  tmpDir: string,
+  overrides: Partial<Pick<ArtifactStoreOptions, "artifactLimits">> = {},
+): PluginArtifactStore {
   const fetcher = {
     listPlugins: async () => [],
     getPluginDetail: async () => null,
@@ -28,10 +30,11 @@ export function makeStore(tmpDir: string): PluginArtifactStore {
     fetcher,
     publicKeys: {},
     tarballCacheBase: null,
+    ...overrides,
   });
 }
 
 /** Throwaway temp dir; callers are responsible for `rmSync(..., {recursive, force})`. */
 export function makeTmpDir(prefix = "artifact-store-"): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return mkdtempSync(join(process.cwd(), `.${prefix}`));
 }

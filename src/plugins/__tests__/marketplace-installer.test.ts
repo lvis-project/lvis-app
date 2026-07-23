@@ -10,15 +10,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import {
   buildVerifiedTarballPaths,
   installFromMarketplace,
   MarketplaceInstallerError,
+  MarketplaceTransientDownloadError,
   type MarketplaceHttp
 } from "../marketplace-installer.js";
 import { verifyEnvelope } from "../envelope-verifier.js";
+import { setCachedTarball } from "../offline-cache.js";
 import type { SignatureEnvelope } from "../types.js";
 
 function freshEd25519() {
@@ -97,7 +98,7 @@ function fakeHttp(
 }
 
 function tmpDownloadRoot(): string {
-  return mkdtempSync(join(tmpdir(), "s2-installer-"));
+  return mkdtempSync(join(process.cwd(), ".s2-installer-"));
 }
 
 describe("installFromMarketplace — happy path", () => {
@@ -117,9 +118,70 @@ describe("installFromMarketplace — happy path", () => {
       expect(out.version).toBe("1.0.0");
       expect(out.signerKeyId).toBe("prod-v1");
       expect(out.sha256).toBe(createHash("sha256").update(tarball).digest("hex"));
+      expect(out.zipBuffer).toEqual(tarball);
       expect(existsSync(out.tarballPath)).toBe(true);
       const persisted = await readFile(out.tarballPath);
       expect(persisted.equals(tarball)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installFromMarketplace — artifact size ceiling", () => {
+  it("rejects an oversized body from an injected MarketplaceHttp implementation", async () => {
+    const tarball = Buffer.from("sixsix");
+    const { privateKey, pubBuf } = freshEd25519();
+    const http = fakeHttp(tarball, makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]));
+    const root = tmpDownloadRoot();
+    try {
+      await expect(installFromMarketplace("acme", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+        artifactLimits: { maxCompressedBytes: 5 },
+      })).rejects.toMatchObject({ code: "ARTIFACT_TOO_LARGE" });
+      expect(http.envelopeCalls).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows a body exactly at the configured boundary", async () => {
+    const tarball = Buffer.from("12345");
+    const { privateKey, pubBuf } = freshEd25519();
+    const http = fakeHttp(tarball, makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]));
+    const root = tmpDownloadRoot();
+    try {
+      const result = await installFromMarketplace("acme", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+        artifactLimits: { maxCompressedBytes: 5 },
+      });
+      expect(result.sha256).toBe(createHash("sha256").update(tarball).digest("hex"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an oversized offline-cache hit before signature or network work", async () => {
+    const tarball = Buffer.from("123456");
+    const { privateKey, pubBuf } = freshEd25519();
+    const http = fakeHttp(tarball, makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]));
+    const root = tmpDownloadRoot();
+    const cacheBase = join(root, "offline-cache");
+    try {
+      await setCachedTarball("acme", "1.0.0", tarball, cacheBase);
+      await expect(installFromMarketplace("acme", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+        cacheBase,
+        artifactLimits: { maxCompressedBytes: 5 },
+      })).rejects.toMatchObject({ code: "ARTIFACT_TOO_LARGE" });
+      expect(http.downloadCalls).toBe(0);
+      expect(http.envelopeCalls).toBe(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -504,6 +566,150 @@ describe("installFromMarketplace — HTTP handling", () => {
     }
   });
 
+  it("caps an untrusted Retry-After delay at 30 seconds", async () => {
+    vi.useFakeTimers();
+    const tarball = Buffer.from("rate-cap");
+    const { privateKey, pubBuf } = freshEd25519();
+    const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]);
+    const http = fakeHttp(tarball, envelope, null, {
+      sequence: [
+        { status: 429, retryAfterSeconds: 24 * 60 * 60 },
+        { status: 200 },
+      ],
+    });
+    const root = tmpDownloadRoot();
+    try {
+      const promise = installFromMarketplace("x", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+      });
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(http.downloadCalls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(promise).resolves.toMatchObject({ signerKeyId: "prod-v1" });
+      expect(http.downloadCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not sleep after the final retry attempt and enforces the aggregate deadline", async () => {
+    vi.useFakeTimers();
+    const tarball = Buffer.from("rate-deadline");
+    const { pubBuf } = freshEd25519();
+    const singleAttemptHttp = fakeHttp(tarball, {} as SignatureEnvelope, null, {
+      status: 429,
+      retryAfterSeconds: 30,
+    });
+    const firstRoot = tmpDownloadRoot();
+    const deadlineRoot = tmpDownloadRoot();
+    try {
+      const singleAttempt = installFromMarketplace("x", "1.0.0", {
+        http: singleAttemptHttp,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: firstRoot,
+        maxRetries: 1,
+      });
+      await expect(singleAttempt).rejects.toMatchObject({ code: "RETRY_EXHAUSTED" });
+      expect(vi.getTimerCount()).toBe(0);
+
+      const deadlineHttp = fakeHttp(tarball, {} as SignatureEnvelope, null, {
+        status: 429,
+        retryAfterSeconds: 30,
+      });
+      const deadlineAttempt = installFromMarketplace("x", "1.0.0", {
+        http: deadlineHttp,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: deadlineRoot,
+        maxRetries: 10,
+      });
+      const caught = deadlineAttempt.catch((error) => error);
+      await vi.runAllTimersAsync();
+      await expect(caught).resolves.toMatchObject({ code: "RETRY_EXHAUSTED" });
+      expect(deadlineHttp.downloadCalls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+      rmSync(firstRoot, { recursive: true, force: true });
+      rmSync(deadlineRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("aborts a stalled download attempt when the aggregate deadline expires", async () => {
+    vi.useFakeTimers();
+    const { pubBuf } = freshEd25519();
+    let observedAbort = false;
+    const http: MarketplaceHttp = {
+      async downloadArtifact(_slug, _version, _onChunk, options) {
+        return await new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => {
+            observedAbort = true;
+            reject(new MarketplaceTransientDownloadError("request aborted"));
+          }, { once: true });
+        });
+      },
+      async fetchSignatureEnvelope() {
+        throw new Error("not reached");
+      },
+    };
+    const root = tmpDownloadRoot();
+    try {
+      const result = installFromMarketplace("x", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+      }).catch((error) => error);
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(observedAbort).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toMatchObject({
+        code: "RETRY_EXHAUSTED",
+        message: expect.stringMatching(/retry deadline exceeded/i),
+      });
+      expect(observedAbort).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects at the aggregate deadline even when the HTTP adapter ignores abort", async () => {
+    vi.useFakeTimers();
+    const tarball = Buffer.from("late-success");
+    const { privateKey, pubBuf } = freshEd25519();
+    const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]);
+    const http: MarketplaceHttp = {
+      async downloadArtifact() {
+        return await new Promise((resolve) => {
+          setTimeout(() => resolve({
+            body: tarball,
+            sha256Header: createHash("sha256").update(tarball).digest("hex"),
+            status: 200,
+          }), 120_000);
+        });
+      },
+      async fetchSignatureEnvelope() {
+        return envelope;
+      },
+    };
+    const root = tmpDownloadRoot();
+    try {
+      const result = installFromMarketplace("x", "1.0.0", {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root,
+      }).catch((error) => error);
+      await vi.advanceTimersByTimeAsync(90_000);
+      await expect(result).resolves.toMatchObject({ code: "RETRY_EXHAUSTED" });
+      await vi.advanceTimersByTimeAsync(30_000);
+    } finally {
+      vi.useRealTimers();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("retries on 5xx and gives up after maxRetries", async () => {
     vi.useFakeTimers();
     const tarball = Buffer.from("5xx");
@@ -560,7 +766,7 @@ describe("installFromMarketplace — HTTP handling", () => {
     const http: MarketplaceHttp = {
       async downloadArtifact() {
         calls++;
-        if (calls < 2) throw new Error("ECONNRESET");
+        if (calls < 2) throw new MarketplaceTransientDownloadError("ECONNRESET");
         return {
           body: tarball,
           sha256Header: createHash("sha256").update(tarball).digest("hex"),
@@ -584,6 +790,32 @@ describe("installFromMarketplace — HTTP handling", () => {
       expect(calls).toBe(2);
     } finally {
       vi.useRealTimers();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not retry deterministic protocol or programming errors", async () => {
+    const protocolError = new Error("200 response has no readable body");
+    let calls = 0;
+    const http: MarketplaceHttp = {
+      async downloadArtifact() {
+        calls++;
+        throw protocolError;
+      },
+      async fetchSignatureEnvelope() {
+        throw new Error("not reached");
+      },
+    };
+    const root = tmpDownloadRoot();
+    try {
+      await expect(installFromMarketplace("x", "1.0.0", {
+        http,
+        publicKeys: {},
+        downloadRoot: root,
+        maxRetries: 3,
+      })).rejects.toBe(protocolError);
+      expect(calls).toBe(1);
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

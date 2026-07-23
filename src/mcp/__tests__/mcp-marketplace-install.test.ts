@@ -9,9 +9,9 @@
  */
 import AdmZip from "adm-zip";
 import { describe, expect, it, vi } from "vitest";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   buildMcpServerConfig,
@@ -22,12 +22,11 @@ import {
 } from "../mcp-marketplace-install.js";
 import { MAX_MCP_MANIFEST_BYTES } from "../safe-names.js";
 import type { McpRuntimeSpec, PluginMarketplaceItem } from "../../plugins/types.js";
-import type { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
+import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
 
 function makeTmpDir(): string {
-  const root = tmpdir();
-  return mkdtempSync(join(root, "mcp-install-"));
+  return mkdtempSync(join(process.cwd(), ".mcp-install-"));
 }
 
 describe("substituteRuntimeTokens", () => {
@@ -345,6 +344,19 @@ describe("readRuntimeFromInstalledManifest", () => {
 });
 
 describe("readRuntimeFromVerifiedZip", () => {
+  const inspectionStore = new PluginArtifactStore({
+    installRoot: resolve(process.cwd(), ".lvis-mcp-inspection-installed"),
+    cacheRoot: resolve(process.cwd(), ".lvis-mcp-inspection-cache"),
+    fetcher: {
+      listPlugins: async () => [],
+      getPluginDetail: async () => null,
+      downloadVersion: async () => ({ zipBuffer: Buffer.alloc(0), sha256: "x" }),
+      listAnnouncements: async () => [],
+    },
+    publicKeys: {},
+    tarballCacheBase: null,
+  });
+
   function zipWithPluginJson(content: Buffer | string): Buffer {
     const zip = new AdmZip();
     zip.addFile("plugin.json", Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8"));
@@ -357,7 +369,7 @@ describe("readRuntimeFromVerifiedZip", () => {
       version: "1.0.0",
       runtime: { transport: "stdio", command: "node", args: ["server.js"] },
     }));
-    expect(readRuntimeFromVerifiedZip("weather", zip)).toEqual({
+    expect(readRuntimeFromVerifiedZip(inspectionStore, "weather", zip)).toEqual({
       transport: "stdio",
       command: "node",
       args: ["server.js"],
@@ -367,14 +379,25 @@ describe("readRuntimeFromVerifiedZip", () => {
   it("throws when the verified zip has no root plugin.json", () => {
     const zip = new AdmZip();
     zip.addFile("nested/plugin.json", Buffer.from("{}"));
-    expect(() => readRuntimeFromVerifiedZip("weather", zip.toBuffer())).toThrow(
-      /manifest not found/,
+    expect(() => readRuntimeFromVerifiedZip(inspectionStore, "weather", zip.toBuffer())).toThrow(
+      /must contain plugin\.json/,
     );
   });
 
   it("enforces the manifest byte cap before extraction", () => {
-    const zip = zipWithPluginJson(Buffer.alloc(MAX_MCP_MANIFEST_BYTES + 1, "x"));
-    expect(() => readRuntimeFromVerifiedZip("weather", zip)).toThrow(/byte cap/);
+    const zip = zipWithPluginJson(randomBytes(MAX_MCP_MANIFEST_BYTES + 1));
+    expect(() => readRuntimeFromVerifiedZip(inspectionStore, "weather", zip)).toThrow(/byte cap/);
+  });
+
+  it("rejects an excessive declared entry count before MCP entry enumeration", () => {
+    const zip = new AdmZip().toBuffer();
+    const endOfCentralDirectoryOffset = zip.byteLength - 22;
+    zip.writeUInt16LE(10_001, endOfCentralDirectoryOffset + 8);
+    zip.writeUInt16LE(10_001, endOfCentralDirectoryOffset + 10);
+
+    expect(() => readRuntimeFromVerifiedZip(inspectionStore, "weather", zip)).toThrow(
+      expect.objectContaining({ code: "ARCHIVE_ENTRY_LIMIT_EXCEEDED" }),
+    );
   });
 });
 
@@ -402,7 +425,14 @@ describe("installMcpFromMarketplace", () => {
     installDir: string,
     manifest: Record<string, unknown> = defaultManifest(),
   ): PluginArtifactStore {
-    return {
+    const inspectionStore = new PluginArtifactStore({
+      installRoot: installDir,
+      cacheRoot: resolve(installDir, ".cache"),
+      fetcher: makeStubFetcher(null),
+      publicKeys: {},
+      tarballCacheBase: null,
+    });
+    const store = {
       installDirFor: vi.fn(() => installDir),
       downloadVerifiedZip: vi.fn(async () => makeMcpZip(manifest)),
       extractZip: vi.fn(async () => []),
@@ -411,7 +441,17 @@ describe("installMcpFromMarketplace", () => {
         result: await commit(installDir, []),
       })),
       appendHistory: vi.fn(async () => undefined),
+      readRequiredRootTextFiles: inspectionStore.readRequiredRootTextFiles.bind(inspectionStore),
     } as unknown as PluginArtifactStore;
+    store.withVerifiedArtifactTransaction = vi.fn(async (detail, version, onProgress, operation) => {
+      const zipBuffer = await store.downloadVerifiedZip(detail, version, onProgress);
+      return operation({
+        zipBuffer,
+        artifactSha256: "test-sha",
+        signerKeyId: "test-key",
+      });
+    });
+    return store;
   }
 
   function makeRegisterConfig() {
