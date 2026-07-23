@@ -113,8 +113,23 @@ function buildProjection(
   owner: PluginMcpOwner,
   configWithoutId: Omit<McpServerConfig, "id">,
 ): PreparedPluginMcpProjection {
+  // HTTP connections are content-addressed and may be reused across runtime
+  // activations. A stdio client is a child process rooted in one immutable
+  // activation payload, so its identity must change even when signed bytes are
+  // identical; otherwise the successor can inherit a process whose root is
+  // deleted when the predecessor retires.
+  const activationIdentity = configWithoutId.transport === "stdio"
+    ? owner.activationId
+    : "";
   const identityHash = createHash("sha256")
-    .update([owner.pluginId, owner.pluginVersion, owner.generationId, owner.localId, owner.fingerprint].join("\0"))
+    .update([
+      owner.pluginId,
+      owner.pluginVersion,
+      owner.generationId,
+      activationIdentity,
+      owner.localId,
+      owner.fingerprint,
+    ].join("\0"))
     .digest("hex")
     .slice(0, 24);
   const serverId = `plugin_${identityHash}`;

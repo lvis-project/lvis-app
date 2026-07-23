@@ -98,6 +98,10 @@ function setup(options: { wireHooks?: boolean } = {}) {
   const auditLogger = {
     log: vi.fn(),
     logShadow: vi.fn(),
+    appendPermissionAuditEntry: vi.fn(async (entry: Record<string, unknown>) => ({
+      ...entry,
+      prevHash: "test-prev-hash",
+    })),
     isPermissionAuditChainReady: vi.fn(() => false),
     isShadowChannelWritable: vi.fn(() => true),
     getPermissionShadowLogFile: vi.fn(() => "/tmp/shadow"),
@@ -110,6 +114,7 @@ function setup(options: { wireHooks?: boolean } = {}) {
   const generationAccess = {
     getActive: vi.fn((pluginId: string) =>
       pluginId === principal.ownerPluginId ? activeGeneration : undefined),
+    isExactAdmitted: vi.fn(() => true),
     acquire: vi.fn(async () => ({ generation: activeGeneration, release: vi.fn() })),
     acquireExact: vi.fn(async (_pluginId: string, generationId: string) => {
       if (generationId !== principal.generationId) throw new Error("stale test generation");
@@ -156,7 +161,7 @@ function options(grantToken?: string, principalOverride = principal) {
 
 describe("ToolExecutor plugin operation governance", () => {
   it("requires a fresh read and consumes one app-write grant exactly once", async () => {
-    const { executor, read, write } = setup();
+    const { executor, read, write, auditLogger } = setup();
     const readResult = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll([{ id: "r", name: "domain_read", input: { operation: "status" } }], options()),
     );
@@ -179,6 +184,18 @@ describe("ToolExecutor plugin operation governance", () => {
     );
     expect(replay[0].is_error).toBe(true);
     expect(write).toHaveBeenCalledTimes(1);
+    expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "allow",
+        pluginOperation: expect.objectContaining({ outcome: "consumed" }),
+      }),
+    );
+    expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "deny",
+        pluginOperation: expect.objectContaining({ outcome: "rejected" }),
+      }),
+    );
   });
 
   it("atomically burns one read at grant issuance and requires a fresh read before the next write", async () => {

@@ -143,7 +143,12 @@ export class HostApiGenerationScope {
         return;
       }
       try {
-        await callback(...args);
+        await binding.access.runWithLease(
+          lease,
+          async () => {
+            await callback(...args);
+          },
+        );
       } finally {
         lease.release();
       }
@@ -202,6 +207,16 @@ export class HostApiGenerationScope {
   ): unknown {
     if (this.state === "discarded" || this.state === "retired") {
       throw new Error(`[plugin:${this.pluginId}] hostApi.${path} belongs to a retired generation`);
+    }
+    if (this.state === "superseded") {
+      const binding = this.binding;
+      if (
+        !binding ||
+        !binding.access.isExactAdmitted(this.pluginId, binding.generationId)
+      ) {
+        throw new Error(`[plugin:${this.pluginId}] hostApi.${path} belongs to a retired generation`);
+      }
+      return method.apply(receiver, args);
     }
     if (this.state !== "preparing") return method.apply(receiver, args);
 

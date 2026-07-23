@@ -927,13 +927,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     // `Plugin not found` from the deployment guard against the already-purged
     // marketplace registry.
     const plugin = this.plugins.get(canonicalPluginId);
+    let retirementError: unknown;
     if (plugin) {
       const generationLifecycle = this.requireGenerationLifecycle("plugin removal");
-      const { retirement } = await generationLifecycle.deactivateWithCommit(
-        canonicalPluginId,
-        async () => undefined,
-      );
-      await this.settleCommittedRetirement(canonicalPluginId, retirement, "plugin removal");
+      const { retirement } = await generationLifecycle.deactivateWithCommit(canonicalPluginId, async () => undefined);
+      retirementError = await this.captureCommittedRetirementFailure(canonicalPluginId, retirement, "plugin removal");
     } else if (
       !this.knownPluginManifests.has(canonicalPluginId) &&
       !this.failedPluginIds.has(canonicalPluginId) &&
@@ -964,10 +962,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.failedPluginStubs.delete(canonicalPluginId);
     this.loadFailureInfo.delete(canonicalPluginId);
     this.disabledPluginIds.delete(canonicalPluginId);
-    this.pluginUiRevisions.delete(canonicalPluginId);
+    this.invalidatePluginUiRevision(canonicalPluginId);
     this.knownInstallAliases.delete(canonicalPluginId);
 
     this.onDisable?.(canonicalPluginId);
+    if (retirementError !== undefined) throw retirementError;
   }
 
   /** Helper: does a manifest path's directory name suggest it owns `pluginId`? */
@@ -1395,7 +1394,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
     this.disabledPluginIds.add(canonicalPluginId);
     this.failedPluginIds.delete(canonicalPluginId);
-    this.pluginUiRevisions.delete(canonicalPluginId);
+    this.invalidatePluginUiRevision(canonicalPluginId);
     this.onDisable?.(canonicalPluginId);
     await this.settleCommittedRetirement(canonicalPluginId, retirement, "plugin disable");
   }
@@ -1583,14 +1582,14 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       throw new Error(`cannot atomically remove unloaded plugin: ${pluginId}`);
     }
     const generationLifecycle = this.requireGenerationLifecycle("atomic plugin removal");
-    const { result, retirement } = await generationLifecycle.deactivateWithCommit(
-      canonicalPluginId,
-      durableCommit,
+    const { result, retirement } = await generationLifecycle.deactivateWithCommit(canonicalPluginId, durableCommit);
+    const retirementError = await this.captureCommittedRetirementFailure(
+      canonicalPluginId, retirement, "atomic plugin removal",
     );
-    await this.settleCommittedRetirement(canonicalPluginId, retirement, "atomic plugin removal");
     // The inactive pointer is already published. This call purges only the
     // durable runtime tracking maps and fires the host cleanup callback.
     await this.removePlugin(canonicalPluginId);
+    if (retirementError !== undefined) throw retirementError;
     return result;
   }
 

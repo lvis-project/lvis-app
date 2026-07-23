@@ -56,6 +56,7 @@ describe("PluginRuntime generation isolation", () => {
     runtime.setGenerationAccess({
       replaceRuntime: vi.fn(async () => undefined),
       getActive: vi.fn(() => lease.generation as never),
+      isExactAdmitted: vi.fn(() => true),
       acquire: vi.fn(async () => lease as never),
       acquireExact: vi.fn(async () => lease as never),
       runWithLease: vi.fn(async (_lease, operation) => operation()),
@@ -119,6 +120,7 @@ describe("PluginRuntime generation isolation", () => {
     runtime.setGenerationAccess({
       replaceRuntime: vi.fn(async () => undefined),
       getActive: vi.fn(() => generation as never),
+      isExactAdmitted: vi.fn(() => true),
       acquire: vi.fn(async () => ({ generation, release }) as never),
       acquireExact: vi.fn(async () => ({ generation, release }) as never),
       runWithLease: vi.fn(async (_lease, operation) => {

@@ -22,9 +22,11 @@ import {
   publishHostThemeChanged,
   __resetLastThemePayloadForTests,
   registerPluginsHandlers,
+  revokePluginWebviewsForPlugin,
   unregisterPluginWebview,
 } from "../domains/plugins.js";
 import { ipcMain } from "electron";
+import { UNAUTHORIZED_FRAME } from "../gated.js";
 import { onEvent } from "../../boot/types.js";
 import { HOST_ONLY_EMIT_NAMESPACES } from "../../plugins/capabilities.js";
 import type { IpcDeps } from "../types.js";
@@ -73,6 +75,19 @@ function createDeps(pluginRoot: string): {
     setConfigOverride: ReturnType<typeof vi.fn>;
   };
 } {
+  const generationAccess = {
+    getActive: vi.fn((pluginId: string) =>
+      pluginId === "meeting"
+        ? { pluginId, generationId: "generation-1", manifest: { id: pluginId } }
+        : undefined),
+    isExactAdmitted: vi.fn(() => true),
+    acquire: vi.fn(async () => { throw new Error("not used"); }),
+    acquireExact: vi.fn(async (pluginId: string, generationId: string) => ({
+      generation: { pluginId, generationId },
+      release: vi.fn(),
+    })),
+    runWithLease: vi.fn(async (_lease: unknown, operation: () => Promise<unknown>) => operation()),
+  };
   const pluginRuntime = {
     getPluginManifest: vi.fn(() => ({
       id: "meeting",
@@ -81,6 +96,7 @@ function createDeps(pluginRoot: string): {
     getPluginRoot: vi.fn(() => pluginRoot),
     assertPluginEventEmitAccess: vi.fn(),
     isPluginUiRevisionCurrent: vi.fn(() => true),
+    getGenerationAccess: vi.fn(() => generationAccess),
     setConfigOverride: vi.fn(),
   };
   const pluginConfig = new Map<string, Record<string, unknown>>();
@@ -527,12 +543,49 @@ describe("plugin theme IPC handlers", () => {
     pluginRuntime.isPluginUiRevisionCurrent.mockReturnValue(false);
     const result = await configSet(pluginEvent(1705), "theme", "dark");
 
-    expect(result).toEqual({
-      ok: false,
-      error: "Plugin webview is no longer active: meeting",
-    });
+    expect(result).toEqual(UNAUTHORIZED_FRAME);
     expect(deps.settingsService.setPluginConfig).not.toHaveBeenCalled();
     expect(pluginRuntime.setConfigOverride).not.toHaveBeenCalled();
+  });
+
+  it("revokes a stale webview when its exact runtime generation changes", () => {
+    const { root, entryUrl } = createPluginFixture();
+    const { deps, pluginRuntime } = createDeps(root);
+    registerPluginsHandlers(deps);
+    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
+    expect(registerWebview(rendererEvent(), {
+      webContentsId: 1707,
+      pluginId: "meeting",
+      entryUrl,
+    })).toEqual({ ok: true });
+
+    const access = pluginRuntime.getGenerationAccess();
+    access.getActive.mockReturnValue({
+      pluginId: "meeting",
+      generationId: "generation-2",
+      manifest: { id: "meeting" },
+    });
+    expect(emitEvent(pluginEvent(1707), "meeting.changed")).toEqual(UNAUTHORIZED_FRAME);
+    expect(deps.revokePluginOperationSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("synchronously revokes registered webviews on a runtime UI revision signal", () => {
+    const { root, entryUrl } = createPluginFixture();
+    const { deps } = createDeps(root);
+    registerPluginsHandlers(deps);
+    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
+    expect(registerWebview(rendererEvent(), {
+      webContentsId: 1708,
+      pluginId: "meeting",
+      entryUrl,
+    })).toEqual({ ok: true });
+
+    revokePluginWebviewsForPlugin("meeting", deps.revokePluginOperationSession);
+
+    expect(deps.revokePluginOperationSession).toHaveBeenCalledTimes(1);
+    expect(emitEvent(pluginEvent(1708), "meeting.changed")).toEqual(UNAUTHORIZED_FRAME);
   });
 
   it("persists config for the currently registered plugin UI revision", async () => {

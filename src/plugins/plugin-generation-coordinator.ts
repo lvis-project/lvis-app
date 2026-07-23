@@ -40,6 +40,11 @@ interface GenerationState<TState> {
   transitionTail: Promise<void>;
 }
 
+interface GenerationAdmission<TState> {
+  readonly generation: ActivePluginGeneration<TState>;
+  readonly isActive: () => boolean;
+}
+
 function freezeGeneration<TState>(candidate: ActivePluginGeneration<TState>): ActivePluginGeneration<TState> {
   if (!candidate.pluginId || !candidate.pluginVersion || !candidate.generationId) {
     throw new Error("plugin generation identity must be complete");
@@ -69,7 +74,11 @@ export class PluginGenerationCoordinator<TState = unknown> {
   private readonly plugins = new Map<string, GenerationState<TState>>();
   private readonly retirements = new Set<Promise<void>>();
   private readonly admittedGenerations = new AsyncLocalStorage<
-    ReadonlyMap<string, ActivePluginGeneration<TState>>
+    ReadonlyMap<string, GenerationAdmission<TState>>
+  >();
+  private readonly leaseAdmissions = new WeakMap<
+    PluginGenerationLease<TState>,
+    GenerationAdmission<TState>
   >();
 
   private stateFor(pluginId: string): GenerationState<TState> {
@@ -102,7 +111,10 @@ export class PluginGenerationCoordinator<TState = unknown> {
   async acquire(pluginId: string): Promise<PluginGenerationLease<TState>> {
     const admitted = this.admittedGenerations.getStore()?.get(pluginId);
     if (admitted) {
-      return Object.freeze({ generation: admitted, release: () => undefined });
+      if (!admitted.isActive()) {
+        throw new Error(`plugin '${pluginId}' generation admission has expired`);
+      }
+      return this.createNestedLease(admitted);
     }
     const state = this.stateFor(pluginId);
     while (state.pendingTransitions > 0) {
@@ -112,7 +124,11 @@ export class PluginGenerationCoordinator<TState = unknown> {
     if (!generation) throw new Error(`plugin '${pluginId}' has no active generation`);
     state.leaseCounts.set(generation.generationId, (state.leaseCounts.get(generation.generationId) ?? 0) + 1);
     let released = false;
-    return Object.freeze({
+    const admission: GenerationAdmission<TState> = Object.freeze({
+      generation,
+      isActive: () => !released,
+    });
+    const lease = Object.freeze({
       generation,
       release: () => {
         if (released) return;
@@ -127,20 +143,30 @@ export class PluginGenerationCoordinator<TState = unknown> {
         state.drainWaiters.delete(generation.generationId);
       },
     });
+    this.leaseAdmissions.set(lease, admission);
+    return lease;
   }
 
   async acquireExact(pluginId: string, generationId: string): Promise<PluginGenerationLease<TState>> {
     const admitted = this.admittedGenerations.getStore()?.get(pluginId);
     if (admitted) {
-      if (admitted.generationId !== generationId) {
+      if (!admitted.isActive()) {
+        throw new Error(`plugin '${pluginId}' generation admission has expired`);
+      }
+      if (admitted.generation.generationId !== generationId) {
         throw new Error(`plugin '${pluginId}' generation '${generationId}' is not admitted`);
       }
-      return Object.freeze({ generation: admitted, release: () => undefined });
+      return this.createNestedLease(admitted);
     }
     const lease = await this.acquire(pluginId);
     if (lease.generation.generationId === generationId) return lease;
     lease.release();
     throw new Error(`plugin '${pluginId}' generation '${generationId}' is not active`);
+  }
+
+  isExactAdmitted(pluginId: string, generationId: string): boolean {
+    const admitted = this.admittedGenerations.getStore()?.get(pluginId);
+    return admitted?.generation.generationId === generationId && admitted.isActive();
   }
 
   /**
@@ -153,12 +179,32 @@ export class PluginGenerationCoordinator<TState = unknown> {
     lease: PluginGenerationLease<TState>,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const next = new Map(this.admittedGenerations.getStore() ?? []);
-    next.set(lease.generation.pluginId, lease.generation);
+    const admission = this.leaseAdmissions.get(lease);
+    if (!admission || !admission.isActive()) {
+      throw new Error(
+        `plugin '${lease.generation.pluginId}' generation lease is not active`,
+      );
+    }
+    const next = new Map(
+      [...(this.admittedGenerations.getStore() ?? [])]
+        .filter(([, current]) => current.isActive()),
+    );
+    next.set(lease.generation.pluginId, admission);
     return this.admittedGenerations.run(
-      Object.freeze(next) as ReadonlyMap<string, ActivePluginGeneration<TState>>,
+      Object.freeze(next) as ReadonlyMap<string, GenerationAdmission<TState>>,
       operation,
     );
+  }
+
+  private createNestedLease(
+    admission: GenerationAdmission<TState>,
+  ): PluginGenerationLease<TState> {
+    const lease = Object.freeze({
+      generation: admission.generation,
+      release: () => undefined,
+    });
+    this.leaseAdmissions.set(lease, admission);
+    return lease;
   }
 
   async commit(

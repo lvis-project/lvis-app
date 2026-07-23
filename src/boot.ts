@@ -55,6 +55,7 @@ import { openLinkWindow as openLinkWindowService } from "./main/link-window-serv
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
 import { type AppServices, onEvent } from "./boot/types.js";
+import { revokePluginWebviewsForPlugin } from "./ipc/domains/plugins.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { RoutinesStore } from "./main/routines-store.js";
@@ -435,6 +436,12 @@ export async function bootstrap(
     permissionManager,
     // Idempotency SOT for `hostApi.hasRoutineBySource` (constructed above).
     routinesStore,
+    onPluginUiRevisionChange: (pluginId) => {
+      revokePluginWebviewsForPlugin(
+        pluginId,
+        (appSessionId) => ctx.revokePluginOperationSession?.(appSessionId),
+      );
+    },
     deferStart: true,
   });
   ctx.pluginRuntime = pluginRuntime;

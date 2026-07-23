@@ -1439,7 +1439,7 @@ export default async function createPlugin({ hostApi }) {
     expect(disposed).toEqual([pluginId, pluginId]);
   });
 
-  it("finishes atomic removal tracking when bounded generation retirement fails", async () => {
+  it("reports bounded retirement failure after atomically removing runtime tracking", async () => {
     const pluginId = "p-remove-stop-timeout";
     const toolName = "p_remove_stop_timeout_ping";
     const manifestPath = await writePlugin(pluginId);
@@ -1464,7 +1464,7 @@ export default async function createPlugin({ hostApi }) {
     await expect(runtime.removePluginWithCommit(
       pluginId,
       async () => "durably-removed",
-    )).resolves.toBe("durably-removed");
+    )).rejects.toThrow(/generation retirement failed/);
 
     expect(runtime.listPluginIds()).not.toContain(pluginId);
     await expect(runtime.call(toolName)).rejects.toThrow(/not found/);

@@ -107,6 +107,35 @@ describe("PluginGenerationCoordinator", () => {
     expect(coordinator.getActive("bundle-host-test")?.generationId).toBe("g2");
   });
 
+  it("expires detached async admission when the owning lease is released", async () => {
+    const coordinator = new PluginGenerationCoordinator();
+    await coordinator.commit(generation("g1"), async () => undefined);
+    const lease = await coordinator.acquire("bundle-host-test");
+    let continueDetached!: () => void;
+    const detachedBarrier = new Promise<void>((resolve) => {
+      continueDetached = resolve;
+    });
+    let detached!: Promise<string>;
+
+    await coordinator.runWithLease(lease, async () => {
+      detached = (async () => {
+        await detachedBarrier;
+        const nested = await coordinator.acquireExact("bundle-host-test", "g1");
+        try {
+          return nested.generation.generationId;
+        } finally {
+          nested.release();
+        }
+      })();
+    });
+
+    lease.release();
+    await coordinator.commit(generation("g2"), async () => undefined);
+    continueDetached();
+    await expect(detached).rejects.toThrow(/admission has expired/);
+    expect(coordinator.isExactAdmitted("bundle-host-test", "g1")).toBe(false);
+  });
+
   it("quiesces existing leases before an in-place projection transition", async () => {
     const coordinator = new PluginGenerationCoordinator<{ label: string }>();
     await coordinator.commit(generation("g1"), async () => undefined);

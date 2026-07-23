@@ -5,6 +5,8 @@ import type { PluginRuntimeGenerationAccess } from "../plugin-host-generation.js
 function generationAccess(activeGenerationId: { current: string }): PluginRuntimeGenerationAccess {
   return {
     getActive: vi.fn(() => undefined),
+    isExactAdmitted: vi.fn((_pluginId, generationId) =>
+      generationId === activeGenerationId.current),
     acquire: vi.fn(async () => { throw new Error("not used"); }),
     acquireExact: vi.fn(async (_pluginId, generationId) => {
       if (generationId !== activeGenerationId.current) throw new Error("not active");
@@ -44,14 +46,16 @@ describe("HostApiGenerationScope", () => {
   it("admits callbacks only for the exact active generation and disposes exact resources", async () => {
     const active = { current: "g1" };
     const scope = new HostApiGenerationScope("ep-api");
+    const access = generationAccess(active);
     const callback = vi.fn();
     const dispose = vi.fn();
     scope.registerDisposer(dispose);
-    scope.bindGeneration(generationAccess(active), "g1");
+    scope.bindGeneration(access, "g1");
     scope.publish();
 
     await scope.wrapCallback(callback)("first");
     expect(callback).toHaveBeenCalledWith("first");
+    expect(access.runWithLease).toHaveBeenCalledTimes(1);
     active.current = "g2";
     await scope.wrapCallback(callback)("stale");
     expect(callback).toHaveBeenCalledTimes(1);
@@ -59,6 +63,22 @@ describe("HostApiGenerationScope", () => {
     scope.supersede();
     scope.retire();
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects detached HostApi calls after supersede without a live exact admission", () => {
+    const active = { current: "g1" };
+    const access = generationAccess(active);
+    const admitted = vi.mocked(access.isExactAdmitted);
+    admitted.mockReturnValue(false);
+    const scope = new HostApiGenerationScope("ep-api");
+    const getInstalledPluginIds = vi.fn(() => ["ep-api"]);
+    const api = scope.wrapHostApi({ getInstalledPluginIds } as never);
+    scope.bindGeneration(access, "g1");
+    scope.publish();
+    scope.supersede();
+
+    expect(() => api.getInstalledPluginIds()).toThrow(/retired generation/);
+    expect(getInstalledPluginIds).not.toHaveBeenCalled();
   });
 
   it("discards a failed candidate and rejects its late work", () => {

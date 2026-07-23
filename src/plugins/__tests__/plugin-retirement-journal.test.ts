@@ -19,6 +19,7 @@ describe("PluginRetirementJournal", () => {
     const generationId = "a".repeat(64);
     const journal = new PluginRetirementJournal(path);
     journal.record("ep-api", generationId, new Error("disconnect failed"));
+    journal.completePhase("ep-api", generationId, "runtime");
 
     const reloaded = new PluginRetirementJournal(path);
     expect(reloaded.list()).toEqual([
@@ -27,6 +28,7 @@ describe("PluginRetirementJournal", () => {
         generationId,
         attempts: 1,
         lastError: "disconnect failed",
+        completedPhases: ["runtime"],
       }),
     ]);
 

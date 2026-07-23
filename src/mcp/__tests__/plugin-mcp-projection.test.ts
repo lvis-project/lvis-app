@@ -50,7 +50,27 @@ function generation(version = "1.0.0", generationId = "g1", fingerprint = "a".re
   };
 }
 
+function stdioGeneration(generationId: string): ActivePluginGeneration {
+  const base = generation("1.0.0", generationId);
+  const contribution = base.contributions[0];
+  return {
+    ...base,
+    contributions: [{
+      ...contribution,
+      files: [{
+        ...contribution.files[0],
+        content: JSON.stringify({
+          transport: "stdio",
+          command: "node",
+          args: ["./server.mjs"],
+        }),
+      }],
+    }],
+  };
+}
+
 const testDir = mkdtempSync(join(tmpdir(), "lvis-plugin-mcp-"));
+const previousLvisHome = process.env.LVIS_HOME;
 const configPath = join(testDir, "servers.json");
 const registerRuntimeApproval = vi.fn();
 const unregisterRuntimeApproval = vi.fn();
@@ -79,6 +99,7 @@ function manager(): McpManager {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  process.env.LVIS_HOME = testDir;
   connect.mockResolvedValue(undefined);
   await writeFile(configPath, JSON.stringify({ servers: [] }), "utf8");
   await mkdir(join(testDir, "mcp"), { recursive: true });
@@ -86,6 +107,8 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  if (previousLvisHome === undefined) delete process.env.LVIS_HOME;
+  else process.env.LVIS_HOME = previousLvisHome;
   await rm(testDir, { recursive: true, force: true });
 });
 
@@ -201,18 +224,8 @@ describe("plugin-owned MCP projections", () => {
   });
 
   it("anchors bundled stdio scripts and includes their bytes in the trust fingerprint", () => {
-    const base = generation();
-    const contribution = base.contributions[0];
-    const stdio: ActivePluginGeneration = {
-      ...base,
-      contributions: [{
-        ...contribution,
-        files: [{
-          ...contribution.files[0],
-          content: JSON.stringify({ transport: "stdio", command: "node", args: ["./server.mjs"] }),
-        }],
-      }],
-    };
+    const stdio = stdioGeneration("g1");
+    const contribution = stdio.contributions[0];
     const [projection] = preparePluginMcpGeneration(stdio, testDir);
     expect(projection.config).toMatchObject({
       command: "node",
@@ -220,6 +233,38 @@ describe("plugin-owned MCP projections", () => {
     });
     expect(projection.owner.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(projection.owner.fingerprint).not.toBe(contribution.fingerprint);
+  });
+
+  it("reuses identical HTTP identity but restarts identical stdio for each activation", async () => {
+    const httpG1 = preparePluginMcpGeneration(generation("1.0.0", "g1"), testDir)[0];
+    const httpG2 = preparePluginMcpGeneration(generation("1.0.0", "g2"), testDir)[0];
+    expect(httpG2.serverId).toBe(httpG1.serverId);
+
+    const stdioG1 = preparePluginMcpGeneration(stdioGeneration("g1"), testDir)[0];
+    const stdioG2 = preparePluginMcpGeneration(stdioGeneration("g2"), testDir)[0];
+    expect(stdioG2.serverId).not.toBe(stdioG1.serverId);
+
+    const trust = new PluginMcpTrustStore();
+    trust.approve(stdioG1);
+    expect(trust.isApproved(stdioG2)).toBe(true);
+    const mgr = manager();
+    const first = await mgr.prepareBundledGeneration(
+      { pluginId: "ep-api", generationId: "g1" },
+      [stdioG1],
+      trust,
+    );
+    mgr.publishBundledGeneration(first);
+    const second = await mgr.prepareBundledGeneration(
+      { pluginId: "ep-api", generationId: "g2" },
+      [stdioG2],
+      trust,
+    );
+    mgr.publishBundledGeneration(second);
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    await mgr.disconnectBundledGeneration("ep-api", "g1");
+    expect(mgr.getServerState(stdioG1.serverId)).toBeUndefined();
+    expect(mgr.getServerState(stdioG2.serverId)).toBeDefined();
   });
 
   it("installs and removes the ephemeral governance rule without changing managed policy", async () => {
