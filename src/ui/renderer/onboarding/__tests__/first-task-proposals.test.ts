@@ -4,7 +4,7 @@ import { pickFirstTaskProposal } from "../first-task-proposals.js";
 
 function card(
   id: string,
-  priority: number | undefined = 100,
+  priority = 100,
   overrides: Partial<PluginCardSummary> = {},
 ): PluginCardSummary {
   return {
@@ -19,7 +19,7 @@ function card(
     runtimeLoaded: true,
     onboarding: {
       firstTask: {
-        ...(priority === undefined ? {} : { priority }),
+        priority,
         locales: {
           en: {
             headline: `${id} headline`,
@@ -49,10 +49,6 @@ describe("pickFirstTaskProposal", () => {
   it("breaks equal-priority ties deterministically by plugin id", () => {
     expect(pickFirstTaskProposal([card("sample-zulu", 10), card("sample-alpha", 10)], "en")?.pluginId)
       .toBe("sample-alpha");
-  });
-
-  it("uses priority 100 when the declaration omits priority", () => {
-    expect(pickFirstTaskProposal([card("sample-default", undefined)], "en")?.priority).toBe(100);
   });
 
   it.each([
