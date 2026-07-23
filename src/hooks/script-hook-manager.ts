@@ -457,7 +457,16 @@ export class ScriptHookManager {
     operation: (activeEntries: HookRegistryEntry[]) => Promise<T>,
   ): Promise<T> {
     const access = this.generationAccess;
-    if (!access) return operation([...entries]);
+    if (!access) {
+      const pluginEntry = entries.find((entry) => entry.owner);
+      if (pluginEntry?.owner) {
+        throw new Error(
+          `plugin hook '${pluginEntry.id}' cannot run without generation leasing for ` +
+          `'${pluginEntry.owner.pluginId}' generation '${pluginEntry.owner.generationId}'`,
+        );
+      }
+      return operation([...entries]);
+    }
     const leases = new Map<
       string,
       Awaited<ReturnType<PluginRuntimeGenerationAccess["acquireExact"]>>

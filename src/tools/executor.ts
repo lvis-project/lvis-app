@@ -1930,6 +1930,7 @@ export class ToolExecutor {
       if (
         rationaleResumeContext === undefined &&
         resolvedPluginOperation?.rule.kind === "write" &&
+        resolvedPluginOperation.rule.requiresRead !== undefined &&
         pluginOperationPrincipal !== undefined &&
         invocationPermissionContext.pluginOperation?.grantToken !== undefined &&
         permissionResult.decision === "ask" &&
@@ -2872,17 +2873,16 @@ export class ToolExecutor {
 
     if (
       resolvedPluginOperation?.rule.kind === "write" &&
+      resolvedPluginOperation.rule.requiresRead !== undefined &&
       pluginOperationPrincipal
     ) {
       const readRequirement = resolvedPluginOperation.rule.requiresRead;
-      const readRevision = readRequirement
-        ? this.pluginOperationGrants.latestRequiredRead(
-            pluginOperationPrincipal,
-            readRequirement.tool,
-            readRequirement.operations,
-            readRequirement.maxAgeMs,
-          )
-        : undefined;
+      const readRevision = this.pluginOperationGrants.latestRequiredRead(
+        pluginOperationPrincipal,
+        readRequirement.tool,
+        readRequirement.operations,
+        readRequirement.maxAgeMs,
+      );
       const grantContext = permissionContext?.pluginOperation;
       const consumed = readRevision
         ? this.pluginOperationGrants.consume(grantContext?.grantToken, {
@@ -3077,7 +3077,6 @@ export class ToolExecutor {
             readTool: toolUse.name,
             readOperation: resolvedPluginOperation.operation,
           },
-          rawResult ?? content,
         );
       }
     } else {

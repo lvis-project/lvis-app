@@ -16,6 +16,7 @@ const principal = {
 function setup() {
   const read = vi.fn(async () => ({ output: "fresh", isError: false, metadata: { rawResult: { status: "open" } } }));
   const write = vi.fn(async () => ({ output: "saved", isError: false }));
+  const directWrite = vi.fn(async () => ({ output: "reserved", isError: false }));
   const registry = new ToolRegistry();
   registry.registerBatch([
     createDynamicTool({
@@ -54,6 +55,21 @@ function setup() {
       jsonSchema: { type: "object" },
       execute: write,
     }),
+    createDynamicTool({
+      name: "direct_write",
+      description: "write without an artificial read counterpart",
+      source: "plugin",
+      category: "write",
+      pluginId: principal.ownerPluginId,
+      modelVisible: true,
+      operationGovernance: {
+        discriminant: "operation",
+        appAllowed: ["reserve"],
+        operations: { reserve: { kind: "write", minimumRisk: "network" } },
+      },
+      jsonSchema: { type: "object" },
+      execute: directWrite,
+    }),
   ]);
   const permissions = new PermissionManager("/tmp/nonexistent-operation-governance.json");
   permissions.checkDetailed = () => ({ decision: "allow", reason: "test", layer: 3 });
@@ -79,6 +95,7 @@ function setup() {
     approvalGate,
     read,
     write,
+    directWrite,
     auditLogger,
   };
 }
@@ -149,6 +166,20 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(result.is_error).toBeFalsy();
     expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
     expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps no-read writes on ordinary approval and ignores forged grant tokens", async () => {
+    const { executor, permissions, approvalGate, directWrite } = setup();
+    permissions.checkDetailed = () => ({ decision: "ask", reason: "ordinary write ask", layer: 6 });
+    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w", name: "direct_write", input: { operation: "reserve" } }],
+        options("forged-token"),
+      ),
+    );
+    expect(result.is_error).toBeFalsy();
+    expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+    expect(directWrite).toHaveBeenCalledTimes(1);
   });
 
   it("binds an MCP-App grant to its Host session and burns it on a cross-session attempt", async () => {

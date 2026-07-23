@@ -216,8 +216,12 @@ export async function materializePluginContributions(
       : [declaration.path];
     const files: MaterializedContributionFile[] = [];
     for (const path of selected.sort()) {
-      const content = await readFile(resolve(pluginRoot, path), "utf8");
-      files.push(Object.freeze({ path, content, sha256: createHash("sha256").update(content).digest("hex") }));
+      const bytes = await readFile(resolve(pluginRoot, path));
+      files.push(Object.freeze({
+        path,
+        content: bytes.toString("utf8"),
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      }));
     }
     const fingerprint = createHash("sha256")
       .update(files.map((file) => `${file.path}\0${file.sha256}`).join("\n"))
