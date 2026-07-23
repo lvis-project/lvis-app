@@ -20,11 +20,11 @@ jobs:
     # to trusted default-branch repository_dispatch workflows.
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: lvis-app
-      - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
@@ -34,7 +34,7 @@ jobs:
       # ABI-correct binaries without re-downloading Electron or recompiling
       # better-sqlite3/node-pty. Exact-key only — a lockfile change (which pins
       # the Electron version) misses and rebuilds, so a stale ABI never leaks in.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: lvis-app/node_modules
           key: ${{ runner.os }}-${{ runner.arch }}-ci-nm-${{ hashFiles('lvis-app/bun.lock') }}
@@ -70,16 +70,16 @@ jobs:
     name: Windows permission path tests
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: lvis-app
-      - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
           restore-keys: ${{ runner.os }}-ci-bun-
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: lvis-app/node_modules
           key: ${{ runner.os }}-${{ runner.arch }}-ci-nm-${{ hashFiles('lvis-app/bun.lock') }}
@@ -120,16 +120,16 @@ jobs:
     name: macOS permission path tests
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: lvis-app
-      - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-ci-bun-${{ hashFiles('lvis-app/bun.lock') }}
           restore-keys: ${{ runner.os }}-ci-bun-
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: lvis-app/node_modules
           key: ${{ runner.os }}-${{ runner.arch }}-ci-nm-${{ hashFiles('lvis-app/bun.lock') }}
