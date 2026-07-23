@@ -101,6 +101,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
           outcome: "abort",
           reason: decision.reason,
         });
+        await bootAuditLogger.flush();
         throw new Error(message);
       } else if (decision.action === "degrade") {
         // DEFAULT / settings-on (NOT the explicit env) + the sandbox cannot
@@ -281,6 +282,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
               outcome: "abort",
               reason: failureReason,
             });
+            await bootAuditLogger.flush();
             throw initErr;
           }
           // DEFAULT / settings-on (or Windows) — GRACEFUL degrade, non-bricking.
