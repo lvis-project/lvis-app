@@ -78,7 +78,7 @@ import {
   type LvisHomeDocUpgradeMarker,
 } from "./main/seed-lvis-home-docs.js";
 
-import { createBootContext } from "./boot/context.js";
+import { assertBootContextReady, createBootContext } from "./boot/context.js";
 import { assembleAppServices } from "./boot/assemble-services.js";
 import { setupNetworkFetch } from "./boot/steps/network-fetch-setup.js";
 import { setupAuditAndNotification } from "./boot/steps/audit-notification.js";
@@ -592,5 +592,6 @@ export async function bootstrap(
   ctx.pluginTelemetry = pluginTelemetry;
   ctx.autoUpdaterStop = autoUpdaterStop;
 
+  assertBootContextReady(ctx);
   return assembleAppServices(ctx);
 }
