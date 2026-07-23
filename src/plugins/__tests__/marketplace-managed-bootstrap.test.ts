@@ -5,13 +5,16 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import {
+  makeTestPluginPaths,
+  TestPluginMarketplaceService,
+} from "./test-helpers.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
 
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
   const fetcher = new MockMarketplaceFetcher(marketplacePath);
-  return new PluginMarketplaceService(paths, fetcher);
+  return new TestPluginMarketplaceService(paths, fetcher);
 }
 
 describe("PluginMarketplaceService managed bootstrap", () => {
@@ -356,7 +359,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
       "installWithDependencies",
     ).mockImplementation(async (...args: unknown[]) => {
-      const activate = args[6] as ((prepared: unknown) => Promise<unknown>) | undefined;
+      const activate = args[5] as ((prepared: unknown) => Promise<unknown>) | undefined;
       if (!activate) throw new Error("missing managed generation activation seam");
       await activate({
         pluginRoot: join(testDir, "staged-meeting"),

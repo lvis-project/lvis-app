@@ -20,7 +20,10 @@ import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem, PluginRegistryEntry } from "../types.js";
 import { setCachedCatalog } from "../offline-cache.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import {
+  makeTestPluginPaths,
+  TestPluginMarketplaceService,
+} from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
@@ -109,7 +112,7 @@ describe("PluginMarketplaceService install()", () => {
       pluginsRoot: installedDir,
       cacheRoot,
     });
-    const service = new PluginMarketplaceService(paths, fetcher);
+    const service = new TestPluginMarketplaceService(paths, fetcher);
     // Phase 2-final: npm install no longer exists on the service. Tests
     // that previously asserted "npm was not called" now check there's no
     // such method to call. The mock is kept as a tombstone so existing

@@ -81,4 +81,37 @@ describe("PluginOperationGrantCoordinator", () => {
     coordinator.revokeSession(principal.appSessionId);
     expect(coordinator.consume(session.token, expected)).toMatchObject({ ok: false });
   });
+
+  it("revokes unused grants and read snapshots for one authenticated account session", () => {
+    const coordinator = new PluginOperationGrantCoordinator(() => 50);
+    const readRevision = coordinator.recordRead({
+      ...principal,
+      readTool: "ep_attendance_read",
+      readOperation: "today",
+    });
+    const expected = {
+      ...principal,
+      toolName: "ep_attendance_write",
+      operation: "clock",
+      intentHash: "intent",
+      readRevision,
+    };
+    const grant = coordinator.issue({ ...expected, expiresAt: 100 });
+
+    coordinator.revokeAccount(
+      principal.ownerPluginId,
+      principal.generationId,
+      principal.accountHash,
+    );
+
+    expect(coordinator.consume(grant.token, expected)).toMatchObject({ ok: false });
+    expect(
+      coordinator.latestRequiredRead(
+        principal,
+        "ep_attendance_read",
+        ["today"],
+        1_000,
+      ),
+    ).toBeUndefined();
+  });
 });

@@ -136,6 +136,34 @@ export class PluginOperationGrantCoordinator {
     }
   }
 
+  revokeAccount(
+    ownerPluginId: string,
+    generationId: string,
+    accountHash: string,
+  ): void {
+    for (const [key, value] of this.grants) {
+      if (
+        value.binding.ownerPluginId === ownerPluginId &&
+        value.binding.generationId === generationId &&
+        value.binding.accountHash === accountHash
+      ) {
+        this.grants.delete(key);
+      }
+    }
+    const principalPrefix = `${ownerPluginId}\0`;
+    const generationMarker = `\0${generationId}\0`;
+    const accountMarker = `\0${accountHash}\0`;
+    for (const [key] of this.snapshots) {
+      if (
+        key.startsWith(principalPrefix) &&
+        key.includes(generationMarker) &&
+        key.includes(accountMarker)
+      ) {
+        this.snapshots.delete(key);
+      }
+    }
+  }
+
   private collectExpired(): void {
     const now = this.now();
     for (const [key, value] of this.grants) if (value.binding.expiresAt <= now) this.grants.delete(key);
