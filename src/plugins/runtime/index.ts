@@ -786,10 +786,14 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
         if (!generationLifecycle.getActive(pluginId)) {
           throw new Error(`cannot disable plugin without an active generation: ${pluginId}`);
         }
-        await generationLifecycle.deactivateWithCommit(pluginId, persist);
+        const { retirement } = await generationLifecycle.deactivateWithCommit(pluginId, persist);
         this.inactivePluginIds.add(pluginId);
         this.disabledPluginIds.add(pluginId);
-        await generationLifecycle.waitForRetirements();
+        await this.settleCommittedRetirement(
+          pluginId,
+          retirement,
+          "plugin enabled-state disable",
+        );
       } else {
         if (generationLifecycle.getActive(pluginId)) {
           throw new Error(`cannot re-enable plugin while a generation is active: ${pluginId}`);

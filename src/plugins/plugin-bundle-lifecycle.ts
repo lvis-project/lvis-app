@@ -166,10 +166,15 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   }
 
   deactivate(pluginId: string): Promise<void> {
-    return this.serialize(pluginId, () => this.deactivateNow(pluginId));
+    return this.serialize(pluginId, async () => {
+      await this.deactivateNow(pluginId);
+    });
   }
 
-  async deactivateWithCommit<T>(pluginId: string, durableCommit: () => Promise<T>): Promise<T> {
+  async deactivateWithCommit<T>(
+    pluginId: string,
+    durableCommit: () => Promise<T>,
+  ): Promise<CommittedPluginGeneration<T>> {
     return this.serialize(pluginId, () => this.deactivateNow(pluginId, durableCommit));
   }
 
@@ -488,7 +493,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   private async deactivateNow<T = void>(
     pluginId: string,
     durableCommit?: () => Promise<T>,
-  ): Promise<T> {
+  ): Promise<CommittedPluginGeneration<T>> {
     let result!: T;
     const active = this.coordinator.getActive(pluginId);
     const bundledServerIds = this.deps.mcpManager.bundledServerIdsForPlugin(pluginId);
@@ -497,7 +502,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
         throw new Error(`plugin '${pluginId}' has live projections without an active bundle generation`);
       }
       if (durableCommit) result = await durableCommit();
-      return result;
+      return Object.freeze({ result, retirement: Promise.resolve() });
     }
     const preparedLoopback = this.deps.loopbackManager.prepareRemoval(
       pluginId,
@@ -532,8 +537,8 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       throw error;
     }
     this.deps.loopbackManager.postPublishGeneration(preparedLoopback);
-    this.trackRetirement(active, published.retired);
-    return result;
+    const retirement = this.trackRetirement(active, published.retired);
+    return Object.freeze({ result, retirement });
   }
 
   /**
