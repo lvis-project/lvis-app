@@ -1529,6 +1529,49 @@ export default async function createPlugin({ hostApi }) {
     },
   );
 
+  it.each([
+    ["valid entry first", false],
+    ["failed entry first", true],
+  ] as const)(
+    "reserves a failed registry id before boot identity mutation (%s)",
+    async (_label, reverseEntries) => {
+      const canonicalId = "p-failed-identity-beta";
+      const validManifestPath = await writePlugin(canonicalId);
+      const malformedDir = join(installedDir, "p-malformed-identity");
+      const malformedManifestPath = join(malformedDir, "plugin.json");
+      await mkdir(malformedDir, { recursive: true });
+      await writeFile(malformedManifestPath, "{}", "utf-8");
+      const entries = [
+        {
+          id: "p-failed-identity-alpha",
+          manifestPath: validManifestPath,
+          enabled: true,
+        },
+        {
+          id: canonicalId,
+          manifestPath: malformedManifestPath,
+          enabled: true,
+        },
+      ];
+      await writeFile(
+        registryPath,
+        JSON.stringify({
+          version: 1,
+          plugins: reverseEntries ? entries.reverse() : entries,
+        }),
+        "utf-8",
+      );
+      const runtime = makeRuntime();
+
+      await expect(runtime.startAll()).rejects.toMatchObject({
+        code: "plugin-identity-collision",
+        message: expect.stringContaining(canonicalId),
+      });
+      expect(runtime.listPluginIds()).toEqual([]);
+      expect(runtime.getPluginManifest(canonicalId)).toBeUndefined();
+    },
+  );
+
   it("rejects a newly installed alias collision before restarting the existing plugin", async () => {
     const existingCanonicalId = "p-runtime-existing-canonical";
     const conflictingCanonicalId = "p-runtime-conflicting-canonical";

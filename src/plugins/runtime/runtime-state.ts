@@ -437,6 +437,7 @@ export abstract class PluginRuntimeState {
    */
   protected assertPluginIdentityNamespace(
     mappings: Iterable<{ pluginId: string; alias?: string }>,
+    reservedInstallIds: Iterable<string> = [],
   ): void {
     const normalizedMappings = [...mappings]
       .map(({ pluginId, alias }) => ({
@@ -444,6 +445,9 @@ export abstract class PluginRuntimeState {
         alias: alias?.trim(),
       }))
       .filter(({ pluginId }) => pluginId.length > 0);
+    const normalizedReservedIds = [...reservedInstallIds]
+      .map((pluginId) => pluginId.trim())
+      .filter(Boolean);
     const canonicalIds = new Set([
       ...this.knownPluginManifests.keys(),
       ...this.plugins.keys(),
@@ -484,6 +488,32 @@ export abstract class PluginRuntimeState {
         );
       }
       recordAliasOwner(alias, pluginId);
+    }
+
+    // Failed manifest/integrity rows still own their raw registry ids for
+    // diagnostics and cleanup. Consume the claims backed by successful
+    // mappings, then reject any remaining raw id that overlaps a canonical or
+    // alias identity.
+    const successfulClaimCounts = new Map<string, number>();
+    for (const { alias } of normalizedMappings) {
+      if (!alias) continue;
+      successfulClaimCounts.set(alias, (successfulClaimCounts.get(alias) ?? 0) + 1);
+    }
+    for (const reservedId of normalizedReservedIds) {
+      const successfulClaims = successfulClaimCounts.get(reservedId) ?? 0;
+      if (successfulClaims > 0) {
+        successfulClaimCounts.set(reservedId, successfulClaims - 1);
+        continue;
+      }
+      const aliasOwner = aliasOwners.get(reservedId);
+      if (canonicalIds.has(reservedId) || aliasOwner) {
+        throw this.pluginIdentityCollision(
+          reservedId,
+          aliasOwner
+            ? `failed registry id and install alias for '${aliasOwner}'`
+            : `failed registry id and canonical id for '${reservedId}'`,
+        );
+      }
     }
   }
 
