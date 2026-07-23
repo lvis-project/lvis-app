@@ -443,6 +443,69 @@ export async function parsePluginJson(
     byName.set(name, tool);
   }
 
+  // Host-only operation-governance sidecar. This metadata is deliberately not
+  // part of Tool._meta (manifest==wire); validate its relationship to the MCP
+  // input union before any runtime projection can occur.
+  for (const [toolName, policy] of Object.entries(manifest.operationGovernance ?? {})) {
+    const tool = byName.get(toolName);
+    if (!tool) {
+      fail(`operationGovernance.${toolName}`, "references a tool not declared in tools[]", `declare tools[] entry '${toolName}' or remove the policy`);
+    }
+    if (policy.discriminant !== "operation") {
+      fail(`operationGovernance.${toolName}.discriminant`, "must equal 'operation'", `"discriminant": "operation"`);
+    }
+    const operationNames = Object.keys(policy.operations ?? {});
+    if (operationNames.length === 0) {
+      fail(`operationGovernance.${toolName}.operations`, "must declare at least one operation", `"operations": { "list": { "kind": "read", "minimumRisk": "read" } }`);
+    }
+    const inputSchema = tool!.inputSchema as { required?: unknown; properties?: Record<string, unknown> };
+    if (!Array.isArray(inputSchema.required) || !inputSchema.required.includes("operation")) {
+      fail(`tools.${toolName}.inputSchema.required`, "must require the top-level operation discriminant", `"required": ["operation"]`);
+    }
+    const operationSchema = inputSchema.properties?.operation as { type?: unknown; const?: unknown; enum?: unknown } | undefined;
+    if (!operationSchema || operationSchema.type !== "string") {
+      fail(`tools.${toolName}.inputSchema.properties.operation`, "must be a top-level string schema", `"operation": { "type": "string", "enum": [${operationNames.map((name) => JSON.stringify(name)).join(", ")}] }`);
+    }
+    const governedOperationSchema = operationSchema as { type: "string"; const?: unknown; enum?: unknown };
+    const schemaOperations = Array.isArray(governedOperationSchema.enum)
+      ? governedOperationSchema.enum.filter((value): value is string => typeof value === "string")
+      : typeof governedOperationSchema.const === "string"
+        ? [governedOperationSchema.const]
+        : [];
+    if (
+      schemaOperations.length !== operationNames.length ||
+      [...schemaOperations].sort().some((name, index) => name !== [...operationNames].sort()[index])
+    ) {
+      fail(`tools.${toolName}.inputSchema.properties.operation`, "enum/const must exactly match operationGovernance operations", `use exactly ${JSON.stringify(operationNames.sort())}`);
+    }
+    const visibility = toolVisibility(tool!);
+    for (const operation of policy.appAllowed) {
+      const rule = policy.operations[operation];
+      if (!rule) {
+        fail(`operationGovernance.${toolName}.appAllowed`, `unknown operation '${operation}'`, `choose from ${JSON.stringify(operationNames)}`);
+      }
+      if (!visibility.includes("app")) {
+        fail(`operationGovernance.${toolName}.appAllowed`, "appAllowed requires tool visibility including 'app'", `set tools[]. _meta.ui.visibility to include "app"`);
+      }
+      if (rule.kind === "write" && !rule.requiresRead) {
+        fail(`operationGovernance.${toolName}.operations.${operation}.requiresRead`, "app-allowed writes require a governed read snapshot", `"requiresRead": { "tool": "${toolName}", "operations": ["status"], "maxAgeMs": 60000 }`);
+      }
+    }
+    for (const [operation, rule] of Object.entries(policy.operations)) {
+      if (!rule.requiresRead) continue;
+      const readTool = byName.get(rule.requiresRead.tool);
+      const readPolicy = manifest.operationGovernance?.[rule.requiresRead.tool];
+      if (!readTool || !readPolicy) {
+        fail(`operationGovernance.${toolName}.operations.${operation}.requiresRead.tool`, "must reference a governed declared tool", `reference a tool present in operationGovernance`);
+      }
+      for (const readOperation of rule.requiresRead.operations) {
+        if (readPolicy!.operations[readOperation]?.kind !== "read") {
+          fail(`operationGovernance.${toolName}.operations.${operation}.requiresRead.operations`, `'${readOperation}' must reference a read operation`, `choose a kind='read' operation from '${rule.requiresRead.tool}'`);
+        }
+      }
+    }
+  }
+
   // Surface any remaining testMode flag in a protected plugin manifest.
   if (
     normalizeInstallPolicy(parsed) === "admin" &&
