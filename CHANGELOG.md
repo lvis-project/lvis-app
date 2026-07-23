@@ -6,7 +6,7 @@ Hardens local state and plugin lifecycle recovery, self-heals Electron native-mo
 
 ### Reliability and local data
 
-- **Electron native modules self-heal before launch.** Startup detects a `better-sqlite3` or `node-pty` ABI mismatch, serializes rebuilds, recovers interrupted rebuild state, and retries with the Electron ABI instead of leaving the app in a repeated non-fatal error loop.
+- **`better-sqlite3` self-heals before launch.** Startup detects its Electron ABI mismatch, serializes rebuilds, recovers interrupted rebuild state, and retries with the Electron ABI instead of leaving the app in a repeated non-fatal error loop.
 - **Plugin registry and Marketplace mutations are crash-atomic.** Install, update, removal, receipt, artifact, and boot-recovery state now use serialized, fail-consistent transitions with durable recovery ownership.
 - **Secrets are stored atomically and strictly.** Provider credentials and other secret documents use their own locked atomic store, eliminating partial settings writes and silent plaintext fallback.
 
