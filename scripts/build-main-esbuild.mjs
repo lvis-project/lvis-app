@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // esbuild main-process bundler. Replaces the per-file tsc emit so the
 // runtime dependency tree (`ai`, `@ai-sdk/*`, `zod`, `ajv`, `undici`,
-// `adm-zip`, `proper-lockfile`) inlines into a single ESM module. Externals
+// `adm-zip`, `proper-lockfile`) inlines into a split ESM graph. Externals
 // stay outside the bundle because they either ship native bindings, are
 // provided by Electron at runtime, must share a singleton across plugins, or
 // need real node_modules paths at runtime.
@@ -76,8 +76,8 @@ const buildOptions = {
     // binaries (Linux seccomp loader, Windows srt-win.exe) filesystem-relative
     // to its module — `dist/sandbox/generate-seccomp-filter.js` does
     // `dirname(fileURLToPath(import.meta.url))` then joins `../../vendor/...`.
-    // Because this bundle is `bundle:true` + `format:esm` with no splitting,
-    // esbuild would INLINE a reachable dynamic import of ASRT into main.js,
+    // Because this build is `bundle:true` + `format:esm`, esbuild would INLINE
+    // ASRT into an emitted chunk,
     // which rewrites `import.meta.url` to main.js's own path — so the
     // `../../vendor/...` walk resolves to the wrong directory and the vendor
     // binaries cannot be found at runtime (the same failure class pino hit).
@@ -141,6 +141,7 @@ if (watchMode) {
 
   const bundleMeasurement = analyzeMainBundleMetafile(result.metafile, {
     entryPoint: resolve(repoRoot, "src", "main.ts"),
+    requiredAsyncEntryPoint: resolve(repoRoot, "src", "boot.ts"),
   });
   assertMainBundleBudget(bundleMeasurement, MAIN_BUNDLE_BUDGETS);
   const bundleManifest = createMainBundleManifest(result.metafile, { outdir });

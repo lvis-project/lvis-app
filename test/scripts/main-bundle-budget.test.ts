@@ -22,6 +22,7 @@ const syntheticMetafile = {
     "/repo/dist/chunks/shared.js": { bytes: 50, imports: [] },
     "/repo/dist/chunks/boot.js": {
       bytes: 200,
+      entryPoint: "/repo/src/boot.ts",
       imports: [{ path: "./async-shared.js", kind: "import-statement" }],
     },
     "/repo/dist/chunks/async-shared.js": { bytes: 20, imports: [] },
@@ -33,6 +34,7 @@ describe("main bundle budget", () => {
   it("counts only statically reachable outputs in the initial load", () => {
     const measurement = analyzeMainBundleMetafile(syntheticMetafile, {
       entryPoint: "/repo/src/main.ts",
+      requiredAsyncEntryPoint: "/repo/src/boot.ts",
     });
 
     expect(measurement).toMatchObject({
@@ -42,13 +44,14 @@ describe("main bundle budget", () => {
       totalBytes: 400,
       initialFiles: 2,
       totalFiles: 5,
-      hasAsyncBoundary: true,
+      hasRequiredAsyncBoundary: true,
     });
   });
 
   it("fails closed on a missing split or any exceeded byte budget", () => {
     const measurement = analyzeMainBundleMetafile(syntheticMetafile, {
       entryPoint: "/repo/src/main.ts",
+      requiredAsyncEntryPoint: "/repo/src/boot.ts",
     });
     expect(() => assertMainBundleBudget(measurement, {
       entryBytes: 99,
@@ -56,14 +59,28 @@ describe("main bundle budget", () => {
       totalBytes: 399,
     })).toThrow(/entryBytes 100 exceeds 99[\s\S]*initialBytes 150 exceeds 149[\s\S]*totalBytes 400 exceeds 399/);
     expect(() => assertMainBundleBudget(
-      { ...measurement, hasAsyncBoundary: false },
+      { ...measurement, hasRequiredAsyncBoundary: false },
       { entryBytes: 100, initialBytes: 150, totalBytes: 400 },
-    )).toThrow(/no async bundle boundary/);
+    )).toThrow(/required boot entry has no async bundle boundary/);
+  });
+
+  it("rejects a static boot edge even when an unrelated dynamic import remains", () => {
+    const metafile = structuredClone(syntheticMetafile);
+    metafile.outputs["/repo/dist/main.js"].imports = [
+      { path: "./chunks/shared.js", kind: "import-statement" },
+      { path: "./chunks/boot.js", kind: "import-statement" },
+      { path: "./chunks/locale.js", kind: "dynamic-import" },
+    ];
+    expect(analyzeMainBundleMetafile(metafile, {
+      entryPoint: "/repo/src/main.ts",
+      requiredAsyncEntryPoint: "/repo/src/boot.ts",
+    }).hasRequiredAsyncBoundary).toBe(false);
   });
 
   it("reports the measured legacy initial-load reduction", () => {
     const measurement = analyzeMainBundleMetafile(syntheticMetafile, {
       entryPoint: "/repo/src/main.ts",
+      requiredAsyncEntryPoint: "/repo/src/boot.ts",
     });
     expect(formatMainBundleBudget(measurement)).toContain("legacy-initial-reduction=");
   });
@@ -87,11 +104,12 @@ describe("main bundle budget", () => {
     expect(mainSource).not.toMatch(/^import .* from "\.\/boot\.js";$/m);
     const createWindowAt = mainSource.indexOf("createWindow();");
     const loadBootAt = mainSource.indexOf('import("./boot.js")');
-    const awaitCorporateCaAt = mainSource.indexOf("await ensureCorporateCaInjected();");
-    const awaitBootAt = mainSource.indexOf("await bootModulePromise");
+    const attachStartupAt = mainSource.indexOf("loadMainStartupDependencies(", createWindowAt);
+    const loadCorporateCaAt = mainSource.indexOf("ensureCorporateCaInjected,");
     expect(createWindowAt).toBeGreaterThan(-1);
+    expect(createWindowAt).toBeLessThan(attachStartupAt);
     expect(createWindowAt).toBeLessThan(loadBootAt);
-    expect(loadBootAt).toBeLessThan(awaitCorporateCaAt);
-    expect(awaitCorporateCaAt).toBeLessThan(awaitBootAt);
+    expect(attachStartupAt).toBeLessThan(loadBootAt);
+    expect(loadBootAt).toBeLessThan(loadCorporateCaAt);
   });
 });
