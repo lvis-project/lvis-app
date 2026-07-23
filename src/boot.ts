@@ -384,7 +384,7 @@ export async function bootstrap(
   // initPluginRuntime. The per-plugin HostApi factory consults the registry
   // synchronously from `getSecret`; if the registry isn't initialized the
   // tier-3 check fails closed with `whitelist-unreachable`. Resolves on every
-  // path (success, offline, demo) so a network blip never blocks boot.
+  // path (fresh, offline, cached) so a network blip never blocks boot.
   await wireWhitelistRegistry({ bootAuditLogger: ctx.bootAuditLogger });
 
   // Cluster review M1 — PermissionManager is built BEFORE initPluginRuntime

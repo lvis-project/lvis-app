@@ -3,7 +3,10 @@ import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Label } from "../../../components/ui/label.js";
-import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "../../../components/ui/radio-group.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { getApi } from "../api-client.js";
@@ -31,7 +34,9 @@ export function StartupTab() {
   const [launchMinimized, setLaunchMinimized] = useState(false);
   // Default mirrors `DEFAULT_SETTINGS.system.closeBehavior` so the radio group
   // renders the correct selection even before `settings` arrives.
-  const [closeBehavior, setCloseBehavior] = useState<"hide-to-tray" | "quit">("hide-to-tray");
+  const [closeBehavior, setCloseBehavior] = useState<"hide-to-tray" | "quit">(
+    "hide-to-tray",
+  );
   const [capturing, setCapturing] = useState(false);
   const captureInputRef = useRef<HTMLDivElement | null>(null);
 
@@ -64,7 +69,11 @@ export function StartupTab() {
   );
 
   const persistSystem = useCallback(
-    (next: { launchAtStartup?: boolean; launchMinimized?: boolean; closeBehavior?: "hide-to-tray" | "quit" }) => {
+    (next: {
+      launchAtStartup?: boolean;
+      launchMinimized?: boolean;
+      closeBehavior?: "hide-to-tray" | "quit";
+    }) => {
       void api.updateSettings({ system: next });
     },
     [api],
@@ -141,7 +150,7 @@ export function StartupTab() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <SettingsPageHeader
         title={t("startupTab.title")}
         description={t("startupTab.description")}
@@ -153,11 +162,10 @@ export function StartupTab() {
         description={t("startupTab.shortcutSectionDesc")}
       >
         <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <div className="text-sm font-medium">{t("startupTab.shortcutEnabledLabel")}</div>
-            <div className="text-xs text-muted-foreground">
-              {t("startupTab.shortcutEnabledHint")}
-            </div>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="min-w-0 text-sm font-medium">
+              {t("startupTab.shortcutEnabledLabel")}
+            </span>
           </div>
           <Switch
             checked={enabled}
@@ -168,9 +176,11 @@ export function StartupTab() {
           />
         </div>
 
-        <div className="mt-4 space-y-2">
-          <div className="text-sm font-medium">{t("startupTab.shortcutAcceleratorLabel")}</div>
-          <div className="flex items-center gap-2">
+        <div className="mt-4 min-w-0 space-y-2">
+          <div className="text-sm font-medium">
+            {t("startupTab.shortcutAcceleratorLabel")}
+          </div>
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
             <div
               ref={captureInputRef}
               tabIndex={0}
@@ -180,7 +190,7 @@ export function StartupTab() {
               onBlur={() => setCapturing(false)}
               data-testid="startup-accelerator-capture"
               className={[
-                "flex h-9 min-w-[220px] items-center rounded-md border px-3 text-sm",
+                "flex h-9 w-full min-w-0 items-center rounded-md border px-3 text-sm sm:w-auto sm:min-w-[220px]",
                 capturing
                   ? "border-primary ring-2 ring-primary/(--opacity-medium) text-foreground"
                   : "border-input text-muted-foreground",
@@ -188,28 +198,30 @@ export function StartupTab() {
             >
               {capturing
                 ? t("startupTab.shortcutCapturing")
-                : toggleWindow ?? t("startupTab.shortcutUnset")}
+                : (toggleWindow ?? t("startupTab.shortcutUnset"))}
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={startCapture}
-              disabled={!loaded}
-              data-testid="startup-accelerator-record"
-            >
-              {t("startupTab.shortcutRecord")}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleClearAccelerator}
-              disabled={!loaded || toggleWindow === null}
-              data-testid="startup-accelerator-clear"
-            >
-              {t("startupTab.shortcutClear")}
-            </Button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={startCapture}
+                disabled={!loaded}
+                data-testid="startup-accelerator-record"
+              >
+                {t("startupTab.shortcutRecord")}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleClearAccelerator}
+                disabled={!loaded || toggleWindow === null}
+                data-testid="startup-accelerator-clear"
+              >
+                {t("startupTab.shortcutClear")}
+              </Button>
+            </div>
           </div>
           {enabled && toggleWindow === null ? (
             <p className="text-xs text-warning">
@@ -225,11 +237,10 @@ export function StartupTab() {
         description={t("startupTab.launchSectionDesc")}
       >
         <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <div className="text-sm font-medium">{t("startupTab.launchAtStartupLabel")}</div>
-            <div className="text-xs text-muted-foreground">
-              {t("startupTab.launchAtStartupHint")}
-            </div>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="min-w-0 text-sm font-medium">
+              {t("startupTab.launchAtStartupLabel")}
+            </span>
           </div>
           <Switch
             checked={launchAtStartup}
@@ -241,11 +252,10 @@ export function StartupTab() {
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <div className="text-sm font-medium">{t("startupTab.launchMinimizedLabel")}</div>
-            <div className="text-xs text-muted-foreground">
-              {t("startupTab.launchMinimizedHint")}
-            </div>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="min-w-0 text-sm font-medium">
+              {t("startupTab.launchMinimizedLabel")}
+            </span>
           </div>
           <Switch
             checked={launchMinimized}
@@ -268,9 +278,15 @@ export function StartupTab() {
           className="gap-3"
         >
           <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
-            <RadioGroupItem value="hide-to-tray" id="close-hide-to-tray" className="mt-0.5" />
+            <RadioGroupItem
+              value="hide-to-tray"
+              id="close-hide-to-tray"
+              className="mt-0.5"
+            />
             <Label htmlFor="close-hide-to-tray" className="cursor-pointer">
-              <div className="font-medium">{t("generalTab.hideToTrayLabel")}</div>
+              <div className="font-medium">
+                {t("generalTab.hideToTrayLabel")}
+              </div>
               <div className="text-xs text-muted-foreground">
                 {t("generalTab.hideToTrayDescription")}
               </div>
