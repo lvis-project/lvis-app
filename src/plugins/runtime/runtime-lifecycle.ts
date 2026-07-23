@@ -97,6 +97,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           pluginId: outcome.manifest.id,
           alias: outcome.plan.pluginIdHint,
         })),
+      loadPlan.flatMap((plan) => plan.pluginIdHint ? [plan.pluginIdHint] : []),
     );
     const enabledManifestSnapshots = new Map<string, ManifestSnapshot>();
     for (const outcome of preflight) {
