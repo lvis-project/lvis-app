@@ -13,8 +13,8 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { PluginMarketplaceItem } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 import {
-  assertCompressedArtifactSize,
   MarketplaceArtifactLimitError,
+  readCompressedArtifactFile,
 } from "./marketplace-artifact-limits.js";
 const log = createLogger("offline-cache");
 
@@ -172,22 +172,13 @@ export async function getCachedTarball(
   const filePath = resolve(tarballDir, filename);
   assertWithinDir(tarballDir, filePath);
   try {
-    if (maxBytes !== undefined) {
-      const metadata = await stat(filePath);
-      assertCompressedArtifactSize(
-        metadata.size,
-        maxBytes,
-        `cached marketplace artifact ${slug}@${version}`,
-      );
-    }
-    const buf = await readFile(filePath);
-    if (maxBytes !== undefined) {
-      assertCompressedArtifactSize(
-        buf.byteLength,
-        maxBytes,
-        `cached marketplace artifact ${slug}@${version}`,
-      );
-    }
+    const buf = maxBytes === undefined
+      ? await readFile(filePath)
+      : await readCompressedArtifactFile(
+          filePath,
+          maxBytes,
+          `cached marketplace artifact ${slug}@${version}`,
+        );
     // Update LRU timestamp — best-effort, do not throw on failure.
     const index = await readIndex(indexFile);
     const entry = index.entries.find((e) => e.slug === slug && e.version === version);

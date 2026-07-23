@@ -29,7 +29,7 @@
  */
 
 import AdmZip from "adm-zip";
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -54,10 +54,13 @@ import { createLogger } from "../lib/logger.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import {
   assertCompressedArtifactSize,
+  isMarketplaceArtifactLimitProvider,
   MarketplaceArtifactLimitError,
+  readCompressedArtifactFile,
   resolveMarketplaceArtifactLimits,
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
+import { withMarketplaceArtifactResourceSlot } from "./marketplace-artifact-resource-gate.js";
 export { assertSafeArtifactSlug, SAFE_ARTIFACT_SLUG_RE } from "./plugin-id.js";
 const log = createLogger("plugin-artifact-store");
 
@@ -197,7 +200,19 @@ export class PluginArtifactStore {
     this.cacheRoot = options.cacheRoot;
     this.fetcher = options.fetcher;
     this.publicKeys = options.publicKeys;
-    this.artifactLimits = resolveMarketplaceArtifactLimits(options.artifactLimits);
+    const fetcherLimits = isMarketplaceArtifactLimitProvider(options.fetcher)
+      ? options.fetcher.getArtifactLimits()
+      : undefined;
+    this.artifactLimits = resolveMarketplaceArtifactLimits(
+      options.artifactLimits ?? fetcherLimits,
+    );
+    if (options.artifactLimits && fetcherLimits) {
+      for (const name of Object.keys(this.artifactLimits) as Array<keyof MarketplaceArtifactLimits>) {
+        if (this.artifactLimits[name] !== fetcherLimits[name]) {
+          throw new RangeError(`marketplace artifact limit ${name} must match the fetcher policy`);
+        }
+      }
+    }
     // The store owns the SoT for the tarball cache. `null` disables it
     // (test fetcher); `undefined` falls back to a sibling under cacheRoot.
     // `paths.cacheRoot` lives under the plugin tree's own `.cache/` so
@@ -216,6 +231,11 @@ export class PluginArtifactStore {
       throw new Error(`artifact slug "${slug}" escapes install root`);
     }
     return installDir;
+  }
+
+  /** Serialize the full download → inspect → extract lifetime across plugin kinds. */
+  withArtifactResourceSlot<T>(operation: () => Promise<T>): Promise<T> {
+    return withMarketplaceArtifactResourceSlot(operation);
   }
 
   /**
@@ -260,24 +280,11 @@ export class PluginArtifactStore {
       artifactLimits: this.artifactLimits,
       onProgress,
     });
-    const handle = await open(verified.tarballPath, "r");
-    let zipBuffer: Buffer;
-    try {
-      const metadata = await handle.stat();
-      assertCompressedArtifactSize(
-        metadata.size,
-        this.artifactLimits.maxCompressedBytes,
-        `verified marketplace artifact ${slug}@${version}`,
-      );
-      zipBuffer = await handle.readFile();
-      assertCompressedArtifactSize(
-        zipBuffer.byteLength,
-        this.artifactLimits.maxCompressedBytes,
-        `verified marketplace artifact ${slug}@${version}`,
-      );
-    } finally {
-      await handle.close();
-    }
+    const zipBuffer = await readCompressedArtifactFile(
+      verified.tarballPath,
+      this.artifactLimits.maxCompressedBytes,
+      `verified marketplace artifact ${slug}@${version}`,
+    );
     return {
       zipBuffer,
       artifactSha256: verified.sha256,
@@ -338,11 +345,17 @@ export class PluginArtifactStore {
         throw new Error(`invalid zip format for "${safeSlug}": ${(err as Error).message}`);
       }
 
-      const entries = zip.getEntries();
-      if (entries.length > this.artifactLimits.maxEntryCount) {
+      const declaredEntryCount = zip.getEntryCount();
+      if (declaredEntryCount > this.artifactLimits.maxEntryCount) {
         throw new MarketplaceArtifactLimitError(
           "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
-          `marketplace zip ${safeSlug} has ${entries.length} entries; maximum allowed is ${this.artifactLimits.maxEntryCount}`,
+          `marketplace zip ${safeSlug} has ${declaredEntryCount} entries; maximum allowed is ${this.artifactLimits.maxEntryCount}`,
+        );
+      }
+      const entries = zip.getEntries();
+      if (entries.length !== declaredEntryCount) {
+        throw new Error(
+          `marketplace zip ${safeSlug} entry count changed while parsing: declared=${declaredEntryCount} parsed=${entries.length}`,
         );
       }
       let totalUncompressedBytes = 0;
@@ -356,6 +369,21 @@ export class PluginArtifactStore {
           throw new MarketplaceArtifactLimitError(
             "ARCHIVE_ENTRY_TOO_LARGE",
             `marketplace zip entry ${entry.entryName} is ${declaredBytes} bytes; maximum allowed is ${this.artifactLimits.maxEntryUncompressedBytes}`,
+          );
+        }
+        const compressedBytes = entry.header.compressedSize;
+        if (!Number.isSafeInteger(compressedBytes) || compressedBytes < 0) {
+          throw new Error(`marketplace zip ${safeSlug} has an invalid compressed entry size: ${entry.entryName}`);
+        }
+        const compressionRatio = declaredBytes === 0
+          ? 0
+          : compressedBytes === 0
+            ? Number.POSITIVE_INFINITY
+            : declaredBytes / compressedBytes;
+        if (compressionRatio > this.artifactLimits.maxCompressionRatio) {
+          throw new MarketplaceArtifactLimitError(
+            "ARCHIVE_COMPRESSION_RATIO_EXCEEDED",
+            `marketplace zip entry ${entry.entryName} compression ratio ${compressionRatio.toFixed(1)}:1 exceeds ${this.artifactLimits.maxCompressionRatio}:1`,
           );
         }
         totalUncompressedBytes += declaredBytes;
