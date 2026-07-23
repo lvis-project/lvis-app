@@ -1,3 +1,4 @@
+import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 
 /**
@@ -39,7 +40,9 @@ export type MarketplaceArtifactLimitCode =
   | "ARCHIVE_UNCOMPRESSED_TOO_LARGE"
   | "ARCHIVE_COMPRESSION_RATIO_EXCEEDED"
   | "ARTIFACT_DOWNLOAD_TIMEOUT"
-  | "ARTIFACT_DOWNLOAD_ABORTED";
+  | "ARTIFACT_DOWNLOAD_ABORTED"
+  | "SIGNATURE_ENVELOPE_TOO_LARGE"
+  | "SIGNATURE_ENVELOPE_TIMEOUT";
 
 export class MarketplaceArtifactLimitError extends Error {
   constructor(
@@ -103,7 +106,11 @@ export async function readCompressedArtifactFile(
   limit: number,
   context: string,
 ): Promise<Buffer> {
-  const handle = await open(filePath, "r");
+  const flags =
+    constants.O_RDONLY |
+    (constants.O_NONBLOCK ?? 0) |
+    (constants.O_NOFOLLOW ?? 0);
+  const handle = await open(filePath, flags);
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile()) {

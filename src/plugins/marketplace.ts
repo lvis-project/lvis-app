@@ -121,6 +121,16 @@ function shaOfCatalogItem(item: PluginMarketplaceItem): string {
   return createHash("sha256").update(canonicalJSON(item)).digest("hex");
 }
 
+function throwIfMarketplaceInstallAborted(
+  signal: AbortSignal | undefined,
+  pluginId: string,
+): void {
+  if (!signal?.aborted) return;
+  const error = new Error(`marketplace plugin install aborted before promotion: ${pluginId}`);
+  error.name = "AbortError";
+  throw error;
+}
+
 function findRuntimeCapabilityMismatches(
   expected: { capabilities?: readonly string[] },
   actual: { capabilities?: readonly string[] },
@@ -611,7 +621,10 @@ export class PluginMarketplaceService {
   async install(
     pluginId: string,
     onProgress?: (event: InstallerProgressEvent) => void,
-    options?: { networkAccessAcknowledgement?: NetworkAccessAcknowledgement },
+    options?: {
+      networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+      signal?: AbortSignal;
+    },
   ): Promise<{ pluginId: string; installed: true }> {
     // #1098 — capture ONE catalog snapshot and use it for the whole install:
     // the escalation decision, the deployment guard, and the artifact select.
@@ -664,7 +677,15 @@ export class PluginMarketplaceService {
         touchedEntries: new Map(),
       };
       try {
-        const result = await this.installWithDependencies(canonicalPluginId, actor, catalogSnapshot, new Set<string>(), state, onProgress);
+        const result = await this.installWithDependencies(
+          canonicalPluginId,
+          actor,
+          catalogSnapshot,
+          new Set<string>(),
+          state,
+          onProgress,
+          options?.signal,
+        );
         this.clearInstallFailure(result.pluginId);
         return result;
       } catch (error) {
@@ -695,6 +716,7 @@ export class PluginMarketplaceService {
     seen: Set<string>,
     state: InstallOperationState,
     onProgress?: (event: InstallerProgressEvent) => void,
+    signal?: AbortSignal,
   ): Promise<{ pluginId: string; installed: true }> {
     const plugin = catalogSnapshot.find((x) => x.id === pluginId || x.slug === pluginId);
     if (!plugin) {
@@ -824,6 +846,7 @@ export class PluginMarketplaceService {
     const dlVersion = plugin.version ?? "latest";
     let pendingEntry: PluginRegistryEntry | null = null;
     const manifestPath = await this.installArtifact(plugin, dlVersion, onProgress, {
+      signal,
       beforePromote: async (recoveryBackupDir) => {
         pendingEntry = await this.markMarketplaceRegistryEntryPending(
           existingEntry,
@@ -1114,7 +1137,10 @@ export class PluginMarketplaceService {
   async installPlugin(
     pluginId: string,
     version: string,
-    options?: { networkAccessAcknowledgement?: NetworkAccessAcknowledgement },
+    options?: {
+      networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+      signal?: AbortSignal;
+    },
   ): Promise<{ pluginId: string; installed: true; version: string }> {
     return this.withPluginLock(pluginId, async () => {
       const plugins = await this.fetcher.listPlugins();
@@ -1147,6 +1173,7 @@ export class PluginMarketplaceService {
 
       let pendingEntry: PluginRegistryEntry | null = null;
       const manifestPath = await this.installArtifact(plugin, version, undefined, {
+        signal: options?.signal,
         beforePromote: async (recoveryBackupDir) => {
           pendingEntry = await this.markMarketplaceRegistryEntryPending(existingEntry, recoveryBackupDir);
         },
@@ -1639,77 +1666,87 @@ export class PluginMarketplaceService {
       validateCatalogMetadata?: boolean;
       beforePromote?: (recoveryBackupDir: string) => Promise<void>;
       commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void>;
+      signal?: AbortSignal;
     } = {},
   ): Promise<string> {
-    return this.artifactStore.withArtifactResourceSlot(async () => {
-      let priorReceiptRaw: string | undefined;
-      try {
-        priorReceiptRaw = await readFile(installReceiptPath(this.cacheRoot, plugin.id), "utf-8");
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-      }
-      const verified = await this.artifactStore.downloadVerifiedArtifact(plugin, version, onProgress);
-      let receiptCommitted = false;
-      try {
-        const transaction = await this.artifactStore.extractZipWithCommit(
-          plugin.id,
-          verified.zipBuffer,
-          async (pluginDir, extractedFiles) => {
-            const manifestFile = resolve(pluginDir, "plugin.json");
-            try {
-              await readFile(manifestFile, "utf-8");
-            } catch {
-              throw new Error(
-                `plugin "${plugin.id}" verified artifact is missing plugin.json — every published marketplace zip must ship its own manifest`,
-              );
-            }
-            const validateCatalogMetadata =
-              opts.validateCatalogMetadata ??
-              (!plugin.version || plugin.version === version || version === "latest");
-            await this.assertInstalledManifestMatchesCatalog(
-              plugin,
-              version,
-              manifestFile,
-              pluginDir,
-              validateCatalogMetadata,
-            );
-            await this.finalizeInstall(plugin.id, {
-              version,
-              installSource: "marketplace",
-              artifactSha256: verified.artifactSha256,
-              signerKeyId: verified.signerKeyId,
-              files: extractedFiles,
-            });
-            receiptCommitted = true;
-            const manifestPath = toRegistryRelativeManifestPath(this.registryPath, manifestFile);
-            await opts.commit?.(manifestPath, manifestFile);
-            return manifestPath;
-          },
-          {
-            beforePromote: opts.beforePromote,
-            onCommittedBackupResolved: (obsoleteDir) =>
-              clearObsoletePluginBackupOwnership(this.paths, plugin.id, obsoleteDir),
-          },
-        );
-        return transaction.result;
-      } catch (err) {
-        if (!receiptCommitted) throw err;
-        if (err instanceof ArtifactRollbackError) throw err;
+    return this.artifactStore.withVerifiedArtifactTransaction(
+      plugin,
+      version,
+      onProgress,
+      async (verified) => {
+        let priorReceiptRaw: string | undefined;
         try {
-          if (priorReceiptRaw === undefined) {
-            await rm(installReceiptPath(this.cacheRoot, plugin.id), { force: true });
-          } else {
-            await restoreInstallReceiptRaw(this.cacheRoot, plugin.id, priorReceiptRaw);
-          }
-        } catch (receiptRestoreError) {
-          throw new ArtifactRollbackError(
-            `marketplace install and receipt rollback both failed: ${plugin.id}`,
-            [err, receiptRestoreError],
+          priorReceiptRaw = await readFile(
+            installReceiptPath(this.cacheRoot, plugin.id),
+            "utf-8",
           );
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         }
-        throw err;
-      }
-    });
+        let receiptCommitted = false;
+        try {
+          throwIfMarketplaceInstallAborted(opts.signal, plugin.id);
+          const transaction = await this.artifactStore.extractZipWithCommit(
+            plugin.id,
+            verified.zipBuffer,
+            async (pluginDir, extractedFiles) => {
+              const manifestFile = resolve(pluginDir, "plugin.json");
+              try {
+                await readFile(manifestFile, "utf-8");
+              } catch {
+                throw new Error(
+                  `plugin "${plugin.id}" verified artifact is missing plugin.json — every published marketplace zip must ship its own manifest`,
+                );
+              }
+              const validateCatalogMetadata =
+                opts.validateCatalogMetadata ??
+                (!plugin.version || plugin.version === version || version === "latest");
+              await this.assertInstalledManifestMatchesCatalog(
+                plugin,
+                version,
+                manifestFile,
+                pluginDir,
+                validateCatalogMetadata,
+              );
+              await this.finalizeInstall(plugin.id, {
+                version,
+                installSource: "marketplace",
+                artifactSha256: verified.artifactSha256,
+                signerKeyId: verified.signerKeyId,
+                files: extractedFiles,
+              });
+              receiptCommitted = true;
+              const manifestPath = toRegistryRelativeManifestPath(this.registryPath, manifestFile);
+              await opts.commit?.(manifestPath, manifestFile);
+              return manifestPath;
+            },
+            {
+              beforePromote: opts.beforePromote,
+              onCommittedBackupResolved: (obsoleteDir) =>
+                clearObsoletePluginBackupOwnership(this.paths, plugin.id, obsoleteDir),
+            },
+          );
+          return transaction.result;
+        } catch (err) {
+          if (!receiptCommitted) throw err;
+          if (err instanceof ArtifactRollbackError) throw err;
+          try {
+            if (priorReceiptRaw === undefined) {
+              await rm(installReceiptPath(this.cacheRoot, plugin.id), { force: true });
+            } else {
+              await restoreInstallReceiptRaw(this.cacheRoot, plugin.id, priorReceiptRaw);
+            }
+          } catch (receiptRestoreError) {
+            throw new ArtifactRollbackError(
+              `marketplace install and receipt rollback both failed: ${plugin.id}`,
+              [err, receiptRestoreError],
+            );
+          }
+          throw err;
+        }
+      },
+      opts.signal,
+    );
   }
 
   private async commitMarketplaceRegistryEntry(
