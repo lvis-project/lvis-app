@@ -2546,11 +2546,10 @@ export class PluginRuntime {
    * #1176 active/inactive — whether a plugin's tools may be exposed this turn.
    * Mirrors the registry `enabled` field: `enabled !== false` is active, so an
    * unknown / never-toggled plugin defaults to active (migration-safe). This is
-   * orthogonal to load state — an inactive plugin stays loaded. Its tools are
-   * hidden from the model by resolveToolScope and refused on the generation-
-   * pinned loopback execution path, while host-internal call() stays callable
-   * for auth/config/UI. The synchronous in-memory mirror lets the
-   * per-turn `resolveToolScope` gate read it without touching disk.
+   * Disable removes the active generation pointer and every callable
+   * projection after existing leases drain; it does not leave a host-internal
+   * invocation bypass. The synchronous in-memory mirror lets the per-turn
+   * `resolveToolScope` gate read durable enablement without touching disk.
    */
   isPluginEnabled(pluginId: string): boolean {
     return !this.inactivePluginIds.has(pluginId);

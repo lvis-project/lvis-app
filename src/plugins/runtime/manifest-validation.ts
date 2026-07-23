@@ -279,25 +279,7 @@ export async function parsePluginJson(
     // it's the additional-property case (typical when SDK schema tightens
     // and a stale plugin install carries a deprecated field).
     const rawAjvErrors = validator.errors ?? [];
-    // #885 v6 — `tools` is a `oneOf` (legacy `string[]` | pure `Tool[]`). When the
-    // author WROTE the pure form (`tools[0]` is an object), the legacy arm's
-    // "/tools/N must be string" + the "must match exactly one schema in oneOf"
-    // errors are pure NOISE that bury the real pure-arm violation. Filter them so
-    // the user sees only the actionable pure-arm error(s).
-    // `validator` is an AJV type-guard, so inside this `!validator(parsed)` block
-    // TS narrows `parsed` to `never` — read `tools` back through a cast.
-    const toolsRaw = (parsed as { tools?: unknown }).tools;
-    const isPureShape = Array.isArray(toolsRaw) && typeof toolsRaw[0] === "object";
-    const filteredAjvErrors = isPureShape
-      ? rawAjvErrors.filter(
-          (e) =>
-            !(e.keyword === "type" && /^\/tools\/\d+$/.test(e.instancePath) && e.message === "must be string") &&
-            !(e.keyword === "oneOf" && e.instancePath === "/tools"),
-        )
-      : rawAjvErrors;
-    // Never let the filter swallow the entire message (defensive — a pure-shape
-    // failure always retains ≥1 pure-arm error, but fall back if it somehow does not).
-    const ajvErrors = filteredAjvErrors.length > 0 ? filteredAjvErrors : rawAjvErrors;
+    const ajvErrors = rawAjvErrors;
     const additionalProps: string[] = [];
     for (const e of ajvErrors) {
       if (e.keyword === "additionalProperties") {
@@ -380,8 +362,9 @@ export async function parsePluginJson(
   // message instead of letting it fall through to the downstream tool-name loop,
   // which would spread a bare string into a nameless object and throw the
   // confusing "Invalid tool name 'undefined'" (security-review nitpick a). The
-  // installed SDK validator may still accept the legacy shape during the migration
-  // window, so this host-side guard is the loud, author-facing fail-closed point.
+  // Host and SDK schemas both reject that legacy shape. Keep this host-side guard
+  // as a loud, author-facing error if validation is ever invoked with a custom
+  // validator that is accidentally more permissive than the Host source of truth.
   const preV6ToolIdx = (parsed.tools as unknown[]).findIndex(
     (t) => typeof t !== "object" || t === null || Array.isArray(t),
   );

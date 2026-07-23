@@ -578,7 +578,7 @@ export class ToolExecutor {
     principal: PluginOperationPrincipal;
     origin?: "ui" | "mcp-app";
     ttlMs?: number;
-  }): { token: string; grantId: string; readRevision: string } {
+  }): { token: string; grantId: string; readRevision: string | null } {
     const inspected = this.inspectPluginOperationGrant(args);
     return this.issueInspectedPluginOperationGrant({
       toolName: args.toolName,
@@ -594,10 +594,10 @@ export class ToolExecutor {
     inspected: {
       operation: string;
       intentHash: string;
-      readRevision: string;
+      readRevision: string | null;
     };
     ttlMs?: number;
-  }): { token: string; grantId: string; readRevision: string } {
+  }): { token: string; grantId: string; readRevision: string | null } {
     const issued = this.pluginOperationGrants.issue({
       ...args.principal,
       toolName: args.toolName,
@@ -617,7 +617,7 @@ export class ToolExecutor {
   }): {
     operation: string;
     intentHash: string;
-    readRevision: string;
+    readRevision: string | null;
     approvalArgs: Record<string, unknown>;
   } {
     const tool = this.toolRegistry.findByName(args.toolName);
@@ -643,16 +643,22 @@ export class ToolExecutor {
       throw new Error("[plugin-operation-policy] principal generation is not active");
     }
     const resolved = resolvePluginOperation(tool.operationPolicy, args.input, args.origin ?? "ui");
-    if (resolved.rule.kind !== "write" || !resolved.rule.requiresRead) {
-      throw new Error("[plugin-operation-policy] only read-backed writes receive app grants");
+    if (resolved.rule.kind !== "write") {
+      throw new Error("[plugin-operation-policy] only writes receive app grants");
     }
-    const readRevision = this.pluginOperationGrants.latestRequiredRead(
-      args.principal,
-      resolved.rule.requiresRead.tool,
-      resolved.rule.requiresRead.operations,
-      resolved.rule.requiresRead.maxAgeMs,
-    );
-    if (!readRevision) throw new Error("[plugin-operation-policy] required read is missing or stale");
+    let readRevision: string | null = null;
+    if (resolved.rule.requiresRead) {
+      const latest = this.pluginOperationGrants.latestRequiredRead(
+        args.principal,
+        resolved.rule.requiresRead.tool,
+        resolved.rule.requiresRead.operations,
+        resolved.rule.requiresRead.maxAgeMs,
+      );
+      if (!latest) {
+        throw new Error("[plugin-operation-policy] required read is missing or stale");
+      }
+      readRevision = latest;
+    }
     // The confirmation must show the same complete JSON intent that is hashed
     // into the one-shot grant. Showing only the discriminant lets hidden target
     // or date fields change the authorized action without being visible to the
@@ -2027,7 +2033,6 @@ export class ToolExecutor {
       if (
         rationaleResumeContext === undefined &&
         resolvedPluginOperation?.rule.kind === "write" &&
-        resolvedPluginOperation.rule.requiresRead !== undefined &&
         pluginOperationPrincipal !== undefined &&
         invocationPermissionContext.pluginOperation?.grantToken !== undefined &&
         permissionResult.decision === "ask" &&
@@ -2970,18 +2975,23 @@ export class ToolExecutor {
 
     if (
       resolvedPluginOperation?.rule.kind === "write" &&
-      resolvedPluginOperation.rule.requiresRead !== undefined &&
       pluginOperationPrincipal
     ) {
       const readRequirement = resolvedPluginOperation.rule.requiresRead;
-      const readRevision = this.pluginOperationGrants.latestRequiredRead(
-        pluginOperationPrincipal,
-        readRequirement.tool,
-        readRequirement.operations,
-        readRequirement.maxAgeMs,
-      );
+      let readRevision: string | null = null;
+      let readRequirementSatisfied = true;
+      if (readRequirement) {
+        const latest = this.pluginOperationGrants.latestRequiredRead(
+          pluginOperationPrincipal,
+          readRequirement.tool,
+          readRequirement.operations,
+          readRequirement.maxAgeMs,
+        );
+        if (latest) readRevision = latest;
+        else readRequirementSatisfied = false;
+      }
       const grantContext = permissionContext?.pluginOperation;
-      const consumed = readRevision
+      const consumed = readRequirementSatisfied
         ? this.pluginOperationGrants.consume(grantContext?.grantToken, {
             ...pluginOperationPrincipal,
             toolName: toolUse.name,

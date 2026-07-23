@@ -13,7 +13,12 @@ export interface PluginOperationGrantBinding extends PluginOperationPrincipal {
   toolName: string;
   operation: string;
   intentHash: string;
-  readRevision: string;
+  /**
+   * Fresh read receipt for read-backed writes. `null` deliberately represents
+   * a write with no truthful read prerequisite; the grant is still one-shot
+   * and bound to the full intent, principal, and active generation.
+   */
+  readRevision: string | null;
   expiresAt: number;
   nonce: string;
 }

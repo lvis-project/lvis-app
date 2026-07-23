@@ -22,20 +22,11 @@ import {
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import { sessionContext } from "../../engine/session-context.js";
+import { testLoopbackHost } from "./plugin-mcp-test-helpers.js";
 
 beforeEach(() => manifestIntegrityState.resetForTests());
 
 const PLUGIN_ID = "com.example.notes";
-
-function testLoopbackHost(
-  manifest: PluginManifest,
-  delegate: Parameters<typeof PluginMcpHost.loopback>[1],
-  _registry: ToolRegistry,
-  uiResources?: Parameters<typeof PluginMcpHost.loopback>[2],
-  generationId = "test-generation",
-): PluginMcpHost {
-  return PluginMcpHost.loopback(manifest, delegate, uiResources, generationId);
-}
 
 async function publishTestHost(
   host: PluginMcpHost,

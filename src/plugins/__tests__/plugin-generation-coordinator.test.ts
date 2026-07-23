@@ -100,4 +100,61 @@ describe("PluginGenerationCoordinator", () => {
     expect(nextLease.generation.generationId).toBe("g1");
     nextLease.release();
   });
+
+  it("keeps every high-contention invocation pinned to one generation across replace and disable", async () => {
+    const coordinator = new PluginGenerationCoordinator<{ label: string }>();
+    await coordinator.commit(generation("g1"), async () => undefined);
+    const predecessorLease = await coordinator.acquire("bundle-host-test");
+
+    let publishReplacement!: () => void;
+    const replacementDurable = new Promise<void>((resolve) => {
+      publishReplacement = resolve;
+    });
+    const replacement = coordinator.commit(generation("g2"), () => replacementDurable);
+    const waiting = Array.from({ length: 32 }, () =>
+      coordinator.acquire("bundle-host-test"),
+    );
+
+    const admittedInsidePredecessor = coordinator.runWithLease(
+      predecessorLease,
+      async () => {
+        publishReplacement();
+        await replacement;
+        const nested = await coordinator.acquireExact("bundle-host-test", "g1");
+        const observed = nested.generation.generationId;
+        nested.release();
+        return observed;
+      },
+    );
+    expect(await admittedInsidePredecessor).toBe("g1");
+
+    const replacementLeases = await Promise.all(waiting);
+    expect(new Set(replacementLeases.map((lease) => lease.generation.generationId)))
+      .toEqual(new Set(["g2"]));
+    predecessorLease.release();
+    for (const lease of replacementLeases) lease.release();
+
+    let commitDisable!: () => void;
+    const disableDurable = new Promise<void>((resolve) => {
+      commitDisable = resolve;
+    });
+    const disable = coordinator.commit(
+      undefined,
+      () => disableDurable,
+      undefined,
+      "bundle-host-test",
+    );
+    const blockedAdmissions = Array.from({ length: 32 }, () =>
+      coordinator.acquire("bundle-host-test"),
+    );
+    commitDisable();
+    await disable;
+    const results = await Promise.allSettled(blockedAdmissions);
+    expect(results.every(
+      (result) =>
+        result.status === "rejected" &&
+        String(result.reason).includes("no active generation"),
+    )).toBe(true);
+    expect(coordinator.getActive("bundle-host-test")).toBeUndefined();
+  });
 });

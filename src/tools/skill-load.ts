@@ -105,8 +105,16 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         };
       }
       const selectorMatch = /^plugin:([^:]+):([^:]+)$/.exec(skillName);
-      const generationLease = selectorMatch && deps.acquirePluginGeneration
-        ? await deps.acquirePluginGeneration({
+      if (selectorMatch && !deps.acquirePluginGeneration) {
+        return {
+          output: JSON.stringify({
+            error: "skill_load: plugin generation access unavailable",
+          }),
+          isError: true,
+        };
+      }
+      const generationLease = selectorMatch
+        ? await deps.acquirePluginGeneration!({
             pluginId: selectorMatch[1],
             localId: selectorMatch[2],
           })
