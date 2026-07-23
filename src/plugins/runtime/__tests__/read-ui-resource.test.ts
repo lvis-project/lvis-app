@@ -19,7 +19,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime, MAX_UI_RESOURCE_HTML_BYTES } from "../index.js";
+import { createNoopHostApiForTests, PluginRuntime, MAX_UI_RESOURCE_HTML_BYTES } from "../index.js";
 import { manifestIntegrityState } from "../../../permissions/manifest-integrity.js";
 import { sessionContext } from "../../../engine/session-context.js";
 import type { RuntimePlugin } from "../../types.js";
@@ -32,14 +32,17 @@ beforeEach(() => manifestIntegrityState.resetForTests());
 
 /** A runtime holding one loaded plugin whose instance serves (or doesn't) a card. */
 function runtimeWithCardPlugin(instance: Partial<RuntimePlugin>): PluginRuntime {
-  const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
+  const rt = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: HOST_ROOT, manifestPaths: [] });
   const internals = rt as unknown as {
     plugins: Map<string, { manifest: unknown; instance: Partial<RuntimePlugin> }>;
+    knownInstallClaims: Map<string, string | null>;
   };
   internals.plugins.set(PLUGIN_ID, {
     manifest: { id: PLUGIN_ID, tools: [], uiResources: [{ uri: URI }] },
     instance: { handlers: {}, ...instance },
   });
+  internals.knownInstallClaims.set(PLUGIN_ID, null);
   return rt;
 }
 

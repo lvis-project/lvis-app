@@ -7,7 +7,6 @@ import type {
   PluginToolHandler,
   RuntimePlugin,
 } from "../types.js";
-import { createPluginStorage } from "../storage.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
 import { appVersionSatisfiesMin } from "../../shared/semver-compare.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
@@ -19,12 +18,10 @@ import {
   parsePluginJson,
 } from "./manifest-validation.js";
 import {
-  readEnabledManifestSnapshots,
   resolveManifestLoadPlan,
 } from "./snapshots.js";
 import {
   buildImportUrl,
-  createNoopHostApi,
   ensurePluginDataDir,
   resolveEntryPath,
 } from "./sandbox.js";
@@ -54,13 +51,20 @@ const HOST_API_OPERATION_DRAIN_TIMEOUT_MS = 10_000;
 
 export type RestartPluginResult = "started" | "deferred" | "failed" | undefined;
 
+export interface PendingRestartCancellation {
+  generation: number;
+  cancelled: boolean;
+  readonly promise: Promise<void>;
+  cancel(): void;
+}
+
 export abstract class PluginRuntimeState {
   protected readonly hostRoot: string;
   protected readonly manifestPaths: string[];
   protected readonly registryPath?: string;
   protected readonly pluginsRoot?: string;
   protected readonly configStore: ConfigOverrideStore;
-  protected readonly createHostApi?: (
+  protected readonly createHostApi: (
     pluginId: string,
     manifest: PluginManifest,
     pluginDataDir: string,
@@ -80,6 +84,7 @@ export abstract class PluginRuntimeState {
   protected readonly knownPluginManifests = new Map<string, PluginManifest>();
   protected readonly knownPluginAccessGrants = new Map<string, PluginAccessSpec | undefined>();
   protected readonly knownInstallAliases = new Map<string, Set<string>>();
+  protected readonly knownInstallClaims = new Map<string, string | null>();
   protected readonly knownToolOwners = new Map<string, string>();
   protected readonly knownEventOwners = new Map<string, string>();
   protected readonly failedPluginIds = new Set<string>();
@@ -108,6 +113,7 @@ export abstract class PluginRuntimeState {
   protected readonly preparation: PreparationTracker;
   protected readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
   protected readonly pendingRestartPreparations = new Map<string, Promise<void>>();
+  protected readonly pendingRestartCancellations = new Map<string, PendingRestartCancellation>();
   /** Monotonic generation used to reject stale async add/restart commits. */
   protected readonly pluginLifecycleGenerations = new Map<string, number>();
   /**
@@ -118,6 +124,8 @@ export abstract class PluginRuntimeState {
   protected readonly quarantinedPluginLifecycles = new Map<string, string>();
   /** HostApi incarnations whose plugin factory has not committed an instance. */
   private readonly pendingHostApiIncarnations = new Map<string, Set<() => void>>();
+  /** A RuntimePlugin instance's stop hook must execute at most once. */
+  private readonly pluginStopOperations = new WeakMap<RuntimePlugin, Promise<boolean>>();
   protected nextPluginLifecycleGeneration = 0;
   protected readonly pluginUiRevisions = new Map<string, number>();
   protected nextPluginUiRevision = 0;
@@ -135,6 +143,11 @@ export abstract class PluginRuntimeState {
   ): Promise<SinglePluginStartResult>;
 
   constructor(options: PluginRuntimeOptions) {
+    if (typeof options.createHostApi !== "function") {
+      throw new Error(
+        "PluginRuntime requires an explicit createHostApi factory; test harnesses may inject createNoopHostApiForTests",
+      );
+    }
     this.hostRoot = resolve(options.hostRoot);
     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));
     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
@@ -157,6 +170,41 @@ export abstract class PluginRuntimeState {
       markFailed: (pluginId, stub) => this.markFailed(pluginId, stub),
       onDisable: options.onDisable,
     });
+  }
+
+  /**
+   * Live view of the raw config-override map, backed by {@link configStore}.
+   * Retained for tests that assert against the internal override map.
+   */
+  protected get configOverrides(): Record<string, Record<string, unknown>> {
+    return this.configStore.all();
+  }
+
+  setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
+    this.configStore.set(this.resolveKnownPluginId(pluginId), config);
+  }
+
+  getConfigOverride(pluginId: string): Record<string, unknown> | undefined {
+    return this.configStore.get(this.resolveKnownPluginId(pluginId));
+  }
+
+  mergeConfigOverride(pluginId: string, config: Record<string, unknown>): void {
+    this.configStore.merge(this.resolveKnownPluginId(pluginId), config);
+  }
+
+  /** Merge host-injected values into the wildcard (`"*"`) config slot. */
+  setWildcardConfigOverride(config: Record<string, unknown>): void {
+    this.configStore.setWildcard(config);
+  }
+
+  /** Shallow copy of the wildcard config slot. */
+  getWildcardConfigOverride(): Record<string, unknown> {
+    return this.configStore.getWildcard();
+  }
+
+  /** Clear only the named wildcard keys, preserving unrelated host values. */
+  clearWildcardConfigOverride(keys: string[]): void {
+    this.configStore.clearWildcard(keys);
   }
 
   // ─── Manifest Validator (lazy) ─────────────────────────────────────────────
@@ -237,10 +285,19 @@ export abstract class PluginRuntimeState {
       pending = false;
     };
     deactivate = () => {
+      if (!active && !pending) return;
       active = false;
       lifecycleHookScope.active = false;
       lifecycleHookScope.depth = 0;
-      if (pending) forgetPending();
+      if (pending) {
+        forgetPending();
+        // A factory may never settle after invalidation. Pending incarnations
+        // have not transferred their disposer list into `this.disposers`, so
+        // invalidation itself owns immediate cleanup. Splicing makes every late
+        // factory/error continuation's cleanup idempotent.
+        const pendingDisposers = disposers.splice(0);
+        this.runDisposerList(pendingDisposers, "pending HostApi invalidation");
+      }
     };
     let pendingForPlugin = this.pendingHostApiIncarnations.get(pluginId);
     if (!pendingForPlugin) {
@@ -270,16 +327,16 @@ export abstract class PluginRuntimeState {
         lifecycleHookScope.active && lifecycleHookScope.depth > 0,
     };
     try {
-      const hostApi = this.createHostApi?.(
+      const hostApi = this.createHostApi(
         pluginId,
         manifest,
         pluginDataDir,
         incarnation,
-      ) ?? createNoopHostApi(pluginId, pluginDataDir);
-      // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
-      // objects from test harnesses may omit it.
+      );
       if (!hostApi.storage) {
-        hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
+        throw new Error(
+          `createHostApi returned an incomplete HostApi without storage: ${pluginId}`,
+        );
       }
       return {
         hostApi,
@@ -358,13 +415,6 @@ export abstract class PluginRuntimeState {
     });
   }
 
-  protected async readSnapshotsInternal(
-    loadPlan: ManifestLoadPlan[],
-  ): Promise<Map<string, ManifestSnapshot>> {
-    const validator = await this.getManifestValidator();
-    return readEnabledManifestSnapshots(loadPlan, validator);
-  }
-
   /**
    * #885 v6 — MODEL-ONLY (ratified security decision §2.4a). The `knownToolOwners`
    * map is the pre-runtime `??` fallback in `resolveToolOwner`, feeding the
@@ -416,14 +466,174 @@ export abstract class PluginRuntimeState {
 
   protected rememberPluginInstallAlias(pluginId: string, alias: string | undefined): void {
     const normalizedPluginId = pluginId.trim();
-    const normalizedAlias = alias?.trim();
-    if (!normalizedPluginId || !normalizedAlias || normalizedAlias === normalizedPluginId) return;
+    const normalizedAlias = alias?.trim() || undefined;
+    if (!normalizedPluginId) return;
+    this.assertPluginIdentityNamespace([
+      { pluginId: normalizedPluginId, alias: normalizedAlias },
+    ]);
+    this.knownInstallClaims.set(normalizedPluginId, normalizedAlias ?? null);
+    if (!normalizedAlias || normalizedAlias === normalizedPluginId) return;
     let aliases = this.knownInstallAliases.get(normalizedPluginId);
     if (!aliases) {
       aliases = new Set<string>();
       this.knownInstallAliases.set(normalizedPluginId, aliases);
     }
     aliases.add(normalizedAlias);
+  }
+
+  /**
+   * Manifest ids and deployment aliases share every public lifecycle entry
+   * point, so they must form one unambiguous namespace. Validate a complete
+   * batch before boot mutates runtime state, and validate again at each
+   * incremental alias adoption.
+   */
+  protected assertPluginIdentityNamespace(
+    mappings: Iterable<{ pluginId: string; alias?: string }>,
+    reservedInstallIds: Iterable<string> = [],
+  ): void {
+    const normalizedMappings = [...mappings]
+      .map(({ pluginId, alias }) => ({
+        pluginId: pluginId.trim(),
+        alias: alias?.trim(),
+      }))
+      .filter(({ pluginId }) => pluginId.length > 0);
+    const normalizedReservedIds = [...reservedInstallIds]
+      .map((pluginId) => pluginId.trim())
+      .filter(Boolean);
+    const existingCanonicalIds = new Set([
+      ...this.knownPluginManifests.keys(),
+      ...this.plugins.keys(),
+      ...this.knownInstallAliases.keys(),
+      ...this.knownInstallClaims.keys(),
+    ]);
+    const canonicalIds = new Set([
+      ...existingCanonicalIds,
+      ...normalizedMappings.map(({ pluginId }) => pluginId),
+    ]);
+    const aliasOwners = new Map<string, string>();
+
+    const recordAliasOwner = (alias: string, canonicalId: string) => {
+      const existingOwner = aliasOwners.get(alias);
+      if (existingOwner && existingOwner !== canonicalId) {
+        throw this.pluginIdentityCollision(
+          alias,
+          `install alias for both '${existingOwner}' and '${canonicalId}'`,
+        );
+      }
+      aliasOwners.set(alias, canonicalId);
+    };
+    for (const [canonicalId, aliases] of this.knownInstallAliases) {
+      for (const alias of aliases) recordAliasOwner(alias, canonicalId);
+    }
+
+    const canonicalClaimCounts = new Map<string, number>();
+    for (const { pluginId, alias } of normalizedMappings) {
+      const claimCount = (canonicalClaimCounts.get(pluginId) ?? 0) + 1;
+      canonicalClaimCounts.set(pluginId, claimCount);
+      if (claimCount > 1) {
+        throw this.pluginIdentityCollision(
+          pluginId,
+          `multiple active artifacts claim canonical id '${pluginId}'`,
+        );
+      }
+      const aliasOwner = aliasOwners.get(pluginId);
+      if (aliasOwner && aliasOwner !== pluginId) {
+        throw this.pluginIdentityCollision(
+          pluginId,
+          `canonical id for '${pluginId}' and install alias for '${aliasOwner}'`,
+        );
+      }
+      if (existingCanonicalIds.has(pluginId)) {
+        const incomingClaim = alias ?? null;
+        const reusesKnownIdentity = this.knownInstallClaims.has(pluginId)
+          ? this.knownInstallClaims.get(pluginId) === incomingClaim
+          : !alias
+            ? !(this.knownInstallAliases.get(pluginId)?.size)
+            : alias === pluginId
+            ? !(this.knownInstallAliases.get(pluginId)?.size)
+            : this.knownInstallAliases.get(pluginId)?.has(alias) === true;
+        if (!reusesKnownIdentity) {
+          throw this.pluginIdentityCollision(
+            alias ?? pluginId,
+            `new artifact claim for existing canonical id '${pluginId}'`,
+          );
+        }
+      }
+    }
+    for (const { pluginId, alias } of normalizedMappings) {
+      if (!alias || alias === pluginId) continue;
+      if (canonicalIds.has(alias)) {
+        throw this.pluginIdentityCollision(
+          alias,
+          `canonical id for '${alias}' and install alias for '${pluginId}'`,
+        );
+      }
+      recordAliasOwner(alias, pluginId);
+    }
+
+    // Failed manifest/integrity rows still own their raw registry ids for
+    // diagnostics and cleanup. Consume the claims backed by successful
+    // mappings, then reject any remaining raw id that overlaps a canonical or
+    // alias identity.
+    const successfulClaimCounts = new Map<string, number>();
+    for (const { alias } of normalizedMappings) {
+      if (!alias) continue;
+      successfulClaimCounts.set(alias, (successfulClaimCounts.get(alias) ?? 0) + 1);
+    }
+    for (const reservedId of normalizedReservedIds) {
+      const successfulClaims = successfulClaimCounts.get(reservedId) ?? 0;
+      if (successfulClaims > 0) {
+        successfulClaimCounts.set(reservedId, successfulClaims - 1);
+        continue;
+      }
+      const aliasOwner = aliasOwners.get(reservedId);
+      if (canonicalIds.has(reservedId) || aliasOwner) {
+        throw this.pluginIdentityCollision(
+          reservedId,
+          aliasOwner
+            ? `failed registry id and install alias for '${aliasOwner}'`
+            : `failed registry id and canonical id for '${reservedId}'`,
+        );
+      }
+    }
+  }
+
+  protected async assertCurrentPluginIdentityLoadPlan(
+    loadPlan: ManifestLoadPlan[],
+  ): Promise<Array<{ plan: ManifestLoadPlan; snapshot: ManifestSnapshot }>> {
+    const currentIdentities: Array<{
+      plan: ManifestLoadPlan;
+      snapshot: ManifestSnapshot;
+    }> = [];
+    for (const plan of loadPlan) {
+      try {
+        currentIdentities.push({
+          plan,
+          snapshot: {
+            manifest: await this.readManifest(plan.manifestPath, { report: false }),
+            approvedPluginAccess: plan.approvedPluginAccess,
+          },
+        });
+      } catch {
+        // Raw registry ids are still reserved below when a manifest is invalid.
+      }
+    }
+    this.assertPluginIdentityNamespace(
+      currentIdentities.map(({ plan, snapshot }) => ({
+        pluginId: snapshot.manifest.id,
+        alias: plan.pluginIdHint,
+      })),
+      loadPlan.flatMap((plan) => plan.pluginIdHint ? [plan.pluginIdHint] : []),
+    );
+    return currentIdentities;
+  }
+
+  private pluginIdentityCollision(identifier: string, detail: string): Error {
+    const error = new Error(
+      `Plugin identity collision for '${identifier}': ${detail}`,
+    ) as Error & { code?: string };
+    error.code = "plugin-identity-collision";
+    return error;
   }
 
   protected resolveKnownPluginId(pluginId: string): string {
@@ -440,7 +650,25 @@ export abstract class PluginRuntimeState {
     return [...aliases].sort();
   }
 
-  protected beginPluginLifecycleOperation(pluginId: string): number {
+  protected getPluginInstallClaim(pluginId: string): string | null | undefined {
+    return this.knownInstallClaims.get(pluginId);
+  }
+
+  protected assertPluginManifestIdentity(
+    expectedPluginId: string,
+    actualPluginId: string,
+  ): void {
+    if (expectedPluginId === actualPluginId) return;
+    throw this.pluginIdentityCollision(
+      actualPluginId,
+      `manifest id changed from active canonical id '${expectedPluginId}'`,
+    );
+  }
+
+  protected beginPluginLifecycleOperation(
+    pluginId: string,
+    preserveRestartCancellation?: PendingRestartCancellation,
+  ): number {
     const generation = ++this.nextPluginLifecycleGeneration;
     const canonicalId = this.resolveKnownPluginId(pluginId);
     const lifecycleIds = new Set([
@@ -449,6 +677,8 @@ export abstract class PluginRuntimeState {
       ...(this.knownInstallAliases.get(canonicalId) ?? []),
     ]);
     for (const lifecycleId of lifecycleIds) {
+      const cancellation = this.pendingRestartCancellations.get(lifecycleId);
+      if (cancellation !== preserveRestartCancellation) cancellation?.cancel();
       for (const deactivate of this.pendingHostApiIncarnations.get(lifecycleId) ?? []) {
         deactivate();
       }
@@ -487,13 +717,14 @@ export abstract class PluginRuntimeState {
     requestedPluginId: string,
     canonicalPluginId: string,
     generation: number,
+    installAlias: string | undefined,
   ): boolean {
     const requestedGeneration = this.pluginLifecycleGenerations.get(requestedPluginId);
     const canonicalGeneration = this.pluginLifecycleGenerations.get(canonicalPluginId);
     if (requestedGeneration !== generation || (canonicalGeneration !== undefined && canonicalGeneration > generation)) {
       return false;
     }
-    this.rememberPluginInstallAlias(canonicalPluginId, requestedPluginId);
+    this.rememberPluginInstallAlias(canonicalPluginId, installAlias);
     this.pluginLifecycleGenerations.set(canonicalPluginId, generation);
     this.pluginLifecycleGenerations.set(requestedPluginId, generation);
     for (const alias of this.knownInstallAliases.get(canonicalPluginId) ?? []) {
@@ -552,6 +783,7 @@ export abstract class PluginRuntimeState {
     this.knownPluginManifests.clear();
     this.knownPluginAccessGrants.clear();
     this.knownInstallAliases.clear();
+    this.knownInstallClaims.clear();
     this.knownToolOwners.clear();
     this.knownEventOwners.clear();
     this.plugins.clear();
@@ -564,11 +796,27 @@ export abstract class PluginRuntimeState {
     this.preparation.clear();
     this.pendingRestarts.clear();
     this.pendingRestartPreparations.clear();
+    for (const cancellation of this.pendingRestartCancellations.values()) {
+      cancellation.cancel();
+    }
+    this.pendingRestartCancellations.clear();
     this.pluginLifecycleGenerations.clear();
     this.loaded = false;
   }
 
-  protected async stopAfterStartFailure(
+  protected stopAfterStartFailure(
+    pluginId: string,
+    instance: RuntimePlugin,
+    lifecycleHookScope?: PluginLifecycleHookScope,
+  ): Promise<boolean> {
+    const pending = this.pluginStopOperations.get(instance);
+    if (pending) return pending;
+    const stop = this.stopPluginInstance(pluginId, instance, lifecycleHookScope);
+    this.pluginStopOperations.set(instance, stop);
+    return stop;
+  }
+
+  private async stopPluginInstance(
     pluginId: string,
     instance: RuntimePlugin,
     lifecycleHookScope?: PluginLifecycleHookScope,

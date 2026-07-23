@@ -521,6 +521,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // only but a failed import (e.g. forgot to `bun run build` before
     // selecting the dir) still left a dangling registry entry pre-fix.
     const pluginId = await pluginMarketplace.resolveLocalInstallPluginId(filePaths[0]);
+    pluginRuntime.cancelPendingRestart(pluginId);
     return await withPluginInstallLock(pluginId, async () => {
       const result = await pluginMarketplace.installLocal(filePaths[0]);
       try {

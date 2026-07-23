@@ -8,8 +8,6 @@ import type {
 } from "../types.js";
 import type { Actor } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
-import { isDevModeUnlocked } from "../../boot/dev-flags.js";
-import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 import {
   PluginFactoryTimeoutError,
@@ -20,13 +18,8 @@ import {
   runStartWithTimeout,
 } from "./lifecycle-timeout.js";
 
-import {
-  getDeclaredEmittedEvents,
-} from "./manifest-validation.js";
-import {
-  buildPluginContext,
-  resolveRealEntryPath,
-} from "./sandbox.js";
+import { getDeclaredEmittedEvents } from "./manifest-validation.js";
+import { buildPluginContext, resolveRealEntryPath } from "./sandbox.js";
 import type { ManifestLoadPlan, ManifestSnapshot, SinglePluginStartResult } from "./types.js";
 import {
   buildMethodMap,
@@ -35,15 +28,25 @@ import {
 } from "./plugin-loader.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
-import { PluginRuntimeState, type RestartPluginResult } from "./runtime-state.js";
+import {
+  hasExclusivePluginLifecycleMutation,
+  isPluginInstallLockHeld,
+  withAllPluginInstallLocks,
+  withPluginInstallLock,
+} from "../install-lifecycle.js";
+import {
+  PluginRuntimeState,
+  type PendingRestartCancellation,
+  type RestartPluginResult,
+} from "./runtime-state.js";
 import {
   preflightPluginLoadPlan,
   type BootPreflightOutcome,
   type PluginIntegrityCheckResult,
 } from "./runtime-preflight.js";
+import { reportPluginIntegrity, verifyPluginIntegrity } from "./runtime-integrity.js";
 
 const log = createLogger("plugin-runtime");
-
 export class PluginRuntimeLifecycle extends PluginRuntimeState {
   private async importPluginFactoryForLifecycle(
     pluginId: string,
@@ -90,6 +93,15 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
     }
     const preflight = await this.preflightBootLoadPlan(loadPlan);
+    this.assertPluginIdentityNamespace(
+      preflight
+        .filter((outcome) => outcome.ok)
+        .map((outcome) => ({
+          pluginId: outcome.manifest.id,
+          alias: outcome.plan.pluginIdHint,
+        })),
+      loadPlan.flatMap((plan) => plan.pluginIdHint ? [plan.pluginIdHint] : []),
+    );
     const enabledManifestSnapshots = new Map<string, ManifestSnapshot>();
     for (const outcome of preflight) {
       if (
@@ -414,6 +426,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   }
 
   async restartAll(): Promise<void> {
+    // An individual restart may own its plugin lock while waiting on a
+    // never-settling dependency preparation. Cancel before the global lock
+    // waits for per-plugin mutations to drain.
+    for (const cancellation of this.pendingRestartCancellations.values()) {
+      cancellation.cancel();
+    }
+    return withAllPluginInstallLocks(() => this.restartAllLocked());
+  }
+
+  private async restartAllLocked(): Promise<void> {
     const lifecycleIds = new Set([
       ...this.plugins.keys(),
       ...this.pendingRestarts.keys(),
@@ -452,12 +474,50 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   ): Promise<RestartPluginResult> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
+    if (
+      hasExclusivePluginLifecycleMutation()
+      && !isPluginInstallLockHeld(canonicalPluginId)
+    ) {
+      log.warn(
+        `restartPlugin rejected while an all-plugin lifecycle mutation is queued: ${canonicalPluginId}`,
+      );
+      return "failed";
+    }
     const pending = this.pendingRestarts.get(canonicalPluginId);
     if (pending) return pending;
-    const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
-    const restart = this.restartPluginInternal(canonicalPluginId, generation, opts).finally(() => {
+    let resolveCancellation!: () => void;
+    const cancellation: PendingRestartCancellation = {
+      generation: 0,
+      cancelled: false,
+      promise: new Promise<void>((resolve) => {
+        resolveCancellation = resolve;
+      }),
+      cancel() {
+        if (this.cancelled) return;
+        this.cancelled = true;
+        resolveCancellation();
+      },
+    };
+    this.pendingRestartCancellations.set(canonicalPluginId, cancellation);
+    const restart = withPluginInstallLock(canonicalPluginId, async () => {
+      const generation = this.beginPluginLifecycleOperation(
+        canonicalPluginId,
+        cancellation,
+      );
+      cancellation.generation = generation;
+      if (cancellation.cancelled) return "failed";
+      return this.restartPluginInternal(
+        canonicalPluginId,
+        generation,
+        cancellation,
+        opts,
+      );
+    }).finally(() => {
       if (this.pendingRestarts.get(canonicalPluginId) === restart) {
         this.pendingRestarts.delete(canonicalPluginId);
+      }
+      if (this.pendingRestartCancellations.get(canonicalPluginId) === cancellation) {
+        this.pendingRestartCancellations.delete(canonicalPluginId);
       }
     });
     this.pendingRestarts.set(canonicalPluginId, restart);
@@ -467,6 +527,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   protected async restartPluginInternal(
     pluginId: string,
     generation: number,
+    cancellation: PendingRestartCancellation,
     opts: { skipPreparation?: boolean } = {},
   ): Promise<RestartPluginResult> {
     plog("info", { pluginId, phase: PluginPhase.RESTART_REQUEST }, "restart requested");
@@ -475,25 +536,34 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("warn", { pluginId, phase: PluginPhase.RESTART_REQUEST, reason: "not_loaded" }, "restart no-op — plugin not loaded");
       return undefined;
     }
-    const isCurrent = () => this.isPluginLifecycleOperationCurrent(pluginId, generation);
+    const isCurrent = () =>
+      !cancellation.cancelled
+      && this.isPluginLifecycleOperationCurrent(pluginId, generation);
 
     const loadPlan = await this.resolveManifestLoadPlanInternal();
     if (!isCurrent()) return "failed";
-    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
+    const currentIdentities = await this.assertCurrentPluginIdentityLoadPlan(loadPlan);
     if (!isCurrent()) return "failed";
-    const snapshot = enabledSnapshots.get(pluginId);
-    const targetPlan = loadPlan.find(
-      (p) =>
-        p.pluginIdHint === pluginId ||
-        (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
-    );
+    const installClaim = this.getPluginInstallClaim(pluginId);
+    const targetIdentity = currentIdentities.find(({ plan, snapshot }) => {
+      if (snapshot.manifest.id !== pluginId) return false;
+      return installClaim === null
+        ? !plan.pluginIdHint
+          && resolve(dirname(plan.manifestPath)) === resolve(plugin.pluginRoot)
+        : plan.pluginIdHint === (installClaim ?? pluginId);
+    });
+    const snapshot = targetIdentity?.snapshot;
+    const targetPlan = targetIdentity?.plan;
     const pluginRoot = targetPlan ? dirname(targetPlan.manifestPath) : plugin.pluginRoot;
     const approvedPluginAccess =
       snapshot?.approvedPluginAccess ??
       targetPlan?.approvedPluginAccess ??
       plugin.approvedPluginAccess ??
       this.knownPluginAccessGrants.get(pluginId);
-    const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
+    const receiptPluginId = targetPlan?.pluginIdHint ?? this.getPluginInstallClaim(pluginId);
+    const integrityResult: PluginIntegrityCheckResult = receiptPluginId
+      ? await this.verifyReceiptAndDevGuard(receiptPluginId, pluginRoot)
+      : { ok: true };
     if (!isCurrent()) return "failed";
     if (!integrityResult.ok) {
       return "failed";
@@ -507,6 +577,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
       return "failed";
     }
+    this.assertPluginManifestIdentity(pluginId, manifest.id);
     const restartPlan: ManifestLoadPlan = targetPlan ?? {
       pluginIdHint: pluginId,
       manifestPath: resolve(pluginRoot, "plugin.json"),
@@ -542,7 +613,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
       if (preparation) {
         try {
-          await preparation;
+          const outcome = await Promise.race([
+            preparation.then(() => "prepared" as const),
+            cancellation.promise.then(() => "cancelled" as const),
+          ]);
+          if (outcome === "cancelled") return "failed";
         } catch (err) {
           plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
           return "failed";
@@ -784,57 +859,6 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   }
 
   /**
-   * Live view of the raw config-override map, backed by {@link configStore}.
-   * Retained as an instance member of this name because unit tests assert
-   * against the runtime's internal override map directly (see
-   * `runtime-wildcard-config.test.ts`).
-   */
-  protected get configOverrides(): Record<string, Record<string, unknown>> {
-    return this.configStore.all();
-  }
-
-  setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
-    this.configStore.set(pluginId, config);
-  }
-
-  mergeConfigOverride(pluginId: string, config: Record<string, unknown>): void {
-    this.configStore.merge(pluginId, config);
-  }
-
-  /**
-   * #893 — Wildcard (`"*"` slot) config injection. Plugins read the active
-   * LLM vendor id via `hostApi.config.get("hostApiVendor")`; the raw API key
-   * is NOT injected here — callers must obtain it through `getSecret` so it
-   * never appears in the plain-object config map. Merges with existing
-   * wildcard overrides (e.g. `pythonExecutable`) so calling this does NOT
-   * clobber unrelated keys set by other boot steps.
-   */
-  setWildcardConfigOverride(config: Record<string, unknown>): void {
-    this.configStore.setWildcard(config);
-  }
-
-  /**
-   * #893 / PR #894 B2 — Read the wildcard slot so `hostApi.config.get(...)`
-   * can merge host-injected values (e.g. `hostApiVendor`) into every
-   * plugin's effective config map. Returns an empty object when no wildcard
-   * overrides have been set so callers can spread the result unconditionally.
-   * The returned object is a shallow copy — callers MUST NOT mutate it.
-   */
-  getWildcardConfigOverride(): Record<string, unknown> {
-    return this.configStore.getWildcard();
-  }
-
-  /**
-   * #893 — Inverse of `setWildcardConfigOverride`. Clears ONLY the keys
-   * named in `keys` from the wildcard slot, preserving other injected
-   * values. When `keys` is empty the call is a no-op so the unrelated
-   * `pythonExecutable` slot survives a vendor swap.
-   */
-  clearWildcardConfigOverride(keys: string[]): void {
-    this.configStore.clearWildcard(keys);
-  }
-
-  /**
    * US-A3 — Targeted single-plugin add for install / install-local paths.
    */
   async addPlugin(pluginId: string): Promise<"started" | "preparing"> {
@@ -848,6 +872,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           throw new Error(`restartPlugin failed for ${pluginId}`);
         }
       } catch (err) {
+        if ((err as { code?: string })?.code === "plugin-identity-collision") throw err;
         throw new Error(`addPlugin failed for ${pluginId}: ${(err as Error).message}`);
       }
       this.throwIfPluginFailedAfterAdd(knownPluginId);
@@ -864,17 +889,21 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     if (this.pluginLifecycleGenerations.get(pluginId) !== lifecycleGeneration) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
-    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
+    const currentIdentities = await this.assertCurrentPluginIdentityLoadPlan(loadPlan);
     if (this.pluginLifecycleGenerations.get(pluginId) !== lifecycleGeneration) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
-    const snapshot = enabledSnapshots.get(pluginId);
-    const targetPlan = loadPlan.find(
-      (p) => p.pluginIdHint === pluginId || (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
+    const targetIdentity = currentIdentities.find(({ plan }) =>
+      plan.enabled && plan.pluginIdHint === pluginId
+    ) ?? currentIdentities.find(({ plan, snapshot }) =>
+      !plan.pluginIdHint && plan.enabled && snapshot.manifest.id === pluginId
     );
+    const snapshot = targetIdentity?.snapshot;
+    const targetPlan = targetIdentity?.plan;
     if (!snapshot) {
-      if (targetPlan?.enabled) {
-        await this.readManifest(targetPlan.manifestPath); // throws with the actual reason
+      const requestedPlan = loadPlan.find((plan) => plan.pluginIdHint === pluginId);
+      if (requestedPlan?.enabled) {
+        await this.readManifest(requestedPlan.manifestPath); // throws with the actual reason
       }
       throw new Error(`addPlugin: plugin not found in registry or disabled: ${pluginId}`);
     }
@@ -883,7 +912,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
 
     const { manifest, approvedPluginAccess } = snapshot;
-    if (!this.adoptPluginLifecycleIdentity(pluginId, manifest.id, lifecycleGeneration)) {
+    if (!this.adoptPluginLifecycleIdentity(pluginId, manifest.id, lifecycleGeneration, targetPlan.pluginIdHint)) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
     const shouldCommit = () =>
@@ -912,8 +941,25 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   /**
    * US-A3 — Targeted single-plugin remove for uninstall paths.
    */
-  async removePlugin(pluginId: string): Promise<void> {
+  async removePlugin(
+    pluginId: string,
+    options: { preserveConfigOverride?: boolean } = {},
+  ): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    // A restart can be waiting on an intentionally non-cancellable dependency
+    // preparation while it owns the lifecycle lock. Signal cancellation before
+    // queuing removal so that restart can settle and release the lock.
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    return withPluginInstallLock(canonicalPluginId, () =>
+      this.removePluginLocked(pluginId, canonicalPluginId, options)
+    );
+  }
+
+  private async removePluginLocked(
+    pluginId: string,
+    canonicalPluginId: string,
+    options: { preserveConfigOverride?: boolean },
+  ): Promise<void> {
     // Invalidate in-flight add/restart continuations before the first await.
     this.beginPluginLifecycleOperation(canonicalPluginId);
     this.preparation.clearFor(canonicalPluginId);
@@ -966,8 +1012,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       !this.disabledPluginIds.has(canonicalPluginId)
     ) {
       log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
+      this.inactivePluginIds.delete(canonicalPluginId);
       this.knownInstallAliases.delete(canonicalPluginId);
-      this.configStore.delete(canonicalPluginId);
+      this.knownInstallClaims.delete(canonicalPluginId);
+      if (!options.preserveConfigOverride) {
+        this.configStore.delete(canonicalPluginId);
+      }
       return;
     } else {
       log.info(`removePlugin: plugin in non-loaded state (failed/disabled), purging tracking — ${pluginId}`);
@@ -975,7 +1025,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
     // stop() may persist configuration while releasing resources. Delete the
     // runtime override only after that hook has been bounded and deactivated.
-    this.configStore.delete(canonicalPluginId);
+    if (!options.preserveConfigOverride) {
+      this.configStore.delete(canonicalPluginId);
+    }
 
     this.knownPluginManifests.delete(canonicalPluginId);
     this.knownPluginAccessGrants.delete(canonicalPluginId);
@@ -989,52 +1041,24 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.failedPluginStubs.delete(canonicalPluginId);
     this.loadFailureInfo.delete(canonicalPluginId);
     this.disabledPluginIds.delete(canonicalPluginId);
+    this.inactivePluginIds.delete(canonicalPluginId);
     this.pluginUiRevisions.delete(canonicalPluginId);
     this.knownInstallAliases.delete(canonicalPluginId);
+    this.knownInstallClaims.delete(canonicalPluginId);
 
     this.onDisable?.(canonicalPluginId);
   }
 
-  /** Helper: does a manifest path's directory name suggest it owns `pluginId`? */
-  protected matchesManifestPath(manifestPath: string, pluginId: string): boolean {
-    const parent = dirname(manifestPath);
-    const dirName = parent.split(/[\\/]/).pop() ?? "";
-    return dirName === pluginId || dirName === pluginId.replace(/[^a-zA-Z0-9._-]/g, "-");
-  }
-
-  /** Verify installed bytes and reject local-dev receipts outside dev mode. */
   protected async verifyReceiptAndDevGuard(
     pluginId: string,
     pluginRoot: string,
     options: { report?: boolean } = {},
   ): Promise<PluginIntegrityCheckResult> {
-    if (!this.installReceiptCacheRoot) {
-      return { ok: true };
-    }
-    const receiptResult = await verifyInstallReceipt(
+    const result = await verifyPluginIntegrity(
       this.installReceiptCacheRoot,
       pluginId,
       pluginRoot,
     );
-    if (!receiptResult.ok) {
-      const result = { ok: false as const, reason: receiptResult.reason };
-      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
-      return result;
-    }
-    const { installSource, signerKeyId, artifactSha256 } = receiptResult.receipt;
-    // Policy gate: local-dev receipts are only valid in unpackaged dev builds.
-    // verifyInstallReceipt is a pure integrity verifier; environment-based
-    // policy (packaged vs dev) is enforced here in the runtime layer.
-    if (installSource === "local-dev" && !isDevModeUnlocked()) {
-      const reason = "local-dev install rejected in packaged build";
-      const result = { ok: false as const, reason };
-      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
-      return result;
-    }
-    const result: PluginIntegrityCheckResult = {
-      ok: true,
-      verified: { installSource, artifactSha256, signerKeyId },
-    };
     if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
     return result;
   }
@@ -1043,30 +1067,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     pluginId: string,
     result: PluginIntegrityCheckResult,
   ): void {
-    if (!result.ok) {
-      log.error(
-        { pluginId, reason: result.reason, ...(result.error === undefined ? {} : { err: result.error }) },
-        `${pluginId} rejected — install receipt integrity failed`,
-      );
-      try {
-        this.auditLog?.("error", "plugin_integrity_rejected", {
-          pluginId,
-          reason: result.reason,
-        });
-      } catch (error) {
-        log.error({ pluginId, err: error }, "plugin integrity rejection audit failed");
-      }
-      return;
-    }
-    if (!result.verified) return;
-    try {
-      this.auditLog?.("info", "plugin_integrity_verified", {
-        pluginId,
-        ...result.verified,
-      });
-    } catch (error) {
-      log.error({ pluginId, err: error }, "plugin integrity verification audit failed");
-    }
+    reportPluginIntegrity(pluginId, result, this.auditLog);
   }
 
   /** Instantiate and start one post-boot plugin without rebuilding its peers. */
@@ -1320,6 +1321,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.failedPluginIds.delete(manifest.id);
     this.loadFailureInfo.delete(manifest.id);
     this.disabledPluginIds.delete(manifest.id);
+    this.inactivePluginIds.delete(manifest.id);
 
     this.perf.recordStartup(manifest.id, startupMs);
     this.onEnable?.(manifest.id);
@@ -1332,7 +1334,18 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   async reloadPlugin(pluginId: string): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    return withPluginInstallLock(canonicalPluginId, () =>
+      this.reloadPluginLocked(pluginId, canonicalPluginId)
+    );
+  }
+
+  private async reloadPluginLocked(
+    pluginId: string,
+    canonicalPluginId: string,
+  ): Promise<void> {
     const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
+    this.pendingRestartPreparations.delete(canonicalPluginId);
     const isCurrent = () =>
       this.isPluginLifecycleOperationCurrent(canonicalPluginId, generation);
     const plugin = this.plugins.get(canonicalPluginId);
@@ -1513,6 +1526,24 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         throw new Error(result.reason ?? `Plugin disable denied: ${pluginId}`);
       }
     }
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    return withPluginInstallLock(canonicalPluginId, () =>
+      this.disableLocked(pluginId, canonicalPluginId, actor)
+    );
+  }
+
+  private async disableLocked(
+    pluginId: string,
+    canonicalPluginId: string,
+    actor: Actor,
+  ): Promise<void> {
+    if (this.deploymentGuard) {
+      const result = await this.deploymentGuard.canDisable(pluginId, actor);
+      if (!result.allowed) {
+        throw new Error(result.reason ?? `Plugin disable denied: ${pluginId}`);
+      }
+    }
+    this.pendingRestartPreparations.delete(canonicalPluginId);
     this.beginPluginLifecycleOperation(canonicalPluginId);
     this.preparation.clearFor(canonicalPluginId);
 
