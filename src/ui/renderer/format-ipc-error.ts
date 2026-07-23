@@ -138,6 +138,11 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // their own formatter. This generic key is the fallback for callers that
   // surface the bare code.
   "incompatible-app-version": "formatIpcError.incompatibleAppVersion",
+  // A plugin webview that survived a runtime replacement no longer owns the
+  // active binding. The existing frame-trust message gives the correct user
+  // remediation (refresh the window or restart the app) without exposing the
+  // internal revision counter.
+  "stale-runtime-revision": "formatIpcError.unauthorizedFrame",
   // Frame-trust gate (used by chat.ts + plugins.ts pluginConfigError helper).
 
   // "unauthorized-frame" carries a distinct semantic (the *frame/window* failed

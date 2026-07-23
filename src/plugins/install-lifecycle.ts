@@ -1,7 +1,16 @@
 import { isAppUpdateInstallRequested } from "../main/app-update-install-intent.js";
 import type { NetworkAccessAcknowledgement, NetworkAccessGrant } from "../shared/network-access.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 const inflightInstallLocks = new Map<string, Promise<unknown>>();
+const heldPluginInstallLocks = new AsyncLocalStorage<
+  ReadonlyMap<string, { active: boolean }>
+>();
+const ALL_PLUGIN_LOCK_KEY = "\0all-plugins";
+let exclusiveLifecycleTail: Promise<void> = Promise.resolve();
+let queuedExclusiveLifecycleMutations = 0;
+let activePluginLifecycleMutations = 0;
+let resolvePluginLifecycleDrain: (() => void) | null = null;
 let pendingPluginInstallOperations = 0;
 
 const APP_UPDATE_INSTALL_IN_PROGRESS = "app-update-install-in-progress";
@@ -86,6 +95,17 @@ export async function withPluginInstallLock<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   assertAppUpdateInstallNotRequested();
+  const heldLocks = heldPluginInstallLocks.getStore();
+  if (heldLocks?.get(ALL_PLUGIN_LOCK_KEY)?.active || heldLocks?.get(pluginId)?.active) {
+    return fn();
+  }
+  while (true) {
+    const exclusiveGate = exclusiveLifecycleTail;
+    await exclusiveGate;
+    if (exclusiveGate !== exclusiveLifecycleTail) continue;
+    activePluginLifecycleMutations += 1;
+    break;
+  }
   pendingPluginInstallOperations += 1;
   const prev = inflightInstallLocks.get(pluginId) ?? Promise.resolve();
   let release: () => void = () => {};
@@ -97,13 +117,71 @@ export async function withPluginInstallLock<T>(
   try {
     await prev;
     assertAppUpdateInstallNotRequested();
-    return await fn();
+    const token = { active: true };
+    const nextHeldLocks = new Map(heldLocks ?? []);
+    nextHeldLocks.set(pluginId, token);
+    try {
+      return await heldPluginInstallLocks.run(nextHeldLocks, fn);
+    } finally {
+      // Detached async resources inherit AsyncLocalStorage. Once the owner
+      // exits they must not be treated as re-entrant lock holders.
+      token.active = false;
+    }
   } finally {
     release();
     pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
+    activePluginLifecycleMutations = Math.max(0, activePluginLifecycleMutations - 1);
+    if (activePluginLifecycleMutations === 0) {
+      resolvePluginLifecycleDrain?.();
+      resolvePluginLifecycleDrain = null;
+    }
     if (inflightInstallLocks.get(pluginId) === tail) {
       inflightInstallLocks.delete(pluginId);
     }
+  }
+}
+
+/** True only inside the async call-chain that currently owns this plugin lock. */
+export function isPluginInstallLockHeld(pluginId: string): boolean {
+  const held = heldPluginInstallLocks.getStore();
+  return held?.get(ALL_PLUGIN_LOCK_KEY)?.active === true || held?.get(pluginId)?.active === true;
+}
+
+/** Serialize a multi-plugin artifact mutation plus its full runtime rebuild. */
+export async function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promise<T> {
+  const heldLocks = heldPluginInstallLocks.getStore();
+  if (heldLocks?.get(ALL_PLUGIN_LOCK_KEY)?.active) return fn();
+  assertAppUpdateInstallNotRequested();
+
+  const previousExclusive = exclusiveLifecycleTail;
+  const canEnterSynchronously =
+    queuedExclusiveLifecycleMutations === 0 && activePluginLifecycleMutations === 0;
+  queuedExclusiveLifecycleMutations += 1;
+  let releaseExclusive!: () => void;
+  const exclusiveDone = new Promise<void>((resolve) => { releaseExclusive = resolve; });
+  exclusiveLifecycleTail = previousExclusive.then(() => exclusiveDone);
+  if (!canEnterSynchronously) {
+    await previousExclusive;
+    if (activePluginLifecycleMutations > 0) {
+      await new Promise<void>((resolve) => { resolvePluginLifecycleDrain = resolve; });
+    }
+  }
+
+  pendingPluginInstallOperations += 1;
+  const token = { active: true };
+  const nextHeldLocks = new Map(heldLocks ?? []);
+  nextHeldLocks.set(ALL_PLUGIN_LOCK_KEY, token);
+  try {
+    assertAppUpdateInstallNotRequested();
+    return await heldPluginInstallLocks.run(nextHeldLocks, fn);
+  } finally {
+    token.active = false;
+    pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
+    queuedExclusiveLifecycleMutations = Math.max(
+      0,
+      queuedExclusiveLifecycleMutations - 1,
+    );
+    releaseExclusive();
   }
 }
 

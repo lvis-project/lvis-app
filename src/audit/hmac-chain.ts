@@ -7,8 +7,8 @@
  * `prevLine` is the previous line's exact raw JSON string as stored in the
  * JSONL body, without the trailing newline. The first line of a file uses
  * `HMAC(secret, GENESIS_MARKER)` where `GENESIS_MARKER = "genesis"`.
- * Tampering with any line N forces the recomputed
- * prevHash at line N+1 to mismatch — exposing the tampered region.
+ * New lines additionally carry `entryHash = HMAC(secret, lineWithoutEntryHash)`
+ * so the current tail is authenticated before a successor exists.
  *
  * The HMAC secret lives behind Electron's OS-backed `safeStorage`
  * when encryption is available. On platforms where that external OS
@@ -407,7 +407,7 @@ export function verifyLineHmac(
   expectedPrevHash: string,
 ): boolean {
   const computed = computeLineHmac(secret, previousLine);
-  if (computed.length !== expectedPrevHash.length) return false;
+  if (!/^[a-f0-9]{64}$/i.test(expectedPrevHash) || computed.length !== expectedPrevHash.length) return false;
   return timingSafeEqual(
     Buffer.from(computed, "hex"),
     Buffer.from(expectedPrevHash, "hex"),
@@ -426,18 +426,72 @@ export function verifyLineHmac(
 export function buildChainedEntries<T extends Record<string, unknown>>(
   secret: string,
   entries: T[],
-): Array<T & { prevHash: string }> {
-  const out: Array<T & { prevHash: string }> = [];
+): Array<T & { prevHash: string; entryHash: string }> {
+  const out: Array<T & { prevHash: string; entryHash: string }> = [];
   let prevSerialized = GENESIS_MARKER;
   for (const e of entries) {
-    const withHash = { ...e, prevHash: computeLineHmac(secret, prevSerialized) };
-    out.push(withHash as T & { prevHash: string });
+    const linked = { ...e, prevHash: computeLineHmac(secret, prevSerialized) };
+    const withHash = {
+      ...linked,
+      entryHash: computeLineHmac(secret, JSON.stringify(linked)),
+    };
+    out.push(withHash as T & { prevHash: string; entryHash: string });
     // The *next* entry's prevHash is computed over the SERIALIZED
     // form of this entry — i.e. the JSON.stringify output that
     // ends up on disk.
     prevSerialized = JSON.stringify(withHash);
   }
   return out;
+}
+
+export type ChainLineVerification =
+  | { ok: true; selfAuthenticated: boolean }
+  | { ok: false; reason: string };
+
+/** Authenticate a row independently of its predecessor link. */
+export function verifyEntryHmac(secret: string, raw: string): boolean {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  if (typeof parsed.entryHash !== "string") return false;
+  const { entryHash, ...unsigned } = parsed;
+  return verifyLineHmac(secret, JSON.stringify(unsigned), entryHash);
+}
+
+/** Verify one raw row while retaining only its predecessor serialization. */
+export function verifyChainLine(
+  secret: string,
+  raw: string,
+  previousSerialized: string,
+  requireEntryHash: boolean,
+): ChainLineVerification {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { ok: false, reason: "json-parse-error" };
+  }
+  if (typeof parsed.prevHash !== "string") {
+    return { ok: false, reason: "missing-prevHash" };
+  }
+  if (!verifyLineHmac(secret, previousSerialized, parsed.prevHash)) {
+    return { ok: false, reason: "hmac-mismatch" };
+  }
+  if (parsed.entryHash === undefined) {
+    return requireEntryHash
+      ? { ok: false, reason: "missing-entryHash-after-migration" }
+      : { ok: true, selfAuthenticated: false };
+  }
+  if (typeof parsed.entryHash !== "string") {
+    return { ok: false, reason: "invalid-entryHash" };
+  }
+  if (!verifyEntryHmac(secret, raw)) {
+    return { ok: false, reason: "entry-hmac-mismatch" };
+  }
+  return { ok: true, selfAuthenticated: true };
 }
 
 /**
@@ -455,20 +509,14 @@ export function verifyChain(
   lines: string[],
 ): { ok: true } | { ok: false; firstBrokenLineIndex: number; reason: string } {
   let prevSerialized = GENESIS_MARKER;
+  let authenticatedRowsStarted = false;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
-    let parsed: { prevHash?: unknown };
-    try {
-      parsed = JSON.parse(raw) as { prevHash?: unknown };
-    } catch {
-      return { ok: false, firstBrokenLineIndex: i, reason: "json-parse-error" };
+    const result = verifyChainLine(secret, raw, prevSerialized, authenticatedRowsStarted);
+    if (!result.ok) {
+      return { ok: false, firstBrokenLineIndex: i, reason: result.reason };
     }
-    if (typeof parsed.prevHash !== "string") {
-      return { ok: false, firstBrokenLineIndex: i, reason: "missing-prevHash" };
-    }
-    if (!verifyLineHmac(secret, prevSerialized, parsed.prevHash)) {
-      return { ok: false, firstBrokenLineIndex: i, reason: "hmac-mismatch" };
-    }
+    authenticatedRowsStarted ||= result.selfAuthenticated;
     prevSerialized = raw;
   }
   return { ok: true };
