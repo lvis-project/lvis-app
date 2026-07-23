@@ -1245,8 +1245,16 @@ export class MemoryManager {
    */
   async verifyOrRebuildSearchIndex(): Promise<void> {
     const opened = this.searchIndex.open();
-    const sessionFiles = readdirIfPresent(this.sessionsDir).filter((f) => f.endsWith(".jsonl"));
-    const needsRebuild = !opened || (this.searchIndex.rowCount() === 0 && sessionFiles.length > 0);
+    // A healthy populated index cannot need the only repair this method owns
+    // (rebuild an empty/corrupt index from JSONL). Avoid enumerating the entire
+    // sessions directory on every boot; large profiles can contain thousands of
+    // transcripts, and the list is only consumed by the rebuild branch below.
+    if (opened && this.searchIndex.rowCount() > 0) {
+      this.searchIndex.close();
+      return;
+    }
+    const sessionFiles = this.listSessionJsonlFiles();
+    const needsRebuild = !opened || sessionFiles.length > 0;
     if (!needsRebuild) {
       this.searchIndex.close();
       return;
@@ -1280,6 +1288,11 @@ export class MemoryManager {
     } finally {
       this.searchIndex.close();
     }
+  }
+
+  /** Enumerate rebuild inputs lazily; kept as a seam for scan-regression tests. */
+  private listSessionJsonlFiles(): string[] {
+    return readdirIfPresent(this.sessionsDir).filter((file) => file.endsWith(".jsonl"));
   }
 
   /**
