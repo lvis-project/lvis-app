@@ -20,6 +20,12 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
 import { getCachedTarball, isOfflineCacheEnabled, setCachedTarball } from "./offline-cache.js";
+import {
+  assertCompressedArtifactSize,
+  MarketplaceArtifactLimitError,
+  resolveMarketplaceArtifactLimits,
+  type MarketplaceArtifactLimits,
+} from "./marketplace-artifact-limits.js";
 
 /**
  * Minimal HTTP surface the installer needs. Lets callers inject either
@@ -40,6 +46,7 @@ export interface MarketplaceHttp {
     slug: string,
     version: string,
     onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
+    options?: MarketplaceArtifactDownloadOptions,
   ): Promise<{
     body: Buffer;
     sha256Header: string | null;
@@ -47,7 +54,16 @@ export interface MarketplaceHttp {
     retryAfterSeconds?: number;
   }>;
   /** GET `/api/v1/plugins/{slug}/download.sig?version=X`. */
-  fetchSignatureEnvelope(slug: string, version: string): Promise<SignatureEnvelope>;
+  fetchSignatureEnvelope(
+    slug: string,
+    version: string,
+    options?: MarketplaceArtifactDownloadOptions,
+  ): Promise<SignatureEnvelope>;
+}
+
+export interface MarketplaceArtifactDownloadOptions {
+  /** Cancels the request, body stream, and retry waits. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -100,7 +116,10 @@ export interface MarketplaceInstallerOptions {
    */
   expectedArtifactSha256?: string;
 
-
+  /** Shared resource ceilings for downloaded and cached artifacts. */
+  artifactLimits?: Partial<MarketplaceArtifactLimits>;
+  /** Optional cancellation propagated through request, body read, and retry waits. */
+  signal?: AbortSignal;
 
   onProgress?: (event: InstallerProgressEvent) => void;
 }
@@ -111,6 +130,8 @@ export interface InstalledArtifact {
   tarballPath: string;
   sha256: string;
   signerKeyId: string;
+  /** The exact in-memory bytes whose digest and signature were verified. */
+  zipBuffer: Buffer;
 }
 
 export class MarketplaceInstallerError extends Error {
@@ -122,8 +143,18 @@ export class MarketplaceInstallerError extends Error {
   }
 }
 
+/** Explicit retry marker for transport failures before a usable response exists. */
+export class MarketplaceTransientDownloadError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "MarketplaceTransientDownloadError";
+  }
+}
+
 const DEFAULT_MAX_SKEW_SEC = 72 * 3600;
 const DEFAULT_MAX_RETRIES = 3;
+const MAX_RETRY_AFTER_SECONDS = 30;
+const MAX_DOWNLOAD_RETRY_ELAPSED_MS = 90_000;
 
 /**
  * Encodes an untrusted marketplace version into a flat filename component.
@@ -176,6 +207,7 @@ export async function installFromMarketplace(
   const nowSec = opts.nowSec ?? (() => Date.now() / 1000);
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   const expectedArtifactSha256 = opts.expectedArtifactSha256?.trim().toLowerCase();
+  const artifactLimits = resolveMarketplaceArtifactLimits(opts.artifactLimits);
   if (expectedArtifactSha256 && !/^[a-f0-9]{64}$/.test(expectedArtifactSha256)) {
     throw new MarketplaceInstallerError(
       "CATALOG_SHA256_INVALID",
@@ -195,8 +227,18 @@ export async function installFromMarketplace(
   let fromCache = false;
 
   if (useCache && cacheBase) {
-    const cached = await getCachedTarball(slug, version, cacheBase);
+    const cached = await getCachedTarball(
+      slug,
+      version,
+      cacheBase,
+      artifactLimits.maxCompressedBytes,
+    );
     if (cached) {
+      assertCompressedArtifactSize(
+        cached.byteLength,
+        artifactLimits.maxCompressedBytes,
+        `cached marketplace artifact ${slug}@${version}`,
+      );
       const cachedSha256 = createHash("sha256").update(cached).digest("hex");
       if (!expectedArtifactSha256 || cachedSha256 === expectedArtifactSha256) {
         body = cached;
@@ -214,7 +256,15 @@ export async function installFromMarketplace(
           opts.onProgress!({ phase: "downloading", bytesDownloaded, bytesTotal });
         }
       : undefined;
-    const downloaded = await downloadWithRetry(opts.http, slug, version, maxRetries, onChunk);
+    const downloaded = await downloadWithRetry(
+      opts.http,
+      slug,
+      version,
+      maxRetries,
+      artifactLimits.maxCompressedBytes,
+      onChunk,
+      opts.signal,
+    );
     body = downloaded.body;
     sha256Header = downloaded.sha256Header;
   }
@@ -243,8 +293,11 @@ export async function installFromMarketplace(
   //    security flag: cache hits must not bypass envelope-verifier).
   let envelope: SignatureEnvelope;
   try {
-    envelope = await opts.http.fetchSignatureEnvelope(slug, version);
+    envelope = opts.signal
+      ? await opts.http.fetchSignatureEnvelope(slug, version, { signal: opts.signal })
+      : await opts.http.fetchSignatureEnvelope(slug, version);
   } catch (err) {
+    if (err instanceof MarketplaceArtifactLimitError) throw err;
     throw new MarketplaceInstallerError(
       "ENVELOPE_FETCH_FAILED",
       `failed to fetch signature envelope: ${(err as Error).message}`,
@@ -340,6 +393,7 @@ export async function installFromMarketplace(
     tarballPath,
     sha256: computedSha256,
     signerKeyId,
+    zipBuffer: body,
   };
 }
 
@@ -352,56 +406,215 @@ async function downloadWithRetry(
   slug: string,
   version: string,
   maxRetries: number,
+  maxArtifactBytes: number,
   onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
+  signal?: AbortSignal,
 ): Promise<{ body: Buffer; sha256Header: string | null }> {
   let lastErr: Error | null = null;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    let res: Awaited<ReturnType<MarketplaceHttp["downloadArtifact"]>>;
-    try {
-      res = await http.downloadArtifact(slug, version, onChunk);
-    } catch (err) {
-      lastErr = err as Error;
-      // Network errors: retry with backoff like 429.
-      await sleep(backoffMs(attempt));
-      continue;
-    }
-    if (res.status === 429) {
-      const waitSec = res.retryAfterSeconds ?? Math.pow(2, attempt) * 0.5;
-      // Track a diagnosable last error so exhausting retries on 429s does not
-      // surface as "unknown error" in the RETRY_EXHAUSTED message.
-      lastErr = new MarketplaceInstallerError(
-        "RATE_LIMITED",
-        `marketplace returned 429 for ${slug}@${version} (retry-after=${waitSec}s)`,
-      );
-      await sleep(Math.max(0, waitSec * 1000));
-      continue;
-    }
-    if (res.status >= 500) {
-      lastErr = new MarketplaceInstallerError(
-        "SERVER_ERROR",
-        `marketplace returned ${res.status} for ${slug}@${version}`,
-      );
-      await sleep(backoffMs(attempt));
-      continue;
-    }
-    if (res.status >= 400) {
-      throw new MarketplaceInstallerError(
-        "CLIENT_ERROR",
-        `marketplace returned ${res.status} for ${slug}@${version}`,
-      );
-    }
-    return { body: res.body, sha256Header: res.sha256Header };
-  }
-  throw new MarketplaceInstallerError(
-    "RETRY_EXHAUSTED",
-    `download failed after ${maxRetries} attempts: ${lastErr?.message ?? "unknown error"}`,
+  const retryDeadline = Date.now() + MAX_DOWNLOAD_RETRY_ELAPSED_MS;
+  const retryController = new AbortController();
+  const abortFromCaller = () => retryController.abort(signal?.reason);
+  if (signal?.aborted) abortFromCaller();
+  else signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const deadlineTimer = setTimeout(
+    () => retryController.abort(new Error("marketplace download retry deadline exceeded")),
+    MAX_DOWNLOAD_RETRY_ELAPSED_MS,
   );
+
+  try {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (signal?.aborted) {
+        throw new MarketplaceArtifactLimitError(
+          "ARTIFACT_DOWNLOAD_ABORTED",
+          `marketplace artifact download aborted for ${slug}@${version}`,
+        );
+      }
+      if (Date.now() >= retryDeadline || retryController.signal.aborted) {
+        throw retryDeadlineExceededError(slug, version);
+      }
+      let res: Awaited<ReturnType<MarketplaceHttp["downloadArtifact"]>>;
+      try {
+        const download = http.downloadArtifact(slug, version, onChunk, {
+          signal: retryController.signal,
+        });
+        res = await settleWithinRetryDeadline(
+          download,
+          retryController.signal,
+          signal,
+          slug,
+          version,
+        );
+      } catch (err) {
+        if (signal?.aborted) {
+          throw new MarketplaceArtifactLimitError(
+            "ARTIFACT_DOWNLOAD_ABORTED",
+            `marketplace artifact download aborted for ${slug}@${version}`,
+          );
+        }
+        if (Date.now() >= retryDeadline || retryController.signal.aborted) {
+          throw retryDeadlineExceededError(slug, version);
+        }
+        if (err instanceof MarketplaceArtifactLimitError) throw err;
+        if (!(err instanceof MarketplaceTransientDownloadError)) throw err;
+        lastErr = err;
+        if (attempt + 1 >= maxRetries) break;
+        await sleepWithinRetryDeadline(
+          backoffMs(attempt),
+          retryDeadline,
+          signal,
+          slug,
+          version,
+        );
+        continue;
+      }
+      if (Date.now() >= retryDeadline || retryController.signal.aborted) {
+        throw retryDeadlineExceededError(slug, version);
+      }
+      assertCompressedArtifactSize(
+        res.body.byteLength,
+        maxArtifactBytes,
+        `downloaded marketplace artifact ${slug}@${version}`,
+      );
+      if (res.status === 429) {
+        const requestedWaitSec = res.retryAfterSeconds ?? Math.pow(2, attempt) * 0.5;
+        const waitSec = Math.min(requestedWaitSec, MAX_RETRY_AFTER_SECONDS);
+        // Track a diagnosable last error so exhausting retries on 429s does not
+        // surface as "unknown error" in the RETRY_EXHAUSTED message.
+        lastErr = new MarketplaceInstallerError(
+          "RATE_LIMITED",
+          `marketplace returned 429 for ${slug}@${version} (retry-after=${waitSec}s)`,
+        );
+        if (attempt + 1 >= maxRetries) break;
+        await sleepWithinRetryDeadline(
+          Math.max(0, waitSec * 1000),
+          retryDeadline,
+          signal,
+          slug,
+          version,
+        );
+        continue;
+      }
+      if (res.status >= 500) {
+        lastErr = new MarketplaceInstallerError(
+          "SERVER_ERROR",
+          `marketplace returned ${res.status} for ${slug}@${version}`,
+        );
+        if (attempt + 1 >= maxRetries) break;
+        await sleepWithinRetryDeadline(
+          backoffMs(attempt),
+          retryDeadline,
+          signal,
+          slug,
+          version,
+        );
+        continue;
+      }
+      if (res.status >= 400) {
+        throw new MarketplaceInstallerError(
+          "CLIENT_ERROR",
+          `marketplace returned ${res.status} for ${slug}@${version}`,
+        );
+      }
+      return { body: res.body, sha256Header: res.sha256Header };
+    }
+    throw new MarketplaceInstallerError(
+      "RETRY_EXHAUSTED",
+      `download failed after ${maxRetries} attempts: ${lastErr?.message ?? "unknown error"}`,
+    );
+  } finally {
+    clearTimeout(deadlineTimer);
+    signal?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
+function retryDeadlineExceededError(slug: string, version: string): MarketplaceInstallerError {
+  return new MarketplaceInstallerError(
+    "RETRY_EXHAUSTED",
+    `download retry deadline exceeded for ${slug}@${version}`,
+  );
+}
+
+async function settleWithinRetryDeadline<T>(
+  operation: Promise<T>,
+  retrySignal: AbortSignal,
+  callerSignal: AbortSignal | undefined,
+  slug: string,
+  version: string,
+): Promise<T> {
+  if (retrySignal.aborted) {
+    if (callerSignal?.aborted) {
+      throw new MarketplaceArtifactLimitError(
+        "ARTIFACT_DOWNLOAD_ABORTED",
+        `marketplace artifact download aborted for ${slug}@${version}`,
+      );
+    }
+    throw retryDeadlineExceededError(slug, version);
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      if (callerSignal?.aborted) {
+        reject(new MarketplaceArtifactLimitError(
+          "ARTIFACT_DOWNLOAD_ABORTED",
+          `marketplace artifact download aborted for ${slug}@${version}`,
+        ));
+      } else {
+        reject(retryDeadlineExceededError(slug, version));
+      }
+    };
+    retrySignal.addEventListener("abort", onAbort, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      retrySignal.removeEventListener("abort", onAbort);
+    });
+  });
 }
 
 function backoffMs(attempt: number): number {
   return Math.pow(2, attempt) * 500;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+function sleep(ms: number, signal: AbortSignal | undefined, slug: string, version: string): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new MarketplaceArtifactLimitError(
+      "ARTIFACT_DOWNLOAD_ABORTED",
+      `marketplace artifact download aborted for ${slug}@${version}`,
+    ));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new MarketplaceArtifactLimitError(
+        "ARTIFACT_DOWNLOAD_ABORTED",
+        `marketplace artifact download aborted for ${slug}@${version}`,
+      ));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function sleepWithinRetryDeadline(
+  requestedMs: number,
+  deadlineMs: number,
+  signal: AbortSignal | undefined,
+  slug: string,
+  version: string,
+): Promise<void> {
+  const remainingMs = deadlineMs - Date.now();
+  if (remainingMs <= 0) {
+    throw new MarketplaceInstallerError(
+      "RETRY_EXHAUSTED",
+      `download retry deadline exceeded for ${slug}@${version}`,
+    );
+  }
+  await sleep(Math.min(requestedMs, remainingMs), signal, slug, version);
+  if (Date.now() >= deadlineMs) {
+    throw new MarketplaceInstallerError(
+      "RETRY_EXHAUSTED",
+      `download retry deadline exceeded for ${slug}@${version}`,
+    );
+  }
 }

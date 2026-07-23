@@ -86,7 +86,8 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
     auditDir = mkdtempSync(join(tmpdir(), "lvis-effect-ledger-"));
     auditLogger = new AuditLogger(auditDir);
   });
-  afterEach(() => {
+  afterEach(async () => {
+    await auditLogger.close();
     rmSync(auditDir, { recursive: true, force: true });
   });
 
@@ -110,6 +111,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
     expect(results[0].is_error).toBeFalsy();
     expect(results[0].content).toBe("ok");
 
+    await auditLogger.flush();
     const rows = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_readonly");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -137,6 +139,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
     expect(results[0].is_error).toBeFalsy();
     expect(results[0].content).toBe("ok");
 
+    await auditLogger.flush();
     const rows = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_mutating");
     expect(rows).toHaveLength(1);
     expect(rows[0].hasMutatingEffect).toBe(true);
@@ -163,6 +166,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
       [{ id: "tu-2", name: "lvis-plugin-x_readonly2", input: {} }],
       { sessionId: "sess-2", permissionContext: userPermissionContext() },
     );
+    await auditLogger.flush();
     const mut = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_mutating2");
     const ro = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_readonly2");
     expect(mut[0].hasMutatingEffect).toBe(true);
@@ -202,6 +206,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
       { sessionId: "sess-wrap", permissionContext: userPermissionContext() },
     );
 
+    await auditLogger.flush();
     const wrapRows = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_wrapper");
     expect(wrapRows).toHaveLength(1);
     // The wrapper's OWN ledger surfaces the delegated mutation via callTool-child —
@@ -227,6 +232,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
       [{ id: "tu-corr", name: "lvis-plugin-x_corr", input: {} }],
       { sessionId: "sess-corr", permissionContext: userPermissionContext() },
     );
+    await auditLogger.flush();
     const cat = shadowRows(auditDir, "risk-shadow").filter((r) => r.toolName === "lvis-plugin-x_corr");
     const eff = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_corr");
     expect(cat).toHaveLength(1);
@@ -274,6 +280,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
       );
       expect(results[0].is_error).toBeFalsy();
 
+      await auditLogger.flush();
       const rows = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_storage_mut");
       expect(rows).toHaveLength(1);
       // hostObservable:true is now HONEST — the storage mutation was recorded.
@@ -314,6 +321,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
       [{ id: "tu-clearauth", name: "lvis-plugin-x_clearauth_mut", input: {} }],
       { sessionId: "sess-clearauth", permissionContext: userPermissionContext() },
     );
+    await auditLogger.flush();
     const rows = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_clearauth_mut");
     expect(rows).toHaveLength(1);
     expect(rows[0].hasMutatingEffect).toBe(true);
@@ -417,6 +425,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
     expect(innerObservedOrigin).toBe("plugin");
     // ... and so did effect-ledger propagation: the outer wrapper ledger surfaces
     // the delegated mutation through the same intact async chain.
+    await auditLogger.flush();
     const wrapRows = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_wrapper_real");
     expect(wrapRows).toHaveLength(1);
     expect(wrapRows[0].hasMutatingEffect).toBe(true);
@@ -450,6 +459,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
       [{ id: "tu-mcp", name: "remote_mcp_tool", input: {} }],
       { sessionId: "sess-mcp", permissionContext: userPermissionContext() },
     );
+    await auditLogger.flush();
     const rows = effectShadowRows(auditDir).filter((r) => r.toolName === "remote_mcp_tool");
     expect(rows).toHaveLength(1);
     // An empty ledger alone is indistinguishable from a confirmed read; the

@@ -2,9 +2,11 @@
  * AuditLogger.search() + getStats() — filter correctness, date range, pagination.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
+import { finished } from "node:stream/promises";
 
 // Patch homedir so AuditLogger writes to a temp dir during tests.
 import { vi } from "vitest";
@@ -36,7 +38,7 @@ function writeJsonl(filename: string, entries: AuditEntry[]) {
 }
 
 beforeEach(() => {
-  testHome = mkdtempSync(join(tmpdir(), "lvis-audit-test-"));
+  testHome = mkdtempSync(join(process.cwd(), ".lvis-audit-test-"));
   auditDir = join(testHome, ".lvis", "audit");
   mkdirSync(auditDir, { recursive: true });
   vi.mocked(homedir).mockReturnValue(testHome);
@@ -118,6 +120,41 @@ describe("AuditLogger.search()", () => {
     const { total } = await logger.search({});
     expect(total).toBe(2);
   });
+
+  it("streams a large log while retaining only the requested page", async () => {
+    const filePath = join(auditDir, "2026-04-17.jsonl");
+    const output = createWriteStream(filePath, { encoding: "utf-8" });
+    const totalRows = 50_000;
+    for (let index = 0; index < totalRows; index += 1) {
+      const line = `${JSON.stringify(makeEntry({ input: `${index}:${"x".repeat(1_000)}` }))}\n`;
+      if (!output.write(line)) await once(output, "drain");
+    }
+    output.end();
+    await finished(output);
+
+    let eventLoopTicks = 0;
+    let scanning = true;
+    const tick = () => {
+      eventLoopTicks += 1;
+      if (scanning) setImmediate(tick);
+    };
+    setImmediate(tick);
+
+    const logger = new AuditLogger();
+    const result = await logger.search({ offset: 49_990, limit: 5 });
+    scanning = false;
+
+    expect(result.total).toBe(totalRows);
+    expect(result.entries).toHaveLength(5);
+    expect(result.entries.map((entry) => entry.input?.split(":", 1)[0])).toEqual([
+      "49990",
+      "49991",
+      "49992",
+      "49993",
+      "49994",
+    ]);
+    expect(eventLoopTicks).toBeGreaterThan(0);
+  }, 30_000);
 });
 
 describe("AuditLogger.getStats()", () => {

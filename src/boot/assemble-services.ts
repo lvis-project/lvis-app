@@ -132,6 +132,7 @@ export function assembleAppServices(ctx: BootContext): AppServices {
         attempt(() => ctx.askUserQuestionGate.disposeAll());
         attempt(() => ctx.mcpGovernance.stopPolicyRefresh());
         await attemptAsync(() => ctx.mcpManager.disconnectAll());
+        await attemptAsync(() => ctx.bootAuditLogger.close());
         await attemptAsync(() => ctx.auditService.stop());
 
         if (errors.length > 0) {

@@ -28,33 +28,34 @@ const FALLBACK_VERSION = "unknown";
 let cachedVersion: string | null = null;
 
 function readVersionFromCandidates(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  // The bundled main entry lives at `dist/src/main/main.js`. This module is
-  // inlined into that bundle by esbuild, so `import.meta.url` resolves to
-  // the bundle. Walk up to the project root which contains `package.json`
-  // in both dev (`<repo>/package.json`) and packaged (`app.asar/package.json`).
-  const candidates = [
-    resolve(here, "..", "..", "..", "package.json"), // dist/src/main -> repo root
-    resolve(here, "..", "..", "package.json"),       // dist/src      -> repo root (older layout)
-    resolve(here, "..", "package.json"),             // dist          -> repo root (defensive)
-  ];
-
-  for (const candidate of candidates) {
+  // Walk UP from wherever this module is bundled until we reach the LVIS
+  // `package.json`. A fixed relative depth (`../../../package.json`) breaks the
+  // moment esbuild relocates the code: the startup-bundle split moved it from
+  // `dist/src/main/main.js` into `dist/src/main/chunks/*.js`, one level deeper,
+  // so the old candidates resolved to `dist/` and the version fell back to
+  // "unknown" — which the fail-closed plugin minAppVersion gate then treats as
+  // incompatible, blocking every version-gated plugin. Searching upward is
+  // depth-agnostic and works in dev (`<repo>/package.json`) and packaged
+  // (`app.asar/.../package.json`) alike; the name guard skips any nested
+  // (e.g. Electron) package.json encountered on the way up.
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 12; i++) {
     try {
-      const raw = readFileSync(candidate, "utf8");
+      const raw = readFileSync(resolve(dir, "package.json"), "utf8");
       const parsed = JSON.parse(raw) as { name?: unknown; version?: unknown };
       if (
         typeof parsed.version === "string" &&
         parsed.version.length > 0 &&
-        // Guard against accidentally reading Electron's own package.json
-        // if the entry point ever shifts. LVIS package.json has name "lvis-app".
         (typeof parsed.name !== "string" || parsed.name === "lvis-app")
       ) {
         return parsed.version;
       }
     } catch {
-      // Try next candidate.
+      // No readable package.json at this level — keep walking up.
     }
+    const parent = dirname(dir);
+    if (parent === dir) break; // filesystem root
+    dir = parent;
   }
 
   return FALLBACK_VERSION;

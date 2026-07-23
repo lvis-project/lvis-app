@@ -258,14 +258,18 @@ export async function seedRealPlugins(
     // (e.g. `onboarding`, ahead of the host schema on some plugins). They are
     // orthogonal to UI capture; leaving them would fail manifest validation at
     // load and the plugin would never render. Remove here so the panel mounts.
-    delete seededManifest.onboarding;
+    // Gate so we can verify whether the host now accepts the field.
+    if (!process.env.LVIS_SCREENSHOT_KEEP_ONBOARDING) {
+      delete seededManifest.onboarding;
+    }
     const pluginJsonPath = path.join(pluginDir, 'plugin.json');
     fs.writeFileSync(pluginJsonPath, `${JSON.stringify(seededManifest, null, 2)}\n`, 'utf-8');
     // Copy the ENTIRE built dist tree so UI bundle imports/assets resolve.
     copyDir(sourceDist, path.join(pluginDir, 'dist'));
     // Real-Python opt-in: copy the requirements lockfile so the host can resolve
     // it (it lives at the plugin repo root, not under dist/, so the dist copy
-    // above does not include it). An extra unlisted file is not receipt-flagged.
+    // above does not include it). It MUST be added to the install receipt below
+    // — the host now rejects a payload that contains any unlisted file.
     if (realPython && pythonBlock && typeof pythonBlock.requirementsLock === 'string') {
       const lockSrc = path.join(sourceDir, pythonBlock.requirementsLock);
       if (fs.existsSync(lockSrc)) {
@@ -290,9 +294,16 @@ export async function seedRealPlugins(
 
     // Receipt: list plugin.json + the entire copied dist tree so the integrity
     // check passes for the real files (matches what the host wrote at copy).
+    // The host now rejects an installed payload that contains any file NOT in
+    // the receipt, so EVERY seeded file must be listed — including the
+    // real-python requirements lockfile copied above.
     const receiptFiles = ['plugin.json'];
     for (const file of await listFilesRecursive(path.join(pluginDir, 'dist'))) {
       receiptFiles.push(`dist/${file}`);
+    }
+    if (realPython && pythonBlock && typeof pythonBlock.requirementsLock === 'string'
+      && fs.existsSync(path.join(pluginDir, pythonBlock.requirementsLock))) {
+      receiptFiles.push(pythonBlock.requirementsLock);
     }
     await writeInstallReceipt(cacheRoot, {
       schemaVersion: 2,
