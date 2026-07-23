@@ -418,12 +418,81 @@ export abstract class PluginRuntimeState {
     const normalizedPluginId = pluginId.trim();
     const normalizedAlias = alias?.trim();
     if (!normalizedPluginId || !normalizedAlias || normalizedAlias === normalizedPluginId) return;
+    this.assertPluginIdentityNamespace([
+      { pluginId: normalizedPluginId, alias: normalizedAlias },
+    ]);
     let aliases = this.knownInstallAliases.get(normalizedPluginId);
     if (!aliases) {
       aliases = new Set<string>();
       this.knownInstallAliases.set(normalizedPluginId, aliases);
     }
     aliases.add(normalizedAlias);
+  }
+
+  /**
+   * Manifest ids and deployment aliases share every public lifecycle entry
+   * point, so they must form one unambiguous namespace. Validate a complete
+   * batch before boot mutates runtime state, and validate again at each
+   * incremental alias adoption.
+   */
+  protected assertPluginIdentityNamespace(
+    mappings: Iterable<{ pluginId: string; alias?: string }>,
+  ): void {
+    const normalizedMappings = [...mappings]
+      .map(({ pluginId, alias }) => ({
+        pluginId: pluginId.trim(),
+        alias: alias?.trim(),
+      }))
+      .filter(({ pluginId }) => pluginId.length > 0);
+    const canonicalIds = new Set([
+      ...this.knownPluginManifests.keys(),
+      ...this.plugins.keys(),
+      ...this.knownInstallAliases.keys(),
+      ...normalizedMappings.map(({ pluginId }) => pluginId),
+    ]);
+    const aliasOwners = new Map<string, string>();
+
+    const recordAliasOwner = (alias: string, canonicalId: string) => {
+      const existingOwner = aliasOwners.get(alias);
+      if (existingOwner && existingOwner !== canonicalId) {
+        throw this.pluginIdentityCollision(
+          alias,
+          `install alias for both '${existingOwner}' and '${canonicalId}'`,
+        );
+      }
+      aliasOwners.set(alias, canonicalId);
+    };
+    for (const [canonicalId, aliases] of this.knownInstallAliases) {
+      for (const alias of aliases) recordAliasOwner(alias, canonicalId);
+    }
+
+    for (const { pluginId } of normalizedMappings) {
+      const aliasOwner = aliasOwners.get(pluginId);
+      if (aliasOwner && aliasOwner !== pluginId) {
+        throw this.pluginIdentityCollision(
+          pluginId,
+          `canonical id for '${pluginId}' and install alias for '${aliasOwner}'`,
+        );
+      }
+    }
+    for (const { pluginId, alias } of normalizedMappings) {
+      if (!alias || alias === pluginId) continue;
+      if (canonicalIds.has(alias)) {
+        throw this.pluginIdentityCollision(
+          alias,
+          `canonical id for '${alias}' and install alias for '${pluginId}'`,
+        );
+      }
+      recordAliasOwner(alias, pluginId);
+    }
+  }
+
+  private pluginIdentityCollision(identifier: string, detail: string): Error {
+    const error = new Error(
+      `Plugin identity collision for '${identifier}': ${detail}`,
+    ) as Error & { code?: string };
+    error.code = "plugin-identity-collision";
+    return error;
   }
 
   protected resolveKnownPluginId(pluginId: string): string {

@@ -90,6 +90,14 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
     }
     const preflight = await this.preflightBootLoadPlan(loadPlan);
+    this.assertPluginIdentityNamespace(
+      preflight
+        .filter((outcome) => outcome.ok)
+        .map((outcome) => ({
+          pluginId: outcome.manifest.id,
+          alias: outcome.plan.pluginIdHint,
+        })),
+    );
     const enabledManifestSnapshots = new Map<string, ManifestSnapshot>();
     for (const outcome of preflight) {
       if (
@@ -841,6 +849,19 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     const knownPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(knownPluginId);
     if (this.plugins.has(knownPluginId)) {
+      // Validate a freshly installed registry entry before treating its id as
+      // a restart of an existing canonical runtime identity.
+      const currentLoadPlan = await this.resolveManifestLoadPlanInternal();
+      const requestedPlan = currentLoadPlan.find(
+        (plan) => plan.enabled && plan.pluginIdHint === pluginId,
+      );
+      if (requestedPlan) {
+        const requestedManifest = await this.readManifest(requestedPlan.manifestPath);
+        this.assertPluginIdentityNamespace([{
+          pluginId: requestedManifest.id,
+          alias: requestedPlan.pluginIdHint,
+        }]);
+      }
       try {
         const restartResult = await this.restartPlugin(knownPluginId);
         if (restartResult === "deferred") return "preparing";
