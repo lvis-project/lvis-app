@@ -163,7 +163,6 @@ import { ko as ko_trustOriginLabel } from "../generated/trustOriginLabel.js";
 import { ko as ko_turnActionBar } from "../generated/turnActionBar.js";
 import { ko as ko_unifiedSearchPanel } from "../generated/unifiedSearchPanel.js";
 import { ko as ko_usageDashboard } from "../generated/usageDashboard.js";
-import { ko as ko_useAuthProgress } from "../generated/useAuthProgress.js";
 import { ko as ko_useChatState } from "../generated/useChatState.js";
 import { ko as ko_useMemorySearch } from "../generated/useMemorySearch.js";
 import { ko as ko_usePluginMarketplace } from "../generated/usePluginMarketplace.js";
@@ -344,7 +343,6 @@ export const koMessages: Record<string, string> = {
   ...ko_turnActionBar,
   ...ko_unifiedSearchPanel,
   ...ko_usageDashboard,
-  ...ko_useAuthProgress,
   ...ko_useChatState,
   ...ko_useMemorySearch,
   ...ko_usePluginMarketplace,
