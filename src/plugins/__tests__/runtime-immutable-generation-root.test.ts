@@ -80,6 +80,7 @@ export default async function createPlugin(ctx) {
     const generationId = "b".repeat(64);
     const access = {
       getActive: vi.fn(() => active),
+      isExactAdmitted: vi.fn(() => true),
       acquire: vi.fn(async () => ({ generation: active!, release: vi.fn() })),
       acquireExact: vi.fn(async () => ({ generation: active!, release: vi.fn() })),
       runWithLease: vi.fn(async (_lease, operation) => operation()),

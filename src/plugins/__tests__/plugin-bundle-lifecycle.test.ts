@@ -375,10 +375,11 @@ describe("PluginBundleLifecycle", () => {
     expect(skillStore.listCatalogSync()).toHaveLength(1);
   });
 
-  it("journals a failed retirement and retries exact-generation cleanup", async () => {
+  it("journals retirement progress and retries only the failed cleanup phase", async () => {
     const { root, pluginRoot, cacheRoot, manifest } = await fixture();
-    const retireRuntimeGeneration = vi.fn()
-      .mockRejectedValueOnce(new Error("stop failed"))
+    const retireRuntimeGeneration = vi.fn(async () => undefined);
+    const disconnectBundledGeneration = vi.fn()
+      .mockRejectedValueOnce(new Error("MCP disconnect failed"))
       .mockResolvedValue(undefined);
     const lifecycle = makeLifecycle({
       pluginRuntime: {
@@ -407,7 +408,7 @@ describe("PluginBundleLifecycle", () => {
         publishBundledGeneration: vi.fn((prepared) => { prepared.published = true; }),
         discardBundledGeneration: vi.fn(async () => undefined),
         retirePublishedMcpReplacement: vi.fn(async () => undefined),
-        disconnectBundledGeneration: vi.fn(async () => undefined),
+        disconnectBundledGeneration,
       } as never,
     });
 
@@ -419,7 +420,8 @@ describe("PluginBundleLifecycle", () => {
     expect(committed.result).toBe("removed");
     await committed.retirement;
 
-    expect(retireRuntimeGeneration).toHaveBeenCalledTimes(2);
+    expect(disconnectBundledGeneration).toHaveBeenCalledTimes(2);
+    expect(retireRuntimeGeneration).toHaveBeenCalledTimes(1);
     const journal = JSON.parse(await readFile(join(cacheRoot, "plugin-retirement-journal.json"), "utf8"));
     expect(journal.retirements).toEqual([]);
   });

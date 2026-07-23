@@ -85,6 +85,7 @@ export abstract class PluginRuntimeState {
   protected readonly installReceiptCacheRoot?: string;
   protected readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   protected readonly onDisable?: (pluginId: string) => void;
+  protected readonly onPluginUiRevisionChange?: (pluginId: string) => void;
   protected readonly onEnable?: (pluginId: string) => void;
   protected readonly onActiveStateChange?: (
     pluginId: string,
@@ -181,6 +182,7 @@ export abstract class PluginRuntimeState {
       : undefined;
     this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
+    this.onPluginUiRevisionChange = options.onPluginUiRevisionChange;
     this.onEnable = options.onEnable;
     this.onActiveStateChange = options.onActiveStateChange;
     this.preparePluginStart = options.preparePluginStart;
@@ -371,7 +373,13 @@ export abstract class PluginRuntimeState {
   protected markPluginUiRevision(pluginId: string): number {
     const revision = ++this.nextPluginUiRevision;
     this.pluginUiRevisions.set(pluginId, revision);
+    this.onPluginUiRevisionChange?.(pluginId);
     return revision;
+  }
+
+  protected invalidatePluginUiRevision(pluginId: string): void {
+    this.pluginUiRevisions.delete(pluginId);
+    this.onPluginUiRevisionChange?.(pluginId);
   }
 
   protected getPluginUiRevision(pluginId: string): number {
@@ -592,6 +600,9 @@ export abstract class PluginRuntimeState {
     this.knownToolOwners.clear();
     this.knownEventOwners.clear();
     this.plugins.clear();
+    for (const pluginId of this.pluginUiRevisions.keys()) {
+      this.onPluginUiRevisionChange?.(pluginId);
+    }
     this.pluginUiRevisions.clear();
     this.methodMap.clear();
     this.failedPluginIds.clear();
@@ -661,14 +672,28 @@ export abstract class PluginRuntimeState {
       await retirement;
     } catch (error) {
       log.error(
-        `plugin generation retirement deferred after ${context} for ${pluginId}: %s`,
+        `plugin generation retirement failed after ${context} for ${pluginId}: %s`,
         error instanceof Error ? error.message : String(error),
       );
-      this.auditLog?.("error", "plugin_generation_retirement_deferred", {
+      this.auditLog?.("error", "plugin_generation_retirement_failed", {
         pluginId,
         context,
         error: error instanceof Error ? error.message : String(error),
       });
+      throw error;
+    }
+  }
+
+  protected async captureCommittedRetirementFailure(
+    pluginId: string,
+    retirement: Promise<void>,
+    context: string,
+  ): Promise<unknown | undefined> {
+    try {
+      await this.settleCommittedRetirement(pluginId, retirement, context);
+      return undefined;
+    } catch (error) {
+      return error;
     }
   }
 
@@ -985,7 +1010,7 @@ export abstract class PluginRuntimeState {
         this.methodMap = nextMethods;
         this.plugins = nextPlugins;
         this.disposers = nextDisposers;
-        this.pluginUiRevisions.delete(pluginId);
+        this.invalidatePluginUiRevision(pluginId);
         this.pluginAccountHashes = nextAccountHashes;
         this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
         published = true;
@@ -1027,6 +1052,10 @@ export abstract class PluginRuntimeState {
 
   async retireRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): Promise<void> {
     const errors: Error[] = [];
+    // Revoke general HostApi authority before user stop code runs. Any exact
+    // operation admitted before publication can finish during coordinator
+    // drain; retirement begins only after those leases have been released.
+    runtime.deactivateHostApi?.();
     const stopped = await this.stopAfterStartFailure(
       runtime.manifest.id,
       runtime.instance,
@@ -1037,7 +1066,6 @@ export abstract class PluginRuntimeState {
         `generation stop failed or timed out for ${runtime.manifest.id}`,
       ));
     }
-    runtime.deactivateHostApi?.();
     errors.push(...(runtime.hostEffects?.retire() ?? []));
     for (const dispose of runtime.disposers ?? []) {
       try { dispose(); } catch (error) {

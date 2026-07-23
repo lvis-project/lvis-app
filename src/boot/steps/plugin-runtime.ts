@@ -201,6 +201,8 @@ export interface InitPluginRuntimeInput {
   routinesStore: RoutinesStore;
   /** Production defers activation until Skill/Hook/MCP lifecycle wiring exists. */
   deferStart?: boolean;
+  /** Renderer authority revocation hook owned by the IPC layer. */
+  onPluginUiRevisionChange?: (pluginId: string) => void;
 }
 
 export interface InitPluginRuntimeOutput {
@@ -438,6 +440,7 @@ export async function initPluginRuntime(
     onDisable,
     onActiveStateChange,
     onEnable,
+    onPluginUiRevisionChange: input.onPluginUiRevisionChange,
     createHostApi,
   });
 

@@ -294,82 +294,107 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       : await lifecycle.acquire(pluginId);
     try {
       return await lifecycle.runWithLease(generationLease, async () => {
-    const activeGeneration = generationLease.generation;
-    const manifest = activeGeneration.state.runtime.manifest;
-    const accountHash = resolvePluginOperationAccountHash(
-      pluginRuntime,
-      manifest,
-      pluginId,
-      activeGeneration.generationId,
-    );
-    if (!accountHash) {
-      throw new Error("[plugin-operation-policy] fresh authenticated account status is required");
-    }
-    const principal = {
-      ownerPluginId: pluginId,
-      ownerVersion: manifest.version,
-      generationId: activeGeneration.generationId,
-      appSessionId,
-      accountHash,
-    };
-    const inspected = pluginSurfaceExecutor.inspectPluginOperationGrant({
-      toolName,
-      input,
-      principal,
-      origin,
-    });
-    const decision = await approvalGate.requestAndWait({
-      id: randomUUID(),
-      category: "tool",
-      kind: "tool",
-      allowedChoices: ["allow-once", "deny-once"],
-      toolName,
-      toolCategory: "write",
-      args: inspected.approvalArgs,
-      reason: `Plugin '${pluginId}' requests one execution of '${inspected.operation}'`,
-      source: "plugin",
-      sourcePluginId: pluginId,
-      approvalScope: `operation:${inspected.operation}`,
-      trustOrigin: "user-keyboard",
-      createdAt: Date.now(),
-      forceExplicit: true,
-      isReadOnly: false,
-      mode: "default",
-    });
-    if (decision.choice !== "allow-once") {
-      bootAuditLogger.log({
-        timestamp: new Date().toISOString(),
-        sessionId: "plugin-operation",
-        type: "approval",
-        input: JSON.stringify({ pluginId, toolName, operation: inspected.operation }),
-        output: "denied",
-      });
-      throw new Error("[plugin-operation-policy] operation grant denied");
-    }
-    const ttlMs = 60_000;
-    const issued = pluginSurfaceExecutor.issueInspectedPluginOperationGrant({
-      toolName,
-      principal,
-      inspected,
-      ttlMs,
-    });
-    bootAuditLogger.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "plugin-operation",
-      type: "approval",
-      input: JSON.stringify({
-        pluginId,
-        toolName,
-        operation: inspected.operation,
-        grantId: issued.grantId,
-      }),
-      output: "issued",
-    });
-    return {
-      operationGrantToken: issued.token,
-      grantId: issued.grantId,
-      expiresAt: Date.now() + ttlMs,
-    };
+        const activeGeneration = generationLease.generation;
+        const manifest = activeGeneration.state.runtime.manifest;
+        const accountHash = resolvePluginOperationAccountHash(
+          pluginRuntime,
+          manifest,
+          pluginId,
+          activeGeneration.generationId,
+        );
+        if (!accountHash) {
+          throw new Error("[plugin-operation-policy] fresh authenticated account status is required");
+        }
+        const principal = {
+          ownerPluginId: pluginId,
+          ownerVersion: manifest.version,
+          generationId: activeGeneration.generationId,
+          appSessionId,
+          accountHash,
+        };
+        const inspected = pluginSurfaceExecutor.inspectPluginOperationGrant({
+          toolName,
+          input,
+          principal,
+          origin,
+        });
+        const decision = await approvalGate.requestAndWait({
+          id: randomUUID(),
+          category: "tool",
+          kind: "tool",
+          allowedChoices: ["allow-once", "deny-once"],
+          toolName,
+          toolCategory: "write",
+          args: inspected.approvalArgs,
+          reason: `Plugin '${pluginId}' requests one execution of '${inspected.operation}'`,
+          source: "plugin",
+          sourcePluginId: pluginId,
+          approvalScope: `operation:${inspected.operation}`,
+          trustOrigin: "user-keyboard",
+          createdAt: Date.now(),
+          forceExplicit: true,
+          isReadOnly: false,
+          mode: "default",
+        });
+        const governedTool = toolRegistry.findByName(toolName);
+        if (!governedTool) {
+          throw new Error(`[plugin-operation-policy] governed plugin tool '${toolName}' disappeared`);
+        }
+        if (decision.choice !== "allow-once") {
+          await bootAuditLogger.appendPermissionAuditEntry({
+            decision: "deny",
+            ts: new Date().toISOString(),
+            auditId: randomUUID(),
+            tool: toolName,
+            source: "plugin",
+            category: governedTool.category,
+            denyReasons: [{
+              layer: 6,
+              reason: "plugin operation grant denied by user",
+              source: "plugin-operation-grant",
+            }],
+            trustOrigin: "user-keyboard",
+            pluginOperation: {
+              pluginId,
+              operation: inspected.operation,
+              outcome: "denied",
+            },
+          });
+          throw new Error("[plugin-operation-policy] operation grant denied");
+        }
+        const ttlMs = 60_000;
+        const issued = pluginSurfaceExecutor.issueInspectedPluginOperationGrant({
+          toolName,
+          principal,
+          inspected,
+          ttlMs,
+        });
+        try {
+          await bootAuditLogger.appendPermissionAuditEntry({
+            decision: "allow",
+            ts: new Date().toISOString(),
+            auditId: randomUUID(),
+            tool: toolName,
+            source: "plugin",
+            category: governedTool.category,
+            layer: 6,
+            trustOrigin: "user-keyboard",
+            pluginOperation: {
+              pluginId,
+              operation: inspected.operation,
+              outcome: "issued",
+              grantId: issued.grantId,
+            },
+          });
+        } catch (error) {
+          pluginSurfaceExecutor.revokePluginOperationSession(appSessionId);
+          throw error;
+        }
+        return {
+          operationGrantToken: issued.token,
+          grantId: issued.grantId,
+          expiresAt: Date.now() + ttlMs,
+        };
       });
     } finally {
       generationLease.release();

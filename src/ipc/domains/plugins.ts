@@ -169,6 +169,8 @@ function validateSecretConfigValue(
 }
 interface PluginWebviewBinding {
   pluginId: string;
+  /** Exact runtime generation that minted this renderer authority. */
+  generationId: string;
   entryUrl: string;
   assetEntryUrl: string;
   /** Host-minted authority scope; never accepted from the renderer/plugin. */
@@ -265,6 +267,19 @@ export function unregisterPluginWebview(
   if (binding) revokeSession(binding.appSessionId);
   pluginWebviewRegistry.delete(webContentsId);
   clearPendingEntryUrl(webContentsId);
+}
+
+/** Revoke every renderer authority minted by a superseded plugin generation. */
+export function revokePluginWebviewsForPlugin(
+  pluginId: string,
+  revokeSession: (appSessionId: string) => void,
+): void {
+  for (const [webContentsId, binding] of pluginWebviewRegistry) {
+    if (binding.pluginId !== pluginId) continue;
+    revokeSession(binding.appSessionId);
+    pluginWebviewRegistry.delete(webContentsId);
+    clearPendingEntryUrl(webContentsId);
+  }
 }
 
 export function registerPluginsHandlers(deps: IpcDeps): void {
@@ -1841,6 +1856,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       logRegisterReject("stale-runtime-revision", { webContentsId, pluginId, runtimeRevision });
       return { ok: false, error: "stale-runtime-revision" };
     }
+    const generationAccess = pluginRuntime.getGenerationAccess();
+    const activeGeneration = generationAccess?.getActive(pluginId);
+    if (!activeGeneration) {
+      logRegisterReject("plugin-not-loaded", { webContentsId, pluginId, reason: "active-generation-missing" });
+      return { ok: false, error: "plugin-not-loaded" };
+    }
     try {
       const targetWebview = webContents.fromId(webContentsId);
       if (
@@ -1859,6 +1880,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     const binding = {
       pluginId,
+      generationId: activeGeneration.generationId,
       entryUrl,
       assetEntryUrl: versionedAssetEntryUrl,
       appSessionId: `plugin-ui:${webContentsId}:${randomUUID()}`,
@@ -1883,7 +1905,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!validatePluginFrame(e)) return null;
     const senderId = e.sender?.id;
     if (typeof senderId !== "number") return null;
-    return pluginWebviewRegistry.get(senderId) ?? null;
+    const binding = pluginWebviewRegistry.get(senderId);
+    if (!binding) return null;
+    const activeGeneration = pluginRuntime.getGenerationAccess()?.getActive(binding.pluginId);
+    if (
+      activeGeneration?.generationId === binding.generationId
+      && pluginRuntime.isPluginUiRevisionCurrent(binding.pluginId, binding.runtimeRevision)
+    ) {
+      return binding;
+    }
+    pluginWebviewRegistry.delete(senderId);
+    deps.revokePluginOperationSession(binding.appSessionId);
+    return null;
   }
 
   ipcMain.handle(CHANNELS.pluginBridge.getEntryUrl, (e) => {
@@ -2001,6 +2034,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         ...(typeof options?.operationGrantToken === "string"
           ? { operationGrantToken: options.operationGrantToken }
           : {}),
+        expectedGenerationId: binding.generationId,
       });
       return { ok: true, result };
     } catch (err) {
@@ -2034,6 +2068,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         toolName: method,
         input: payload as Record<string, unknown>,
         appSessionId: binding.appSessionId,
+        expectedGenerationId: binding.generationId,
       });
       return { ok: true as const, result };
     } catch (error) {
@@ -2129,13 +2164,21 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     const safeKey = sanitizeStorageKey(key);
     if (!safeKey) return { ok: false as const, error: "invalid-key" };
-    const storage = pluginRuntime.getPluginStorage(binding.pluginId);
-    if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+    const access = pluginRuntime.getGenerationAccess();
+    if (!access) return { ok: false as const, error: "unknown-plugin-id" };
+    let lease;
     try {
-      const value = await storage.readJson<unknown>(`ui-storage/${safeKey}.json`);
-      return { ok: true as const, value: value ?? undefined };
+      lease = await access.acquireExact(binding.pluginId, binding.generationId);
+      return await access.runWithLease(lease, async () => {
+        const storage = pluginRuntime.getPluginStorage(binding.pluginId);
+        if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+        const value = await storage.readJson<unknown>(`ui-storage/${safeKey}.json`);
+        return { ok: true as const, value: value ?? undefined };
+      });
     } catch (err) {
       return { ok: false as const, error: (err as Error).message };
+    } finally {
+      lease?.release();
     }
   });
   ipcMain.handle(CHANNELS.pluginBridge.storageSet, async (e, key: string, value: unknown) => {
@@ -2146,13 +2189,21 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     const safeKey = sanitizeStorageKey(key);
     if (!safeKey) return { ok: false as const, error: "invalid-key" };
-    const storage = pluginRuntime.getPluginStorage(binding.pluginId);
-    if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+    const access = pluginRuntime.getGenerationAccess();
+    if (!access) return { ok: false as const, error: "unknown-plugin-id" };
+    let lease;
     try {
-      await storage.writeJson(`ui-storage/${safeKey}.json`, value);
-      return { ok: true as const };
+      lease = await access.acquireExact(binding.pluginId, binding.generationId);
+      return await access.runWithLease(lease, async () => {
+        const storage = pluginRuntime.getPluginStorage(binding.pluginId);
+        if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+        await storage.writeJson(`ui-storage/${safeKey}.json`, value);
+        return { ok: true as const };
+      });
     } catch (err) {
       return { ok: false as const, error: (err as Error).message };
+    } finally {
+      lease?.release();
     }
   });
 
