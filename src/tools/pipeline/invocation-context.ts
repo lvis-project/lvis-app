@@ -3,12 +3,12 @@
  * + the self-contained user-abort terminal helper.
  *
  * ── C8 decomposition (SECURITY-CRITICAL trust boundary) ───────────────────────
- * executeOne (executor.ts) owns ~20 per-invocation mutable locals. The highest-
+ * invocation-runner.ts owns the per-invocation mutable state. The highest-
  * risk of them participate in the TWO MUTUALLY-EXCLUSIVE sandbox
  * FILESYSTEM-CONTAINMENT relaxation blocks (one flips a plugin read auto-allow
  * to `ask` only when `!sandboxFsContainedProvider(tool)`; the other relaxes a
  * foreground plugin `ask` to `allow` only when `sandboxFsContainedProvider(tool)`).
- * Those blocks MUST stay inline and byte-identical — a denied WRITE must never
+ * Those blocks MUST stay together in invocation-authorization.ts — a denied WRITE must never
  * become an allowed one, and the read-relaxation must fire under exactly the same
  * conditions. This module therefore extracts ONLY the genuinely self-contained
  * pieces that do NOT participate in that relaxation mutation:
@@ -21,11 +21,11 @@
  *      runs only on the abort short-circuit (never on the relaxation path) and
  *      touches no permission decision — it always emits a fixed `deny`/error row.
  *
- * DELIBERATELY LEFT INLINE in executor.ts (moving them would touch the relaxation
- * blocks, reassign executeOne's `let` locals, or edit the approval-flow closure):
+ * The state is split only at named stage boundaries:
  *   - permissionResult / invocationCategory / invocationAllowedScope /
  *     invocationRuntimeAllowedDirectories reassignments (relaxation-block state);
- *   - the two sandbox relaxation blocks + the relaxed perm-hook preservation;
+ *   - the two sandbox relaxation blocks + the relaxed perm-hook preservation
+ *     stay together in invocation-authorization.ts;
  *   - applyApprovedDirectory (reassigns the scope `let` locals in place);
  *   - requestOutOfAllowedDirectoryAccess / propagateGrantScope (approval flow);
  *   - makeEvaluationContext (already a thin adapter over buildPermissionEvaluation-
@@ -56,26 +56,26 @@ import type { AuditWriter } from "./audit-writer.js";
 import { emitToolStart } from "./display-mask.js";
 
 /**
- * The per-invocation mutable-state contract threaded through executeOne's
+ * The per-invocation mutable-state contract threaded through the ordered
  * 8-step pipeline. Documents the load-bearing values that mutate as a single
  * tool call flows through permission resolution, the sandbox-relaxation blocks,
  * and execution.
  *
- * NOTE: executeOne holds these as individual `let`/`const` LOCALS, not as one
+ * NOTE: the preparation runner holds these as individual `let`/`const` locals,
  * object. Several fields (permissionResult, invocationCategory, allowedScope,
  * runtimeAllowedDirectories) are reassigned by the SECURITY-CRITICAL sandbox
  * filesystem-containment relaxation blocks and by applyApprovedDirectory; boxing
- * them into a shared object would force edits inside those byte-identical
- * trust-boundary blocks. This interface is the CONTRACT/record of that state;
+ * them into one shared mutable object would couple independent stages. This
+ * interface is the CONTRACT/record of that state;
  * {@link createInvocationContext} seeds the initial values ({@link
  * InitialInvocationState}).
  */
 export interface InvocationContext {
   /**
-   * Layer-3 permission verdict. Reassigned ~15x across executeOne as the call
+   * Layer-3 permission verdict. Reassigned across authorization as the call
    * flows through the category matrix, the sandbox relaxation blocks, the
    * reviewer / memory-skip lanes, and the ApprovalGate. LEFT as a `let` local in
-   * executeOne — the relaxation blocks reassign it inline.
+   * authorization — the relaxation blocks reassign it together.
    */
   permissionResult: PermissionCheckResult | undefined;
   /** Tool source (builtin / plugin / mcp) — set once after the Step-1 lookup. */
@@ -85,7 +85,7 @@ export interface InvocationContext {
   /**
    * Effective category. Starts as the declared category, may be swapped by
    * resolveEnforcedCategory (flag-gated) and re-read by the relaxation blocks.
-   * LEFT as a `let` local in executeOne.
+   * Held as a `let` local by the preparation runner.
    */
   invocationCategory: ToolCategory;
   /** Layer-1 allowed scope; widened in place by applyApprovedDirectory. */
@@ -109,7 +109,7 @@ export interface InvocationContext {
 /**
  * The subset of {@link InvocationContext} that {@link createInvocationContext}
  * seeds up front. The remaining fields (source / trust / invocationCategory /
- * permissionResult) are set by executeOne's Step-1 lookup and Step-3 flow.
+ * permissionResult) are set by the preparation and authorization stages.
  */
 export type InitialInvocationState = Pick<
   InvocationContext,
@@ -121,7 +121,7 @@ export type InitialInvocationState = Pick<
 >;
 
 /**
- * Build the INITIAL per-invocation state at the top of executeOne — byte-for-byte
+ * Build the initial per-invocation state at the top of the preparation stage —
  * the former inline initializers. No permission decision is made here.
  */
 export function createInvocationContext(
@@ -167,7 +167,7 @@ export function createInvocationContext(
  * Dependency bundle for {@link returnUserAbort}. A named-field object (not a
  * positional list) so the wide capture surface of the original closure threads
  * without positional-arg mistakes. `auditWriter.auditToolCall` is called
- * directly — executeOne's private `auditToolCall` was a pure pass-through
+ * directly — the former private `auditToolCall` was a pure pass-through
  * delegator to it, so this is byte-identical.
  */
 export interface UserAbortDeps {
@@ -189,7 +189,7 @@ export interface UserAbortDeps {
 
 /**
  * Terminal user-abort path: emit the standard cancellation ToolResult + audit
- * row. Extracted verbatim from executeOne's `returnUserAbort` closure — same
+ * row. Extracted verbatim from the former `returnUserAbort` closure — same
  * fixed `deny` / "user aborted turn" permission shape, same `"user-abort"`
  * termination reason, same emit/onToolEnd/audit ordering. Never participates in
  * the sandbox-relaxation decision.

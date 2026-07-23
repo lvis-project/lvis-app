@@ -26,9 +26,9 @@ behind a phase that adds the security control it depends on first.
 
 | Event | File pattern | Fire point (`file:line`) | Blocking semantics |
 |---|---|---|---|
-| `PreToolUse` | `pre-*.sh` | `src/tools/executor.ts:1833` (step 4, after Layer-3 permission resolves, before execute) | **deny → tool blocked** |
-| `PostToolUse` | `post-*.sh` | `src/tools/executor.ts:1991` (step 7, after execute; receives `toolOutput` + `isError`) | **informational only** (tool already ran) |
-| `PermissionRequest` | `perm-*.sh` | `src/tools/executor.ts:1736` (only when `permission.decision === "ask"`, before `approvalGate.requestAndWait()`) | **deny → ask+execute blocked** |
+| `PreToolUse` | `pre-*.sh` | `src/tools/invocation-execution.ts:147` (step 4, after Layer-3 permission resolves, before execute) | **deny → tool blocked** |
+| `PostToolUse` | `post-*.sh` | `src/tools/invocation-execution.ts:498` (step 7, after execute; receives `toolOutput` + `isError`) | **informational only** (tool already ran) |
+| `PermissionRequest` | `perm-*.sh` | `src/tools/invocation-authorization.ts:427/465/814/931` (ask-path gates, before `approvalGate.requestAndWait()`) | **deny → ask+execute blocked** |
 
 Discovery: `src/hooks/hook-discovery.ts` resolves `~/.config/lvis/hooks/`, globs `pre-|post-|perm-` prefix + `.sh` suffix (`hookTypeFromName`, line 115), skips dotfiles and `.disabled/`, returns a sorted `DiscoveredHook[]` of `{ fileName, path, hookType, sha256, size }`.
 
@@ -140,16 +140,16 @@ Each proposed event below has a **verified existing fire point**. `Blocking` sta
 
 | Event | Fire point (`file:line`) | Subject for `matcher` | Blocking | Context payload (additions to base) |
 |---|---|---|---|---|
-| `PreToolUse` *(existing)* | `src/tools/executor.ts:1833` | `toolName` | **yes** | `input`, `source`, `category` |
-| `PostToolUse` *(existing)* | `src/tools/executor.ts:1991` | `toolName` | no | `toolOutput`, `isError` |
-| `PermissionRequest` *(existing)* | `src/tools/executor.ts:1736` | `toolName` | **yes** | `input`, permission verdict |
-| `PostToolUseFailure` | `src/tools/executor.ts:~1949` (execute returned `isError`) | `toolName` | no | `errorMessage`, `durationMs` |
-| `PermissionDenied` | `src/tools/executor.ts:~1707–1822` deny paths (centralize in `auditToolCall`) | `toolName` | no (observe) | `denyReason { layer, source }` |
-| `UserPromptSubmit` | `src/engine/conversation-loop.ts:~1770` (after classify/route, before `queryLoop`) | input text | **yes** (deny → turn refused) | `inputText`*, `inputOrigin`, `route`, `classification` |
-| `SessionStart` | `src/engine/conversation-loop.ts:~1640` (`runTurn` entry / `startRoutineConversation`) | sessionId | no | `sessionMeta` (routine scope / persona) |
-| `Stop` | `src/engine/conversation-loop.ts:~1829` (`runTurn` finally, before post-turn chain) | sessionId | no | `stopReason`, `toolCount`, `durationMs` |
-| `PreCompact` | `src/engine/conversation-loop.ts:~3322` (`runPreflightGuard`) / `manualCompact` | sessionId | no | `reason` (threshold/manual), `tokenEstimate` |
-| `PostCompact` | after `auto-compact` returns (in `runPreflightGuard` / `manualCompact`) | sessionId | no | `messagesBefore/After`, `tokensBefore/After` |
+| `PreToolUse` *(existing)* | `src/tools/invocation-execution.ts:147` | `toolName` | **yes** | `input`, `source`, `category` |
+| `PostToolUse` *(existing)* | `src/tools/invocation-execution.ts:498` | `toolName` | no | `toolOutput`, `isError` |
+| `PermissionRequest` *(existing)* | `src/tools/invocation-authorization.ts:427/465/814/931` | `toolName` | **yes** | `input`, permission verdict |
+| `PostToolUseFailure` | `src/tools/invocation-execution.ts:520` (execute returned `isError`) | `toolName` | no | `errorMessage`, `durationMs` |
+| `PermissionDenied` | `src/tools/pipeline/audit-writer.ts:191` (all denied terminal audits) | `toolName` | no (observe) | `denyReason { layer, source }` |
+| `UserPromptSubmit` | `src/engine/turn/run-turn.ts:183` (after classify/route, before `queryLoop`) | input text | **yes** (deny → turn refused) | `inputText`*, `inputOrigin`, `route`, `classification` |
+| `SessionStart` | `src/engine/turn/run-turn.ts:169` (`runTurn` entry) | sessionId | no | `sessionMeta` (routine scope / persona) |
+| `Stop` | `src/engine/turn/run-turn.ts:430` (`runTurn` finally, before post-turn chain) | sessionId | no | `stopReason`, `toolCount`, `durationMs` |
+| `PreCompact` | `src/engine/turn/compaction.ts:81/442` (manual/automatic paths) | sessionId | no | `reason` (threshold/manual), `tokenEstimate` |
+| `PostCompact` | `src/engine/turn/compaction.ts:118/488` (manual/automatic paths) | sessionId | no | `messagesBefore/After`, `tokensBefore/After` |
 
 \* `UserPromptSubmit` `inputText` and any tool `input` are **DLP-redacted** before dispatch (§6.6). `UserPromptSubmit` is the only **new** blocking event; it must inherit the same fail-closed semantics as `PreToolUse`.
 
