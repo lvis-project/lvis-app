@@ -260,6 +260,68 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(write).toHaveBeenCalledTimes(2);
   });
 
+  it("holds one exclusive domain lease through write execution before admitting readback", async () => {
+    const { executor, read, write } = setup();
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    const grantArgs = {
+      toolName: "domain_write",
+      input: { operation: "save", value: 11 },
+      principal,
+    };
+    const firstGrant = executor.issuePluginOperationGrant(grantArgs);
+    let signalWriteStarted!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      signalWriteStarted = resolve;
+    });
+    let releaseWrite!: () => void;
+    const writeBlocked = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    write.mockImplementationOnce(async () => {
+      signalWriteStarted();
+      await writeBlocked;
+      return { output: "saved", isError: false };
+    });
+
+    const firstWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w1", name: "domain_write", input: { operation: "save", value: 11 } }],
+        options(firstGrant.token),
+      ),
+    );
+    await writeStarted;
+    const readback = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    await Promise.resolve();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(() => executor.issuePluginOperationGrant(grantArgs))
+      .toThrow(/required read is missing or stale/);
+
+    releaseWrite();
+    await firstWrite;
+    await readback;
+    expect(read).toHaveBeenCalledTimes(2);
+
+    const secondGrant = executor.issuePluginOperationGrant(grantArgs);
+    const [secondWrite] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w2", name: "domain_write", input: { operation: "save", value: 11 } }],
+        options(secondGrant.token),
+      ),
+    );
+    expect(secondWrite.is_error).toBeFalsy();
+    expect(write).toHaveBeenCalledTimes(2);
+  });
+
   it("default-denies missing, unknown and app-disallowed operations before dispatch", async () => {
     const { executor, read } = setup();
     for (const input of [{}, { operation: "unknown" }]) {

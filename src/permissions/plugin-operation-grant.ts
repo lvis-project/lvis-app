@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { PluginToolOperationPolicy } from "../plugins/types.js";
 
 export interface PluginOperationPrincipal {
   ownerPluginId: string;
@@ -41,6 +42,21 @@ export interface PluginOperationGrantExpectation extends PluginOperationPrincipa
   requiresRead: boolean;
 }
 
+export interface PluginOperationDomainTool {
+  name: string;
+  pluginId?: string;
+  pluginGeneration?: {
+    generationId: string;
+  };
+  operationPolicy?: PluginToolOperationPolicy;
+}
+
+export interface PluginOperationExecutionLease {
+  readonly domainKey: string;
+  readonly kind: "read" | "write";
+  release(): void;
+}
+
 interface ReadSnapshot {
   revision: string;
   recordedAt: number;
@@ -68,6 +84,101 @@ function snapshotKey(value: PluginReadSnapshotKey): string {
   return `${principalKey(value)}\0${value.readTool}\0${value.readOperation}`;
 }
 
+function operationNode(toolName: string, operation: string): string {
+  return `${toolName}\0${operation}`;
+}
+
+/**
+ * Compute the Host-private connected operation domain for one invocation.
+ *
+ * Every operation on the same consolidated Tool belongs to one domain. A
+ * write's declared read prerequisites join the read and write Tools into the
+ * same component. The account, plugin version, and immutable generation scope
+ * the resulting lock; app windows for the same provider account deliberately
+ * share it so two sessions cannot race the same remote state.
+ */
+export function pluginOperationExecutionDomain(
+  principal: PluginOperationPrincipal,
+  toolName: string,
+  operation: string,
+  tools: readonly PluginOperationDomainTool[],
+): string {
+  const graph = new Map<string, Set<string>>();
+  const connect = (left: string, right: string): void => {
+    const leftEdges = graph.get(left) ?? new Set<string>();
+    const rightEdges = graph.get(right) ?? new Set<string>();
+    leftEdges.add(right);
+    rightEdges.add(left);
+    graph.set(left, leftEdges);
+    graph.set(right, rightEdges);
+  };
+
+  for (const tool of tools) {
+    if (
+      tool.pluginId !== principal.ownerPluginId ||
+      tool.pluginGeneration?.generationId !== principal.generationId ||
+      !tool.operationPolicy
+    ) {
+      continue;
+    }
+    const nodes = Object.keys(tool.operationPolicy.operations)
+      .map((candidateOperation) => operationNode(tool.name, candidateOperation));
+    for (const node of nodes) {
+      graph.set(node, graph.get(node) ?? new Set());
+      for (const sibling of nodes) connect(node, sibling);
+    }
+    for (const [candidateOperation, rule] of Object.entries(
+      tool.operationPolicy.operations,
+    )) {
+      if (rule.kind !== "write" || !rule.requiresRead) continue;
+      const writeNode = operationNode(tool.name, candidateOperation);
+      for (const readOperation of rule.requiresRead.operations) {
+        connect(
+          writeNode,
+          operationNode(rule.requiresRead.tool, readOperation),
+        );
+      }
+    }
+  }
+
+  const start = operationNode(toolName, operation);
+  if (!graph.has(start)) {
+    throw new Error(
+      `plugin operation domain is missing '${toolName}.${operation}' in active generation`,
+    );
+  }
+  const component = new Set<string>();
+  const pending = [start];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (component.has(node)) continue;
+    component.add(node);
+    for (const neighbor of graph.get(node) ?? []) pending.push(neighbor);
+  }
+  return hash([
+    "plugin-operation-domain/v1",
+    principal.ownerPluginId,
+    principal.ownerVersion,
+    principal.generationId,
+    principal.accountHash,
+    ...[...component].sort(),
+  ].join("\0"));
+}
+
+interface PendingExecutionLease {
+  readonly kind: "read" | "write";
+  readonly resolve: (lease: PluginOperationExecutionLease) => void;
+  readonly reject: (error: Error) => void;
+  readonly signal?: AbortSignal;
+  onAbort?: () => void;
+}
+
+interface ExecutionDomainState {
+  readers: number;
+  writer: boolean;
+  queue: PendingExecutionLease[];
+}
+
 export class PluginOperationGrantCoordinator {
   private readonly grants = new Map<string, {
     id: string;
@@ -76,6 +187,7 @@ export class PluginOperationGrantCoordinator {
   }>();
   private readonly snapshots = new Map<string, ReadSnapshot>();
   private readonly latestReadSequences = new Map<string, number>();
+  private readonly executionDomains = new Map<string, ExecutionDomainState>();
   private nextReadSequence = 0;
 
   constructor(
@@ -209,6 +321,41 @@ export class PluginOperationGrantCoordinator {
     return { ok: true, grantId: stored.id };
   }
 
+  acquireExecutionLease(
+    domainKey: string,
+    kind: "read" | "write",
+    signal?: AbortSignal,
+  ): Promise<PluginOperationExecutionLease> {
+    if (!/^[0-9a-f]{64}$/.test(domainKey)) {
+      return Promise.reject(new Error("plugin operation domain key is invalid"));
+    }
+    if (signal?.aborted) {
+      return Promise.reject(new Error("plugin operation execution lease aborted"));
+    }
+    const state = this.executionDomains.get(domainKey) ?? {
+      readers: 0,
+      writer: false,
+      queue: [],
+    };
+    this.executionDomains.set(domainKey, state);
+
+    return new Promise<PluginOperationExecutionLease>((resolve, reject) => {
+      const request: PendingExecutionLease = { kind, resolve, reject, signal };
+      if (signal) {
+        request.onAbort = () => {
+          const index = state.queue.indexOf(request);
+          if (index < 0) return;
+          state.queue.splice(index, 1);
+          reject(new Error("plugin operation execution lease aborted"));
+          this.drainExecutionDomain(domainKey, state);
+        };
+        signal.addEventListener("abort", request.onAbort, { once: true });
+      }
+      state.queue.push(request);
+      this.drainExecutionDomain(domainKey, state);
+    });
+  }
+
   revokeGeneration(ownerPluginId: string, generationId: string): void {
     for (const [key, value] of this.grants) {
       if (value.binding.ownerPluginId === ownerPluginId && value.binding.generationId === generationId) this.grants.delete(key);
@@ -330,5 +477,58 @@ export class PluginOperationGrantCoordinator {
     if (this.snapshots.size < this.maxSnapshots) return;
     const oldest = this.snapshots.keys().next().value as string | undefined;
     if (oldest) this.snapshots.delete(oldest);
+  }
+
+  private drainExecutionDomain(
+    domainKey: string,
+    state: ExecutionDomainState,
+  ): void {
+    if (state.writer) return;
+    if (state.readers > 0) {
+      while (state.queue[0]?.kind === "read") {
+        const reader = state.queue.shift()!;
+        state.readers += 1;
+        this.resolveExecutionLease(domainKey, state, reader);
+      }
+      return;
+    }
+    const first = state.queue[0];
+    if (!first) {
+      this.executionDomains.delete(domainKey);
+      return;
+    }
+    if (first.kind === "write") {
+      state.queue.shift();
+      state.writer = true;
+      this.resolveExecutionLease(domainKey, state, first);
+      return;
+    }
+    while (state.queue[0]?.kind === "read") {
+      const reader = state.queue.shift()!;
+      state.readers += 1;
+      this.resolveExecutionLease(domainKey, state, reader);
+    }
+  }
+
+  private resolveExecutionLease(
+    domainKey: string,
+    state: ExecutionDomainState,
+    request: PendingExecutionLease,
+  ): void {
+    if (request.signal && request.onAbort) {
+      request.signal.removeEventListener("abort", request.onAbort);
+    }
+    let released = false;
+    request.resolve(Object.freeze({
+      domainKey,
+      kind: request.kind,
+      release: () => {
+        if (released) return;
+        released = true;
+        if (request.kind === "write") state.writer = false;
+        else state.readers = Math.max(0, state.readers - 1);
+        this.drainExecutionDomain(domainKey, state);
+      },
+    }));
   }
 }
