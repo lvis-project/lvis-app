@@ -8,6 +8,7 @@ import type { PluginRuntime } from "./runtime.js";
 import {
   drainPluginInstallLockOperations,
   withPluginInstallLock,
+  withPluginInstallLocks,
 } from "./install-lifecycle.js";
 
 type WarnLogger = { warn: (message: string, ...args: unknown[]) => void };
@@ -128,7 +129,9 @@ export async function uninstallPluginWithLifecycle(
     );
   }
   deps.pluginRuntime.cancelPendingRestart(canonicalPluginId);
-  return withPluginInstallLock(canonicalPluginId, async () => {
+  return withPluginInstallLocks(
+    [canonicalPluginId, installPluginId],
+    async () => {
     const secretKeys = listSecretKeys(
       deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
     );
@@ -180,7 +183,8 @@ export async function uninstallPluginWithLifecycle(
     deps.refreshPluginNotifications?.();
 
     return result ?? { pluginId, uninstalled: true as const };
-  });
+    },
+  );
 }
 
 export async function cleanupFailedPluginInstallWithLifecycle(

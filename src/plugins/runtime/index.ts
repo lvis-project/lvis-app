@@ -22,6 +22,7 @@ import type {
 } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
+import { withPluginInstallLock } from "../install-lifecycle.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { updatePluginRegistry } from "../registry.js";
@@ -741,44 +742,46 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
-    if (
-      !this.knownPluginManifests.has(canonicalPluginId)
-      && !this.plugins.has(canonicalPluginId)
-    ) {
-      throw new Error(`Plugin not found: ${pluginId}`);
-    }
-    const installClaim = this.getPluginInstallClaim(canonicalPluginId);
-    if (installClaim === undefined) {
-      throw new Error(`Plugin install provenance unknown: ${pluginId}`);
-    }
-    if (this.registryPath) {
-      // Static manifests have no registry row, so their active toggle is
-      // session-local. Registry installs persist through their raw install id.
-      if (installClaim !== null) {
-        await updatePluginRegistry(this.registryPath, (registry) => {
-          const entry = registry.plugins.find(({ id }) => id === installClaim);
-          if (!entry) {
-            throw new Error(`Plugin not found in registry: ${installClaim}`);
-          }
-          entry.enabled = enabled;
-        });
+    return withPluginInstallLock(canonicalPluginId, async () => {
+      if (
+        !this.knownPluginManifests.has(canonicalPluginId)
+        && !this.plugins.has(canonicalPluginId)
+      ) {
+        throw new Error(`Plugin not found: ${pluginId}`);
       }
-    }
-    if (enabled) {
-      this.inactivePluginIds.delete(canonicalPluginId);
-      try {
-        this.onActiveStateChange?.(canonicalPluginId, true);
-      } catch (err) {
-        log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, true): %s`, (err as Error).message);
+      const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+      if (installClaim === undefined) {
+        throw new Error(`Plugin install provenance unknown: ${pluginId}`);
       }
-    } else {
-      this.inactivePluginIds.add(canonicalPluginId);
-      try {
-        this.onActiveStateChange?.(canonicalPluginId, false);
-      } catch (err) {
-        log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, false): %s`, (err as Error).message);
+      if (this.registryPath) {
+        // Static manifests have no registry row, so their active toggle is
+        // session-local. Registry installs persist through their raw install id.
+        if (installClaim !== null) {
+          await updatePluginRegistry(this.registryPath, (registry) => {
+            const entry = registry.plugins.find(({ id }) => id === installClaim);
+            if (!entry) {
+              throw new Error(`Plugin not found in registry: ${installClaim}`);
+            }
+            entry.enabled = enabled;
+          });
+        }
       }
-    }
+      if (enabled) {
+        this.inactivePluginIds.delete(canonicalPluginId);
+        try {
+          this.onActiveStateChange?.(canonicalPluginId, true);
+        } catch (err) {
+          log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, true): %s`, (err as Error).message);
+        }
+      } else {
+        this.inactivePluginIds.add(canonicalPluginId);
+        try {
+          this.onActiveStateChange?.(canonicalPluginId, false);
+        } catch (err) {
+          log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, false): %s`, (err as Error).message);
+        }
+      }
+    });
   }
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {

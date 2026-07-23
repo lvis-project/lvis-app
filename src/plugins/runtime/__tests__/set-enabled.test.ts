@@ -15,6 +15,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
+import { withPluginInstallLock } from "../../install-lifecycle.js";
 
 describe("PluginRuntime — active/inactive toggle (#1176)", () => {
   let testDir: string;
@@ -115,6 +116,42 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.loadStatus).toBe("loaded");
     expect(card?.runtimeLoaded).toBe(true);
     expect(card?.active).toBe(true);
+  });
+
+  it("serializes registry and active-state changes with canonical lifecycle mutations", async () => {
+    const changes: Array<{ id: string; enabled: boolean }> = [];
+    const runtime = makeRuntime({
+      onActiveStateChange: (id, enabled) => changes.push({ id, enabled }),
+    });
+    await runtime.startAll();
+
+    let releaseMutation!: () => void;
+    let markMutationEntered!: () => void;
+    const mutationGate = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    const mutationEntered = new Promise<void>((resolve) => {
+      markMutationEntered = resolve;
+    });
+    const mutation = withPluginInstallLock("se-plugin", async () => {
+      markMutationEntered();
+      await mutationGate;
+    });
+    await mutationEntered;
+
+    const toggle = runtime.setPluginEnabled("se-plugin", false);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    expect(changes).toEqual([]);
+    expect(
+      JSON.parse(await readFile(registryPath, "utf-8")).plugins[0].enabled,
+    ).toBe(true);
+
+    releaseMutation();
+    await mutation;
+    await toggle;
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    expect(changes).toEqual([{ id: "se-plugin", enabled: false }]);
   });
 
   it("persists a canonical card toggle through its registry install alias", async () => {
