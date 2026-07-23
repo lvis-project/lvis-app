@@ -189,6 +189,39 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.active).toBe(true);
   });
 
+  it("uninstalls an inactive plugin and permits a clean same-id reinstall", async () => {
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await runtime.setPluginEnabled("se-plugin", false);
+
+    const removed = await runtime.removePluginWithCommit(
+      "se-plugin",
+      async () => {
+        await writeFile(
+          registryPath,
+          JSON.stringify({ version: 1, plugins: [] }),
+          "utf-8",
+        );
+        return "removed";
+      },
+    );
+
+    expect(removed).toBe("removed");
+    expect(runtime.listPluginCards().find((card) => card.id === "se-plugin")).toBeUndefined();
+
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "se-plugin", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    await expect(runtime.addPlugin("se-plugin")).resolves.toBe("started");
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    await expect(runtime.call("se_ping")).resolves.toBe("pong");
+  });
+
   it("preserves a later enable while an earlier disable commit is delayed", async () => {
     const changes: boolean[] = [];
     const runtime = makeRuntime({
@@ -267,6 +300,35 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
 
     await expect(runtime.setPluginEnabled("se-plugin", false)).rejects.toThrow("MCP projection failed");
 
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);
+  });
+
+  it("projects the committed inactive state even when runtime retirement fails", async () => {
+    const onActiveStateChange = vi.fn();
+    const runtime = makeRuntime({ onActiveStateChange });
+    await runtime.startAll();
+    const prepareRuntimeRetirement =
+      runtime.prepareRuntimeRetirement.bind(runtime);
+    vi.spyOn(runtime, "prepareRuntimeRetirement").mockImplementation(
+      (projection) =>
+        prepareRuntimeRetirement(projection).map((step) =>
+          step.phase === "runtime.drain"
+            ? Object.freeze({
+                ...step,
+                run: async () => {
+                  throw new Error("retirement drain failed");
+                },
+              })
+            : step),
+    );
+
+    await expect(runtime.setPluginEnabled("se-plugin", false)).rejects.toThrow(
+      /retirement drain failed/,
+    );
+
+    expect(onActiveStateChange).toHaveBeenCalledWith("se-plugin", false);
     expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);

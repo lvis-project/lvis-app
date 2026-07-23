@@ -789,6 +789,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
           });
         }
       };
+      let retirementError: unknown;
       if (!enabled) {
         if (!generationLifecycle.getActive(pluginId)) {
           throw new Error(`cannot disable plugin without an active generation: ${pluginId}`);
@@ -796,7 +797,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
         const { retirement } = await generationLifecycle.deactivateWithCommit(pluginId, persist);
         this.inactivePluginIds.add(pluginId);
         this.disabledPluginIds.add(pluginId);
-        await this.settleCommittedRetirement(
+        retirementError = await this.captureCommittedRetirementFailure(
           pluginId,
           retirement,
           "plugin enabled-state disable",
@@ -839,7 +840,27 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       // Keep this runtime view aligned even if a downstream host projection
       // callback reports a post-commit fault; later requests must queue behind
       // that callback and observe the committed state.
-      await this.onActiveStateChange?.(pluginId, enabled);
+      let callbackError: unknown;
+      try {
+        await this.onActiveStateChange?.(pluginId, enabled);
+      } catch (error) {
+        callbackError = error;
+      }
+      if (retirementError !== undefined && callbackError !== undefined) {
+        throw new AggregateError(
+          [
+            retirementError instanceof Error
+              ? retirementError
+              : new Error(String(retirementError)),
+            callbackError instanceof Error
+              ? callbackError
+              : new Error(String(callbackError)),
+          ],
+          `plugin '${pluginId}' committed disable cleanup failed`,
+        );
+      }
+      if (retirementError !== undefined) throw retirementError;
+      if (callbackError !== undefined) throw callbackError;
     });
   }
 

@@ -962,6 +962,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.failedPluginStubs.delete(canonicalPluginId);
     this.loadFailureInfo.delete(canonicalPluginId);
     this.disabledPluginIds.delete(canonicalPluginId);
+    this.inactivePluginIds.delete(canonicalPluginId);
     this.invalidatePluginUiRevision(canonicalPluginId);
     this.knownInstallAliases.delete(canonicalPluginId);
 
@@ -1578,19 +1579,49 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     durableCommit: () => Promise<T>,
   ): Promise<T> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
-    if (!this.plugins.has(canonicalPluginId)) {
-      throw new Error(`cannot atomically remove unloaded plugin: ${pluginId}`);
-    }
     const generationLifecycle = this.requireGenerationLifecycle("atomic plugin removal");
-    const { result, retirement } = await generationLifecycle.deactivateWithCommit(canonicalPluginId, durableCommit);
-    const retirementError = await this.captureCommittedRetirementFailure(
-      canonicalPluginId, retirement, "atomic plugin removal",
-    );
-    // The inactive pointer is already published. This call purges only the
-    // durable runtime tracking maps and fires the host cleanup callback.
-    await this.removePlugin(canonicalPluginId);
-    if (retirementError !== undefined) throw retirementError;
-    return result;
+    return generationLifecycle.runInLifecycleQueue(canonicalPluginId, async () => {
+      const loaded = this.plugins.has(canonicalPluginId);
+      const known =
+        loaded
+        || this.knownPluginManifests.has(canonicalPluginId)
+        || this.failedPluginIds.has(canonicalPluginId)
+        || this.failedPluginStubs.has(canonicalPluginId)
+        || this.disabledPluginIds.has(canonicalPluginId)
+        || this.inactivePluginIds.has(canonicalPluginId);
+      if (!known) {
+        throw new Error(`cannot atomically remove unknown plugin: ${pluginId}`);
+      }
+
+      let result: T;
+      let retirementError: unknown;
+      if (loaded) {
+        const committed = await generationLifecycle.deactivateWithCommit(
+          canonicalPluginId,
+          durableCommit,
+        );
+        result = committed.result;
+        retirementError = await this.captureCommittedRetirementFailure(
+          canonicalPluginId,
+          committed.retirement,
+          "atomic plugin removal",
+        );
+      } else {
+        if (generationLifecycle.getActive(canonicalPluginId)) {
+          throw new Error(
+            `atomic plugin removal found active generation without loaded runtime: ${canonicalPluginId}`,
+          );
+        }
+        result = await durableCommit();
+      }
+
+      // The inactive pointer is already published, or no active generation
+      // existed. Purge durable runtime tracking and fire host cleanup before
+      // returning the marketplace commit result.
+      await this.removePlugin(canonicalPluginId);
+      if (retirementError !== undefined) throw retirementError;
+      return result;
+    });
   }
 
   // ─── Dispatcher / Bridge ───────────────────────────────────────────────────
