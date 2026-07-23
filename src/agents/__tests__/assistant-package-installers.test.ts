@@ -10,6 +10,8 @@ import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
 import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { PluginMarketplaceItem } from "../../plugins/types.js";
 
+const TEST_INSTALL_ROOT = resolve(process.cwd(), ".lvis-package");
+
 function zipBuffer(files: Record<string, string>): Buffer {
   const zip = new AdmZip();
   for (const [filename, contents] of Object.entries(files)) {
@@ -43,10 +45,10 @@ function makeFetcher(pluginType: "agent" | "skill"): MarketplaceFetcher {
 function makeStore(buffer: Buffer): PluginArtifactStore & {
   extractZip: ReturnType<typeof vi.fn>;
 } {
-  const installRoot = resolve("/tmp/lvis-package");
+  const installRoot = TEST_INSTALL_ROOT;
   const store = new PluginArtifactStore({
     installRoot,
-    cacheRoot: resolve("/tmp/lvis-package-cache"),
+    cacheRoot: resolve(process.cwd(), ".lvis-package-cache"),
     fetcher: makeFetcher("agent"),
     publicKeys: {},
     tarballCacheBase: null,
@@ -103,8 +105,8 @@ describe("assistant package installers", () => {
         id: "reviewer",
         source: "marketplace",
         enabled: true,
-        profilePath: join(resolve("/tmp/lvis-package"), "AGENTS.md"),
-        manifestPath: join(resolve("/tmp/lvis-package"), "plugin.json"),
+        profilePath: join(TEST_INSTALL_ROOT, "AGENTS.md"),
+        manifestPath: join(TEST_INSTALL_ROOT, "plugin.json"),
       });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -150,8 +152,8 @@ describe("assistant package installers", () => {
         id: "audit",
         source: "marketplace",
         enabled: true,
-        skillPath: join(resolve("/tmp/lvis-package"), "SKILL.md"),
-        manifestPath: join(resolve("/tmp/lvis-package"), "plugin.json"),
+        skillPath: join(TEST_INSTALL_ROOT, "SKILL.md"),
+        manifestPath: join(TEST_INSTALL_ROOT, "plugin.json"),
       });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -168,7 +170,7 @@ describe("assistant package installers", () => {
       installAgentPackageFromMarketplace("reviewer", {
         fetcher: makeFetcher("agent"),
         store,
-        registryPath: "/tmp/lvis-agent-registry.json",
+        registryPath: resolve(process.cwd(), ".lvis-agent-registry.json"),
       }),
     ).rejects.toThrow(/empty AGENTS\.md body/);
 
@@ -185,7 +187,7 @@ describe("assistant package installers", () => {
       installSkillPackageFromMarketplace("audit", {
         fetcher: makeFetcher("skill"),
         store,
-        registryPath: "/tmp/lvis-skill-registry.json",
+        registryPath: resolve(process.cwd(), ".lvis-skill-registry.json"),
       }),
     ).rejects.toThrow(/empty SKILL\.md body/);
 
@@ -202,7 +204,7 @@ describe("assistant package installers", () => {
       installAgentPackageFromMarketplace("reviewer", {
         fetcher: makeFetcher("agent"),
         store,
-        registryPath: "/tmp/lvis-agent-registry.json",
+        registryPath: resolve(process.cwd(), ".lvis-agent-registry.json"),
       }),
     ).rejects.toThrow(/must match the package slug/);
 
@@ -219,7 +221,7 @@ describe("assistant package installers", () => {
       installSkillPackageFromMarketplace("audit", {
         fetcher: makeFetcher("skill"),
         store,
-        registryPath: "/tmp/lvis-skill-registry.json",
+        registryPath: resolve(process.cwd(), ".lvis-skill-registry.json"),
       }),
     ).rejects.toThrow(/must match the package slug/);
 
@@ -282,7 +284,7 @@ describe("assistant package installers", () => {
     await expect(installAgentPackageFromMarketplace("reviewer", {
       fetcher: makeFetcher("agent"),
       store: agentStore,
-      registryPath: "/tmp/lvis-agent-registry.json",
+      registryPath: resolve(process.cwd(), ".lvis-agent-registry.json"),
     })).rejects.toMatchObject({ code: "ARCHIVE_COMPRESSION_RATIO_EXCEEDED" });
     expect(agentStore.extractZip).not.toHaveBeenCalled();
 
@@ -293,7 +295,7 @@ describe("assistant package installers", () => {
     await expect(installSkillPackageFromMarketplace("audit", {
       fetcher: makeFetcher("skill"),
       store: skillStore,
-      registryPath: "/tmp/lvis-skill-registry.json",
+      registryPath: resolve(process.cwd(), ".lvis-skill-registry.json"),
     })).rejects.toMatchObject({ code: "ARCHIVE_COMPRESSION_RATIO_EXCEEDED" });
     expect(skillStore.extractZip).not.toHaveBeenCalled();
   });
