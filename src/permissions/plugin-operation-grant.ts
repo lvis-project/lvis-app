@@ -28,6 +28,19 @@ export interface PluginReadSnapshotKey extends PluginOperationPrincipal {
   readOperation: string;
 }
 
+export interface PluginRequiredReadReservation {
+  readTool: string;
+  readOperations: readonly string[];
+  maxAgeMs: number;
+}
+
+export interface PluginOperationGrantExpectation extends PluginOperationPrincipal {
+  toolName: string;
+  operation: string;
+  intentHash: string;
+  requiresRead: boolean;
+}
+
 interface ReadSnapshot {
   revision: string;
   recordedAt: number;
@@ -81,11 +94,28 @@ export class PluginOperationGrantCoordinator {
     return newest.revision;
   }
 
-  issue(binding: Omit<PluginOperationGrantBinding, "contractVersion" | "nonce">): {
+  issue(
+    binding: Omit<PluginOperationGrantBinding, "contractVersion" | "nonce">,
+    requiredRead?: PluginRequiredReadReservation,
+  ): {
     token: string;
     grantId: string;
   } {
     this.collectExpired();
+    if (binding.readRevision === null) {
+      if (requiredRead) {
+        throw new Error("operation grant required read revision is missing");
+      }
+    } else {
+      if (
+        !requiredRead ||
+        !this.reserveRequiredRead(binding, requiredRead, binding.readRevision)
+      ) {
+        throw new Error(
+          "operation grant required read is missing, stale, changed, or already reserved",
+        );
+      }
+    }
     if (this.grants.size >= this.maxGrants) {
       const oldest = this.grants.keys().next().value as string | undefined;
       if (oldest) this.grants.delete(oldest);
@@ -99,7 +129,10 @@ export class PluginOperationGrantCoordinator {
     return { token, grantId };
   }
 
-  consume(token: string | undefined, expected: Omit<PluginOperationGrantBinding, "contractVersion" | "nonce" | "expiresAt">): GrantConsumeResult {
+  consume(
+    token: string | undefined,
+    expected: PluginOperationGrantExpectation,
+  ): GrantConsumeResult {
     if (!token) return { ok: false, reason: "operation grant missing" };
     const key = hash(token);
     const stored = this.grants.get(key);
@@ -109,11 +142,18 @@ export class PluginOperationGrantCoordinator {
     if (binding.expiresAt <= this.now()) return { ok: false, reason: "operation grant expired", grantId: stored.id };
     for (const field of [
       "ownerPluginId", "ownerVersion", "generationId", "toolName", "operation",
-      "intentHash", "appSessionId", "accountHash", "readRevision",
+      "intentHash", "appSessionId", "accountHash",
     ] as const) {
       if (binding[field] !== expected[field]) {
         return { ok: false, reason: `operation grant ${field} mismatch`, grantId: stored.id };
       }
+    }
+    if ((binding.readRevision !== null) !== expected.requiresRead) {
+      return {
+        ok: false,
+        reason: "operation grant read requirement mismatch",
+        grantId: stored.id,
+      };
     }
     return { ok: true, grantId: stored.id };
   }
@@ -167,6 +207,42 @@ export class PluginOperationGrantCoordinator {
   private collectExpired(): void {
     const now = this.now();
     for (const [key, value] of this.grants) if (value.binding.expiresAt <= now) this.grants.delete(key);
+  }
+
+  private reserveRequiredRead(
+    principal: PluginOperationPrincipal,
+    requiredRead: PluginRequiredReadReservation,
+    expectedRevision: string,
+  ): boolean {
+    let newest:
+      | { key: string; snapshot: ReadSnapshot }
+      | undefined;
+    for (const readOperation of requiredRead.readOperations) {
+      const key = snapshotKey({
+        ...principal,
+        readTool: requiredRead.readTool,
+        readOperation,
+      });
+      const snapshot = this.snapshots.get(key);
+      if (
+        snapshot &&
+        (!newest || snapshot.recordedAt > newest.snapshot.recordedAt)
+      ) {
+        newest = { key, snapshot };
+      }
+    }
+    if (
+      !newest ||
+      newest.snapshot.revision !== expectedRevision ||
+      this.now() - newest.snapshot.recordedAt > requiredRead.maxAgeMs
+    ) {
+      return false;
+    }
+    // Reservation and deletion are one synchronous critical section. Once a
+    // grant owns this revision, no concurrent approval can mint another grant
+    // from the same user-visible read snapshot.
+    this.snapshots.delete(newest.key);
+    return true;
   }
 
   private trimSnapshots(): void {

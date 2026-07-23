@@ -449,6 +449,13 @@ export class PluginRuntime {
     identityHash: string;
     principalHash: string;
   }>();
+  /**
+   * Latest auth-lifecycle invocation for each immutable plugin generation.
+   * Epochs are allocated before dispatch, so a late status/logout completion
+   * cannot publish state after a newer status, login, or logout has started.
+   */
+  private pluginAuthInvocationEpochs = new Map<string, number>();
+  private nextPluginAuthInvocationEpoch = 0;
   private readonly pluginUiRevisions = new Map<string, number>();
   private nextPluginUiRevision = 0;
   private toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
@@ -681,6 +688,9 @@ export class PluginRuntime {
     const nextAccountHashes = new Map(
       [...this.pluginAccountHashes].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
     );
+    const nextAuthInvocationEpochs = new Map(
+      [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
+    );
     const publishHostEffects = runtime.hostEffects?.preparePublish();
     let published = false;
     return Object.freeze({
@@ -698,6 +708,7 @@ export class PluginRuntime {
         this.loadFailureInfo.delete(pluginId);
         this.disabledPluginIds.delete(pluginId);
         this.pluginAccountHashes = nextAccountHashes;
+        this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
         published = true;
       },
     });
@@ -715,6 +726,9 @@ export class PluginRuntime {
     const nextAccountHashes = new Map(
       [...this.pluginAccountHashes].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
     );
+    const nextAuthInvocationEpochs = new Map(
+      [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
+    );
     let published = false;
     return Object.freeze({
       pluginId,
@@ -726,6 +740,7 @@ export class PluginRuntime {
         this.disposers = nextDisposers;
         this.pluginUiRevisions.delete(pluginId);
         this.pluginAccountHashes = nextAccountHashes;
+        this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
         published = true;
       },
     });
@@ -2674,6 +2689,36 @@ export class PluginRuntime {
   }
 
   /**
+   * Claim publication order for any auth lifecycle invocation. Login does not
+   * publish a principal directly, but starting it supersedes older status or
+   * logout probes that would otherwise complete during the new login flow.
+   * The caller must do this before awaiting plugin execution and pass the
+   * returned epoch to {@link observePluginAuthResult}.
+   */
+  beginPluginAuthInvocation(
+    pluginId: string,
+    generationId: string,
+    toolName: string,
+  ): number | undefined {
+    const active = this.requireGenerationAccess("plugin auth invocation").getActive(pluginId);
+    if (!active || active.generationId !== generationId) return undefined;
+    const auth = active.state.runtime.manifest?.auth;
+    if (
+      !auth ||
+      (
+        toolName !== auth.statusTool &&
+        toolName !== auth.loginTool &&
+        toolName !== auth.logoutTool
+      )
+    ) {
+      return undefined;
+    }
+    const epoch = ++this.nextPluginAuthInvocationEpoch;
+    this.pluginAuthInvocationEpochs.set(`${pluginId}\0${generationId}`, epoch);
+    return epoch;
+  }
+
+  /**
    * Observe only manifest-declared auth tools after a successful invocation.
    * The account hash is derived exclusively from statusTool output; login
    * results cannot mint write authority, and a successful logout burns it.
@@ -2683,6 +2728,7 @@ export class PluginRuntime {
     generationId: string,
     toolName: string,
     result: unknown,
+    invocationEpoch: number | undefined,
   ): { invalidatedAccountHash?: string } {
     const active = this.requireGenerationAccess("plugin auth result observation").getActive(pluginId);
     if (!active || active.generationId !== generationId) return {};
@@ -2690,6 +2736,15 @@ export class PluginRuntime {
     const auth = manifest?.auth;
     if (!auth) return {};
     const key = `${pluginId}\0${generationId}`;
+    if (
+      (toolName === auth.statusTool || toolName === auth.logoutTool) &&
+      (
+        invocationEpoch === undefined ||
+        this.pluginAuthInvocationEpochs.get(key) !== invocationEpoch
+      )
+    ) {
+      return {};
+    }
     if (toolName === auth.logoutTool) {
       const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
       this.pluginAccountHashes.delete(key);
@@ -2726,6 +2781,9 @@ export class PluginRuntime {
   clearPluginOperationAccount(pluginId: string): void {
     for (const key of this.pluginAccountHashes.keys()) {
       if (key.startsWith(`${pluginId}\0`)) this.pluginAccountHashes.delete(key);
+    }
+    for (const key of this.pluginAuthInvocationEpochs.keys()) {
+      if (key.startsWith(`${pluginId}\0`)) this.pluginAuthInvocationEpochs.delete(key);
     }
   }
 

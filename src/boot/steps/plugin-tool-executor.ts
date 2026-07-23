@@ -98,12 +98,14 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     generationId: string,
     toolName: string,
     result: unknown,
+    invocationEpoch: number | undefined,
   ): void => {
     const observed = pluginRuntime.observePluginAuthResult(
       pluginId,
       generationId,
       toolName,
       result,
+      invocationEpoch,
     );
     if (observed.invalidatedAccountHash) {
       pluginSurfaceExecutor.revokePluginOperationAccount(
@@ -129,6 +131,18 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     // "mcp-app" at every depth and can never be laundered into "ui".
     return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
+      const ownerPluginId = context.ownerPluginId;
+      const ownerGenerationId = context.ownerGenerationId;
+      // Claim auth publication order before either dispatch path awaits plugin
+      // code. A later status/login/logout invocation supersedes this
+      // completion even when the older handler resolves last.
+      const authInvocationEpoch = ownerPluginId && ownerGenerationId
+        ? pluginRuntime.beginPluginAuthInvocation(
+            ownerPluginId,
+            ownerGenerationId,
+            toolName,
+          )
+        : undefined;
       if (isAppOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
         // App-only dispatch path — TRUSTED PANEL ONLY (`effectiveOrigin === "ui"`;
         // an "mcp-app" chain never satisfies the predicate). Routes to the runtime
@@ -152,12 +166,12 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             context.ownerGenerationId,
             toolName,
             result,
+            authInvocationEpoch,
           );
         }
         return result;
       }
 
-      const ownerPluginId = context.ownerPluginId;
       const appInvocation = context.appInvocation;
       const activeGeneration = ownerPluginId
         ? ctx.pluginBundleLifecycle?.getActive(ownerPluginId)
@@ -231,6 +245,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             context.ownerGenerationId,
             toolName,
             result.rawResult,
+            authInvocationEpoch,
           );
         }
         return result.rawResult;
@@ -241,6 +256,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           context.ownerGenerationId,
           toolName,
           result.content,
+          authInvocationEpoch,
         );
       }
       return result.content;

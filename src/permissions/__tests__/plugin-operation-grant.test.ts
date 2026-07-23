@@ -8,6 +8,11 @@ const principal = {
   appSessionId: "window-7",
   accountHash: "acct-hash",
 };
+const requiredRead = {
+  readTool: "ep_attendance_read",
+  readOperations: ["today"],
+  maxAgeMs: 1_000,
+} as const;
 
 describe("PluginOperationGrantCoordinator", () => {
   it("records opaque read revisions and consumes a matching grant exactly once", () => {
@@ -24,14 +29,15 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "intent",
       readRevision,
       expiresAt: now + 500,
-    });
+    }, requiredRead);
     const expected = {
       ...principal,
       toolName: "ep_attendance_write",
       operation: "clock",
       intentHash: "intent",
-      readRevision,
+      requiresRead: true,
     };
+    expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000)).toBeUndefined();
     expect(coordinator.consume(grant.token, expected)).toEqual({ ok: true, grantId: grant.grantId });
     expect(coordinator.consume(grant.token, expected)).toMatchObject({ ok: false, reason: expect.stringContaining("already consumed") });
     now += 2_000;
@@ -40,20 +46,25 @@ describe("PluginOperationGrantCoordinator", () => {
 
   it("burns before comparison so a mismatch cannot be retried", () => {
     const coordinator = new PluginOperationGrantCoordinator(() => 10);
+    const readRevision = coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    });
     const grant = coordinator.issue({
       ...principal,
       toolName: "ep_parking_write",
       operation: "apply",
       intentHash: "one",
-      readRevision: "r1",
+      readRevision,
       expiresAt: 100,
-    });
+    }, requiredRead);
     const expected = {
       ...principal,
       toolName: "ep_parking_write",
       operation: "apply",
       intentHash: "one",
-      readRevision: "r1",
+      requiresRead: true,
     };
     expect(coordinator.consume(grant.token, { ...expected, accountHash: "forged" })).toMatchObject({ ok: false, reason: "operation grant accountHash mismatch" });
     expect(coordinator.consume(grant.token, expected)).toMatchObject({ ok: false });
@@ -67,17 +78,38 @@ describe("PluginOperationGrantCoordinator", () => {
       toolName: "ep_meeting_write",
       operation: "reserve",
       intentHash: "i",
-      readRevision: "r",
+      requiresRead: false,
     };
     expect(coordinator.consume(undefined, expected)).toMatchObject({ ok: false, reason: expect.stringContaining("missing") });
     expect(coordinator.consume("forged", expected)).toMatchObject({ ok: false });
-    const expired = coordinator.issue({ ...expected, expiresAt: 51 });
+    const expired = coordinator.issue({
+      ...principal,
+      toolName: expected.toolName,
+      operation: expected.operation,
+      intentHash: expected.intentHash,
+      readRevision: null,
+      expiresAt: 51,
+    });
     now = 52;
     expect(coordinator.consume(expired.token, expected)).toMatchObject({ ok: false, reason: expect.stringContaining("expired") });
-    const generation = coordinator.issue({ ...expected, expiresAt: 100 });
+    const generation = coordinator.issue({
+      ...principal,
+      toolName: expected.toolName,
+      operation: expected.operation,
+      intentHash: expected.intentHash,
+      readRevision: null,
+      expiresAt: 100,
+    });
     coordinator.revokeGeneration(principal.ownerPluginId, principal.generationId);
     expect(coordinator.consume(generation.token, expected)).toMatchObject({ ok: false });
-    const session = coordinator.issue({ ...expected, expiresAt: 100 });
+    const session = coordinator.issue({
+      ...principal,
+      toolName: expected.toolName,
+      operation: expected.operation,
+      intentHash: expected.intentHash,
+      readRevision: null,
+      expiresAt: 100,
+    });
     coordinator.revokeSession(principal.appSessionId);
     expect(coordinator.consume(session.token, expected)).toMatchObject({ ok: false });
   });
@@ -94,9 +126,16 @@ describe("PluginOperationGrantCoordinator", () => {
       toolName: "ep_attendance_write",
       operation: "clock",
       intentHash: "intent",
-      readRevision,
+      requiresRead: true,
     };
-    const grant = coordinator.issue({ ...expected, expiresAt: 100 });
+    const grant = coordinator.issue({
+      ...principal,
+      toolName: expected.toolName,
+      operation: expected.operation,
+      intentHash: expected.intentHash,
+      readRevision,
+      expiresAt: 100,
+    }, requiredRead);
 
     coordinator.revokeAccount(
       principal.ownerPluginId,
@@ -113,5 +152,34 @@ describe("PluginOperationGrantCoordinator", () => {
         1_000,
       ),
     ).toBeUndefined();
+  });
+
+  it("atomically reserves one read revision for only one concurrent grant", async () => {
+    const coordinator = new PluginOperationGrantCoordinator(() => 50);
+    const readRevision = coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    });
+    const issue = () => coordinator.issue({
+      ...principal,
+      toolName: "ep_attendance_write",
+      operation: "clock",
+      intentHash: "same-intent",
+      readRevision,
+      expiresAt: 100,
+    }, requiredRead);
+
+    const results = await Promise.allSettled([
+      Promise.resolve().then(issue),
+      Promise.resolve().then(issue),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected"))
+      .toMatchObject({ reason: expect.objectContaining({
+        message: expect.stringContaining("already reserved"),
+      }) });
   });
 });
