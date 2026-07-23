@@ -226,7 +226,15 @@ export async function verifyInstallReceiptRaw(
   }
   let actualPaths: string[];
   try {
-    actualPaths = await listFilesRecursive(pluginRoot);
+    // Validate the INSTALLED PAYLOAD only. A plugin's writable data directory
+    // (`<pluginRoot>/data`, created by ensurePluginDataDir — under the LVIS
+    // home, the sole writable area the sandbox grants the plugin inside its
+    // root) holds runtime state the plugin legitimately creates/mutates at
+    // runtime (index DBs, migration markers, workspace). That is NOT part of
+    // the signed install artifact, so scanning it makes the receipt fail the
+    // moment the plugin runs. Skip it at the TOP level only — a nested
+    // `dist/data/` would be shipped payload and stays validated.
+    actualPaths = await listFilesRecursive(pluginRoot, PLUGIN_RUNTIME_DIR_NAMES);
   } catch (err) {
     return { ok: false, reason: `installed payload unreadable: ${(err as Error).message}` };
   }
@@ -240,10 +248,26 @@ export async function verifyInstallReceiptRaw(
   return { ok: true, receipt };
 }
 
-export async function listFilesRecursive(root: string): Promise<string[]> {
+/**
+ * Top-level directory names under a plugin root that hold runtime state, not
+ * installed payload, and are therefore excluded from receipt validation. Kept
+ * in sync with `ensurePluginDataDir` (runtime/sandbox.ts), which creates the
+ * plugin's writable data dir as `<pluginRoot>/data`.
+ */
+const PLUGIN_RUNTIME_DIR_NAMES: ReadonlySet<string> = new Set(["data"]);
+
+export async function listFilesRecursive(
+  root: string,
+  skipTopLevel?: ReadonlySet<string>,
+): Promise<string[]> {
   const out: string[] = [];
   async function walk(dir: string): Promise<void> {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
+      // Skip named directories at the ROOT level only (e.g. runtime `data/`);
+      // deeper directories with the same name stay part of the scan.
+      if (dir === root && entry.isDirectory() && skipTopLevel?.has(entry.name as string)) {
+        continue;
+      }
       const abs = resolve(dir, entry.name as string);
       const info = await lstat(abs);
       if (info.isSymbolicLink()) {
