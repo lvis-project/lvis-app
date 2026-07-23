@@ -237,7 +237,6 @@ export default async function createPlugin() {
             id,
             manifest,
             pluginDataDir,
-            incarnation,
           );
           const getSecret = hostApi.getSecret.bind(hostApi);
           hostApi.getSecret = (key) => {
