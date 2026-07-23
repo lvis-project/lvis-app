@@ -22,6 +22,7 @@ import type { LoadedSkill } from "./skill-store.js";
 export interface SkillOverlayEntry {
   name: string;
   body: string;
+  pluginOwner?: LoadedSkill["pluginOwner"];
 }
 
 export class SkillOverlay {
@@ -31,9 +32,10 @@ export class SkillOverlay {
   register(sessionId: string, skill: LoadedSkill): void {
     if (!sessionId) return;
     const bySkill = this.bySession.get(sessionId) ?? new Map<string, SkillOverlayEntry>();
-    bySkill.set(skill.name, {
+    bySkill.set(skill.approvalKey ?? skill.name, {
       name: skill.name,
       body: skill.body,
+      pluginOwner: skill.pluginOwner,
     });
     this.bySession.set(sessionId, bySkill);
   }
@@ -48,6 +50,17 @@ export class SkillOverlay {
   /** Drop all skills for a session — fired on user-turn boundaries and chat:new. */
   clear(sessionId: string): void {
     this.bySession.delete(sessionId);
+  }
+
+  clearPluginGeneration(pluginId: string, generationId: string): void {
+    for (const [sessionId, entries] of this.bySession) {
+      for (const [key, entry] of entries) {
+        if (entry.pluginOwner?.pluginId === pluginId && entry.pluginOwner.generationId === generationId) {
+          entries.delete(key);
+        }
+      }
+      if (entries.size === 0) this.bySession.delete(sessionId);
+    }
   }
 
   /**

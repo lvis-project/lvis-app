@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SkillStore } from "../main/skill-store.js";
-import { SKILL_NAME_ALLOWLIST } from "../main/skill-store.js";
+import { SKILL_SELECTOR_ALLOWLIST } from "../main/skill-store.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
@@ -89,10 +89,10 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // C2(b): allowlist check before doing any filesystem work — defense in
       // depth even though SkillStore enforces the same constraint on file
       // discovery.
-      if (!SKILL_NAME_ALLOWLIST.test(skillName)) {
+      if (!SKILL_SELECTOR_ALLOWLIST.test(skillName)) {
         return {
           output: JSON.stringify({
-            error: `invalid skillName: must match ${SKILL_NAME_ALLOWLIST.source}`,
+            error: `invalid skillName: must match ${SKILL_SELECTOR_ALLOWLIST.source}`,
           }),
           isError: true,
         };
@@ -113,7 +113,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // post-approval body mutations would silently inherit the previous
       // "yes."
       const alreadyApproved = await deps.approvals.isApproved(
-        skill.name,
+        skill.approvalKey ?? skill.name,
         skill.body,
       );
       if (!alreadyApproved) {
@@ -146,7 +146,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         }
         // R2-CR-3: persist approval BOUND TO the current body's sha256.
         // A subsequent body swap will invalidate this record.
-        await deps.approvals.approve(skill.name, skill.body).catch((err) => {
+        await deps.approvals.approve(skill.approvalKey ?? skill.name, skill.body).catch((err) => {
           log.warn(
             "skill_load: approval persistence failed (non-fatal): %s",
             (err as Error).message,
