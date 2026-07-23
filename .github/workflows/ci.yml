@@ -15,57 +15,14 @@ jobs:
     # self-hosted Oracle runner risky for fork PRs (a fork controls
     # package.json + postinstall scripts, and `bun install` would execute
     # attacker code). ARM64 keeps native-module (better-sqlite3 etc.) parity
-    # with the dev fleet. Fork-PR secret access is still gated at the sibling
-    # clone step below (skipped when no LVIS_REPO_READ_TOKEN is available).
+    # with the dev fleet. Core CI is deliberately secret-free and does not
+    # clone private sibling repositories; cross-repository integration belongs
+    # to trusted default-branch repository_dispatch workflows.
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
         with:
           path: lvis-app
-      - name: Clone sibling plugin repos
-        id: siblings
-        # Sibling plugin repos are private. Two contexts lack the
-        # LVIS_REPO_READ_TOKEN secret: fork PRs (GitHub withholds secrets
-        # from forks) and Dependabot PRs (GitHub runs Dependabot in a
-        # restricted context that also withholds repo secrets, even though
-        # the PR originates from the same repository). In both cases an
-        # authenticated clone is impossible, and an unauthenticated clone of
-        # a private repo fails hard ("could not read Username" -> exit 128),
-        # which would red-X the whole job. So when no token is resolvable we
-        # SKIP the clone, record siblings-available=false, and let the host's
-        # own build+test continue — they do not import sibling sources (the
-        # app builds and tests entirely from lvis-app/src), so coverage on
-        # the no-token path is identical to the token path today.
-        env:
-          LVIS_REPO_READ_TOKEN: ${{ secrets.LVIS_REPO_READ_TOKEN }}
-        run: |
-          set -euo pipefail
-          repo_token="${LVIS_REPO_READ_TOKEN:-}"
-          if [ -z "$repo_token" ] && gh auth status --hostname github.com >/dev/null 2>&1; then
-            repo_token="$(gh auth token)"
-          fi
-          if [ -z "$repo_token" ]; then
-            # No token (Dependabot / fork PR). Do NOT attempt an
-            # unauthenticated private clone — it fails with exit 128 and
-            # reds the job. Degrade gracefully so the core build+test runs.
-            echo "::notice::No LVIS_REPO_READ_TOKEN or gh auth token available (Dependabot/fork PR context); skipping private sibling-plugin clones. Core build+test still runs."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "::add-mask::$repo_token"
-          echo "available=true" >> "$GITHUB_OUTPUT"
-          sibling_ref="${LVIS_SIBLING_REPO_REF:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}}"
-          for slug in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-work-assistant lvis-plugin-ms-graph; do
-            if [ -d "$slug" ]; then rm -rf "$slug"; fi
-            clone_url="https://x-access-token:${repo_token}@github.com/lvis-project/${slug}.git"
-            if [ -n "$sibling_ref" ] && git ls-remote --exit-code --heads "$clone_url" "$sibling_ref" >/dev/null 2>&1; then
-              echo "Cloning ${slug}@${sibling_ref}"
-              git clone --depth 1 --branch "$sibling_ref" "$clone_url" "$slug"
-            else
-              echo "Cloning ${slug}@default"
-              git clone --depth 1 "$clone_url" "$slug"
-            fi
-          done
       - uses: oven-sh/setup-bun@v2
       - uses: actions/cache@v6
         with:
@@ -101,16 +58,8 @@ jobs:
         working-directory: lvis-app
         run: rm -f ajv pino
       - name: Run quality-gated tests
-        # Intentionally NOT gated on steps.siblings.outputs.available: the
-        # build above and this suite resolve entirely from lvis-app/src and
-        # never import a sibling plugin's sources from disk (sibling slugs
-        # appear only as string fixtures and as specs passed to mocked
-        # installers). They therefore run — and must stay green — on the
-        # no-token (Dependabot/fork) path too. If a future plugin-integration
-        # or e2e step is added that genuinely needs the cloned siblings on
-        # disk, gate ONLY that step with:
-        #   if: steps.siblings.outputs.available == 'true'
-        # so it no-ops on the no-token path without weakening this core gate.
+        # The suite resolves entirely from lvis-app/src. Sibling slugs appear
+        # only as fixtures or mocked installer inputs.
         run: bun run check:test-quality
         working-directory: lvis-app
 
