@@ -1818,6 +1818,22 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // URL construction cannot throw.
     const entrySearch = new URL(entryUrl).search;
     const versionedAssetEntryUrl = entrySearch ? `${assetEntryUrl}${entrySearch}` : assetEntryUrl;
+    try {
+      const targetWebview = webContents.fromId(webContentsId);
+      if (
+        !targetWebview
+        || targetWebview.isDestroyed()
+        || targetWebview.getType() !== "webview"
+      ) {
+        logRegisterReject("webview-not-live", { webContentsId, pluginId });
+        plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
+        return { ok: false, error: "webview-not-live" };
+      }
+    } catch {
+      logRegisterReject("webview-not-live", { webContentsId, pluginId });
+      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
+      return { ok: false, error: "webview-not-live" };
+    }
     const binding = {
       pluginId,
       entryUrl,
