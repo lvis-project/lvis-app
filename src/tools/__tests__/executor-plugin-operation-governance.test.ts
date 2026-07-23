@@ -196,6 +196,12 @@ describe("ToolExecutor plugin operation governance", () => {
 
   it("keeps no-read writes on ordinary approval and ignores forged grant tokens", async () => {
     const { executor, permissions, approvalGate, directWrite } = setup();
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve" },
+      principal,
+    })).toThrow("only read-backed writes receive app grants");
+
     permissions.checkDetailed = () => ({ decision: "ask", reason: "ordinary write ask", layer: 6 });
     const [result] = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll(

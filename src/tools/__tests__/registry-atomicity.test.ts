@@ -98,4 +98,20 @@ describe("ToolRegistry MCP generation replacement", () => {
     prepared.publish();
     expect(registry.findByName("plugin_ep_read")?.pluginId).toBe("ep-api");
   });
+
+  it("publishes only prepared names and preserves unrelated registrations made while reserved", () => {
+    const registry = new ToolRegistry();
+    registry.register(pluginTool("plugin_ep_read", "ep-api"));
+    const prepared = registry.reservePluginReplacement(
+      "ep-api",
+      [pluginTool("plugin_ep_write", "ep-api")],
+    );
+
+    registry.register(pluginTool("other_read", "other-plugin"));
+    prepared.publish();
+
+    expect(registry.findByName("plugin_ep_read")).toBeUndefined();
+    expect(registry.findByName("plugin_ep_write")?.pluginId).toBe("ep-api");
+    expect(registry.findByName("other_read")?.pluginId).toBe("other-plugin");
+  });
 });

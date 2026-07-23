@@ -323,11 +323,6 @@ export class ToolRegistry {
         throw new Error(`MCP replacement expected an MCP-owned tool: ${tool.name}`);
       }
     }
-    for (const name of names) {
-      if (this.reservedMcpToolNames.has(name)) {
-        throw new Error(`MCP replacement tool name is already reserved: ${name}`);
-      }
-    }
     const replacementOwners = new Set(replacementTools.map((tool) => tool.mcpServerId!));
     const reservedOwners = new Set([...predecessors, ...replacementOwners]);
     for (const owner of reservedOwners) {
@@ -335,17 +330,30 @@ export class ToolRegistry {
         throw new Error(`MCP tool owner is already reserved: ${owner}`);
       }
     }
+    const affectedNames = new Set(names);
+    for (const [name, versionMap] of this.versioned) {
+      if ([...versionMap.values()].some((tool) =>
+        tool.source === "mcp" && tool.mcpServerId && predecessors.has(tool.mcpServerId)
+      )) {
+        affectedNames.add(name);
+      }
+    }
+    for (const name of affectedNames) {
+      if (this.reservedMcpToolNames.has(name)) {
+        throw new Error(`MCP replacement tool name is already reserved: ${name}`);
+      }
+    }
     const validate = this.cloneVersioned();
     this.removeMcpOwners(validate, predecessors);
     for (const tool of replacementTools) this.addToVersioned(validate, tool);
-    this.buildLatestMap(validate);
+    const nextTools = this.buildLatestMap(validate);
     const token = Symbol("mcp-generation-replacement");
-    for (const name of names) this.reservedMcpToolNames.set(name, token);
+    for (const name of affectedNames) this.reservedMcpToolNames.set(name, token);
     for (const owner of reservedOwners) this.reservedMcpOwners.set(owner, token);
 
     let settled = false;
     const releaseReservations = () => {
-      for (const name of names) {
+      for (const name of affectedNames) {
         if (this.reservedMcpToolNames.get(name) === token) this.reservedMcpToolNames.delete(name);
       }
       for (const owner of reservedOwners) {
@@ -356,11 +364,7 @@ export class ToolRegistry {
       replacementTools: Object.freeze([...replacementTools]),
       publish: () => {
         if (settled) return;
-        const current = this.cloneVersioned();
-        this.removeMcpOwners(current, predecessors);
-        for (const tool of replacementTools) this.addToVersioned(current, tool);
-        this.versioned = current;
-        this.tools = this.buildLatestMap(current);
+        this.publishPreparedNames(validate, nextTools, affectedNames);
         this.generation += 1;
         settled = true;
         releaseReservations();
@@ -388,8 +392,17 @@ export class ToolRegistry {
         throw new Error(`Plugin replacement expected '${pluginId}' tool: ${tool.name}`);
       }
     }
-    const nextVersioned = this.cloneVersioned();
     const mcpPredecessors = new Set(predecessorMcpServerIds);
+    const affectedNames = new Set(replacementTools.map((tool) => tool.name));
+    for (const [name, versionMap] of this.versioned) {
+      if ([...versionMap.values()].some((tool) =>
+        (tool.source === "plugin" && tool.pluginId === pluginId) ||
+        (tool.mcpServerId !== undefined && mcpPredecessors.has(tool.mcpServerId))
+      )) {
+        affectedNames.add(name);
+      }
+    }
+    const nextVersioned = this.cloneVersioned();
     for (const [name, versionMap] of nextVersioned) {
       for (const [version, tool] of versionMap) {
         if (
@@ -402,30 +415,28 @@ export class ToolRegistry {
       if (versionMap.size === 0) nextVersioned.delete(name);
     }
     for (const tool of replacementTools) this.addToVersioned(nextVersioned, tool);
-    this.buildLatestMap(nextVersioned);
+    const nextTools = this.buildLatestMap(nextVersioned);
     const token = Symbol("plugin-generation-replacement");
-    const mcpPredecessorOwners = mcpPredecessors;
-    for (const owner of mcpPredecessorOwners) {
+    for (const owner of mcpPredecessors) {
       if (this.reservedMcpOwners.has(owner)) {
         throw new Error(`MCP tool owner is already reserved: ${owner}`);
       }
     }
-    const names = new Set(replacementTools.map((tool) => tool.name));
-    for (const name of names) {
+    for (const name of affectedNames) {
       if (this.reservedMcpToolNames.has(name)) {
         throw new Error(`Tool name is already reserved: ${name}`);
       }
     }
     this.reservedPluginOwners.set(pluginId, token);
-    for (const owner of mcpPredecessorOwners) this.reservedMcpOwners.set(owner, token);
-    for (const name of names) this.reservedMcpToolNames.set(name, token);
+    for (const owner of mcpPredecessors) this.reservedMcpOwners.set(owner, token);
+    for (const name of affectedNames) this.reservedMcpToolNames.set(name, token);
     let settled = false;
     const release = () => {
       if (this.reservedPluginOwners.get(pluginId) === token) this.reservedPluginOwners.delete(pluginId);
-      for (const owner of mcpPredecessorOwners) {
+      for (const owner of mcpPredecessors) {
         if (this.reservedMcpOwners.get(owner) === token) this.reservedMcpOwners.delete(owner);
       }
-      for (const name of names) {
+      for (const name of affectedNames) {
         if (this.reservedMcpToolNames.get(name) === token) this.reservedMcpToolNames.delete(name);
       }
     };
@@ -433,21 +444,7 @@ export class ToolRegistry {
       replacementTools: Object.freeze([...replacementTools]),
       publish: () => {
         if (settled) return;
-        const current = this.cloneVersioned();
-        for (const [name, versionMap] of current) {
-          for (const [version, tool] of versionMap) {
-            if (
-              (tool.source === "plugin" && tool.pluginId === pluginId) ||
-              (tool.mcpServerId !== undefined && mcpPredecessorOwners.has(tool.mcpServerId))
-            ) {
-              versionMap.delete(version);
-            }
-          }
-          if (versionMap.size === 0) current.delete(name);
-        }
-        for (const tool of replacementTools) this.addToVersioned(current, tool);
-        this.versioned = current;
-        this.tools = this.buildLatestMap(current);
+        this.publishPreparedNames(nextVersioned, nextTools, affectedNames);
         this.generation += 1;
         settled = true;
         release();
@@ -725,6 +722,22 @@ export class ToolRegistry {
       if (versionMap.size > 0) latest.set(name, this.pickLatest(versionMap));
     }
     return latest;
+  }
+
+  /** Publish only prevalidated entries; unrelated registrations remain intact. */
+  private publishPreparedNames(
+    nextVersioned: ReadonlyMap<string, Map<string, Tool>>,
+    nextTools: ReadonlyMap<string, Tool>,
+    affectedNames: ReadonlySet<string>,
+  ): void {
+    for (const name of affectedNames) {
+      const versions = nextVersioned.get(name);
+      if (versions) this.versioned.set(name, versions);
+      else this.versioned.delete(name);
+      const latest = nextTools.get(name);
+      if (latest) this.tools.set(name, latest);
+      else this.tools.delete(name);
+    }
   }
 
   /** Recompute the `tools` map entry for `name` after a version change. */
