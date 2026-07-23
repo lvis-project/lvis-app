@@ -66,6 +66,35 @@ describe("installer smoke and packaging discipline", () => {
     expect(sdkCheckout).not.toContain("M4_MARKETPLACE_CHECKOUT_TOKEN");
   });
 
+  it("keeps privileged workflows on trusted default-branch events", () => {
+    for (const path of [
+      ".github/workflows/marketplace-e2e.yml",
+      ".github/workflows/e2e.yml",
+      ".github/workflows/a2a-p4-5-packaged-evidence.yml",
+      ".github/workflows/web-deploy.yml",
+    ]) {
+      const workflow = readRepoFile(path);
+      expect(workflow).toContain("repository_dispatch:");
+      expect(workflow).not.toContain("workflow_dispatch:");
+      expect(workflow).not.toContain("pull_request:");
+    }
+
+    const marketplaceE2e = readRepoFile(".github/workflows/marketplace-e2e.yml");
+    expect(marketplaceE2e).toContain("merge-base --is-ancestor");
+    expect(marketplaceE2e).toContain("persist-credentials: false");
+
+    const signing = readRepoFile(
+      ".github/workflows/a2a-p4-5-packaged-evidence.yml",
+    );
+    expect(signing).toContain("environment: release-signing");
+    expect(signing).toContain("merge-base --is-ancestor");
+
+    const coreCi = readRepoFile(".github/workflows/ci.yml");
+    expect(coreCi).not.toContain("LVIS_REPO_READ_TOKEN");
+    const webCi = readRepoFile(".github/workflows/web-ci.yml");
+    expect(webCi).not.toContain("CLOUDFLARE_API_TOKEN");
+  });
+
 
   it("runs the NSIS smoke before win-unpacked and owner-cleans HKCU afterward", () => {
     const smoke = readRepoFile("scripts/smoke-packaged-app.mjs");

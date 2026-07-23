@@ -1,27 +1,12 @@
 name: Marketplace E2E (publish ↔ install)
 
-# Opt-in for PRs, scheduled on main. Run manually via workflow_dispatch, when a
-# PR branch includes a `marketplace-e2e` label, or nightly against main. The
-# nightly schedule prevents this (publish↔install) suite from silently rotting
-# the way the UI e2e suite did (#1212) — it is opt-in, so without a schedule it
-# would never actually run on main. Keeps per-PR CI fast (still label-gated).
+# Secret-bearing cross-repository validation runs only from trusted
+# default-branch workflow code through repository_dispatch or the nightly
+# schedule. Pull requests remain secret-free; callers provide exact candidate
+# SHAs in repository_dispatch.client_payload.
 on:
-  workflow_dispatch:
-    inputs:
-      marketplace_ref:
-        description: Exact 40-character lvis-marketplace commit SHA
-        required: true
-        type: string
-      sdk_ref:
-        description: Exact 40-character lvis-plugin-sdk commit SHA consumed by ep-api
-        required: true
-        type: string
-      ep_api_ref:
-        description: Exact 40-character lvis-plugin-lge-api commit SHA
-        required: true
-        type: string
-  pull_request:
-    types: [labeled]
+  repository_dispatch:
+    types: [marketplace-e2e]
   schedule:
     # 02:30 KST (17:30 UTC) daily — offset from e2e.yml's 17:00 to avoid ARM
     # runner contention. Secrets are available on schedule events.
@@ -30,22 +15,14 @@ on:
 jobs:
   marketplace-e2e:
     name: Marketplace E2E (live lifecycle + containment)
-    # workflow_dispatch (manual), nightly schedule, OR same-repo PR labeled
-    # `marketplace-e2e`. Sibling marketplace + signing-key secrets are not
-    # exposed to forks.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'schedule' ||
-      (github.event_name == 'pull_request' &&
-       github.event.label.name == 'marketplace-e2e' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.repository == 'lvis-project/lvis-app'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
     env:
-      HOST_SHA: ${{ github.sha }}
-      MARKETPLACE_SHA: ${{ inputs.marketplace_ref || vars.M4_MARKETPLACE_SHA }}
-      SDK_SHA: ${{ inputs.sdk_ref || vars.M4_SDK_SHA }}
-      EP_API_SHA: ${{ inputs.ep_api_ref || vars.M4_EP_API_SHA }}
+      HOST_SHA: ${{ github.event.client_payload.host_ref || github.sha }}
+      MARKETPLACE_SHA: ${{ github.event.client_payload.marketplace_ref || vars.M4_MARKETPLACE_SHA }}
+      SDK_SHA: ${{ github.event.client_payload.sdk_ref || vars.M4_SDK_SHA }}
+      EP_API_SHA: ${{ github.event.client_payload.ep_api_ref || vars.M4_EP_API_SHA }}
       # These authorize only the ephemeral loopback database created by this
       # job. They are unique per run and are not production credentials.
       PUBLISHER_KEY: lvismkt_e2epub_${{ github.run_id }}_${{ github.run_attempt }}
@@ -55,6 +32,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: lvis-app
+          ref: ${{ env.HOST_SHA }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout lvis-marketplace
@@ -64,6 +43,7 @@ jobs:
           path: lvis-marketplace
           ref: ${{ env.MARKETPLACE_SHA }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+          fetch-depth: 0
           submodules: recursive
           persist-credentials: false
 
@@ -73,6 +53,7 @@ jobs:
           repository: lvis-project/lvis-plugin-sdk
           path: lvis-plugin-sdk
           ref: ${{ env.SDK_SHA }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout lvis-plugin-lge-api
@@ -82,15 +63,33 @@ jobs:
           path: lvis-plugin-lge-api
           ref: ${{ env.EP_API_SHA }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Prove immutable checkout refs
+      - name: Prove immutable main-ancestor checkout refs
         shell: bash
         run: |
           set -euo pipefail
           for value in "$HOST_SHA" "$MARKETPLACE_SHA" "$SDK_SHA" "$EP_API_SHA"; do
             if [[ ! "$value" =~ ^[0-9a-f]{40}$ ]]; then
               echo "::error::Every cross-repository ref must be an exact lowercase 40-character SHA"
+              exit 1
+            fi
+          done
+          for spec in \
+            "lvis-app:$HOST_SHA" \
+            "lvis-marketplace:$MARKETPLACE_SHA" \
+            "lvis-plugin-sdk:$SDK_SHA" \
+            "lvis-plugin-lge-api:$EP_API_SHA"; do
+            repo="${spec%%:*}"
+            expected="${spec#*:}"
+            actual="$(git -C "$repo" rev-parse HEAD)"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$repo checked out $actual instead of $expected"
+              exit 1
+            fi
+            if ! git -C "$repo" merge-base --is-ancestor "$expected" origin/main; then
+              echo "::error::$repo candidate $expected is not reachable from origin/main"
               exit 1
             fi
           done

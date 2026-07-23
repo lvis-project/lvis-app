@@ -1,8 +1,8 @@
 name: Playwright E2E (Electron)
 
-# Opt-in for PRs, scheduled on main. Runs on:
-#   - workflow_dispatch (manual, with a `ref` input to target any branch/SHA)
-#   - a same-repo PR labeled `e2e`
+# Secret-bearing private sibling checkouts run only from trusted default-branch
+# workflow code. Runs on:
+#   - repository_dispatch with an exact main-ancestor Host SHA
 #   - a nightly schedule against main — catches default-changing PRs (i18n,
 #     onboarding, activation) that the opt-in label skipped, within 24h, without
 #     adding ~75 min of ARM latency to every PR. (#1212: the i18n/activation flip
@@ -10,14 +10,8 @@ name: Playwright E2E (Electron)
 # Keeps normal CI fast; this is the full Electron UI suite (merged from the
 # former e2e + ui-e2e workflows, which ran the identical suite).
 on:
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: 'Branch, tag, or SHA to test (default: main)'
-        required: false
-        default: main
-  pull_request:
-    types: [labeled]
+  repository_dispatch:
+    types: [host-e2e]
   schedule:
     # 02:00 KST (17:00 UTC) daily — off-peak; runs against the default branch.
     - cron: '0 17 * * *'
@@ -28,15 +22,7 @@ concurrency:
 
 jobs:
   e2e:
-    # workflow_dispatch (manual), nightly schedule, OR same-repo PR labeled
-    # `e2e`. Fork PRs cannot access LVIS_REPO_READ_TOKEN, so the sibling plugin
-    # clone + fixture build would fail — gate them out even if labeled.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'schedule' ||
-      (github.event_name == 'pull_request' &&
-       github.event.label.name == 'e2e' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.repository == 'lvis-project/lvis-app'
     runs-on: ubuntu-24.04-arm
     # github-hosted ARM64 (4 vCPU, single worker) is slower than the old
     # self-hosted Oracle box, and the full Electron suite is heavy — give it
@@ -45,45 +31,54 @@ jobs:
     env:
       E2E: "1"
       LVIS_E2E: "1"
+      HOST_SHA: ${{ github.event.client_payload.host_ref || github.sha }}
     steps:
       - name: Checkout lvis-app
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: lvis-app
-          # dispatch targets the `ref` input; PR/label uses the event ref.
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          ref: ${{ env.HOST_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Clone sibling plugin repos
-        env:
-          LVIS_REPO_READ_TOKEN: ${{ secrets.LVIS_REPO_READ_TOKEN }}
-          # dispatch pins siblings to the same ref; PR falls back to the head branch.
-          LVIS_SIBLING_REPO_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || '' }}
+      - name: Verify exact Host main ancestor
         run: |
           set -euo pipefail
-          repo_token="${LVIS_REPO_READ_TOKEN:-}"
-          if [ -z "$repo_token" ] && gh auth status --hostname github.com >/dev/null 2>&1; then
-            repo_token="$(gh auth token)"
+          if [[ ! "$HOST_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::host_ref must be an exact 40-character lowercase commit SHA"
+            exit 1
           fi
-          if [ -n "$repo_token" ]; then
-            echo "::add-mask::$repo_token"
-          else
-            echo "::warning::No LVIS_REPO_READ_TOKEN or gh auth token available; attempting unauthenticated sibling clones."
+          actual="$(git -C lvis-app rev-parse HEAD)"
+          if [ "$actual" != "$HOST_SHA" ]; then
+            echo "::error::Host checkout $actual does not match $HOST_SHA"
+            exit 1
           fi
-          sibling_ref="${LVIS_SIBLING_REPO_REF:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}}"
-          for slug in lvis-plugin-local-indexer lvis-plugin-meeting lvis-plugin-work-assistant; do
-            if [ -d "$slug" ]; then rm -rf "$slug"; fi
-            clone_url="https://github.com/lvis-project/${slug}.git"
-            if [ -n "$repo_token" ]; then
-              clone_url="https://x-access-token:${repo_token}@github.com/lvis-project/${slug}.git"
-            fi
-            if [ -n "$sibling_ref" ] && git ls-remote --exit-code --heads "$clone_url" "$sibling_ref" >/dev/null 2>&1; then
-              echo "Cloning ${slug}@${sibling_ref}"
-              git clone --depth 1 --branch "$sibling_ref" "$clone_url" "$slug"
-            else
-              echo "Cloning ${slug}@default"
-              git clone --depth 1 "$clone_url" "$slug"
-            fi
-          done
+          git -C lvis-app fetch origin main --quiet
+          git -C lvis-app merge-base --is-ancestor "$HOST_SHA" origin/main
+
+      - name: Checkout local-indexer fixture
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lvis-project/lvis-plugin-local-indexer
+          path: lvis-plugin-local-indexer
+          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Checkout meeting fixture
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lvis-project/lvis-plugin-meeting
+          path: lvis-plugin-meeting
+          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Checkout work-assistant fixture
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lvis-project/lvis-plugin-work-assistant
+          path: lvis-plugin-work-assistant
+          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v6
