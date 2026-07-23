@@ -83,6 +83,7 @@ async function setup() {
     pluginRuntime: {
       resolvePluginId: vi.fn((pluginId: string) => pluginId),
       resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
+      resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
       cancelPendingRestart: vi.fn(),
       clearConfigOverride: vi.fn(),
       getConfigOverride: vi.fn(() => undefined),
@@ -680,6 +681,7 @@ describe("plugins IPC lifecycle broadcast", () => {
       },
       pluginRuntime: {
         resolvePluginId: vi.fn((pluginId: string) => pluginId),
+        resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
         cancelPendingRestart: vi.fn(),
         addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
         waitForPluginReady: vi.fn(async () => undefined),
