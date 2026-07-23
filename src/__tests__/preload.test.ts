@@ -236,6 +236,67 @@ describe("preload — plugin webview asset URLs", () => {
     });
   });
 
+  it("forwards the opaque operation grant token on plugin calls", async () => {
+    const api = await loadLvisApi();
+    const callPluginMethod = api["callPluginMethod"] as (
+      method: string,
+      payload?: unknown,
+      options?: { operationGrantToken?: string },
+    ) => Promise<unknown>;
+
+    await callPluginMethod(
+      "attendance_write",
+      { operation: "clock_in" },
+      { operationGrantToken: "grant-once" },
+    );
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "lvis:plugins:call",
+      "attendance_write",
+      { operation: "clock_in" },
+      { userAction: false, operationGrantToken: "grant-once" },
+    );
+  });
+
+  it("pins MCP app resource and tool calls to the supplied generation", async () => {
+    const api = await loadLvisApi();
+    const mcp = api["mcp"] as {
+      readUiResource(
+        serverId: string,
+        uri: string,
+        generationId?: string,
+      ): Promise<unknown>;
+      callTool(
+        serverId: string,
+        name: string,
+        args: Record<string, unknown>,
+        generationId?: string,
+      ): Promise<unknown>;
+    };
+
+    await mcp.readUiResource("plugin:ep-api:mcp:work", "ui://attendance", "generation-a");
+    await mcp.callTool(
+      "plugin:ep-api:mcp:work",
+      "attendance_read",
+      { operation: "today" },
+      "generation-a",
+    );
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "lvis:mcp:ui-resource",
+      "plugin:ep-api:mcp:work",
+      "ui://attendance",
+      "generation-a",
+    );
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "lvis:mcp:call-tool",
+      "plugin:ep-api:mcp:work",
+      "attendance_read",
+      { operation: "today" },
+      "generation-a",
+    );
+  });
+
   it("consumes captured chat user-intent tokens exactly once", async () => {
     mockUserActivation.isActive = true;
     const api = await loadLvisApi();
