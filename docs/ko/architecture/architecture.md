@@ -671,7 +671,7 @@ RESUME_DELAY ──── 90s elapsed ──→ RUNNING
 
 #### 4.4.5 LLM Agentic 검색 — function calling (depth ≤ 3)
 
-`pageindex==0.2.8`에 `search()` 메서드가 없으므로 LVIS는 4개 builtin 도구를 노출해 LLM이 트리를 직접 탐색하도록 한다. 현재 구현 도구 정의는 `lvis-app/src/tools/knowledge-search.ts`, depth cap enforcement는 `lvis-app/src/engine/conversation-loop.ts`에 있다.
+`pageindex==0.2.8`에 `search()` 메서드가 없으므로 LVIS는 4개 builtin 도구를 노출해 LLM이 트리를 직접 탐색하도록 한다. 현재 구현 도구 정의는 `lvis-app/src/tools/knowledge-search.ts`, depth cap enforcement는 `lvis-app/src/engine/turn/knowledge-cap.ts`이며 `query-loop.ts`가 라운드별로 적용한다.
 
 | Tool | 동작 |
 | --- | --- |
@@ -1179,7 +1179,8 @@ lvis-app/src/
 │                  #  reviewer-permission-wiring, conversation-wiring, plugin-tool-executor,
 │                  #  plugin-runtime.ts barrel + plugin-runtime/* host-api-factory/lifecycle)
 ├── preload.ts     # webpack entry — composes preload/{gesture-intent,public-surface,
-│                  #  internal-surface} + exposes the byte-identical window.* worlds (C11)
+│                  #  internal-surface}; internal-api-surface owns the internal API object
+│                  #  while internal-surface keeps stable world builders and frame-0 primes
 ├── ipc/           # index.ts + domains/* (thin ipcMain.handle wrappers) +
 │                  #  handlers/* (transport-agnostic pure impls, C10) + gated.ts
 ├── ipc-bridge.ts, plugin-ui-host.tsx                          # 엔트리 / 브릿지
@@ -1204,7 +1205,8 @@ lvis-app/src/
 │   │                            #  ReasoningCard, ToolApprovalDialog, ToolGroupCard,
 │   │                            #  UnifiedSearchPanel, Sparkline, UsageDashboard,
 │   │                            #  HtmlPreview, StarredView,
-│   │                            #  MarketplaceUpdateBanner
+│   │                            #  MarketplaceUpdateBanner; ChatSidePanel composition plus
+│   │                            #  chat-side-panel-{preview,layout,workspaces} focused units
 │   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
 │   │                            #  PluginUninstallDialog, CommandPaletteDialog
 │   ├── tabs/                    # LlmTab, AppearanceTab, ChatTab, WebTab,
@@ -1224,7 +1226,8 @@ lvis-app/src/
 │   ├── turn/     # §4.5 turn units (C9): types, trust-origin, context-carrier,
 │   │            #  tool-exposure, tool-scope, provider, lifecycle-hooks,
 │   │            #  compaction, session, commands, loop-context, run-turn, query-loop,
-│   │            #  stream-collector, plugin-expansion, tool-search, knowledge-cap
+│   │            #  intercepted-meta-gate, stream-collector, plugin-expansion,
+│   │            #  tool-search, knowledge-cap
 │   └── llm/      # provider abstraction + factory (vendor-agnostic)
 │
 ├── tools/         # 1-file-per-tool
@@ -1277,7 +1280,8 @@ lvis-app/src/
 │
 ├── plugins/       # 플러그인 런타임
 │   ├── runtime.ts               # re-export shim (verbatim surface)
-│   ├── runtime/  # PluginRuntime class + collaborators (C4): index (orchestrator),
+│   ├── runtime/  # PluginRuntime layers: index (invocation/query facade),
+│   │            #  runtime-lifecycle (mutations), runtime-state (single state owner),
 │   │            #  perf-stats, config-overrides, preparation, lifecycle-timeout,
 │   │            #  access-control, cards, plugin-loader, manifest-validation,
 │   │            #  origin-chain, sandbox, snapshots, types
@@ -1304,7 +1308,8 @@ lvis-app/src/
 │   └── http-client.ts  # HTTP LocalApi transport (reads ~/.lvis/local-api/server.json);
 │                       #  entry = scripts/lvis-cli.ts (`bun run cli -- <command>`)
 │
-├── data/, main/, lib/, components/ui/, ui/, __tests__/
+├── data/          # settings-store service facade + settings-defaults + settings-normalization
+├── main/, lib/, components/ui/, ui/, __tests__/
 ```
 
 **External surfaces (`api/` · `sdk/` · `cli/`, #1409/#1436)** — the SAME
@@ -2639,7 +2644,7 @@ SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
 ### 6.10.10 앵커 (구현 기준점)
 
 - `src/ui/renderer/preview/workspace-tabs.ts` — `useWorkspaceTabs` 스토어 + `WorkspaceTabKind` / `WorkspaceTab` 타입 (PR-1).
-- `src/ui/renderer/components/ChatSidePanel.tsx` — 워크스페이스 레일 UI. PR-1 이후 스토어를 `workspaceTabs` prop 으로 소비.
+- `src/ui/renderer/components/ChatSidePanel.tsx` — 워크스페이스 레일과 탭 조합. 스토어를 `workspaceTabs` prop 으로 소비하며 preview/layout/workspace 구현은 `chat-side-panel-*.tsx`가 소유한다.
 - `src/ui/renderer/ChatView.tsx` — 스토어 마운트 지점(`useWorkspaceTabs()`), 조건부 `ChatSidePanel` 렌더.
 - `src/ui/renderer/preview/preview-targets.ts` — preview-target 데이터 모델(`ChatPreviewTarget` / `WorkspaceFileItem` / `collectChatPreviewModel`).
 - `src/ui/renderer/components/command-actions.ts` — 런처 SOT(`buildQuickActions` / `QuickAction`), PR-3 수렴 대상.
