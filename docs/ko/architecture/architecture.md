@@ -1154,6 +1154,16 @@ Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계다. Phase 1~2의 `src/age
 > assembles its extracted units. Full rationale + per-file plan:
 > [`docs/blueprints/host-structure-alignment.md`](../blueprints/host-structure-alignment.md).
 
+**메인 프로세스 조립·부팅 불변식:** `src/`의 TypeScript 정적 runtime
+import graph에는 strongly connected component가 없어야 하며,
+`bun run check:import-cycles`가 build gate에서 이를 검증한다(type-only import는
+제외). Theme replay cache와 native window event listener는 leaf module이 소유하고,
+호환 barrel은 re-export만 한다. 메뉴·트레이·메인 윈도우의 상호 동작은
+`main.ts`가 한 번 설정하는 native-window coordinator를 통해서만 조립하며, 설정 전
+호출과 중복 설정은 contract error다. 부팅 단계가 채우는 `BootContext`는
+`assembleAppServices` 직전에 exhaustive own-property readiness 검사를 통과해야 하며,
+누락 producer는 필드 이름과 함께 명시적으로 실패한다.
+
 ```
 lvis-app/src/
 ├── main.ts        # thin Electron entry — single-instance/whenReady/main() only;

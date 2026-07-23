@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCommonChromeOptions } from "./window-chrome.js";
 import { BrowserWindow, screen, session, type Cookie, type Session, type WebContents } from "electron";
-import { registerWindowEventListeners } from "../ipc/domains/window.js";
+import { registerWindowEventListeners } from "./window-event-listeners.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
 import { markAsAuthOwned } from "./auth-window-registry.js";
 import {

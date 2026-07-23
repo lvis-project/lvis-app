@@ -2,7 +2,7 @@
  * Window domain IPC handlers.
  * Covers: window:minimize, window:toggleMaximize, window:close,
  *         window:syncTitleBarTheme
- * Also exports registerWindowEventListeners (re-used by main.ts).
+ * Re-exports the leaf registerWindowEventListeners helper for compatibility.
  */
 import { BrowserWindow, ipcMain, type BrowserWindow as ElectronBrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { t } from "../../i18n/index.js";
@@ -17,28 +17,7 @@ import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../gated.
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { isWindowControlOwned } from "../window-control-registry.js";
-
-/**
- * Attach maximize / fullscreen state-broadcast listeners to a BrowserWindow.
- * Must be called every time a new BrowserWindow is created.
- */
-export function registerWindowEventListeners(win: ElectronBrowserWindow): void {
-  const broadcastMaximized = (maximized: boolean) => {
-    try {
-      win.webContents.send(CHANNELS.window.maximizedChanged, maximized);
-    } catch {
-      // webContents may be destroyed
-    }
-  };
-  win.on("maximize", () => broadcastMaximized(true));
-  win.on("unmaximize", () => broadcastMaximized(false));
-  win.on("enter-full-screen", () => {
-    try { win.webContents.send(CHANNELS.window.fullscreenChanged, true); } catch { /* destroyed */ }
-  });
-  win.on("leave-full-screen", () => {
-    try { win.webContents.send(CHANNELS.window.fullscreenChanged, false); } catch { /* destroyed */ }
-  });
-}
+export { registerWindowEventListeners } from "../../main/window-event-listeners.js";
 
 export function registerWindowHandlers(deps: IpcDeps): void {
   const { auditLogger, getMainWindow } = deps;

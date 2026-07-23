@@ -35,7 +35,7 @@ import { BrowserWindow, session as electronSession, type WebContents } from "ele
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
-import { registerWindowEventListeners } from "../ipc/domains/window.js";
+import { registerWindowEventListeners } from "./window-event-listeners.js";
 import { getCommonChromeOptions } from "./window-chrome.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
 import { markAsLinkOwned } from "./link-window-registry.js";
