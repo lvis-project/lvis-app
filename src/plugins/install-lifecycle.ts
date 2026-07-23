@@ -9,9 +9,13 @@ interface HeldPluginInstallLock {
 }
 
 interface TrackedReentrantOperation {
-  promise: Promise<unknown>;
   parent?: TrackedReentrantOperation;
-  observed: boolean;
+  branches: Set<TrackedPromiseBranch>;
+}
+
+interface TrackedPromiseBranch {
+  promise: Promise<unknown>;
+  handled: boolean;
   settled: boolean;
   rejected: boolean;
   failure?: unknown;
@@ -23,14 +27,15 @@ class ObservedReentrantPromise<T> extends Promise<T> {
   }
 
   constructor(
-    operation: Promise<T>,
-    private readonly observe: () => void,
+    private readonly source: Promise<T>,
+    private readonly branch: TrackedPromiseBranch,
+    private readonly trackBranch: <U>(promise: Promise<U>) => ObservedReentrantPromise<U>,
   ) {
     super((resolve, reject) => {
-      void operation.then(resolve, reject);
+      void source.then(resolve, reject);
     });
-    // True detached failures are reported to the owning lifecycle mutation,
-    // not to the process unhandled-rejection channel.
+    // Branch failures are reported to the owning lifecycle mutation, not to
+    // the process unhandled-rejection channel.
     void Promise.prototype.then.call(this, undefined, () => undefined);
   }
 
@@ -38,20 +43,21 @@ class ObservedReentrantPromise<T> extends Promise<T> {
     onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
-    this.observe();
-    return super.then(onfulfilled, onrejected);
+    this.branch.handled = true;
+    return this.trackBranch(
+      this.source.then(onfulfilled, onrejected),
+    );
   }
 
   override catch<TResult = never>(
     onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
   ): Promise<T | TResult> {
-    this.observe();
-    return super.catch(onrejected);
+    return this.then(undefined, onrejected);
   }
 
   override finally(onfinally?: (() => void) | null): Promise<T> {
-    this.observe();
-    return super.finally(onfinally);
+    this.branch.handled = true;
+    return this.trackBranch(this.source.finally(onfinally));
   }
 }
 
@@ -123,7 +129,11 @@ interface PluginInstallRuntime {
   listPluginIds(): string[];
   addPlugin(pluginId: string): Promise<InstalledPluginStartState>;
   waitForPluginReady(pluginId: string): Promise<void>;
-  removePlugin(pluginId: string): Promise<void>;
+  removePlugin(
+    pluginId: string,
+    options?: { preserveConfigOverride?: boolean },
+  ): Promise<void>;
+  cancelPendingRestart(pluginId: string): void;
 }
 
 interface PluginLifecycleMarketplace {
@@ -264,6 +274,11 @@ async function acquirePluginInstallLock<T>(
 export function isPluginInstallLockHeld(pluginId: string): boolean {
   const held = heldPluginInstallLocks.getStore();
   return held?.get(ALL_PLUGIN_LOCK_KEY)?.active === true || held?.get(pluginId)?.active === true;
+}
+
+/** True while an all-plugin lifecycle mutation is queued or active. */
+export function hasExclusivePluginLifecycleMutation(): boolean {
+  return queuedExclusiveLifecycleMutations > 0;
 }
 
 /**
@@ -411,37 +426,35 @@ function trackReentrantOperation<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const tracked: TrackedReentrantOperation = {
-    promise: Promise.resolve(),
-    observed: false,
-    settled: false,
-    rejected: false,
+    branches: new Set(),
   };
   const parent = currentReentrantOperation.getStore();
   if (parent) tracked.parent = parent;
   const operation = Promise.resolve().then(() =>
     currentReentrantOperation.run(tracked, fn),
   );
-  tracked.promise = operation;
   token.pendingReentrantOperations.add(tracked);
-  void operation.then(
-    () => {
-      tracked.settled = true;
-    },
-    (err) => {
-      tracked.rejected = true;
-      tracked.failure = err;
-      tracked.settled = true;
-    },
-  );
-  // A plain rejected Promise cannot tell the owner whether its caller awaited
-  // and handled the failure or deliberately detached it. Return a Promise-like
-  // observer so `await`, `.then`, `.catch`, and `.finally` mark consumption.
-  // The underlying operation already has a rejection observer above, avoiding
-  // process-level unhandled-rejection noise for true fire-and-forget calls.
-  const observe = () => {
-    tracked.observed = true;
+  const trackBranch = <U>(promise: Promise<U>): ObservedReentrantPromise<U> => {
+    const branch: TrackedPromiseBranch = {
+      promise,
+      handled: false,
+      settled: false,
+      rejected: false,
+    };
+    tracked.branches.add(branch);
+    void promise.then(
+      () => {
+        branch.settled = true;
+      },
+      (err) => {
+        branch.rejected = true;
+        branch.failure = err;
+        branch.settled = true;
+      },
+    );
+    return new ObservedReentrantPromise(promise, branch, trackBranch);
   };
-  return new ObservedReentrantPromise(operation, observe);
+  return trackBranch(operation);
 }
 
 async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<void> {
@@ -454,14 +467,17 @@ async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<v
   const deadline = Date.now() + PLUGIN_LIFECYCLE_DRAIN_TIMEOUT_MS;
   while (true) {
     const pending = [...token.pendingReentrantOperations]
-      .filter((operation) => !operation.settled && !excluded.has(operation));
+      .filter((operation) => !excluded.has(operation))
+      .flatMap((operation) =>
+        [...operation.branches].filter((branch) => !branch.settled)
+      );
     if (pending.length === 0) break;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) throw new PluginLifecycleDrainTimeoutError();
     let timer: NodeJS.Timeout | undefined;
     try {
       await Promise.race([
-        Promise.allSettled(pending.map((operation) => operation.promise)),
+        Promise.allSettled(pending.map((branch) => branch.promise)),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new PluginLifecycleDrainTimeoutError()), remainingMs);
         }),
@@ -471,8 +487,12 @@ async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<v
     }
   }
   const failures = [...token.pendingReentrantOperations]
-    .filter((operation) => !excluded.has(operation) && !operation.observed && operation.rejected)
-    .map((operation) => operation.failure);
+    .filter((operation) => !excluded.has(operation))
+    .flatMap((operation) =>
+      [...operation.branches]
+        .filter((branch) => !branch.handled && branch.rejected)
+        .map((branch) => branch.failure)
+    );
   for (const operation of [...token.pendingReentrantOperations]) {
     if (!excluded.has(operation)) token.pendingReentrantOperations.delete(operation);
   }
@@ -482,11 +502,16 @@ async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<v
 }
 
 async function settleReentrantOperations(token: HeldPluginInstallLock): Promise<void> {
-  while ([...token.pendingReentrantOperations].some((operation) => !operation.settled)) {
+  while ([...token.pendingReentrantOperations].some((operation) =>
+    [...operation.branches].some((branch) => !branch.settled)
+  )) {
     await Promise.allSettled(
       [...token.pendingReentrantOperations]
-        .filter((operation) => !operation.settled)
-        .map((operation) => operation.promise),
+        .flatMap((operation) =>
+          [...operation.branches]
+            .filter((branch) => !branch.settled)
+            .map((branch) => branch.promise)
+        ),
     );
   }
   token.pendingReentrantOperations.clear();
@@ -625,6 +650,10 @@ export async function installMarketplacePluginWithLifecycle(options: {
   const resolvedLifecyclePluginId = lifecyclePluginId ?? catalogState.pluginId;
   const progressSlug = eventSlug ?? resolvedLifecyclePluginId;
 
+  // A pending restart can own this lifecycle lock while waiting on dependency
+  // preparation. Cancel it before this outer lock queues; removePlugin cannot
+  // reach its own cancellation boundary until after this callback starts.
+  pluginRuntime.cancelPendingRestart(resolvedLifecyclePluginId);
   return withPluginInstallLock(resolvedLifecyclePluginId, async () => {
     const currentCatalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
     const expectedVersionForGuard = expectedVersion?.trim();
@@ -646,7 +675,9 @@ export async function installMarketplacePluginWithLifecycle(options: {
       if (hadExistingInstall) {
         broadcastInstallProgress?.({ slug: progressSlug, phase: "restarting" });
         installedVersionBeforeInstall = await pluginMarketplace.getInstalledVersion(currentCatalogState.pluginId);
-        await pluginRuntime.removePlugin(currentCatalogState.pluginId);
+        await pluginRuntime.removePlugin(currentCatalogState.pluginId, {
+          preserveConfigOverride: true,
+        });
       }
 
       broadcastInstallProgress?.({ slug: progressSlug, phase: "installing" });
@@ -882,6 +913,7 @@ export async function startInstalledPluginWithLifecycle(options: {
     wasLoadedBeforeStartOverride ?? pluginRuntime.listPluginIds().includes(pluginId);
   try {
     broadcastInstallProgress?.({ slug: pluginId, phase: "restarting" });
+    pluginRuntime.cancelPendingRestart(pluginId);
     const startState = await pluginRuntime.addPlugin(pluginId);
     if (startState === "preparing") {
       broadcastInstallProgress?.({ slug: pluginId, phase: "preparing" });
@@ -960,6 +992,7 @@ async function restoreRuntimePlugin(options: {
 }): Promise<void> {
   const { pluginRuntime, pluginId, log, context } = options;
   try {
+    pluginRuntime.cancelPendingRestart(pluginId);
     const startState = await pluginRuntime.addPlugin(pluginId);
     if (startState === "preparing") {
       await pluginRuntime.waitForPluginReady(pluginId);

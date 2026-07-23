@@ -7,7 +7,6 @@ import type {
   PluginToolHandler,
   RuntimePlugin,
 } from "../types.js";
-import { createPluginStorage } from "../storage.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
 import { appVersionSatisfiesMin } from "../../shared/semver-compare.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
@@ -173,6 +172,41 @@ export abstract class PluginRuntimeState {
     });
   }
 
+  /**
+   * Live view of the raw config-override map, backed by {@link configStore}.
+   * Retained for tests that assert against the internal override map.
+   */
+  protected get configOverrides(): Record<string, Record<string, unknown>> {
+    return this.configStore.all();
+  }
+
+  setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
+    this.configStore.set(this.resolveKnownPluginId(pluginId), config);
+  }
+
+  getConfigOverride(pluginId: string): Record<string, unknown> | undefined {
+    return this.configStore.get(this.resolveKnownPluginId(pluginId));
+  }
+
+  mergeConfigOverride(pluginId: string, config: Record<string, unknown>): void {
+    this.configStore.merge(pluginId, config);
+  }
+
+  /** Merge host-injected values into the wildcard (`"*"`) config slot. */
+  setWildcardConfigOverride(config: Record<string, unknown>): void {
+    this.configStore.setWildcard(config);
+  }
+
+  /** Shallow copy of the wildcard config slot. */
+  getWildcardConfigOverride(): Record<string, unknown> {
+    return this.configStore.getWildcard();
+  }
+
+  /** Clear only the named wildcard keys, preserving unrelated host values. */
+  clearWildcardConfigOverride(keys: string[]): void {
+    this.configStore.clearWildcard(keys);
+  }
+
   // ─── Manifest Validator (lazy) ─────────────────────────────────────────────
 
   protected async getManifestValidator(): Promise<ValidateFunction> {
@@ -299,10 +333,10 @@ export abstract class PluginRuntimeState {
         pluginDataDir,
         incarnation,
       );
-      // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
-      // objects from test harnesses may omit it.
       if (!hostApi.storage) {
-        hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
+        throw new Error(
+          `createHostApi returned an incomplete HostApi without storage: ${pluginId}`,
+        );
       }
       return {
         hostApi,

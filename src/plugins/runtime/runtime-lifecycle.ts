@@ -36,6 +36,8 @@ import {
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 import {
+  hasExclusivePluginLifecycleMutation,
+  isPluginInstallLockHeld,
   withAllPluginInstallLocks,
   withPluginInstallLock,
 } from "../install-lifecycle.js";
@@ -51,7 +53,6 @@ import {
 } from "./runtime-preflight.js";
 
 const log = createLogger("plugin-runtime");
-
 export class PluginRuntimeLifecycle extends PluginRuntimeState {
   private async importPluginFactoryForLifecycle(
     pluginId: string,
@@ -479,6 +480,15 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   ): Promise<RestartPluginResult> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
+    if (
+      hasExclusivePluginLifecycleMutation()
+      && !isPluginInstallLockHeld(canonicalPluginId)
+    ) {
+      log.warn(
+        `restartPlugin rejected while an all-plugin lifecycle mutation is queued: ${canonicalPluginId}`,
+      );
+      return "failed";
+    }
     const pending = this.pendingRestarts.get(canonicalPluginId);
     if (pending) return pending;
     let resolveCancellation!: () => void;
@@ -855,57 +865,6 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   }
 
   /**
-   * Live view of the raw config-override map, backed by {@link configStore}.
-   * Retained as an instance member of this name because unit tests assert
-   * against the runtime's internal override map directly (see
-   * `runtime-wildcard-config.test.ts`).
-   */
-  protected get configOverrides(): Record<string, Record<string, unknown>> {
-    return this.configStore.all();
-  }
-
-  setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
-    this.configStore.set(pluginId, config);
-  }
-
-  mergeConfigOverride(pluginId: string, config: Record<string, unknown>): void {
-    this.configStore.merge(pluginId, config);
-  }
-
-  /**
-   * #893 — Wildcard (`"*"` slot) config injection. Plugins read the active
-   * LLM vendor id via `hostApi.config.get("hostApiVendor")`; the raw API key
-   * is NOT injected here — callers must obtain it through `getSecret` so it
-   * never appears in the plain-object config map. Merges with existing
-   * wildcard overrides (e.g. `pythonExecutable`) so calling this does NOT
-   * clobber unrelated keys set by other boot steps.
-   */
-  setWildcardConfigOverride(config: Record<string, unknown>): void {
-    this.configStore.setWildcard(config);
-  }
-
-  /**
-   * #893 / PR #894 B2 — Read the wildcard slot so `hostApi.config.get(...)`
-   * can merge host-injected values (e.g. `hostApiVendor`) into every
-   * plugin's effective config map. Returns an empty object when no wildcard
-   * overrides have been set so callers can spread the result unconditionally.
-   * The returned object is a shallow copy — callers MUST NOT mutate it.
-   */
-  getWildcardConfigOverride(): Record<string, unknown> {
-    return this.configStore.getWildcard();
-  }
-
-  /**
-   * #893 — Inverse of `setWildcardConfigOverride`. Clears ONLY the keys
-   * named in `keys` from the wildcard slot, preserving other injected
-   * values. When `keys` is empty the call is a no-op so the unrelated
-   * `pythonExecutable` slot survives a vendor swap.
-   */
-  clearWildcardConfigOverride(keys: string[]): void {
-    this.configStore.clearWildcard(keys);
-  }
-
-  /**
    * US-A3 — Targeted single-plugin add for install / install-local paths.
    */
   async addPlugin(pluginId: string): Promise<"started" | "preparing"> {
@@ -988,20 +947,24 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   /**
    * US-A3 — Targeted single-plugin remove for uninstall paths.
    */
-  async removePlugin(pluginId: string): Promise<void> {
+  async removePlugin(
+    pluginId: string,
+    options: { preserveConfigOverride?: boolean } = {},
+  ): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     // A restart can be waiting on an intentionally non-cancellable dependency
     // preparation while it owns the lifecycle lock. Signal cancellation before
     // queuing removal so that restart can settle and release the lock.
     this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
     return withPluginInstallLock(canonicalPluginId, () =>
-      this.removePluginLocked(pluginId, canonicalPluginId)
+      this.removePluginLocked(pluginId, canonicalPluginId, options)
     );
   }
 
   private async removePluginLocked(
     pluginId: string,
     canonicalPluginId: string,
+    options: { preserveConfigOverride?: boolean },
   ): Promise<void> {
     // Invalidate in-flight add/restart continuations before the first await.
     this.beginPluginLifecycleOperation(canonicalPluginId);
@@ -1057,7 +1020,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
       this.knownInstallAliases.delete(canonicalPluginId);
       this.knownInstallClaims.delete(canonicalPluginId);
-      this.configStore.delete(canonicalPluginId);
+      if (!options.preserveConfigOverride) {
+        this.configStore.delete(canonicalPluginId);
+      }
       return;
     } else {
       log.info(`removePlugin: plugin in non-loaded state (failed/disabled), purging tracking — ${pluginId}`);
@@ -1065,7 +1030,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
     // stop() may persist configuration while releasing resources. Delete the
     // runtime override only after that hook has been bounded and deactivated.
-    this.configStore.delete(canonicalPluginId);
+    if (!options.preserveConfigOverride) {
+      this.configStore.delete(canonicalPluginId);
+    }
 
     this.knownPluginManifests.delete(canonicalPluginId);
     this.knownPluginAccessGrants.delete(canonicalPluginId);
@@ -1441,6 +1408,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     canonicalPluginId: string,
   ): Promise<void> {
     const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
+    this.pendingRestartPreparations.delete(canonicalPluginId);
     const isCurrent = () =>
       this.isPluginLifecycleOperationCurrent(canonicalPluginId, generation);
     const plugin = this.plugins.get(canonicalPluginId);
@@ -1626,6 +1594,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     canonicalPluginId: string,
     actor: Actor,
   ): Promise<void> {
+    this.pendingRestartPreparations.delete(canonicalPluginId);
     if (this.deploymentGuard) {
       const result = await this.deploymentGuard.canDisable(pluginId, actor);
       if (!result.allowed) {
