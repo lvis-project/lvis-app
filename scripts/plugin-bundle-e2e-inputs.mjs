@@ -125,7 +125,10 @@ function fromEnvironment() {
   });
   const rendered = `${JSON.stringify(evidence, null, 2)}\n`;
   if (process.env.BUNDLE_E2E_EVIDENCE_PATH) {
-    writeFileSync(process.env.BUNDLE_E2E_EVIDENCE_PATH, rendered, { flag: "wx" });
+    writeFileSync(process.env.BUNDLE_E2E_EVIDENCE_PATH, rendered, {
+      flag: "wx",
+      mode: 0o600,
+    });
   } else {
     process.stdout.write(rendered);
   }
