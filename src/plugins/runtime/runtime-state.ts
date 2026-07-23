@@ -17,6 +17,7 @@ import type {
   PluginRuntimeGenerationAccess,
   PluginRuntimeGenerationLifecycle,
   PluginRuntimeGenerationProjection,
+  PluginRuntimeRetirementStep,
   PreparedPluginRuntimeGenerationPublication,
 } from "../plugin-host-generation.js";
 import { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
@@ -1050,38 +1051,74 @@ export abstract class PluginRuntimeState {
     this.prepareRuntimeRemoval(pluginId).publish();
   }
 
-  async retireRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): Promise<void> {
-    const errors: Error[] = [];
-    // Revoke general HostApi authority before user stop code runs. Any exact
-    // operation admitted before publication can finish during coordinator
-    // drain; retirement begins only after those leases have been released.
-    runtime.deactivateHostApi?.();
-    const stopped = await this.stopAfterStartFailure(
-      runtime.manifest.id,
-      runtime.instance,
-      runtime.lifecycleHookScope,
-    );
-    if (!stopped) {
-      errors.push(new Error(
-        `generation stop failed or timed out for ${runtime.manifest.id}`,
-      ));
-    }
-    errors.push(...(runtime.hostEffects?.retire() ?? []));
-    for (const dispose of runtime.disposers ?? []) {
-      try { dispose(); } catch (error) {
-        log.error(`generation disposer failed for ${runtime.manifest.id}: %s`, (error as Error).message);
-        errors.push(error instanceof Error ? error : new Error(String(error)));
-      }
-    }
-    if (runtime.drainHostApiOperations) {
-      try {
-        await runtime.drainHostApiOperations();
-      } catch (error) {
-        log.error(`generation HostApi drain failed for ${runtime.manifest.id}: %s`, (error as Error).message);
-        errors.push(error instanceof Error ? error : new Error(String(error)));
-      }
-    }
-    if (errors.length > 0) throw new AggregateError(errors, `plugin '${runtime.manifest.id}' generation retirement failed`);
+  prepareRuntimeRetirement(
+    runtime: PluginRuntimeGenerationProjection,
+  ): readonly PluginRuntimeRetirementStep[] {
+    return Object.freeze([
+      Object.freeze({
+        phase: "runtime.authority" as const,
+        run: () => {
+          // Revoke general HostApi authority before user stop code runs. Any
+          // exact operation admitted before publication can finish during
+          // coordinator drain; retirement begins only after those leases have
+          // been released.
+          runtime.deactivateHostApi?.();
+        },
+      }),
+      Object.freeze({
+        phase: "runtime.stop" as const,
+        run: async () => {
+          const stopped = await this.stopAfterStartFailure(
+            runtime.manifest.id,
+            runtime.instance,
+            runtime.lifecycleHookScope,
+          );
+          if (!stopped) {
+            throw new Error(
+              `generation stop failed or timed out for ${runtime.manifest.id}`,
+            );
+          }
+        },
+      }),
+      Object.freeze({
+        phase: "runtime.effects" as const,
+        run: () => {
+          const errors = [...(runtime.hostEffects?.retire() ?? [])];
+          for (const dispose of runtime.disposers ?? []) {
+            try {
+              dispose();
+            } catch (error) {
+              log.error(
+                `generation disposer failed for ${runtime.manifest.id}: %s`,
+                (error as Error).message,
+              );
+              errors.push(error instanceof Error ? error : new Error(String(error)));
+            }
+          }
+          if (errors.length > 0) {
+            throw new AggregateError(
+              errors,
+              `plugin '${runtime.manifest.id}' generation effects retirement failed`,
+            );
+          }
+        },
+      }),
+      Object.freeze({
+        phase: "runtime.drain" as const,
+        run: async () => {
+          if (!runtime.drainHostApiOperations) return;
+          try {
+            await runtime.drainHostApiOperations();
+          } catch (error) {
+            log.error(
+              `generation HostApi drain failed for ${runtime.manifest.id}: %s`,
+              (error as Error).message,
+            );
+            throw error;
+          }
+        },
+      }),
+    ]);
   }
 
   protected async withPinnedGeneration<T>(
