@@ -702,7 +702,7 @@ function runAppChecks(dir) {
     runPackageScripts(join(dir, "packages", "plugin-sdk"), ["check:drift", "build"]);
   }
   ensureAppTestRuntimeAbi(dir);
-  runPackageScripts(dir, ["lint", "typecheck", "test", "build"]);
+  runPackageScripts(dir, ["lint", "check:knip", "typecheck", "test", "build"]);
   runJavaScriptFile(dir, "scripts/check-tool-namespace.mjs");
 }
 

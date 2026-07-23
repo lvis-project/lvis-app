@@ -17,6 +17,18 @@
     "unresolved": "error",
     "binaries": "error"
   },
+  "workspaces": {
+    ".": {},
+    "web": {
+      // The nested web workspace owns a separate lockfile/install. Root Knip
+      // still analyzes its sources and dependency declarations without
+      // requiring web/node_modules to exist in desktop-app workflows.
+      "ignoreBinaries": ["next"]
+    }
+  },
+  "vitest": {
+    "config": "vitest.analysis.config.ts"
+  },
   "ignoreDependencies": [
     "@sentry/electron",
     "@types/better-sqlite3",
@@ -29,6 +41,7 @@
   "ignoreBinaries": [
     "lsof",
     "mountvol",
+    "mkfifo",
     "pgrep",
     "plutil",
     "powershell.exe",

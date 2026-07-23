@@ -7,6 +7,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 // Mock must be declared BEFORE the import under test so vi.mock hoists correctly.
 vi.mock("../../core/network-guard.js", () => ({
@@ -21,6 +23,7 @@ vi.mock("../../core/network-guard.js", () => ({
 
 import { fetchPublicHttpResponse, NetworkGuardError } from "../../core/network-guard.js";
 import { CloudMarketplaceFetcher } from "../cloud-marketplace-fetcher.js";
+import { installFromMarketplace } from "../marketplace-installer.js";
 
 const mockedFetchPublic = fetchPublicHttpResponse as unknown as ReturnType<typeof vi.fn>;
 
@@ -28,34 +31,59 @@ const mockedFetchPublic = fetchPublicHttpResponse as unknown as ReturnType<typeo
 function jsonResponse(body: unknown, init: { status?: number; ok?: boolean } = {}): Response {
   const status = init.status ?? 200;
   const ok = init.ok ?? status < 400;
+  const response = new Response(JSON.stringify(body), {
+    status,
+    statusText: ok ? "OK" : "ERR",
+    headers: { "content-type": "application/json" },
+  });
   return {
     ok,
     status,
     statusText: ok ? "OK" : "ERR",
+    headers: response.headers,
+    body: response.body,
     async json() {
       return body;
-    },
-    async arrayBuffer() {
-      throw new Error("not used");
     },
   } as unknown as Response;
 }
 
-function bytesResponse(bytes: Uint8Array): Response {
-  return {
-    ok: true,
-    status: 200,
-    statusText: "OK",
-    async arrayBuffer() {
-      return bytes.buffer.slice(
-        bytes.byteOffset,
-        bytes.byteOffset + bytes.byteLength,
-      );
+function bytesResponse(
+  bytes: Uint8Array,
+  options: {
+    contentLength?: string;
+    chunks?: number[];
+    onCancel?: (reason: unknown) => void;
+    stall?: boolean;
+  } = {},
+): Response {
+  const sizes = options.chunks ?? [bytes.byteLength];
+  let offset = 0;
+  const body = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (options.stall) return new Promise<void>(() => undefined);
+        const size = sizes.shift();
+        if (size === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(bytes.slice(offset, offset + size));
+        offset += size;
+      },
+      cancel(reason) {
+        options.onCancel?.(reason);
+      },
     },
-    async json() {
-      throw new Error("not used");
-    },
-  } as unknown as Response;
+    // Prevent eager prefetch from closing the synthetic source before the
+    // consumer can cancel it after crossing the configured byte ceiling.
+    { highWaterMark: 0 },
+  );
+  const headers = new Headers();
+  if (options.contentLength !== undefined) {
+    headers.set("content-length", options.contentLength);
+  }
+  return new Response(body, { status: 200, headers });
 }
 
 describe("CloudMarketplaceFetcher (public-network path)", () => {
@@ -731,6 +759,197 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
     expect(url).toBe(
       "http://127.0.0.1:8000/api/v1/plugins/lvis-plugin-meeting/versions/0.1.0/download",
     );
+  });
+
+  it("rejects an oversized Content-Length before reading the response body", async () => {
+    const payload = new TextEncoder().encode("12345");
+    const onCancel = vi.fn();
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(payload, { contentLength: "6", onCancel }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      artifactLimits: { maxCompressedBytes: 5 },
+    });
+
+    await expect(fetcher.downloadArtifact("acme", "1.0.0")).rejects.toMatchObject({
+      code: "ARTIFACT_TOO_LARGE",
+    });
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a streamed body that exceeds a smaller or missing Content-Length", async () => {
+    const payload = new TextEncoder().encode("123456");
+    for (const contentLength of ["2", undefined]) {
+      const onCancel = vi.fn();
+      mockedFetchPublic.mockReset();
+      mockedFetchPublic.mockResolvedValueOnce(
+        bytesResponse(payload, { contentLength, chunks: [3, 3], onCancel }),
+      );
+      const fetcher = new CloudMarketplaceFetcher({
+        baseUrl: "https://marketplace.example.com",
+        artifactLimits: { maxCompressedBytes: 5 },
+      });
+
+      await expect(fetcher.downloadArtifact("acme", "1.0.0")).rejects.toMatchObject({
+        code: "ARTIFACT_TOO_LARGE",
+      });
+      expect(onCancel).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("allows an artifact exactly at the boundary and emits final progress", async () => {
+    const payload = new TextEncoder().encode("12345");
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(payload, { contentLength: "5", chunks: [2, 3] }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      artifactLimits: { maxCompressedBytes: 5 },
+    });
+
+    const onChunk = vi.fn();
+    const result = await fetcher.downloadArtifact("acme", "1.0.0", onChunk);
+    expect(result.body.toString()).toBe("12345");
+    expect(onChunk).toHaveBeenLastCalledWith(5, 5);
+  });
+
+  it("switches progress to indeterminate when Content-Length understates the body", async () => {
+    const payload = new TextEncoder().encode("123");
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(payload, { contentLength: "2", chunks: [3] }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      artifactLimits: { maxCompressedBytes: 5 },
+    });
+
+    const onChunk = vi.fn();
+    await expect(fetcher.downloadArtifact("acme", "1.0.0", onChunk))
+      .resolves.toMatchObject({ body: Buffer.from("123") });
+    expect(onChunk).toHaveBeenLastCalledWith(3, null);
+    expect(onChunk).not.toHaveBeenCalledWith(3, 2);
+  });
+
+  it("cancels a stalled body at its read deadline", async () => {
+    const onCancel = vi.fn();
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(new Uint8Array(), { stall: true, onCancel }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      artifactReadTimeoutMs: 10,
+    });
+
+    await expect(fetcher.downloadArtifact("acme", "1.0.0")).rejects.toMatchObject({
+      code: "ARTIFACT_DOWNLOAD_TIMEOUT",
+    });
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("propagates caller abort while a body read is stalled", async () => {
+    const onCancel = vi.fn();
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(new Uint8Array(), { stall: true, onCancel }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const controller = new AbortController();
+    const download = fetcher.downloadArtifact(
+      "acme",
+      "1.0.0",
+      undefined,
+      { signal: controller.signal },
+    );
+
+    controller.abort();
+    await expect(download).rejects.toMatchObject({
+      code: "ARTIFACT_DOWNLOAD_ABORTED",
+    });
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("bounds and times out the signature envelope body", async () => {
+    const oversizedCancel = vi.fn();
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(new Uint8Array(), {
+        contentLength: String(64 * 1024 + 1),
+        onCancel: oversizedCancel,
+      }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.fetchSignatureEnvelope("acme", "1.0.0"))
+      .rejects.toMatchObject({ code: "SIGNATURE_ENVELOPE_TOO_LARGE" });
+    expect(oversizedCancel).toHaveBeenCalledOnce();
+
+    const stalledCancel = vi.fn();
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(new Uint8Array(), { stall: true, onCancel: stalledCancel }),
+    );
+    const shortDeadlineFetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      envelopeReadTimeoutMs: 10,
+    });
+    await expect(shortDeadlineFetcher.fetchSignatureEnvelope("acme", "1.0.0"))
+      .rejects.toMatchObject({ code: "SIGNATURE_ENVELOPE_TIMEOUT" });
+    expect(stalledCancel).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry a deterministic missing-body response", async () => {
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const downloadRoot = mkdtempSync(join(process.cwd(), ".marketplace-protocol-integration-"));
+    try {
+      await expect(installFromMarketplace("acme", "1.0.0", {
+        http: fetcher,
+        publicKeys: {},
+        downloadRoot,
+        maxRetries: 3,
+      })).rejects.toThrow(/no readable body/);
+      expect(mockedFetchPublic).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(downloadRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not retry or reclassify a streamed limit failure through the installer", async () => {
+    const payload = new TextEncoder().encode("123456");
+    const onCancel = vi.fn();
+    mockedFetchPublic.mockReset();
+    mockedFetchPublic.mockResolvedValueOnce(
+      bytesResponse(payload, { chunks: [3, 3], onCancel }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      artifactLimits: { maxCompressedBytes: 5 },
+    });
+    const downloadRoot = mkdtempSync(join(process.cwd(), ".marketplace-limit-integration-"));
+    try {
+      await expect(installFromMarketplace("acme", "1.0.0", {
+        http: fetcher,
+        publicKeys: {},
+        downloadRoot,
+        maxRetries: 3,
+        artifactLimits: fetcher.getArtifactLimits(),
+      })).rejects.toMatchObject({ code: "ARTIFACT_TOO_LARGE" });
+      expect(mockedFetchPublic).toHaveBeenCalledOnce();
+      expect(onCancel).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(downloadRoot, { recursive: true, force: true });
+    }
   });
 
   it("missing latest_stable_version (null) → packageSpec falls back to slug only", async () => {

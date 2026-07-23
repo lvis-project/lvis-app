@@ -18,11 +18,10 @@ import {
   statSync,
 } from "node:fs";
 import { createWriteStream } from "node:fs";
-import { unlink, stat as fsStat } from "node:fs/promises";
+import { chmod, open as openFile, unlink, stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { createGzip } from "node:zlib";
-import { finished, pipeline } from "node:stream/promises";
+import { pipeline } from "node:stream/promises";
 import { withFileLock } from "../lib/with-file-lock.js";
 import {
   computeLineHmac,
@@ -31,6 +30,7 @@ import {
 } from "./hmac-chain.js";
 import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-schema.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { iterateJsonlLines } from "./jsonl-reader.js";
 
 function readLastNonEmptyLineSync(filePath: string): string {
   let fd: number;
@@ -177,6 +177,15 @@ export interface AuditEntry {
   route?: string;
 }
 
+export interface AuditSearchFilter {
+  dateFrom?: string;
+  dateTo?: string;
+  type?: string;
+  textSearch?: string;
+  limit?: number;
+  offset?: number;
+}
+
 /**
  * Boot-time OS-sandbox activation telemetry. ONE record per boot, written to the
  * DEDICATED `<date>.sandbox-gate.jsonl` channel (mirrors the channel-separation
@@ -217,6 +226,36 @@ export interface AuditRotationOptions {
   rotationAgeDays?: number;
 }
 
+export interface AuditLoggerOptions {
+  /** Maximum queued/in-flight writes per plain channel before that channel drops telemetry. */
+  maxPendingWrites?: number;
+  /** Maximum serialized bytes retained by each plain-channel writer queue. */
+  maxPendingBytes?: number;
+}
+
+export interface AuditWriterStats {
+  pendingWrites: number;
+  pendingBytes: number;
+  droppedWrites: number;
+  acceptingWrites: boolean;
+}
+
+const DEFAULT_MAX_PENDING_WRITES = 1_024;
+const DEFAULT_MAX_PENDING_BYTES = 4 * 1024 * 1024;
+
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isSafeInteger(value) || value <= 0) {
+    return fallback;
+  }
+  return value;
+}
+
+interface PlainWriterState {
+  tail: Promise<void>;
+  pendingWrites: number;
+  pendingBytes: number;
+}
+
 export class AuditLogger {
   private readonly auditDir: string;
   private readonly logFile: string;
@@ -253,8 +292,14 @@ export class AuditLogger {
   private permissionAuditChainBootstrapped = false;
   /** Permission policy — secret store for daily seals. Wired alongside `setupPermissionAuditChain`. */
   private permissionAuditSealStore: SecretStore | null = null;
+  private readonly plainWriters = new Map<string, PlainWriterState>();
+  private droppedPlainWrites = 0;
+  private acceptingPlainWrites = true;
+  private readonly maxPendingWrites: number;
+  private readonly maxPendingBytes: number;
+  private readonly hardenedPlainFiles = new Set<string>();
 
-  constructor(auditDirOverride?: string) {
+  constructor(auditDirOverride?: string, options: AuditLoggerOptions = {}) {
     this.auditDir = auditDirOverride ?? join(lvisHome(), "audit");
     if (!existsSync(this.auditDir)) {
       mkdirSync(this.auditDir, { recursive: true, mode: 0o700 });
@@ -266,20 +311,20 @@ export class AuditLogger {
     this.permissionAuditLogFile = join(this.auditDir, `${date}.permission-audit.jsonl`);
     this.permissionShadowLogFile = join(this.auditDir, `${date}.permission-shadow.jsonl`);
     this.sandboxGateLogFile = join(this.auditDir, `${date}.sandbox-gate.jsonl`);
+    this.maxPendingWrites = normalizePositiveInteger(
+      options.maxPendingWrites,
+      DEFAULT_MAX_PENDING_WRITES,
+    );
+    this.maxPendingBytes = normalizePositiveInteger(
+      options.maxPendingBytes,
+      DEFAULT_MAX_PENDING_BYTES,
+    );
   }
 
   log(entry: AuditEntry): void {
     try {
       const line = JSON.stringify(entry) + "\n";
-      appendFileSync(this.logFile, line, { encoding: "utf-8", mode: 0o600 });
-      // Defensive: ensure 0o600 even when the file pre-existed with a wider
-      // mode (e.g. created by a process with permissive umask). CLAUDE.md
-      // `~/.lvis/<feature>/` rule requires audit files be user-readable only.
-      try {
-        chmodSync(this.logFile, 0o600);
-      } catch {
-        // Non-fatal — chmod failure must not block audit writes.
-      }
+      this.enqueuePlainWrite(this.logFile, line);
     } catch {
       // Audit failures must not block app behavior.
     }
@@ -296,12 +341,7 @@ export class AuditLogger {
   logShadow(entry: AuditEntry): void {
     try {
       const line = JSON.stringify(entry) + "\n";
-      appendFileSync(this.permissionShadowLogFile, line, { encoding: "utf-8", mode: 0o600 });
-      try {
-        chmodSync(this.permissionShadowLogFile, 0o600);
-      } catch {
-        // Non-fatal — chmod failure must not block shadow writes.
-      }
+      this.enqueuePlainWrite(this.permissionShadowLogFile, line);
     } catch {
       // Shadow logging must never break a tool invocation.
     }
@@ -329,15 +369,94 @@ export class AuditLogger {
         ...event,
       };
       const line = JSON.stringify(entry) + "\n";
-      appendFileSync(this.sandboxGateLogFile, line, { encoding: "utf-8", mode: 0o600 });
-      try {
-        chmodSync(this.sandboxGateLogFile, 0o600);
-      } catch {
-        // Non-fatal — chmod failure must not block telemetry writes.
-      }
+      this.enqueuePlainWrite(this.sandboxGateLogFile, line);
     } catch {
       // Activation telemetry must never break boot.
     }
+  }
+
+  /** Wait until every plain-channel write accepted before this call has settled. */
+  async flush(): Promise<void> {
+    const tails = [...this.plainWriters.values()].map((writer) => writer.tail);
+    await Promise.all(tails);
+  }
+
+  /** Stop accepting plain telemetry and drain the bounded writer queue. */
+  async close(): Promise<void> {
+    this.acceptingPlainWrites = false;
+    await this.flush();
+  }
+
+  /** Queue state exposed for deterministic saturation and shutdown tests. */
+  getWriterStats(): AuditWriterStats {
+    let pendingWrites = 0;
+    let pendingBytes = 0;
+    for (const writer of this.plainWriters.values()) {
+      pendingWrites += writer.pendingWrites;
+      pendingBytes += writer.pendingBytes;
+    }
+    return {
+      pendingWrites,
+      pendingBytes,
+      droppedWrites: this.droppedPlainWrites,
+      acceptingWrites: this.acceptingPlainWrites,
+    };
+  }
+
+  private enqueuePlainWrite(filePath: string, line: string): void {
+    const bytes = Buffer.byteLength(line, "utf-8");
+    if (!this.acceptingPlainWrites) {
+      this.droppedPlainWrites += 1;
+      return;
+    }
+    let writer = this.plainWriters.get(filePath);
+    if (!writer) {
+      writer = { tail: Promise.resolve(), pendingWrites: 0, pendingBytes: 0 };
+      this.plainWriters.set(filePath, writer);
+    }
+    if (
+      writer.pendingWrites >= this.maxPendingWrites ||
+      bytes > this.maxPendingBytes - writer.pendingBytes
+    ) {
+      this.droppedPlainWrites += 1;
+      return;
+    }
+
+    writer.pendingWrites += 1;
+    writer.pendingBytes += bytes;
+    const write = writer.tail.then(() => this.appendPlainLine(filePath, line));
+    writer.tail = write
+      .catch(() => {
+        this.droppedPlainWrites += 1;
+      })
+      .finally(() => {
+        writer.pendingWrites -= 1;
+        writer.pendingBytes -= bytes;
+      });
+  }
+
+  private async appendPlainLine(filePath: string, line: string): Promise<void> {
+    await withFileLock(filePath, async () => {
+      const handle = await openFile(
+        filePath,
+        fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT,
+        0o600,
+      );
+      try {
+        if (!this.hardenedPlainFiles.has(filePath)) {
+          try {
+            await handle.chmod(0o600);
+            this.hardenedPlainFiles.add(filePath);
+          } catch {
+            // Best-effort hardening: creation already requested mode 0o600.
+            // Retry chmod on the next accepted write instead of caching failure.
+          }
+        }
+        await handle.writeFile(line, { encoding: "utf-8" });
+      } finally {
+        await handle.close();
+      }
+    });
   }
 
   /** Accessor for the dedicated sandbox-gate telemetry channel file (tests). */
@@ -481,6 +600,7 @@ export class AuditLogger {
    * Uses withFileLock on each candidate file to prevent concurrent write races.
    */
   async rotateAndPrune(opts: AuditRotationOptions = {}): Promise<void> {
+    await this.flush();
     const {
       maxBytes = 10 * 1024 * 1024,
       retentionDays = 30,
@@ -552,10 +672,12 @@ export class AuditLogger {
           await pipeline(
             createReadStream(filePath),
             createGzip(),
-            createWriteStream(archivePath),
+            createWriteStream(archivePath, { mode: 0o600 }),
           );
+          await chmod(archivePath, 0o600);
           // Remove original after successful compression
           await unlink(filePath);
+          this.hardenedPlainFiles.delete(filePath);
         });
       } catch {
         // Rotation failure is non-fatal
@@ -595,26 +717,21 @@ export class AuditLogger {
    * Search audit entries across JSONL files within a date range.
    * Returns a filtered, paginated slice of matching entries.
    */
-  async search(filter: {
-    dateFrom?: string;
-    dateTo?: string;
-    type?: string;
-    textSearch?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<{ entries: AuditEntry[]; total: number }> {
+  async search(filter: AuditSearchFilter): Promise<{ entries: AuditEntry[]; total: number }> {
+    await this.flush();
     const { dateFrom, dateTo, type, textSearch, limit = 100, offset = 0 } = filter;
 
     // Collect JSONL file names in range
     const files = this._filesInRange(dateFrom, dateTo);
 
-    const matched: AuditEntry[] = [];
+    const entries: AuditEntry[] = [];
+    let total = 0;
+    const normalizedNeedle = textSearch?.toLowerCase();
 
     for (const file of files) {
       const filePath = join(this.auditDir, file);
       if (!existsSync(filePath)) continue;
-      const lines = await this._readLines(filePath);
-      for (const line of lines) {
+      for await (const line of iterateJsonlLines(filePath)) {
         if (!line.trim()) continue;
         let entry: AuditEntry;
         try {
@@ -623,17 +740,17 @@ export class AuditLogger {
           continue;
         }
         if (type && entry.type !== type) continue;
-        if (textSearch) {
-          const needle = textSearch.toLowerCase();
+        if (normalizedNeedle) {
           const haystack = JSON.stringify(entry).toLowerCase();
-          if (!haystack.includes(needle)) continue;
+          if (!haystack.includes(normalizedNeedle)) continue;
         }
-        matched.push(entry);
+        if (total >= offset && entries.length < limit) {
+          entries.push(entry);
+        }
+        total += 1;
       }
     }
 
-    const total = matched.length;
-    const entries = matched.slice(offset, offset + limit);
     return { entries, total };
   }
 
@@ -645,6 +762,7 @@ export class AuditLogger {
     totalByDay: Record<string, number>;
     sensitiveOps: number;
   }> {
+    await this.flush();
     const dateFrom = new Date(Date.now() - lastDays * 86400_000).toISOString().slice(0, 10);
     const files = this._filesInRange(dateFrom, undefined);
 
@@ -657,8 +775,7 @@ export class AuditLogger {
     for (const file of files) {
       const filePath = join(this.auditDir, file);
       if (!existsSync(filePath)) continue;
-      const lines = await this._readLines(filePath);
-      for (const line of lines) {
+      for await (const line of iterateJsonlLines(filePath)) {
         if (!line.trim()) continue;
         let entry: AuditEntry;
         try {
@@ -692,23 +809,6 @@ export class AuditLogger {
       if (dateTo && date > dateTo) return false;
       return true;
     });
-  }
-
-  /** Read all lines from a JSONL file asynchronously. */
-  private async _readLines(filePath: string): Promise<string[]> {
-    const lines: string[] = [];
-    const input = createReadStream(filePath, { encoding: "utf-8" });
-    const rl = createInterface({ input, crlfDelay: Infinity });
-    try {
-      for await (const line of rl) {
-        lines.push(line);
-      }
-    } finally {
-      rl.close();
-      input.destroy();
-      await finished(input, { cleanup: true }).catch(() => undefined);
-    }
-    return lines;
   }
 
   logTurn(params: {

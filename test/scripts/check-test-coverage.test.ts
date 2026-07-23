@@ -175,7 +175,10 @@ describe("check-test-coverage", () => {
 
   it("keeps the quality scripts and v8 provider wired as a regression guard", () => {
     const packageJson = JSON.parse(fs.readFileSync(path.resolve("package.json"), "utf8"));
-    const vitestConfig = fs.readFileSync(path.resolve("vitest.config.ts"), "utf8");
+    const vitestAnalysisConfig = fs.readFileSync(
+      path.resolve("vitest.analysis.config.ts"),
+      "utf8",
+    );
     const coverageGateScript = fs.readFileSync(path.resolve("scripts/run-test-coverage-gate.mjs"), "utf8");
     const vitestRunner = fs.readFileSync(
       path.resolve("scripts/run-vitest-under-electron.mjs"),
@@ -209,9 +212,9 @@ describe("check-test-coverage", () => {
     expect(packageJson.scripts["check:test-coverage"]).toContain("scripts/run-test-coverage-gate.mjs");
     expect(packageJson.scripts["check:test-quality"]).toContain("check:test-duplicates");
     expect(coverageVersion).toBe(vitestVersion);
-    expect(vitestConfig).toContain('provider: "v8"');
-    expect(vitestConfig).toContain('reportsDirectory: "coverage/vitest"');
-    expect(vitestConfig).toContain('"json-summary"');
+    expect(vitestAnalysisConfig).toContain('provider: "v8"');
+    expect(vitestAnalysisConfig).toContain('reportsDirectory: "coverage/vitest"');
+    expect(vitestAnalysisConfig).toContain('"json-summary"');
     expect(coverageGateScript).toContain('process.platform === "win32" ? "bun.exe" : "bun"');
     expect(coverageGateScript).toContain('["run", "test:prepare"]');
     expect(coverageGateScript).toContain('join("scripts", "run-vitest-under-electron.mjs")');
