@@ -103,7 +103,7 @@
     "ai": "~7.0.2",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.1",
     "electron-updater": "~6.8.3",
     "mermaid": "^11.16.0",
     "node-pty": "^1.1.0",
