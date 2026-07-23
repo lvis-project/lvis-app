@@ -20,6 +20,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -572,6 +573,40 @@ describe("AuditLogger permission audit chain", () => {
       layer: 2,
     })).resolves.toMatchObject({ auditId: "after-torn-recovery" });
     expect(readPermissionAuditLines(activePath)).toHaveLength(2);
+  });
+
+  it("does not overwrite an existing torn-tail archive or expose a staging file", async () => {
+    const now = new Date("2026-05-09T00:00:02.000Z");
+    const seals = new MemorySecretStore();
+    const logger = new AuditLogger(undefined, { now: () => now });
+    await logger.setupPermissionAuditChain(SECRET, seals);
+    await logger.appendPermissionAuditEntry({
+      decision: "allow",
+      auditId: "archive-collision-predecessor",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      tool: "fs_read",
+      source: "builtin",
+      category: "read",
+      layer: 1,
+    });
+    const activePath = logger.getPermissionAuditLogFile();
+    writeFileSync(activePath, `${readFileSync(activePath, "utf-8")}{"partial":`, "utf-8");
+    const originalTornBytes = readFileSync(activePath);
+    const archivePath = join(
+      auditDir,
+      `2026-05-09.permission-audit.torn-unverified-${statSync(activePath).size}-${now.getTime()}.jsonl`,
+    );
+    writeFileSync(archivePath, "existing-forensic-evidence", { mode: 0o600 });
+
+    const rebooted = new AuditLogger(undefined, { now: () => now });
+    await expect(rebooted.setupPermissionAuditChain(SECRET, seals)).rejects.toThrow(
+      /archive already exists/,
+    );
+    expect(rebooted.isPermissionAuditChainReady()).toBe(false);
+    expect(readFileSync(activePath)).toEqual(originalTornBytes);
+    expect(readFileSync(archivePath, "utf-8")).toBe("existing-forensic-evidence");
+    expect(readdirSync(auditDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
   it("rejects an oversized audit row without reading the whole file into memory", async () => {

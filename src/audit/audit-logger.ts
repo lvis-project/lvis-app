@@ -2,14 +2,16 @@
 
 
 
+import { randomUUID } from "node:crypto";
 import {
   accessSync,
   chmodSync,
   closeSync,
-  copyFileSync,
   constants as fsConstants,
   fstatSync,
+  ftruncateSync,
   fsyncSync,
+  linkSync,
   mkdirSync,
   existsSync,
   openSync,
@@ -18,7 +20,8 @@ import {
   readSync,
   renameSync,
   statSync,
-  truncateSync,
+  unlinkSync,
+  writeSync,
   writeFileSync,
 } from "node:fs";
 import { createWriteStream } from "node:fs";
@@ -50,6 +53,107 @@ function fsyncDirectorySync(dir: string): void {
     fsyncSync(fd);
   } finally {
     closeSync(fd);
+  }
+}
+
+function copyOpenFileSync(sourceFd: number, destinationFd: number, size: number): void {
+  const chunk = Buffer.allocUnsafe(64 * 1024);
+  let position = 0;
+  while (position < size) {
+    const bytesRead = readSync(
+      sourceFd,
+      chunk,
+      0,
+      Math.min(chunk.length, size - position),
+      position,
+    );
+    if (bytesRead === 0) {
+      throw new Error("permission audit archive source ended unexpectedly");
+    }
+    let written = 0;
+    while (written < bytesRead) {
+      const bytesWritten = writeSync(
+        destinationFd,
+        chunk,
+        written,
+        bytesRead - written,
+      );
+      if (bytesWritten === 0) {
+        throw new Error("permission audit archive write made no progress");
+      }
+      written += bytesWritten;
+    }
+    position += bytesRead;
+  }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+function publishOpenFileArchiveSync(
+  sourceFd: number,
+  size: number,
+  archivePath: string,
+  auditDir: string,
+  noFollow: number,
+): void {
+  const stagedPath = `${archivePath}.${randomUUID()}.tmp`;
+  let stagedFd: number | undefined;
+  let operationError: unknown;
+  try {
+    stagedFd = openSync(
+      stagedPath,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | noFollow,
+      0o600,
+    );
+    copyOpenFileSync(sourceFd, stagedFd, size);
+    fsyncSync(stagedFd);
+    closeSync(stagedFd);
+    stagedFd = undefined;
+
+    // A hard-link publishes the fully-synced inode atomically without the
+    // overwrite semantics of rename(2). Existing forensic evidence therefore
+    // fails closed with EEXIST instead of being replaced.
+    try {
+      linkSync(stagedPath, archivePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error("permission audit torn-tail archive already exists");
+      }
+      throw error;
+    }
+    unlinkSync(stagedPath);
+    // Persist both publication of the final name and removal of the staging
+    // name before the caller truncates the canonical descriptor.
+    fsyncDirectorySync(auditDir);
+  } catch (error) {
+    operationError = error;
+    throw error;
+  } finally {
+    const cleanupErrors: unknown[] = [];
+    if (stagedFd !== undefined) {
+      try {
+        closeSync(stagedFd);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    try {
+      unlinkSync(stagedPath);
+    } catch (error) {
+      if (!isMissingFileError(error)) cleanupErrors.push(error);
+    }
+    if (cleanupErrors.length > 0) {
+      if (operationError !== undefined) {
+        throw new AggregateError(
+          [operationError, ...cleanupErrors],
+          "permission audit archive publication and cleanup both failed",
+        );
+      }
+      throw cleanupErrors[0];
+    }
   }
 }
 
@@ -454,9 +558,9 @@ export class AuditLogger {
     try {
       await transition;
     } finally {
-      if (this.permissionAuditEpochTransition === transition) {
-        this.permissionAuditEpochTransition = null;
-      }
+      // Every contender awaits the one published transition before it can
+      // create another, so the owner can clear the slot unconditionally.
+      this.permissionAuditEpochTransition = null;
     }
   }
 
@@ -649,49 +753,47 @@ export class AuditLogger {
     let authenticatedRowsStarted = false;
     await withFileLock(this.permissionAuditLogFile, async () => {
       try {
-        if (existsSync(this.permissionAuditLogFile)) {
-          const fd = openSync(this.permissionAuditLogFile, "r");
-          try {
-            const { size } = fstatSync(fd);
-            if (size > 0) {
-              const lastByte = Buffer.allocUnsafe(1);
-              readSync(fd, lastByte, 0, 1, size - 1);
-              if (lastByte[0] !== 0x0a) {
-                const boundary = findLastCompleteJsonlBoundarySync(fd, size);
-                const completeTail = readLastCompleteLineSync(fd, boundary);
-                const storedSeal = sealStore?.read(
-                  sealKeyName(this.permissionAuditDate),
-                  4 * 1024,
-                ) ?? null;
-                const expectedSeal = completeTail === GENESIS_MARKER
-                  ? null
-                  : computeDailySeal(secret, completeTail);
-                if (!sealStore || storedSeal !== expectedSeal) {
-                  throw new Error("permission audit chain has an unterminated tail");
-                }
-                const archivePath = join(
-                  this.auditDir,
-                  `${this.permissionAuditDate}.permission-audit.torn-unverified-${size}-${this.now().getTime()}.jsonl`,
-                );
-                if (existsSync(archivePath)) {
-                  throw new Error("permission audit torn-tail archive already exists");
-                }
-                copyFileSync(this.permissionAuditLogFile, archivePath);
-                try { chmodSync(archivePath, 0o600); } catch { /* best effort */ }
-                const archiveFd = openSync(archivePath, "r");
-                try { fsyncSync(archiveFd); } finally { closeSync(archiveFd); }
-                // The archive must be discoverable after a crash before the
-                // canonical log is truncated. File fsync alone does not make
-                // the newly-created directory entry durable.
-                fsyncDirectorySync(this.auditDir);
-                truncateSync(this.permissionAuditLogFile, boundary);
-                const repairedFd = openSync(this.permissionAuditLogFile, "r+");
-                try { fsyncSync(repairedFd); } finally { closeSync(repairedFd); }
+        const noFollow = platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
+        const fd = openSync(
+          this.permissionAuditLogFile,
+          fsConstants.O_RDWR | fsConstants.O_CREAT | noFollow,
+          0o600,
+        );
+        try {
+          const { size } = fstatSync(fd);
+          if (size > 0) {
+            const lastByte = Buffer.allocUnsafe(1);
+            readSync(fd, lastByte, 0, 1, size - 1);
+            if (lastByte[0] !== 0x0a) {
+              const boundary = findLastCompleteJsonlBoundarySync(fd, size);
+              const completeTail = readLastCompleteLineSync(fd, boundary);
+              const storedSeal = sealStore?.read(
+                sealKeyName(this.permissionAuditDate),
+                4 * 1024,
+              ) ?? null;
+              const expectedSeal = completeTail === GENESIS_MARKER
+                ? null
+                : computeDailySeal(secret, completeTail);
+              if (!sealStore || storedSeal !== expectedSeal) {
+                throw new Error("permission audit chain has an unterminated tail");
               }
+              const archivePath = join(
+                this.auditDir,
+                `${this.permissionAuditDate}.permission-audit.torn-unverified-${size}-${this.now().getTime()}.jsonl`,
+              );
+              publishOpenFileArchiveSync(
+                fd,
+                size,
+                archivePath,
+                this.auditDir,
+                noFollow,
+              );
+              ftruncateSync(fd, boundary);
+              fsyncSync(fd);
             }
-          } finally {
-            closeSync(fd);
           }
+        } finally {
+          closeSync(fd);
         }
         for await (const line of iterateJsonlLines(
           this.permissionAuditLogFile,
