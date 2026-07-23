@@ -20,6 +20,7 @@ import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
+import type { PluginManifest } from "../plugins/types.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 import { trackManagedChildProcess } from "./managed-child-processes.js";
@@ -340,23 +341,11 @@ export class PythonRuntimeBootstrapper {
     const candidates: string[] = [];
     try {
       const raw = await fs.readFile(manifestPath, "utf-8");
-      const manifest = JSON.parse(raw) as {
-        capabilities?: unknown;
-        python?: { requirementsLock?: unknown };
-        pythonRequirementsLock?: unknown;
-        runtime?: { python?: { requirementsLock?: unknown } };
-        config?: { pythonRequirementsLock?: unknown };
-      };
+      const manifest = JSON.parse(raw) as Pick<PluginManifest, "python">;
       const declared =
         typeof manifest.python?.requirementsLock === "string"
           ? manifest.python.requirementsLock
-          : typeof manifest.pythonRequirementsLock === "string"
-          ? manifest.pythonRequirementsLock
-          : typeof manifest.runtime?.python?.requirementsLock === "string"
-            ? manifest.runtime.python.requirementsLock
-            : typeof manifest.config?.pythonRequirementsLock === "string"
-              ? manifest.config.pythonRequirementsLock
-              : undefined;
+          : undefined;
       if (declared && declared.length > 0) {
         if (path.isAbsolute(declared)) {
           await this.log(`[python-runtime] plugin manifest lockfile declaration rejected (absolute path): ${manifestPath}`);
