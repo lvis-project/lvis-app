@@ -51,6 +51,7 @@
     "cli": "tsx scripts/lvis-cli.ts",
     "test:prepare": "bun run build:icons",
     "test:vitest": "node scripts/run-vitest-under-electron.mjs",
+    "test:plugin-bundle-inputs": "node --test scripts/plugin-bundle-e2e-inputs.test.mjs",
     "test": "bun run test:prepare && bun run test:vitest -- run",
     "test:a2a-tck": "bun scripts/run-a2a-tck.ts",
     "test:a2a-external": "bun scripts/run-a2a-external-smoke.ts",

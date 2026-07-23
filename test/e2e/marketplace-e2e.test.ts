@@ -4,7 +4,7 @@
  * End-to-end scenario:
  *   1. Publish a minimal signed plugin zip against a live marketplace server
  *      using the /api/v1/plugins/{slug}/versions publisher endpoint.
- *   2. Fetch the server's active ed25519 public keys from /api/v1/keys.
+ *   2. Load the Host's embedded ed25519 trust anchors.
  *   3. Run `installFromMarketplace()` with a real HTTP client against the
  *      live server — exercises downloadArtifact + fetchSignatureEnvelope +
  *      SHA-256 cross-check + envelope verification + atomic tarball persist.
@@ -22,106 +22,17 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import AdmZip from "adm-zip";
 import { describe, expect, it } from "vitest";
+import { installFromMarketplace } from "../../src/plugins/marketplace-installer.js";
+import { getBundledPublicKeys } from "../../src/plugins/publisher-keys.js";
 import {
-  installFromMarketplace,
-  type MarketplaceHttp,
-} from "../../src/plugins/marketplace-installer.js";
-import type { SignatureEnvelope } from "../../src/plugins/types.js";
+  buildPluginZip,
+  makeLiveHttp,
+  publishPlugin,
+} from "./marketplace-e2e-fixture.js";
 
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const PUBLISHER_KEY = process.env.MARKETPLACE_PUBLISHER_KEY ?? "";
-
-/** Minimal valid plugin zip — mirrors server conftest.make_valid_plugin_zip. */
-function buildPluginZip(slug: string, version: string): Buffer {
-  const zip = new AdmZip();
-  const pluginJson = {
-    id: slug,
-    name: "M4 E2E Plugin",
-    version,
-    // SDK v5.13 schema requires `entry`. `main` is the older field.
-    // Keep both for back-compat with intermediate SDK versions.
-    entry: "index.js",
-    installPolicy: "user",
-    description: "M4 e2e test plugin",
-    publisher: "lvis-community",
-    // SDK v5.13 schema: additionalProperties=false. Required fields:
-    // id, name, version, entry, tools, description.
-    tools: [],
-  };
-  zip.addFile("plugin.json", Buffer.from(JSON.stringify(pluginJson)));
-  // A trivial smoke handler that the assertion below exec()s indirectly by
-  // reading the file back — we do NOT require(...) untrusted code in tests.
-  zip.addFile("index.js", Buffer.from("module.exports = { smoke: () => 'ok' };\n"));
-  return zip.toBuffer();
-}
-
-function makeLiveHttp(baseUrl: string): MarketplaceHttp {
-  return {
-    async downloadArtifact(slug, version) {
-      const url = `${baseUrl}/api/v1/plugins/${slug}/versions/${version}/download`;
-      const res = await fetch(url);
-      const body = Buffer.from(await res.arrayBuffer());
-      return {
-        body,
-        sha256Header: res.headers.get("X-Plugin-SHA256"),
-        status: res.status,
-        retryAfterSeconds: res.headers.get("Retry-After")
-          ? Number(res.headers.get("Retry-After")) || undefined
-          : undefined,
-      };
-    },
-    async fetchSignatureEnvelope(slug, version) {
-      const url = `${baseUrl}/api/v1/plugins/${slug}/versions/${version}/download.sig`;
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(`download.sig returned ${res.status}`);
-      }
-      return (await res.json()) as SignatureEnvelope;
-    },
-  };
-}
-
-async function fetchPublicKeys(baseUrl: string): Promise<Record<string, Buffer>> {
-  const res = await fetch(`${baseUrl}/api/v1/keys`);
-  if (!res.ok) throw new Error(`/api/v1/keys returned ${res.status}`);
-  const body = (await res.json()) as {
-    keys: Array<{ key_id: string; alg: string; pub: string }>;
-  };
-  const out: Record<string, Buffer> = {};
-  for (const k of body.keys) {
-    if (k.alg !== "ed25519") continue;
-    out[k.key_id] = Buffer.from(k.pub, "base64");
-  }
-  if (Object.keys(out).length === 0) {
-    throw new Error("marketplace returned no ed25519 public keys");
-  }
-  return out;
-}
-
-async function publishPlugin(
-  baseUrl: string,
-  apiKey: string,
-  slug: string,
-  version: string,
-  zipBytes: Buffer,
-): Promise<void> {
-  const form = new FormData();
-  form.append(
-    "file",
-    new Blob([zipBytes], { type: "application/zip" }),
-    `${slug}-${version}.zip`,
-  );
-  const res = await fetch(`${baseUrl}/api/v1/plugins/${slug}/versions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-  });
-  if (res.status !== 201) {
-    const detail = await res.text();
-    throw new Error(`publish failed: status=${res.status} body=${detail}`);
-  }
-}
 
 describe.skipIf(!E2E_ENABLED)("M4 E2E — marketplace ↔ app installer", () => {
   it("publishes, downloads, verifies signature, extracts plugin", async () => {
@@ -140,8 +51,10 @@ describe.skipIf(!E2E_ENABLED)("M4 E2E — marketplace ↔ app installer", () => 
     // 1. Publish
     await publishPlugin(BASE_URL, PUBLISHER_KEY, slug, version, zipBytes);
 
-    // 2. Fetch public keys
-    const publicKeys = await fetchPublicKeys(BASE_URL);
+    // 2. Use the Host-owned trust anchors. Trusting `/api/v1/keys` from the
+    // same server that supplied the artifact would let a substituted server
+    // authorize its own signing key and turn this into a self-signed test.
+    const publicKeys = getBundledPublicKeys();
 
     // 3. Install via the real installer flow
     const downloadRoot = mkdtempSync(resolve(tmpdir(), "m4-e2e-"));
