@@ -6,11 +6,20 @@ import type {
 } from "./types.js";
 import type { PreparedPluginHookProjection } from "../hooks/plugin-hook-projection.js";
 import type { PreparedPluginMcpProjection } from "../mcp/plugin-mcp-projection.js";
-import type {
-  ActivePluginGeneration,
-  PluginGenerationLease,
-} from "./plugin-generation-coordinator.js";
+import type { PluginGenerationLease } from "./plugin-generation-coordinator.js";
 import type { HostApiGenerationScope } from "./plugin-host-effect-scope.js";
+
+type DeepReadonly<T> =
+  T extends (...args: never[]) => unknown ? T
+    : T extends readonly (infer TItem)[] ? readonly DeepReadonly<TItem>[]
+      : T extends object ? { readonly [TKey in keyof T]: DeepReadonly<T[TKey]> }
+        : T;
+
+export interface ActivePluginGenerationSnapshot {
+  readonly pluginId: string;
+  readonly generationId: string;
+  readonly manifest: DeepReadonly<PluginManifest>;
+}
 
 export interface PluginRuntimeGenerationProjection {
   readonly activationId: string;
@@ -43,7 +52,7 @@ export interface HostPluginGenerationState {
 }
 
 export interface PluginRuntimeGenerationAccess {
-  getActive(pluginId: string): ActivePluginGeneration<HostPluginGenerationState> | undefined;
+  getActive(pluginId: string): ActivePluginGenerationSnapshot | undefined;
   acquire(pluginId: string): Promise<PluginGenerationLease<HostPluginGenerationState>>;
   acquireExact(pluginId: string, generationId: string): Promise<PluginGenerationLease<HostPluginGenerationState>>;
   runWithLease<T>(

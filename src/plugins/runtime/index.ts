@@ -1029,7 +1029,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   } | undefined {
     const active = this.requireGenerationAccess("plugin auth invocation").getActive(pluginId);
     if (!active || active.generationId !== generationId) return undefined;
-    const auth = active.state.runtime.manifest?.auth;
+    const auth = active.manifest.auth;
     if (
       !auth ||
       (
@@ -1067,7 +1067,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   ): { invalidatedAccountHash?: string } {
     const active = this.requireGenerationAccess("plugin auth result observation").getActive(pluginId);
     if (!active || active.generationId !== generationId) return {};
-    const manifest = active.state.runtime.manifest;
+    const manifest = active.manifest;
     const auth = manifest?.auth;
     if (!auth) return {};
     const key = `${pluginId}\0${generationId}`;

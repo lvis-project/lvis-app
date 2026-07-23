@@ -205,7 +205,13 @@ describe("PluginBundleLifecycle", () => {
     expect(prepareBundledGeneration).toHaveBeenCalledTimes(2);
     expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
 
-    const generationId = lifecycle.getActive("ep-api")?.generationId;
+    const active = lifecycle.getActive("ep-api");
+    expect(active).not.toHaveProperty("state");
+    expect(active?.manifest).not.toBe(manifest);
+    expect(Object.isFrozen(active)).toBe(true);
+    expect(Object.isFrozen(active?.manifest)).toBe(true);
+    expect(Object.isFrozen(active?.manifest.tools)).toBe(true);
+    const generationId = active?.generationId;
     expect(generationId).toMatch(/^[a-f0-9]{64}$/);
     await lifecycle.deactivate("ep-api");
     await lifecycle.waitForRetirements();
