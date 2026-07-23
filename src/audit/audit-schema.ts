@@ -95,10 +95,10 @@ export type RoutineScopeSnapshot = Record<string, unknown>;
 /**
  * Common fields present on every permission audit entry. The chain link is
  * the `prevHash` field — `audit-logger`'s emitter computes
- * `prevHash = HMAC(secret, prevLine)` where `prevLine` is the
- * previously-emitted line's *full JSON*. This binds each entry to
- * its predecessor; tampering with any line breaks the chain at the
- * next entry's hash check.
+ * `prevHash = HMAC(secret, prevLine)` binds each entry to its predecessor.
+ * New rows also carry `entryHash`, an HMAC over that row before `entryHash`
+ * is appended, so the active tail is authenticated without waiting for a
+ * successor. `entryHash` is optional only for reading pre-migration rows.
  */
 export interface AuditCommon {
   /** ISO 8601 timestamp. */
@@ -121,6 +121,7 @@ export interface AuditCommon {
    * For the first entry of the file this is HMAC(secret, "genesis").
    */
   prevHash: string;
+  entryHash?: string;
 }
 
 /**
@@ -283,7 +284,7 @@ export type PermissionAuditEntry =
 
 export type PermissionAuditEntryInput = PermissionAuditEntry extends infer Entry
   ? Entry extends PermissionAuditEntry
-    ? Omit<Entry, "prevHash">
+    ? Omit<Entry, "prevHash" | "entryHash">
     : never
   : never;
 

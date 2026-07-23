@@ -76,6 +76,7 @@ function makeMockGate() {
 // ─── Build minimal AppServices stub ──────────────────
 
 function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) {
+  const defaultPluginManifest = { id: "meeting", config: {} };
   return {
     pluginRuntime: {
       call: vi.fn(),
@@ -84,13 +85,13 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
       restartAll: vi.fn(),
       // US-3c.2: config:set now calls restartPlugin(pluginId) instead of
       // restartAll() so only the affected plugin is restarted.
-      restartPlugin: vi.fn(),
+      restartPlugin: vi.fn(async () => "started"),
       setConfigOverride: vi.fn(),
       listUiExtensions: vi.fn(() => []),
       // §9.2 Track B — config:set IPC handler reads the manifest to detect
-      // `format: "secret"` keys. Default to undefined so the strip pass is
-      // a no-op for legacy tests.
-      getPluginManifest: vi.fn(() => undefined),
+      // `format: "secret"` keys. The runtime returns the same manifest object
+      // for the lifetime of one active incarnation.
+      getPluginManifest: vi.fn(() => defaultPluginManifest),
     } as any,
     pluginMarketplace: { list: vi.fn(), install: vi.fn(), uninstall: vi.fn() } as any,
     settingsService: {
@@ -437,7 +438,10 @@ describe("lvis:plugins:config:*", () => {
     expect(services.settingsService.setPluginConfig).toHaveBeenCalledWith("meeting", { apiKey: "secret" });
     expect(services.pluginRuntime.setConfigOverride).toHaveBeenCalledWith("meeting", { apiKey: "secret" });
     // US-3c.2: targeted restart — only the affected plugin is restarted.
-    expect(services.pluginRuntime.restartPlugin).toHaveBeenCalledWith("meeting");
+    expect(services.pluginRuntime.restartPlugin).toHaveBeenCalledWith(
+      "meeting",
+      { skipPreparation: true },
+    );
     expect(services.pluginRuntime.restartAll).not.toHaveBeenCalled();
   });
 
@@ -461,7 +465,10 @@ describe("lvis:plugins:config:*", () => {
     };
 
     expect(result.ok).toBe(true);
-    expect(services.pluginRuntime.restartPlugin).toHaveBeenCalledWith("meeting");
+    expect(services.pluginRuntime.restartPlugin).toHaveBeenCalledWith(
+      "meeting",
+      { skipPreparation: true },
+    );
     // The IPC handler must not bypass the runtime's lifecycle contract by
     // mutating the ToolRegistry on its own — that's onEnable's job, and the
     // runtime layer's lifecycle tests verify it fires.
@@ -479,7 +486,7 @@ describe("lvis:plugins:config:*", () => {
     // Manifest declares apiKey as a secret. The IPC handler MUST drop
     // it from the payload before calling setPluginConfig so the
     // cleartext settings.json never sees it.
-    services.pluginRuntime.getPluginManifest = vi.fn(() => ({
+    const manifest = {
       id: "meeting",
       name: "Meeting",
       version: "1.0.0",
@@ -491,7 +498,8 @@ describe("lvis:plugins:config:*", () => {
           apiKey: { type: "string", format: "secret" },
         },
       },
-    }));
+    };
+    services.pluginRuntime.getPluginManifest = vi.fn(() => manifest);
     registerIpcHandlers(services, () => null);
 
     const result = await invoke(

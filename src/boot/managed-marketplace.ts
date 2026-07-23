@@ -8,12 +8,20 @@ import type {
 import type { PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
+import { withAllPluginInstallLocks } from "../plugins/install-lifecycle.js";
 const log = createLogger("lvis");
 
 export function resolveManagedPluginBootstrap(input: {
   marketplace: Pick<MarketplaceSettings, "backend" | "cloudBaseUrl">;
+  e2eTestMode?: boolean;
 }): { enabled: boolean; reason?: string } {
   const { marketplace } = input;
+  if (input.e2eTestMode) {
+    return {
+      enabled: false,
+      reason: "managed plugin bootstrap disabled in isolated E2E test mode",
+    };
+  }
   // The cloud backend is the only marketplace backend; bootstrap is enabled iff
   // a base URL is configured. (The former mock-backend / isPackaged skip branch
   // was dead once the mock backend was removed.)
@@ -38,9 +46,9 @@ export interface RunManagedBootstrapInput {
  * In-flight bootstrap promise. The first-boot caller and the renderer-driven
  * `lvis:bootstrap:retry` IPC both go through `runManagedBootstrap`; if the
  * user mashes the retry button or boot is still in progress when retry fires,
- * concurrent runs would race on `ensureManagedInstalled` (registry write) +
- * `restartAll` (runtime tear-down/reload). Coalescing eliminates both
- * windows — subsequent callers await the in-flight result.
+ * concurrent runs would race on `ensureManagedInstalled` and atomic runtime
+ * publication. Coalescing eliminates both windows — subsequent callers await
+ * the in-flight result.
  *
  * Module-scoped (not instance-scoped) because the singleton matches the
  * single PluginMarketplaceService + PluginRuntime constructed at boot. If
@@ -57,12 +65,12 @@ export function _resetBootstrapInFlightForTest(): void {
  * Run the managed-plugin bootstrap once and emit lifecycle status to the
  * renderer. Shared between the first-boot call in `boot()` and the
  * `lvis:bootstrap:retry` IPC handler so the retry path is bug-for-bug
- * identical to the original — same skip-reason resolution, same
- * `restartAll()` call after a successful install, same status payload shape.
+ * identical to the original — same skip-reason resolution and status payload
+ * shape, with successful artifacts activated through the generation lifecycle.
  *
  * Concurrent calls are coalesced via {@link bootstrapInFlight}: if a run is
  * already underway, the new caller awaits the same promise instead of
- * starting a parallel `ensureManagedInstalled` / `restartAll` cycle.
+ * starting a parallel managed-install/activation cycle.
  *
  * Graceful by contract: marketplace unreachable / per-plugin failure /
  * thrown errors all emit a status event but never propagate. The caller does
@@ -81,7 +89,10 @@ export function runManagedBootstrap(input: RunManagedBootstrapInput): Promise<vo
 
 async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<void> {
   const { pluginMarketplace, pluginRuntime, mainWindow, marketplace } = input;
-  const decision = resolveManagedPluginBootstrap({ marketplace });
+  const decision = resolveManagedPluginBootstrap({
+    marketplace,
+    e2eTestMode: process.env.LVIS_E2E === "1" && process.env.NODE_ENV === "test",
+  });
   if (!decision.enabled) {
     log.warn(`boot: managed plugin bootstrap skipped: ${decision.reason}`);
     notifyBootstrapStatus(mainWindow, {
@@ -97,8 +108,10 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     const activatePreparedArtifact: PreparedMarketplacePluginActivation =
       (prepared: PreparedMarketplacePluginArtifact) =>
         pluginRuntime.activatePreparedArtifact<string>(prepared);
-    const ensureResult = await pluginMarketplace.ensureManagedInstalled({
-      activatePreparedArtifact,
+    const ensureResult = await withAllPluginInstallLocks(async () => {
+      return pluginMarketplace.ensureManagedInstalled({
+        activatePreparedArtifact,
+      });
     });
     const updated = ensureResult.updated ?? [];
     if (ensureResult.installed.length > 0) {

@@ -21,6 +21,7 @@ const runtimeTestState = vi.hoisted(() => ({
   browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void } }>,
   capturedRuntimeOptions: null as Record<string, unknown> | null,
   readPluginRegistry: vi.fn(async () => ({ version: 1, plugins: [] })),
+  spawnWorker: vi.fn(),
   runtime: {
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
@@ -66,6 +67,10 @@ vi.mock("../../../plugins/dev-watcher.js", () => ({
   startPluginDevWatcher: vi.fn(() => ({ stop: vi.fn() })),
 }));
 
+vi.mock("../../../permissions/worker-spawn.js", () => ({
+  spawnWorker: runtimeTestState.spawnWorker,
+}));
+
 vi.mock("../../../main/html-preview-partition.js", () => ({
   installPluginPartitionPolicy: vi.fn(),
 }));
@@ -83,6 +88,7 @@ vi.mock("../../../plugins/registry.js", () => ({
 }));
 
 import { initPluginRuntime } from "../plugin-runtime.js";
+import { withPluginInstallLock } from "../../../plugins/install-lifecycle.js";
 
 type ConfigHostApi = {
   config: {
@@ -91,6 +97,19 @@ type ConfigHostApi = {
   };
   emitEvent: (type: string, data?: unknown) => void;
   onEvent: (type: string, handler: (data: unknown) => void) => () => void;
+  getSecret: (key: string) => string | undefined | null;
+  resolveApiKey: (opts: { purpose: "llm"; vendor?: "openai" }) => Promise<
+    | { ok: false; reason: string }
+    | { ok: true; vendor: string; bearer: () => string; release: () => void }
+  >;
+  spawnWorker: (spec: { workerId: string; command: string }) => Promise<{
+    socketPath: string | null;
+    pid: number | undefined;
+    stop: () => void;
+    onStdout: (listener: (chunk: string) => void) => void;
+    onStderr: (listener: (chunk: string) => void) => void;
+    onExit: (listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void) => void;
+  }>;
 };
 
 type CreateHostApi = (
@@ -100,8 +119,15 @@ type CreateHostApi = (
     config?: Record<string, unknown>;
     configSchema?: { properties?: Record<string, { type?: string; format?: string; default?: unknown }> };
     capabilities?: string[];
+    emittedEvents?: string[];
   },
   pluginDataDir: string,
+  incarnation: {
+    registerDisposer: (dispose: () => void) => void;
+    trackOperation: <T>(operation: Promise<T>) => Promise<T>;
+    isActive: () => boolean;
+    isLifecycleHookActive: () => boolean;
+  },
 ) => ConfigHostApi;
 
 async function initAndGetFactory(settingsService: unknown): Promise<CreateHostApi> {
@@ -150,6 +176,15 @@ function makeSettingsService(store: Map<string, Record<string, unknown>>) {
   };
 }
 
+function activeIncarnation() {
+  return {
+    registerDisposer: vi.fn(),
+    trackOperation: <T>(operation: Promise<T>) => operation,
+    isActive: () => true,
+    isLifecycleHookActive: () => false,
+  };
+}
+
 beforeEach(() => {
   runtimeTestState.readPluginRegistry.mockReset();
   runtimeTestState.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
@@ -157,6 +192,7 @@ beforeEach(() => {
   runtimeTestState.runtime.restartPlugin.mockClear();
   runtimeTestState.runtime.getWildcardConfigOverride.mockReturnValue({});
   runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+  runtimeTestState.spawnWorker.mockReset();
 });
 
 describe("HostApi.config.get merged-read precedence", () => {
@@ -170,6 +206,7 @@ describe("HostApi.config.get merged-read precedence", () => {
       "plugin-a",
       { id: "plugin-a", config: { a: "m", shared: "m" } },
       mkdtempSync("/tmp/lvis-cfg-"),
+      activeIncarnation(),
     );
 
     expect(api.config.get("a")).toBe("m");
@@ -198,6 +235,7 @@ describe("HostApi.config.get merged-read precedence", () => {
         },
       },
       mkdtempSync("/tmp/lvis-cfg-def-"),
+      activeIncarnation(),
     );
 
     // Unset schema-defaulted key now returns the author-declared default
@@ -211,17 +249,44 @@ describe("HostApi.config.get merged-read precedence", () => {
 });
 
 describe("HostApi.config.set round-trip", () => {
+  beforeEach(() => {
+    runtimeTestState.runtime.getPluginManifest.mockImplementation((pluginId: string) => (
+      pluginId === "plugin-a" ? activeManifest : null
+    ));
+  });
+
+  let activeManifest: Parameters<CreateHostApi>[1];
+
+  async function createActiveApi(settings: ReturnType<typeof makeSettingsService>) {
+    const createHostApi = await initAndGetFactory(settings);
+    activeManifest = { id: "plugin-a", config: {} };
+    return createHostApi(
+      "plugin-a",
+      activeManifest,
+      mkdtempSync("/tmp/lvis-cfg-set-"),
+      {
+        registerDisposer: vi.fn(),
+        trackOperation: <T>(operation: Promise<T>) => operation,
+        isActive: () =>
+          runtimeTestState.runtime.getPluginManifest("plugin-a") === activeManifest,
+        isLifecycleHookActive: () => false,
+      },
+    );
+  }
+
   it("persists via setPluginConfig, refreshes the override, restarts the plugin, and re-reads the value", async () => {
     const store = new Map<string, Record<string, unknown>>();
     const settings = makeSettingsService(store);
-    const createHostApi = await initAndGetFactory(settings);
-    const api = createHostApi("plugin-a", { id: "plugin-a", config: {} }, mkdtempSync("/tmp/lvis-cfg-set-"));
+    const api = await createActiveApi(settings);
 
     await api.config.set("k", "v");
 
     expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { k: "v" });
     expect(runtimeTestState.runtime.setConfigOverride).toHaveBeenCalledWith("plugin-a", { k: "v" });
-    expect(runtimeTestState.runtime.restartPlugin).toHaveBeenCalledWith("plugin-a");
+    expect(runtimeTestState.runtime.restartPlugin).toHaveBeenCalledWith(
+      "plugin-a",
+      { skipPreparation: true },
+    );
     expect(api.config.get("k")).toBe("v");
   });
 
@@ -229,25 +294,107 @@ describe("HostApi.config.set round-trip", () => {
     const store = new Map<string, Record<string, unknown>>();
     const settings = makeSettingsService(store);
     const createHostApi = await initAndGetFactory(settings);
+    activeManifest = {
+      id: "plugin-a",
+      config: {},
+      configSchema: { properties: { secretKey: { type: "string", format: "secret" } } },
+    };
     const api = createHostApi(
       "plugin-a",
-      {
-        id: "plugin-a",
-        config: {},
-        configSchema: { properties: { secretKey: { type: "string", format: "secret" } } },
-      },
+      activeManifest,
       mkdtempSync("/tmp/lvis-cfg-secret-"),
+      activeIncarnation(),
     );
 
     await expect(api.config.set("secretKey", "leak")).rejects.toThrow(/secret fields must be saved via hostApi\.setSecret/);
     expect(settings.setPluginConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects a queued write when uninstall invalidates the HostApi instance", async () => {
+    const store = new Map<string, Record<string, unknown>>();
+    const settings = makeSettingsService(store);
+    const api = await createActiveApi(settings);
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lockEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const uninstall = withPluginInstallLock("plugin-a", async () => {
+      entered();
+      await gate;
+    });
+    await lockEntered;
+
+    const write = api.config.set("k", "stale");
+    await Promise.resolve();
+    expect(settings.setPluginConfig).not.toHaveBeenCalled();
+
+    runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+    expect(() => api.config.get("k")).toThrow(/plugin instance is no longer active/);
+    release();
+    await uninstall;
+    await expect(write).rejects.toThrow(/plugin instance is no longer active/);
+    expect(settings.setPluginConfig).not.toHaveBeenCalled();
+    expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("persists config from a lifecycle hook without recursively restarting itself", async () => {
+    const store = new Map<string, Record<string, unknown>>();
+    const settings = makeSettingsService(store);
+    const createHostApi = await initAndGetFactory(settings);
+    activeManifest = { id: "plugin-a", config: {} };
+    const trackOperation = vi.fn(<T>(operation: Promise<T>) => operation);
+    const api = createHostApi(
+      "plugin-a",
+      activeManifest,
+      mkdtempSync("/tmp/lvis-cfg-lifecycle-"),
+      {
+        registerDisposer: vi.fn(),
+        trackOperation,
+        isActive: () => true,
+        isLifecycleHookActive: () => true,
+      },
+    );
+
+    await expect(api.config.set("duringStart", true)).resolves.toBeUndefined();
+    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { duringStart: true });
+    expect(trackOperation).toHaveBeenCalledTimes(1);
+    expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("does not deadlock when stop-time config.set re-enters the uninstall lock", async () => {
+    const settings = makeSettingsService(new Map());
+    const api = await createActiveApi(settings);
+
+    await expect(withPluginInstallLock("plugin-a", async () => {
+      await api.config.set("duringStop", true);
+    })).resolves.toBeUndefined();
+
+    expect(settings.setPluginConfig).toHaveBeenCalledWith(
+      "plugin-a",
+      { duringStop: true },
+    );
+    expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a non-started runtime reload result after config persistence", async () => {
+    const settings = makeSettingsService(new Map());
+    const api = await createActiveApi(settings);
+    runtimeTestState.runtime.restartPlugin.mockResolvedValueOnce("failed");
+
+    await expect(api.config.set("k", "v")).rejects.toThrow(/runtime reload returned failed/);
+    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { k: "v" });
   });
 });
 
 describe("HostApi emitEvent/onEvent round-trip", () => {
   it("delivers an emitted event to a same-plugin subscriber with the pluginId injected, and unsubscribe stops delivery", async () => {
     const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
-    const api = createHostApi("plugin-a", { id: "plugin-a", config: {}, capabilities: [] }, mkdtempSync("/tmp/lvis-evt-"));
+    const api = createHostApi(
+      "plugin-a",
+      { id: "plugin-a", config: {}, capabilities: [] },
+      mkdtempSync("/tmp/lvis-evt-"),
+      activeIncarnation(),
+    );
 
     const handler = vi.fn();
     const unsubscribe = api.onEvent("plugin-a.updated", handler);
@@ -259,5 +406,98 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     unsubscribe();
     api.emitEvent("plugin-a.updated", { value: 8 });
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases returned API-key and worker capabilities when the incarnation is disposed", async () => {
+    const settings = makeSettingsService(new Map());
+    settings.getSecret.mockImplementation((key: string) => (
+      key === "plugin.plugin-a.llm.apiKey.openai" ? "sk-incarnation" : undefined
+    ));
+    const workerStop = vi.fn();
+    const workerOnStdout = vi.fn();
+    const workerOnStderr = vi.fn();
+    const workerOnExit = vi.fn();
+    runtimeTestState.spawnWorker.mockResolvedValue({
+      socketPath: "/tmp/plugin-a.sock",
+      pid: 42,
+      stop: workerStop,
+      onStdout: workerOnStdout,
+      onStderr: workerOnStderr,
+      onExit: workerOnExit,
+    });
+    const disposers: Array<() => void> = [];
+    let active = true;
+    const createHostApi = await initAndGetFactory(settings);
+    const api = createHostApi(
+      "plugin-a",
+      { id: "plugin-a", config: {} },
+      mkdtempSync("/tmp/lvis-issued-capabilities-"),
+      {
+        registerDisposer: (dispose) => disposers.push(dispose),
+        trackOperation: <T>(operation: Promise<T>) => operation,
+        isActive: () => active,
+        isLifecycleHookActive: () => false,
+      },
+    );
+
+    const key = await api.resolveApiKey({ purpose: "llm", vendor: "openai" });
+    expect(key.ok).toBe(true);
+    if (!key.ok) throw new Error("expected API key capability");
+    expect(key.bearer()).toBe("sk-incarnation");
+    const worker = await api.spawnWorker({ workerId: "worker-a", command: "node" });
+    const stdoutListener = vi.fn();
+    const stderrListener = vi.fn();
+    const exitListener = vi.fn();
+    worker.onStdout(stdoutListener);
+    worker.onStderr(stderrListener);
+    worker.onExit(exitListener);
+
+    workerOnStdout.mock.calls[0]?.[0]("before");
+    workerOnStderr.mock.calls[0]?.[0]("before-error");
+    workerOnExit.mock.calls[0]?.[0]({ code: 0, signal: null });
+    expect(stdoutListener).toHaveBeenCalledWith("before");
+    expect(stderrListener).toHaveBeenCalledWith("before-error");
+    expect(exitListener).toHaveBeenCalledWith({ code: 0, signal: null });
+    stdoutListener.mockClear();
+    stderrListener.mockClear();
+    exitListener.mockClear();
+
+    active = false;
+    for (const dispose of disposers) dispose();
+
+    expect(() => key.bearer()).toThrow(/plugin instance is no longer active/);
+    expect(() => worker.onStdout(vi.fn())).toThrow(/plugin instance is no longer active/);
+    workerOnStdout.mock.calls[0]?.[0]("after");
+    workerOnStderr.mock.calls[0]?.[0]("after-error");
+    workerOnExit.mock.calls[0]?.[0]({ code: null, signal: "SIGTERM" });
+    expect(stdoutListener).not.toHaveBeenCalled();
+    expect(stderrListener).not.toHaveBeenCalled();
+    expect(exitListener).not.toHaveBeenCalled();
+    expect(workerStop).toHaveBeenCalledTimes(1);
+    worker.stop();
+    expect(workerStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("revokes every callable HostApi surface when its incarnation is deactivated", async () => {
+    const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
+    let active = true;
+    const api = createHostApi(
+      "plugin-a",
+      { id: "plugin-a", config: {}, emittedEvents: ["plugin-a.updated"] },
+      mkdtempSync("/tmp/lvis-revoked-hostapi-"),
+      {
+        registerDisposer: vi.fn(),
+        trackOperation: <T>(operation: Promise<T>) => operation,
+        isActive: () => active,
+        isLifecycleHookActive: () => false,
+      },
+    );
+    expect(api.config.get("before")).toBeUndefined();
+
+    active = false;
+    expect(() => api.config.get("after")).toThrow(/plugin instance is no longer active/);
+    expect(() => api.getSecret("token")).toThrow(/plugin instance is no longer active/);
+    expect(() => api.emitEvent("plugin-a.updated", {})).toThrow(/plugin instance is no longer active/);
+    expect(() => api.onEvent("plugin-a.updated", vi.fn())).toThrow(/plugin instance is no longer active/);
   });
 });
