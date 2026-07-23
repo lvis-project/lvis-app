@@ -70,6 +70,12 @@ afterEach(async () => {
 });
 
 describe("PluginBundleLifecycle", () => {
+  it("rejects a missing receipt cache root with an explicit contract error", () => {
+    expect(() => new PluginBundleLifecycle({ receiptCacheRoot: "" } as never)).toThrow(
+      "PluginBundleLifecycle requires a non-empty receiptCacheRoot",
+    );
+  });
+
   it("publishes Skills, keeps executable bundles fail-closed, approves exact owners, and tears down", async () => {
     const { root, pluginRoot, cacheRoot, manifest } = await fixture();
     const skillStore = new SkillStore({ userDir: join(root, "user-skills") });

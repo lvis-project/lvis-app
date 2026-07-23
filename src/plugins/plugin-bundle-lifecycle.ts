@@ -82,6 +82,9 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   private readonly retirementTasks = new Set<Promise<void>>();
 
   constructor(private readonly deps: PluginBundleLifecycleDeps) {
+    if (typeof deps.receiptCacheRoot !== "string" || deps.receiptCacheRoot.trim().length === 0) {
+      throw new Error("PluginBundleLifecycle requires a non-empty receiptCacheRoot");
+    }
     this.hookTrust = deps.hookTrust ?? new PluginHookTrustStore(
       resolve(deps.receiptCacheRoot, "plugin-contribution-trust", "hooks.json"),
     );
