@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.9 — 2026-07-23
+
+Re-ships the v0.5.8 plugin-integrity fixes with a working Windows installer. Public tags remain unsigned.
+
+### Build
+
+- **Windows installers build again.** The packaged-footprint audit read the main bundle manifest from the app archive with POSIX separators, but electron-builder keys asar entries with the OS separator on Windows, so every lookup missed its backslash-keyed entry and the release build failed with a spurious "bundle manifest not found." The audit now resolves entries with the archive's own separator; macOS and Linux are unaffected. (v0.5.8's release build failed this audit and was never published; v0.5.9 carries the same fixes.)
+
 ## v0.5.8 — 2026-07-23
 
 Fixes a v0.5.7 regression where stateful and Python-backed plugins could stop loading after first use, and lands the startup-bundle split with hardened version resolution. Public tags remain unsigned.
