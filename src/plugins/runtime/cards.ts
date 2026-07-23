@@ -74,6 +74,7 @@ export function buildPluginCard(
     configSchema: manifest.configSchema,
     auth: manifest.auth,
     networkAccess: manifest.networkAccess,
+    onboarding: manifest.onboarding,
     installAliases: extras.installAliases,
   };
 }

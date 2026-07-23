@@ -1,111 +1,52 @@
-/**
- * Tutorial-X5 — Post-tour First Task Proposal catalog.
- *
- * After the SpotlightTour finishes, we want to bridge the user from
- * "I just saw a tutorial" → "I just achieved my first real value with
- * LVIS" without a dead-end transition. This module is the catalog of
- * first-task proposals keyed by *installed plugin id* — the
- * PostTourFirstTask component looks up the user's installed plugins
- * and surfaces the highest-priority proposal whose plugin is present.
- *
- * Each proposal has:
- *   - `pluginId` (matches the installed bare manifest id, e.g. "meeting" —
- *     the same id `pluginCards[].id` carries, NOT the marketplace slug)
- *   - `priority` (lower number wins — the order of "real first value")
- *   - `headlineKo` (the offer card title)
- *   - `bodyKo` (1–2 sentence description)
- *   - `ctaKo` (button label)
- *   - `composerSeed` (the message text that auto-fills the composer when
- *     the user accepts — this is what triggers the *real* plugin tool
- *     via the natural conversation path, no hidden IPC)
- *
- * Design rationale:
- *   - Pre-seeding the composer (instead of dispatching a hidden tool
- *     call) keeps the user in control and matches LVIS's tool-approval
- *     contract. The user sees the prompt that will run.
- *   - The catalog is plugin-keyed so marketplace installs converge on the
- *     same proposal.
- */
+import type { PluginFirstTaskCopy } from "../../../plugins/types.js";
+import type { PluginCardSummary } from "../types.js";
 
-import { t } from "../../../i18n/runtime.js";
-
-export interface FirstTaskProposal {
+export interface FirstTaskProposal extends PluginFirstTaskCopy {
   pluginId: string;
   priority: number;
-  headlineKo: string;
-  bodyKo: string;
-  ctaKo: string;
-  /**
-   * Composer pre-fill text. The PostTourFirstTask card dispatches this
-   * via `api.chatSubmit?.(composerSeed)` (or a composer-set IPC) so the
-   * user is *one click* away from a real plugin invocation — every step
-   * after is the canonical chat-tool-approval loop, not a tutorial fork.
-   */
-  composerSeed: string;
+}
+
+function normalizeLocaleTag(locale: string): string {
+  return locale.trim().toLowerCase().replaceAll("_", "-");
+}
+
+function resolveCopy(
+  locales: Record<string, PluginFirstTaskCopy>,
+  locale: string,
+): PluginFirstTaskCopy {
+  const normalized = normalizeLocaleTag(locale);
+  const primary = normalized.split("-")[0];
+  return locales[normalized] ?? locales[primary] ?? locales.en;
 }
 
 /**
- * Build the first-task proposal catalog with the current active locale.
- * Called at runtime so t() resolves against the active locale at the
- * time of the call rather than at module-init time.
- */
-function getFirstTaskProposals(): readonly FirstTaskProposal[] {
-  return [
-    {
-      pluginId: "meeting",
-      priority: 10,
-      headlineKo: t("firstTaskProposals.meetingHeadline"),
-      bodyKo: t("firstTaskProposals.meetingBody"),
-      ctaKo: t("firstTaskProposals.meetingCta"),
-      composerSeed: t("firstTaskProposals.meetingComposerSeed"),
-    },
-    {
-      pluginId: "local-indexer",
-      priority: 20,
-      headlineKo: t("firstTaskProposals.indexerHeadline"),
-      bodyKo: t("firstTaskProposals.indexerBody"),
-      ctaKo: t("firstTaskProposals.indexerCta"),
-      composerSeed: t("firstTaskProposals.indexerComposerSeed"),
-    },
-    {
-      // The marketplace package slug is `lvis-plugin-work-assistant`
-
-      // The installed-plugin set is keyed by the bare manifest id, so
-      // pluginId here is the manifest id (not the slug) for the lookup.
-      pluginId: "work-assistant",
-      priority: 30,
-      headlineKo: t("firstTaskProposals.workAssistantHeadline"),
-      bodyKo: t("firstTaskProposals.workAssistantBody"),
-      ctaKo: t("firstTaskProposals.workAssistantCta"),
-      composerSeed: t("firstTaskProposals.workAssistantComposerSeed"),
-    },
-    {
-      pluginId: "agent-hub",
-      priority: 40,
-      headlineKo: t("firstTaskProposals.agentHubHeadline"),
-      bodyKo: t("firstTaskProposals.agentHubBody"),
-      ctaKo: t("firstTaskProposals.agentHubCta"),
-      composerSeed: t("firstTaskProposals.agentHubComposerSeed"),
-    },
-  ];
-}
-
-/**
- * Pick the highest-priority proposal whose plugin is installed. Returns
- * `null` when no installed plugin has a registered proposal — the
- * PostTourFirstTask card then doesn't render and the user lands on the
- * normal chat surface (already a valid end state).
+ * Select declarative first-run guidance from plugins that are actually usable.
+ * The metadata can only prefill the visible composer; it carries no tool,
+ * channel, arguments, or auto-submit behavior.
  */
 export function pickFirstTaskProposal(
-  installedPluginIds: readonly string[],
+  pluginCards: readonly PluginCardSummary[],
+  locale: string,
 ): FirstTaskProposal | null {
-  const installedSet = new Set(installedPluginIds);
-  const candidates = getFirstTaskProposals().filter((p) =>
-    installedSet.has(p.pluginId),
-  );
-  if (candidates.length === 0) return null;
-  // Sort by priority ascending — lowest number is the user's first
-  // recommended action.
-  candidates.sort((a, b) => a.priority - b.priority);
-  return candidates[0];
+  const candidates = pluginCards
+    .filter((card) =>
+      card.loadStatus === "loaded"
+      && card.active === true
+      && card.onboarding?.firstTask !== undefined)
+    .sort((left, right) => {
+      const leftPriority = left.onboarding!.firstTask!.priority;
+      const rightPriority = right.onboarding!.firstTask!.priority;
+      return leftPriority - rightPriority
+        || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+    });
+
+  const card = candidates[0];
+  const firstTask = card?.onboarding?.firstTask;
+  if (!card || !firstTask) return null;
+
+  return {
+    pluginId: card.id,
+    priority: firstTask.priority,
+    ...resolveCopy(firstTask.locales, locale),
+  };
 }

@@ -230,6 +230,8 @@ export interface PluginManifest {
   tools: Tool[];
 
   description: string;
+  /** Declarative, inert first-run guidance rendered by the host. */
+  onboarding?: PluginOnboardingSpec;
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   /**
@@ -353,6 +355,22 @@ export interface PluginManifest {
   hostSecrets?: {
     /** Allowlisted secret keys this plugin can read via `hostApi.getSecret`. */
     read?: string[];
+  };
+}
+
+export interface PluginFirstTaskCopy {
+  headline: string;
+  body: string;
+  actionLabel: string;
+  composerPrompt: string;
+}
+
+export interface PluginOnboardingSpec {
+  firstTask?: {
+    /** Lower numbers are proposed first. */
+    priority: number;
+    /** Normalized lower-case BCP-47 tags; English is the required fallback. */
+    locales: Record<string, PluginFirstTaskCopy>;
   };
 }
 

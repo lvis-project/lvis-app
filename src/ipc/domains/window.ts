@@ -25,7 +25,7 @@ import { isWindowControlOwned } from "../window-control-registry.js";
 export function registerWindowEventListeners(win: ElectronBrowserWindow): void {
   const broadcastMaximized = (maximized: boolean) => {
     try {
-      win.webContents.send("window:maximizedChanged", maximized);
+      win.webContents.send(CHANNELS.window.maximizedChanged, maximized);
     } catch {
       // webContents may be destroyed
     }
@@ -33,10 +33,10 @@ export function registerWindowEventListeners(win: ElectronBrowserWindow): void {
   win.on("maximize", () => broadcastMaximized(true));
   win.on("unmaximize", () => broadcastMaximized(false));
   win.on("enter-full-screen", () => {
-    try { win.webContents.send("window:fullscreenChanged", true); } catch { /* destroyed */ }
+    try { win.webContents.send(CHANNELS.window.fullscreenChanged, true); } catch { /* destroyed */ }
   });
   win.on("leave-full-screen", () => {
-    try { win.webContents.send("window:fullscreenChanged", false); } catch { /* destroyed */ }
+    try { win.webContents.send(CHANNELS.window.fullscreenChanged, false); } catch { /* destroyed */ }
   });
 }
 
@@ -49,30 +49,30 @@ export function registerWindowHandlers(deps: IpcDeps): void {
   const canUseWindowControl = (e: IpcMainInvokeEvent): boolean =>
     validateSender(e) || isWindowControlOwned(e.sender);
 
-  ipcMain.handle("window:minimize", (e) => {
-    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, "window:minimize", e); return; }
+  ipcMain.handle(CHANNELS.window.minimize, (e) => {
+    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, CHANNELS.window.minimize, e); return; }
     getSenderWindowOrMain(e)?.minimize();
   });
 
-  ipcMain.handle("window:toggleMaximize", (e) => {
-    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, "window:toggleMaximize", e); return; }
+  ipcMain.handle(CHANNELS.window.toggleMaximize, (e) => {
+    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, CHANNELS.window.toggleMaximize, e); return; }
     const win = getSenderWindowOrMain(e);
     if (!win) return;
     win.isMaximized() ? win.unmaximize() : win.maximize();
   });
 
-  ipcMain.handle("window:close", (e) => {
-    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, "window:close", e); return; }
+  ipcMain.handle(CHANNELS.window.close, (e) => {
+    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, CHANNELS.window.close, e); return; }
     getSenderWindow(e)?.close();
   });
 
-  ipcMain.handle("window:syncTitleBarTheme", (e, payload: { color: string; symbolColor: string }) => {
-    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, "window:syncTitleBarTheme", e); return; }
+  ipcMain.handle(CHANNELS.window.syncTitleBarTheme, (e, payload: { color: string; symbolColor: string }) => {
+    if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, CHANNELS.window.syncTitleBarTheme, e); return; }
     if (process.platform === "darwin") return;
     const win = getSenderWindowOrMain(e);
     if (!win || typeof win.setTitleBarOverlay !== "function") return;
     if (typeof payload?.color !== "string" || typeof payload?.symbolColor !== "string") {
-      throw new Error("[lvis] window:syncTitleBarTheme: invalid payload");
+      throw new Error(`[lvis] ${CHANNELS.window.syncTitleBarTheme}: invalid payload`);
     }
     try {
       win.setTitleBarOverlay({ color: payload.color, symbolColor: payload.symbolColor, height: 36 });

@@ -16,6 +16,7 @@ import type {
   PluginConfigSchema,
   PluginHostApi,
   PluginManifest,
+  PluginOnboardingSpec,
   PluginToolHandler,
   PluginUiExtension,
   RuntimePlugin,
@@ -135,6 +136,8 @@ export interface PluginCard {
   auth?: PluginAuthSpec;
   /** Declarative egress disclosure copied from the plugin manifest/catalog. */
   networkAccess?: PluginManifest["networkAccess"];
+  /** Declarative first-run guidance copied unchanged from the manifest. */
+  onboarding?: PluginOnboardingSpec;
   /** Structured marketplace install failure classification for Doctor UI. */
   installFailureKind?: PluginInstallFailureKind;
   /** User-visible install/load failure detail preserved for Doctor diagnostics. */

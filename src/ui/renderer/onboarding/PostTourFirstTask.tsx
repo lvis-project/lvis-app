@@ -1,28 +1,17 @@
-
-
-
-
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { cn } from "../../../lib/utils.js";
+import type { PluginCardSummary } from "../types.js";
 import {
   pickFirstTaskProposal,
   type FirstTaskProposal,
 } from "./first-task-proposals.js";
 
-export interface PostTourFirstTaskApi {
-  /**
-   * Pre-fill the chat composer with the given text. When undefined the
-   * card uses the clipboard fallback. The host's existing
-   * `chat.setComposerDraft` IPC is the canonical implementation.
-   */
-  composerSeedText?: (text: string) => Promise<{ ok: boolean }> | void;
-}
-
 export interface PostTourFirstTaskProps {
-  api: PostTourFirstTaskApi;
-  /** Plugin ids that are currently installed (marketplace slugs). */
-  installedPluginIds: readonly string[];
+  /** Local renderer callback only; this never submits chat or invokes a tool. */
+  onPrefillComposer: (text: string) => void;
+  /** Manifest-derived cards, including runtime eligibility. */
+  pluginCards: readonly PluginCardSummary[];
   /**
    * Set to `true` after the SpotlightTour completes. The card is
    * suppressed when false so the user is never offered a "first task"
@@ -34,45 +23,32 @@ export interface PostTourFirstTaskProps {
 }
 
 export function PostTourFirstTask({
-  api,
-  installedPluginIds,
+  onPrefillComposer,
+  pluginCards,
   tourCompleted,
   disabled,
 }: PostTourFirstTaskProps) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
-  const [accepted, setAccepted] = useState(false);
-  const [proposal, setProposal] = useState<FirstTaskProposal | null>(null);
+  const [prefillError, setPrefillError] = useState<string | null>(null);
+  const proposal = useMemo<FirstTaskProposal | null>(
+    () => disabled || !tourCompleted || dismissed
+      ? null
+      : pickFirstTaskProposal(pluginCards, locale),
+    [disabled, dismissed, locale, pluginCards, tourCompleted],
+  );
 
-  useEffect(() => {
-    if (disabled || !tourCompleted || dismissed) {
-      setProposal(null);
-      return;
-    }
-    setProposal(pickFirstTaskProposal(installedPluginIds));
-  }, [disabled, tourCompleted, dismissed, installedPluginIds]);
-
-  const onAccept = useCallback(async () => {
+  const onAccept = useCallback(() => {
     if (!proposal) return;
-    setAccepted(true);
-    if (typeof api.composerSeedText === "function") {
-      try {
-        await api.composerSeedText(proposal.composerSeed);
-      } catch {
-        // Composer-set IPC failure is non-fatal; user still sees the card.
-      }
-    } else if (
-      typeof navigator !== "undefined" &&
-      navigator.clipboard?.writeText
-    ) {
-      try {
-        await navigator.clipboard.writeText(proposal.composerSeed);
-      } catch {
-        /* clipboard write rejection is benign */
-      }
+    try {
+      onPrefillComposer(proposal.composerPrompt);
+      setDismissed(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[post-tour-first-task] composer prefill failed", error);
+      setPrefillError(message);
     }
-    setDismissed(true);
-  }, [api, proposal]);
+  }, [onPrefillComposer, proposal]);
 
   const onSkip = useCallback(() => {
     setDismissed(true);
@@ -99,11 +75,16 @@ export function PostTourFirstTask({
         {t("postTourFirstTask.badgeLabel")}
       </div>
       <h3 className="mt-1 text-[14px] font-semibold leading-tight">
-        {proposal.headlineKo}
+        {proposal.headline}
       </h3>
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-        {proposal.bodyKo}
+        {proposal.body}
       </p>
+      {prefillError ? (
+        <p className="mt-2 text-[11px] text-destructive" role="alert">
+          {prefillError}
+        </p>
+      ) : null}
       <div className="mt-3 flex items-center justify-end gap-2">
         <button
           type="button"
@@ -116,21 +97,14 @@ export function PostTourFirstTask({
         <button
           type="button"
           data-testid="post-tour-first-task:accept"
-          onClick={() => void onAccept()}
-          disabled={accepted}
+          onClick={onAccept}
           className={cn(
-            "rounded-md px-3 py-1 text-[11px] font-medium text-primary-foreground transition",
-            "bg-primary hover:opacity-90 disabled:opacity-60",
+            "rounded-md bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground transition hover:opacity-90",
           )}
         >
-          {accepted ? t("postTourFirstTask.acceptedLabel") : proposal.ctaKo}
+          {proposal.actionLabel}
         </button>
       </div>
-      {typeof api.composerSeedText !== "function" && (
-        <p className="mt-2 text-[10px] text-muted-foreground">
-          {t("postTourFirstTask.clipboardHint")}
-        </p>
-      )}
     </div>
   );
 }
