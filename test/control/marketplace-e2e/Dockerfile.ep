@@ -7,7 +7,7 @@ FROM ${BUN_IMAGE} AS dependencies
 USER root
 WORKDIR /deps
 COPY --from=candidate package.json bun.lock ./
-RUN --mount=type=cache,target=/root/.bun/install/cache \
+RUN --mount=type=cache,id=lvis-m4-ep-candidate-bun,target=/root/.bun/install/cache \
     bun install --frozen-lockfile --ignore-scripts
 
 FROM ${BUN_IMAGE} AS candidate-build

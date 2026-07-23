@@ -201,6 +201,43 @@ describe("trusted marketplace E2E workflow", () => {
     expect(orchestrate).toContain("private log retained only on runner");
   });
 
+  it("isolates candidate dependency caches from each other and the trusted runner", () => {
+    const candidateCacheIds = [
+      "lvis-m4-host-candidate-bun",
+      "lvis-m4-marketplace-candidate-uv",
+      "lvis-m4-ep-candidate-bun",
+    ];
+    const dockerfiles = [hostDockerfile, marketplaceDockerfile, epDockerfile];
+    const cacheMounts = dockerfiles
+      .flatMap((source) =>
+        [...source.matchAll(/--mount=([^\\\s]+)/gu)].map((match) => match[1]),
+      )
+      .filter((mount) => mount.split(",").includes("type=cache"));
+    const cacheIds = cacheMounts.map(
+      (mount) =>
+        mount
+          .split(",")
+          .find((option) => option.startsWith("id="))
+          ?.slice("id=".length),
+    );
+
+    expect(cacheMounts).toHaveLength(candidateCacheIds.length);
+    expect(cacheIds).toEqual(candidateCacheIds);
+    expect(new Set(cacheIds).size).toBe(cacheIds.length);
+
+    const trustedRunnerStart = hostDockerfile.indexOf(
+      "FROM native-toolchain AS trusted-runner",
+    );
+    const trustedRunner = hostDockerfile.slice(
+      trustedRunnerStart,
+      hostDockerfile.indexOf("\nFROM ", trustedRunnerStart + 1),
+    );
+    expect(trustedRunnerStart).toBeGreaterThan(-1);
+    expect(trustedRunner).toContain("RUN bun install --frozen-lockfile");
+    expect(trustedRunner).not.toContain("--mount=type=cache");
+    expect(trustedRunner).not.toContain("/root/.bun/install/cache");
+  });
+
   it("removes candidate tests before overlaying and digest-verifying the full trusted closure", () => {
     const remove = hostDockerfile.indexOf("rm -rf /candidate/app/test/e2e");
     const overlay = hostDockerfile.indexOf(

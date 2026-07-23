@@ -18,7 +18,7 @@ USER root
 COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /deps
 COPY --from=candidate package.json bun.lock ./
-RUN --mount=type=cache,target=/root/.bun/install/cache \
+RUN --mount=type=cache,id=lvis-m4-host-candidate-bun,target=/root/.bun/install/cache \
     bun install --frozen-lockfile --ignore-scripts
 
 FROM native-toolchain AS trusted-runner
@@ -27,8 +27,7 @@ COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /trusted/runner
 COPY --from=control test/control/marketplace-e2e/runner-package.json package.json
 COPY --from=control test/control/marketplace-e2e/runner-bun.lock bun.lock
-RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --frozen-lockfile
+RUN bun install --frozen-lockfile
 
 FROM trusted-runner AS trusted-electron-headers
 USER root
