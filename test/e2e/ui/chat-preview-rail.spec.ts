@@ -371,12 +371,15 @@ test.describe("chat preview rail", () => {
       expect(actionBarBox).not.toBeNull();
       expect(railBox).not.toBeNull();
       expect(railBox!.width).toBeGreaterThanOrEqual(300);
-      expect(railBox!.x).toBeGreaterThan(chatBox!.x + chatBox!.width - 8);
-      expect(railBox!.x).toBeGreaterThan(actionBarBox!.x + actionBarBox!.width - 8);
-      expect(Math.abs((railBox!.x + railBox!.width) - (rootBox!.x + rootBox!.width))).toBeLessThanOrEqual(2);
+      // The 16px splitter hit target is centered on the visual boundary, so its
+      // left half may overlap the main column by exactly 8px.
+      expect(railBox!.x).toBeGreaterThanOrEqual(chatBox!.x + chatBox!.width - 8);
+      expect(railBox!.x).toBeGreaterThanOrEqual(actionBarBox!.x + actionBarBox!.width - 8);
+      // The docked rail is a floating card with Tailwind `mr-2` / `my-2`.
+      expect(Math.abs((rootBox!.x + rootBox!.width) - (railBox!.x + railBox!.width) - 8)).toBeLessThanOrEqual(2);
       expect(Math.abs(chatBox!.width - mainColumnBox!.width)).toBeLessThanOrEqual(2);
       expect(Math.abs(actionBarBox!.width - mainColumnBox!.width)).toBeLessThanOrEqual(48);
-      expect(Math.abs(railBox!.height - rootBox!.height)).toBeLessThanOrEqual(2);
+      expect(Math.abs(rootBox!.height - railBox!.height - 16)).toBeLessThanOrEqual(2);
       await expect(panel).not.toHaveCSS("position", "absolute");
 
       const actionRailBox = await ctx.page.getByTestId("action-panel-rail").boundingBox();
