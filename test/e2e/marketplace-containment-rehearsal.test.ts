@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { mergeEvidenceFile } from "./evidence-file.js";
 import { buildPluginZip, publishPlugin } from "./marketplace-e2e-fixture.js";
 
 const E2E_ENABLED = process.env.M4_E2E === "1";
@@ -32,11 +33,15 @@ function isAbsent(status: number): boolean {
   return status === 404 || status === 410;
 }
 
-function appendEvidence(section: Record<string, unknown>): void {
-  if (!EVIDENCE_PATH) return;
-  const current = JSON.parse(readFileSync(EVIDENCE_PATH, "utf8")) as Record<string, unknown>;
-  current.containmentRehearsal = section;
-  writeFileSync(EVIDENCE_PATH, `${JSON.stringify(current, null, 2)}\n`);
+function exactStatus(status: number, expected: number): number {
+  expect(status).toBe(expected);
+  return expected;
+}
+
+function absentStatus(status: number): "not-found" | "gone" {
+  if (status === 404) return "not-found";
+  if (status === 410) return "gone";
+  throw new Error(`expected an absent Marketplace resource, got HTTP ${status}`);
 }
 
 describe.skipIf(!E2E_ENABLED)("Marketplace loopback reverse containment", () => {
@@ -77,7 +82,7 @@ describe.skipIf(!E2E_ENABLED)("Marketplace loopback reverse containment", () => 
       download: await request(affectedDownload),
       signature: await request(affectedSignature),
     };
-    expect(versionYank).toBe(200);
+    const versionYankEvidence = exactStatus(versionYank, 200);
     expect(isAbsent(afterVersionYank.download)).toBe(true);
     expect(isAbsent(afterVersionYank.signature)).toBe(true);
 
@@ -91,7 +96,7 @@ describe.skipIf(!E2E_ENABLED)("Marketplace loopback reverse containment", () => 
         `/api/v1/plugins/${slug}/versions/${priorVersion}/download.sig`,
       ),
     };
-    expect(pluginYank).toBe(200);
+    const pluginYankEvidence = exactStatus(pluginYank, 200);
     expect(Object.values(afterPluginYank).every(isAbsent)).toBe(true);
 
     const sdkRoot = resolve(process.env.SDK_ROOT ?? "../lvis-plugin-sdk");
@@ -114,20 +119,29 @@ describe.skipIf(!E2E_ENABLED)("Marketplace loopback reverse containment", () => 
     expect(hostRollbackBlockedBeforeContainment).toBe(true);
     expect(hostRollbackAllowed).toBe(true);
 
-    appendEvidence({
-      target: new URL(BASE_URL).origin,
+    mergeEvidenceFile(EVIDENCE_PATH, {
+      containmentRehearsal: {
+      target: "loopback:8765",
       slug,
       priorVersion,
       affectedVersion,
       orderedActions: ["version-yank", "plugin-yank", "corrective-sdk", "host-decision"],
-      versionYank,
-      afterVersionYank,
-      pluginYank,
-      afterPluginYank,
+      versionYank: versionYankEvidence,
+      afterVersionYank: {
+        download: absentStatus(afterVersionYank.download),
+        signature: absentStatus(afterVersionYank.signature),
+      },
+      pluginYank: pluginYankEvidence,
+      afterPluginYank: {
+        detail: absentStatus(afterPluginYank.detail),
+        priorDownload: absentStatus(afterPluginYank.priorDownload),
+        priorSignature: absentStatus(afterPluginYank.priorSignature),
+      },
       correctiveSdk,
       hostRollbackBlockedBeforeContainment,
       hostRollbackAllowed,
       productionWriteExecuted: false,
+      },
     });
   }, 60_000);
 });
