@@ -20,6 +20,7 @@ export interface PluginUninstallLifecycleDeps {
     | "removePlugin"
     | "getPluginManifest"
     | "resolvePluginId"
+    | "resolvePluginInstallId"
     | "clearConfigOverride"
     | "getConfigOverride"
     | "setConfigOverride"
@@ -120,6 +121,12 @@ export async function uninstallPluginWithLifecycle(
   deps: PluginUninstallLifecycleDeps,
 ): Promise<{ pluginId: string; uninstalled: true }> {
   const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
+  const installPluginId = deps.pluginRuntime.resolvePluginInstallId(pluginId);
+  if (installPluginId === null) {
+    throw new Error(
+      `Statically configured plugin cannot be uninstalled: ${canonicalPluginId}`,
+    );
+  }
   deps.pluginRuntime.cancelPendingRestart(canonicalPluginId);
   return withPluginInstallLock(canonicalPluginId, async () => {
     const secretKeys = listSecretKeys(
@@ -137,7 +144,7 @@ export async function uninstallPluginWithLifecycle(
     let result: { pluginId: string; uninstalled: true } | null = null;
     let marketplaceRemoved = false;
     try {
-      result = await deps.pluginMarketplace.uninstall(pluginId);
+      result = await deps.pluginMarketplace.uninstall(installPluginId);
       marketplaceRemoved = true;
     } catch (err) {
       const message = (err as Error).message ?? "uninstall failed";
@@ -153,7 +160,7 @@ export async function uninstallPluginWithLifecycle(
           // when the manifest declares a different canonical runtime id.
           // removePlugin clears the runtime's alias map, so restoration must
           // use the original registry identity.
-          await deps.pluginRuntime.addPlugin(pluginId);
+          await deps.pluginRuntime.addPlugin(installPluginId);
         } catch (restoreError) {
           throw new AggregateError(
             [err, restoreError],

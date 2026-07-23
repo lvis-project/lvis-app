@@ -8,8 +8,6 @@ import type {
 } from "../types.js";
 import type { Actor } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
-import { isDevModeUnlocked } from "../../boot/dev-flags.js";
-import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 import {
   PluginFactoryTimeoutError,
@@ -20,13 +18,8 @@ import {
   runStartWithTimeout,
 } from "./lifecycle-timeout.js";
 
-import {
-  getDeclaredEmittedEvents,
-} from "./manifest-validation.js";
-import {
-  buildPluginContext,
-  resolveRealEntryPath,
-} from "./sandbox.js";
+import { getDeclaredEmittedEvents } from "./manifest-validation.js";
+import { buildPluginContext, resolveRealEntryPath } from "./sandbox.js";
 import type { ManifestLoadPlan, ManifestSnapshot, SinglePluginStartResult } from "./types.js";
 import {
   buildMethodMap,
@@ -51,6 +44,7 @@ import {
   type BootPreflightOutcome,
   type PluginIntegrityCheckResult,
 } from "./runtime-preflight.js";
+import { reportPluginIntegrity, verifyPluginIntegrity } from "./runtime-integrity.js";
 
 const log = createLogger("plugin-runtime");
 export class PluginRuntimeLifecycle extends PluginRuntimeState {
@@ -1018,6 +1012,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       !this.disabledPluginIds.has(canonicalPluginId)
     ) {
       log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
+      this.inactivePluginIds.delete(canonicalPluginId);
       this.knownInstallAliases.delete(canonicalPluginId);
       this.knownInstallClaims.delete(canonicalPluginId);
       if (!options.preserveConfigOverride) {
@@ -1046,6 +1041,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.failedPluginStubs.delete(canonicalPluginId);
     this.loadFailureInfo.delete(canonicalPluginId);
     this.disabledPluginIds.delete(canonicalPluginId);
+    this.inactivePluginIds.delete(canonicalPluginId);
     this.pluginUiRevisions.delete(canonicalPluginId);
     this.knownInstallAliases.delete(canonicalPluginId);
     this.knownInstallClaims.delete(canonicalPluginId);
@@ -1053,53 +1049,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.onDisable?.(canonicalPluginId);
   }
 
-  /**
-   * Verify the install receipt for `pluginId` under `pluginRoot` and enforce
-   * the dev-signer-in-packaged-build guard. Reporting may be deferred so boot
-   * can perform concurrent checks while emitting results in registry order.
-   *
-   * Returns `{ ok: true }` when verification passes (or is not required).
-   * Returns `{ ok: false }` when the plugin must be rejected — the caller is
-   * responsible for calling `markFailed` and deciding the control-flow
-   * (`continue` vs `return`).
-   *
-   * Skips all checks when `installReceiptCacheRoot` is not configured.
-   * Receipt verification now applies to every install source (admin / user /
-   * local-dev) — the legacy dev-link bypass was removed when the dev:link
-   * script was deleted.
-   */
   protected async verifyReceiptAndDevGuard(
     pluginId: string,
     pluginRoot: string,
     options: { report?: boolean } = {},
   ): Promise<PluginIntegrityCheckResult> {
-    if (!this.installReceiptCacheRoot) {
-      return { ok: true };
-    }
-    const receiptResult = await verifyInstallReceipt(
+    const result = await verifyPluginIntegrity(
       this.installReceiptCacheRoot,
       pluginId,
       pluginRoot,
     );
-    if (!receiptResult.ok) {
-      const result = { ok: false as const, reason: receiptResult.reason };
-      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
-      return result;
-    }
-    const { installSource, signerKeyId, artifactSha256 } = receiptResult.receipt;
-    // Policy gate: local-dev receipts are only valid in unpackaged dev builds.
-    // verifyInstallReceipt is a pure integrity verifier; environment-based
-    // policy (packaged vs dev) is enforced here in the runtime layer.
-    if (installSource === "local-dev" && !isDevModeUnlocked()) {
-      const reason = "local-dev install rejected in packaged build";
-      const result = { ok: false as const, reason };
-      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
-      return result;
-    }
-    const result: PluginIntegrityCheckResult = {
-      ok: true,
-      verified: { installSource, artifactSha256, signerKeyId },
-    };
     if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
     return result;
   }
@@ -1108,30 +1067,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     pluginId: string,
     result: PluginIntegrityCheckResult,
   ): void {
-    if (!result.ok) {
-      log.error(
-        { pluginId, reason: result.reason, ...(result.error === undefined ? {} : { err: result.error }) },
-        `${pluginId} rejected — install receipt integrity failed`,
-      );
-      try {
-        this.auditLog?.("error", "plugin_integrity_rejected", {
-          pluginId,
-          reason: result.reason,
-        });
-      } catch (error) {
-        log.error({ pluginId, err: error }, "plugin integrity rejection audit failed");
-      }
-      return;
-    }
-    if (!result.verified) return;
-    try {
-      this.auditLog?.("info", "plugin_integrity_verified", {
-        pluginId,
-        ...result.verified,
-      });
-    } catch (error) {
-      log.error({ pluginId, err: error }, "plugin integrity verification audit failed");
-    }
+    reportPluginIntegrity(pluginId, result, this.auditLog);
   }
 
   /** Instantiate and start one post-boot plugin without rebuilding its peers. */
@@ -1385,6 +1321,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.failedPluginIds.delete(manifest.id);
     this.loadFailureInfo.delete(manifest.id);
     this.disabledPluginIds.delete(manifest.id);
+    this.inactivePluginIds.delete(manifest.id);
 
     this.perf.recordStartup(manifest.id, startupMs);
     this.onEnable?.(manifest.id);

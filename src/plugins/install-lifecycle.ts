@@ -128,6 +128,7 @@ class InstalledPluginVersionMismatchError extends Error {
 
 interface PluginInstallRuntime {
   listPluginIds(): string[];
+  resolvePluginId(pluginId: string): string;
   addPlugin(pluginId: string): Promise<InstalledPluginStartState>;
   waitForPluginReady(pluginId: string): Promise<void>;
   removePlugin(
@@ -662,7 +663,9 @@ export async function installMarketplacePluginWithLifecycle(options: {
   } = options;
   assertAppUpdateInstallNotRequested();
   const catalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
-  const resolvedLifecyclePluginId = lifecyclePluginId ?? catalogState.pluginId;
+  const resolvedLifecyclePluginId = pluginRuntime.resolvePluginId(
+    lifecyclePluginId ?? catalogState.pluginId,
+  );
   const progressSlug = eventSlug ?? resolvedLifecyclePluginId;
 
   // A pending restart can own this lifecycle lock while waiting on dependency
@@ -671,6 +674,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
   pluginRuntime.cancelPendingRestart(resolvedLifecyclePluginId);
   return withPluginInstallLock(resolvedLifecyclePluginId, async () => {
     const currentCatalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
+    const currentRuntimePluginId = pluginRuntime.resolvePluginId(currentCatalogState.pluginId);
     const expectedVersionForGuard = expectedVersion?.trim();
     if (expectedVersionForGuard) {
       assertExpectedVersionMatchesTrustedCatalog({
@@ -681,7 +685,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
     }
     const hadExistingInstall =
       currentCatalogState.installed === true ||
-      pluginRuntime.listPluginIds().includes(currentCatalogState.pluginId);
+      pluginRuntime.listPluginIds().includes(currentRuntimePluginId);
     let restorePluginId = resolvedLifecyclePluginId;
     let startLifecycleAttempted = false;
     let versionVerificationFailed = false;
@@ -690,7 +694,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
       if (hadExistingInstall) {
         broadcastInstallProgress?.({ slug: progressSlug, phase: "restarting" });
         installedVersionBeforeInstall = await pluginMarketplace.getInstalledVersion(currentCatalogState.pluginId);
-        await pluginRuntime.removePlugin(currentCatalogState.pluginId, {
+        await pluginRuntime.removePlugin(currentRuntimePluginId, {
           preserveConfigOverride: true,
         });
       }

@@ -689,7 +689,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * per-turn `resolveToolScope` gate read it without touching disk.
    */
   isPluginEnabled(pluginId: string): boolean {
-    return !this.inactivePluginIds.has(pluginId);
+    return !this.inactivePluginIds.has(this.resolveKnownPluginId(pluginId));
   }
 
   /**
@@ -740,31 +740,43 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * @throws if `pluginId` is not a known/loaded plugin.
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
-    if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
+    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    if (
+      !this.knownPluginManifests.has(canonicalPluginId)
+      && !this.plugins.has(canonicalPluginId)
+    ) {
       throw new Error(`Plugin not found: ${pluginId}`);
     }
+    const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+    if (installClaim === undefined) {
+      throw new Error(`Plugin install provenance unknown: ${pluginId}`);
+    }
     if (this.registryPath) {
-      await updatePluginRegistry(this.registryPath, (registry) => {
-        const entry = registry.plugins.find((p) => p.id === pluginId);
-        if (!entry) {
-          throw new Error(`Plugin not found in registry: ${pluginId}`);
-        }
-        entry.enabled = enabled;
-      });
+      // Static manifests have no registry row, so their active toggle is
+      // session-local. Registry installs persist through their raw install id.
+      if (installClaim !== null) {
+        await updatePluginRegistry(this.registryPath, (registry) => {
+          const entry = registry.plugins.find(({ id }) => id === installClaim);
+          if (!entry) {
+            throw new Error(`Plugin not found in registry: ${installClaim}`);
+          }
+          entry.enabled = enabled;
+        });
+      }
     }
     if (enabled) {
-      this.inactivePluginIds.delete(pluginId);
+      this.inactivePluginIds.delete(canonicalPluginId);
       try {
-        this.onActiveStateChange?.(pluginId, true);
+        this.onActiveStateChange?.(canonicalPluginId, true);
       } catch (err) {
-        log.error(`onActiveStateChange failed during setPluginEnabled(${pluginId}, true): %s`, (err as Error).message);
+        log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, true): %s`, (err as Error).message);
       }
     } else {
-      this.inactivePluginIds.add(pluginId);
+      this.inactivePluginIds.add(canonicalPluginId);
       try {
-        this.onActiveStateChange?.(pluginId, false);
+        this.onActiveStateChange?.(canonicalPluginId, false);
       } catch (err) {
-        log.error(`onActiveStateChange failed during setPluginEnabled(${pluginId}, false): %s`, (err as Error).message);
+        log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, false): %s`, (err as Error).message);
       }
     }
   }
@@ -776,6 +788,16 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   /** Canonical lifecycle identity for a marketplace/install alias. */
   resolvePluginId(pluginId: string): string {
     return this.resolveKnownPluginId(pluginId);
+  }
+
+  /** Raw registry identity for a canonical/alias plugin id; null for static roots. */
+  resolvePluginInstallId(pluginId: string): string | null {
+    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+    if (installClaim === undefined) {
+      throw new Error(`Plugin install provenance unknown: ${pluginId}`);
+    }
+    return installClaim;
   }
 
   /** Final uninstall cleanup after stop-hook mutations have drained. */
