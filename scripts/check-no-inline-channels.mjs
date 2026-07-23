@@ -62,8 +62,19 @@ const TARGETS = [
 function isCliCommandName(node, rel) {
   if (rel !== "src/cli/commands.ts" || !ts.isPropertyAssignment(node.parent)) return false;
   const propertyName = node.parent.name;
-  return (ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName))
-    && propertyName.text === "name";
+  if (!(ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName))
+      || propertyName.text !== "name") return false;
+
+  const command = node.parent.parent;
+  if (!ts.isObjectLiteralExpression(command) || !ts.isArrayLiteralExpression(command.parent)) {
+    return false;
+  }
+  const array = command.parent;
+  const initializer = ts.isAsExpression(array.parent) ? array.parent : array;
+  const declaration = initializer.parent;
+  return ts.isVariableDeclaration(declaration)
+    && ts.isIdentifier(declaration.name)
+    && declaration.name.text === "CLI_COMMANDS";
 }
 
 function isInlineChannel(value, node, rel) {

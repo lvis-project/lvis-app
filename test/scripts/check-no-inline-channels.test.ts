@@ -29,7 +29,7 @@ function createRoot(): string {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, "export {};\n", "utf-8");
   }
-  write(root, "src/cli/commands.ts", "export const commands = [{ name: 'marketplace:list' }];\n");
+  write(root, "src/cli/commands.ts", "export const CLI_COMMANDS = [{ name: 'marketplace:list' }] as const;\n");
   return root;
 }
 
@@ -111,11 +111,25 @@ describe("check-no-inline-channels", () => {
     expect(run(root).status).toBe(0);
 
     write(root, "src/cli/commands.ts", [
-      "export const commands = [{ name: 'marketplace:list' }];",
+      "export const CLI_COMMANDS = [{ name: 'marketplace:list' }] as const;",
       "const channel = 'marketplace:raw-wire';",
       "",
     ].join("\n"));
     const result = run(root);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("src/cli/commands.ts:2 inline channel literal");
+  });
+
+  it("does not exempt arbitrary name properties in the CLI module", () => {
+    const root = createRoot();
+    write(root, "src/cli/commands.ts", [
+      "export const CLI_COMMANDS = [{ name: 'marketplace:list' }] as const;",
+      "const unrelated = { name: 'marketplace:raw-wire' };",
+      "",
+    ].join("\n"));
+
+    const result = run(root);
+
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("src/cli/commands.ts:2 inline channel literal");
   });
