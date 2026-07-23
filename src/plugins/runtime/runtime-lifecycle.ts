@@ -894,8 +894,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
     this.assertCurrentPluginIdentityLoadPlan(loadPlan, enabledSnapshots);
     const snapshot = enabledSnapshots.get(pluginId);
-    const targetPlan = loadPlan.find(
-      (p) => p.pluginIdHint === pluginId || (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
+    const targetPlan = loadPlan.find((plan) =>
+      plan.pluginIdHint === pluginId
     ) ?? await this.findStaticManifestPlan(loadPlan, pluginId);
     if (!snapshot) {
       if (targetPlan?.enabled) {

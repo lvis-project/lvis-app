@@ -1760,6 +1760,55 @@ export default async function createPlugin({ hostApi }) {
     ).resolves.toContain(`hi-${firstId}`);
   });
 
+  it("prioritizes an exact registry id over a static root basename during add", async () => {
+    const staticId = "p-static-basename-owner";
+    const requestedId = "p-registry-add-target";
+    const staticManifestPath = await writePluginArtifact(
+      staticId,
+      requestedId,
+      "static",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      manifestPaths: [staticManifestPath],
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    await runtime.startAll();
+
+    const registryManifestPath = await writePluginArtifact(
+      requestedId,
+      "p-registry-add-artifact",
+      "registry",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: requestedId,
+          manifestPath: registryManifestPath,
+          enabled: true,
+        }],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin(requestedId)).resolves.toBe("started");
+    await expect(
+      runtime.call(`${requestedId.replace(/[^a-zA-Z0-9_]/g, "_")}_registry`),
+    ).resolves.toContain(`hi-${requestedId}`);
+    await expect(
+      runtime.call(`${staticId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
+    ).resolves.toContain(`hi-${staticId}`);
+  });
+
   it("re-adds a disabled static plugin without changing its artifact claim", async () => {
     const canonicalId = "p-static-disable-readd";
     const manifestPath = await writePluginArtifact(
