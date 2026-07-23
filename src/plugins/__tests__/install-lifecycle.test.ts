@@ -16,6 +16,7 @@ function makeRuntime(initialPluginIds: string[] = []) {
   let pluginIds = [...initialPluginIds];
   return {
     listPluginIds: vi.fn(() => [...pluginIds]),
+    resolvePluginId: vi.fn((pluginId: string) => pluginId),
     addPlugin: vi.fn(async (pluginId: string) => {
       if (!pluginIds.includes(pluginId)) pluginIds.push(pluginId);
       return "started" as const;
@@ -402,6 +403,64 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(runtime.cancelPendingRestart).toHaveBeenCalledWith("p");
     expect(runtime.cancelPendingRestart.mock.invocationCallOrder[0])
       .toBeLessThan(marketplace.install.mock.invocationCallOrder[0]);
+  });
+
+  it("serializes an alias update with canonical lifecycle mutations", async () => {
+    const installAlias = "p-install-alias";
+    const canonicalPluginId = "p-canonical-runtime";
+    const runtime = makeRuntime([canonicalPluginId]);
+    runtime.resolvePluginId.mockImplementation((pluginId: string) =>
+      pluginId === installAlias ? canonicalPluginId : pluginId
+    );
+    const marketplace = makeMarketplace();
+    marketplace.list.mockResolvedValue([{
+      id: installAlias,
+      slug: installAlias,
+      installed: true,
+      version: "2.0.0",
+    }]);
+    let releaseInstall!: () => void;
+    let markInstallStarted!: () => void;
+    const installGate = new Promise<void>((resolve) => {
+      releaseInstall = resolve;
+    });
+    const installStarted = new Promise<void>((resolve) => {
+      markInstallStarted = resolve;
+    });
+    marketplace.install.mockImplementationOnce(async () => {
+      markInstallStarted();
+      await installGate;
+      return { pluginId: installAlias, installed: true as const };
+    });
+
+    const install = installMarketplacePluginWithLifecycle({
+      requestedPluginId: installAlias,
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    });
+    await installStarted;
+
+    let competingMutationEntered = false;
+    const competingMutation = withPluginInstallLock(
+      canonicalPluginId,
+      async () => {
+        competingMutationEntered = true;
+      },
+    );
+    await Promise.resolve();
+    expect(competingMutationEntered).toBe(false);
+
+    releaseInstall();
+    await expect(install).resolves.toEqual({
+      pluginId: canonicalPluginId,
+      installed: true,
+    });
+    await competingMutation;
+    expect(competingMutationEntered).toBe(true);
+    expect(runtime.cancelPendingRestart).toHaveBeenCalledWith(canonicalPluginId);
+    expect(runtime.removePlugin).toHaveBeenCalledWith(canonicalPluginId, {
+      preserveConfigOverride: true,
+    });
   });
 
   it("stops a loaded plugin before marketplace patching and starts the installed result", async () => {

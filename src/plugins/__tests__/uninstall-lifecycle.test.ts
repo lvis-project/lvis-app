@@ -16,6 +16,7 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
     },
     pluginRuntime: {
       resolvePluginId: vi.fn((requestedPluginId: string) => requestedPluginId),
+      resolvePluginInstallId: vi.fn((requestedPluginId: string) => requestedPluginId),
       cancelPendingRestart: vi.fn(),
       clearConfigOverride: vi.fn(),
       getConfigOverride: vi.fn(() => undefined as Record<string, unknown> | undefined),
@@ -219,6 +220,45 @@ describe("uninstallPluginWithLifecycle", () => {
         "override:clear",
         "settings:clear",
       ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uninstalls a canonical plugin card through its registry install alias", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-canonical-card-"));
+    try {
+      const deps = makeDeps("canonical-plugin", join(root, ".cache"));
+      deps.pluginRuntime.resolvePluginId.mockReturnValue("canonical-plugin");
+      deps.pluginRuntime.resolvePluginInstallId.mockReturnValue("marketplace-alias");
+
+      await uninstallPluginWithLifecycle("canonical-plugin", deps);
+
+      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith(
+        "canonical-plugin",
+        { preserveConfigOverride: true },
+      );
+      expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith(
+        "marketplace-alias",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects static uninstall before mutating runtime state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-static-"));
+    try {
+      const deps = makeDeps("static-plugin", join(root, ".cache"));
+      deps.pluginRuntime.resolvePluginInstallId.mockReturnValue(null);
+
+      await expect(
+        uninstallPluginWithLifecycle("static-plugin", deps),
+      ).rejects.toThrow(/Statically configured plugin cannot be uninstalled/);
+
+      expect(deps.pluginRuntime.cancelPendingRestart).not.toHaveBeenCalled();
+      expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
+      expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
