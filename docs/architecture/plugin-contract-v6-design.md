@@ -5,6 +5,9 @@
 > The 2026-07-23 amendment adds one signed, restriction-only, colocated key,
 > `_meta["lvisai/operationPolicy"]`, for composite domain tools. It does not restore
 > a top-level tool map, `uiActions`, `toolSchemas`, or self-declared risk authority.
+> The 2026-07-24 authority amendment places the complete public TypeScript
+> contract and JSDoc in Host `src/plugins/public-contract.ts`; the SDK is a
+> mechanical generated mirror and owns no declaration-selection or doc policy.
 > Issue: #885 (feat(sdk): plugin contract simplification + MCP server isolation parity).
 > Scope directive: this design **formally narrows** `docs/architecture/mcp-alignment-design.md` for the
 > plugin-contract axis — LVIS adopts the **MCP `Tool` object shape verbatim** (manifest shape == wire shape)
@@ -349,7 +352,10 @@ can never see a `Tool[]`).
 ## References (file:line + external evidence)
 
 Internal:
-- `src/plugins/types.ts:163,201,237-293` — `tools[]`, `uiActions`, `toolSchemas` (the three surfaces).
+- `src/plugins/public-contract.ts` — current public Tool, manifest, HostApi, and
+  runtime authoring contract plus authoritative JSDoc.
+- `src/plugins/types.ts` — Host-private registry/marketplace DTOs and public
+  contract re-export.
 - `src/plugins/runtime/manifest-validation.ts:494-519,525-548,592-607,629-638` — cross-field checks the pure
   shape replaces.
 - `src/plugins/runtime/plugin-loader.ts:28-40` — `declaredUiInvokableMethods`/`declaredRuntimeMethods`.

@@ -101,6 +101,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       "uiAction",
       "uiActions",
       "operationGovernance",
+      "appAllowed",
     ]) {
       expect(validator({ ...base, [field]: {} }), field).toBe(false);
       expect(validator.errors).toEqual(expect.arrayContaining([
