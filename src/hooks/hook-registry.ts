@@ -34,6 +34,14 @@ import type { HookEvent } from "./script-hook-types.js";
  */
 export type HookRegistryEntry = ShHookRegistryEntry | ConfigHookRegistryEntry;
 
+export interface PluginHookOwner {
+  pluginId: string;
+  pluginVersion: string;
+  generationId: string;
+  localId: string;
+  fingerprint: string;
+}
+
 interface BaseHookRegistryEntry {
   /** Stable identity for trust-review / audit. */
   id: string;
@@ -43,6 +51,8 @@ interface BaseHookRegistryEntry {
   matcher?: string;
   /** argv form of the command to execute (always ≥1 element). */
   command: string[];
+  /** Exact plugin-owned trust identity; absent for user/global hooks. */
+  owner?: PluginHookOwner;
 }
 
 /** A registry entry synthesized from a legacy `.sh` `DiscoveredHook`. */
