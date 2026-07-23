@@ -7,6 +7,7 @@ import {
   approvePendingPlugin,
   buildPluginZip,
   publishPlugin,
+  requireExactLoopbackMarketplaceOrigin,
 } from "../marketplace-e2e-fixture.js";
 import {
   buildE2eBaseSettings,
@@ -48,6 +49,23 @@ type BundleSnapshot = {
     mcpServerId?: string;
     generationId?: string;
   }>;
+  hooks: {
+    probeToolName: string;
+    registered: Array<{
+      id: string;
+      event: "pre";
+      matcher?: string;
+      owner: {
+        pluginId: string;
+        pluginVersion: string;
+        activationId: string;
+        generationId: string;
+        localId: string;
+        fingerprint: string;
+      };
+    }>;
+    matchingPreToolUse: string[];
+  };
 };
 
 type McpProcessProbe = {
@@ -76,6 +94,7 @@ test.skip(!builtMainExists(), "build the Electron app before running this spec")
 
 test("publish, approve, install, update, rollback, disable, re-enable, and uninstall atomically", async ({}, testInfo) => {
   testInfo.setTimeout(180_000);
+  requireExactLoopbackMarketplaceOrigin(BASE_URL);
   if (!PUBLISHER_KEY || !ADMIN_KEY) {
     throw new Error("MARKETPLACE_PUBLISHER_KEY and MARKETPLACE_ADMIN_KEY are required");
   }
@@ -120,18 +139,27 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       return api.lvisApi.listPluginCards();
     });
     const bundleSnapshot = () => ctx.page.evaluate(async (
-      { pluginId, skillLocalId },
+      { pluginId, skillLocalId, hookProbeToolName },
     ) => {
       const api = globalThis as unknown as {
         lvisApi: {
           e2ePluginBundleSnapshot(
             id: string,
             localId: string,
+            hookProbeToolName: string,
           ): Promise<BundleSnapshot>;
         };
       };
-      return api.lvisApi.e2ePluginBundleSnapshot(pluginId, skillLocalId);
-    }, { pluginId: slug, skillLocalId: "lifecycle" });
+      return api.lvisApi.e2ePluginBundleSnapshot(
+        pluginId,
+        skillLocalId,
+        hookProbeToolName,
+      );
+    }, {
+      pluginId: slug,
+      skillLocalId: "lifecycle",
+      hookProbeToolName: `${slug.replace(/-/g, "_")}_read`,
+    });
     const setEnabled = (enabled: boolean) => ctx.page.evaluate(async ({ pluginId, enabled }) => {
       const api = globalThis as unknown as {
         lvisApi: { setPluginEnabled(id: string, active: boolean): Promise<unknown> };
@@ -424,6 +452,21 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       expect(row.generationId).toMatch(/^[a-f0-9]{64}$/);
       expect(row.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     }
+    const approvedHookSnapshot = await bundleSnapshot();
+    expect(approvedHookSnapshot.hooks.registered).toEqual([
+      expect.objectContaining({
+        event: "pre",
+        matcher: `${slug.replace(/-/g, "_")}_read`,
+        owner: expect.objectContaining({
+          pluginId: slug,
+          pluginVersion: "1.0.0",
+          localId: "audit",
+        }),
+      }),
+    ]);
+    expect(approvedHookSnapshot.hooks.matchingPreToolUse).toEqual([
+      approvedHookSnapshot.hooks.registered[0]!.id,
+    ]);
     const hookDeniedV1 = await callLifecycleTool("hook_probe");
     expect(hookDeniedV1).toMatchObject({ ok: false });
     expect(JSON.stringify(hookDeniedV1)).toContain("marketplace lifecycle hook probe");
@@ -506,11 +549,16 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       runtimeLoaded: false,
       loadStatus: "disabled",
     }));
-    expect(await bundleSnapshot()).toMatchObject({
+    const disabledSnapshot = await bundleSnapshot();
+    expect(disabledSnapshot).toMatchObject({
       ok: true,
       active: null,
       skill: null,
       tools: [],
+      hooks: {
+        registered: [],
+        matchingPreToolUse: [],
+      },
     });
     expect((await contributionTrust()).rows).toEqual([]);
     await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount);
@@ -518,9 +566,10 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     transitions.push({
       state: "disabled",
       runtimeLoaded: false,
-      hookRows: 0,
+      hookRows: disabledSnapshot.hooks.registered.length,
+      hookMatches: disabledSnapshot.hooks.matchingPreToolUse.length,
       mcpConnected: false,
-      registryOwnerRows: 0,
+      registryOwnerRows: disabledSnapshot.tools.length,
       terminatedProcessIdentity: activeMcpProbe.process.processIdentity,
     });
 
@@ -556,6 +605,10 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       active: null,
       skill: null,
       tools: [],
+      hooks: {
+        registered: [],
+        matchingPreToolUse: [],
+      },
     });
     const generationRoot = join(ctx.lvisHome, "plugins", ".cache", slug, "generations");
     await expect.poll(
@@ -574,6 +627,8 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       snapshotAfterUninstall.active === null &&
       snapshotAfterUninstall.skill === null &&
       snapshotAfterUninstall.tools.length === 0 &&
+      snapshotAfterUninstall.hooks.registered.length === 0 &&
+      snapshotAfterUninstall.hooks.matchingPreToolUse.length === 0 &&
       mcpCountAfterUninstall === baselineMcpCount &&
       retainedGenerations.length === 0 &&
       !pluginRootExists;
@@ -581,6 +636,8 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     transitions.push({
       state: "uninstalled",
       trustRows: trustRowsAfterUninstall.length,
+      hookRows: snapshotAfterUninstall.hooks.registered.length,
+      hookMatches: snapshotAfterUninstall.hooks.matchingPreToolUse.length,
       retainedGenerations: retainedGenerations.length,
       mcpConnected: false,
       registryOwnerRows: snapshotAfterUninstall.tools.length,

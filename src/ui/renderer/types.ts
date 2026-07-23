@@ -785,10 +785,11 @@ export type LvisApi = {
     p?: unknown,
     options?: { userAction?: boolean; operationGrantToken?: string },
   ) => Promise<unknown>;
-  /** LVIS_E2E-only generation/Skill/registry projection; production fails closed. */
+  /** LVIS_E2E-only generation/Skill/tool/Hook projection; production fails closed. */
   e2ePluginBundleSnapshot: (
     pluginId: string,
     skillLocalId: string,
+    hookProbeToolName: string,
   ) => Promise<unknown>;
   /**
    * Subscribe to plugin-emitted events forwarded by the host event bridge

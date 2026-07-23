@@ -52,12 +52,12 @@ jobs:
       ADMIN_KEY: lvismkt_e2eadm_${{ github.run_id }}_${{ github.run_attempt }}
     steps:
       - name: Checkout lvis-app
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: lvis-app
 
       - name: Checkout lvis-marketplace
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/lvis-marketplace
           path: lvis-marketplace
@@ -66,7 +66,7 @@ jobs:
           submodules: recursive
 
       - name: Checkout lvis-plugin-sdk
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/lvis-plugin-sdk
           path: lvis-plugin-sdk
@@ -74,7 +74,7 @@ jobs:
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
 
       - name: Checkout lvis-plugin-lge-api
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/lvis-plugin-ep
           path: lvis-plugin-lge-api
@@ -97,7 +97,7 @@ jobs:
           test "$(git -C lvis-plugin-lge-api rev-parse HEAD)" = "$EP_API_SHA"
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
 
@@ -105,7 +105,7 @@ jobs:
         working-directory: lvis-marketplace/server
         run: |
           pip install -U pip uv
-          uv sync --frozen --all-groups || uv sync --all-groups
+          uv sync --frozen --all-groups
 
       - name: Build plugin schemas (production-equivalent of Dockerfile RUN)
         working-directory: lvis-marketplace
@@ -192,12 +192,12 @@ jobs:
           printf '%s' "$PUBLISHER_KEY" | sha256sum | head -c 32 ; echo
 
       - name: Setup Node (required by postinstall + build scripts)
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "20"
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Build and package exact EP attendance bundle
         working-directory: lvis-plugin-lge-api
@@ -257,7 +257,9 @@ jobs:
           MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
           MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
         run: |
-          M4_E2E=1 bun run test:vitest -- run --reporter=verbose test/e2e/marketplace-e2e.test.ts
+          M4_E2E=1 bun run test:vitest -- run --reporter=verbose \
+            test/e2e/marketplace-e2e-fixture.test.ts \
+            test/e2e/marketplace-e2e.test.ts
 
       - name: Run live Electron IPC lifecycle
         working-directory: lvis-app
@@ -305,7 +307,7 @@ jobs:
 
       - name: Upload immutable-ref evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: marketplace-live-lifecycle-evidence-${{ github.sha }}
           path: |
