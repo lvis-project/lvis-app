@@ -33,6 +33,11 @@ interface PreparedBundledMcpRecord {
   reused: boolean;
 }
 
+interface PendingBundledCandidateCleanup {
+  readonly serverId: string;
+  readonly context: string;
+}
+
 export interface BundledMcpDegradedState {
   readonly pluginId: string;
   readonly generationId: string;
@@ -63,6 +68,11 @@ export class McpManager {
   private bundledDegraded = new Map<string, readonly BundledMcpDegradedState[]>();
   private readonly bundledBaseTools = new WeakMap<Tool, Tool>();
   private readonly bundledToolSnapshots = new Map<string, readonly Tool[]>();
+  /** Retains exact transport handles until candidate teardown succeeds. */
+  private readonly pendingBundledCandidateCleanup = new Map<
+    McpClient,
+    PendingBundledCandidateCleanup
+  >();
   private generationAccess: PluginRuntimeGenerationAccess | undefined;
   private readonly configPath: string;
   private readonly configLockPath: string;
@@ -278,6 +288,7 @@ export class McpManager {
     projections: readonly PreparedPluginMcpProjection[],
     trust: PluginMcpTrustStore,
   ): Promise<PreparedBundledMcpGeneration> {
+    await this.retryPendingBundledCandidateCleanup("before bundled preparation");
     const predecessorServerIds = [...this.bundledOwners]
       .filter(([serverId, current]) =>
         this.activeBundledServerIds.has(serverId) && current.pluginId === owner.pluginId)
@@ -327,7 +338,17 @@ export class McpManager {
         try {
           await client.connect();
         } catch (error) {
-          await this.disconnectBundledCandidate(client, projection.serverId, "failed preparation");
+          try {
+            await this.disconnectBundledCandidate(client, projection.serverId, "failed preparation");
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [
+                error instanceof Error ? error : new Error(String(error)),
+                cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+              ],
+              `bundled MCP candidate connection and cleanup failed (${projection.serverId})`,
+            );
+          }
           const message = scrubSecrets(error instanceof Error ? error.message : String(error));
           degraded.push(Object.freeze({
             pluginId: owner.pluginId,
@@ -377,13 +398,26 @@ export class McpManager {
         published: false,
       };
     } catch (error) {
-      await Promise.all(records
+      const cleanupResults = await Promise.allSettled(records
         .filter((record) => !record.reused)
         .map((record) => this.disconnectBundledCandidate(
           record.client,
           record.projection.serverId,
           "aborted preparation",
         )));
+      const cleanupErrors = cleanupResults
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) =>
+          result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [
+            error instanceof Error ? error : new Error(String(error)),
+            ...cleanupErrors,
+          ],
+          `bundled MCP preparation and candidate cleanup failed (${owner.pluginId})`,
+        );
+      }
       throw error;
     }
   }
@@ -427,13 +461,34 @@ export class McpManager {
     serverId: string,
     context: string,
   ): Promise<void> {
+    const pending = this.pendingBundledCandidateCleanup.get(client) ?? { serverId, context };
+    this.pendingBundledCandidateCleanup.set(client, pending);
     try {
       await client.disconnect();
+      this.pendingBundledCandidateCleanup.delete(client);
     } catch (error) {
       log.warn(
-        `bundled MCP candidate disconnect failed (${serverId}, ${context}): %s`,
+        `bundled MCP candidate disconnect failed (${pending.serverId}, ${pending.context}): %s`,
         scrubSecrets(error instanceof Error ? error.message : String(error)),
       );
+      throw new Error(
+        `bundled MCP candidate cleanup remains pending (${pending.serverId}, ${context})`,
+        { cause: error },
+      );
+    }
+  }
+
+  private async retryPendingBundledCandidateCleanup(context: string): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.pendingBundledCandidateCleanup].map(([client, pending]) =>
+        this.disconnectBundledCandidate(client, pending.serverId, context)),
+    );
+    const errors = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) =>
+        result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "bundled MCP candidate cleanup remains pending");
     }
   }
 
@@ -500,6 +555,12 @@ export class McpManager {
 
   /** 모든 서버 연결 해제 */
   async disconnectAll(): Promise<void> {
+    let pendingCleanupError: Error | undefined;
+    try {
+      await this.retryPendingBundledCandidateCleanup("manager shutdown");
+    } catch (error) {
+      pendingCleanupError = error instanceof Error ? error : new Error(String(error));
+    }
     const ids = Array.from(this.clients.keys());
     const promises: Promise<void>[] = [];
     for (const [id, client] of this.clients) {
@@ -522,6 +583,7 @@ export class McpManager {
       this.onServerDisconnected?.(id);
     }
     log.info("All MCP servers disconnected");
+    if (pendingCleanupError) throw pendingCleanupError;
   }
 
   /**
