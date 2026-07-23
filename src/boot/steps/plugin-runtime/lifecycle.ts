@@ -19,6 +19,7 @@ import type { PluginLoopbackManager } from "../../../mcp/plugin-loopback-manager
 import type { KeywordEngine } from "../../../core/keyword-engine.js";
 import type { PythonRuntimeBootstrapper } from "../../../main/python-runtime.js";
 import type { LateBindingRefs } from "../plugin-runtime.js";
+import type { PluginBundleLifecycleHandler } from "../../../plugins/plugin-bundle-lifecycle.js";
 
 const log = createLogger("lvis");
 
@@ -32,6 +33,7 @@ export interface LifecycleDeps {
   mainWindow: BrowserWindow;
   pythonRuntime?: PythonRuntimeBootstrapper;
   installLoadedPluginPartitionPolicy: (pluginId: string) => void;
+  getBundleLifecycle?: () => PluginBundleLifecycleHandler | undefined;
 }
 
 /**
@@ -51,6 +53,7 @@ export function createLifecycleCallbacks(
     mainWindow,
     pythonRuntime,
     installLoadedPluginPartitionPolicy,
+    getBundleLifecycle,
   } = deps;
 
   return {
@@ -92,11 +95,17 @@ export function createLifecycleCallbacks(
         log.error(`loopback plugin stop failed (${pluginId}): %s`, (err as Error).message),
       );
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
+      void getBundleLifecycle?.()?.deactivate(pluginId).catch((err) =>
+        log.error(`plugin bundle deactivation failed (${pluginId}): %s`, (err as Error).message),
+      );
     },
     onActiveStateChange: (pluginId, enabled) => {
       if (!enabled) {
         keywordEngine.unregisterByPlugin(pluginId);
         lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
+        void getBundleLifecycle?.()?.deactivate(pluginId).catch((err) =>
+          log.error(`plugin bundle inactive cleanup failed (${pluginId}): %s`, (err as Error).message),
+        );
         return;
       }
       const pluginRuntime = getPluginRuntime();
@@ -105,6 +114,9 @@ export function createLifecycleCallbacks(
         keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
         log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on activation`);
       }
+      void getBundleLifecycle?.()?.activate(pluginId).catch((err) =>
+        log.error(`plugin bundle reactivation failed (${pluginId}): %s`, (err as Error).message),
+      );
     },
     // Symmetric to `onDisable` — re-registers tools after a successful
     // restart/add/reload. Without this every chat-surface tool call hits
@@ -142,6 +154,9 @@ export function createLifecycleCallbacks(
         keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
         log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on enable`);
       }
+      void getBundleLifecycle?.()?.activate(pluginId).catch((err) =>
+        log.error(`plugin bundle activation failed (${pluginId}): %s`, (err as Error).message),
+      );
       // Best-effort renderer refresh signal. Runtime/tool registry state is
       // already updated; a closed window must not make reload fail —
       // sendToWindow owns the isDestroyed guard + send try/catch.
