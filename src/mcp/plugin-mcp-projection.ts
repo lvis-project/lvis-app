@@ -102,8 +102,7 @@ function parseStaticConfig(raw: unknown, label: string): Omit<McpServerConfig, "
 }
 
 function safePrefix(owner: PluginMcpOwner): string {
-  const local = `${owner.pluginId}_${owner.localId}`.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 40);
-  return `${local}_${owner.fingerprint.slice(0, 8)}`;
+  return `${owner.pluginId}_${owner.localId}`.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 48);
 }
 
 function buildProjection(owner: PluginMcpOwner, raw: unknown): PreparedPluginMcpProjection {

@@ -43,6 +43,7 @@ import type { MemoryManager } from "../../memory/memory-manager.js";
 import type { RoutinesStore } from "../../main/routines-store.js";
 import { buildPluginConfigOverrides } from "../plugins.js";
 import { PluginLoopbackManager } from "../../mcp/plugin-loopback-manager.js";
+import type { PluginBundleLifecycleHandler } from "../../plugins/plugin-bundle-lifecycle.js";
 import { createLogger } from "../../lib/logger.js";
 
 // ── C5 extraction — pure/self-contained clusters now live under
@@ -214,6 +215,8 @@ export interface InitPluginRuntimeOutput {
    * before the external `mcpManager.clients` registry.
    */
   loopbackManager: PluginLoopbackManager;
+  /** Late-bind bundle projections after workflow, Hook, and MCP services exist. */
+  setBundleLifecycleHandler: (handler: PluginBundleLifecycleHandler) => void;
 }
 
 /**
@@ -361,6 +364,7 @@ export async function initPluginRuntime(
   // construction; the lifecycle closures below capture it and only fire on
   // post-boot events.
   let loopbackManager!: PluginLoopbackManager;
+  let bundleLifecycle: PluginBundleLifecycleHandler | undefined;
 
   const installLoadedPluginPartitionPolicy = (pluginId: string): void => {
     installPluginPartitionPolicy(pluginPartitionName(pluginId), {
@@ -404,6 +408,7 @@ export async function initPluginRuntime(
       mainWindow,
       pythonRuntime,
       installLoadedPluginPartitionPolicy,
+      getBundleLifecycle: () => bundleLifecycle,
     });
 
   pluginRuntime = new PluginRuntime({
@@ -547,6 +552,7 @@ export async function initPluginRuntime(
     runPluginShutdownHandlers,
     pluginPaths,
     loopbackManager,
+    setBundleLifecycleHandler: (handler) => { bundleLifecycle = handler; },
   };
 }
 
