@@ -10,7 +10,7 @@
 import * as asar from "@electron/asar";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { resolveBuildAssets } from "./lib/build-assets.mjs";
@@ -123,6 +123,16 @@ function asarList(archivePath) {
   }
 }
 
+// electron-builder keys asar entries with the OS path separator, so on Windows
+// they are stored like `dist\src\main\main.js`. `asar.extractFile` matches the
+// raw stored key, so a POSIX lookup path ("dist/src/main/x") misses the
+// backslash-keyed entry and reports it "not found" — even though the file is
+// packaged (the list-based checks pass because normalizeAsarEntry folds `\`→`/`).
+// Convert POSIX lookup paths to the stored separator before extracting.
+function extractAsarFile(archivePath, posixPath) {
+  return asar.extractFile(archivePath, posixPath.split("/").join(sep));
+}
+
 function isMacAppPackage() {
   return basename(appOutDir) === "Contents" && basename(dirname(appOutDir)).endsWith(".app");
 }
@@ -198,7 +208,7 @@ if (missingRequired.length > 0) fail("required runtime entries missing from app.
 let mainBundleManifest;
 try {
   mainBundleManifest = JSON.parse(
-    asar.extractFile(appAsar, "dist/src/main/bundle-manifest.json").toString("utf8"),
+    extractAsarFile(appAsar, "dist/src/main/bundle-manifest.json").toString("utf8"),
   );
 } catch (error) {
   fail(`main bundle manifest is unreadable: ${error instanceof Error ? error.message : String(error)}`);
@@ -231,7 +241,7 @@ if (missingMainBundleEntries.length > 0) {
   fail("main-process lazy chunks missing from app.asar", missingMainBundleEntries);
 }
 for (const [path, expectedBytes] of mainBundleFiles) {
-  const actualBytes = asar.extractFile(appAsar, `dist/src/main/${path}`).byteLength;
+  const actualBytes = extractAsarFile(appAsar, `dist/src/main/${path}`).byteLength;
   if (actualBytes !== expectedBytes) {
     fail("main bundle packaged byte count differs from build manifest", [
       `${path}: expected=${expectedBytes} actual=${actualBytes}`,
