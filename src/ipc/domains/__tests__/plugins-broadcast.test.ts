@@ -84,6 +84,10 @@ async function setup() {
       addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
       waitForPluginReady: vi.fn(async () => undefined),
       removePlugin: vi.fn(async () => undefined),
+      removePluginWithCommit: vi.fn(async (
+        _pluginId: string,
+        durableCommit: () => Promise<unknown>,
+      ) => durableCommit()),
       listPluginIds: vi.fn((): string[] => []),
       mergeConfigOverride: vi.fn(),
       setConfigOverride: vi.fn(),
@@ -193,7 +197,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("uses the canonical plugin id for pre-stop and rollback when an alias update is already loaded", async () => {
+  it("keeps the canonical plugin generation active while an alias update rolls back", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginRuntime.listPluginIds.mockReturnValue(["meeting"]);
     deps.pluginMarketplace.install.mockImplementationOnce(async (...args: unknown[]) => {
@@ -204,7 +208,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await expect(invoke("lvis:plugins:install", "lvis-plugin-meeting")).rejects.toThrow("restart failed");
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("meeting");
+    expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
     expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("meeting");
     expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("meeting");
     for (const win of appWindows) {
@@ -306,7 +310,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("stops the loaded plugin before marketplace update and rolls back when restart fails", async () => {
+  it("keeps the loaded plugin generation active while a marketplace update rolls back", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginRuntime.listPluginIds.mockReturnValue(["agent-hub"]);
     deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("prepare failed"));
@@ -314,10 +318,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("prepare failed");
 
     expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("agent-hub");
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
-    expect(deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0]).toBeLessThan(
-      deps.pluginMarketplace.install.mock.invocationCallOrder[0],
-    );
+    expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
     expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("agent-hub");
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
@@ -362,7 +363,10 @@ describe("plugins IPC lifecycle broadcast", () => {
     await invoke("lvis:plugins:uninstall", "agent-hub");
 
     expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("agent-hub");
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledWith(
+      "agent-hub",
+      expect.any(Function),
+    );
     expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledWith("agent-hub");
     expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledWith("agent-hub", new Set(["apiKey", "sttApiKey"]));
     expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:agent-hub");
@@ -496,7 +500,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await invoke("lvis:plugins:uninstall", "agent-hub");
 
-    const removePluginOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
+    const removePluginOrder = deps.pluginRuntime.removePluginWithCommit.mock.invocationCallOrder[0];
     const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
     expect(removePluginOrder).toBeLessThan(uninstallOrder);
   });
@@ -510,7 +514,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     // otherwise registry mutation happens while runtime tracking still
     // references the plugin, leaving listPluginCards showing a ghost card.
     const { deps, appWindows } = await setup();
-    deps.pluginRuntime.removePlugin.mockRejectedValueOnce(new Error("dispose chain failed"));
+    deps.pluginRuntime.removePluginWithCommit.mockRejectedValueOnce(new Error("dispose chain failed"));
 
     await expect(invoke("lvis:plugins:uninstall", "agent-hub")).rejects.toThrow("dispose chain failed");
 
@@ -534,7 +538,10 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await expect(invoke("lvis:plugins:uninstall", "agent-hub")).rejects.toThrow("EACCES");
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledWith(
+      "agent-hub",
+      expect.any(Function),
+    );
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",
@@ -569,7 +576,10 @@ describe("plugins IPC lifecycle broadcast", () => {
       uninstalled: true,
     });
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledWith(
+      "agent-hub",
+      expect.any(Function),
+    );
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",

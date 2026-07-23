@@ -63,6 +63,23 @@ describe("plugin-owned Hook projections", () => {
     ]);
   });
 
+  it("refuses to run plugin hooks without exact generation leasing", async () => {
+    const [projection] = preparePluginHookGeneration(generation("1.0.0", "g1"), payloadRoot);
+    const trust = new PluginHookTrustStore();
+    const manager = new ScriptHookManager();
+    trust.approve(projection);
+    manager.publishPluginGeneration([projection], trust);
+
+    await expect(manager.runPreToolUse({
+      toolName: "ep_read",
+      source: "plugin",
+      category: "read",
+      input: {},
+      sessionId: "session-1",
+      trustOrigin: "user-keyboard",
+    })).rejects.toThrow(/cannot run without generation leasing/);
+  });
+
   it("does not transfer trust across versions or fingerprints", () => {
     const trust = new PluginHookTrustStore();
     const [approved] = preparePluginHookGeneration(generation("1.0.0", "g1"), payloadRoot);

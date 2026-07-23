@@ -239,42 +239,6 @@ export class McpManager {
     }
   }
 
-  async connectBundledServer(
-    projection: PreparedPluginMcpProjection,
-    trust: PluginMcpTrustStore,
-  ): Promise<
-    | { status: "approval_required"; serverId: string; owner: PluginMcpOwner; registeredTools: readonly [] }
-    | { status: "connected"; serverId: string; owner: PluginMcpOwner; registeredTools: readonly string[] }
-    | { status: "degraded"; serverId: string; owner: PluginMcpOwner; registeredTools: readonly []; error: string }
-  > {
-    if (!trust.isApproved(projection)) {
-      return { status: "approval_required", serverId: projection.serverId, owner: projection.owner, registeredTools: [] };
-    }
-    this.governance.registerRuntimeApproval(projection.approval);
-    try {
-      await this.connectServer(projection.config);
-      this.bundledOwners.set(projection.serverId, projection.owner);
-      this.activeBundledServerIds.add(projection.serverId);
-      return {
-        status: "connected",
-        serverId: projection.serverId,
-        owner: projection.owner,
-        registeredTools: Object.freeze([...(this.clients.get(projection.serverId)?.getState().registeredTools ?? [])]),
-      };
-    } catch (error) {
-      this.clients.delete(projection.serverId);
-      this.toolRegistry.unregisterByMcp(projection.serverId);
-      this.governance.unregisterRuntimeApproval(projection.serverId);
-      return {
-        status: "degraded",
-        serverId: projection.serverId,
-        owner: projection.owner,
-        registeredTools: [],
-        error: scrubSecrets(error instanceof Error ? error.message : String(error)),
-      };
-    }
-  }
-
   /** Prepare trusted bundled servers against an isolated registry. */
   async prepareBundledGeneration(
     owner: { pluginId: string; generationId: string },
@@ -322,7 +286,7 @@ export class McpManager {
         try {
           await client.connect();
         } catch (error) {
-          await client.disconnect().catch(() => undefined);
+          await this.disconnectBundledCandidate(client, projection.serverId, "failed preparation");
           log.warn(`bundled MCP candidate degraded (${projection.serverId}): %s`, scrubSecrets(error instanceof Error ? error.message : String(error)));
           continue;
         }
@@ -344,7 +308,13 @@ export class McpManager {
         published: false,
       };
     } catch (error) {
-      await Promise.all(records.filter((record) => !record.reused).map((record) => record.client.disconnect().catch(() => undefined)));
+      await Promise.all(records
+        .filter((record) => !record.reused)
+        .map((record) => this.disconnectBundledCandidate(
+          record.client,
+          record.projection.serverId,
+          "aborted preparation",
+        )));
       throw error;
     }
   }
@@ -380,8 +350,27 @@ export class McpManager {
     await Promise.all(
       prepared.records
         .filter((record) => !record.reused)
-        .map((record) => record.client.disconnect().catch(() => undefined)),
+        .map((record) => this.disconnectBundledCandidate(
+          record.client,
+          record.projection.serverId,
+          "discarded preparation",
+        )),
     );
+  }
+
+  private async disconnectBundledCandidate(
+    client: McpClient,
+    serverId: string,
+    context: string,
+  ): Promise<void> {
+    try {
+      await client.disconnect();
+    } catch (error) {
+      log.warn(
+        `bundled MCP candidate disconnect failed (${serverId}, ${context}): %s`,
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+      );
+    }
   }
 
   /** Disconnect predecessor clients that the just-published replacement omitted. */

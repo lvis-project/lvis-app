@@ -88,7 +88,7 @@ describe("McpManager bundled generation", () => {
     });
 
     const trust = new PluginMcpTrustStore();
-    const g1Projection = preparePluginMcpGeneration(generation("g1"))[0];
+    const g1Projection = preparePluginMcpGeneration(generation("g1"), root)[0];
     trust.approve(g1Projection);
     const g1 = await manager.prepareBundledGeneration(
       { pluginId: "ep-api", generationId: "g1" },
@@ -100,7 +100,7 @@ describe("McpManager bundled generation", () => {
     const oldTool = registry.findByName("mcp_ep_api_ep_read");
     expect(oldTool?.mcpServerId).toBe(g1Projection.serverId);
 
-    const g2Projection = preparePluginMcpGeneration(generation("g2"))[0];
+    const g2Projection = preparePluginMcpGeneration(generation("g2"), root)[0];
     expect(trust.isApproved(g2Projection)).toBe(true);
     const g2 = await manager.prepareBundledGeneration(
       { pluginId: "ep-api", generationId: "g2" },
