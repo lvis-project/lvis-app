@@ -920,10 +920,6 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     return result;
   }
 
-  getPluginInstance<T = unknown>(pluginId: string): T | undefined {
-    return this.plugins.get(pluginId)?.instance as T | undefined;
-  }
-
   getPluginEntryDir(pluginId: string): string | undefined {
     const plugin = this.plugins.get(pluginId);
     if (!plugin) return undefined;
