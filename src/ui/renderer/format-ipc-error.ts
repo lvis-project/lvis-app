@@ -38,6 +38,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-payload": "formatIpcError.invalidPayload",
   "invalid-params": "formatIpcError.invalidParams",
   "invalid-input": "formatIpcError.invalidInput",
+  "invalid-operation-input": "formatIpcError.invalidInput",
+  "invalid-plugin-id": "formatIpcError.invalidInput",
+  "invalid-contribution-trust-request": "formatIpcError.invalidInput",
   "invalid-native-context-menu": "formatIpcError.invalidInput",
   "invalid-value": "formatIpcError.invalidValue",
   "invalid-format": "formatIpcError.invalidFormat",
@@ -121,6 +124,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
   // ── Plugin / marketplace / bundle ──
   "plugin-not-loaded": "formatIpcError.pluginNotLoaded",
+  "plugin-bundle-lifecycle-unavailable": "formatIpcError.noEngine",
+  "contribution-trust-update-failed": "formatIpcError.writeFailed",
   "unknown-plugin-id": "formatIpcError.unknownPluginId",
   "invalid-bundle-id": "formatIpcError.invalidBundleId",
   "invalid-entry-url": "formatIpcError.invalidEntryUrl",

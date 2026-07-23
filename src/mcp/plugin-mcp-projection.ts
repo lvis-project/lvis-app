@@ -107,8 +107,10 @@ function safePrefix(owner: PluginMcpOwner): string {
   return `${owner.pluginId}_${owner.localId}`.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 48);
 }
 
-function buildProjection(owner: PluginMcpOwner, raw: unknown): PreparedPluginMcpProjection {
-  const configWithoutId = parseStaticConfig(raw, `plugin MCP '${owner.localId}'`);
+function buildProjection(
+  owner: PluginMcpOwner,
+  configWithoutId: Omit<McpServerConfig, "id">,
+): PreparedPluginMcpProjection {
   const identityHash = createHash("sha256")
     .update([owner.pluginId, owner.pluginVersion, owner.generationId, owner.localId, owner.fingerprint].join("\0"))
     .digest("hex")
@@ -139,7 +141,7 @@ function buildProjection(owner: PluginMcpOwner, raw: unknown): PreparedPluginMcp
 /** Static parse/fingerprint preparation. It performs no spawn, network, discovery, or registration. */
 export function preparePluginMcpGeneration(
   generation: ActivePluginGeneration,
-  payloadRoot = process.cwd(),
+  payloadRoot: string,
 ): readonly PreparedPluginMcpProjection[] {
   const projections: PreparedPluginMcpProjection[] = [];
   for (const contribution of generation.contributions) {
@@ -155,7 +157,7 @@ export function preparePluginMcpGeneration(
     }
     const parsed = parseStaticConfig(raw, `plugin MCP '${contribution.localId}'`);
     let fingerprint = contribution.fingerprint;
-    let preparedRaw: unknown = raw;
+    let preparedConfig = parsed;
     if (parsed.transport === "stdio") {
       const anchored = anchorBundledCommand(
         payloadRoot,
@@ -165,11 +167,11 @@ export function preparePluginMcpGeneration(
         `plugin MCP '${contribution.localId}'`,
       );
       fingerprint = anchored.fingerprint;
-      preparedRaw = {
-        ...(raw as Record<string, unknown>),
+      preparedConfig = Object.freeze({
+        ...parsed,
         command: anchored.command[0]!,
         args: anchored.command.slice(1),
-      };
+      });
     }
     projections.push(buildProjection({
       pluginId: generation.pluginId,
@@ -177,7 +179,7 @@ export function preparePluginMcpGeneration(
       generationId: generation.generationId,
       localId: contribution.localId,
       fingerprint,
-    }, preparedRaw));
+    }, preparedConfig));
   }
   return Object.freeze(projections);
 }

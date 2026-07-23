@@ -15,7 +15,6 @@ describe("PluginOperationGrantCoordinator", () => {
     const coordinator = new PluginOperationGrantCoordinator(() => now);
     const readRevision = coordinator.recordRead(
       { ...principal, readTool: "ep_attendance_read", readOperation: "today" },
-      { private: "not stored in the binding" },
     );
     expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000)).toBe(readRevision);
     const grant = coordinator.issue({

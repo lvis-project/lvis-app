@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,6 +115,32 @@ describe("materializePluginContributions", () => {
     ]);
     expect(result[0].fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(Object.isFrozen(result[0].files)).toBe(true);
+  });
+
+  it("fingerprints reference assets from exact bytes rather than decoded text", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lvis-contributions-bytes-"));
+    roots.push(root);
+    const skillPath = "skills/attendance/SKILL.md";
+    const assetPath = "skills/attendance/assets/icon.bin";
+    const skillBytes = Buffer.from("# Attendance\n", "utf8");
+    const assetBytes = Buffer.from([0xff, 0xfe, 0x00, 0x41]);
+    await mkdir(join(root, "skills", "attendance", "assets"), { recursive: true });
+    await writeFile(join(root, skillPath), skillBytes);
+    await writeFile(join(root, assetPath), assetBytes);
+
+    const [contribution] = await materializePluginContributions(root, manifest({
+      skills: [{ id: "attendance", path: "skills/attendance" }],
+    }));
+    const expectedFiles = [
+      { path: skillPath, sha256: createHash("sha256").update(skillBytes).digest("hex") },
+      { path: assetPath, sha256: createHash("sha256").update(assetBytes).digest("hex") },
+    ];
+    const expectedFingerprint = createHash("sha256")
+      .update(expectedFiles.map((file) => `${file.path}\0${file.sha256}`).join("\n"))
+      .digest("hex");
+
+    expect(contribution.files.map(({ path, sha256 }) => ({ path, sha256 }))).toEqual(expectedFiles);
+    expect(contribution.fingerprint).toBe(expectedFingerprint);
   });
 
   it.skipIf(process.platform === "win32")("rejects installed symlinks before reading contribution bytes", async () => {
