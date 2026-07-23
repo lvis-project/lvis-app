@@ -209,6 +209,12 @@ Key boundaries:
   owner/version/local ID and static policy fingerprint. Candidate preparation
   for MCP is parse/fingerprint-only and performs no spawn, network, discovery,
   registry write, or plugin execution.
+  An `mcpServers[].path` descriptor is one JSON object containing a standard
+  `stdio` or Streamable HTTP MCP config without `id`, `apiKey`, `sandboxRoot`,
+  or `allowPrivateNetworks`; the Host derives a generation-scoped server ID and
+  an ephemeral strict governance rule. Exact approval connects it without
+  adding it to the user's global `servers.json`. A failed connection is a typed
+  degraded projection with zero tools and does not roll back the plugin bundle.
 - plugin code, handlers, materialized Skill bytes, Hook projections, static MCP
   descriptors, and operation policy belong to one immutable active generation.
   Every dispatch first acquires a lease on that generation. Lifecycle transitions
