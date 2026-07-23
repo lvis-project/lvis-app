@@ -348,6 +348,12 @@ export interface PluginManifest {
   requires?: RequiresSpec;
   publisher?: string;
   /**
+   * npm package name persisted into installed manifests by the marketplace
+   * service for rollback support. The publish pipeline owns this value;
+   * plugin authors should not set it manually.
+   */
+  packageName?: string;
+  /**
    * Optional hard startup timeout (ms, positive integer).
    * When declared, PluginRuntime enforces a `Promise.race`-based timeout on
    * the plugin's `start()` call — the running task is NOT cancelled
@@ -384,6 +390,15 @@ export interface PluginManifest {
    * Use when no Lucide glyph matches the plugin's domain identity.
    */
   iconText?: string;
+  /** Optional Python runtime co-deployment metadata. */
+  python?: {
+    /** `lvis-app` installs the declared lock; `self` leaves runtime ownership to the plugin. */
+    managedBy?: "lvis-app" | "self";
+    /** Lockfile path relative to the verified plugin root. */
+    requirementsLock?: string;
+    /** Optional interpreter override for self-managed runtimes. */
+    interpreter?: string;
+  };
   /**
    * #893 — Declarative allowlist of host-owned secret keys this plugin is
    * allowed to read via `hostApi.getSecret(key)`. The runtime gate matches
@@ -404,6 +419,10 @@ export interface PluginManifest {
     /** Allowlisted secret keys this plugin can read via `hostApi.getSecret`. */
     read?: string[];
   };
+  /** Individual maintainer name or contact, distinct from the publishing organization. */
+  author?: string;
+  /** Marketplace-only advertisement of UI slot names; bindings remain in `ui[].slot`. */
+  uiSlots?: string[];
 }
 
 export interface PluginFirstTaskCopy {

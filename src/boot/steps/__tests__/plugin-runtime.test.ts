@@ -152,7 +152,7 @@ describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", 
 });
 
 describe("declaresHostManagedPythonRuntime", () => {
-  it("uses the same lockfile declaration shapes as Python runtime discovery", () => {
+  it("recognizes only the canonical Host manifest Python declaration", () => {
     const manifest = (overrides: Record<string, unknown>) => ({
       id: "test-plugin",
       name: "Test Plugin",
@@ -167,13 +167,7 @@ describe("declaresHostManagedPythonRuntime", () => {
       python: { managedBy: "lvis-app" },
     }))).toBe(true);
     expect(declaresHostManagedPythonRuntime(manifest({
-      pythonRequirementsLock: "requirements/python.lock",
-    }))).toBe(true);
-    expect(declaresHostManagedPythonRuntime(manifest({
-      runtime: { python: { requirementsLock: "requirements/python.lock" } },
-    }))).toBe(true);
-    expect(declaresHostManagedPythonRuntime(manifest({
-      config: { pythonRequirementsLock: "requirements/python.lock" },
+      python: { requirementsLock: "requirements/python.lock" },
     }))).toBe(true);
     expect(declaresHostManagedPythonRuntime(manifest({}))).toBe(false);
   });

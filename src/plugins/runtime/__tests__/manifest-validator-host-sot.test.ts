@@ -20,6 +20,7 @@ import {
   formatUnknownErrorMessage,
   parsePluginJson,
 } from "../manifest-validation.js";
+import type { PluginManifest } from "../../types.js";
 import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 
@@ -81,6 +82,60 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     expect(validator.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({ keyword: "additionalProperties" }),
       expect.objectContaining({ keyword: "pattern" }),
+    ]));
+  });
+
+  it("rejects retired parallel UI and operation-governance fields", async () => {
+    const validator = await buildManifestValidator();
+    const base = {
+      id: "retired-parallel-fields",
+      version: "1.0.0",
+      description: "Retired parallel manifest field fixture.",
+      entry: "dist/index.js",
+      tools: [],
+    };
+
+    for (const field of [
+      "uiTool",
+      "uiTools",
+      "uiAction",
+      "uiActions",
+      "operationGovernance",
+    ]) {
+      expect(validator({ ...base, [field]: {} }), field).toBe(false);
+      expect(validator.errors).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          keyword: "additionalProperties",
+          params: expect.objectContaining({ additionalProperty: field }),
+        }),
+      ]));
+    }
+
+    expect(validator({
+      ...base,
+      tools: [{
+        name: "legacy_governed",
+        inputSchema: {
+          type: "object",
+          properties: { operation: { type: "string", const: "status" } },
+          required: ["operation"],
+        },
+        _meta: {
+          "lvisai/operationPolicy": {
+            discriminant: "operation",
+            appAllowed: ["status"],
+            operations: {
+              status: { kind: "read", minimumRisk: "read" },
+            },
+          },
+        },
+      }],
+    })).toBe(false);
+    expect(validator.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        keyword: "additionalProperties",
+        params: expect.objectContaining({ additionalProperty: "appAllowed" }),
+      }),
     ]));
   });
 
@@ -508,7 +563,9 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
     version: "1.2.3",
     description: "A representative manifest exercising every host-required field.",
     publisher: "LVIS",
+    packageName: "@lvis/full-featured-plugin",
     author: "LVIS Team",
+    uiSlots: ["sidebar"],
     entry: "dist/index.js",
     tools: [
       {
@@ -580,8 +637,13 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       },
       required: ["enabled"],
     },
+    python: {
+      managedBy: "lvis-app",
+      requirementsLock: "python-requirements.lock",
+      interpreter: "python3",
+    },
     startupTimeoutMs: 8000,
-  };
+  } satisfies PluginManifest;
 
   it("validates against the compiled host schema", async () => {
     const validator = await buildManifestValidator();
@@ -604,6 +666,14 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       expect(parsed.id).toBe("full-featured-plugin");
       expect(parsed.auth?.statusTool).toBe("ff_status");
       expect(parsed.auth?.logoutTool).toBe("ff_logout");
+      expect(parsed.packageName).toBe("@lvis/full-featured-plugin");
+      expect(parsed.author).toBe("LVIS Team");
+      expect(parsed.uiSlots).toEqual(["sidebar"]);
+      expect(parsed.python).toEqual({
+        managedBy: "lvis-app",
+        requirementsLock: "python-requirements.lock",
+        interpreter: "python3",
+      });
       expect(parsed.requires?.minAppVersion).toBe("1.0.0");
       expect(parsed.networkAccess?.allowedDomains).toEqual(["api.example.com"]);
       expect(parsed.uiResources?.[0]).toEqual({
