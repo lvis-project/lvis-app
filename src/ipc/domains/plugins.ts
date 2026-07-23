@@ -73,7 +73,11 @@ import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../.
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import { isPluginInstallFailureKind, type PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
-import { handlePluginCards, handleMarketplaceList } from "../handlers/plugins.js";
+import {
+  handlePluginBundleE2eSnapshot,
+  handlePluginCards,
+  handleMarketplaceList,
+} from "../handlers/plugins.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
 const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
@@ -997,6 +1001,24 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         : {}),
     });
   });
+
+  ipcMain.handle(
+    CHANNELS.plugins.e2eBundleSnapshot,
+    async (e, pluginId: unknown, skillLocalId: unknown) => {
+      if (!validateHostRendererSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.plugins.e2eBundleSnapshot, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (process.env.LVIS_E2E !== "1") {
+        return { ok: false as const, error: "e2e-disabled" };
+      }
+      return handlePluginBundleE2eSnapshot(
+        deps,
+        pluginId,
+        skillLocalId,
+      );
+    },
+  );
 
   // ─── MCP ──────────────────────────────────────
 
