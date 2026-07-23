@@ -528,8 +528,9 @@ describe("PluginRuntime.disable", () => {
         registryPath,
         deploymentGuard: guard,
         pluginsRoot: installedDir,
-        createHostApi: (_pluginId, _manifest) => {
+        createHostApi: (pluginId, manifest, pluginDataDir) => {
           const hostApi = {
+            ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
             registerKeywords: () => {},
             emitEvent: () => {},
             onEvent: () => () => {},
@@ -575,7 +576,8 @@ describe("PluginRuntime.disable", () => {
         registryPath,
         deploymentGuard: guard,
         pluginsRoot: installedDir,
-        createHostApi: (_pluginId, _manifest) => ({
+        createHostApi: (pluginId, manifest, pluginDataDir) => ({
+          ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
           registerKeywords: () => {},
           emitEvent: () => {},
           onEvent: () => () => {},
@@ -840,7 +842,8 @@ describe("PluginRuntime.disable", () => {
       registryPath,
       pluginsRoot: installedDir,
       deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
-      createHostApi: (pluginId) => ({
+      createHostApi: (pluginId, manifest, pluginDataDir) => ({
+        ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
         registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
@@ -889,7 +892,8 @@ describe("PluginRuntime.disable", () => {
       registryPath,
       pluginsRoot: installedDir,
       deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
-      createHostApi: (pluginId) => ({
+      createHostApi: (pluginId, manifest, pluginDataDir) => ({
+        ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
         registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
@@ -1262,7 +1266,8 @@ export default async function createPlugin({ hostApi }) {
       registryPath,
       pluginsRoot: installedDir,
       onDisable: (pluginId) => disabled.push(pluginId),
-      createHostApi: (pluginId, _manifest, _pluginDataDir, incarnation) => ({
+      createHostApi: (pluginId, manifest, pluginDataDir, incarnation) => ({
+        ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
         registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: () => {
@@ -2892,6 +2897,85 @@ export default async function createPlugin() {
     ).resolves.toBe("started");
   });
 
+  it("uninstall lifecycle cancels a never-settling restart before its outer lock", async () => {
+    const pluginId = "p-uninstall-immortal-restart";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    let prepareRestart = false;
+    let entered!: () => void;
+    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const runtime = makeRuntimeWithPreparation(() => {
+      if (!prepareRestart) return undefined;
+      entered();
+      return new Promise<void>(() => {});
+    });
+    await runtime.startAll();
+    prepareRestart = true;
+
+    const restart = runtime.restartPlugin(pluginId);
+    await preparationEntered;
+    const uninstall = uninstallPluginWithLifecycle(pluginId, {
+      pluginRuntime: runtime,
+      pluginMarketplace: {
+        uninstall: vi.fn(async () => ({ pluginId, uninstalled: true as const })),
+      },
+    });
+
+    await expect(restart).resolves.toBe("failed");
+    await expect(uninstall).resolves.toEqual({ pluginId, uninstalled: true });
+    expect(runtime.listPluginIds()).not.toContain(pluginId);
+  });
+
+  it("restores the runtime config snapshot before a failed uninstall re-adds the plugin", async () => {
+    const pluginId = "p-uninstall-config-restore";
+    const methodName = "p_uninstall_config_restore_ping";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      join(installedDir, pluginId, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: { "${methodName}": async () => ctx.config.token ?? "missing" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    runtime.setConfigOverride(pluginId, { token: "preserved" });
+    await runtime.startAll();
+    await expect(runtime.call(methodName)).resolves.toBe("preserved");
+    const durableFailure = new Error("marketplace registry write failed");
+
+    await expect(uninstallPluginWithLifecycle(pluginId, {
+      pluginRuntime: runtime,
+      pluginMarketplace: {
+        uninstall: vi.fn(async () => {
+          throw durableFailure;
+        }),
+      },
+    })).rejects.toBe(durableFailure);
+
+    expect(runtime.getConfigOverride(pluginId)).toEqual({ token: "preserved" });
+    await expect(runtime.call(methodName)).resolves.toBe("preserved");
+  });
+
   it("runs an old instance stop hook once when removal cancels a restart", async () => {
     const pluginId = "p-remove-during-restart-stop";
     const manifestPath = await writePlugin(pluginId);
@@ -2976,6 +3060,78 @@ export default async function createPlugin() {
     );
     await assertWaitsForPersistence(() => runtime.reloadPlugin(pluginId));
     expect(runtime.listPluginIds()).toEqual([pluginId]);
+  });
+
+  it("rejects an external restart while an all-plugin mutation owns the gate", async () => {
+    const pluginId = "p-global-gate-restart";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    let releaseGlobal!: () => void;
+    let globalEntered!: () => void;
+    const globalGate = new Promise<void>((resolve) => { releaseGlobal = resolve; });
+    const globalStarted = new Promise<void>((resolve) => { globalEntered = resolve; });
+    const globalMutation = withAllPluginInstallLocks(async () => {
+      globalEntered();
+      await globalGate;
+    });
+    await globalStarted;
+
+    await expect(runtime.restartPlugin(pluginId)).resolves.toBe("failed");
+    expect(runtime.isPluginRestartPending(pluginId)).toBe(false);
+
+    releaseGlobal();
+    await globalMutation;
+    await expect(
+      runtime.restartPlugin(pluginId, { skipPreparation: true }),
+    ).resolves.toBe("started");
+  });
+
+  it("drops a cancelled restart preparation before reload and the next restart", async () => {
+    const pluginId = "p-reload-cancelled-preparation";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    let mode: "boot" | "hang" | "fresh" = "boot";
+    let entered!: () => void;
+    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const neverSettles = new Promise<void>(() => {});
+    let restartPreparationCalls = 0;
+    const runtime = makeRuntimeWithPreparation(() => {
+      if (mode === "boot") return undefined;
+      restartPreparationCalls += 1;
+      if (mode === "hang") {
+        entered();
+        return neverSettles;
+      }
+      return undefined;
+    });
+    await runtime.startAll();
+    mode = "hang";
+
+    const staleRestart = runtime.restartPlugin(pluginId);
+    await preparationEntered;
+    mode = "fresh";
+    const reload = runtime.reloadPlugin(pluginId);
+
+    await expect(staleRestart).resolves.toBe("failed");
+    await expect(reload).resolves.toBeUndefined();
+    await expect(runtime.restartPlugin(pluginId)).resolves.toBe("started");
+    expect(restartPreparationCalls).toBe(2);
   });
 
   it("addPlugin restart path prepares dependencies before stopping the loaded plugin", async () => {

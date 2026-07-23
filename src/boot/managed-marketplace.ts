@@ -101,6 +101,9 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   }
   notifyBootstrapStatus(mainWindow, { phase: "start" });
   try {
+    // A dependency preparation can hold a per-plugin lifecycle lock forever.
+    // Cancellation must happen before the outer all-plugin lock queues.
+    pluginRuntime.cancelAllPendingRestarts();
     const ensureResult = await withAllPluginInstallLocks(async () => {
       const result = await pluginMarketplace.ensureManagedInstalled();
       const changed = result.installed.length > 0 || (result.updated?.length ?? 0) > 0;

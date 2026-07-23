@@ -16,7 +16,10 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
     },
     pluginRuntime: {
       resolvePluginId: vi.fn((requestedPluginId: string) => requestedPluginId),
+      cancelPendingRestart: vi.fn(),
       clearConfigOverride: vi.fn(),
+      getConfigOverride: vi.fn(() => undefined as Record<string, unknown> | undefined),
+      setConfigOverride: vi.fn(),
       getPluginManifest: vi.fn(() => ({
         configSchema: {
           properties: {
@@ -119,6 +122,34 @@ describe("uninstallPluginWithLifecycle", () => {
     }
   });
 
+  it("cancels a pending restart before the outer uninstall lock queues", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-cancel-restart-"));
+    try {
+      let releaseRestart!: () => void;
+      let restartEntered!: () => void;
+      const restartGate = new Promise<void>((resolve) => { releaseRestart = resolve; });
+      const restartStarted = new Promise<void>((resolve) => { restartEntered = resolve; });
+      const restart = withPluginInstallLock("agent-hub", async () => {
+        restartEntered();
+        await restartGate;
+      });
+      await restartStarted;
+
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      deps.pluginRuntime.cancelPendingRestart.mockImplementationOnce(() => releaseRestart());
+
+      await expect(uninstallPluginWithLifecycle("agent-hub", deps))
+        .resolves.toEqual({ pluginId: "agent-hub", uninstalled: true });
+      await restart;
+
+      expect(deps.pluginRuntime.cancelPendingRestart).toHaveBeenCalledWith("agent-hub");
+      expect(deps.pluginRuntime.cancelPendingRestart.mock.invocationCallOrder[0])
+        .toBeLessThan(deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("drains detached stop-hook mutations before deleting durable plugin state", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-detached-"));
     try {
@@ -176,7 +207,10 @@ describe("uninstallPluginWithLifecycle", () => {
 
       await uninstallPluginWithLifecycle("marketplace-alias", deps);
 
-      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("canonical-plugin");
+      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith(
+        "canonical-plugin",
+        { preserveConfigOverride: true },
+      );
       expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("marketplace-alias");
       expect(deps.pluginRuntime.clearConfigOverride).toHaveBeenCalledWith("canonical-plugin");
       expect(order).toEqual([
@@ -216,13 +250,30 @@ describe("uninstallPluginWithLifecycle", () => {
       const failure = new Error("marketplace registry write failed");
       const deps = makeDeps("canonical-plugin", join(root, ".cache"), failure);
       deps.pluginRuntime.resolvePluginId.mockReturnValue("canonical-plugin");
+      deps.pluginRuntime.getConfigOverride.mockReturnValue({ token: "runtime-value" });
+      const restoreOrder: string[] = [];
+      deps.pluginRuntime.setConfigOverride.mockImplementationOnce(() => {
+        restoreOrder.push("config");
+      });
+      deps.pluginRuntime.addPlugin.mockImplementationOnce(async () => {
+        restoreOrder.push("add");
+        return "started";
+      });
 
       await expect(
         uninstallPluginWithLifecycle("marketplace-alias", deps),
       ).rejects.toBe(failure);
 
-      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("canonical-plugin");
+      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith(
+        "canonical-plugin",
+        { preserveConfigOverride: true },
+      );
+      expect(deps.pluginRuntime.setConfigOverride).toHaveBeenCalledWith(
+        "canonical-plugin",
+        { token: "runtime-value" },
+      );
       expect(deps.pluginRuntime.addPlugin).toHaveBeenCalledWith("marketplace-alias");
+      expect(restoreOrder).toEqual(["config", "add"]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
