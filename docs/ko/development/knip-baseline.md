@@ -12,9 +12,9 @@ Run:
 bun run check:knip
 ```
 
-명령은 정확히 고정된 `knip@6.23.0` devDependency를 실행하고 정규화된 결과를
-`knip-baseline.json`과 비교한다. 기준선에는 이슈 유형, 파일, 심볼 이름만
-기록하므로 소스 줄 이동은 거짓 drift를 만들지 않는다.
+명령은 설치된 devDependency가 정확히 `knip@6.23.0`인지 검증한 뒤 실행하고,
+정규화된 결과를 `knip-baseline.json`과 비교한다. 기준선에는 이슈 유형, 파일,
+심볼 이름만 기록하므로 소스 줄 이동은 거짓 drift를 만들지 않는다.
 
 다음 조건에서는 실패한다.
 
@@ -31,7 +31,9 @@ bun run test:knip-gate
 
 검증은 저장소 밖의 임시 프로젝트를 사용하고 종료 후 삭제하므로 동시에 실행된
 저장소 scan과 경합하지 않는다. 의도된 부채 변경을 검토한 뒤에만
-`bun run check:knip:update`로 기준선을 갱신한다.
+`bun run check:knip:update`로 기준선을 갱신한다. 이 명령은 같은 디렉터리의
+staging 파일을 flush한 뒤 원자 교체하므로 중단된 갱신이 검토된 기준선을
+잘라내지 않는다.
 
 현재 snapshot은 file 25건, export 235건, type 370건, duplicate export group
 7건, devDependency 7건 등 총 644건을 허용한다. 기존 항목이 해소된 경우에는
