@@ -342,13 +342,14 @@ describe("HostApi.config.set round-trip", () => {
     const settings = makeSettingsService(store);
     const createHostApi = await initAndGetFactory(settings);
     activeManifest = { id: "plugin-a", config: {} };
+    const trackOperation = vi.fn(<T>(operation: Promise<T>) => operation);
     const api = createHostApi(
       "plugin-a",
       activeManifest,
       mkdtempSync("/tmp/lvis-cfg-lifecycle-"),
       {
         registerDisposer: vi.fn(),
-        trackOperation: <T>(operation: Promise<T>) => operation,
+        trackOperation,
         isActive: () => true,
         isLifecycleHookActive: () => true,
       },
@@ -356,6 +357,7 @@ describe("HostApi.config.set round-trip", () => {
 
     await expect(api.config.set("duringStart", true)).resolves.toBeUndefined();
     expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { duringStart: true });
+    expect(trackOperation).toHaveBeenCalledTimes(1);
     expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
   });
 
@@ -413,13 +415,15 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     ));
     const workerStop = vi.fn();
     const workerOnStdout = vi.fn();
+    const workerOnStderr = vi.fn();
+    const workerOnExit = vi.fn();
     runtimeTestState.spawnWorker.mockResolvedValue({
       socketPath: "/tmp/plugin-a.sock",
       pid: 42,
       stop: workerStop,
       onStdout: workerOnStdout,
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
+      onStderr: workerOnStderr,
+      onExit: workerOnExit,
     });
     const disposers: Array<() => void> = [];
     let active = true;
@@ -441,13 +445,34 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     if (!key.ok) throw new Error("expected API key capability");
     expect(key.bearer()).toBe("sk-incarnation");
     const worker = await api.spawnWorker({ workerId: "worker-a", command: "node" });
-    worker.onStdout(vi.fn());
+    const stdoutListener = vi.fn();
+    const stderrListener = vi.fn();
+    const exitListener = vi.fn();
+    worker.onStdout(stdoutListener);
+    worker.onStderr(stderrListener);
+    worker.onExit(exitListener);
+
+    workerOnStdout.mock.calls[0]?.[0]("before");
+    workerOnStderr.mock.calls[0]?.[0]("before-error");
+    workerOnExit.mock.calls[0]?.[0]({ code: 0, signal: null });
+    expect(stdoutListener).toHaveBeenCalledWith("before");
+    expect(stderrListener).toHaveBeenCalledWith("before-error");
+    expect(exitListener).toHaveBeenCalledWith({ code: 0, signal: null });
+    stdoutListener.mockClear();
+    stderrListener.mockClear();
+    exitListener.mockClear();
 
     active = false;
     for (const dispose of disposers) dispose();
 
     expect(() => key.bearer()).toThrow(/plugin instance is no longer active/);
     expect(() => worker.onStdout(vi.fn())).toThrow(/plugin instance is no longer active/);
+    workerOnStdout.mock.calls[0]?.[0]("after");
+    workerOnStderr.mock.calls[0]?.[0]("after-error");
+    workerOnExit.mock.calls[0]?.[0]({ code: null, signal: "SIGTERM" });
+    expect(stdoutListener).not.toHaveBeenCalled();
+    expect(stderrListener).not.toHaveBeenCalled();
+    expect(exitListener).not.toHaveBeenCalled();
     expect(workerStop).toHaveBeenCalledTimes(1);
     worker.stop();
     expect(workerStop).toHaveBeenCalledTimes(1);
