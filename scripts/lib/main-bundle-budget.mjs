@@ -85,6 +85,7 @@ export function analyzeMainBundleMetafile(metafile, { entryPoint, requiredAsyncE
     initialFiles: initial.size,
     totalFiles: outputs.size,
     hasRequiredAsyncBoundary,
+    requiredAsyncEntryIsInitial: initial.has(requiredAsyncEntry[0]),
     legacyInitialReduction: 1 - (initialBytes / LEGACY_SINGLE_MAIN_BUNDLE_BYTES),
   };
 }
@@ -93,6 +94,9 @@ export function assertMainBundleBudget(measurement, budgets) {
   const failures = [];
   if (!measurement.hasRequiredAsyncBoundary) {
     failures.push("required boot entry has no async bundle boundary");
+  }
+  if (measurement.requiredAsyncEntryIsInitial) {
+    failures.push("required boot entry remains statically reachable from main");
   }
   for (const key of ["entryBytes", "initialBytes", "totalBytes"]) {
     if (!Number.isFinite(measurement[key]) || measurement[key] < 0) {

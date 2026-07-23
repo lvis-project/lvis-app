@@ -113,14 +113,13 @@ async function main() {
   const { bootstrap } = await loadMainStartupDependencies(
     () => import("./boot.js"),
     ensureCorporateCaInjected,
+    () => updateSplashStatus(t("be_main.splashLoadingSettings")),
   );
 
   // Drive splash status from the real bootstrap pipeline so the text below
   // the wordmark matches what's actually happening rather than cycling
   // through a setInterval list. The fallback idle cycle inside the splash
   // still runs until the first explicit update lands.
-  updateSplashStatus(t("be_main.splashLoadingSettings"));
-
   const services = await bootstrap(projectRoot, getMainWindow()!, () => getMainWindow());
   setServices(services);
 
