@@ -262,28 +262,17 @@ export async function executeAuthorizedToolInvocation(
     pluginOperationPrincipal
   ) {
     const readRequirement = resolvedPluginOperation.rule.requiresRead;
-    let readRevision: string | null = null;
-    let readRequirementSatisfied = true;
-    if (readRequirement) {
-      const latest = services.pluginOperationGrants.latestRequiredRead(
-        pluginOperationPrincipal,
-        readRequirement.tool,
-        readRequirement.operations,
-        readRequirement.maxAgeMs,
-      );
-      if (latest) readRevision = latest;
-      else readRequirementSatisfied = false;
-    }
     const grantContext = invocationPermissionContext.pluginOperation;
-    const consumed = readRequirementSatisfied
-      ? services.pluginOperationGrants.consume(grantContext?.grantToken, {
-          ...pluginOperationPrincipal,
-          toolName: toolUse.name,
-          operation: resolvedPluginOperation.operation,
-          intentHash: resolvedPluginOperation.intentHash,
-          readRevision,
-        })
-      : { ok: false as const, reason: "required read is missing or stale" };
+    const consumed = services.pluginOperationGrants.consume(
+      grantContext?.grantToken,
+      {
+        ...pluginOperationPrincipal,
+        toolName: toolUse.name,
+        operation: resolvedPluginOperation.operation,
+        intentHash: resolvedPluginOperation.intentHash,
+        requiresRead: readRequirement !== undefined,
+      },
+    );
     services.auditLogger.log({
       timestamp: new Date().toISOString(),
       sessionId: "plugin-operation",

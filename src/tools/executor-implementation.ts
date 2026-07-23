@@ -187,6 +187,11 @@ export class ToolExecutor {
       operation: string;
       intentHash: string;
       readRevision: string | null;
+      requiredRead?: {
+        readTool: string;
+        readOperations: readonly string[];
+        maxAgeMs: number;
+      };
     };
     ttlMs?: number;
   }): { token: string; grantId: string; readRevision: string | null } {
@@ -197,7 +202,7 @@ export class ToolExecutor {
       intentHash: args.inspected.intentHash,
       readRevision: args.inspected.readRevision,
       expiresAt: Date.now() + Math.min(Math.max(args.ttlMs ?? 60_000, 1), 300_000),
-    });
+    }, args.inspected.requiredRead);
     return { ...issued, readRevision: args.inspected.readRevision };
   }
 
@@ -210,6 +215,11 @@ export class ToolExecutor {
     operation: string;
     intentHash: string;
     readRevision: string | null;
+    requiredRead?: {
+      readTool: string;
+      readOperations: readonly string[];
+      maxAgeMs: number;
+    };
     approvalArgs: Record<string, unknown>;
   } {
     const tool = this.toolRegistry.findByName(args.toolName);
@@ -239,6 +249,13 @@ export class ToolExecutor {
       throw new Error("[plugin-operation-policy] only writes receive app grants");
     }
     let readRevision: string | null = null;
+    let requiredRead:
+      | {
+          readTool: string;
+          readOperations: readonly string[];
+          maxAgeMs: number;
+        }
+      | undefined;
     if (resolved.rule.requiresRead) {
       const latest = this.pluginOperationGrants.latestRequiredRead(
         args.principal,
@@ -250,12 +267,18 @@ export class ToolExecutor {
         throw new Error("[plugin-operation-policy] required read is missing or stale");
       }
       readRevision = latest;
+      requiredRead = {
+        readTool: resolved.rule.requiresRead.tool,
+        readOperations: resolved.rule.requiresRead.operations,
+        maxAgeMs: resolved.rule.requiresRead.maxAgeMs,
+      };
     }
     const approvalArgs = structuredClone(args.input);
     return {
       operation: resolved.operation,
       intentHash: resolved.intentHash,
       readRevision,
+      ...(requiredRead ? { requiredRead } : {}),
       approvalArgs,
     };
   }
