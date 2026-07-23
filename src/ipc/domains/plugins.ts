@@ -173,6 +173,7 @@ interface PluginWebviewBinding {
   assetEntryUrl: string;
   /** Host-minted authority scope; never accepted from the renderer/plugin. */
   appSessionId: string;
+  runtimeRevision: number;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
@@ -892,23 +893,36 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
-      const manifest = pluginRuntime.getPluginManifest(pluginId);
-      const schema = manifest?.configSchema;
-      const stripped = stripSecretFields(schema, asPlainRecord(config));
-      const savedConfig = await settingsService.setPluginConfig(pluginId, stripped);
-      pluginRuntime.setConfigOverride(pluginId, savedConfig);
-      const previous = settingsService.getPluginConfig(pluginId) ?? {};
-      const observed = new Set<string>([
-        ...Object.keys(savedConfig ?? {}),
-        ...Object.keys(previous ?? {}),
-      ]);
-      for (const k of observed) {
-        emitPluginConfigChange(pluginId, k, savedConfig?.[k]);
+      const persisted = await withPluginInstallLock(pluginId, async () => {
+        const manifest = pluginRuntime.getPluginManifest(pluginId);
+        if (!manifest) {
+          throw new Error(`Plugin not found: ${pluginId}`);
+        }
+        const schema = manifest?.configSchema;
+        const stripped = stripSecretFields(schema, asPlainRecord(config));
+        const previous = settingsService.getPluginConfig(pluginId) ?? {};
+        const savedConfig = await settingsService.setPluginConfig(pluginId, stripped);
+        pluginRuntime.setConfigOverride(pluginId, savedConfig);
+        const observed = new Set<string>([
+          ...Object.keys(savedConfig ?? {}),
+          ...Object.keys(previous ?? {}),
+        ]);
+        for (const k of observed) {
+          emitPluginConfigChange(pluginId, k, savedConfig?.[k]);
+        }
+        return { manifest, savedConfig };
+      });
+      if (pluginRuntime.getPluginManifest(pluginId) !== persisted.manifest) {
+        throw new Error(`Plugin instance changed before config reload: ${pluginId}`);
       }
-      // `restartPlugin` resolves after the runtime's wired `onEnable`
-      // resyncs ToolRegistry, so no explicit sync is needed here.
-      await pluginRuntime.restartPlugin(pluginId);
-      return { ok: true as const, config: savedConfig };
+      const restartResult = await pluginRuntime.restartPlugin(
+        pluginId,
+        { skipPreparation: true },
+      );
+      if (restartResult !== "started") {
+        throw new Error(`Plugin config saved but runtime reload returned ${restartResult ?? "not-loaded"}`);
+      }
+      return { ok: true as const, config: persisted.savedConfig };
     } catch (err) {
       return pluginConfigError("plugin-config-save-failed", (err as Error).message);
     }
@@ -933,14 +947,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
-      const manifest = pluginRuntime.getPluginManifest(pluginId);
-      const prop = manifest?.configSchema?.properties?.[key];
-      if (!prop || prop.type !== "string" || prop.format !== "secret") {
-        return pluginConfigError(
-          "plugin-config-secret-invalid-key",
-          `Plugin '${pluginId}' configSchema does not declare a secret field '${key}'.`,
-        );
-      }
       const safePluginId = pluginId.trim();
       if (!/^[A-Za-z][A-Za-z0-9._-]{0,127}$/.test(safePluginId)) {
         return pluginConfigError("plugin-config-secret-invalid-plugin-id", `Invalid pluginId: ${pluginId}`);
@@ -948,16 +954,26 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       const secretValue = String(value ?? "");
       const validationError = validateSecretConfigValue(safePluginId, key, secretValue);
       if (validationError) return validationError;
-      await settingsService.setSecret(`plugin.${safePluginId}.${key}`, secretValue);
-      const current = settingsService.getPluginConfig(safePluginId) ?? {};
-      if (key in current) {
-        const next = { ...current };
-        delete next[key];
-        await settingsService.setPluginConfig(safePluginId, next);
-        pluginRuntime.setConfigOverride(safePluginId, next);
-      }
-      emitPluginConfigChange(safePluginId, key, SECRET_REDACTED_SENTINEL);
-      return { ok: true as const };
+      return await withPluginInstallLock(safePluginId, async () => {
+        const manifest = pluginRuntime.getPluginManifest(safePluginId);
+        const prop = manifest?.configSchema?.properties?.[key];
+        if (!prop || prop.type !== "string" || prop.format !== "secret") {
+          return pluginConfigError(
+            "plugin-config-secret-invalid-key",
+            `Plugin '${safePluginId}' configSchema does not declare a secret field '${key}'.`,
+          );
+        }
+        await settingsService.setSecret(`plugin.${safePluginId}.${key}`, secretValue);
+        const current = settingsService.getPluginConfig(safePluginId) ?? {};
+        if (key in current) {
+          const next = { ...current };
+          delete next[key];
+          await settingsService.setPluginConfig(safePluginId, next);
+          pluginRuntime.setConfigOverride(safePluginId, next);
+        }
+        emitPluginConfigChange(safePluginId, key, SECRET_REDACTED_SENTINEL);
+        return { ok: true as const };
+      });
     } catch (err) {
       return pluginConfigError("plugin-config-secret-save-failed", (err as Error).message);
     }
@@ -1820,6 +1836,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // URL construction cannot throw.
     const entrySearch = new URL(entryUrl).search;
     const versionedAssetEntryUrl = entrySearch ? `${assetEntryUrl}${entrySearch}` : assetEntryUrl;
+    const runtimeRevision = Number(new URL(entryUrl).searchParams.get("lvisRuntimeRevision"));
+    if (!Number.isSafeInteger(runtimeRevision) || !pluginRuntime.isPluginUiRevisionCurrent(pluginId, runtimeRevision)) {
+      logRegisterReject("stale-runtime-revision", { webContentsId, pluginId, runtimeRevision });
+      return { ok: false, error: "stale-runtime-revision" };
+    }
     try {
       const targetWebview = webContents.fromId(webContentsId);
       if (
@@ -1841,6 +1862,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       entryUrl,
       assetEntryUrl: versionedAssetEntryUrl,
       appSessionId: `plugin-ui:${webContentsId}:${randomUUID()}`,
+      runtimeRevision,
     };
     const previousBinding = pluginWebviewRegistry.get(webContentsId);
     if (previousBinding) {
@@ -2054,18 +2076,28 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: false as const, error: "invalid-key" };
     }
     try {
-      const manifest = pluginRuntime.getPluginManifest(binding.pluginId);
-      const schema = manifest?.configSchema;
-      const current = settingsService.getPluginConfig(binding.pluginId) ?? {};
-      const next = { ...current, [key]: value };
-      // Same secret-strip path used by `lvis:plugins:config:set` — keeps
-      // declared secret fields out of the plain-config record. Plugins
-      // store secrets via the existing `setSecret` IPC.
-      const stripped = stripSecretFields(schema, asPlainRecord(next));
-      const savedConfig = await settingsService.setPluginConfig(binding.pluginId, stripped);
-      pluginRuntime.setConfigOverride(binding.pluginId, savedConfig);
-      emitPluginConfigChange(binding.pluginId, key, savedConfig?.[key]);
-      return { ok: true as const };
+      return await withPluginInstallLock(binding.pluginId, async () => {
+        const currentBinding = resolvePluginFromSender(e);
+        const manifest = pluginRuntime.getPluginManifest(binding.pluginId);
+        if (
+          currentBinding !== binding
+          || !manifest
+          || !pluginRuntime.isPluginUiRevisionCurrent(binding.pluginId, binding.runtimeRevision)
+        ) {
+          throw new Error(`Plugin webview is no longer active: ${binding.pluginId}`);
+        }
+        const schema = manifest.configSchema;
+        const current = settingsService.getPluginConfig(binding.pluginId) ?? {};
+        const next = { ...current, [key]: value };
+        // Same secret-strip path used by `lvis:plugins:config:set` — keeps
+        // declared secret fields out of the plain-config record. Plugins
+        // store secrets via the existing `setSecret` IPC.
+        const stripped = stripSecretFields(schema, asPlainRecord(next));
+        const savedConfig = await settingsService.setPluginConfig(binding.pluginId, stripped);
+        pluginRuntime.setConfigOverride(binding.pluginId, savedConfig);
+        emitPluginConfigChange(binding.pluginId, key, savedConfig?.[key]);
+        return { ok: true as const };
+      });
     } catch (err) {
       return { ok: false as const, error: (err as Error).message };
     }

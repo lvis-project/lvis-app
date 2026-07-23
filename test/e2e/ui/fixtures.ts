@@ -221,7 +221,7 @@ async function seedE2ePlugins(
   }> = [];
 
   async function writeSeededPlugin(
-    manifest: E2eManifest & { id: string; version: string; entry: string; tools: string[] },
+    manifest: E2eManifest & { id: string; version: string; entry: string; tools: unknown[] },
     hostPluginSource: string,
   ): Promise<void> {
     const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
@@ -258,14 +258,14 @@ async function seedE2ePlugins(
         description: 'Minimal plugin used by plugin active/inactive E2E coverage.',
         publisher: 'LVIS E2E',
         entry: 'dist/hostPlugin.js',
-        tools: ['e2e_toggle_ping'],
-        toolSchemas: {
-          e2e_toggle_ping: {
-            description: 'E2E toggle smoke tool',
-            category: 'read',
-            inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        tools: [{
+          name: 'e2e_toggle_ping',
+          description: 'E2E toggle smoke tool',
+          inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+          _meta: {
+            ui: { visibility: ['model', 'app'] },
           },
-        },
+        }],
       },
       `export default function createPlugin() {
   return {

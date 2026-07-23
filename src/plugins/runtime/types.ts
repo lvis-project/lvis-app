@@ -14,6 +14,11 @@ import type { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
 
 export type { PluginAccessSpec, PluginManifest, PluginToolHandler, RuntimePlugin };
 
+export type PluginLifecycleHookScope = {
+  active: boolean;
+  depth: number;
+};
+
 /**
  * A fully-loaded plugin: manifest + running instance + registered handlers.
  * #885 v6 — `manifest` is the materialized `PluginManifest` (`parsePluginJson`
@@ -29,6 +34,9 @@ export type LoadedPlugin = {
   approvedPluginAccess?: PluginAccessSpec;
   hostEffects?: HostApiGenerationScope;
   started?: boolean;
+  deactivateHostApi?: () => void;
+  drainHostApiOperations?: () => Promise<void>;
+  lifecycleHookScope?: PluginLifecycleHookScope;
 };
 
 /**

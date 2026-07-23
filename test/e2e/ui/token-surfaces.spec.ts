@@ -91,11 +91,19 @@ test.describe("context-budget token surfaces", () => {
       const ring = ctx.page.getByTestId("token-progress-ring");
       // gpt-5.4-mini is TPM-bound (tpmDefault 200_000 in pricing-data), so the
       // effective limit is 200K: 123,456 / 200,000 ≈ 62%.
-      await expect(ring).toHaveAttribute("aria-label", "Projected input 62 percent");
-      await ring.hover({ force: true });
-      await expect(ctx.page.getByText("projected input").first()).toBeVisible();
+      await expect(ring).toHaveAttribute(
+        "aria-label",
+        t("tokenProgressRing.projectedInputAriaLabel", { pct: "62" }),
+      );
+      await ring.focus();
+      const hint = ctx.page.getByTestId("token-progress-ring-hint");
+      await expect(hint).toBeVisible();
+      await expect(hint).toContainText("62%");
+      await ring.click({ force: true });
+      await expect(ctx.page.getByTestId("token-progress-ring-detail")).toBeVisible();
+      await expect(ctx.page.getByText(t("tokenProgressRing.projectedInputHeading")).first()).toBeVisible();
       await expect(ctx.page.getByText("123,456").first()).toBeVisible();
-      await expect(ctx.page.getByText("effective limit (TPM):").first()).toBeVisible();
+      await expect(ctx.page.getByText(t("tokenProgressRing.effectiveLimitTpmLabel")).first()).toBeVisible();
 
       const badge = ctx.page.getByTestId("token-cost-badge").first();
       await expect(badge).toContainText("2.0k");
@@ -163,10 +171,11 @@ test.describe("context-budget token surfaces", () => {
       await expect(ctx.page.getByTestId("token-progress-ring")).toHaveAttribute(
         "aria-label",
         // post-compact projected 42,000 / 200,000 (TPM) ≈ 21%
-        "Projected input 21 percent",
+        t("tokenProgressRing.projectedInputAriaLabel", { pct: "21" }),
       );
       await expect(ctx.page.getByTestId("token-cost-badge")).toHaveCount(1);
-      await ctx.page.getByTestId("token-progress-ring").hover({ force: true });
+      await ctx.page.getByTestId("token-progress-ring").click({ force: true });
+      await expect(ctx.page.getByTestId("token-progress-ring-detail")).toBeVisible();
       await expect(ctx.page.getByText("42,000").first()).toBeVisible();
       await expect(ctx.page.getByText("300,000")).toHaveCount(0);
     } finally {
@@ -232,9 +241,10 @@ test.describe("context-budget token surfaces", () => {
       await expect(ctx.page.getByTestId("token-progress-ring")).toHaveAttribute(
         "aria-label",
         // projected 180,000 / 200,000 (TPM) = 90%
-        "Projected input 90 percent",
+        t("tokenProgressRing.projectedInputAriaLabel", { pct: "90" }),
       );
-      await ctx.page.getByTestId("token-progress-ring").hover({ force: true });
+      await ctx.page.getByTestId("token-progress-ring").click({ force: true });
+      await expect(ctx.page.getByTestId("token-progress-ring-detail")).toBeVisible();
       await expect(ctx.page.getByText("180,000").first()).toBeVisible();
 
       const statusBar = ctx.page.locator('[data-testid="status-bar"]');

@@ -35,9 +35,6 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     mainWindow,
     t,
   }) => {
-    const statusBar = mainWindow.locator('[data-testid="status-bar"]');
-    await statusBar.waitFor({ state: 'visible', timeout: 15_000 });
-
     const composer = mainWindow.locator('[data-testid="composer"]').first();
     const booted = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
@@ -51,6 +48,8 @@ test.describe('compact recovery banners (#916 + #917)', () => {
       estimatedBefore: 90_000,
       preflight: 88_000,
     });
+    const statusBar = mainWindow.locator('[data-testid="status-bar"]');
+    await statusBar.waitFor({ state: 'visible', timeout: 8_000 });
 
     // StatusBar should show the force-recover OFF-override message.
     await expect
@@ -73,9 +72,6 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     mainWindow,
     t,
   }) => {
-    const statusBar = mainWindow.locator('[data-testid="status-bar"]');
-    await statusBar.waitFor({ state: 'visible', timeout: 15_000 });
-
     const composer = mainWindow.locator('[data-testid="composer"]').first();
     const booted = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
@@ -89,6 +85,8 @@ test.describe('compact recovery banners (#916 + #917)', () => {
       estimatedBefore: 90_000,
       preflight: 88_000,
     });
+    const statusBar = mainWindow.locator('[data-testid="status-bar"]');
+    await statusBar.waitFor({ state: 'visible', timeout: 8_000 });
 
     await expect
       .poll(
@@ -112,9 +110,6 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     mainWindow,
     t,
   }) => {
-    const statusBar = mainWindow.locator('[data-testid="status-bar"]');
-    await statusBar.waitFor({ state: 'visible', timeout: 15_000 });
-
     const composer = mainWindow.locator('[data-testid="composer"]').first();
     const booted = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
@@ -123,6 +118,8 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     test.skip(!booted, 'Chat surface not booted.');
 
     await sendStreamEvent(app, { type: 'recovery_exhausted' });
+    const statusBar = mainWindow.locator('[data-testid="status-bar"]');
+    await statusBar.waitFor({ state: 'visible', timeout: 8_000 });
 
     await expect
       .poll(
@@ -137,9 +134,6 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     mainWindow,
     t,
   }) => {
-    const statusBar = mainWindow.locator('[data-testid="status-bar"]');
-    await statusBar.waitFor({ state: 'visible', timeout: 15_000 });
-
     const composer = mainWindow.locator('[data-testid="composer"]').first();
     const booted = await composer
       .waitFor({ state: 'visible', timeout: 15_000 })
@@ -148,6 +142,8 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     test.skip(!booted, 'Chat surface not booted.');
 
     await sendStreamEvent(app, { type: 'recovery_exhausted' });
+    const statusBar = mainWindow.locator('[data-testid="status-bar"]');
+    await statusBar.waitFor({ state: 'visible', timeout: 8_000 });
 
     await expect
       .poll(

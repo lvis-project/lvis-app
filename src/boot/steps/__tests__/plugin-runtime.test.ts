@@ -98,6 +98,33 @@ import { installPluginPartitionPolicy } from "../../../main/html-preview-partiti
 import { pluginPartitionName } from "../../../shared/plugin-partition.js";
 import { emitEvent } from "../../types.js";
 
+type TestHostApiIncarnation = {
+  registerDisposer: (dispose: () => void) => void;
+  trackOperation: <T>(operation: Promise<T>) => Promise<T>;
+  isActive: () => boolean;
+  isLifecycleHookActive: () => boolean;
+};
+
+function invokeHostApiFactory<TArgs extends unknown[], TResult>(
+  factory: (...args: TArgs) => TResult,
+  pluginId: string,
+  manifest: unknown,
+  pluginDataDir: string,
+): TResult {
+  const incarnation: TestHostApiIncarnation = {
+    registerDisposer: vi.fn(),
+    trackOperation: <T>(operation: Promise<T>) => operation,
+    isActive: () => true,
+    isLifecycleHookActive: () => false,
+  };
+  return (factory as unknown as (
+    pluginId: string,
+    manifest: unknown,
+    pluginDataDir: string,
+    incarnation: TestHostApiIncarnation,
+  ) => TResult)(pluginId, manifest, pluginDataDir, incarnation);
+}
+
 beforeEach(() => {
   runtimeTestState.readPluginRegistry.mockReset();
   runtimeTestState.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
@@ -461,7 +488,8 @@ describe("initPluginRuntime HostApi factory", () => {
       | HostFetchCreateHostApi
       | undefined;
     expect(createHostApi).toBeDefined();
-    const api = createHostApi!(
+    const api = invokeHostApiFactory(
+      createHostApi!,
       pluginId,
       manifest,
       mkdtempSync("/tmp/lvis-hostfetch-data-"),
@@ -619,7 +647,8 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(createHostApi).toBeDefined();
 
     const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
-    const api = createHostApi!(
+    const api = invokeHostApiFactory(
+      createHostApi!,
       "plugin-a",
       {
         id: "plugin-a",
@@ -713,7 +742,8 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(createHostApi).toBeDefined();
 
     const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
-    const api = createHostApi!(
+    const api = invokeHostApiFactory(
+      createHostApi!,
       "plugin-a",
       {
         id: "plugin-a",
@@ -788,7 +818,12 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(createHostApi).toBeDefined();
 
     const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
-    const api = createHostApi!("caller-plugin", { id: "caller-plugin", config: {} }, pluginDataDir);
+    const api = invokeHostApiFactory(
+      createHostApi!,
+      "caller-plugin",
+      { id: "caller-plugin", config: {} },
+      pluginDataDir,
+    );
     expect(api).not.toHaveProperty("callTool");
     expect(api).toHaveProperty("emitEvent");
     expect(api).toHaveProperty("onEvent");
@@ -840,7 +875,8 @@ describe("initPluginRuntime HostApi factory", () => {
 
     // A forged manifest id cannot create a capability that the HostApi no
     // longer publishes. Cross-plugin coordination is event-only.
-    const evilApi = createHostApi!(
+    const evilApi = invokeHostApiFactory(
+      createHostApi!,
       "evil-plugin",
       { id: "ms-graph", config: {} },
       mkdtempSync("/tmp/lvis-hostapi-data-"),
@@ -974,7 +1010,8 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(createHostApi).toBeDefined();
 
     const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
-    const api = createHostApi!(
+    const api = invokeHostApiFactory(
+      createHostApi!,
       "plugin-b6",
       {
         id: "plugin-b6",
@@ -1091,7 +1128,8 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const api = createHostApi!(
+    const api = invokeHostApiFactory(
+      createHostApi!,
       "plugin-marketplace-secret",
       manifest,
       mkdtempSync("/tmp/lvis-hostapi-data-"),
@@ -1190,7 +1228,8 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const api = createHostApi!(
+    const api = invokeHostApiFactory(
+      createHostApi!,
       "plugin-generic-compatible-secret",
       manifest,
       mkdtempSync("/tmp/lvis-hostapi-data-"),
@@ -1259,7 +1298,8 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(createHostApi).toBeDefined();
 
     const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
-    const api = createHostApi!(
+    const api = invokeHostApiFactory(
+      createHostApi!,
       "plugin-b7",
       { id: "plugin-b7", config: {}, hostSecrets: { read: [] } },
       pluginDataDir,
@@ -1327,7 +1367,12 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(createHostApi).toBeDefined();
 
     const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
-    const api = createHostApi!("plugin-q", { id: "plugin-q", config: {} }, pluginDataDir);
+    const api = invokeHostApiFactory(
+      createHostApi!,
+      "plugin-q",
+      { id: "plugin-q", config: {} },
+      pluginDataDir,
+    );
 
     expect(api.getSecret("plugin.plugin-q.sttApiKey")).toBeNull();
     expect(api.getSecret("plugin.plugin-q.webhookUrl")).toBe("https://example.com/hook");
@@ -1411,7 +1456,8 @@ describe("initPluginRuntime HostApi factory", () => {
       | undefined;
     expect(createHostApi).toBeDefined();
 
-    const api = createHostApi!(
+    const api = invokeHostApiFactory(
+      createHostApi!,
       "plugin-cache-fail",
       manifest,
       mkdtempSync("/tmp/lvis-hostapi-data-"),
@@ -1474,7 +1520,12 @@ describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () =>
     });
     const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as CreateHostApi | undefined;
     expect(createHostApi).toBeDefined();
-    return createHostApi!(pluginId, { id: pluginId, config: {}, capabilities: [] }, mkdtempSync("/tmp/lvis-hasroutine-"));
+    return invokeHostApiFactory(
+      createHostApi!,
+      pluginId,
+      { id: pluginId, config: {}, capabilities: [] },
+      mkdtempSync("/tmp/lvis-hasroutine-"),
+    );
   }
 
   const records = [

@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,6 +106,190 @@ export default async function createPlugin() {
     // Tool should still be callable
     await expect(runtime.call("lc_restart_ping")).resolves.toBeDefined();
   });
+
+  it("does not commit a replacement that finishes after removePlugin invalidates it", async () => {
+    const pluginDir = join(installedDir, "lc-restart-remove-race");
+    const armPath = join(testDir, "restart-arm");
+    const enteredPath = join(testDir, "restart-entered");
+    const releasePath = join(testDir, "restart-release");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `import { access, writeFile } from "node:fs/promises";
+export default async function createPlugin() {
+  return {
+    handlers: { lc_restart_remove_race_ping: async () => "pong" },
+    start: async () => {
+      try {
+        await access(${JSON.stringify(armPath)});
+        await writeFile(${JSON.stringify(enteredPath)}, "entered");
+        while (true) {
+          try { await access(${JSON.stringify(releasePath)}); break; }
+          catch { await new Promise((resolve) => setTimeout(resolve, 5)); }
+        }
+      } catch {}
+    },
+    stop: async () => {},
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "lc-restart-remove-race",
+        name: "Restart Remove Race",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [{ name: "lc_restart_remove_race_ping", description: "restart removal race regression tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        description: "Lifecycle race regression",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "lc-restart-remove-race", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await writeFile(armPath, "armed", "utf-8");
+    const restart = runtime.restartPlugin("lc-restart-remove-race");
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      try { await access(enteredPath); break; }
+      catch { await new Promise((resolve) => setTimeout(resolve, 5)); }
+    }
+    await expect(access(enteredPath)).resolves.toBeUndefined();
+
+    const removal = runtime.removePlugin("lc-restart-remove-race");
+    await writeFile(releasePath, "release", "utf-8");
+
+    await expect(restart).resolves.toBe("failed");
+    await expect(removal).resolves.toBeUndefined();
+    expect(runtime.listPluginIds()).not.toContain("lc-restart-remove-race");
+    await expect(runtime.call("lc_restart_remove_race_ping")).rejects.toThrow(/not found/);
+  });
+
+  it("bounds an uncertain replacement start and preserves the predecessor generation", async () => {
+    const pluginDir = join(installedDir, "lc-restart-timeout");
+    const armPath = join(testDir, "restart-timeout-arm");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `import { access } from "node:fs/promises";
+export default async function createPlugin() {
+  return {
+    handlers: { lc_restart_timeout_ping: async () => "old-still-live" },
+    start: async () => {
+      try {
+        await access(${JSON.stringify(armPath)});
+        await new Promise(() => {});
+      } catch {}
+    },
+    stop: async () => {},
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "lc-restart-timeout",
+        name: "Restart Timeout",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        startupTimeoutMs: 50,
+        tools: [{
+          name: "lc_restart_timeout_ping",
+          description: "Restart timeout regression tool",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        }],
+        description: "Lifecycle restart timeout regression.",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "lc-restart-timeout", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await writeFile(armPath, "armed", "utf-8");
+
+    await expect(runtime.restartPlugin("lc-restart-timeout")).resolves.toBe("failed");
+    expect(runtime.listPluginIds()).toContain("lc-restart-timeout");
+    await expect(runtime.call("lc_restart_timeout_ping")).resolves.toBe("old-still-live");
+    await expect(runtime.restartPlugin("lc-restart-timeout")).rejects.toMatchObject({
+      code: "plugin-lifecycle-quarantined",
+    });
+  });
+
+  it("keeps the published replacement active when predecessor retirement times out", async () => {
+    const pluginDir = join(installedDir, "lc-stop-timeout");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: { lc_stop_timeout_ping: async () => "pong" },
+    stop: async () => new Promise(() => {}),
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "lc-stop-timeout",
+        name: "Stop Timeout",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [{
+          name: "lc_stop_timeout_ping",
+          description: "stop timeout regression tool",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        }],
+        description: "Stop timeout regression.",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "lc-stop-timeout", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await expect(runtime.call("lc_stop_timeout_ping")).resolves.toBe("pong");
+
+    await expect(runtime.restartPlugin("lc-stop-timeout")).resolves.toBe("started");
+    expect(runtime.listPluginIds()).toContain("lc-stop-timeout");
+    await expect(runtime.call("lc_stop_timeout_ping")).resolves.toBe("pong");
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    await expect(runtime.restartPlugin("lc-stop-timeout")).rejects.toMatchObject({
+      code: "plugin-lifecycle-quarantined",
+    });
+  }, 10_000);
 
   it("restartPlugin re-imports the latest on-disk module (ESM cache-bust)", async () => {
     // 회귀 가드: Node ESM 로더는 import URL 로 모듈을 메모이즈하므로,

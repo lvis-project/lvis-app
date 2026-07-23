@@ -30,6 +30,12 @@ export interface PluginRuntimeGenerationProjection {
   readonly approvedPluginAccess?: PluginAccessSpec;
   readonly disposers?: readonly (() => void)[];
   readonly hostEffects?: HostApiGenerationScope;
+  readonly deactivateHostApi?: () => void;
+  readonly drainHostApiOperations?: () => Promise<void>;
+  readonly lifecycleHookScope?: {
+    active: boolean;
+    depth: number;
+  };
 }
 
 export interface PreparedPluginRuntimeGenerationPublication {

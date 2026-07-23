@@ -56,7 +56,11 @@ function createPluginFixture(): { root: string; entryUrl: string } {
   const root = mkdtempSync(join(tmpdir(), "lvis-plugin-ipc-"));
   const entry = join(root, "index.html");
   writeFileSync(entry, "<!doctype html>");
-  return { root, entryUrl: pathToFileURL(entry).toString() };
+  return {
+    root,
+    entryUrl:
+      `${pathToFileURL(entry).toString()}?lvisPluginVersion=1.0.0&lvisRuntimeRevision=1`,
+  };
 }
 
 function createDeps(pluginRoot: string): {
@@ -65,6 +69,8 @@ function createDeps(pluginRoot: string): {
     getPluginManifest: ReturnType<typeof vi.fn>;
     getPluginRoot: ReturnType<typeof vi.fn>;
     assertPluginEventEmitAccess: ReturnType<typeof vi.fn>;
+    isPluginUiRevisionCurrent: ReturnType<typeof vi.fn>;
+    setConfigOverride: ReturnType<typeof vi.fn>;
   };
 } {
   const pluginRuntime = {
@@ -74,11 +80,22 @@ function createDeps(pluginRoot: string): {
     })),
     getPluginRoot: vi.fn(() => pluginRoot),
     assertPluginEventEmitAccess: vi.fn(),
+    isPluginUiRevisionCurrent: vi.fn(() => true),
+    setConfigOverride: vi.fn(),
   };
+  const pluginConfig = new Map<string, Record<string, unknown>>();
   const deps = {
     pluginRuntime,
     pluginMarketplace: {},
-    settingsService: { get: vi.fn(), set: vi.fn() },
+    settingsService: {
+      get: vi.fn(),
+      set: vi.fn(),
+      getPluginConfig: vi.fn((pluginId: string) => pluginConfig.get(pluginId)),
+      setPluginConfig: vi.fn(async (pluginId: string, config: Record<string, unknown>) => {
+        pluginConfig.set(pluginId, config);
+        return config;
+      }),
+    },
     memoryManager: {},
     keywordEngine: {},
     routeEngine: {},
@@ -338,6 +355,8 @@ describe("plugin theme IPC handlers", () => {
     unregisterPluginWebview(1702, () => {});
     unregisterPluginWebview(1703, () => {});
     unregisterPluginWebview(1704, () => {});
+    unregisterPluginWebview(1705, () => {});
+    unregisterPluginWebview(1706, () => {});
     __resetLastThemePayloadForTests();
   });
 
@@ -405,7 +424,8 @@ describe("plugin theme IPC handlers", () => {
     registerPluginsHandlers(deps);
     const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
     const getEntryUrl = getRegisteredHandler("lvis:plugin:get-entry-url");
-    const versionedEntryUrl = `${entryUrl}?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7`;
+    const versionedEntryUrl =
+      `${entryUrl.split("?")[0]}?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7`;
 
     expect(registerWebview(rendererEvent(), {
       webContentsId: 1704,
@@ -492,6 +512,51 @@ describe("plugin theme IPC handlers", () => {
     expect(revokeSession).not.toHaveBeenCalled();
   });
 
+  it("rejects config writes from a retired plugin UI revision", async () => {
+    const { root, entryUrl } = createPluginFixture();
+    const { deps, pluginRuntime } = createDeps(root);
+    registerPluginsHandlers(deps);
+    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const configSet = getRegisteredHandler("lvis:plugin:config:set");
+    expect(registerWebview(rendererEvent(), {
+      webContentsId: 1705,
+      pluginId: "meeting",
+      entryUrl,
+    })).toEqual({ ok: true });
+
+    pluginRuntime.isPluginUiRevisionCurrent.mockReturnValue(false);
+    const result = await configSet(pluginEvent(1705), "theme", "dark");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Plugin webview is no longer active: meeting",
+    });
+    expect(deps.settingsService.setPluginConfig).not.toHaveBeenCalled();
+    expect(pluginRuntime.setConfigOverride).not.toHaveBeenCalled();
+  });
+
+  it("persists config for the currently registered plugin UI revision", async () => {
+    const { root, entryUrl } = createPluginFixture();
+    const { deps, pluginRuntime } = createDeps(root);
+    registerPluginsHandlers(deps);
+    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const configSet = getRegisteredHandler("lvis:plugin:config:set");
+    expect(registerWebview(rendererEvent(), {
+      webContentsId: 1706,
+      pluginId: "meeting",
+      entryUrl,
+    })).toEqual({ ok: true });
+
+    await expect(configSet(pluginEvent(1706), "theme", "dark")).resolves.toEqual({ ok: true });
+    expect(deps.settingsService.setPluginConfig).toHaveBeenCalledWith(
+      "meeting",
+      { theme: "dark" },
+    );
+    expect(pluginRuntime.setConfigOverride).toHaveBeenCalledWith(
+      "meeting",
+      { theme: "dark" },
+    );
+  });
   it("rejects host namespace emits through the production plugin emit IPC handler", () => {
     const { pluginRuntime } = registerHandlersWithPlugin(1703);
     const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");

@@ -353,7 +353,15 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
   const lifecycleTails = new Map<string, Promise<void>>();
   const lifecycleQueueContext = new AsyncLocalStorage<ReadonlyMap<string, object>>();
   const activeLifecycleQueueTokens = new WeakSet<object>();
+  const retirementTasks = new Set<Promise<void>>();
   let sequence = 0;
+
+  const trackRetirement = (retirement: Promise<void>): void => {
+    retirementTasks.add(retirement);
+    void retirement
+      .finally(() => retirementTasks.delete(retirement))
+      .catch(() => undefined);
+  };
 
   const runInLifecycleQueue = <T>(
     pluginId: string,
@@ -441,7 +449,7 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
       },
     });
     if (predecessor && predecessor.state.runtime !== projection) {
-      await runtime.retireRuntimeGeneration(predecessor.state.runtime);
+      trackRetirement(runtime.retireRuntimeGeneration(predecessor.state.runtime));
     }
   };
 
@@ -449,7 +457,9 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
     const predecessor = active.get(pluginId);
     runtime.prepareRuntimeRemoval(pluginId).publish();
     active.delete(pluginId);
-    if (predecessor) await runtime.retireRuntimeGeneration(predecessor.state.runtime);
+    if (predecessor) {
+      trackRetirement(runtime.retireRuntimeGeneration(predecessor.state.runtime));
+    }
   };
 
   const lifecycle = {
@@ -495,7 +505,9 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
         return result;
       }),
     recoverRetirements: async () => undefined,
-    waitForRetirements: async () => undefined,
+    waitForRetirements: async () => {
+      await Promise.all([...retirementTasks]);
+    },
   };
 
   const testInternals = runtime as unknown as {
