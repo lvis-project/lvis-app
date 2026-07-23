@@ -33,6 +33,15 @@ function outputForEntryPoint(outputs, entryPoint) {
   });
 }
 
+function outputContainsInput(output, inputPath) {
+  const normalizedInputPath = normalizedPath(inputPath);
+  return Object.keys(output?.inputs ?? {}).some((path) => {
+    const candidate = normalizedPath(path);
+    return candidate === normalizedInputPath
+      || (!isAbsolute(candidate) && normalizedInputPath.endsWith(`/${candidate}`));
+  });
+}
+
 export function analyzeMainBundleMetafile(metafile, { entryPoint, requiredAsyncEntryPoint }) {
   if (!metafile || typeof metafile !== "object" || !metafile.outputs) {
     throw new Error("main bundle metafile is missing outputs");
@@ -85,7 +94,10 @@ export function analyzeMainBundleMetafile(metafile, { entryPoint, requiredAsyncE
     initialFiles: initial.size,
     totalFiles: outputs.size,
     hasRequiredAsyncBoundary,
-    requiredAsyncEntryIsInitial: initial.has(requiredAsyncEntry[0]),
+    requiredAsyncEntryIsInitial: initial.has(requiredAsyncEntry[0])
+      || [...initial].some((outputPath) => (
+        outputContainsInput(outputs.get(outputPath), requiredAsyncEntryPoint)
+      )),
     legacyInitialReduction: 1 - (initialBytes / LEGACY_SINGLE_MAIN_BUNDLE_BYTES),
   };
 }

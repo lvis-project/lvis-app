@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { build } from "esbuild";
 import { describe, expect, it } from "vitest";
 import {
   analyzeMainBundleMetafile,
@@ -95,6 +96,54 @@ describe("main bundle budget", () => {
       entryBytes: 1_000,
       initialBytes: 1_000,
       totalBytes: 1_000,
+    })).toThrow(/boot entry remains statically reachable/);
+  });
+
+  it("rejects real esbuild factoring that moves boot into an initial shared chunk", async () => {
+    const modules = new Map([
+      ["v:main.ts", 'import { shared } from "v:shared.ts"; void shared; void import("v:boot.ts");'],
+      ["v:shared.ts", 'export { boot as shared } from "v:boot.ts";'],
+      ["v:boot.ts", 'export const boot = "loaded";'],
+    ]);
+    const result = await build({
+      entryPoints: ["v:main.ts"],
+      bundle: true,
+      splitting: true,
+      format: "esm",
+      outdir: "/virtual-out",
+      write: false,
+      metafile: true,
+      plugins: [{
+        name: "virtual-main-bundle",
+        setup(esbuild) {
+          esbuild.onResolve({ filter: /^v:/ }, ({ path }) => ({ path, namespace: "virtual" }));
+          esbuild.onLoad({ filter: /.*/, namespace: "virtual" }, ({ path }) => ({
+            contents: modules.get(path),
+            loader: "ts",
+          }));
+        },
+      }],
+    });
+    const entryPoints = Object.values(result.metafile.outputs)
+      .map((output) => output.entryPoint)
+      .filter((entryPoint): entryPoint is string => typeof entryPoint === "string");
+    const mainEntryPoint = entryPoints.find((entryPoint) => entryPoint.includes("main.ts"));
+    const bootEntryPoint = entryPoints.find((entryPoint) => entryPoint.includes("boot.ts"));
+    expect(mainEntryPoint).toBeDefined();
+    expect(bootEntryPoint).toBeDefined();
+
+    const measurement = analyzeMainBundleMetafile(result.metafile, {
+      entryPoint: mainEntryPoint!,
+      requiredAsyncEntryPoint: bootEntryPoint!,
+    });
+    expect(measurement).toMatchObject({
+      hasRequiredAsyncBoundary: true,
+      requiredAsyncEntryIsInitial: true,
+    });
+    expect(() => assertMainBundleBudget(measurement, {
+      entryBytes: Number.MAX_SAFE_INTEGER,
+      initialBytes: Number.MAX_SAFE_INTEGER,
+      totalBytes: Number.MAX_SAFE_INTEGER,
     })).toThrow(/boot entry remains statically reachable/);
   });
 
