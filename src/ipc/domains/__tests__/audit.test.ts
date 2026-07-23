@@ -35,6 +35,7 @@ const MISSING_EVENT = {} as IpcMainInvokeEvent;
 
 const search = vi.fn(async (filter: unknown) => ({ entries: [], total: 0, filter }));
 const getStats = vi.fn(async (days: number) => ({ days }));
+const flush = vi.fn(async () => undefined);
 const log = vi.fn();
 
 function invoke(channel: string, event: IpcMainInvokeEvent, input?: unknown): Promise<unknown> {
@@ -45,7 +46,7 @@ beforeEach(() => {
   handlers.clear();
   vi.clearAllMocks();
   registerAuditHandlers({
-    auditLogger: { search, getStats, log },
+    auditLogger: { search, getStats, flush, log },
     getMainWindow: () => null,
   } as unknown as IpcDeps);
 });
@@ -61,6 +62,7 @@ describe("audit IPC sender boundary", () => {
       expect(search).not.toHaveBeenCalled();
       expect(getStats).not.toHaveBeenCalled();
       expect(getDlpStats).not.toHaveBeenCalled();
+      expect(flush).not.toHaveBeenCalled();
       expect(log).toHaveBeenCalledTimes(3);
     },
   );
@@ -72,6 +74,10 @@ describe("audit IPC sender boundary", () => {
     expect(search).toHaveBeenCalledWith({ limit: 100, offset: 0 });
     expect(getStats).toHaveBeenCalledWith(30);
     expect(getDlpStats).toHaveBeenCalledWith(14);
+    expect(flush).toHaveBeenCalledOnce();
+    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(
+      getDlpStats.mock.invocationCallOrder[0],
+    );
   });
 });
 

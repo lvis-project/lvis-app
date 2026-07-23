@@ -52,7 +52,9 @@ describe("rotateAndPrune — size-triggered rotation", () => {
     // Original .jsonl should be gone
     expect(files.some((f) => f === "2026-04-10.jsonl")).toBe(false);
     // A .gz archive should exist
-    expect(files.some((f) => /2026-04-10\.jsonl\.\d{8}\.gz$/.test(f))).toBe(true);
+    const archive = files.find((f) => /2026-04-10\.jsonl\.\d{8}\.gz$/.test(f));
+    expect(archive).toBeDefined();
+    expect(statSync(join(auditDir, archive!)).mode & 0o777).toBe(0o600);
   });
 
   it("does NOT rotate a file below the size threshold", async () => {

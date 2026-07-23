@@ -18,7 +18,7 @@ import {
   statSync,
 } from "node:fs";
 import { createWriteStream } from "node:fs";
-import { open as openFile, unlink, stat as fsStat } from "node:fs/promises";
+import { chmod, open as openFile, unlink, stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -227,9 +227,9 @@ export interface AuditRotationOptions {
 }
 
 export interface AuditLoggerOptions {
-  /** Maximum queued/in-flight plain-channel writes before new telemetry is dropped. */
+  /** Maximum queued/in-flight writes per plain channel before that channel drops telemetry. */
   maxPendingWrites?: number;
-  /** Maximum serialized bytes retained by the plain-channel writer queue. */
+  /** Maximum serialized bytes retained by each plain-channel writer queue. */
   maxPendingBytes?: number;
 }
 
@@ -248,6 +248,12 @@ function normalizePositiveInteger(value: number | undefined, fallback: number): 
     return fallback;
   }
   return value;
+}
+
+interface PlainWriterState {
+  tail: Promise<void>;
+  pendingWrites: number;
+  pendingBytes: number;
 }
 
 export class AuditLogger {
@@ -286,9 +292,7 @@ export class AuditLogger {
   private permissionAuditChainBootstrapped = false;
   /** Permission policy — secret store for daily seals. Wired alongside `setupPermissionAuditChain`. */
   private permissionAuditSealStore: SecretStore | null = null;
-  private plainWriteTail: Promise<void> = Promise.resolve();
-  private pendingPlainWrites = 0;
-  private pendingPlainBytes = 0;
+  private readonly plainWriters = new Map<string, PlainWriterState>();
   private droppedPlainWrites = 0;
   private acceptingPlainWrites = true;
   private readonly maxPendingWrites: number;
@@ -373,8 +377,8 @@ export class AuditLogger {
 
   /** Wait until every plain-channel write accepted before this call has settled. */
   async flush(): Promise<void> {
-    const tail = this.plainWriteTail;
-    await tail;
+    const tails = [...this.plainWriters.values()].map((writer) => writer.tail);
+    await Promise.all(tails);
   }
 
   /** Stop accepting plain telemetry and drain the bounded writer queue. */
@@ -385,9 +389,15 @@ export class AuditLogger {
 
   /** Queue state exposed for deterministic saturation and shutdown tests. */
   getWriterStats(): AuditWriterStats {
+    let pendingWrites = 0;
+    let pendingBytes = 0;
+    for (const writer of this.plainWriters.values()) {
+      pendingWrites += writer.pendingWrites;
+      pendingBytes += writer.pendingBytes;
+    }
     return {
-      pendingWrites: this.pendingPlainWrites,
-      pendingBytes: this.pendingPlainBytes,
+      pendingWrites,
+      pendingBytes,
       droppedWrites: this.droppedPlainWrites,
       acceptingWrites: this.acceptingPlainWrites,
     };
@@ -395,23 +405,33 @@ export class AuditLogger {
 
   private enqueuePlainWrite(filePath: string, line: string): void {
     const bytes = Buffer.byteLength(line, "utf-8");
+    if (!this.acceptingPlainWrites) {
+      this.droppedPlainWrites += 1;
+      return;
+    }
+    let writer = this.plainWriters.get(filePath);
+    if (!writer) {
+      writer = { tail: Promise.resolve(), pendingWrites: 0, pendingBytes: 0 };
+      this.plainWriters.set(filePath, writer);
+    }
     if (
-      !this.acceptingPlainWrites ||
-      this.pendingPlainWrites >= this.maxPendingWrites ||
-      bytes > this.maxPendingBytes - this.pendingPlainBytes
+      writer.pendingWrites >= this.maxPendingWrites ||
+      bytes > this.maxPendingBytes - writer.pendingBytes
     ) {
       this.droppedPlainWrites += 1;
       return;
     }
 
-    this.pendingPlainWrites += 1;
-    this.pendingPlainBytes += bytes;
-    const write = this.plainWriteTail.then(() => this.appendPlainLine(filePath, line));
-    this.plainWriteTail = write
-      .catch(() => undefined)
+    writer.pendingWrites += 1;
+    writer.pendingBytes += bytes;
+    const write = writer.tail.then(() => this.appendPlainLine(filePath, line));
+    writer.tail = write
+      .catch(() => {
+        this.droppedPlainWrites += 1;
+      })
       .finally(() => {
-        this.pendingPlainWrites -= 1;
-        this.pendingPlainBytes -= bytes;
+        writer.pendingWrites -= 1;
+        writer.pendingBytes -= bytes;
       });
   }
 
@@ -652,8 +672,9 @@ export class AuditLogger {
           await pipeline(
             createReadStream(filePath),
             createGzip(),
-            createWriteStream(archivePath),
+            createWriteStream(archivePath, { mode: 0o600 }),
           );
+          await chmod(archivePath, 0o600);
           // Remove original after successful compression
           await unlink(filePath);
           this.hardenedPlainFiles.delete(filePath);
