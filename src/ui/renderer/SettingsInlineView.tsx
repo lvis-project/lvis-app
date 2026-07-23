@@ -2,9 +2,6 @@ import { PageShell } from "./components/PageShell.js";
 import { SettingsContent } from "./SettingsContent.js";
 import type { LvisApi } from "./types.js";
 
-
-
-
 export function SettingsInlineView({
   api,
   initialTab,
@@ -20,12 +17,10 @@ export function SettingsInlineView({
     <PageShell
       padded={false}
       maxWidth="none"
-      onBack={onBack}
-      backTestId="settings-inline-back"
-      className="px-4 pt-4"
-      contentClassName="flex min-h-0 flex-1 flex-col"
+      className="px-3 pt-4 sm:px-4"
+      contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <SettingsContent api={api} onSaved={onSaved} initialTab={initialTab} />
+      <SettingsContent api={api} onSaved={onSaved} initialTab={initialTab} onClose={onBack} />
     </PageShell>
   );
 }

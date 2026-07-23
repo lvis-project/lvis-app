@@ -16,7 +16,7 @@ import { closeSettingsWindow, openSettingsWindow } from './settings-window';
  *     this surface.
  *
  * What remains worth pinning is that the inline panel opens to the requested
- * tab and that Back leaves it.
+ * tab and that the title-bar close button exits it.
  */
 test('inline settings opens to the requested tab and closes back', async ({ app, mainWindow, t }) => {
   const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
@@ -29,6 +29,6 @@ test('inline settings opens to the requested tab and closes back', async ({ app,
     settingsPanel.getByRole('tab', { name: t('settingsContent.tabChat'), exact: true }),
   ).toHaveAttribute('data-state', 'active');
 
-  // Back navigation leaves the settings view (the sidebar heading disappears).
+  // Title-bar close leaves the settings view (the sidebar heading disappears).
   await closeSettingsWindow(app, settingsWindow);
 });
