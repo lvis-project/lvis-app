@@ -18,6 +18,7 @@ import {
   existsSync,
   fstatSync,
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -611,28 +612,24 @@ describe("AuditLogger permission audit chain", () => {
         /archive already exists/,
       );
       expect(rebooted.isPermissionAuditChainReady()).toBe(false);
-      const publishedDescriptor = openSync(activePath, constants.O_RDONLY | noFollow);
-      try {
-        const originalIdentity = fstatSync(activeDescriptor);
-        const publishedIdentity = fstatSync(publishedDescriptor);
-        expect({ dev: publishedIdentity.dev, ino: publishedIdentity.ino }).toEqual({
-          dev: originalIdentity.dev,
-          ino: originalIdentity.ino,
-        });
-        const preservedTornBytes = Buffer.alloc(originalTornBytes.byteLength);
-        expect(
-          readSync(
-            publishedDescriptor,
-            preservedTornBytes,
-            0,
-            preservedTornBytes.byteLength,
-            0,
-          ),
-        ).toBe(preservedTornBytes.byteLength);
-        expect(preservedTornBytes).toEqual(originalTornBytes);
-      } finally {
-        closeSync(publishedDescriptor);
-      }
+      const originalIdentity = fstatSync(activeDescriptor);
+      const publishedIdentity = lstatSync(activePath);
+      expect(publishedIdentity.isSymbolicLink()).toBe(false);
+      expect({ dev: publishedIdentity.dev, ino: publishedIdentity.ino }).toEqual({
+        dev: originalIdentity.dev,
+        ino: originalIdentity.ino,
+      });
+      const preservedTornBytes = Buffer.alloc(originalTornBytes.byteLength);
+      expect(
+        readSync(
+          activeDescriptor,
+          preservedTornBytes,
+          0,
+          preservedTornBytes.byteLength,
+          0,
+        ),
+      ).toBe(preservedTornBytes.byteLength);
+      expect(preservedTornBytes).toEqual(originalTornBytes);
       expect(readFileSync(archivePath, "utf-8")).toBe("existing-forensic-evidence");
       expect(readdirSync(auditDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     } finally {
