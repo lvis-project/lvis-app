@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
-import { describe, it, expect, vi } from "vitest";
+import { beforeAll, describe, it, expect, vi } from "vitest";
 import { render, act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
@@ -13,6 +13,13 @@ const DEFAULT_ACTIONS: QuickAction[] = [
   { id: "settings", label: "설정 열기",     run: vi.fn() },
   { id: "new-chat", label: "새 대화 시작",  run: vi.fn() },
 ];
+
+beforeAll(async () => {
+  // The component deliberately lazy-loads this panel in production. Warm the
+  // Vite module cache so a saturated full-suite transform pool cannot consume
+  // Testing Library's assertion timeout before the behavior under test mounts.
+  await import("../CommandPopoverPanel.js");
+});
 
 function renderPopover({
   actions = DEFAULT_ACTIONS,
