@@ -276,7 +276,20 @@ export async function listFilesRecursive(
       if (info.isDirectory()) {
         await walk(abs);
       } else if (info.isFile()) {
-        out.push(relative(root, abs).split(sep).join("/"));
+        const rel = relative(root, abs).split(sep).join("/");
+        // Python bytecode cache (`**​/__pycache__/<name>.pyc|pyo`) is compiled
+        // in-place by the interpreter from the validated `.py` sources, is never
+        // part of the signed install artifact, and regenerates whenever the
+        // plugin's Python runtime runs. Exclude it at ANY depth so a
+        // Python-backed plugin's payload stays receipt-valid across runs. The
+        // scope is deliberately tight — only `.pyc`/`.pyo` *inside* a
+        // `__pycache__/` segment — so a non-bytecode file smuggled into a
+        // `__pycache__/` directory is still listed and rejected as unlisted.
+        // Tamper-safety: Python ignores a `.pyc` whose source hash/mtime does
+        // not match, so an altered cache file is never executed while the
+        // covered `.py` remains validated.
+        if (isPythonBytecodeCacheFile(rel)) continue;
+        out.push(rel);
       } else {
         throw new Error(`installed payload contains unsupported entry: ${relative(root, abs).split(sep).join("/")}`);
       }
@@ -284,6 +297,17 @@ export async function listFilesRecursive(
   }
   await walk(root);
   return out.sort();
+}
+
+/**
+ * True for Python bytecode cache files — `**​/__pycache__/<name>.pyc` (or
+ * `.pyo`). These are compiled in-place from validated `.py` sources, never
+ * shipped in the signed artifact, and regenerate at runtime; excluding them
+ * from payload validation keeps Python-backed plugins receipt-valid without
+ * weakening tamper detection of executed code (see `listFilesRecursive`).
+ */
+function isPythonBytecodeCacheFile(relPath: string): boolean {
+  return /(?:^|\/)__pycache__\/[^/]+\.(?:pyc|pyo)$/.test(relPath);
 }
 
 function normalizeReceiptPath(path: string): string {
