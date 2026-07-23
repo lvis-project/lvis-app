@@ -44,10 +44,15 @@ evidence_volume="lvis-evidence-${suffix}"
 artifacts_volume="lvis-artifacts-${suffix}"
 marketplace_container="lvis-marketplace-${suffix}"
 host_container="lvis-host-${suffix}"
+host_marker_pid=""
 ep_artifact_container=""
 
 cleanup() {
   set +e
+  if [[ -n "$host_marker_pid" ]]; then
+    kill "$host_marker_pid" >"$private_logs/cleanup-host-marker.log" 2>&1 || true
+    wait "$host_marker_pid" >>"$private_logs/cleanup-host-marker.log" 2>&1 || true
+  fi
   docker rm -f "$host_container" "$marketplace_container" \
     >"$private_logs/cleanup-containers.log" 2>&1
   if [[ -n "$ep_artifact_container" ]]; then
@@ -117,6 +122,14 @@ rm -f \
   "$evidence_root/host-image.iid"
 
 ep_artifact_container="$(docker create "$ep_image")"
+if ! observed_ep_artifact_image="$(
+  docker inspect --format '{{.Image}}' "$ep_artifact_container" \
+    2>"$private_logs/ep-artifact-inspect.log"
+)"; then
+  fail "EP artifact container image inspection failed"
+fi
+[[ "$observed_ep_artifact_image" == "$(jq -r '.ep' "$evidence_root/image-digests.json")" ]] \
+  || fail "EP artifact container image does not match the recorded build digest"
 docker cp \
   "$ep_artifact_container:/bundle/lvis-plugin-ep.zip" \
   "$artifacts_root/lvis-plugin-ep.zip" \
@@ -188,9 +201,49 @@ docker run --rm \
   >"$private_logs/evidence-volume-seed.log" 2>&1 \
   || fail "evidence volume initialization failed"
 
-docker network create --internal "$network" \
+network_third_octet="$(( (GITHUB_RUN_ID + GITHUB_RUN_ATTEMPT) % 200 + 20 ))"
+network_subnet="172.30.${network_third_octet}.0/24"
+network_gateway="172.30.${network_third_octet}.1"
+marketplace_ip="172.30.${network_third_octet}.10"
+docker network create --internal \
+  --driver bridge \
+  --ipv6=false \
+  --subnet "$network_subnet" \
+  --gateway "$network_gateway" \
+  -o com.docker.network.bridge.gateway_mode_ipv4=isolated \
+  "$network" \
   >"$private_logs/network-create.log" 2>&1 \
-  || fail "internal Docker network creation failed"
+  || fail "isolated internal Docker network creation failed"
+docker network inspect "$network" >"$private_logs/network-inspect.json" 2>&1 \
+  || fail "isolated Docker network inspection failed"
+jq -e \
+  --arg name "$network" \
+  --arg subnet "$network_subnet" \
+  --arg gateway "$network_gateway" \
+  '
+    length == 1
+    and .[0].Name == $name
+    and .[0].Driver == "bridge"
+    and .[0].Scope == "local"
+    and .[0].Internal == true
+    and .[0].EnableIPv6 == false
+    and .[0].Attachable == false
+    and .[0].Ingress == false
+    and .[0].ConfigOnly == false
+    and .[0].ConfigFrom == {"Network": ""}
+    and .[0].IPAM == {
+      "Driver": "default",
+      "Options": {},
+      "Config": [{"Subnet": $subnet, "Gateway": $gateway}]
+    }
+    and .[0].Options == {
+      "com.docker.network.bridge.gateway_mode_ipv4": "isolated"
+    }
+    and .[0].Labels == {}
+    and .[0].Containers == {}
+  ' "$private_logs/network-inspect.json" \
+  >"$private_logs/network-policy-check.log" 2>&1 \
+  || fail "Docker network does not match the fail-closed isolation policy"
 
 common_runtime_flags=(
   --network "$network"
@@ -216,6 +269,7 @@ hostile_runtime_flags=(
 docker run -d \
   --name "$marketplace_container" \
   --network "$network" \
+  --ip "$marketplace_ip" \
   --network-alias marketplace \
   --dns 127.0.0.1 \
   --dns-option timeout:1 \
@@ -239,12 +293,14 @@ marketplace_network_count="$(
 )"
 [[ "$marketplace_network_count" == 1 ]] \
   || fail "Marketplace runtime must attach to exactly one internal network"
-marketplace_ip="$(
+observed_marketplace_ip="$(
   docker inspect \
     --format "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" \
     "$marketplace_container"
 )"
-python3 - "$marketplace_ip" <<'PY' \
+[[ "$observed_marketplace_ip" == "$marketplace_ip" ]] \
+  || fail "Marketplace runtime did not receive its fixed isolated IPv4 address"
+python3 - "$observed_marketplace_ip" <<'PY' \
   || fail "Marketplace runtime IP is not a private non-loopback IPv4 address"
 import ipaddress
 import sys
@@ -285,10 +341,44 @@ for _ in $(seq 1 60); do
 done
 [[ "$marketplace_ready" == true ]] || fail "Marketplace runtime did not become healthy"
 
+[[ "$(uname -s)" == Linux ]] \
+  || fail "host-gateway containment proof requires a Linux Docker runner"
+node - "$private_logs/host-marker.port" \
+  >"$private_logs/host-marker.log" 2>&1 <<'NODE' &
+const { writeFileSync } = require("node:fs");
+const net = require("node:net");
+
+const portFile = process.argv[2];
+const server = net.createServer((socket) => {
+  socket.end("LVIS_TRUSTED_HOST_MARKER");
+});
+server.listen(0, "0.0.0.0", () => {
+  const address = server.address();
+  if (!address || typeof address === "string") process.exit(1);
+  writeFileSync(portFile, `${address.port}\n`, { flag: "wx", mode: 0o600 });
+});
+NODE
+host_marker_pid="$!"
+host_marker_port=""
+for _ in $(seq 1 30); do
+  if [[ -s "$private_logs/host-marker.port" ]]; then
+    host_marker_port="$(tr -d '\r\n' <"$private_logs/host-marker.port")"
+    break
+  fi
+  sleep 1
+done
+[[ "$host_marker_port" =~ ^[0-9]+$ \
+  && "$host_marker_port" -ge 1024 \
+  && "$host_marker_port" -le 65535 ]] \
+  || fail "trusted host-network marker did not publish a valid private port"
+kill -0 "$host_marker_pid" >"$private_logs/host-marker-liveness.log" 2>&1 \
+  || fail "trusted host-network marker stopped before containment rehearsal"
+
 if ! docker run --rm \
   "${hostile_runtime_flags[@]}" \
   --mount "type=volume,src=$evidence_volume,dst=/evidence" \
   --mount "type=volume,src=$artifacts_volume,dst=/artifacts,readonly" \
+  --env "HOST_MARKER_PORT=$host_marker_port" \
   --entrypoint node \
   "$host_image" \
   /trusted/control/run-hostile.mjs \
