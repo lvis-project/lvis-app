@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.5.7 — 2026-07-23
+
+Hardens local state and plugin lifecycle recovery, self-heals Electron native-module ABI drift, and adds a strict declarative first-task contract for plugins. Public tags remain unsigned.
+
+### Reliability and local data
+
+- **`better-sqlite3` self-heals before launch.** Startup detects its Electron ABI mismatch, serializes rebuilds, recovers interrupted rebuild state, and retries with the Electron ABI instead of leaving the app in a repeated non-fatal error loop.
+- **Plugin registry and Marketplace mutations are crash-atomic.** Install, update, removal, receipt, artifact, and boot-recovery state now use serialized, fail-consistent transitions with durable recovery ownership.
+- **Secrets are stored atomically and strictly.** Provider credentials and other secret documents use their own locked atomic store, eliminating partial settings writes and silent plaintext fallback.
+
+### Plugins and onboarding
+
+- **Plugins can declare their first post-tour task.** The host validates bounded localized copy and mandatory priority, orders proposals deterministically, and surfaces rejected plugin declarations as retryable UI errors instead of inventing fallback content. Plugins using this field require `lvis-app >= 0.5.7`.
+- **Plugin views stay inline in chat mode.** Opening a plugin panel no longer detaches it from the active conversation layout.
+
+### Tools and runtime
+
+- Added `view_image`, model-directed `memory_write`, and managed background-shell tools with bounded history and end-of-session cleanup.
+- Image tool results age out of persisted and wire histories, reducing long-session context and storage growth without waiting for token pressure.
+- Web search, web fetch, plugin request, and tool search now live in their owning tool modules, reducing boot coupling without changing their public contracts.
+
+### Build and UI
+
+- Removed the unused Storybook toolchain and moved local Git hooks into the app repository with the same validation policies used by CI.
+- Added common hook events for subagent lifecycle, session end, and notifications; improved settings-cache synchronization and Radix selected-state styling.
+
 ## v0.5.6 — 2026-07-22
 
 Adds self-hosted model discovery, completes the reviewer negotiation flow, and trims the Windows installer. Public tags remain unsigned.
