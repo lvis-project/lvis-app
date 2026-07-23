@@ -1,4 +1,3 @@
-import AdmZip from "adm-zip";
 import { rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
@@ -8,11 +7,14 @@ import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js
 import { AGENT_NAME_ALLOWLIST, parseAgentFrontmatter } from "../main/agent-profile-store.js";
 import { updateAgentRegistry } from "./agent-registry.js";
 
+const MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES = 1024 * 1024;
+
 export interface InstallAgentPackageOptions {
   fetcher: MarketplaceFetcher;
   store: PluginArtifactStore;
   registryPath: string;
   onProgress?: (event: InstallerProgressEvent) => void;
+  signal?: AbortSignal;
 }
 
 export interface InstallAgentPackageResult {
@@ -37,56 +39,76 @@ export async function installAgentPackageFromMarketplace(
   const version = detail.version;
   if (!version) throw new Error(`marketplace entry "${slug}" has no published version`);
 
-  const verified = await opts.store.downloadVerifiedArtifact(detail, version, opts.onProgress);
-  const raw = readRequiredRootFile(slug, verified.zipBuffer, "AGENTS.md", "agent");
-  const { fm, body } = parseAgentFrontmatter(raw);
-  const agentId = fm.name || slug;
-  if (!AGENT_NAME_ALLOWLIST.test(agentId)) {
-    throw new Error(`agent package "${slug}" declares invalid agent name "${agentId}"`);
-  }
-  if (agentId !== slug) {
-    throw new Error(`agent package "${slug}" declares agent name "${agentId}", which must match the package slug`);
-  }
-  if (body.trim().length === 0) {
-    throw new Error(`agent package "${slug}" has an empty AGENTS.md body`);
-  }
-  readRequiredRootFile(slug, verified.zipBuffer, "plugin.json", "agent");
-
-  const files = await opts.store.extractZip(slug, verified.zipBuffer);
-  const installDir = opts.store.installDirFor(slug);
-  const profilePath = resolve(installDir, "AGENTS.md");
-  const manifestPath = resolve(installDir, "plugin.json");
-
-  await opts.store.writeInstallReceipt(slug, {
+  return opts.store.withVerifiedArtifactTransaction(
+    detail,
     version,
-    installSource: "marketplace",
-    artifactSha256: verified.artifactSha256,
-    signerKeyId: verified.signerKeyId,
-    files,
-  });
-  await opts.store.appendHistory(slug, {
-    version,
-    installedAt: new Date().toISOString(),
-  });
+    opts.onProgress,
+    async (verified) => {
+      const rootFiles = opts.store.readRequiredRootTextFiles(slug, verified.zipBuffer, [
+        {
+          filename: "AGENTS.md",
+          maxBytes: MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES,
+          packageLabel: "agent",
+        },
+        {
+          filename: "plugin.json",
+          maxBytes: MAX_ASSISTANT_PACKAGE_ROOT_TEXT_BYTES,
+          packageLabel: "agent",
+        },
+      ]);
+      const { fm, body } = parseAgentFrontmatter(rootFiles["AGENTS.md"]);
+      const agentId = fm.name || slug;
+      if (!AGENT_NAME_ALLOWLIST.test(agentId)) {
+        throw new Error(`agent package "${slug}" declares invalid agent name "${agentId}"`);
+      }
+      if (agentId !== slug) {
+        throw new Error(
+          `agent package "${slug}" declares agent name "${agentId}", which must match the package slug`,
+        );
+      }
+      if (body.trim().length === 0) {
+        throw new Error(`agent package "${slug}" has an empty AGENTS.md body`);
+      }
+      throwIfMarketplaceInstallAborted(opts.signal, slug);
 
-  await updateAgentRegistry(opts.registryPath, (registry) => {
-    const entry = {
-      id: slug,
-      version,
-      source: "marketplace" as const,
-      manifestPath,
-      profilePath,
-      installedAt: new Date().toISOString(),
-      enabled: true,
-      artifactSha256: verified.artifactSha256,
-      signerKeyId: verified.signerKeyId,
-    };
-    const idx = registry.agents.findIndex((item) => item.id === slug);
-    if (idx >= 0) registry.agents[idx] = entry;
-    else registry.agents.push(entry);
-  });
+      const files = await opts.store.extractZip(slug, verified.zipBuffer);
+      const installDir = opts.store.installDirFor(slug);
+      const profilePath = resolve(installDir, "AGENTS.md");
+      const manifestPath = resolve(installDir, "plugin.json");
 
-  return { agentId, slug, version, installed: true };
+      await opts.store.writeInstallReceipt(slug, {
+        version,
+        installSource: "marketplace",
+        artifactSha256: verified.artifactSha256,
+        signerKeyId: verified.signerKeyId,
+        files,
+      });
+      await opts.store.appendHistory(slug, {
+        version,
+        installedAt: new Date().toISOString(),
+      });
+
+      await updateAgentRegistry(opts.registryPath, (registry) => {
+        const entry = {
+          id: slug,
+          version,
+          source: "marketplace" as const,
+          manifestPath,
+          profilePath,
+          installedAt: new Date().toISOString(),
+          enabled: true,
+          artifactSha256: verified.artifactSha256,
+          signerKeyId: verified.signerKeyId,
+        };
+        const idx = registry.agents.findIndex((item) => item.id === slug);
+        if (idx >= 0) registry.agents[idx] = entry;
+        else registry.agents.push(entry);
+      });
+
+      return { agentId, slug, version, installed: true };
+    },
+    opts.signal,
+  );
 }
 
 export async function uninstallAgentPackage(
@@ -116,21 +138,9 @@ function isWithin(parent: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-function readRequiredRootFile(
-  slug: string,
-  zipBuffer: Buffer,
-  filename: "AGENTS.md" | "plugin.json",
-  packageLabel: string,
-): string {
-  let zip: AdmZip;
-  try {
-    zip = new AdmZip(zipBuffer);
-  } catch (err) {
-    throw new Error(`invalid zip format for "${slug}": ${(err as Error).message}`);
-  }
-  const entry = zip.getEntry(filename);
-  if (!entry || entry.isDirectory) {
-    throw new Error(`${packageLabel} package "${slug}" must contain ${filename} at the archive root`);
-  }
-  return entry.getData().toString("utf-8");
+function throwIfMarketplaceInstallAborted(signal: AbortSignal | undefined, slug: string): void {
+  if (!signal?.aborted) return;
+  const error = new Error(`agent package install aborted before promotion: ${slug}`);
+  error.name = "AbortError";
+  throw error;
 }
