@@ -41,7 +41,7 @@ export async function setupAuditAndNotification(ctx: BootContext): Promise<void>
   const permissionAuditSecretStore = safeStorage.isEncryptionAvailable()
     ? new SafeStorageSecretStore(safeStorage)
     : new FileSecretStore();
-  bootAuditLogger.setupPermissionAuditChain(
+  await bootAuditLogger.setupPermissionAuditChain(
     ensureAuditSecret(permissionAuditSecretStore),
     permissionAuditSecretStore,
   );

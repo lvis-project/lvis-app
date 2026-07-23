@@ -57,6 +57,10 @@ export class PreparationTracker {
 
   constructor(private readonly deps: PreparationTrackerDeps) {}
 
+  hasPending(pluginId: string): boolean {
+    return this.pendingPreparedStarts.has(pluginId);
+  }
+
   /**
    * Attempt to defer a plugin's start behind its `preparePluginStart` gate.
    * Returns `true` when the start was deferred (an async preparation is now
@@ -67,7 +71,7 @@ export class PreparationTracker {
     plan: ManifestLoadPlan,
     manifest: PluginManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
-    startOpts: { cacheBust?: boolean } = {},
+    startOpts: { cacheBust?: boolean; shouldCommit?: () => boolean } = {},
   ): boolean {
     if (!this.deps.preparePluginStart) return false;
     if (this.pendingPreparedStarts.has(manifest.id)) return true;
@@ -113,7 +117,9 @@ export class PreparationTracker {
         const startResult = await this.deps.instantiateAndStartSinglePlugin(plan, manifest, approvedPluginAccess, {
           skipPreparation: true,
           cacheBust: startOpts.cacheBust,
-          shouldCommit: () => this.preparationGenerations.get(manifest.id) === generation,
+          shouldCommit: () =>
+            this.preparationGenerations.get(manifest.id) === generation
+            && (startOpts.shouldCommit?.() ?? true),
         });
         if (this.preparationGenerations.get(manifest.id) !== generation) {
           return;

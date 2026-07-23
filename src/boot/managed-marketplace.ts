@@ -4,12 +4,20 @@ import type { PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
+import { withAllPluginInstallLocks } from "../plugins/install-lifecycle.js";
 const log = createLogger("lvis");
 
 export function resolveManagedPluginBootstrap(input: {
   marketplace: Pick<MarketplaceSettings, "backend" | "cloudBaseUrl">;
+  e2eTestMode?: boolean;
 }): { enabled: boolean; reason?: string } {
   const { marketplace } = input;
+  if (input.e2eTestMode) {
+    return {
+      enabled: false,
+      reason: "managed plugin bootstrap disabled in isolated E2E test mode",
+    };
+  }
   // The cloud backend is the only marketplace backend; bootstrap is enabled iff
   // a base URL is configured. (The former mock-backend / isPackaged skip branch
   // was dead once the mock backend was removed.)
@@ -77,7 +85,10 @@ export function runManagedBootstrap(input: RunManagedBootstrapInput): Promise<vo
 
 async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<void> {
   const { pluginMarketplace, pluginRuntime, mainWindow, marketplace } = input;
-  const decision = resolveManagedPluginBootstrap({ marketplace });
+  const decision = resolveManagedPluginBootstrap({
+    marketplace,
+    e2eTestMode: process.env.LVIS_E2E === "1" && process.env.NODE_ENV === "test",
+  });
   if (!decision.enabled) {
     log.warn(`boot: managed plugin bootstrap skipped: ${decision.reason}`);
     notifyBootstrapStatus(mainWindow, {
@@ -90,7 +101,12 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   }
   notifyBootstrapStatus(mainWindow, { phase: "start" });
   try {
-    const ensureResult = await pluginMarketplace.ensureManagedInstalled();
+    const ensureResult = await withAllPluginInstallLocks(async () => {
+      const result = await pluginMarketplace.ensureManagedInstalled();
+      const changed = result.installed.length > 0 || (result.updated?.length ?? 0) > 0;
+      if (changed) await pluginRuntime.restartAll();
+      return result;
+    });
     const updated = ensureResult.updated ?? [];
     if (ensureResult.installed.length > 0) {
       log.info(
@@ -104,9 +120,6 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     }
     // Reload the runtime once if anything was installed OR auto-updated so the
     // new versions are picked up without an app restart.
-    if (ensureResult.installed.length > 0 || updated.length > 0) {
-      await pluginRuntime.restartAll();
-    }
     if (ensureResult.failed.length > 0) {
       log.warn(
         `boot: managed plugin bootstrap failed ${ensureResult.failed.length}: %s`,
