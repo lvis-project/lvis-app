@@ -6,6 +6,7 @@ import { join } from "node:path";
 const mockedElectron = vi.hoisted(() => ({
   safeStorage: {
     isEncryptionAvailable: vi.fn(() => false),
+    getSelectedStorageBackend: vi.fn(() => "gnome_libsecret" as const),
     encryptString: vi.fn(),
     decryptString: vi.fn(),
   },
@@ -159,7 +160,7 @@ describe("SettingsService marketplace defaults", () => {
       "utf-8",
     );
 
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
     expect(service.get("marketplace")).toMatchObject({
       installedProviderIds: ["groq"],
       installedProviderPresets: [{
@@ -208,7 +209,7 @@ describe("SettingsService marketplace defaults", () => {
   });
 
   it("resets the active custom provider preset when the preset is uninstalled", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
     const preset = {
       providerId: "future-router",
       label: "Future Router",
@@ -362,7 +363,7 @@ describe("SettingsService marketplace defaults", () => {
   });
 
   it("refreshes existing custom provider preset metadata through the trusted marketplace install path", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
     const preset = {
       providerId: "future-router",
       label: "Future Router",
@@ -413,6 +414,13 @@ describe("SettingsService marketplace defaults", () => {
   });
 
   it("leaves an active custom provider preset installed when preset-secret deletion fails", async () => {
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(true);
+    mockedElectron.safeStorage.encryptString.mockImplementation(
+      (value: string) => Buffer.from(`sealed:${value}`),
+    );
+    mockedElectron.safeStorage.decryptString.mockImplementation(
+      (value: Buffer) => value.toString("utf-8").slice(7),
+    );
     const service = new SettingsService({ userDataPath });
     const preset = {
       providerId: "future-router",
@@ -441,23 +449,21 @@ describe("SettingsService marketplace defaults", () => {
       marketplaceProviderPresetSecretKey("future-router"),
       "fr-secret",
     );
-    const deleteSecretSpy = vi
-      .spyOn(service, "deleteSecret")
-      .mockRejectedValueOnce(new Error("keychain write failed"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
 
     await expect(service.patch({
       marketplace: { installedProviderPresets: [] },
-    })).rejects.toThrow("keychain write failed");
+    })).rejects.toThrow("safeStorage encryption is unavailable");
 
     expect(service.get("marketplace").installedProviderPresets).toEqual([preset]);
     expect(service.get("llm")).toMatchObject({
       provider: "openai-compatible",
       marketplaceProviderPresetId: "future-router",
     });
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(true);
     expect(service.getSecret(marketplaceProviderPresetSecretKey("future-router")))
       .toBe("fr-secret");
 
-    deleteSecretSpy.mockRestore();
     await service.patch({
       marketplace: { installedProviderPresets: [] },
     });
@@ -564,7 +570,7 @@ describe("SettingsService plugin uninstall cleanup", () => {
   });
 
   it("deletes only requested secret keys for the selected plugin", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
 
     await service.setSecret("plugin.meeting.token", "abc");
     await service.setSecret("plugin.meeting.unlisted", "preserved");
@@ -580,7 +586,7 @@ describe("SettingsService plugin uninstall cleanup", () => {
   });
 
   it("does not delete another dotted plugin id's secret by prefix", async () => {
-    const service = new SettingsService({ userDataPath });
+    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
 
     await service.setSecret("plugin.com.example.token", "abc");
     await service.setSecret("plugin.com.example.mail.token", "preserved");
