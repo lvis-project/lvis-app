@@ -29,6 +29,16 @@ function requireCheckout(label, repoRoot, expectedSha) {
   if (actual !== expectedSha) {
     fail(`${label} checkout is ${actual}, expected ${expectedSha}`);
   }
+  const dirty = git(
+    repoRoot,
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--ignore-submodules=none",
+  );
+  if (dirty) {
+    fail(`${label} checkout is dirty: ${dirty.split("\n")[0]}`);
+  }
 }
 
 function sha256(bytes) {
