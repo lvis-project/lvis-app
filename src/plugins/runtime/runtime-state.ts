@@ -103,6 +103,8 @@ export abstract class PluginRuntimeState {
   protected readonly pendingRestartPreparations = new Map<string, Promise<void>>();
   /** Monotonic generation used to reject stale async add/restart commits. */
   protected readonly pluginLifecycleGenerations = new Map<string, number>();
+  /** HostApi incarnations whose plugin factory has not committed an instance. */
+  private readonly pendingHostApiIncarnations = new Map<string, Set<() => void>>();
   protected nextPluginLifecycleGeneration = 0;
   protected readonly activePluginLifecycleHooks = new Map<string, number>();
   protected readonly pluginUiRevisions = new Map<string, number>();
@@ -204,9 +206,30 @@ export abstract class PluginRuntimeState {
     hostApi: PluginHostApi;
     disposers: Array<() => void>;
     deactivate: () => void;
+    commit: () => void;
   } {
     const disposers: Array<() => void> = [];
     let active = true;
+    let pending = true;
+    let deactivate!: () => void;
+    const forgetPending = () => {
+      const pendingForPlugin = this.pendingHostApiIncarnations.get(pluginId);
+      pendingForPlugin?.delete(deactivate);
+      if (pendingForPlugin?.size === 0) {
+        this.pendingHostApiIncarnations.delete(pluginId);
+      }
+      pending = false;
+    };
+    deactivate = () => {
+      active = false;
+      if (pending) forgetPending();
+    };
+    let pendingForPlugin = this.pendingHostApiIncarnations.get(pluginId);
+    if (!pendingForPlugin) {
+      pendingForPlugin = new Set();
+      this.pendingHostApiIncarnations.set(pluginId, pendingForPlugin);
+    }
+    pendingForPlugin.add(deactivate);
     const incarnation: PluginHostApiIncarnation = {
       registerDisposer: (dispose) => {
         if (active) {
@@ -219,24 +242,33 @@ export abstract class PluginRuntimeState {
       isLifecycleHookActive: () =>
         (this.activePluginLifecycleHooks.get(pluginId) ?? 0) > 0,
     };
-    const hostApi = this.createHostApi?.(
-      pluginId,
-      manifest,
-      pluginDataDir,
-      incarnation,
-    ) ?? createNoopHostApi(pluginId, pluginDataDir);
-    // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
-    // objects from test harnesses may omit it.
-    if (!hostApi.storage) {
-      hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
+    try {
+      const hostApi = this.createHostApi?.(
+        pluginId,
+        manifest,
+        pluginDataDir,
+        incarnation,
+      ) ?? createNoopHostApi(pluginId, pluginDataDir);
+      // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
+      // objects from test harnesses may omit it.
+      if (!hostApi.storage) {
+        hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
+      }
+      return {
+        hostApi,
+        disposers,
+        deactivate,
+        commit: () => {
+          if (!active) {
+            throw new Error(`Cannot commit inactive HostApi incarnation: ${pluginId}`);
+          }
+          if (pending) forgetPending();
+        },
+      };
+    } catch (err) {
+      deactivate();
+      throw err;
     }
-    return {
-      hostApi,
-      disposers,
-      deactivate: () => {
-        active = false;
-      },
-    };
   }
 
   protected async runPluginLifecycleHook<T>(
@@ -368,6 +400,16 @@ export abstract class PluginRuntimeState {
   protected beginPluginLifecycleOperation(pluginId: string): number {
     const generation = ++this.nextPluginLifecycleGeneration;
     const canonicalId = this.resolveKnownPluginId(pluginId);
+    const lifecycleIds = new Set([
+      pluginId,
+      canonicalId,
+      ...(this.knownInstallAliases.get(canonicalId) ?? []),
+    ]);
+    for (const lifecycleId of lifecycleIds) {
+      for (const deactivate of this.pendingHostApiIncarnations.get(lifecycleId) ?? []) {
+        deactivate();
+      }
+    }
     this.pluginLifecycleGenerations.set(canonicalId, generation);
     this.pluginLifecycleGenerations.set(pluginId, generation);
     for (const alias of this.knownInstallAliases.get(canonicalId) ?? []) {
@@ -428,6 +470,12 @@ export abstract class PluginRuntimeState {
     for (const plugin of this.plugins.values()) {
       plugin.deactivateHostApi?.();
     }
+    for (const pending of this.pendingHostApiIncarnations.values()) {
+      for (const deactivate of pending) {
+        deactivate();
+      }
+    }
+    this.pendingHostApiIncarnations.clear();
     for (const [, list] of this.disposers) {
       for (const d of list) {
         try { d(); } catch (err) {

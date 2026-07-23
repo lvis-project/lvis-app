@@ -90,6 +90,42 @@ import type { LateBindingRefs } from "../plugin-runtime.js";
 
 const log = createLogger("lvis");
 
+/** Revoke every callable surface of an obsolete HostApi incarnation. */
+function enforceActiveHostApi(
+  pluginId: string,
+  incarnation: PluginHostApiIncarnation,
+  hostApi: PluginHostApi,
+): PluginHostApi {
+  const proxies = new WeakMap<object, object>();
+  const wrap = (target: object, path: string): object => {
+    const existing = proxies.get(target);
+    if (existing) return existing;
+    const proxy = new Proxy(target, {
+      get(currentTarget, property, receiver) {
+        const value = Reflect.get(currentTarget, property, receiver) as unknown;
+        const memberPath = `${path}.${String(property)}`;
+        if (typeof value === "function") {
+          return (...args: unknown[]) => {
+            if (!incarnation.isActive()) {
+              throw new Error(
+                `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
+              );
+            }
+            return Reflect.apply(value, currentTarget, args);
+          };
+        }
+        if (value !== null && typeof value === "object") {
+          return wrap(value, memberPath);
+        }
+        return value;
+      },
+    });
+    proxies.set(target, proxy);
+    return proxy;
+  };
+  return wrap(hostApi, "hostApi") as PluginHostApi;
+}
+
 /** Explicit deps the HostApi factory needs. Lazy bindings arrive as getters. */
 export interface CreateHostApiFactoryDeps {
   /** Getter for the mutable `pluginRuntime` binding (assigned after this factory is built). */
@@ -172,7 +208,10 @@ export function createHostApiFactory(
     const pluginRuntime = getPluginRuntime();
     const hostIncarnation = incarnation ?? {
       registerDisposer: (dispose: () => void) => pluginRuntime.registerDisposer(pluginId, dispose),
-      isActive: () => pluginRuntime.getPluginManifest(pluginId) === manifest,
+      // Runtime production calls always provide an incarnation. The fallback
+      // exists only for direct factory test harnesses that exercise one method
+      // without constructing PluginRuntime lifecycle state.
+      isActive: () => true,
       isLifecycleHookActive: () => false,
     };
       // #893 Stage 2 — manifest sha256 pin (Tier-3 whitelist check). The
@@ -209,7 +248,7 @@ export function createHostApiFactory(
       // DENIED effect is never recorded as a host-observed mutation. The lone
       // verb-derived chokepoint (hostFetch) is gated INLINE in its closure from
       // the single verb snapshot; the wrapper skips it.
-      return enforceMutatingEffects<PluginHostApi>(
+      return enforceActiveHostApi(pluginId, hostIncarnation, enforceMutatingEffects<PluginHostApi>(
         instrumentEffectsByPath<PluginHostApi>({
       storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
         try {
@@ -315,6 +354,7 @@ export function createHostApiFactory(
             pluginId,
             key,
             (_changedKey, value) => {
+              if (!hostIncarnation.isActive()) return;
               callback(value as T | undefined);
             },
           );
@@ -359,7 +399,9 @@ export function createHostApiFactory(
       },
       onEvent: (type, handler) => {
         pluginRuntime.assertPluginEventAccess(pluginId, type);
-        const unsubscribe = onEvent(type, handler);
+        const unsubscribe = onEvent(type, (data) => {
+          if (hostIncarnation.isActive()) handler(data);
+        });
         hostIncarnation.registerDisposer(unsubscribe);
         plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
         return unsubscribe;
@@ -369,6 +411,7 @@ export function createHostApiFactory(
       },
       onPluginsChanged: (handler) => {
         const dispatchInstalled = (data: unknown) => {
+          if (!hostIncarnation.isActive()) return;
           const payload = data as { pluginId?: string; source?: "marketplace" | "local-dev" } | null | undefined;
           const subjectId = payload?.pluginId;
           if (typeof subjectId !== "string" || subjectId === pluginId) return;
@@ -376,6 +419,7 @@ export function createHostApiFactory(
           handler({ type: "installed", pluginId: subjectId, source });
         };
         const dispatchUninstalled = (data: unknown) => {
+          if (!hostIncarnation.isActive()) return;
           const subjectId = (data as { pluginId?: string } | null | undefined)?.pluginId;
           if (typeof subjectId !== "string" || subjectId === pluginId) return;
           handler({ type: "uninstalled", pluginId: subjectId });
@@ -762,7 +806,12 @@ export function createHostApiFactory(
         }
       },
       onShutdown: (handler) => {
-        pluginShutdownHandlers.push({ pluginId, handler });
+        const registration = { pluginId, handler };
+        pluginShutdownHandlers.push(registration);
+        hostIncarnation.registerDisposer(() => {
+          const index = pluginShutdownHandlers.indexOf(registration);
+          if (index >= 0) pluginShutdownHandlers.splice(index, 1);
+        });
       },
       // ─── Host-mediated worker spawn ───────────────────────────────────
       // HOST PRIMITIVE — Tool.workerId producer is intentionally NOT wired here.
@@ -1189,6 +1238,6 @@ export function createHostApiFactory(
       },
         }),
         { pluginId, approvalGate, flagEnabled: hostClassifiesRiskEnabled },
-      );
+      ));
   };
 }

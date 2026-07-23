@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  drainPluginInstallLockOperations,
   withPluginInstallLock,
   withAllPluginInstallLocks,
   installMarketplacePluginWithLifecycle,
@@ -120,6 +121,91 @@ describe("installMarketplacePluginWithLifecycle", () => {
     releaseInner();
     await owner;
     expect(order).toEqual(["owner:start", "inner:start", "owner:callback-end", "inner:end"]);
+  });
+
+  it("does not self-deadlock when a re-entrant uninstall drains its own descendants", async () => {
+    const order: string[] = [];
+    await expect(withPluginInstallLock("p", async () => {
+      await withPluginInstallLock("p", async () => {
+        order.push("inner:start");
+        await drainPluginInstallLockOperations("p");
+        order.push("inner:end");
+      });
+      order.push("outer:end");
+    })).resolves.toBeUndefined();
+    expect(order).toEqual(["inner:start", "inner:end", "outer:end"]);
+  });
+
+  it("does not let an inactive inherited all-plugin token shadow a new plugin lock", async () => {
+    const order: string[] = [];
+    let inherited!: () => Promise<void>;
+    await withAllPluginInstallLocks(async () => {
+      inherited = async () => {
+        await withPluginInstallLock("p", async () => {
+          order.push("plugin");
+          await withPluginInstallLock("p", async () => {
+            order.push("nested");
+          });
+        });
+      };
+    });
+
+    await expect(inherited()).resolves.toBeUndefined();
+    expect(order).toEqual(["plugin", "nested"]);
+  });
+
+  it("reports detached re-entrant failures to the owning mutation", async () => {
+    const detachedFailure = new Error("detached write failed");
+    const error = await withPluginInstallLock("p", async () => {
+      void withPluginInstallLock("p", async () => {
+        throw detachedFailure;
+      });
+    }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([detachedFailure]);
+  });
+
+  it("rejects a per-plugin to all-plugin lock upgrade instead of deadlocking", async () => {
+    await expect(withPluginInstallLock("p", async () => {
+      await withAllPluginInstallLocks(async () => undefined);
+    })).rejects.toThrow("Cannot upgrade a held per-plugin lifecycle lock");
+  });
+
+  it("bounds the owner wait while quarantining a detached mutation until it settles", async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseDetached!: () => void;
+      let detachedStarted!: () => void;
+      const detachedGate = new Promise<void>((resolve) => { releaseDetached = resolve; });
+      const started = new Promise<void>((resolve) => { detachedStarted = resolve; });
+      const owner = withPluginInstallLock("p", async () => {
+        void withPluginInstallLock("p", async () => {
+          detachedStarted();
+          await detachedGate;
+        });
+        await started;
+      });
+      const ownerResult = owner.catch((caught) => caught);
+      await started;
+      await vi.advanceTimersByTimeAsync(10_001);
+      await expect(ownerResult).resolves.toMatchObject({
+        code: "plugin-lifecycle-drain-timeout",
+      });
+
+      let nextEntered = false;
+      const next = withPluginInstallLock("p", async () => {
+        nextEntered = true;
+      });
+      await Promise.resolve();
+      expect(nextEntered).toBe(false);
+
+      releaseDetached();
+      await next;
+      expect(nextEntered).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("gives multi-plugin bootstrap exclusive access across per-plugin mutations", async () => {
