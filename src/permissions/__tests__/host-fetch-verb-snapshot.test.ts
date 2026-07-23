@@ -118,6 +118,12 @@ type CreateHostApi = (
     networkAccess?: { allowedDomains?: string[]; allowPrivateNetworks?: boolean };
   },
   pluginDataDir: string,
+  incarnation: {
+    registerDisposer: (dispose: () => void) => void;
+    trackOperation: <T>(operation: Promise<T>) => Promise<T>;
+    isActive: () => boolean;
+    isLifecycleHookActive: () => boolean;
+  },
 ) => PluginHostApi;
 
 /** Build a REAL hostApi + the captured networkFetch mock (the wire). */
@@ -173,6 +179,12 @@ async function buildRealHostApi(): Promise<{
       networkAccess: { allowedDomains: ["api.example.com"] },
     },
     pluginDataDir,
+    {
+      registerDisposer: vi.fn(),
+      trackOperation: <T>(operation: Promise<T>) => operation,
+      isActive: () => true,
+      isLifecycleHookActive: () => false,
+    },
   );
   return { hostApi, networkFetch };
 }

@@ -474,7 +474,7 @@ describe("verifyAllAuditFiles", () => {
       { decision: "ask", auditId: "3", ts: "t3", trustOrigin: "user-keyboard", tool: "c" },
     ]);
     const lines = entries.map((e) => JSON.stringify(e));
-    // Tamper line 1
+    // Tamper line 1; entryHash detects the same row immediately.
     const obj = JSON.parse(lines[1]) as { tool: string };
     obj.tool = "TAMPERED";
     lines[1] = JSON.stringify(obj);
@@ -486,7 +486,7 @@ describe("verifyAllAuditFiles", () => {
     expect(result.firstBrokenFile).toBe("2026-05-09.permission-audit.jsonl");
     expect(result.perDay[0].result.ok).toBe(false);
     if (!result.perDay[0].result.ok) {
-      expect(result.perDay[0].result.firstBrokenLineIndex).toBe(2);
+      expect(result.perDay[0].result.firstBrokenLineIndex).toBe(1);
     }
   });
 

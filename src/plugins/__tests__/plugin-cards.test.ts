@@ -292,4 +292,27 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       }),
     ]);
   });
+
+  it("keeps event ownership on the manifest id when the registry id is an install alias", async () => {
+    const manifestPath = writePlugin(tmp, "manifest-event-owner", {
+      name: "Alias Event Fixture",
+      tools: ["alias_event_ping"],
+      emittedEvents: ["manifest-event-owner.changed"],
+    });
+    const registryPath = writeRegistry(tmp, [
+      { id: "marketplace-event-slug", manifestPath, enabled: true },
+    ]);
+
+    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
+    await runtime.load();
+
+    expect(() => runtime.assertPluginEventEmitAccess(
+      "manifest-event-owner",
+      "manifest-event-owner.changed",
+    )).not.toThrow();
+    expect(() => runtime.assertPluginEventEmitAccess(
+      "unrelated-plugin",
+      "manifest-event-owner.changed",
+    )).toThrow(/owned by plugin 'manifest-event-owner'/);
+  });
 });

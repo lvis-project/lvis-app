@@ -78,7 +78,7 @@ test.describe('ask_user_question overlay layout', () => {
     { width: 1100, height: 720 },
     { width: 1440, height: 900 },
   ]) {
-    test(`overlay fills the chat width and sits flush above the status bar at ${viewport.width}x${viewport.height}`, async ({
+    test(`overlay fills the chat width and is flush with its dock at ${viewport.width}x${viewport.height}`, async ({
       app,
       mainWindow,
     }) => {
@@ -92,33 +92,31 @@ test.describe('ask_user_question overlay layout', () => {
       expect(visible, 'ask_user_question injection must render the overlay').toBe(true);
 
       const geometry = await mainWindow.evaluate(() => {
-        const main = document.querySelector<HTMLElement>('main');
         const overlay = document.querySelector<HTMLElement>('[data-testid="question-overlay"]');
         const card = document.querySelector<HTMLElement>('[data-testid="ask-user-question-card"]');
-        const statusBar = document.querySelector<HTMLElement>('[data-testid="status-bar"]');
-        if (!main || !overlay || !card || !statusBar) return null;
-        const m = main.getBoundingClientRect();
+        const dock = overlay.parentElement as HTMLElement | null;
+        if (!overlay || !card || !dock) return null;
         const o = overlay.getBoundingClientRect();
         const c = card.getBoundingClientRect();
-        const s = statusBar.getBoundingClientRect();
+        const d = dock.getBoundingClientRect();
         return {
-          mainLeft: m.left,
-          mainRight: m.right,
+          dockLeft: d.left,
+          dockRight: d.right,
           overlayLeft: o.left,
           overlayRight: o.right,
           cardLeft: c.left,
           cardRight: c.right,
           cardBottom: c.bottom,
-          statusTop: s.top,
+          dockBottom: d.bottom,
         };
       });
 
       expect(geometry, 'layout elements must exist').not.toBeNull();
-      expect(Math.abs(geometry!.overlayLeft - geometry!.mainLeft)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry!.overlayRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry!.cardLeft - geometry!.mainLeft)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry!.cardRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry!.cardBottom - geometry!.statusTop)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.overlayLeft - geometry!.dockLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.overlayRight - geometry!.dockRight)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.cardLeft - geometry!.dockLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.cardRight - geometry!.dockRight)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry!.cardBottom - geometry!.dockBottom)).toBeLessThanOrEqual(1);
     });
   }
 

@@ -109,6 +109,17 @@ describe("capabilities module namespace policy", () => {
     expect(canEmitEvent("plugin.installed", ["email.new", "calendar.event"])).toBe(false);
     expect(canEmitEvent("host.theme.changed", ["host.theme.changed"])).toBe(false);
   });
+
+  it("private namespaces reject plugin emit even when explicitly declared", () => {
+    for (const eventType of [
+      "memory.private.document",
+      "settings.apiKey.openai",
+      "audit.log",
+      "dlp.redacted",
+    ]) {
+      expect(canEmitEvent(eventType, [eventType])).toBe(false);
+    }
+  });
 });
 
 describe("registerManifestEventSubscriptions namespace gate", () => {

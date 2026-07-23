@@ -4,6 +4,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { uninstallPluginWithLifecycle } from "../uninstall-lifecycle.js";
+import { withPluginInstallLock } from "../install-lifecycle.js";
 
 function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
   return {
@@ -14,6 +15,8 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
       }),
     },
     pluginRuntime: {
+      resolvePluginId: vi.fn((requestedPluginId: string) => requestedPluginId),
+      clearConfigOverride: vi.fn(),
       getPluginManifest: vi.fn(() => ({
         configSchema: {
           properties: {
@@ -111,6 +114,77 @@ describe("uninstallPluginWithLifecycle", () => {
       const removeOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
       const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
       expect(removeOrder).toBeLessThan(uninstallOrder);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("drains detached stop-hook mutations before deleting durable plugin state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-detached-"));
+    try {
+      const order: string[] = [];
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      let releaseWrite!: () => void;
+      let writeEntered!: () => void;
+      const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+      const writeStarted = new Promise<void>((resolve) => { writeEntered = resolve; });
+      deps.pluginRuntime.removePlugin.mockImplementationOnce(async () => {
+        void withPluginInstallLock("agent-hub", async () => {
+          order.push("write:start");
+          writeEntered();
+          await writeGate;
+          order.push("write:end");
+        });
+        await writeStarted;
+        order.push("remove:end");
+      });
+      deps.settingsService.deletePluginConfig.mockImplementationOnce(async () => {
+        order.push("config:delete");
+      });
+
+      const uninstall = uninstallPluginWithLifecycle("agent-hub", deps);
+      await writeStarted;
+      await Promise.resolve();
+      expect(deps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
+
+      releaseWrite();
+      await uninstall;
+      expect(order).toEqual(["write:start", "remove:end", "write:end", "config:delete"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("serializes an install alias under the canonical id and clears late config state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-alias-"));
+    try {
+      const order: string[] = [];
+      const deps = makeDeps("canonical-plugin", join(root, ".cache"));
+      deps.pluginRuntime.resolvePluginId.mockReturnValue("canonical-plugin");
+      deps.pluginRuntime.removePlugin.mockImplementationOnce(async () => {
+        await withPluginInstallLock("canonical-plugin", async () => {
+          order.push("stop-write");
+        });
+        order.push("remove");
+      });
+      deps.pluginRuntime.clearConfigOverride.mockImplementationOnce(() => {
+        order.push("override:clear");
+      });
+      deps.settingsService.deletePluginConfig.mockImplementationOnce(async () => {
+        order.push("settings:clear");
+      });
+
+      await uninstallPluginWithLifecycle("marketplace-alias", deps);
+
+      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("canonical-plugin");
+      expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("marketplace-alias");
+      expect(deps.pluginRuntime.clearConfigOverride).toHaveBeenCalledWith("canonical-plugin");
+      expect(order).toEqual([
+        "stop-write",
+        "remove",
+        "override:clear",
+        "settings:clear",
+      ]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
