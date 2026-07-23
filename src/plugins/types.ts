@@ -251,6 +251,13 @@ export interface PluginManifest {
   uiResources?: PluginUiResourceDecl[];
   keywords?: Array<{ keyword: string; skillId: string }>;
 
+  /** Plugin-owned instruction bundles, rooted at a directory containing SKILL.md. */
+  skills?: PluginContributionDeclaration[];
+  /** Plugin-owned declarative Hook configuration files. Presence does not grant trust. */
+  hooks?: PluginContributionDeclaration[];
+  /** Plugin-owned declarative MCP server configuration files. Presence does not grant approval. */
+  mcpServers?: PluginContributionDeclaration[];
+
 
 
   capabilities?: string[];
@@ -372,6 +379,16 @@ export interface PluginOnboardingSpec {
     /** Normalized lower-case BCP-47 tags; English is the required fallback. */
     locales: Record<string, PluginFirstTaskCopy>;
   };
+}
+
+/**
+ * A contribution identity is local to its owning plugin and contribution kind.
+ * `path` is always a normalized, plugin-root-relative POSIX path. Runtime code
+ * must resolve it through the Host contribution resolver before reading bytes.
+ */
+export interface PluginContributionDeclaration {
+  id: string;
+  path: string;
 }
 
 /**

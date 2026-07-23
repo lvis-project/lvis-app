@@ -197,6 +197,27 @@ Key boundaries:
   staging succeeds. Direct and bundle uninstall stage the live directory plus
   all recovery/cleanup-owned paths before deleting the row; unresolved recovery
   backups are never handled by the orphan tombstone sweeper.
+- a plugin artifact may declare plugin-owned `skills`, `hooks`, and `mcpServers`
+  as `{id,path}` entries. IDs are local to the tuple `(plugin id, plugin version,
+  contribution kind)` and paths are normalized relative to the verified plugin
+  root. The Host rejects absolute/traversing/ambiguous paths, declaration or
+  archive-member collisions, links/devices, missing members, and a Skill
+  directory without `SKILL.md`. A contribution-free manifest remains valid.
+- declaration and signature are not execution authority. Skills contribute
+  instructions only; Hook trust is bound to the exact owner/version/local ID and
+  command-policy fingerprint; MCP connection approval is bound to the exact
+  owner/version/local ID and static policy fingerprint. Candidate preparation
+  for MCP is parse/fingerprint-only and performs no spawn, network, discovery,
+  registry write, or plugin execution.
+- plugin code, handlers, materialized Skill bytes, Hook projections, static MCP
+  descriptors, and operation policy belong to one immutable active generation.
+  Every dispatch first acquires a lease on that generation. Lifecycle transitions
+  prepare a hidden candidate, block new leases, durably commit bytes/receipt/
+  registry identity, then publish with one non-throwing in-memory pointer
+  assignment. Existing predecessor leases may finish; teardown waits for their
+  drain and remains journaled/retriable if fallible cleanup fails. A crash before
+  the durable commit reconstructs the predecessor; a crash after it reconstructs
+  only the committed verified generation.
 - renderer-to-plugin method calls are allowlisted by each tool's
   `_meta.ui.visibility`: only app-visible tools (visibility includes `"app"` —
   the union of app-only `["app"]` and dual `["model","app"]`) are

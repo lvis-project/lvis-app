@@ -181,6 +181,24 @@
         }
       }
     },
+    "skills": {
+      "type": "array",
+      "description": "Plugin-owned Skill directories. Each path is relative to the verified plugin root and must contain SKILL.md.",
+      "maxItems": 64,
+      "items": { "$ref": "#/definitions/pluginContributionDeclaration" }
+    },
+    "hooks": {
+      "type": "array",
+      "description": "Plugin-owned declarative Hook configuration files. Declaration does not grant execution trust.",
+      "maxItems": 64,
+      "items": { "$ref": "#/definitions/pluginContributionDeclaration" }
+    },
+    "mcpServers": {
+      "type": "array",
+      "description": "Plugin-owned declarative MCP server configuration files. Declaration does not grant connection approval.",
+      "maxItems": 64,
+      "items": { "$ref": "#/definitions/pluginContributionDeclaration" }
+    },
     "capabilities": {
       "type": "array",
       "description": "Free-form capability declarations (format-validated, NOT a closed enum). The host ENFORCES only two at runtime — 'external-auth-consumer' and 'host:overlay' (see src/plugins/capabilities.ts KNOWN_CAPABILITY_IDS). Every other string is a harmless self-declaration (e.g. the live 'worker-client' host discovery key, or legacy strings on already-installed manifests). Kept free-form — rather than an enum — so an installed manifest declaring a removed/legacy capability still validates and loads instead of being rejected at schema validation. Emit authorization for event-source namespaces (email/calendar/meeting/index) is inferred from emittedEvents, not from a capability here. The pattern is format hygiene only (blocks uppercase/whitespace/garbage), not a vocabulary.",
@@ -758,6 +776,24 @@
         "body": { "type": "string", "minLength": 1, "maxLength": 320 },
         "actionLabel": { "type": "string", "minLength": 1, "maxLength": 64 },
         "composerPrompt": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "pluginContributionDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
       }
     },
     "tool": {

@@ -177,6 +177,34 @@ describe("PluginArtifactStore — installDirFor", () => {
 });
 
 describe("PluginArtifactStore — extractZip", () => {
+  it("rejects archive symlink members before extraction", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const zip = new AdmZip();
+      zip.addFile("link", Buffer.from("outside"));
+      const entry = zip.getEntry("link");
+      if (!entry) throw new Error("test fixture entry missing");
+      entry.attr = (0o120777 << 16) >>> 0;
+      await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/unsupported member kind/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects case-colliding archive members", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const zip = new AdmZip();
+      zip.addFile("Hooks/a.json", Buffer.from("one"));
+      zip.addFile("hooks/A.json", Buffer.from("two"));
+      await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/colliding entry/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("rejects unsafe slugs before staging zip contents", async () => {
     const tmp = makeTmpDir();
     try {
