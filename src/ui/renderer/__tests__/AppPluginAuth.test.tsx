@@ -124,8 +124,10 @@ describe("App plugin auth routing", () => {
         userAction: true,
       });
     });
-    // ...and never opens a detached window (plugin views are inline-only).
+    // ...never opens a detached window (plugin views are inline-only) AND does
+    // not navigate the inline view until the plugin reports authed (login-first).
     expect(api.window.openDetached).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("plugin-page-back")).not.toBeInTheDocument();
   });
 
   it("authenticated auth plugin → navigates the panel inline without firing loginTool", async () => {
@@ -137,11 +139,11 @@ describe("App plugin auth routing", () => {
 
     await selectPluginView(user, "Token Plugin");
 
-    // Already authed → navigate inline directly (picker closes), no login
-    // round-trip and no detached window.
-    await waitFor(() => {
-      expect(screen.queryByTestId("slash-group-plugin")).not.toBeInTheDocument();
-    });
+    // Already authed → navigate inline directly, no login round-trip and no
+    // detached window. Assert the plugin view host actually rendered (its back
+    // affordance) — not merely that the picker closed (it closes on every
+    // selection regardless of navigation).
+    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
     expect(api.window.openDetached).not.toHaveBeenCalled();
     expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "token_login")).toBe(false);
   });
@@ -164,17 +166,19 @@ describe("App plugin auth routing", () => {
       });
     });
     expect(api.window.openDetached).not.toHaveBeenCalled();
+    // Deferred: the inline view is NOT navigated yet (still unauthed).
+    expect(screen.queryByTestId("plugin-page-back")).not.toBeInTheDocument();
 
     // Login completes: status flips to authed and the plugin emits
     // `<pluginId>.auth.changed`, which re-fetches status. The host's one-shot
-    // effect then navigates the DEFERRED inline view (login-window-closes →
+    // drain effect then navigates the DEFERRED inline view (login-window-closes →
     // panel-opens).
     authed = true;
     emitPluginEvent("token-plugin.auth.changed", { authenticated: true });
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("slash-group-plugin")).not.toBeInTheDocument();
-    });
+    // The plugin view host now renders inline — proving the drain effect, not
+    // the initial click, performed the navigation.
+    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
     expect(api.window.openDetached).not.toHaveBeenCalled();
   });
 
@@ -238,10 +242,8 @@ describe("App plugin auth routing", () => {
     await user.click(await screen.findByTestId("slash-picker-cat-shortcut"));
     await user.click(await screen.findByText("Token Plugin 열기"));
 
-    // Navigates inline (picker closes); the plugin view never opens a window.
-    await waitFor(() => {
-      expect(screen.queryByTestId("slash-group-plugin")).not.toBeInTheDocument();
-    });
+    // Navigates the plugin view inline (its host renders); never opens a window.
+    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
     expect(api.window.openDetached).not.toHaveBeenCalled();
     expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "token_login")).toBe(false);
   });
@@ -295,9 +297,8 @@ describe("App plugin auth routing", () => {
     authed = true;
     emitPluginEvent("oauth-plugin.auth.changed", { authenticated: true });
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("slash-group-plugin")).not.toBeInTheDocument();
-    });
+    // The deferred inline view is navigated once authed (its host renders).
+    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
   });
 
   it("navigates an unauthenticated plugin view inline in work mode even with no loginTool (no silent abort)", async () => {
@@ -346,9 +347,8 @@ describe("App plugin auth routing", () => {
     // completion instead of bailing out early).
     await selectPluginView(user, "No-LoginTool Plugin");
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("slash-group-plugin")).not.toBeInTheDocument();
-    });
+    // Navigated inline directly (no loginTool): the plugin view host renders.
+    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
     // Inline, not detached; and with no loginTool declared the host must not
     // invoke one (no token_login / fabricated login bypass).
     expect(api.window.openDetached).not.toHaveBeenCalled();

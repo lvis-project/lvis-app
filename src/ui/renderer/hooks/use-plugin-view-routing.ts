@@ -77,10 +77,10 @@ export function usePluginViewRouting({
   setErrorWithThought,
   statusPushToast,
 }: UsePluginViewRoutingDeps): UsePluginViewRoutingResult {
-  // Detached auth gate — plugins awaiting an unauthed→authed transition before
-  // their detached panel opens. Keyed by pluginId → the detached view key to
-  // open once `manifest.auth` status flips to `authed`. Populated by
-  // handleViewSelect when a detached auth plugin is selected while unauthed
+  // Inline auth gate — plugins awaiting an unauthed→authed transition before
+  // their inline panel is navigated to. Keyed by pluginId → the view key to
+  // open (via setActiveView) once `manifest.auth` status flips to `authed`.
+  // Populated by handleViewSelect when an auth plugin is selected while unauthed
   // (the host fires loginTool to open the SSO window, NOT the panel); drained
   // by the auth-transition effect below. See architecture.md §9.4a.
   const pendingInlineAuthOpenRef = useRef<Map<string, string>>(new Map());
