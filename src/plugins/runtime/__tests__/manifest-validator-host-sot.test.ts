@@ -663,3 +663,79 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
     }
   });
 });
+
+describe("operationGovernance host-only cross-field contract", () => {
+  const governed = {
+    id: "governed-plugin",
+    version: "1.0.0",
+    description: "Governed operation union fixture.",
+    entry: "dist/index.js",
+    tools: [
+      {
+        name: "domain_read",
+        description: "Read domain state before a write.",
+        inputSchema: {
+          type: "object",
+          properties: { operation: { type: "string", enum: ["status"] } },
+          required: ["operation"],
+          additionalProperties: false,
+        },
+        _meta: { ui: { visibility: ["model", "app"] } },
+      },
+      {
+        name: "domain_write",
+        description: "Write domain state after confirmation.",
+        inputSchema: {
+          type: "object",
+          properties: { operation: { type: "string", enum: ["save"] } },
+          required: ["operation"],
+          additionalProperties: false,
+        },
+        _meta: { ui: { visibility: ["model", "app"] } },
+      },
+    ],
+    operationGovernance: {
+      domain_read: {
+        discriminant: "operation",
+        appAllowed: ["status"],
+        operations: { status: { kind: "read", minimumRisk: "read" } },
+      },
+      domain_write: {
+        discriminant: "operation",
+        appAllowed: ["save"],
+        operations: {
+          save: {
+            kind: "write",
+            minimumRisk: "network",
+            requiresRead: { tool: "domain_read", operations: ["status"], maxAgeMs: 60000 },
+          },
+        },
+      },
+    },
+  };
+
+  async function parse(value: unknown) {
+    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-governance-"));
+    try {
+      const file = join(dir, "plugin.json");
+      await writeFile(file, JSON.stringify(value), "utf-8");
+      return await parsePluginJson(file, await buildManifestValidator());
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("accepts a policy whose operation union exactly matches its tool schema", async () => {
+    await expect(parse(governed)).resolves.toMatchObject({ operationGovernance: governed.operationGovernance });
+  });
+
+  it("rejects operation drift and app writes without a governed read", async () => {
+    const drifted = structuredClone(governed);
+    drifted.tools[1].inputSchema.properties.operation.enum = ["save", "delete"];
+    await expect(parse(drifted)).rejects.toThrow(/exactly match/);
+
+    const noRead = structuredClone(governed);
+    delete (noRead.operationGovernance.domain_write.operations.save as { requiresRead?: unknown }).requiresRead;
+    await expect(parse(noRead)).rejects.toThrow(/require a governed read snapshot/);
+  });
+});

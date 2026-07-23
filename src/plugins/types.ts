@@ -1,6 +1,8 @@
 import type { MarketplacePackageType } from "../shared/assistant-context.js";
 import type { MarketplacePackageAsset } from "../shared/marketplace-package-assets.js";
 import type { PluginUiResourceDecl } from "../mcp/types.js";
+import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
+export type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
 
 export type { PluginUiResourceDecl } from "../mcp/types.js";
 
@@ -228,6 +230,8 @@ export interface PluginManifest {
   /** Pure MCP `Tool` objects (manifest == wire). Surface visibility lives in each
    *  tool's `_meta.ui.visibility`; there is no separate app-action map or schema map. */
   tools: Tool[];
+  /** Host-only operation policy sidecar keyed by declared tool name. Never projected onto MCP. */
+  operationGovernance?: Record<string, PluginToolOperationPolicy>;
 
   description: string;
   /** Declarative, inert first-run guidance rendered by the host. */
