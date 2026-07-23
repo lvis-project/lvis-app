@@ -11,7 +11,7 @@ type WarnLogger = { warn: (message: string, ...args: unknown[]) => void };
 
 export interface PluginUninstallLifecycleDeps {
   pluginMarketplace: Pick<PluginMarketplaceService, "uninstall">;
-  pluginRuntime: Pick<PluginRuntime, "addPlugin" | "removePlugin" | "getPluginManifest">;
+  pluginRuntime: Pick<PluginRuntime, "removePlugin" | "removePluginWithCommit" | "getPluginManifest">;
   settingsService?: Partial<Pick<SettingsService, "deletePluginConfig" | "deletePluginSecrets">>;
   pluginPaths?: Pick<PluginPaths, "cacheRoot">;
   clearAuthPartitionService?: (partition: string) => Promise<void>;
@@ -108,24 +108,17 @@ export async function uninstallPluginWithLifecycle(
 ): Promise<{ pluginId: string; uninstalled: true }> {
   return withPluginInstallLock(pluginId, async () => {
     const secretKeys = listSecretKeys(deps.pluginRuntime.getPluginManifest(pluginId)?.configSchema);
-    await deps.pluginRuntime.removePlugin(pluginId);
-
     let result: { pluginId: string; uninstalled: true } | null = null;
     let marketplaceRemoved = false;
     try {
-      result = await deps.pluginMarketplace.uninstall(pluginId);
+      result = await deps.pluginRuntime.removePluginWithCommit(
+        pluginId,
+        () => deps.pluginMarketplace.uninstall(pluginId),
+      );
       marketplaceRemoved = true;
     } catch (err) {
       const message = (err as Error).message ?? "uninstall failed";
       if (!isMissingPluginError(message)) {
-        try {
-          await deps.pluginRuntime.addPlugin(pluginId);
-        } catch (restoreError) {
-          throw new AggregateError(
-            [err, restoreError],
-            `plugin uninstall and runtime restore both failed: ${pluginId}`,
-          );
-        }
         throw err;
       }
     }

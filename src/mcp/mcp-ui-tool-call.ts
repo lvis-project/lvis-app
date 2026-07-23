@@ -112,6 +112,11 @@ export function createExternalToolCallSource(deps: ExternalToolCallDeps): {
       // Unreachable via the IPC handler (its owner check already denied an unknown
       // tool), but this source is the one place that must never invoke blind.
       if (!tool) throw new Error(`Tool not found: ${toolName}`);
+      if (tool.mcpServerId !== serverId) {
+        throw new Error(
+          `Tool '${toolName}' owner changed during MCP App call: expected '${serverId}', got '${tool.mcpServerId ?? "unknown"}'`,
+        );
+      }
 
       // ── SPEC MUST (external arm) ──────────────────────────────────────────────
       // The host MUST reject an app's `tools/call` for a tool whose
@@ -136,7 +141,11 @@ export function createExternalToolCallSource(deps: ExternalToolCallDeps): {
       // backs it, and neither arm is the trusted panel. It is still a foreground
       // (non-headless) call the user can be asked about; what it is NOT is a call
       // that can claim a user gesture (`userAction` is never set — see the header).
-      return invoke(tool.name, args, { origin: "mcp-app", userAction: false });
+      return invoke(tool.name, args, {
+        origin: "mcp-app",
+        userAction: false,
+        expectedMcpServerId: serverId,
+      });
     },
   };
 }

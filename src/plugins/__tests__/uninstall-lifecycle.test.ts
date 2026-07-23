@@ -6,6 +6,19 @@ import { join } from "node:path";
 import { uninstallPluginWithLifecycle } from "../uninstall-lifecycle.js";
 
 function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
+  const pluginRuntime = {
+    getPluginManifest: vi.fn(() => ({
+      configSchema: {
+        properties: {
+          token: { type: "string", format: "secret" },
+        },
+      },
+    })),
+    removePlugin: vi.fn(async () => undefined),
+    removePluginWithCommit: vi.fn(async <T>(_pluginId: string, commit: () => Promise<T>) => {
+      return commit();
+    }),
+  };
   return {
     pluginMarketplace: {
       uninstall: vi.fn(async () => {
@@ -13,17 +26,7 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
         return { pluginId, uninstalled: true as const };
       }),
     },
-    pluginRuntime: {
-      getPluginManifest: vi.fn(() => ({
-        configSchema: {
-          properties: {
-            token: { type: "string", format: "secret" },
-          },
-        },
-      })),
-      addPlugin: vi.fn(async () => "started" as const),
-      removePlugin: vi.fn(async () => undefined),
-    },
+    pluginRuntime,
     settingsService: {
       deletePluginConfig: vi.fn(async () => undefined),
       deletePluginSecrets: vi.fn(async () => 0),
@@ -101,22 +104,27 @@ describe("uninstallPluginWithLifecycle", () => {
     }
   });
 
-  it("removes runtime before marketplace files to let plugins release handles", async () => {
+  it("runs durable marketplace removal inside the runtime generation barrier", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-order-"));
     try {
       const deps = makeDeps("agent-hub", join(root, ".cache"));
 
       await uninstallPluginWithLifecycle("agent-hub", deps);
 
-      const removeOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
       const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
-      expect(removeOrder).toBeLessThan(uninstallOrder);
+      const barrierOrder = deps.pluginRuntime.removePluginWithCommit.mock.invocationCallOrder[0];
+      expect(barrierOrder).toBeLessThan(uninstallOrder);
+      expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledWith(
+        "agent-hub",
+        expect.any(Function),
+      );
+      expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("restores runtime before surfacing a durable uninstall failure", async () => {
+  it("surfaces a durable uninstall failure without replacing the active generation", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-restore-"));
     try {
       const failure = Object.assign(new Error("locked by Windows handle"), { code: "EACCES" });
@@ -124,11 +132,8 @@ describe("uninstallPluginWithLifecycle", () => {
 
       await expect(uninstallPluginWithLifecycle("agent-hub", deps)).rejects.toBe(failure);
 
-      expect(deps.pluginRuntime.addPlugin).toHaveBeenCalledWith("agent-hub");
-      expect(deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0])
-        .toBeLessThan(deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0]);
-      expect(deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0])
-        .toBeLessThan(deps.pluginRuntime.addPlugin.mock.invocationCallOrder[0]);
+      expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledTimes(1);
+      expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
       expect(deps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
       expect(deps.emitHostEvent).not.toHaveBeenCalled();
     } finally {
@@ -136,17 +141,15 @@ describe("uninstallPluginWithLifecycle", () => {
     }
   });
 
-  it("preserves uninstall and runtime restore failures", async () => {
-    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-restore-fail-"));
+  it("preserves the original durable uninstall failure", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-fail-"));
     try {
       const uninstallFailure = new Error("uninstall failed");
-      const restoreFailure = new Error("runtime restore failed");
       const deps = makeDeps("agent-hub", join(root, ".cache"), uninstallFailure);
-      deps.pluginRuntime.addPlugin.mockRejectedValueOnce(restoreFailure);
 
       const error = await uninstallPluginWithLifecycle("agent-hub", deps).catch((caught) => caught);
-      expect(error).toBeInstanceOf(AggregateError);
-      expect((error as AggregateError).errors).toEqual([uninstallFailure, restoreFailure]);
+      expect(error).toBe(uninstallFailure);
+      expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

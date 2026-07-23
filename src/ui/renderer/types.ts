@@ -166,6 +166,16 @@ export type PluginCardSummary = {
   installAliases?: string[];
 };
 
+export interface PluginContributionTrustRow {
+  kind: "hook" | "mcpServer";
+  pluginId: string;
+  pluginVersion: string;
+  generationId: string;
+  localId: string;
+  fingerprint: string;
+  status: "approved" | "approval_required";
+}
+
 /**
  * Mirror of host-side `PluginAuthSpec` for renderer consumption — kept as a
  * separate name to make the renderer/host boundary explicit. Field shape
@@ -788,6 +798,19 @@ export type LvisApi = {
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
+  listPluginContributionTrust: (pluginId?: string) => Promise<
+    | { ok: true; rows: PluginContributionTrustRow[] }
+    | { ok: false; error: string }
+  >;
+  setPluginContributionTrust: (input: {
+    pluginId: string;
+    localId: string;
+    kind: "hook" | "mcpServer";
+    approved: boolean;
+  }) => Promise<
+    | { ok: true; pluginId: string; localId: string; kind: "hook" | "mcpServer"; approved: boolean }
+    | { ok: false; error: string; message?: string }
+  >;
   /**
    * #1176 — toggle a plugin active/inactive. Inactive plugins stay loaded but
    * their tools are hidden from the model's per-turn scope.

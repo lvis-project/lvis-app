@@ -194,6 +194,7 @@ vi.mock("../steps/plugin-runtime.js", () => ({
         clearWildcardConfigOverride: vi.fn(),
         restartPlugin: vi.fn(async () => {}),
         setToolInvocationDelegate: vi.fn(),
+        setGenerationAccess: vi.fn(),
       },
       deploymentGuard: {},
       lateBinding: {
@@ -549,6 +550,7 @@ describe("bootstrap() integration lock", () => {
         "refreshSandboxNetworkConfig",
         "registerPluginEventBridge",
         "remoteA2AActionController",
+        "requestPluginOperationGrant",
         "rewireReviewerAgent",
         "routeEngine",
         "routineEngine",

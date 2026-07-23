@@ -168,7 +168,6 @@ export async function installMarketplacePluginWithLifecycle(options: {
       if (hadExistingInstall) {
         broadcastInstallProgress?.({ slug: progressSlug, phase: "restarting" });
         installedVersionBeforeInstall = await pluginMarketplace.getInstalledVersion(currentCatalogState.pluginId);
-        await pluginRuntime.removePlugin(currentCatalogState.pluginId);
       }
 
       broadcastInstallProgress?.({ slug: progressSlug, phase: "installing" });

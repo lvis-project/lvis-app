@@ -47,6 +47,10 @@ export interface SkillLoadToolDeps {
   getApprovalGate: () => ApprovalGate | undefined;
   /** Renderer event sink — used by the chat to render the SkillBadge. */
   emit: (event: SkillLoadEvent) => void;
+  /** Exact generation lease held from materialized body read through overlay registration. */
+  acquirePluginGeneration?: (
+    owner: NonNullable<import("../main/skill-store.js").LoadedSkill["pluginOwner"]>,
+  ) => Promise<{ release(): void }>;
 }
 
 export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
@@ -104,6 +108,11 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           isError: true,
         };
       }
+
+      const generationLease = skill.pluginOwner && deps.acquirePluginGeneration
+        ? await deps.acquirePluginGeneration(skill.pluginOwner)
+        : undefined;
+      try {
 
       // C2(d): every skill body is user-editable on disk — seeded built-in
       // files included — so the approval gate runs uniformly. R2-CR-3:
@@ -189,6 +198,9 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         }),
         isError: false,
       };
+      } finally {
+        generationLease?.release();
+      }
     },
   });
 }

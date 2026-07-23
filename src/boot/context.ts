@@ -67,6 +67,7 @@ import type { RationaleScopeReviewer } from "../permissions/reviewer/rationale-s
 import type { RationaleHostService } from "../tools/pipeline/rationale-host-service.js";
 import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
 import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
+import type { PluginBundleLifecycle } from "../plugins/plugin-bundle-lifecycle.js";
 
 type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
@@ -154,6 +155,17 @@ export interface BootContext {
   // ── Hooks + plugin tool execution surface ──────────────────────────────────
   hookRunner: HookRunner;
   scriptHookManager: ScriptHookManager;
+  pluginBundleLifecycle: PluginBundleLifecycle | undefined;
+  requestPluginOperationGrant: (request: {
+    pluginId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+    appSessionId: string;
+  }) => Promise<{
+    operationGrantToken: string;
+    grantId: string;
+    expiresAt: number;
+  }>;
 
   // ── Conversation / agent loop ──────────────────────────────────────────────
   routineEngine: RoutineEngine;
