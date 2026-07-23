@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { handlePluginCards } from "../plugins.js";
+import {
+  handlePluginBundleE2eSnapshot,
+  handlePluginCards,
+} from "../plugins.js";
 import type { IpcDeps } from "../../types.js";
 import type { PluginCard } from "../../../plugins/runtime/index.js";
 
@@ -95,5 +98,111 @@ describe("handlePluginCards", () => {
     } as unknown as IpcDeps;
 
     expect(handlePluginCards(deps)).toHaveLength(1);
+  });
+});
+
+describe("handlePluginBundleE2eSnapshot", () => {
+  it("returns only the requested plugin generation, Skill body, and owned tools", async () => {
+    const deps = {
+      pluginBundleLifecycle: {
+        getActive: vi.fn(() => ({
+          pluginId: "ep-api",
+          pluginVersion: "2.0.0",
+          generationId: "runtime-g2",
+          artifactGenerationId: "a".repeat(64),
+        })),
+      },
+      skillStore: {
+        load: vi.fn(async () => ({
+          name: "plugin:ep-api:lifecycle",
+          body: "fixture-version:2.0.0",
+          pluginOwner: {
+            pluginId: "ep-api",
+            pluginVersion: "2.0.0",
+            generationId: "runtime-g2",
+            localId: "lifecycle",
+            fingerprint: "b".repeat(64),
+          },
+        })),
+      },
+      toolRegistry: {
+        listAll: vi.fn(() => [
+          {
+            name: "ep_api_read",
+            source: "plugin",
+            version: "2.0.0",
+            pluginId: "ep-api",
+            pluginGeneration: { pluginId: "ep-api", generationId: "runtime-g2" },
+          },
+          {
+            name: "mcp_ep_api_bundle_echo",
+            source: "mcp",
+            version: "1.0.0",
+            mcpServerId: "plugin_server_g2",
+            pluginGeneration: { pluginId: "ep-api", generationId: "runtime-g2" },
+          },
+          {
+            name: "other_read",
+            source: "plugin",
+            version: "1.0.0",
+            pluginId: "other-plugin",
+          },
+        ]),
+      },
+    } as unknown as IpcDeps;
+
+    await expect(
+      handlePluginBundleE2eSnapshot(deps, "ep-api", "lifecycle"),
+    ).resolves.toEqual({
+      ok: true,
+      pluginId: "ep-api",
+      active: {
+        version: "2.0.0",
+        generationId: "runtime-g2",
+        artifactGenerationId: "a".repeat(64),
+      },
+      skill: {
+        name: "plugin:ep-api:lifecycle",
+        body: "fixture-version:2.0.0",
+        owner: {
+          pluginId: "ep-api",
+          pluginVersion: "2.0.0",
+          generationId: "runtime-g2",
+          localId: "lifecycle",
+          fingerprint: "b".repeat(64),
+        },
+      },
+      tools: [
+        {
+          name: "ep_api_read",
+          source: "plugin",
+          version: "2.0.0",
+          pluginId: "ep-api",
+          generationId: "runtime-g2",
+        },
+        {
+          name: "mcp_ep_api_bundle_echo",
+          source: "mcp",
+          version: "1.0.0",
+          mcpServerId: "plugin_server_g2",
+          generationId: "runtime-g2",
+        },
+      ],
+    });
+  });
+
+  it("rejects traversal-shaped plugin ids before reading Host state", async () => {
+    const deps = {
+      pluginBundleLifecycle: { getActive: vi.fn() },
+      skillStore: { load: vi.fn() },
+      toolRegistry: { listAll: vi.fn() },
+    } as unknown as IpcDeps;
+
+    await expect(
+      handlePluginBundleE2eSnapshot(deps, "../ep-api", "lifecycle"),
+    ).resolves.toEqual({ ok: false, error: "invalid-plugin-id" });
+    expect(deps.pluginBundleLifecycle!.getActive).not.toHaveBeenCalled();
+    expect(deps.skillStore!.load).not.toHaveBeenCalled();
+    expect(deps.toolRegistry.listAll).not.toHaveBeenCalled();
   });
 });

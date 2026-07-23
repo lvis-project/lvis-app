@@ -128,6 +128,8 @@ export const CHANNELS = {
     call: "lvis:plugins:call",
     contributionTrustList: "lvis:plugins:contribution-trust:list",
     contributionTrustSet: "lvis:plugins:contribution-trust:set",
+    /** Trusted-renderer, LVIS_E2E-only bundle generation observation. */
+    e2eBundleSnapshot: "lvis:plugins:e2e:bundle-snapshot",
     // Lifecycle event channels (main → renderer). Not registered via ipcMain.
     installProgress: "lvis:plugins:install-progress",
     installResult: "lvis:plugins:install-result",
