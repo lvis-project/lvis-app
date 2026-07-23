@@ -173,13 +173,14 @@ describe("rotateAndPrune — concurrent write + rotate race", () => {
     // Fire off rotation and concurrent writes simultaneously
     const rotatePromise = logger.rotateAndPrune({ maxBytes: 10, retentionDays: 30 });
 
-    // Concurrent writes — these use appendFileSync so they may write to the
-    // original or a new file but must not throw.
+    // Concurrent writes use the ordered async queue and the same file lock as
+    // rotation, so they may land before or after the archive but must not corrupt it.
     for (let i = 0; i < 10; i++) {
       logger.log({ timestamp: new Date().toISOString(), sessionId: "race", type: "turn" });
     }
 
     await rotatePromise;
+    await logger.flush();
 
     // Either the archive exists or the original still does — no crash is the assertion.
     const files = listAuditFiles();

@@ -208,7 +208,7 @@ describe("shadow log — dedicated shadow channel sink (temp LVIS_HOME)", () => 
     if (auditDir) rmSync(auditDir, { recursive: true, force: true });
   });
 
-  it("lands the effect record in the DEDICATED permission-shadow channel, NOT the telemetry channel", () => {
+  it("lands the effect record in the DEDICATED permission-shadow channel, NOT the telemetry channel", async () => {
     auditDir = mkdtempSync(join(tmpdir(), "lvis-shadow-audit-"));
     const logger = new AuditLogger(auditDir);
     // Write a real telemetry row first so we can prove channel separation.
@@ -228,6 +228,7 @@ describe("shadow log — dedicated shadow channel sink (temp LVIS_HOME)", () => 
       },
       logger,
     );
+    await logger.flush();
     // The shadow record lands in `<date>.permission-shadow.jsonl`.
     const shadowFiles = readdirSync(auditDir).filter((f) => f.endsWith(".permission-shadow.jsonl"));
     expect(shadowFiles.length).toBe(1);

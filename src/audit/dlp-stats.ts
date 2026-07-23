@@ -4,11 +4,11 @@
  * Reads audit JSONL files, filters type="dlp" entries, and aggregates
  * hit statistics for the Privacy tab dashboard.
  */
-import { existsSync, readdirSync, createReadStream } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import type { AuditEntry } from "./audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { iterateJsonlLines } from "./jsonl-reader.js";
 
 export interface DlpStats {
   totalHits: number;
@@ -34,19 +34,6 @@ function filesInRange(auditDir: string, days: number): string[] {
   return files.filter((f) => f.replace(".jsonl", "") >= dateFrom);
 }
 
-function readLines(filePath: string): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    const lines: string[] = [];
-    const rl = createInterface({
-      input: createReadStream(filePath, { encoding: "utf-8" }),
-      crlfDelay: Infinity,
-    });
-    rl.on("line", (l) => lines.push(l));
-    rl.on("close", () => resolve(lines));
-    rl.on("error", reject);
-  });
-}
-
 export async function getDlpStats(days = 7): Promise<DlpStats> {
   const auditDir = join(lvisHome(), "audit");
   const files = filesInRange(auditDir, days);
@@ -58,8 +45,7 @@ export async function getDlpStats(days = 7): Promise<DlpStats> {
   for (const file of files) {
     const filePath = join(auditDir, file);
     if (!existsSync(filePath)) continue;
-    const lines = await readLines(filePath);
-    for (const line of lines) {
+    for await (const line of iterateJsonlLines(filePath)) {
       if (!line.trim()) continue;
       let entry: AuditEntry;
       try {
