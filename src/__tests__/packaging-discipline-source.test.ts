@@ -43,6 +43,29 @@ describe("installer smoke and packaging discipline", () => {
     expect(smokeScript).toContain("prompts");
   });
 
+  it("does not persist cross-repository E2E checkout credentials into PR-controlled steps", () => {
+    const workflow = readRepoFile(".github/workflows/marketplace-e2e.yml");
+    const checkoutNames = [
+      "lvis-app",
+      "lvis-marketplace",
+      "lvis-plugin-sdk",
+      "lvis-plugin-lge-api",
+    ];
+
+    for (const name of checkoutNames) {
+      const start = workflow.indexOf(`- name: Checkout ${name}`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const nextStep = workflow.indexOf("\n      - name:", start + 1);
+      const block = workflow.slice(start, nextStep);
+      expect(block).toContain("persist-credentials: false");
+    }
+
+    const sdkStart = workflow.indexOf("- name: Checkout lvis-plugin-sdk");
+    const sdkEnd = workflow.indexOf("\n      - name:", sdkStart + 1);
+    const sdkCheckout = workflow.slice(sdkStart, sdkEnd);
+    expect(sdkCheckout).not.toContain("M4_MARKETPLACE_CHECKOUT_TOKEN");
+  });
+
 
   it("runs the NSIS smoke before win-unpacked and owner-cleans HKCU afterward", () => {
     const smoke = readRepoFile("scripts/smoke-packaged-app.mjs");

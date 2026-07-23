@@ -55,6 +55,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: lvis-app
+          persist-credentials: false
 
       - name: Checkout lvis-marketplace
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -64,6 +65,7 @@ jobs:
           ref: ${{ env.MARKETPLACE_SHA }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
           submodules: recursive
+          persist-credentials: false
 
       - name: Checkout lvis-plugin-sdk
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -71,7 +73,7 @@ jobs:
           repository: lvis-project/lvis-plugin-sdk
           path: lvis-plugin-sdk
           ref: ${{ env.SDK_SHA }}
-          token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout lvis-plugin-lge-api
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -80,6 +82,7 @@ jobs:
           path: lvis-plugin-lge-api
           ref: ${{ env.EP_API_SHA }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+          persist-credentials: false
 
       - name: Prove immutable checkout refs
         shell: bash
