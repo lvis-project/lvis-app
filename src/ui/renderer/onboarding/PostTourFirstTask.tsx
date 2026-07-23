@@ -9,7 +9,7 @@ import {
 
 export interface PostTourFirstTaskProps {
   /** Local renderer callback only; this never submits chat or invokes a tool. */
-  onPrefillComposer: (text: string) => Promise<void> | void;
+  onPrefillComposer: (text: string) => void;
   /** Manifest-derived cards, including runtime eligibility. */
   pluginCards: readonly PluginCardSummary[];
   /**
@@ -30,7 +30,7 @@ export function PostTourFirstTask({
 }: PostTourFirstTaskProps) {
   const { locale, t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
-  const [accepted, setAccepted] = useState(false);
+  const [prefillError, setPrefillError] = useState<string | null>(null);
   const proposal = useMemo<FirstTaskProposal | null>(
     () => disabled || !tourCompleted || dismissed
       ? null
@@ -38,15 +38,16 @@ export function PostTourFirstTask({
     [disabled, dismissed, locale, pluginCards, tourCompleted],
   );
 
-  const onAccept = useCallback(async () => {
+  const onAccept = useCallback(() => {
     if (!proposal) return;
-    setAccepted(true);
     try {
-      await onPrefillComposer(proposal.composerPrompt);
-    } catch {
-      // A local composer state update is non-fatal; no alternate side effect.
+      onPrefillComposer(proposal.composerPrompt);
+      setDismissed(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[post-tour-first-task] composer prefill failed", error);
+      setPrefillError(message);
     }
-    setDismissed(true);
   }, [onPrefillComposer, proposal]);
 
   const onSkip = useCallback(() => {
@@ -79,6 +80,11 @@ export function PostTourFirstTask({
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
         {proposal.body}
       </p>
+      {prefillError ? (
+        <p className="mt-2 text-[11px] text-destructive" role="alert">
+          {prefillError}
+        </p>
+      ) : null}
       <div className="mt-3 flex items-center justify-end gap-2">
         <button
           type="button"
@@ -91,14 +97,12 @@ export function PostTourFirstTask({
         <button
           type="button"
           data-testid="post-tour-first-task:accept"
-          onClick={() => void onAccept()}
-          disabled={accepted}
+          onClick={onAccept}
           className={cn(
-            "rounded-md px-3 py-1 text-[11px] font-medium text-primary-foreground transition",
-            "bg-primary hover:opacity-90 disabled:opacity-60",
+            "rounded-md bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground transition hover:opacity-90",
           )}
         >
-          {accepted ? t("postTourFirstTask.acceptedLabel") : proposal.actionLabel}
+          {proposal.actionLabel}
         </button>
       </div>
     </div>
