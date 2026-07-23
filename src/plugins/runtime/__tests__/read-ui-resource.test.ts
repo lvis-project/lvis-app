@@ -19,7 +19,8 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime, MAX_UI_RESOURCE_HTML_BYTES } from "../index.js";
+import { MAX_UI_RESOURCE_HTML_BYTES } from "../index.js";
+import { TestPluginRuntime as PluginRuntime } from "../../__tests__/test-helpers.js";
 import { manifestIntegrityState } from "../../../permissions/manifest-integrity.js";
 import { sessionContext } from "../../../engine/session-context.js";
 import type { RuntimePlugin } from "../../types.js";
@@ -59,7 +60,7 @@ describe("PluginRuntime.readUiResource — the plugin serves its own card", () =
   it("throws when the plugin is not loaded", async () => {
     const rt = runtimeWithCardPlugin({ readUiResource: () => "<p>x</p>" });
     await expect(rt.readUiResource("com.absent", "ui://com.absent/card.html")).rejects.toThrow(
-      /not loaded/i,
+      /not active/i,
     );
   });
 

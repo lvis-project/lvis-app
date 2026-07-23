@@ -83,6 +83,8 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     // ask stands (see ToolExecutor.sandboxFsContainedProvider).
     isActiveSandboxFilesystemContainedForPluginEffects,
     () => lateBinding.conversationLoopRef.fn?.deps.workspaceRootLifecycle,
+    undefined,
+    () => ctx.pluginBundleLifecycle,
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,
@@ -123,8 +125,13 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           toPluginToolInput(payload),
           context,
         );
-        if (context.ownerPluginId) {
-          pluginRuntime.observePluginAuthResult(context.ownerPluginId, toolName, result);
+        if (context.ownerPluginId && context.ownerGenerationId) {
+          pluginRuntime.observePluginAuthResult(
+            context.ownerPluginId,
+            context.ownerGenerationId,
+            toolName,
+            result,
+          );
         }
         return result;
       }
@@ -134,16 +141,18 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       const activeGeneration = ownerPluginId
         ? ctx.pluginBundleLifecycle?.getActive(ownerPluginId)
         : undefined;
-      const manifest = ownerPluginId
-        ? pluginRuntime.getPluginManifest(ownerPluginId)
+      const invocationGeneration = ownerPluginId && context.ownerGenerationId &&
+        activeGeneration?.generationId === context.ownerGenerationId
+        ? activeGeneration
         : undefined;
-      const accountHash = ownerPluginId
-        ? pluginRuntime.getPluginOperationAccountHash(ownerPluginId)
+      const manifest = invocationGeneration?.state.runtime.manifest;
+      const accountHash = ownerPluginId && context.ownerGenerationId
+        ? pluginRuntime.getPluginOperationAccountHash(ownerPluginId, context.ownerGenerationId)
         : undefined;
-      const pluginOperation = appInvocation && ownerPluginId && manifest && activeGeneration && accountHash
+      const pluginOperation = appInvocation && ownerPluginId && manifest && invocationGeneration && accountHash
         ? {
             ownerVersion: manifest.version,
-            generationId: activeGeneration.generationId,
+            generationId: invocationGeneration.generationId,
             appSessionId: appInvocation.sessionId,
             accountHash,
             ...(appInvocation.operationGrantToken
@@ -190,13 +199,23 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
         throw new Error(result.content);
       }
       if (Object.prototype.hasOwnProperty.call(result, "rawResult")) {
-        if (ownerPluginId) {
-          pluginRuntime.observePluginAuthResult(ownerPluginId, toolName, result.rawResult);
+        if (ownerPluginId && context.ownerGenerationId) {
+          pluginRuntime.observePluginAuthResult(
+            ownerPluginId,
+            context.ownerGenerationId,
+            toolName,
+            result.rawResult,
+          );
         }
         return result.rawResult;
       }
-      if (ownerPluginId) {
-        pluginRuntime.observePluginAuthResult(ownerPluginId, toolName, result.content);
+      if (ownerPluginId && context.ownerGenerationId) {
+        pluginRuntime.observePluginAuthResult(
+          ownerPluginId,
+          context.ownerGenerationId,
+          toolName,
+          result.content,
+        );
       }
       return result.content;
     });
@@ -204,16 +223,29 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
   lateBinding.pluginToolInvokerRef.fn = invokePluginTool;
   pluginRuntime.setToolInvocationDelegate(invokePluginTool);
 
-  ctx.requestPluginOperationGrant = async ({ pluginId, toolName, input, appSessionId, origin = "ui" }) => {
-    const manifest = pluginRuntime.getPluginManifest(pluginId);
-    const activeGeneration = ctx.pluginBundleLifecycle?.getActive(pluginId);
-    const accountHash = pluginRuntime.getPluginOperationAccountHash(pluginId);
-    if (!manifest || !activeGeneration) {
+  ctx.requestPluginOperationGrant = async ({
+    pluginId,
+    toolName,
+    input,
+    appSessionId,
+    origin = "ui",
+    expectedGenerationId,
+  }) => {
+    const lifecycle = ctx.pluginBundleLifecycle;
+    if (!lifecycle) {
       throw new Error("[plugin-operation-policy] active plugin generation is missing");
     }
-    if (activeGeneration.pluginVersion !== manifest.version) {
-      throw new Error("[plugin-operation-policy] runtime and bundle version mismatch");
-    }
+    const generationLease = expectedGenerationId
+      ? await lifecycle.acquireExact(pluginId, expectedGenerationId)
+      : await lifecycle.acquire(pluginId);
+    try {
+      return await lifecycle.runWithLease(generationLease, async () => {
+    const activeGeneration = generationLease.generation;
+    const manifest = activeGeneration.state.runtime.manifest;
+    const accountHash = pluginRuntime.getPluginOperationAccountHash(
+      pluginId,
+      activeGeneration.generationId,
+    );
     if (!accountHash) {
       throw new Error("[plugin-operation-policy] fresh authenticated account status is required");
     }
@@ -237,7 +269,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       allowedChoices: ["allow-once", "deny-once"],
       toolName,
       toolCategory: "write",
-      args: { operation: inspected.operation },
+      args: inspected.approvalArgs,
       reason: `Plugin '${pluginId}' requests one execution of '${inspected.operation}'`,
       source: "plugin",
       sourcePluginId: pluginId,
@@ -259,11 +291,10 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       throw new Error("[plugin-operation-policy] operation grant denied");
     }
     const ttlMs = 60_000;
-    const issued = pluginSurfaceExecutor.issuePluginOperationGrant({
+    const issued = pluginSurfaceExecutor.issueInspectedPluginOperationGrant({
       toolName,
-      input,
       principal,
-      origin,
+      inspected,
       ttlMs,
     });
     bootAuditLogger.log({
@@ -283,6 +314,13 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       grantId: issued.grantId,
       expiresAt: Date.now() + ttlMs,
     };
+      });
+    } finally {
+      generationLease.release();
+    }
+  };
+  ctx.revokePluginOperationGeneration = (pluginId, generationId) => {
+    pluginSurfaceExecutor.revokePluginOperationGeneration(pluginId, generationId);
   };
 
   ctx.hookRunner = hookRunner;

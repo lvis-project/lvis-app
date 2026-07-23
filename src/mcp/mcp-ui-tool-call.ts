@@ -47,6 +47,8 @@ export interface McpAppToolInvocation {
   appSessionId: string;
   /** Host-issued one-shot token, retained inside main and never exposed to the card. */
   operationGrantToken?: string;
+  /** Exact immutable plugin generation bound to a loopback card. */
+  expectedGenerationId?: string;
 }
 
 export interface McpOperationGrantTarget {
@@ -79,7 +81,11 @@ export interface PluginToolCallRuntime {
   callFromApp(
     method: string,
     payload?: unknown,
-    options?: { appSessionId?: string; operationGrantToken?: string },
+    options?: {
+      appSessionId?: string;
+      operationGrantToken?: string;
+      expectedGenerationId?: string;
+    },
   ): Promise<unknown>;
 }
 

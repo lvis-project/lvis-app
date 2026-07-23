@@ -1,7 +1,7 @@
 /**
  * `pluginRuntimeToolDelegate` parity (mcp-alignment-design.md §5 plugin-loopback-server).
  *
- * The loopback delegate must reproduce buildPluginTool's execute gate exactly:
+ * The loopback delegate is the authoritative plugin execution gate:
  * inactive / integrity-disabled fail closed, ManifestIntegrityViolation records
  * + fails closed, and the structured return value survives as
  * _meta["lvisai/rawResult"]. A host-level test asserts that raw value reaches
@@ -27,14 +27,38 @@ beforeEach(() => manifestIntegrityState.resetForTests());
 
 const PLUGIN_ID = "com.example.notes";
 
+function testLoopbackHost(
+  manifest: PluginManifest,
+  delegate: Parameters<typeof PluginMcpHost.loopback>[1],
+  _registry: ToolRegistry,
+  uiResources?: Parameters<typeof PluginMcpHost.loopback>[2],
+  generationId = "test-generation",
+): PluginMcpHost {
+  return PluginMcpHost.loopback(manifest, delegate, uiResources, generationId);
+}
+
+async function publishTestHost(
+  host: PluginMcpHost,
+  pluginId: string,
+  registry: ToolRegistry,
+): Promise<void> {
+  const tools = await host.prepareTools();
+  registry.reservePluginReplacement(pluginId, tools, []).publish();
+  host.publishPrepared(tools);
+}
+
 // fakeRuntime builds a minimal PluginRuntime stub. isSessionActivated now takes
 // (sessionId, pluginId) matching the per-session Map API; the mock can ignore
 // sessionId and return a test-controlled value.
 function fakeRuntime(over: Partial<Pick<PluginRuntime, "isPluginEnabled" | "isSessionActivated" | "call">>): PluginRuntime {
+  const call = over.call ?? vi.fn(async () => "ok");
   return {
     isPluginEnabled: () => true,
     isSessionActivated: (_sessionId: string, _pluginId: string) => false,
-    call: vi.fn(async () => "ok"),
+    call,
+    callForPlugin: vi.fn(async (_pluginId: string, toolName: string, payload?: unknown) =>
+      call(toolName, payload),
+    ),
     ...over,
   } as unknown as PluginRuntime;
 }
@@ -73,7 +97,7 @@ describe("pluginRuntimeToolDelegate — fail-closed gate parity", () => {
     expect(out._meta?.[RAW_RESULT_META]).toEqual({ items: ["a", "b"] });
   });
 
-  it("empty args → runtime receives undefined payload (parity with buildPluginTool)", async () => {
+  it("passes undefined when the MCP call has no arguments", async () => {
     const call = vi.fn(async () => "ok");
     const delegate = pluginRuntimeToolDelegate(fakeRuntime({ call }), PLUGIN_ID);
     await delegate("notes_read", {});
@@ -311,8 +335,8 @@ describe("end-to-end: raw plugin value survives manifest → server → host →
       fakeRuntime({ call: vi.fn(async () => ({ hits: 3 })) }),
       PLUGIN_ID,
     );
-    const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
-    await host.start();
+    const host = testLoopbackHost(MANIFEST, delegate, registry);
+    await publishTestHost(host, MANIFEST.id, registry);
 
     const result = await registry.findByName("notes_read")!.execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(false);
@@ -428,8 +452,8 @@ describe("end-to-end: a plugin tool result renders a card (delegate → server �
       PLUGIN_ID,
       DECLARED,
     );
-    const host = PluginMcpHost.loopback(CARD_MANIFEST, delegate, registry);
-    await host.start();
+    const host = testLoopbackHost(CARD_MANIFEST, delegate, registry);
+    await publishTestHost(host, CARD_MANIFEST.id, registry);
 
     const result = await registry.findByName("notes_read")!.execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(false);
@@ -437,12 +461,34 @@ describe("end-to-end: a plugin tool result renders a card (delegate → server �
     // point a card at another server's namespace.
     expect(result.metadata?.uiPayload).toEqual({
       serverId: PLUGIN_ID,
+      generationId: "test-generation",
       resourceUri: CARD_URI,
       slot: "chat", // default when the plugin declares no slot
       height: undefined,
       title: undefined,
     });
     expect(result.metadata?.rawResult).toEqual({ hits: 3 });
+  });
+
+  it("stamps the exact loopback generation into a rendered card", async () => {
+    const registry = new ToolRegistry();
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({
+        call: vi.fn(async () => ({ hits: 1, _meta: { ui: { resourceUri: CARD_URI } } })),
+      }),
+      PLUGIN_ID,
+      DECLARED,
+      "g1",
+    );
+    const host = testLoopbackHost(CARD_MANIFEST, delegate, registry, undefined, "g1");
+    await publishTestHost(host, CARD_MANIFEST.id, registry);
+
+    const result = await registry.findByName("notes_read")!.execute({}, {} as never);
+    expect(result.metadata?.uiPayload).toMatchObject({
+      serverId: PLUGIN_ID,
+      generationId: "g1",
+      resourceUri: CARD_URI,
+    });
   });
 
   it("an undeclared resourceUri renders NO card end-to-end", async () => {
@@ -457,8 +503,8 @@ describe("end-to-end: a plugin tool result renders a card (delegate → server �
       PLUGIN_ID,
       DECLARED,
     );
-    const host = PluginMcpHost.loopback(CARD_MANIFEST, delegate, registry);
-    await host.start();
+    const host = testLoopbackHost(CARD_MANIFEST, delegate, registry);
+    await publishTestHost(host, CARD_MANIFEST.id, registry);
 
     const result = await registry.findByName("notes_read")!.execute({ q: "x" }, {} as never);
     expect(result.isError).toBe(false);

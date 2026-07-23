@@ -12,7 +12,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
-import { PluginRuntime } from "../runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "./test-helpers.js";
 import { PluginPhase } from "../lifecycle-log.js";
 import {
   emitPluginConfigChange,

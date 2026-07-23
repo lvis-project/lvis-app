@@ -15,6 +15,11 @@ import { PluginMarketplaceService } from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import { PluginRuntime, type PluginRuntimeOptions } from "../runtime.js";
 import type { PluginManifest, Tool } from "../types.js";
+import type {
+  HostPluginGenerationState,
+  PluginRuntimeGenerationProjection,
+} from "../plugin-host-generation.js";
+import type { ActivePluginGeneration } from "../plugin-generation-coordinator.js";
 
 /**
  * #885 v6 — build a pure MCP `Tool` object from a bare tool name. Tests declare
@@ -251,12 +256,159 @@ export function makeTestPluginRuntime(
   fixture: TestPluginRuntimeFixture,
   options: Partial<PluginRuntimeOptions> = {},
 ): PluginRuntime {
-  return new PluginRuntime({
+  return bindTestPluginRuntimeGeneration(new PluginRuntime({
     hostRoot: fixture.rootDir,
     registryPath: fixture.registryPath,
     pluginsRoot: fixture.pluginsRoot,
     ...options,
-  });
+  }));
+}
+
+/**
+ * Bind the smallest complete generation lifecycle needed by legacy runtime
+ * unit tests. Product code never receives this adapter: strict lifecycle
+ * binding and immutable receipt-backed roots are covered by dedicated tests.
+ * These older tests intentionally exercise parsing, startup, restart, and
+ * teardown in their mutable tmp fixture, so their candidate-root materializer
+ * is replaced with that fixture root while publication still goes through the
+ * same runtime prepare/publish boundary as production.
+ */
+export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginRuntime {
+  const active = new Map<string, ActivePluginGeneration<HostPluginGenerationState>>();
+  let sequence = 0;
+
+  const adoptLegacyProjection = (
+    pluginId: string,
+  ): ActivePluginGeneration<HostPluginGenerationState> | undefined => {
+    const existing = active.get(pluginId);
+    if (existing) return existing;
+    const projection = runtime.getRuntimeGenerationProjection(pluginId);
+    if (!projection) return undefined;
+    const methods = new Map(
+      [...runtime.getMethodMap()].flatMap(([name, entry]) =>
+        entry.pluginId === pluginId ? [[name, entry.handler] as const] : [],
+      ),
+    );
+    const generationId = projection.activationId || `test-generation-${++sequence}`;
+    const normalizedProjection = Object.freeze({
+      ...projection,
+      activationId: generationId,
+      pluginRoot: projection.pluginRoot || "/tmp/test-plugin-runtime",
+      methods,
+    });
+    const generation: ActivePluginGeneration<HostPluginGenerationState> = {
+      pluginId,
+      pluginVersion: projection.manifest.version,
+      artifactGenerationId: generationId,
+      generationId,
+      manifestSha256: generationId,
+      receiptSha256: generationId,
+      contributions: [],
+      state: {
+        payloadRoot: normalizedProjection.pluginRoot,
+        runtime: normalizedProjection,
+        hooks: [],
+        mcpServers: [],
+      },
+    };
+    active.set(pluginId, generation);
+    return generation;
+  };
+
+  const publish = async (projection: PluginRuntimeGenerationProjection): Promise<void> => {
+    const pluginId = projection.manifest.id;
+    const predecessor = active.get(pluginId);
+    const generationId = `test-generation-${++sequence}`;
+    projection.hostEffects?.bindGeneration(lifecycle as never, generationId);
+    runtime.prepareRuntimeGeneration(projection).publish();
+    active.set(pluginId, {
+      pluginId,
+      pluginVersion: projection.manifest.version,
+      artifactGenerationId: generationId,
+      generationId,
+      manifestSha256: generationId,
+      receiptSha256: generationId,
+      contributions: [],
+      state: {
+        payloadRoot: projection.pluginRoot,
+        runtime: projection,
+        hooks: [],
+        mcpServers: [],
+      },
+    });
+    if (predecessor && predecessor.state.runtime !== projection) {
+      await runtime.retireRuntimeGeneration(predecessor.state.runtime);
+    }
+  };
+
+  const deactivate = async (pluginId: string): Promise<void> => {
+    const predecessor = active.get(pluginId);
+    runtime.prepareRuntimeRemoval(pluginId).publish();
+    active.delete(pluginId);
+    if (predecessor) await runtime.retireRuntimeGeneration(predecessor.state.runtime);
+  };
+
+  const lifecycle = {
+    getActive: (pluginId: string) => active.get(pluginId) ?? adoptLegacyProjection(pluginId),
+    acquire: async (pluginId: string) => {
+      const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
+      if (!generation) throw new Error(`test generation is not active for '${pluginId}'`);
+      return { generation, release: () => undefined };
+    },
+    acquireExact: async (pluginId: string, generationId: string) => {
+      const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
+      if (!generation || generation.generationId !== generationId) {
+        throw new Error(`test generation '${pluginId}:${generationId}' is not active`);
+      }
+      return { generation, release: () => undefined };
+    },
+    runWithLease: async <T>(_lease: unknown, operation: () => Promise<T>) => operation(),
+    replaceRuntime: publish,
+    replaceRuntimeWithCommit: async <T>(
+      projection: PluginRuntimeGenerationProjection,
+      _receiptRaw: string,
+      durableCommit: () => Promise<T>,
+    ) => {
+      const result = await durableCommit();
+      await publish(projection);
+      return { result, retirement: Promise.resolve() };
+    },
+    deactivate,
+    deactivateWithCommit: async <T>(pluginId: string, durableCommit: () => Promise<T>) => {
+      const result = await durableCommit();
+      await deactivate(pluginId);
+      return result;
+    },
+    setContributionsEnabled: async () => undefined,
+    setContributionsEnabledWithCommit: async <T>(
+      _pluginId: string,
+      _enabled: boolean,
+      durableCommit: () => Promise<T>,
+    ) => durableCommit(),
+    recoverRetirements: async () => undefined,
+    waitForRetirements: async () => undefined,
+  };
+
+  const testInternals = runtime as unknown as {
+    materializeImmutableRuntimeRoot: (
+      pluginId: string,
+      pluginRoot: string,
+      activationId: string,
+    ) => Promise<string>;
+    removeUnpublishedRuntimeRoot: (pluginId: string, pluginRoot: string) => Promise<void>;
+  };
+  testInternals.materializeImmutableRuntimeRoot = async (_pluginId, pluginRoot) => pluginRoot;
+  testInternals.removeUnpublishedRuntimeRoot = async () => undefined;
+  runtime.setGenerationAccess(lifecycle as never);
+  return runtime;
+}
+
+/** PluginRuntime constructor for tests that need the complete generation fixture. */
+export class TestPluginRuntime extends PluginRuntime {
+  constructor(options: PluginRuntimeOptions) {
+    super(options);
+    bindTestPluginRuntimeGeneration(this);
+  }
 }
 
 export function makeTestPluginMarketplaceService(

@@ -84,7 +84,7 @@ const DEFAULT_POLICY: McpGovernancePolicy = {
 
 export class McpGovernance {
   private policy: McpGovernancePolicy;
-  private readonly runtimeApprovals: Map<string, McpServerApproval>;
+  private runtimeApprovals: Map<string, McpServerApproval>;
   private readonly policyPath: string;
   private refreshTimer: NodeJS.Timeout | null = null;
 
@@ -426,8 +426,37 @@ export class McpGovernance {
       }
       next.set(approval.id, Object.freeze({ ...approval }));
     }
-    this.runtimeApprovals.clear();
-    for (const [serverId, approval] of next) this.runtimeApprovals.set(serverId, approval);
+    this.runtimeApprovals = next;
+  }
+
+  /** Validate and prebuild a runtime approval snapshot for atomic publication. */
+  prepareRuntimeApprovals(
+    predecessorServerIds: Iterable<string>,
+    approvals: readonly McpServerApproval[],
+  ): { publish(): void } {
+    const predecessors = Object.freeze([...predecessorServerIds]);
+    const prepared = approvals.map((approval) => Object.freeze({ ...approval }));
+    const next = new Map(this.runtimeApprovals);
+    for (const serverId of predecessors) next.delete(serverId);
+    for (const approval of prepared) {
+      if (this.policy.servers.some((entry) => entry.id === approval.id)) {
+        throw new Error(`runtime MCP approval '${approval.id}' collides with managed policy`);
+      }
+      const existing = next.get(approval.id);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(approval)) {
+        throw new Error(`runtime MCP approval '${approval.id}' has conflicting policy`);
+      }
+      next.set(approval.id, approval);
+    }
+    let published = false;
+    return Object.freeze({
+      publish: () => {
+        if (published) return;
+        for (const serverId of predecessors) this.runtimeApprovals.delete(serverId);
+        for (const approval of prepared) this.runtimeApprovals.set(approval.id, approval);
+        published = true;
+      },
+    });
   }
 
   // ─── Private Validation ──────────────────────────

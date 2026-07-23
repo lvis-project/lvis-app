@@ -199,6 +199,8 @@ export interface InitPluginRuntimeInput {
    * therefore constructs it BEFORE calling initPluginRuntime.
    */
   routinesStore: RoutinesStore;
+  /** Production defers activation until Skill/Hook/MCP lifecycle wiring exists. */
+  deferStart?: boolean;
 }
 
 export interface InitPluginRuntimeOutput {
@@ -217,6 +219,8 @@ export interface InitPluginRuntimeOutput {
   loopbackManager: PluginLoopbackManager;
   /** Late-bind bundle projections after workflow, Hook, and MCP services exist. */
   setBundleLifecycleHandler: (handler: PluginBundleLifecycleHandler) => void;
+  /** Idempotent cold-start entrypoint used after bundle lifecycle wiring. */
+  startPlugins: () => Promise<void>;
 }
 
 /**
@@ -401,7 +405,6 @@ export async function initPluginRuntime(
   const { preparePluginStart, onDisable, onActiveStateChange, onEnable } =
     createLifecycleCallbacks({
       getPluginRuntime: () => pluginRuntime,
-      getLoopbackManager: () => loopbackManager,
       keywordEngine,
       lateBinding,
       getMainWindow,
@@ -427,7 +430,9 @@ export async function initPluginRuntime(
           input: `[${level.toUpperCase()}] ${message}`,
           output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
         });
-      } catch {}
+      } catch (error) {
+        log.error({ err: error }, "plugin runtime audit sink failed");
+      }
     },
     preparePluginStart,
     onDisable,
@@ -467,8 +472,12 @@ export async function initPluginRuntime(
   // starts (startAll fires onEnable, whose closures use it).
   loopbackManager = new PluginLoopbackManager(pluginRuntime, toolRegistry);
 
-  await pluginRuntime.startAll();
-  log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
+  let pluginsStarted = false;
+  const startPlugins = async (): Promise<void> => {
+    if (pluginsStarted) return;
+    pluginsStarted = true;
+    await pluginRuntime.startAll();
+    log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 
   // Pre-register the per-partition `setPreloads(...)` policy for every
   // loaded plugin (#498). Electron's `<webview partition="persist:plugin:..."
@@ -482,9 +491,11 @@ export async function initPluginRuntime(
   // surfacing as "lvisPlugin bridge missing" in the shell. Pre-registering
   // by walking the loaded-plugin set sidesteps the partition-name read
   // entirely.
-  for (const pluginId of pluginRuntime.listPluginIds()) {
-    installLoadedPluginPartitionPolicy(pluginId);
-  }
+    for (const pluginId of pluginRuntime.listPluginIds()) {
+      installLoadedPluginPartitionPolicy(pluginId);
+    }
+  };
+  if (!input.deferStart) await startPlugins();
   // Cover plugins added AFTER startAll() — deep-link install
   // (`lvis://install/<slug>` → `addPlugin`), dev hot-reload watcher
   // (LVIS_DEV_RELOAD=1), Settings sideload. The boot loop above only sees
@@ -505,30 +516,15 @@ export async function initPluginRuntime(
     void refreshRegistryEntryCache();
   });
 
-  // Uninstall: `onDisable` only unregisters the removed plugin's tools, but a
-  // full resync also sweeps any ghost entries (e.g. a stale registry row from
-  // a previous load generation). `onEnable` covers add/restart/reload; it
-  // does NOT fire on uninstall, so the listener-driven sync is still load-bearing.
+  // Uninstall projection is owned by PluginBundleLifecycle. Never run legacy
+  // syncAll here: it can re-admit untagged tools outside the generation barrier.
   onHostEvent("plugin.uninstalled", (data) => {
     const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
     if (typeof pluginId !== "string") return;
-    // legacy-removal flag-day: reconcile the loopback hosts to the post-uninstall
-    // runtime state (stops the removed plugin's host, leaves the rest).
-    void loopbackManager
-      .syncAll(pluginRuntime.listPluginManifests())
-      .catch((err) =>
-        log.error(`loopback re-sync failed after plugin.uninstalled (${pluginId}): %s`, (err as Error).message),
-      );
     // #958/#959 — drop the stale cache entry so a re-install does not inherit
     // the previous Tier-3 bypass or manifest SHA decision.
     void refreshRegistryEntryCache();
   });
-
-  // legacy-removal flag-day: ALL plugins register through the loopback manager
-  // (server/discover → tools/list → reverse projection). This replaces the legacy
-  // `syncPluginToolRegistry` sweep + `pluginToolsForRegistration`. Awaited so tool
-  // registration completes before boot proceeds.
-  await loopbackManager.syncAll(pluginRuntime.listPluginManifests());
 
   // I2 — Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
   // ToolRegistry resync runs through the runtime's `onEnable` callback wired
@@ -553,6 +549,7 @@ export async function initPluginRuntime(
     pluginPaths,
     loopbackManager,
     setBundleLifecycleHandler: (handler) => { bundleLifecycle = handler; },
+    startPlugins,
   };
 }
 

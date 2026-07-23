@@ -145,6 +145,11 @@ import {
   type PluginOperationPrincipal,
 } from "../permissions/plugin-operation-grant.js";
 import type { SealedRationaleResumeRequest } from "./pipeline/rationale-resume-contract.js";
+import type {
+  PluginRuntimeGenerationAccess,
+  HostPluginGenerationState,
+} from "../plugins/plugin-host-generation.js";
+import type { PluginGenerationLease } from "../plugins/plugin-generation-coordinator.js";
 import {
   authorizeRationaleResume,
   extractSealedRationaleExecutionTarget,
@@ -442,6 +447,7 @@ export class ToolExecutor {
   private readonly workspaceRootLifecycleProvider: () => PermissionDirectoryLifecycle | undefined;
   private readonly auditWriter: AuditWriter;
   private readonly pluginOperationGrants: PluginOperationGrantCoordinator;
+  private readonly pluginGenerationAccessProvider: () => PluginRuntimeGenerationAccess | undefined;
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -455,6 +461,7 @@ export class ToolExecutor {
     sandboxFsContainedProvider?: (tool: Tool) => boolean,
     workspaceRootLifecycleProvider?: () => PermissionDirectoryLifecycle | undefined,
     pluginOperationGrants?: PluginOperationGrantCoordinator,
+    pluginGenerationAccessProvider?: () => PluginRuntimeGenerationAccess | undefined,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -467,6 +474,7 @@ export class ToolExecutor {
     this.sandboxFsContainedProvider = sandboxFsContainedProvider ?? (() => false);
     this.workspaceRootLifecycleProvider = workspaceRootLifecycleProvider ?? (() => undefined);
     this.pluginOperationGrants = pluginOperationGrants ?? new PluginOperationGrantCoordinator();
+    this.pluginGenerationAccessProvider = pluginGenerationAccessProvider ?? (() => undefined);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
     this.auditWriter = new AuditWriter(
       this.auditLogger,
@@ -572,15 +580,33 @@ export class ToolExecutor {
     ttlMs?: number;
   }): { token: string; grantId: string; readRevision: string } {
     const inspected = this.inspectPluginOperationGrant(args);
+    return this.issueInspectedPluginOperationGrant({
+      toolName: args.toolName,
+      principal: args.principal,
+      inspected,
+      ttlMs: args.ttlMs,
+    });
+  }
+
+  issueInspectedPluginOperationGrant(args: {
+    toolName: string;
+    principal: PluginOperationPrincipal;
+    inspected: {
+      operation: string;
+      intentHash: string;
+      readRevision: string;
+    };
+    ttlMs?: number;
+  }): { token: string; grantId: string; readRevision: string } {
     const issued = this.pluginOperationGrants.issue({
       ...args.principal,
       toolName: args.toolName,
-      operation: inspected.operation,
-      intentHash: inspected.intentHash,
-      readRevision: inspected.readRevision,
+      operation: args.inspected.operation,
+      intentHash: args.inspected.intentHash,
+      readRevision: args.inspected.readRevision,
       expiresAt: Date.now() + Math.min(Math.max(args.ttlMs ?? 60_000, 1), 300_000),
     });
-    return { ...issued, readRevision: inspected.readRevision };
+    return { ...issued, readRevision: args.inspected.readRevision };
   }
 
   inspectPluginOperationGrant(args: {
@@ -588,13 +614,33 @@ export class ToolExecutor {
     input: Record<string, unknown>;
     principal: PluginOperationPrincipal;
     origin?: "ui" | "mcp-app";
-  }): { operation: string; intentHash: string; readRevision: string } {
+  }): {
+    operation: string;
+    intentHash: string;
+    readRevision: string;
+    approvalArgs: Record<string, unknown>;
+  } {
     const tool = this.toolRegistry.findByName(args.toolName);
     if (!tool?.pluginId || !tool.operationGovernance) {
       throw new Error(`[plugin-operation-policy] governed plugin tool '${args.toolName}' not found`);
     }
     if (tool.pluginId !== args.principal.ownerPluginId) {
       throw new Error("[plugin-operation-policy] owner mismatch");
+    }
+    const generationAccess = this.pluginGenerationAccessProvider();
+    if (!generationAccess) {
+      throw new Error("[plugin-operation-policy] plugin generation access is not wired");
+    }
+    if (
+      !tool.pluginGeneration ||
+      tool.pluginGeneration.pluginId !== args.principal.ownerPluginId ||
+      tool.pluginGeneration.generationId !== args.principal.generationId
+    ) {
+      throw new Error("[plugin-operation-policy] tool generation mismatch");
+    }
+    const activeGeneration = generationAccess.getActive(args.principal.ownerPluginId);
+    if (!activeGeneration || activeGeneration.generationId !== args.principal.generationId) {
+      throw new Error("[plugin-operation-policy] principal generation is not active");
     }
     const resolved = resolvePluginOperation(tool.operationGovernance, args.input, args.origin ?? "ui");
     if (resolved.rule.kind !== "write" || !resolved.rule.requiresRead) {
@@ -607,7 +653,16 @@ export class ToolExecutor {
       resolved.rule.requiresRead.maxAgeMs,
     );
     if (!readRevision) throw new Error("[plugin-operation-policy] required read is missing or stale");
-    return { operation: resolved.operation, intentHash: resolved.intentHash, readRevision };
+    // The confirmation must show the same complete JSON intent that is hashed
+    // into the one-shot grant. Showing only the discriminant lets hidden target
+    // or date fields change the authorized action without being visible to the
+    // user. resolvePluginOperation has already rejected non-JSON/cyclic input.
+    const approvalArgs = structuredClone(args.input);
+    return { operation: resolved.operation, intentHash: resolved.intentHash, readRevision, approvalArgs };
+  }
+
+  revokePluginOperationGeneration(pluginId: string, generationId: string): void {
+    this.pluginOperationGrants.revokeGeneration(pluginId, generationId);
   }
 
   private async runScriptHook(
@@ -624,6 +679,9 @@ export class ToolExecutor {
     isError?: boolean,
   ) {
     if (!this.scriptHookManager) {
+      if (this.toolRegistry.findByName(toolName)?.pluginGeneration) {
+        throw new Error(`[plugin-hooks] script Hook manager is not wired for generation-owned tool '${toolName}'`);
+      }
       return { decision: "allow" as const, reason: "script hooks not wired", results: [] };
     }
     const payload = {
@@ -1020,6 +1078,45 @@ export class ToolExecutor {
       callbacks?.onToolEnd?.(toolUse.name, t("be_executor.toolNotFound", { name: toolUse.name }), true, meta, undefined, durationMs);
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: t("be_executor.toolNotFound", { name: toolUse.name }), is_error: true, durationMs });
     }
+    let generationAccess: PluginRuntimeGenerationAccess | undefined;
+    let generationLease: PluginGenerationLease<HostPluginGenerationState> | undefined;
+    if (tool.pluginGeneration) {
+      generationAccess = this.pluginGenerationAccessProvider();
+      try {
+        if (!generationAccess) {
+          throw new Error("plugin generation access is unavailable");
+        }
+        generationLease = await generationAccess.acquireExact(
+          tool.pluginGeneration.pluginId,
+          tool.pluginGeneration.generationId,
+        );
+      } catch (error) {
+        const durationMs = Date.now() - startTime;
+        const reason = `Plugin generation admission denied: ${error instanceof Error ? error.message : String(error)}`;
+        const denied: PermissionCheckResult = { decision: "deny", reason, layer: 0 };
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          tool.source,
+          trustFromSource(tool.source),
+          toolUse.input,
+          reason,
+          true,
+          startTime,
+          denied,
+          Infinity,
+          permissionContext,
+        );
+        callbacks?.onToolEnd?.(toolUse.name, reason, true, meta, undefined, durationMs);
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: reason,
+          is_error: true,
+          durationMs,
+        });
+      }
+    }
+    const executeAdmitted = async (): Promise<ToolResult | RationaleRequiredExecuteOneOutcome> => {
     if (
       permissionContext?.expectedMcpServerId &&
       tool.mcpServerId !== permissionContext.expectedMcpServerId
@@ -1776,8 +1873,8 @@ export class ToolExecutor {
     // calls). Shell tools run the same Layer 1 request path above because
     // their filesystem operands are parsed from the command string. Native
     // host tools and plugin tools both declare
-    // path-bearing arguments on Tool.pathFields; plugin entries are copied
-    // from SDK manifest authority metadata by plugin-tool-adapter.
+    // path-bearing arguments on Tool.pathFields; plugin entries are projected
+    // from signed SDK manifest authority metadata by the loopback MCP host.
     if (canonicalTargets.length > 0) {
       while (true) {
         // Re-run the Layer 1 predicate each iteration: applyApprovedDirectory
@@ -3302,6 +3399,14 @@ export class ToolExecutor {
       ...(image && { image }),
       durationMs,
     });
+    };
+    try {
+      return generationAccess && generationLease
+        ? await generationAccess.runWithLease(generationLease, executeAdmitted)
+        : await executeAdmitted();
+    } finally {
+      generationLease?.release();
+    }
   }
 
   // ─── Audit (불변 — 항상 실행) — chokepoint owned by AuditWriter ────

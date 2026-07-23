@@ -63,7 +63,12 @@ export function verifyPluginBundleE2EInputs({
 
   const epPackage = readJson(resolve(epApiRoot, "package.json"));
   const expectedDependency = `github:lvis-project/lvis-plugin-sdk#${refs.sdk}`;
-  const actualDependency = epPackage.dependencies?.["@lvis/plugin-sdk"];
+  const runtimeDependency = epPackage.dependencies?.["@lvis/plugin-sdk"];
+  const buildDependency = epPackage.devDependencies?.["@lvis/plugin-sdk"];
+  if (runtimeDependency !== undefined && buildDependency !== undefined) {
+    fail("ep-api must declare @lvis/plugin-sdk in exactly one dependency section");
+  }
+  const actualDependency = runtimeDependency ?? buildDependency;
   if (actualDependency !== expectedDependency) {
     fail(`ep-api must consume ${expectedDependency}; found ${String(actualDependency)}`);
   }

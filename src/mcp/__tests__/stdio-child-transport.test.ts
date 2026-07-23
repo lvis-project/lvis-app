@@ -16,7 +16,20 @@ function makeHost(registry: ToolRegistry): PluginMcpHost {
   const transport = new StdioChildTransport(process.execPath, [FIXTURE]);
   // The host registers tools under the plugin id namespace; "echo" stands in for
   // the spawned plugin's id.
-  return new PluginMcpHost("echo", transport, registry);
+  void registry;
+  return new PluginMcpHost("echo", transport, {}, "test-generation");
+}
+
+async function publishTestHost(host: PluginMcpHost, registry: ToolRegistry): Promise<string[]> {
+  const tools = await host.prepareTools();
+  registry.reservePluginReplacement("echo", tools, []).publish();
+  host.publishPrepared(tools);
+  return tools.map((tool) => tool.name);
+}
+
+async function retireTestHost(host: PluginMcpHost, registry: ToolRegistry): Promise<void> {
+  registry.reservePluginReplacement("echo", [], []).publish();
+  await host.dispose();
 }
 
 describe("StdioChildTransport — out-of-process plugin over a real subprocess", () => {
@@ -24,7 +37,7 @@ describe("StdioChildTransport — out-of-process plugin over a real subprocess",
     const registry = new ToolRegistry();
     const host = makeHost(registry);
 
-    const registered = await host.start();
+    const registered = await publishTestHost(host, registry);
     expect(registered).toEqual(["echo_say"]);
 
     const tool = registry.findByName("echo_say");
@@ -44,19 +57,19 @@ describe("StdioChildTransport — out-of-process plugin over a real subprocess",
     const out = await tool!.execute({ msg: "hi" }, {} as never);
     expect(out).toEqual({ output: "echo: hi", isError: false });
 
-    await host.stop();
+    await retireTestHost(host, registry);
   }, 15_000);
 
   it("contains a plugin crash — a mid-call subprocess exit surfaces as an error, not a hang", async () => {
     const registry = new ToolRegistry();
     const host = makeHost(registry);
-    await host.start();
+    await publishTestHost(host, registry);
 
     // The fixture process.exit(7)s on { crash: true }; the pending request must
     // reject (transport onClose) rather than hang forever.
     const result = await registry.findByName("echo_say")!.execute({ crash: true }, {} as never);
     expect(result.isError).toBe(true);
 
-    await host.stop();
+    await retireTestHost(host, registry);
   }, 15_000);
 });

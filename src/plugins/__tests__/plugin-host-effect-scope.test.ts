@@ -13,6 +13,7 @@ function generationAccess(activeGenerationId: { current: string }): PluginRuntim
         release: vi.fn(),
       };
     }),
+    runWithLease: vi.fn(async (_lease, operation) => operation()),
   };
 }
 

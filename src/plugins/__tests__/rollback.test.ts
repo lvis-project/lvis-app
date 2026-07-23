@@ -96,13 +96,13 @@ describe("PluginMarketplaceService install → update → rollback", () => {
         version: string,
         onProgress?: unknown,
         opts?: { commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void> },
-      ) => Promise<string>;
+      ) => Promise<{ manifestPath: string; predecessorRetired: boolean }>;
     }, "installArtifact").mockImplementation(async (_plugin, version, _onProgress, opts) => {
       await mkdir(pluginDir, { recursive: true });
       const manifestFile = join(pluginDir, "plugin.json");
       await writeFile(manifestFile, JSON.stringify(sampleManifest(version)), "utf-8");
       await opts?.commit?.("example-sample/plugin.json", manifestFile);
-      return "example-sample/plugin.json";
+      return { manifestPath: "example-sample/plugin.json", predecessorRetired: true };
     });
     return svc;
   }

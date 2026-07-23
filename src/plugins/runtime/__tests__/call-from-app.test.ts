@@ -39,7 +39,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime, MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE } from "../index.js";
+import { MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE } from "../index.js";
+import { TestPluginRuntime as PluginRuntime } from "../../__tests__/test-helpers.js";
 import type { PluginToolInvocationContext } from "../index.js";
 import type { PluginManifest, Tool } from "../../types.js";
 
@@ -134,6 +135,7 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
     expect(executor).toHaveBeenCalledWith("acme_ui_rows", { chunk: 1 }, {
       origin: "mcp-app",
       ownerPluginId: "acme-cards",
+      ownerGenerationId: expect.any(String),
       userAction: false,
     });
     // …and the reviewer-skipping path did not. This is the whole point: `["app"]`
@@ -151,6 +153,7 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
     expect(executor).toHaveBeenCalledWith("acme_open", { id: 7 }, {
       origin: "mcp-app",
       ownerPluginId: "acme-cards",
+      ownerGenerationId: expect.any(String),
       userAction: false,
     });
     expect(appOnlyDispatch).not.toHaveBeenCalled();
@@ -253,6 +256,7 @@ describe("PluginRuntime.callFromUi — the trusted panel keeps its existing beha
     expect(executor).toHaveBeenCalledWith("acme_open", { id: 7 }, {
       origin: "ui",
       ownerPluginId: "acme-cards",
+      ownerGenerationId: expect.any(String),
       userAction: true,
     });
   });
@@ -271,6 +275,7 @@ describe("PluginRuntime.callFromUi — the trusted panel keeps its existing beha
     expect(executor).toHaveBeenCalledWith(MANIFEST.auth!.loginTool, {}, {
       origin: "ui",
       ownerPluginId: "acme-cards",
+      ownerGenerationId: expect.any(String),
       userAction: true,
     });
   });

@@ -14,6 +14,9 @@ const EXTERNAL_READ: McpUiResourceRead = { html: "<p>external</p>" };
 function sources(running: string[]) {
   const loopback = {
     has: vi.fn((id: string) => running.includes(id)),
+    assertCardGeneration: vi.fn((_id: string, generationId: string | undefined) => {
+      if (generationId === "stale") throw new Error("stale card generation");
+    }),
     readUiResource: vi.fn(async (_id: string, _uri: string) => LOOPBACK_READ),
     resolveToolOwner: vi.fn((_id: string, _tool: string) => "acme-cards"),
     resolveOperationGrantTarget: vi.fn(() => undefined),
@@ -31,7 +34,7 @@ function sources(running: string[]) {
 describe("resolveMcpUiBackend — loopback-first then external", () => {
   it("routes to the plugin loopback host when one is running for the serverId", async () => {
     const s = sources(["acme-cards"]);
-    const backend = resolveMcpUiBackend("acme-cards", s);
+    const backend = resolveMcpUiBackend("acme-cards", s, "g1");
 
     const res = await backend.readUiResource("ui://acme-cards/hello.html");
     expect(res).toBe(LOOPBACK_READ);
@@ -52,9 +55,21 @@ describe("resolveMcpUiBackend — loopback-first then external", () => {
 
   it("prefers loopback over external even if BOTH could serve the id (loopback wins)", async () => {
     const s = sources(["dual"]);
-    await resolveMcpUiBackend("dual", s).readUiResource("ui://dual/x.html");
+    await resolveMcpUiBackend("dual", s, "g1").readUiResource("ui://dual/x.html");
     expect(s.loopback.readUiResource).toHaveBeenCalledOnce();
     expect(s.mcpManager.readUiResource).not.toHaveBeenCalled();
+  });
+
+  it("validates a loopback generation token before returning either render or call methods", () => {
+    const s = sources(["acme-cards"]);
+    expect(() => resolveMcpUiBackend("acme-cards", s, "stale")).toThrow(/stale card generation/);
+    expect(s.loopback.readUiResource).not.toHaveBeenCalled();
+    expect(s.loopback.callTool).not.toHaveBeenCalled();
+  });
+
+  it("rejects a loopback card without an immutable generation token", () => {
+    const s = sources(["acme-cards"]);
+    expect(() => resolveMcpUiBackend("acme-cards", s)).toThrow(/missing its immutable generation id/);
   });
 });
 
@@ -63,14 +78,19 @@ describe("resolveMcpUiBackend — callTool takes the SAME loopback-first resolut
 
   it("routes an app's tools/call to the plugin loopback source when one owns the id", async () => {
     const s = sources(["acme-cards"]);
-    const backend = resolveMcpUiBackend("acme-cards", s);
+    const backend = resolveMcpUiBackend("acme-cards", s, "g1");
 
     expect(backend.resolveToolOwner("acme_open")).toBe("acme-cards");
     await expect(backend.callTool("acme_open", { id: 1 }, invocation)).resolves.toBe("loopback-result");
 
     // Bound to the resolved serverId — the caller never passes one.
     expect(s.loopback.resolveToolOwner).toHaveBeenCalledWith("acme-cards", "acme_open");
-    expect(s.loopback.callTool).toHaveBeenCalledWith("acme-cards", "acme_open", { id: 1 }, invocation);
+    expect(s.loopback.callTool).toHaveBeenCalledWith(
+      "acme-cards",
+      "acme_open",
+      { id: 1 },
+      { ...invocation, expectedGenerationId: "g1" },
+    );
     expect(s.mcpManager.callTool).not.toHaveBeenCalled();
     expect(s.mcpManager.resolveToolOwner).not.toHaveBeenCalled();
   });
@@ -88,7 +108,7 @@ describe("resolveMcpUiBackend — callTool takes the SAME loopback-first resolut
 
   it("resolves the render and the call path to the SAME source (one branch, not two)", async () => {
     const s = sources(["acme-cards"]);
-    const backend = resolveMcpUiBackend("acme-cards", s);
+    const backend = resolveMcpUiBackend("acme-cards", s, "g1");
 
     await backend.readUiResource("ui://acme-cards/x.html");
     await backend.callTool("acme_open", {}, invocation);

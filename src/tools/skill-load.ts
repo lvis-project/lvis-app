@@ -49,8 +49,11 @@ export interface SkillLoadToolDeps {
   emit: (event: SkillLoadEvent) => void;
   /** Exact generation lease held from materialized body read through overlay registration. */
   acquirePluginGeneration?: (
-    owner: NonNullable<import("../main/skill-store.js").LoadedSkill["pluginOwner"]>,
-  ) => Promise<{ release(): void }>;
+    owner: { pluginId: string; localId: string },
+  ) => Promise<{
+    generation: import("../plugins/plugin-generation-coordinator.js").ActivePluginGeneration;
+    release(): void;
+  }>;
 }
 
 export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
@@ -101,17 +104,25 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           isError: true,
         };
       }
-      const skill = await deps.store.load(skillName);
+      const selectorMatch = /^plugin:([^:]+):([^:]+)$/.exec(skillName);
+      const generationLease = selectorMatch && deps.acquirePluginGeneration
+        ? await deps.acquirePluginGeneration({
+            pluginId: selectorMatch[1],
+            localId: selectorMatch[2],
+          })
+        : undefined;
+      const skill = generationLease
+        ? deps.store.loadPluginGeneration(generationLease.generation, skillName)
+        : await deps.store.load(skillName);
       if (!skill) {
+        generationLease?.release();
         return {
           output: JSON.stringify({ error: `skill not found: ${skillName}` }),
           isError: true,
         };
       }
 
-      const generationLease = skill.pluginOwner && deps.acquirePluginGeneration
-        ? await deps.acquirePluginGeneration(skill.pluginOwner)
-        : undefined;
+      let generationLeaseTransferred = false;
       try {
 
       // C2(d): every skill body is user-editable on disk — seeded built-in
@@ -183,7 +194,8 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // Register in the current-turn overlay. SystemPromptBuilder reads this
       // on subsequent assistant rounds, and ConversationLoop clears it at the
       // user-turn boundary so the body does not become ambient session context.
-      deps.overlay.register(sessionId, skill);
+      deps.overlay.register(sessionId, skill, generationLease);
+      generationLeaseTransferred = Boolean(generationLease);
 
       deps.emit({
         name: skill.name,
@@ -199,7 +211,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         isError: false,
       };
       } finally {
-        generationLease?.release();
+        if (!generationLeaseTransferred) generationLease?.release();
       }
     },
   });

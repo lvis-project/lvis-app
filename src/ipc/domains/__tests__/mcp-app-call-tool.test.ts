@@ -26,6 +26,7 @@ vi.mock("electron", () => ({
 }));
 
 const CHANNEL = "lvis:mcp:call-tool";
+const LOOPBACK_GENERATION = "generation-acme-1";
 const invoke = makeAppIpcInvoker(handlers);
 
 /**
@@ -53,6 +54,7 @@ async function setup() {
     },
     pluginLoopbackManager: {
       has: vi.fn((serverId: string) => serverId === "acme-cards"),
+      assertCardGeneration: vi.fn(),
       readUiResource: vi.fn(),
     },
     mcpManager: {
@@ -147,7 +149,13 @@ describe("lvis:mcp:call-tool — tool-owner == serverId (enforced once, here)", 
   it("denies a plugin card asking for a tool its plugin does not own", async () => {
     const { deps, callFromApp } = await setup();
 
-    const result = await invoke(CHANNEL, "acme-cards", "other_plugin_tool", {});
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "other_plugin_tool",
+      {},
+      LOOPBACK_GENERATION,
+    );
 
     expect(result).toEqual({
       ok: false,
@@ -200,11 +208,18 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
   it("routes a plugin card's own tool through PluginRuntime.callFromApp — the APP path, not the panel's callFromUi", async () => {
     const { callFromApp, invokePluginTool } = await setup();
 
-    const result = await invoke(CHANNEL, "acme-cards", "acme_open", { id: 7 });
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_open",
+      { id: 7 },
+      LOOPBACK_GENERATION,
+    );
 
     expect(result).toEqual({ ok: true, result: "plugin-result" });
     expect(callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 }, {
       appSessionId: "mcp-app:acme-cards:0:0",
+      expectedGenerationId: LOOPBACK_GENERATION,
     });
     expect(invokePluginTool).not.toHaveBeenCalled();
   });
@@ -230,19 +245,32 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
 
   it("coerces non-object args to an empty input rather than forwarding junk", async () => {
     const { callFromApp } = await setup();
-    await invoke(CHANNEL, "acme-cards", "acme_open", "not-an-object");
+    await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_open",
+      "not-an-object",
+      LOOPBACK_GENERATION,
+    );
     expect(callFromApp).toHaveBeenCalledWith("acme_open", {}, {
       appSessionId: "mcp-app:acme-cards:0:0",
+      expectedGenerationId: LOOPBACK_GENERATION,
     });
   });
 
   it("keeps a governed write grant inside main and binds it to the Host-minted card session", async () => {
     const { callFromApp, requestPluginOperationGrant } = await setup();
 
-    const result = await invoke(CHANNEL, "acme-cards", "acme_write", {
-      operation: "update",
-      employeeId: "E-7",
-    });
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_write",
+      {
+        operation: "update",
+        employeeId: "E-7",
+      },
+      LOOPBACK_GENERATION,
+    );
 
     expect(result).toEqual({ ok: true, result: "plugin-result" });
     expect(requestPluginOperationGrant).toHaveBeenCalledWith({
@@ -251,6 +279,7 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
       input: { operation: "update", employeeId: "E-7" },
       appSessionId: "mcp-app:acme-cards:0:0",
       origin: "mcp-app",
+      expectedGenerationId: LOOPBACK_GENERATION,
     });
     expect(callFromApp).toHaveBeenCalledWith(
       "acme_write",
@@ -258,6 +287,7 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
       {
         appSessionId: "mcp-app:acme-cards:0:0",
         operationGrantToken: "host-one-shot-token",
+        expectedGenerationId: LOOPBACK_GENERATION,
       },
     );
   });
@@ -266,7 +296,13 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
     const { deps, callFromApp } = await setup();
     callFromApp.mockRejectedValueOnce(new Error("Tool execution denied by user"));
 
-    const result = await invoke(CHANNEL, "acme-cards", "acme_open", {});
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_open",
+      {},
+      LOOPBACK_GENERATION,
+    );
 
     expect(result).toEqual({
       ok: false,

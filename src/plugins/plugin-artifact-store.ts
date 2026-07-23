@@ -46,8 +46,8 @@ import type { PluginAccessSpec, PluginMarketplaceItem, PluginRegistryEntryInstal
 import { stripLegacyPluginToolGrants } from "./registry.js";
 import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import {
-  hashReceiptFiles,
-  writeInstallReceipt,
+  buildInstallReceipt,
+  restoreInstallReceiptRaw,
   type PluginInstallReceipt,
 } from "./plugin-install-receipt.js";
 import { createLogger } from "../lib/logger.js";
@@ -124,6 +124,20 @@ export interface VerifiedArtifact {
   zipBuffer: Buffer;
   artifactSha256: string;
   signerKeyId: string;
+}
+
+export interface PreparedArtifactCommit<T> {
+  /** Verified extraction root. It remains staged until durableCommit runs. */
+  pluginRoot: string;
+  files: readonly string[];
+  /** Promote the payload and execute the caller's durable commit exactly once. */
+  durableCommit(): Promise<T>;
+}
+
+export interface CoordinatedArtifactCommit<T> {
+  result: T;
+  /** Predecessor resources must drain before recovery backup cleanup. */
+  retirement?: Promise<void>;
 }
 
 export class ArtifactRollbackError extends AggregateError {
@@ -284,8 +298,12 @@ export class PluginArtifactStore {
       beforePromote?: (recoveryBackupDir: string) => Promise<void>;
       /** Clears durable cleanup ownership after removal or tombstone staging. */
       onCommittedBackupResolved?: (obsoleteDir: string) => Promise<void>;
+      /** Prepare projections from the staged tree before promotion. */
+      coordinateCommit?: (
+        prepared: PreparedArtifactCommit<T>,
+      ) => Promise<CoordinatedArtifactCommit<T>>;
     } = {},
-  ): Promise<{ files: string[]; result: T }> {
+  ): Promise<{ files: string[]; result: T; predecessorRetired: boolean }> {
     const safeSlug = assertSafeArtifactSlug(slug);
     const installDir = this.installDirFor(safeSlug);
     const stageDir = resolve(this.installRoot, `.${safeSlug}.stage-${randomUUID()}`);
@@ -336,79 +354,96 @@ export class PluginArtifactStore {
         extractedFiles.push(safeEntryPath.split("\\").join("/"));
       }
 
-      // Windows-safe atomic swap: rename existing installDir to a unique
-      // .old before promoting stageDir, so a half-promoted state is never
-      // observable. `rename()` refuses to overwrite a non-empty directory
-      // on Windows; macOS/Linux would also reject the no-op rename.
-      //
-      // Both renames are retried through `retryOnTransientFsLock` because on
-      // Windows a directory-swap rejects with EPERM/EBUSY while the previous
-      // plugin instance (webview/worker) or an antivirus scan still holds a
-      // handle inside the directory — a transient lock that clears once the
-      // old instance finishes tearing down (meeting#154).
       const oldDir = resolve(this.installRoot, `.${safeSlug}.old-${randomUUID()}`);
       let hadOldDir = false;
-      await options.beforePromote?.(oldDir);
-      try {
-        await retryOnTransientFsLock(() => rename(installDir, oldDir), {
-          onRetry: (attempt, code) =>
-            log.warn({ safeSlug, attempt, code }, "retrying installDir->old swap under fs lock"),
-        });
-        hadOldDir = true;
-      } catch (err) {
-        // Only an absent installDir is a legitimate "first install". A locked
-        // installDir that survived the retry ladder must surface — swallowing
-        // it here would leave the still-present dir in the promotion's path and
-        // resurface as the confusing EPERM in the issue's stack trace.
-        if ((err as NodeJS.ErrnoException | null)?.code !== "ENOENT") throw err;
-      }
-      try {
-        await retryOnTransientFsLock(() => rename(stageDir, installDir), {
-          onRetry: (attempt, code) =>
-            log.warn({ safeSlug, attempt, code }, "retrying stage->installDir promotion under fs lock"),
-        });
-      } catch (renameErr) {
-        if (hadOldDir) {
+      const files = extractedFiles.sort();
+      let durableCommitInvoked = false;
+      let durableCommitCompleted = false;
+      const durableCommit = async (): Promise<T> => {
+        if (durableCommitInvoked) {
+          throw new Error(`artifact durable commit invoked more than once: ${safeSlug}`);
+        }
+        durableCommitInvoked = true;
+        await options.beforePromote?.(oldDir);
+        try {
+          await retryOnTransientFsLock(() => rename(installDir, oldDir), {
+            onRetry: (attempt, code) =>
+              log.warn({ safeSlug, attempt, code }, "retrying installDir->old swap under fs lock"),
+          });
+          hadOldDir = true;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException | null)?.code !== "ENOENT") throw err;
+        }
+        try {
+          await retryOnTransientFsLock(() => rename(stageDir, installDir), {
+            onRetry: (attempt, code) =>
+              log.warn({ safeSlug, attempt, code }, "retrying stage->installDir promotion under fs lock"),
+          });
+        } catch (renameErr) {
+          if (hadOldDir) {
+            try {
+              await retryOnTransientFsLock(() => rename(oldDir, installDir));
+            } catch (restoreErr) {
+              throw new ArtifactRollbackError(
+                `artifact promotion and directory restore both failed: ${safeSlug}`,
+                [renameErr, restoreErr],
+                oldDir,
+              );
+            }
+          }
+          throw renameErr;
+        }
+        try {
+          const result = await commit(installDir, files);
+          durableCommitCompleted = true;
+          return result;
+        } catch (commitErr) {
           try {
-            await retryOnTransientFsLock(() => rename(oldDir, installDir));
-          } catch (restoreErr) {
+            await retryOnTransientFsLock(() => rm(installDir, { recursive: true, force: true }));
+          } catch (cleanupErr) {
             throw new ArtifactRollbackError(
-              `artifact promotion and directory restore both failed: ${safeSlug}`,
-              [renameErr, restoreErr],
-              oldDir,
+              `artifact commit and promoted-directory cleanup both failed: ${safeSlug}`,
+              [commitErr, cleanupErr],
+              hadOldDir ? oldDir : undefined,
             );
           }
+          if (hadOldDir) {
+            try {
+              await retryOnTransientFsLock(() => rename(oldDir, installDir));
+            } catch (restoreErr) {
+              throw new ArtifactRollbackError(
+                `artifact commit and directory restore both failed: ${safeSlug}`,
+                [commitErr, restoreErr],
+                oldDir,
+              );
+            }
+          }
+          throw commitErr;
         }
-        throw renameErr;
+      };
+      const coordinated = options.coordinateCommit
+        ? await options.coordinateCommit(Object.freeze({
+            pluginRoot: stageDir,
+            files: Object.freeze([...files]),
+            durableCommit,
+          }))
+        : { result: await durableCommit() };
+      if (!durableCommitCompleted) {
+        throw new Error(`artifact commit coordinator returned before durable commit: ${safeSlug}`);
       }
-      const files = extractedFiles.sort();
-      let result: T;
-      try {
-        result = await commit(installDir, files);
-      } catch (commitErr) {
+      let predecessorRetired = true;
+      if (coordinated.retirement) {
         try {
-          await retryOnTransientFsLock(() => rm(installDir, { recursive: true, force: true }));
-        } catch (cleanupErr) {
-          throw new ArtifactRollbackError(
-            `artifact commit and promoted-directory cleanup both failed: ${safeSlug}`,
-            [commitErr, cleanupErr],
-            hadOldDir ? oldDir : undefined,
+          await coordinated.retirement;
+        } catch (error) {
+          predecessorRetired = false;
+          log.error(
+            { safeSlug, oldDir, err: error },
+            "predecessor generation retirement failed; retaining recovery backup",
           );
         }
-        if (hadOldDir) {
-          try {
-            await retryOnTransientFsLock(() => rename(oldDir, installDir));
-          } catch (restoreErr) {
-            throw new ArtifactRollbackError(
-              `artifact commit and directory restore both failed: ${safeSlug}`,
-              [commitErr, restoreErr],
-              oldDir,
-            );
-          }
-        }
-        throw commitErr;
       }
-      if (hadOldDir) {
+      if (hadOldDir && predecessorRetired) {
         let cleanupResolved = false;
         try {
           await retryOnTransientFsLock(() => this.removeCommittedBackup(oldDir));
@@ -438,7 +473,7 @@ export class PluginArtifactStore {
           });
         }
       }
-      return { files, result };
+      return { files, result: coordinated.result, predecessorRetired };
     } catch (err) {
       if (existsSync(stageDir)) {
         await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
@@ -460,18 +495,31 @@ export class PluginArtifactStore {
   ): Promise<PluginInstallReceipt> {
     const safeSlug = assertSafeArtifactSlug(slug);
     const pluginRoot = this.installDirFor(safeSlug);
-    const receipt: PluginInstallReceipt = {
-      schemaVersion: 2,
-      pluginId: safeSlug,
-      version: input.version,
-      installSource: input.installSource,
-      artifactSha256: input.artifactSha256,
-      signerKeyId: input.signerKeyId,
-      installedAt: input.installedAt ?? new Date().toISOString(),
-      files: await hashReceiptFiles(pluginRoot, input.files),
-    };
-    await writeInstallReceipt(this.cacheRoot, receipt);
+    const { receipt, raw } = await this.prepareInstallReceipt(safeSlug, pluginRoot, input);
+    await this.persistPreparedInstallReceipt(safeSlug, raw);
     return receipt;
+  }
+
+  async prepareInstallReceipt(
+    slug: string,
+    pluginRoot: string,
+    input: {
+      version: string;
+      installSource: "marketplace" | "local-dev";
+      artifactSha256: string | null;
+      signerKeyId: string | null;
+      files: string[];
+      installedAt?: string;
+    },
+  ): Promise<{ receipt: PluginInstallReceipt; raw: string }> {
+    return buildInstallReceipt(pluginRoot, {
+      pluginId: assertSafeArtifactSlug(slug),
+      ...input,
+    });
+  }
+
+  persistPreparedInstallReceipt(slug: string, raw: string): Promise<void> {
+    return restoreInstallReceiptRaw(this.cacheRoot, assertSafeArtifactSlug(slug), raw);
   }
 
   /**

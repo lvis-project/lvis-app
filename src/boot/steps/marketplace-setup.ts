@@ -14,7 +14,6 @@ import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "../../plug
 import type { MarketplaceFetcher } from "../../plugins/marketplace.js";
 import { CloudMarketplaceFetcher } from "../../plugins/cloud-marketplace-fetcher.js";
 import { createRefreshActiveLlmWildcard } from "./refresh-active-llm-wildcard.js";
-import { runManagedBootstrap } from "../managed-marketplace.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
 
@@ -27,7 +26,6 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
     deploymentGuard,
     bootAuditLogger,
     pluginRuntime,
-    mainWindow,
   } = ctx;
 
   // §9.5 marketplace backend selection.
@@ -157,19 +155,6 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
       );
     });
   };
-
-  // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
-  // from the marketplace on boot (VS Code-style), not packaged in app source.
-  // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
-  // Surfaces lifecycle status (start/complete/error) to the renderer
-  // so the user sees something when the marketplace is unreachable or
-  // partial-fails. The same helper backs the `lvis:bootstrap:retry` IPC.
-  await runManagedBootstrap({
-    pluginMarketplace,
-    pluginRuntime,
-    mainWindow,
-    marketplace: marketplaceSettings,
-  });
 
   ctx.marketplaceFetcher = marketplaceFetcher;
   ctx.pluginMarketplace = pluginMarketplace;

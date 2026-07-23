@@ -162,11 +162,13 @@ export interface BootContext {
     input: Record<string, unknown>;
     appSessionId: string;
     origin?: "ui" | "mcp-app";
+    expectedGenerationId?: string;
   }) => Promise<{
     operationGrantToken: string;
     grantId: string;
     expiresAt: number;
   }>;
+  revokePluginOperationGeneration: (pluginId: string, generationId: string) => void;
 
   // ── Conversation / agent loop ──────────────────────────────────────────────
   routineEngine: RoutineEngine;

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PermissionManager } from "../../permissions/permission-manager.js";
+import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
 import { runWithInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { createDynamicTool } from "../base.js";
 import { ToolExecutor } from "../executor.js";
@@ -13,7 +14,7 @@ const principal = {
   accountHash: "account-hash",
 };
 
-function setup() {
+function setup(options: { wireHooks?: boolean } = {}) {
   const read = vi.fn(async () => ({ output: "fresh", isError: false, metadata: { rawResult: { status: "open" } } }));
   const write = vi.fn(async () => ({ output: "saved", isError: false }));
   const directWrite = vi.fn(async () => ({ output: "reserved", isError: false }));
@@ -25,6 +26,7 @@ function setup() {
       source: "plugin",
       category: "write",
       pluginId: principal.ownerPluginId,
+      pluginGeneration: { pluginId: principal.ownerPluginId, generationId: principal.generationId },
       modelVisible: true,
       operationGovernance: {
         discriminant: "operation",
@@ -40,6 +42,7 @@ function setup() {
       source: "plugin",
       category: "write",
       pluginId: principal.ownerPluginId,
+      pluginGeneration: { pluginId: principal.ownerPluginId, generationId: principal.generationId },
       modelVisible: true,
       operationGovernance: {
         discriminant: "operation",
@@ -61,6 +64,7 @@ function setup() {
       source: "plugin",
       category: "write",
       pluginId: principal.ownerPluginId,
+      pluginGeneration: { pluginId: principal.ownerPluginId, generationId: principal.generationId },
       modelVisible: true,
       operationGovernance: {
         discriminant: "operation",
@@ -81,6 +85,22 @@ function setup() {
     isShadowChannelWritable: vi.fn(() => true),
     getPermissionShadowLogFile: vi.fn(() => "/tmp/shadow"),
   };
+  const activeGeneration = {
+    pluginId: principal.ownerPluginId,
+    generationId: principal.generationId,
+    state: {},
+  };
+  const generationAccess = {
+    getActive: vi.fn((pluginId: string) =>
+      pluginId === principal.ownerPluginId ? activeGeneration : undefined),
+    acquire: vi.fn(async () => ({ generation: activeGeneration, release: vi.fn() })),
+    acquireExact: vi.fn(async (_pluginId: string, generationId: string) => {
+      if (generationId !== principal.generationId) throw new Error("stale test generation");
+      return { generation: activeGeneration, release: vi.fn() };
+    }),
+    runWithLease: vi.fn(async (_lease: unknown, operation: () => Promise<unknown>) => operation()),
+  };
+  let generationAccessAvailable = true;
   return {
     executor: new ToolExecutor(
       registry,
@@ -88,9 +108,15 @@ function setup() {
       permissions,
       undefined,
       approvalGate as never,
-      undefined,
+      options.wireHooks === false ? undefined : new ScriptHookManager(),
       auditLogger as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => generationAccessAvailable ? generationAccess as never : undefined,
     ),
+    setGenerationAccessAvailable: (available: boolean) => { generationAccessAvailable = available; },
     permissions,
     approvalGate,
     read,
@@ -233,5 +259,28 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(serialized).not.toContain("bearer-must-not-log");
     expect(serialized).not.toContain(principal.accountHash);
     expect(serialized).not.toContain("fresh");
+  });
+
+  it("refuses to mint a grant when exact generation access becomes unavailable", async () => {
+    const { executor, setGenerationAccessAvailable } = setup();
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll([{ id: "r", name: "domain_read", input: { operation: "status" } }], options()),
+    );
+    setGenerationAccessAvailable(false);
+
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 9 },
+      principal,
+    })).toThrow(/generation access is not wired/);
+  });
+
+  it("fails closed for a generation-owned tool when the script Hook manager is not wired", async () => {
+    const { executor, read } = setup({ wireHooks: false });
+    await expect(runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll([{ id: "r", name: "domain_read", input: { operation: "status" } }], options()),
+    )).rejects.toThrow(/script Hook manager is not wired/);
+
+    expect(read).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,7 @@
  * errors increment errorCount without losing timing info.
  */
 import { describe, it, expect } from "vitest";
-import { PluginRuntime } from "../runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "./test-helpers.js";
 
 function makeRuntime() {
   return new PluginRuntime({ hostRoot: "/tmp/test-host" });

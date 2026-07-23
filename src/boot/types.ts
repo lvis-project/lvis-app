@@ -126,6 +126,7 @@ export interface AppServices {
     input: Record<string, unknown>;
     appSessionId: string;
     origin?: "ui" | "mcp-app";
+    expectedGenerationId?: string;
   }) => Promise<{
     operationGrantToken: string;
     grantId: string;

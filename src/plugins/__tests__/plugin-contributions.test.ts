@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PluginManifest } from "../types.js";
 import {
   materializePluginContributions,
+  materializePluginGenerationRoot,
   normalizePluginContributionPath,
   PluginContributionError,
   resolvePluginContributionDeclarations,
@@ -59,6 +60,22 @@ describe("plugin contribution declarations", () => {
       hooks: [{ id: "hook", path: "bundle/hook.json" }],
     }))).toThrow(/path_collision/);
   });
+
+  it.each([
+    { override: { id: "bundlehosttest", skills: [{ id: "bundlehosttest", path: "skills/x" }] }, owner: "plugin" },
+    { override: { tools: [{ name: "reserved_tool" }], hooks: [{ id: "reserved_tool", path: "hooks/x.json" }] }, owner: "tool" },
+    { override: { emittedEvents: ["reserved_event"], mcpServers: [{ id: "reserved_event", path: "mcp/x.json" }] }, owner: "event" },
+  ])("rejects contribution IDs reserved by the $owner namespace", ({ override }) => {
+    expect(() => resolvePluginContributionDeclarations(manifest(override as Partial<PluginManifest>)))
+      .toThrow(/reserved_identifier_collision/);
+  });
+
+  it("rejects a contribution ID reused across kinds", () => {
+    expect(() => resolvePluginContributionDeclarations(manifest({
+      skills: [{ id: "shared", path: "skills/shared" }],
+      hooks: [{ id: "shared", path: "hooks/shared.json" }],
+    }))).toThrow(/duplicate_local_id/);
+  });
 });
 
 describe("plugin contribution inventory", () => {
@@ -81,6 +98,21 @@ describe("plugin contribution inventory", () => {
       { path: "hooks/audit.json", kind: "file" },
       { path: "mcp/ep.json", kind: "file" },
     ])).toThrow(/skill_entry_missing/);
+  });
+
+  it("rejects wrong member kinds and children below exact single-file contributions", () => {
+    expect(() => validatePluginContributionInventory(manifest({
+      skills: [{ id: "attendance", path: "skills/attendance" }],
+    }), [{ path: "skills/attendance", kind: "file" }])).toThrow(/declared_directory_wrong_kind/);
+    expect(() => validatePluginContributionInventory(manifest({
+      hooks: [{ id: "audit", path: "hooks/audit.json" }],
+    }), [{ path: "hooks/audit.json", kind: "directory" }])).toThrow(/declared_file_wrong_kind/);
+    expect(() => validatePluginContributionInventory(manifest({
+      hooks: [{ id: "audit", path: "hooks/audit.json" }],
+    }), [
+      { path: "hooks/audit.json", kind: "file" },
+      { path: "hooks/audit.json/extra", kind: "file" },
+    ])).toThrow(/undeclared_contribution_file/);
   });
 
   it.each(["symlink", "hardlink", "device", "other"] as const)("rejects %s archive members", (kind) => {
@@ -152,5 +184,35 @@ describe("materializePluginContributions", () => {
     await expect(materializePluginContributions(root, manifest({
       skills: [{ id: "attendance", path: "skills/attendance" }],
     }))).rejects.toThrow(/unsupported_member_kind/);
+  });
+
+  it.skipIf(process.platform === "win32")("rejects a hard-linked source before retained-generation copy", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lvis-contributions-hardlink-"));
+    const cacheRoot = await mkdtemp(join(tmpdir(), "lvis-contributions-cache-"));
+    roots.push(root, cacheRoot);
+    await writeFile(join(root, "plugin.json"), "{}");
+    await link(join(root, "plugin.json"), join(root, "linked.json"));
+    const sha256 = createHash("sha256").update("{}").digest("hex");
+    const receiptRaw = JSON.stringify({
+      schemaVersion: 2,
+      pluginId: "bundle-host-test",
+      version: "1.0.0",
+      installSource: "local-dev",
+      artifactSha256: null,
+      signerKeyId: null,
+      installedAt: new Date(0).toISOString(),
+      files: [
+        { path: "plugin.json", sha256 },
+        { path: "linked.json", sha256 },
+      ],
+    });
+
+    await expect(materializePluginGenerationRoot(
+      root,
+      cacheRoot,
+      "bundle-host-test",
+      "a".repeat(64),
+      receiptRaw,
+    )).rejects.toThrow(/not a regular unlinked file/);
   });
 });
