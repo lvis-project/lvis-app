@@ -81,7 +81,7 @@ exposed eagerly. (The former `settings.experimental.toolDeferral` flag was dead 
 
 ## Data model changes
 
-`ConversationLoop.ToolScope` (conversation-loop.ts:512) gains:
+`src/engine/turn/types.ts`의 `ToolScope`가 계약을 소유한다:
 
 ```ts
 interface ToolScope {
@@ -107,14 +107,14 @@ sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply firs
 
 ## File-by-file (host-only stage)
 
-1. **`src/engine/conversation-loop.ts`**
-   - Extend `ToolScope` (line 512).
-   - `resolveToolScope` (line 2735): compute `activeToolNames` =
+1. **`src/engine/turn/types.ts`, `tool-scope.ts`, `run-turn.ts`, `query-loop.ts`**
+   - `types.ts`에서 `ToolScope`를 정의한다.
+   - `tool-scope.ts`의 `resolveToolScope`가 `activeToolNames`를 계산한다 =
      `keywordEngine.matchToolNames(input)` (B) ∪ carried `lastTurnScope.activeToolNames` ∪ explicit fixed-surface
      allowlists. Keep `activePluginIds` as active owner scope; below the eager ceiling it exposes full active-plugin
      schemas, and at/above the ceiling it becomes catalog scope for individually loaded tools.
-   - `lastTurnScope` (line 1577): persist `activeToolNames` too (so a follow-up keeps loaded tools).
-   - Wire `handleToolSearch` next to `handleRequestPlugin` (lines 2248-2288): same intercept→promote→
+   - `run-turn.ts`가 follow-up용 carry-forward scope를 보존한다.
+   - `query-loop.ts`가 `handleToolSearch`와 `handleRequestPlugin`을 함께 연결한다: same intercept→promote→
      `rebuildToolSchemas(scope)` pattern, sharing the round-refund (`round--`) and counter logic.
 2. **`src/core/keyword-engine.ts`**: add `matchToolNames(input): Set<string>` — scan `skillKeywords`, return
    `skillId`s whose keyword appears in input AND that resolve to a registered plugin/mcp tool. (Companion to
