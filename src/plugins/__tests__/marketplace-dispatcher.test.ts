@@ -26,13 +26,16 @@ import { canonicalJSON } from "../whitelist/canonical-json.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
 
-function makePluginZip(manifest: Record<string, unknown>): Buffer {
+function makePluginZip(manifest: Record<string, unknown>, files: Record<string, string> = {}): Buffer {
   const zip = new AdmZip();
   zip.addFile("plugin.json", Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf-8"));
   zip.addFile(
     "dist/hostPlugin.js",
     Buffer.from("export default async function createPlugin() { return { handlers: {} }; }\n", "utf-8"),
   );
+  for (const [path, content] of Object.entries(files)) {
+    zip.addFile(path, Buffer.from(content, "utf-8"));
+  }
   return zip.toBuffer();
 }
 
@@ -189,6 +192,48 @@ describe("PluginMarketplaceService install()", () => {
     ) as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
+  });
+
+  it("rejects and rolls back an artifact whose declared Skill is absent", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/test-plugin@1.2.3",
+      packageName: "@lvis/test-plugin",
+      tools: ["ping"],
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+      skills: [{ id: "attendance", path: "skills/attendance" }],
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+
+    const { service } = makeService(fetcher);
+    await expect(service.install(plugin.id)).rejects.toThrow(/declared_directory_missing/);
+    expect(existsSync(join(installedDir, plugin.id))).toBe(false);
+    expect(existsSync(join(cacheRoot, plugin.id, "install-receipt.json"))).toBe(false);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] };
+    expect(registry.plugins).toEqual([]);
   });
 
   it("uses the canonical catalog id for alias replacement history and receipt-cache invalidation", async () => {

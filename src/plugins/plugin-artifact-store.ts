@@ -304,9 +304,25 @@ export class PluginArtifactStore {
         throw new Error(`invalid zip format for "${safeSlug}": ${(err as Error).message}`);
       }
 
+      const archiveMembers = new Set<string>();
       for (const entry of zip.getEntries()) {
         const safeEntryPath = sanitizeZipEntryPath(safeSlug, entry.entryName);
         if (!safeEntryPath) continue;
+        const memberKey = safeEntryPath.normalize("NFC").toLocaleLowerCase("en-US");
+        if (archiveMembers.has(memberKey)) {
+          throw new Error(`"${safeSlug}" zip contains colliding entry: ${entry.entryName}`);
+        }
+        archiveMembers.add(memberKey);
+
+        // ZIP external attributes preserve the Unix file type in the upper
+        // 16 bits. Never materialize links/devices/sockets as ordinary files:
+        // signature integrity proves bytes, not safe filesystem semantics.
+        const unixMode = (entry.attr >>> 16) & 0xffff;
+        const unixType = unixMode & 0o170000;
+        const expectedType = entry.isDirectory ? 0o040000 : 0o100000;
+        if (unixType !== 0 && unixType !== expectedType) {
+          throw new Error(`"${safeSlug}" zip contains unsupported member kind: ${entry.entryName}`);
+        }
         const targetPath = resolve(stageDir, safeEntryPath);
         if (!isWithin(stageDir, targetPath)) {
           throw new Error(`"${safeSlug}" zip entry escapes install root: ${entry.entryName}`);

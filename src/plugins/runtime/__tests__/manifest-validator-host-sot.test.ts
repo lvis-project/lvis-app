@@ -29,6 +29,36 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     expect(typeof validator).toBe("function");
   });
 
+  it("accepts structured plugin-owned Skill, Hook, and MCP declarations", async () => {
+    const validator = await buildManifestValidator();
+    expect(validator({
+      id: "atomic-bundle-plugin",
+      version: "1.0.0",
+      description: "Atomic contribution bundle fixture.",
+      entry: "dist/index.js",
+      tools: [],
+      skills: [{ id: "attendance", path: "skills/attendance" }],
+      hooks: [{ id: "audit", path: "hooks/audit.json" }],
+      mcpServers: [{ id: "ep", path: "mcp/ep.json" }],
+    })).toBe(true);
+  });
+
+  it("rejects malformed contribution declarations and unknown fields", async () => {
+    const validator = await buildManifestValidator();
+    expect(validator({
+      id: "atomic-bundle-plugin",
+      version: "1.0.0",
+      description: "Atomic contribution bundle fixture.",
+      entry: "dist/index.js",
+      tools: [],
+      skills: [{ id: "invalid-id", path: "skills/attendance", trust: true }],
+    })).toBe(false);
+    expect(validator.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ keyword: "additionalProperties" }),
+      expect.objectContaining({ keyword: "pattern" }),
+    ]));
+  });
+
   // ── accept-probes (formerly runtime guards vs a stale SDK; now test-time
   // assertions against the host-compiled validator) ──────────────────────────
   it("accepts a pure MCP Tool[] object carrying _meta.ui.visibility", async () => {

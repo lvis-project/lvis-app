@@ -249,6 +249,13 @@ export interface PluginManifest {
   uiResources?: PluginUiResourceDecl[];
   keywords?: Array<{ keyword: string; skillId: string }>;
 
+  /** Plugin-owned instruction bundles, rooted at a directory containing SKILL.md. */
+  skills?: PluginContributionDeclaration[];
+  /** Plugin-owned declarative Hook configuration files. Presence does not grant trust. */
+  hooks?: PluginContributionDeclaration[];
+  /** Plugin-owned declarative MCP server configuration files. Presence does not grant approval. */
+  mcpServers?: PluginContributionDeclaration[];
+
 
 
   capabilities?: string[];
@@ -354,6 +361,16 @@ export interface PluginManifest {
     /** Allowlisted secret keys this plugin can read via `hostApi.getSecret`. */
     read?: string[];
   };
+}
+
+/**
+ * A contribution identity is local to its owning plugin and contribution kind.
+ * `path` is always a normalized, plugin-root-relative POSIX path. Runtime code
+ * must resolve it through the Host contribution resolver before reading bytes.
+ */
+export interface PluginContributionDeclaration {
+  id: string;
+  path: string;
 }
 
 /**
