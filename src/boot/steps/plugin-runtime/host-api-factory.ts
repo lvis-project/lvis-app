@@ -171,7 +171,7 @@ export function createHostApiFactory(
   pluginId: string,
   manifest: PluginManifest,
   pluginDataDir: string,
-  incarnation?: PluginHostApiIncarnation,
+  incarnation: PluginHostApiIncarnation,
 ) => PluginHostApi {
   const {
     getPluginRuntime,
@@ -199,21 +199,14 @@ export function createHostApiFactory(
     pluginId: string,
     manifest: PluginManifest,
     pluginDataDir: string,
-    incarnation?: PluginHostApiIncarnation,
+    incarnation: PluginHostApiIncarnation,
   ): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
-    const hostIncarnation = incarnation ?? {
-      registerDisposer: (dispose: () => void) => pluginRuntime.registerDisposer(pluginId, dispose),
-      // Runtime production calls always provide an incarnation. The fallback
-      // exists only for direct factory test harnesses that exercise one method
-      // without constructing PluginRuntime lifecycle state.
-      isActive: () => true,
-      isLifecycleHookActive: () => false,
-    };
+    const hostIncarnation = incarnation;
       // #893 Stage 2 — manifest sha256 pin (Tier-3 whitelist check). The
       // whitelist registry stores `approvedManifestSha256` per pluginId; we
       // compare against the canonicalized JSON of the running manifest so a
