@@ -1025,11 +1025,16 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     e,
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; operationGrantToken?: string },
   ) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.call, e); return UNAUTHORIZED_FRAME; }
     return pluginRuntime.callFromUi(method, payload, {
       userAction: options?.userAction === true,
+      // Renderer cannot choose the authority-bearing session identity.
+      appSessionId: `plugin-ui:${e.sender?.id ?? `${e.processId}:${e.frameId}`}`,
+      ...(typeof options?.operationGrantToken === "string"
+        ? { operationGrantToken: options.operationGrantToken }
+        : {}),
     });
   });
 

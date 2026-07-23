@@ -58,6 +58,7 @@ import {
 } from "../plugins/runtime/tool-visibility.js";
 import { createLogger } from "../lib/logger.js";
 import type { McpUiPayload } from "./types.js";
+import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
 
 const log = createLogger("plugin-tool-from-mcp");
 
@@ -144,6 +145,7 @@ export function mcpToolToPluginTool(
   pluginId: string,
   tool: DiscoveredMcpTool,
   invoke: PluginMcpInvoke,
+  operationGovernance?: PluginToolOperationPolicy,
 ): Tool {
   const meta = tool._meta ?? {};
   // #885 — the host does NOT trust a plugin's self-declared per-tool category.
@@ -159,6 +161,7 @@ export function mcpToolToPluginTool(
     source: "plugin",
     category,
     pluginId,
+    operationGovernance,
     pathFields: readPathFields(meta),
     // MCP Apps `_meta.ui.visibility` ∌ "model" ⇒ app-only: the tool IS registered
     // (that is what puts its card's call under risk → reviewer/approval → audit) but

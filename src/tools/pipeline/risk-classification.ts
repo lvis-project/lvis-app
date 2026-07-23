@@ -10,6 +10,7 @@ import type { ToolCategory } from "../types.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import { inspectHostRisk } from "../../permissions/reviewer/host-risk-inspector.js";
 import { emitRiskShadowLog } from "../../permissions/reviewer/risk-shadow-log.js";
+import { maxOperationRisk, type GovernedRiskFloor } from "../plugin-operation-governance.js";
 
 /**
  * Permission policy host-classifies-risk — resolve the EFFECTIVE category the
@@ -34,6 +35,7 @@ export function resolveEnforcedCategory(args: {
   correlationId: string;
   hostClassifiesRisk: boolean;
   auditLogger: AuditLogger;
+  operationFloor?: GovernedRiskFloor;
 }): ToolCategory {
   const {
     tool,
@@ -43,6 +45,7 @@ export function resolveEnforcedCategory(args: {
     correlationId,
     hostClassifiesRisk,
     auditLogger,
+    operationFloor,
   } = args;
   // Only plugin/MCP tools carry an UNTRUSTED declared category worth
   // re-deriving. `meta` control-flow primitives (which route through
@@ -80,7 +83,10 @@ export function resolveEnforcedCategory(args: {
     auditLogger,
   );
 
-  return enforced && eligibleForHostDerivation
+  const baseline = enforced && eligibleForHostDerivation
     ? hostDerivedCategory
     : declaredCategory;
+  return operationFloor === undefined
+    ? baseline
+    : maxOperationRisk(declaredCategory, hostDerivedCategory, operationFloor);
 }
