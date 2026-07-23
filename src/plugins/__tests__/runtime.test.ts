@@ -1686,6 +1686,53 @@ export default async function createPlugin({ hostApi }) {
     );
   });
 
+  it("reserves a configured static identity after its runtime instance is removed", async () => {
+    const canonicalId = "p-removed-static-canonical";
+    const staticManifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-removed-static-artifact",
+      "static",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      manifestPaths: [staticManifestPath],
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    await runtime.startAll();
+    await runtime.removePlugin(canonicalId);
+
+    const registryManifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-removed-static-registry-artifact",
+      "registry",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: canonicalId,
+          manifestPath: registryManifestPath,
+          enabled: true,
+        }],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin(canonicalId)).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(canonicalId),
+    });
+    expect(runtime.listPluginIds()).toEqual([]);
+  });
+
   it("rejects manifest-id drift when restarting a loaded static plugin", async () => {
     const canonicalId = "p-static-manifest-stable";
     const changedId = "p-static-manifest-changed";
@@ -1758,6 +1805,51 @@ export default async function createPlugin({ hostApi }) {
     await expect(
       runtime.call(`${firstId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
     ).resolves.toContain(`hi-${firstId}`);
+  });
+
+  it("rejects two static plans converging on one identity before restart", async () => {
+    const firstId = "p-static-converge-first";
+    const secondId = "p-static-converge-second";
+    const firstManifestPath = await writePluginArtifact(
+      firstId,
+      "p-static-converge-artifact-one",
+      "static",
+    );
+    const secondManifestPath = await writePluginArtifact(
+      secondId,
+      "p-static-converge-artifact-two",
+      "static",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      manifestPaths: [firstManifestPath, secondManifestPath],
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    await runtime.startAll();
+
+    const secondManifest = JSON.parse(await readFile(secondManifestPath, "utf-8"));
+    secondManifest.id = firstId;
+    secondManifest.name = firstId;
+    await writeFile(secondManifestPath, JSON.stringify(secondManifest), "utf-8");
+
+    await expect(runtime.restartPlugin(firstId)).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(firstId),
+    });
+    expect(runtime.listPluginIds().sort()).toEqual([firstId, secondId].sort());
+    await expect(
+      runtime.call(`${firstId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
+    ).resolves.toContain(`hi-${firstId}`);
+    await expect(
+      runtime.call(`${secondId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
+    ).resolves.toContain(`hi-${secondId}`);
   });
 
   it("prioritizes an exact registry id over a static root basename during add", async () => {

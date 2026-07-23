@@ -488,24 +488,18 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
     const loadPlan = await this.resolveManifestLoadPlanInternal();
     if (!isCurrent()) return "failed";
-    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
+    const currentIdentities = await this.assertCurrentPluginIdentityLoadPlan(loadPlan);
     if (!isCurrent()) return "failed";
-    const registryIdentities = this.assertCurrentPluginIdentityLoadPlan(
-      loadPlan,
-      enabledSnapshots,
-    );
-    const knownAliases = new Set(this.getPluginInstallAliases(pluginId) ?? []);
-    const targetIdentity = registryIdentities.find(({ plan, snapshot }) => {
+    const installClaim = this.getPluginInstallClaim(pluginId);
+    const targetIdentity = currentIdentities.find(({ plan, snapshot }) => {
       if (snapshot.manifest.id !== pluginId) return false;
-      return knownAliases.size > 0
-        ? knownAliases.has(plan.pluginIdHint!)
-        : plan.pluginIdHint === pluginId;
+      return installClaim === null
+        ? !plan.pluginIdHint
+          && resolve(dirname(plan.manifestPath)) === resolve(plugin.pluginRoot)
+        : plan.pluginIdHint === (installClaim ?? pluginId);
     });
-    const snapshot = targetIdentity?.snapshot ?? enabledSnapshots.get(pluginId);
-    const targetPlan = targetIdentity?.plan ?? loadPlan.find((plan) =>
-      !plan.pluginIdHint && plan.enabled
-      && resolve(dirname(plan.manifestPath)) === resolve(plugin.pluginRoot)
-    );
+    const snapshot = targetIdentity?.snapshot;
+    const targetPlan = targetIdentity?.plan;
     const pluginRoot = targetPlan ? dirname(targetPlan.manifestPath) : plugin.pluginRoot;
     const approvedPluginAccess =
       snapshot?.approvedPluginAccess ??
@@ -888,18 +882,21 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     if (this.pluginLifecycleGenerations.get(pluginId) !== lifecycleGeneration) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
-    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
+    const currentIdentities = await this.assertCurrentPluginIdentityLoadPlan(loadPlan);
     if (this.pluginLifecycleGenerations.get(pluginId) !== lifecycleGeneration) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
-    this.assertCurrentPluginIdentityLoadPlan(loadPlan, enabledSnapshots);
-    const snapshot = enabledSnapshots.get(pluginId);
-    const targetPlan = loadPlan.find((plan) =>
+    const targetIdentity = currentIdentities.find(({ plan }) =>
       plan.pluginIdHint === pluginId
-    ) ?? await this.findStaticManifestPlan(loadPlan, pluginId);
+    ) ?? currentIdentities.find(({ plan, snapshot }) =>
+      !plan.pluginIdHint && plan.enabled && snapshot.manifest.id === pluginId
+    );
+    const snapshot = targetIdentity?.snapshot;
+    const targetPlan = targetIdentity?.plan;
     if (!snapshot) {
-      if (targetPlan?.enabled) {
-        await this.readManifest(targetPlan.manifestPath); // throws with the actual reason
+      const requestedPlan = loadPlan.find((plan) => plan.pluginIdHint === pluginId);
+      if (requestedPlan?.enabled) {
+        await this.readManifest(requestedPlan.manifestPath); // throws with the actual reason
       }
       throw new Error(`addPlugin: plugin not found in registry or disabled: ${pluginId}`);
     }

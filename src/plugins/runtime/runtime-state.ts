@@ -19,7 +19,6 @@ import {
   parsePluginJson,
 } from "./manifest-validation.js";
 import {
-  readEnabledManifestSnapshots,
   resolveManifestLoadPlan,
 } from "./snapshots.js";
 import {
@@ -359,29 +358,6 @@ export abstract class PluginRuntimeState {
     });
   }
 
-  protected async readSnapshotsInternal(
-    loadPlan: ManifestLoadPlan[],
-  ): Promise<Map<string, ManifestSnapshot>> {
-    const validator = await this.getManifestValidator();
-    return readEnabledManifestSnapshots(loadPlan, validator);
-  }
-
-  protected async findStaticManifestPlan(
-    loadPlan: ManifestLoadPlan[],
-    pluginId: string,
-  ): Promise<ManifestLoadPlan | undefined> {
-    for (const plan of loadPlan) {
-      if (plan.pluginIdHint || !plan.enabled) continue;
-      try {
-        const manifest = await this.readManifest(plan.manifestPath, { report: false });
-        if (manifest.id === pluginId) return plan;
-      } catch {
-        // Snapshot loading already reports invalid static manifests.
-      }
-    }
-    return undefined;
-  }
-
   /**
    * #885 v6 — MODEL-ONLY (ratified security decision §2.4a). The `knownToolOwners`
    * map is the pre-runtime `??` fallback in `resolveToolOwner`, feeding the
@@ -565,23 +541,34 @@ export abstract class PluginRuntimeState {
     }
   }
 
-  protected assertCurrentPluginIdentityLoadPlan(
+  protected async assertCurrentPluginIdentityLoadPlan(
     loadPlan: ManifestLoadPlan[],
-    snapshots: Map<string, ManifestSnapshot>,
-  ): Array<{ plan: ManifestLoadPlan; snapshot: ManifestSnapshot }> {
-    const registryIdentities = loadPlan.flatMap((plan) => {
-      if (!plan.pluginIdHint) return [];
-      const snapshot = snapshots.get(plan.pluginIdHint);
-      return snapshot ? [{ plan, snapshot }] : [];
-    });
+  ): Promise<Array<{ plan: ManifestLoadPlan; snapshot: ManifestSnapshot }>> {
+    const currentIdentities: Array<{
+      plan: ManifestLoadPlan;
+      snapshot: ManifestSnapshot;
+    }> = [];
+    for (const plan of loadPlan) {
+      try {
+        currentIdentities.push({
+          plan,
+          snapshot: {
+            manifest: await this.readManifest(plan.manifestPath, { report: false }),
+            approvedPluginAccess: plan.approvedPluginAccess,
+          },
+        });
+      } catch {
+        // Raw registry ids are still reserved below when a manifest is invalid.
+      }
+    }
     this.assertPluginIdentityNamespace(
-      registryIdentities.map(({ plan, snapshot }) => ({
+      currentIdentities.map(({ plan, snapshot }) => ({
         pluginId: snapshot.manifest.id,
         alias: plan.pluginIdHint,
       })),
       loadPlan.flatMap((plan) => plan.pluginIdHint ? [plan.pluginIdHint] : []),
     );
-    return registryIdentities;
+    return currentIdentities;
   }
 
   private pluginIdentityCollision(identifier: string, detail: string): Error {
