@@ -230,20 +230,45 @@ export async function seedRealPlugins(
     fs.rmSync(pluginDir, { recursive: true, force: true });
     fs.mkdirSync(pluginDir, { recursive: true, mode: 0o700 });
 
-    // Write the manifest with the `python` field stripped. Same reasoning as
-    // test/e2e/ui/fixtures.ts (`delete base.python`): a host-managed Python
-    // block makes the runtime require a lockfile + provisioned interpreter at
-    // lifecycle start, which fails in the isolated profile and aborts the
-    // plugin's start — so no UI provider registers and the panel never mounts.
-    // The UI bundle itself needs no Python worker to render its empty state, so
-    // dropping it lets the plugin start and expose its UI. The stripped
-    // manifest is what the receipt + whitelist grant are computed against.
+    // Write the manifest with the `python` field stripped BY DEFAULT. Same
+    // reasoning as test/e2e/ui/fixtures.ts (`delete base.python`): a
+    // host-managed Python block makes the runtime require a lockfile +
+    // provisioned interpreter at lifecycle start. For a plugin whose worker is
+    // OPTIONAL to its UI that lets the panel render its empty state; but a
+    // worker-backed plugin (local-indexer) hard-requires `pythonExecutable` in
+    // its own `startInternal` and throws without it regardless of the manifest,
+    // so with the block stripped it degrades to a Doctor entry and never shows
+    // a live panel.
+    //
+    // OPT-IN real Python (LVIS_SCREENSHOT_REAL_PYTHON=1): keep the `python`
+    // block and copy the requirements lockfile next to the manifest so the
+    // host's PythonRuntimeBootstrapper resolves it at lifecycle start (it then
+    // cache-hits the pre-provisioned venv that fixtures.ts hardlinks into the
+    // isolated runtime — no network, no build). This lets the worker start for
+    // real and the live panel render. The worker script itself already ships in
+    // the copied `dist/worker/` tree. The receipt + whitelist grant are
+    // computed against whichever manifest shape is written here.
     const seededManifest = { ...(manifest as Record<string, unknown>) };
-    delete seededManifest.python;
+    const pythonBlock = (manifest as { python?: { requirementsLock?: unknown } }).python;
+    const realPython = process.env.LVIS_SCREENSHOT_REAL_PYTHON === '1';
+    if (!realPython || !pythonBlock) {
+      delete seededManifest.python;
+    }
     const pluginJsonPath = path.join(pluginDir, 'plugin.json');
     fs.writeFileSync(pluginJsonPath, `${JSON.stringify(seededManifest, null, 2)}\n`, 'utf-8');
     // Copy the ENTIRE built dist tree so UI bundle imports/assets resolve.
     copyDir(sourceDist, path.join(pluginDir, 'dist'));
+    // Real-Python opt-in: copy the requirements lockfile so the host can resolve
+    // it (it lives at the plugin repo root, not under dist/, so the dist copy
+    // above does not include it). An extra unlisted file is not receipt-flagged.
+    if (realPython && pythonBlock && typeof pythonBlock.requirementsLock === 'string') {
+      const lockSrc = path.join(sourceDir, pythonBlock.requirementsLock);
+      if (fs.existsSync(lockSrc)) {
+        fs.copyFileSync(lockSrc, path.join(pluginDir, pythonBlock.requirementsLock));
+      } else {
+        console.warn(`[screenshots] real-python: lockfile missing, worker will not start: ${lockSrc}`);
+      }
+    }
 
     // Signed-whitelist grant for any host-secret reads the manifest declares
     // (local-indexer + meeting read llm.apiKey.*). No grant needed for plugins
