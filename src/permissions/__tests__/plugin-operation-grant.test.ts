@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PluginOperationGrantCoordinator,
   pluginOperationExecutionDomain,
+  type PluginOperationPrincipal,
 } from "../plugin-operation-grant.js";
 
 const principal = {
@@ -16,9 +17,10 @@ const requiredRead = {
   readOperations: ["today"],
   maxAgeMs: 1_000,
 } as const;
+const grantDomain = "f".repeat(64);
 
 describe("PluginOperationGrantCoordinator", () => {
-  it("derives one account-scoped connected domain for read-backed writes", () => {
+  it("derives one Host-owned domain for every governed operation in an account", () => {
     const tools = [
       {
         name: "ep_attendance_read",
@@ -74,6 +76,14 @@ describe("PluginOperationGrantCoordinator", () => {
 
     expect(writeDomain).toBe(readDomain);
     expect(anotherAccount).not.toBe(readDomain);
+    expect(
+      pluginOperationExecutionDomain(
+        principal,
+        "ep_attendance_read",
+        "week",
+        tools,
+      ),
+    ).toBe(readDomain);
   });
 
   it("runs domain reads concurrently but queues them behind writes without writer starvation", async () => {
@@ -134,6 +144,36 @@ describe("PluginOperationGrantCoordinator", () => {
     next.release();
   });
 
+  it("keeps an active revoked domain poisoned until its holder releases", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain);
+    const writer = await coordinator.acquireExecutionLease(grantDomain, "write");
+    const queued = coordinator.acquireExecutionLease(grantDomain, "read");
+
+    coordinator.revokeAccount(
+      principal.ownerPluginId,
+      principal.generationId,
+      principal.accountHash,
+    );
+    await expect(queued).rejects.toThrow("revoked");
+    await expect(
+      coordinator.acquireExecutionLease(grantDomain, "write"),
+    ).rejects.toThrow("revoked");
+    expect(() => coordinator.markDomainMutation(grantDomain)).not.toThrow();
+
+    writer.release();
+    const state = coordinator as unknown as {
+      executionDomains: Map<string, unknown>;
+      domainRevisions: Map<string, unknown>;
+    };
+    expect(state.executionDomains.has(grantDomain)).toBe(false);
+    expect(state.domainRevisions.has(grantDomain)).toBe(false);
+  });
+
   it("serializes writes per domain without blocking a different account domain", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const firstAccountDomain = "c".repeat(64);
@@ -170,13 +210,80 @@ describe("PluginOperationGrantCoordinator", () => {
     sameAccountLease.release();
   });
 
+  it("invalidates another session's pre-write grant after a domain mutation", () => {
+    const coordinator = new PluginOperationGrantCoordinator(() => 50);
+    const sessionB = { ...principal, appSessionId: "window-8" };
+    const issueFor = (
+      sessionPrincipal: PluginOperationPrincipal,
+      readRevision: string,
+    ) =>
+      coordinator.issue({
+        ...sessionPrincipal,
+        toolName: "ep_attendance_write",
+        operation: "clock",
+        intentHash: "shared-account-intent",
+        readRevision,
+        expiresAt: 500,
+      }, grantDomain, requiredRead);
+    const expectedFor = (sessionPrincipal: PluginOperationPrincipal) => ({
+      ...sessionPrincipal,
+      toolName: "ep_attendance_write",
+      operation: "clock",
+      intentHash: "shared-account-intent",
+      requiresRead: true,
+    });
+
+    const readA = coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain);
+    const readB = coordinator.recordRead({
+      ...sessionB,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain);
+    const grantA = issueFor(principal, readA);
+    const staleGrantB = issueFor(sessionB, readB);
+
+    expect(
+      coordinator.consume(grantA.token, expectedFor(principal), grantDomain),
+    ).toMatchObject({ ok: true });
+    coordinator.markDomainMutation(grantDomain);
+    expect(
+      coordinator.consume(
+        staleGrantB.token,
+        expectedFor(sessionB),
+        grantDomain,
+      ),
+    ).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("intervening write"),
+    });
+
+    const freshReadB = coordinator.recordRead({
+      ...sessionB,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain);
+    const freshGrantB = issueFor(sessionB, freshReadB);
+    expect(
+      coordinator.consume(
+        freshGrantB.token,
+        expectedFor(sessionB),
+        grantDomain,
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
   it("records opaque read revisions and consumes a matching grant exactly once", () => {
     let now = 1_000;
     const coordinator = new PluginOperationGrantCoordinator(() => now);
     const readRevision = coordinator.recordRead(
       { ...principal, readTool: "ep_attendance_read", readOperation: "today" },
+      grantDomain,
     );
-    expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000)).toBe(readRevision);
+    expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000, grantDomain)).toBe(readRevision);
     const grant = coordinator.issue({
       ...principal,
       toolName: "ep_attendance_write",
@@ -184,7 +291,7 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "intent",
       readRevision,
       expiresAt: now + 500,
-    }, requiredRead);
+    }, grantDomain, requiredRead);
     const expected = {
       ...principal,
       toolName: "ep_attendance_write",
@@ -192,11 +299,11 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "intent",
       requiresRead: true,
     };
-    expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000)).toBeUndefined();
-    expect(coordinator.consume(grant.token, expected)).toEqual({ ok: true, grantId: grant.grantId });
-    expect(coordinator.consume(grant.token, expected)).toMatchObject({ ok: false, reason: expect.stringContaining("already consumed") });
+    expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000, grantDomain)).toBeUndefined();
+    expect(coordinator.consume(grant.token, expected, grantDomain)).toEqual({ ok: true, grantId: grant.grantId });
+    expect(coordinator.consume(grant.token, expected, grantDomain)).toMatchObject({ ok: false, reason: expect.stringContaining("already consumed") });
     now += 2_000;
-    expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000)).toBeUndefined();
+    expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000, grantDomain)).toBeUndefined();
   });
 
   it("burns before comparison so a mismatch cannot be retried", () => {
@@ -205,7 +312,7 @@ describe("PluginOperationGrantCoordinator", () => {
       ...principal,
       readTool: requiredRead.readTool,
       readOperation: "today",
-    });
+    }, grantDomain);
     const grant = coordinator.issue({
       ...principal,
       toolName: "ep_parking_write",
@@ -213,7 +320,7 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "one",
       readRevision,
       expiresAt: 100,
-    }, requiredRead);
+    }, grantDomain, requiredRead);
     const expected = {
       ...principal,
       toolName: "ep_parking_write",
@@ -221,8 +328,8 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "one",
       requiresRead: true,
     };
-    expect(coordinator.consume(grant.token, { ...expected, accountHash: "forged" })).toMatchObject({ ok: false, reason: "operation grant accountHash mismatch" });
-    expect(coordinator.consume(grant.token, expected)).toMatchObject({ ok: false });
+    expect(coordinator.consume(grant.token, { ...expected, accountHash: "forged" }, grantDomain)).toMatchObject({ ok: false, reason: "operation grant accountHash mismatch" });
+    expect(coordinator.consume(grant.token, expected, grantDomain)).toMatchObject({ ok: false });
   });
 
   it("fails closed for missing, forged, expired, generation-revoked and session-revoked grants", () => {
@@ -235,8 +342,8 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "i",
       requiresRead: false,
     };
-    expect(coordinator.consume(undefined, expected)).toMatchObject({ ok: false, reason: expect.stringContaining("missing") });
-    expect(coordinator.consume("forged", expected)).toMatchObject({ ok: false });
+    expect(coordinator.consume(undefined, expected, grantDomain)).toMatchObject({ ok: false, reason: expect.stringContaining("missing") });
+    expect(coordinator.consume("forged", expected, grantDomain)).toMatchObject({ ok: false });
     const expired = coordinator.issue({
       ...principal,
       toolName: expected.toolName,
@@ -244,9 +351,9 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: expected.intentHash,
       readRevision: null,
       expiresAt: 51,
-    });
+    }, grantDomain);
     now = 52;
-    expect(coordinator.consume(expired.token, expected)).toMatchObject({ ok: false, reason: expect.stringContaining("expired") });
+    expect(coordinator.consume(expired.token, expected, grantDomain)).toMatchObject({ ok: false, reason: expect.stringContaining("expired") });
     const generation = coordinator.issue({
       ...principal,
       toolName: expected.toolName,
@@ -254,9 +361,9 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: expected.intentHash,
       readRevision: null,
       expiresAt: 100,
-    });
+    }, grantDomain);
     coordinator.revokeGeneration(principal.ownerPluginId, principal.generationId);
-    expect(coordinator.consume(generation.token, expected)).toMatchObject({ ok: false });
+    expect(coordinator.consume(generation.token, expected, grantDomain)).toMatchObject({ ok: false });
     const session = coordinator.issue({
       ...principal,
       toolName: expected.toolName,
@@ -264,9 +371,9 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: expected.intentHash,
       readRevision: null,
       expiresAt: 100,
-    });
+    }, grantDomain);
     coordinator.revokeSession(principal.appSessionId);
-    expect(coordinator.consume(session.token, expected)).toMatchObject({ ok: false });
+    expect(coordinator.consume(session.token, expected, grantDomain)).toMatchObject({ ok: false });
   });
 
   it("revokes unused grants and read snapshots for one authenticated account session", () => {
@@ -275,7 +382,7 @@ describe("PluginOperationGrantCoordinator", () => {
       ...principal,
       readTool: "ep_attendance_read",
       readOperation: "today",
-    });
+    }, grantDomain);
     const expected = {
       ...principal,
       toolName: "ep_attendance_write",
@@ -290,7 +397,7 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: expected.intentHash,
       readRevision,
       expiresAt: 100,
-    }, requiredRead);
+    }, grantDomain, requiredRead);
 
     coordinator.revokeAccount(
       principal.ownerPluginId,
@@ -298,13 +405,14 @@ describe("PluginOperationGrantCoordinator", () => {
       principal.accountHash,
     );
 
-    expect(coordinator.consume(grant.token, expected)).toMatchObject({ ok: false });
+    expect(coordinator.consume(grant.token, expected, grantDomain)).toMatchObject({ ok: false });
     expect(
       coordinator.latestRequiredRead(
         principal,
         "ep_attendance_read",
         ["today"],
         1_000,
+        grantDomain,
       ),
     ).toBeUndefined();
   });
@@ -327,7 +435,7 @@ describe("PluginOperationGrantCoordinator", () => {
         ...sessionPrincipal,
         readTool: requiredRead.readTool,
         readOperation: "today",
-      });
+      }, grantDomain);
       coordinator.issue({
         ...sessionPrincipal,
         toolName: "ep_attendance_write",
@@ -335,12 +443,12 @@ describe("PluginOperationGrantCoordinator", () => {
         intentHash: `intent-${index}`,
         readRevision,
         expiresAt: 100,
-      }, requiredRead);
+      }, grantDomain, requiredRead);
       coordinator.recordRead({
         ...sessionPrincipal,
         readTool: requiredRead.readTool,
         readOperation: "week",
-      });
+      }, grantDomain);
     }
 
     expect(coordinatorState.grants.size).toBe(sessionCount);
@@ -359,7 +467,7 @@ describe("PluginOperationGrantCoordinator", () => {
       ...principal,
       readTool: requiredRead.readTool,
       readOperation: "today",
-    });
+    }, grantDomain);
     const firstGrant = coordinator.issue({
       ...principal,
       toolName: "ep_attendance_write",
@@ -367,12 +475,12 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "surviving-session",
       readRevision: firstRead,
       expiresAt: 500,
-    }, requiredRead);
+    }, grantDomain, requiredRead);
     const secondRead = coordinator.recordRead({
       ...principal,
       readTool: requiredRead.readTool,
       readOperation: "today",
-    });
+    }, grantDomain);
     const secondGrant = coordinator.issue({
       ...principal,
       toolName: "ep_attendance_write",
@@ -380,7 +488,7 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "surviving-session",
       readRevision: secondRead,
       expiresAt: 500,
-    }, requiredRead);
+    }, grantDomain, requiredRead);
     const expected = {
       ...principal,
       toolName: "ep_attendance_write",
@@ -389,11 +497,11 @@ describe("PluginOperationGrantCoordinator", () => {
       requiresRead: true,
     };
 
-    expect(coordinator.consume(firstGrant.token, expected)).toMatchObject({
+    expect(coordinator.consume(firstGrant.token, expected, grantDomain)).toMatchObject({
       ok: false,
       reason: expect.stringContaining("superseded"),
     });
-    expect(coordinator.consume(secondGrant.token, expected)).toEqual({
+    expect(coordinator.consume(secondGrant.token, expected, grantDomain)).toEqual({
       ok: true,
       grantId: secondGrant.grantId,
     });
@@ -405,7 +513,7 @@ describe("PluginOperationGrantCoordinator", () => {
       ...principal,
       readTool: requiredRead.readTool,
       readOperation: "today",
-    });
+    }, grantDomain);
     const issue = () => coordinator.issue({
       ...principal,
       toolName: "ep_attendance_write",
@@ -413,7 +521,7 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "same-intent",
       readRevision,
       expiresAt: 100,
-    }, requiredRead);
+    }, grantDomain, requiredRead);
 
     const results = await Promise.allSettled([
       Promise.resolve().then(issue),
@@ -441,7 +549,7 @@ describe("PluginOperationGrantCoordinator", () => {
         ...principal,
         readTool: requiredRead.readTool,
         readOperation: "today",
-      });
+      }, grantDomain);
       const grant = coordinator.issue({
         ...principal,
         toolName: "ep_attendance_write",
@@ -449,13 +557,13 @@ describe("PluginOperationGrantCoordinator", () => {
         intentHash: "same-intent",
         readRevision,
         expiresAt: 500,
-      }, multiOperationRequiredRead);
+      }, grantDomain, multiOperationRequiredRead);
 
       coordinator.recordRead({
         ...principal,
         readTool: requiredRead.readTool,
         readOperation: supersedingOperation,
-      });
+      }, grantDomain);
       const expected = {
         ...principal,
         toolName: "ep_attendance_write",
@@ -463,11 +571,11 @@ describe("PluginOperationGrantCoordinator", () => {
         intentHash: "same-intent",
         requiresRead: true,
       };
-      expect(coordinator.consume(grant.token, expected)).toMatchObject({
+      expect(coordinator.consume(grant.token, expected, grantDomain)).toMatchObject({
         ok: false,
         reason: expect.stringContaining("superseded"),
       });
-      expect(coordinator.consume(grant.token, expected)).toMatchObject({
+      expect(coordinator.consume(grant.token, expected, grantDomain)).toMatchObject({
         ok: false,
         reason: expect.stringContaining("already consumed"),
       });
@@ -489,18 +597,18 @@ describe("PluginOperationGrantCoordinator", () => {
         intentHash: "same-intent",
         readRevision,
         expiresAt: 500,
-      }, multiOperationRequiredRead);
+      }, grantDomain, multiOperationRequiredRead);
       const firstRead = coordinator.recordRead({
         ...principal,
         readTool: requiredRead.readTool,
         readOperation: "today",
-      });
+      }, grantDomain);
       const firstGrant = issue(firstRead);
       const secondRead = coordinator.recordRead({
         ...principal,
         readTool: requiredRead.readTool,
         readOperation: supersedingOperation,
-      });
+      }, grantDomain);
       const secondGrant = issue(secondRead);
       const expected = {
         ...principal,
@@ -510,11 +618,11 @@ describe("PluginOperationGrantCoordinator", () => {
         requiresRead: true,
       };
 
-      expect(coordinator.consume(firstGrant.token, expected)).toMatchObject({
+      expect(coordinator.consume(firstGrant.token, expected, grantDomain)).toMatchObject({
         ok: false,
         reason: expect.stringContaining("superseded"),
       });
-      expect(coordinator.consume(secondGrant.token, expected)).toEqual({
+      expect(coordinator.consume(secondGrant.token, expected, grantDomain)).toEqual({
         ok: true,
         grantId: secondGrant.grantId,
       });
@@ -528,7 +636,7 @@ describe("PluginOperationGrantCoordinator", () => {
       ...principal,
       readTool: requiredRead.readTool,
       readOperation: "today",
-    });
+    }, grantDomain);
     const grant = coordinator.issue({
       ...principal,
       toolName: "ep_attendance_write",
@@ -536,7 +644,7 @@ describe("PluginOperationGrantCoordinator", () => {
       intentHash: "same-intent",
       readRevision,
       expiresAt: 5_000,
-    }, requiredRead);
+    }, grantDomain, requiredRead);
 
     now += requiredRead.maxAgeMs + 1;
     expect(coordinator.consume(grant.token, {
@@ -545,7 +653,7 @@ describe("PluginOperationGrantCoordinator", () => {
       operation: "clock",
       intentHash: "same-intent",
       requiresRead: true,
-    })).toMatchObject({
+    }, grantDomain)).toMatchObject({
       ok: false,
       reason: expect.stringContaining("stale"),
     });

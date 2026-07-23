@@ -53,6 +53,7 @@ import {
   type BootPreflightOutcome,
   type PluginIntegrityCheckResult,
 } from "./runtime-preflight.js";
+import { commitAtomicPluginRemoval } from "./atomic-removal.js";
 
 const log = createLogger("plugin-runtime");
 
@@ -912,20 +913,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     // generation is invalidated, uninstall does not wait for a dependency
     // preparation or start Promise that may never settle; any late replacement
     // continuation can only clean its private disposer list.
-    // Plugin may be in one of three states when uninstall is requested:
-    //   - loaded (`this.plugins` has it) → run stop + dispose, then clean
-    //     all tracking maps below
-    //   - failed-load (in `failedPluginIds` / `failedPluginStubs` /
-    //     `knownPluginManifests` but NOT in `this.plugins`) → skip the
-    //     stop/dispose path but still clean tracking so `listPluginCards`
-    //     stops surfacing a stale entry after marketplace registry purge
-    //   - not tracked at all (no-op)
-    //
-    // Pre-fix: an early `return` when `this.plugins` lacked the entry
-    // left failed-load plugins in `failedPluginStubs` / `knownPluginManifests`
-    // forever — UI showed the ghost card and a second uninstall click hit
-    // `Plugin not found` from the deployment guard against the already-purged
-    // marketplace registry.
+    // Loaded plugins retire before cleanup. Failed-load and disabled plugins
+    // skip stop/dispose but still purge every tracking map so the UI cannot
+    // retain a ghost card after marketplace removal. Unknown ids are a no-op.
     const plugin = this.plugins.get(canonicalPluginId);
     let retirementError: unknown;
     if (plugin) {
@@ -1580,48 +1570,24 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   ): Promise<T> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     const generationLifecycle = this.requireGenerationLifecycle("atomic plugin removal");
-    return generationLifecycle.runInLifecycleQueue(canonicalPluginId, async () => {
-      const loaded = this.plugins.has(canonicalPluginId);
-      const known =
-        loaded
-        || this.knownPluginManifests.has(canonicalPluginId)
-        || this.failedPluginIds.has(canonicalPluginId)
-        || this.failedPluginStubs.has(canonicalPluginId)
-        || this.disabledPluginIds.has(canonicalPluginId)
-        || this.inactivePluginIds.has(canonicalPluginId);
-      if (!known) {
-        throw new Error(`cannot atomically remove unknown plugin: ${pluginId}`);
-      }
-
-      let result: T;
-      let retirementError: unknown;
-      if (loaded) {
-        const committed = await generationLifecycle.deactivateWithCommit(
-          canonicalPluginId,
-          durableCommit,
-        );
-        result = committed.result;
-        retirementError = await this.captureCommittedRetirementFailure(
-          canonicalPluginId,
-          committed.retirement,
-          "atomic plugin removal",
-        );
-      } else {
-        if (generationLifecycle.getActive(canonicalPluginId)) {
-          throw new Error(
-            `atomic plugin removal found active generation without loaded runtime: ${canonicalPluginId}`,
-          );
-        }
-        result = await durableCommit();
-      }
-
-      // The inactive pointer is already published, or no active generation
-      // existed. Purge durable runtime tracking and fire host cleanup before
-      // returning the marketplace commit result.
-      await this.removePlugin(canonicalPluginId);
-      if (retirementError !== undefined) throw retirementError;
-      return result;
-    });
+    return generationLifecycle.runInLifecycleQueue(canonicalPluginId, () =>
+      commitAtomicPluginRemoval({
+        requestedPluginId: pluginId,
+        loaded: this.plugins.has(canonicalPluginId),
+        known: this.hasTrackedPluginState(canonicalPluginId),
+        hasActiveGeneration: () => Boolean(generationLifecycle.getActive(canonicalPluginId)),
+        durableCommit,
+        deactivateWithCommit: () =>
+          generationLifecycle.deactivateWithCommit(canonicalPluginId, durableCommit),
+        captureRetirementFailure: (retirement) =>
+          this.captureCommittedRetirementFailure(
+            canonicalPluginId,
+            retirement,
+            "atomic plugin removal",
+          ),
+        purgeRuntimeState: () => this.removePlugin(canonicalPluginId),
+      }),
+    );
   }
 
   // ─── Dispatcher / Bridge ───────────────────────────────────────────────────

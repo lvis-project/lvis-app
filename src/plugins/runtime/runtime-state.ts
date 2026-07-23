@@ -170,6 +170,15 @@ export abstract class PluginRuntimeState {
     opts?: { skipPreparation?: boolean; cacheBust?: boolean; shouldCommit?: () => boolean },
   ): Promise<SinglePluginStartResult>;
 
+  protected hasTrackedPluginState(pluginId: string): boolean {
+    return this.plugins.has(pluginId)
+      || this.knownPluginManifests.has(pluginId)
+      || this.failedPluginIds.has(pluginId)
+      || this.failedPluginStubs.has(pluginId)
+      || this.disabledPluginIds.has(pluginId)
+      || this.inactivePluginIds.has(pluginId);
+  }
+
   constructor(options: PluginRuntimeOptions) {
     this.hostRoot = resolve(options.hostRoot);
     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));

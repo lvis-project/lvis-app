@@ -117,7 +117,13 @@ export interface AuditCommon {
   pluginOperation?: {
     pluginId: string;
     operation: string;
-    outcome: "issued" | "denied" | "consumed" | "rejected";
+    outcome:
+      | "issued"
+      | "denied"
+      | "consumed"
+      | "rejected"
+      | "indeterminate"
+      | "settled";
     grantId?: string;
   };
 

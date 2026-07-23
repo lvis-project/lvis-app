@@ -462,11 +462,8 @@ export async function runToolInvocation(
           finalInput,
           operationOrigin,
         );
-        if (operationOrigin === "ui" || operationOrigin === "mcp-app") {
-          const hostContext = permissionContext?.pluginOperation;
-          if (!hostContext || !tool.pluginId) {
-            throw new Error("host-derived app operation identity is missing");
-          }
+        const hostContext = permissionContext?.pluginOperation;
+        if (hostContext && tool.pluginId) {
           pluginOperationPrincipal = {
             ownerPluginId: tool.pluginId,
             ownerVersion: hostContext.ownerVersion,
@@ -474,6 +471,8 @@ export async function runToolInvocation(
             appSessionId: hostContext.appSessionId,
             accountHash: hostContext.accountHash,
           };
+        } else {
+          throw new Error("host-derived operation identity is missing");
         }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
