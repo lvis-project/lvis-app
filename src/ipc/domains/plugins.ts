@@ -1824,6 +1824,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       assetEntryUrl: versionedAssetEntryUrl,
       appSessionId: `plugin-ui:${webContentsId}:${randomUUID()}`,
     };
+    const previousBinding = pluginWebviewRegistry.get(webContentsId);
+    if (previousBinding) {
+      deps.revokePluginOperationSession(previousBinding.appSessionId);
+    }
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
