@@ -992,6 +992,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     ) {
       log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
       this.knownInstallAliases.delete(canonicalPluginId);
+      this.knownInstallClaims.delete(canonicalPluginId);
       this.configStore.delete(canonicalPluginId);
       return;
     } else {
@@ -1016,6 +1017,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.disabledPluginIds.delete(canonicalPluginId);
     this.pluginUiRevisions.delete(canonicalPluginId);
     this.knownInstallAliases.delete(canonicalPluginId);
+    this.knownInstallClaims.delete(canonicalPluginId);
 
     this.onDisable?.(canonicalPluginId);
   }

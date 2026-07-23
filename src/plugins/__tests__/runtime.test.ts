@@ -1625,6 +1625,58 @@ export default async function createPlugin({ hostApi }) {
     expect(runtime.listToolNames()).toEqual([]);
   });
 
+  it("rejects a registry artifact added over a loaded static canonical identity", async () => {
+    const canonicalId = "p-live-static-canonical";
+    const staticManifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-live-static-artifact",
+      "static",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      manifestPaths: [staticManifestPath],
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    await runtime.startAll();
+
+    const registryManifestPath = await writePluginArtifact(
+      canonicalId,
+      "p-live-registry-artifact",
+      "registry",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: canonicalId,
+          manifestPath: registryManifestPath,
+          enabled: true,
+        }],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin(canonicalId)).rejects.toMatchObject({
+      code: "plugin-identity-collision",
+      message: expect.stringContaining(canonicalId),
+    });
+    expect(runtime.listPluginIds()).toEqual([canonicalId]);
+    expect(runtime.listToolNames()).toContain(
+      `${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`,
+    );
+    expect(runtime.listToolNames()).not.toContain(
+      `${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_registry`,
+    );
+  });
+
   it.each([
     ["valid entry first", false],
     ["failed entry first", true],

@@ -80,6 +80,7 @@ export abstract class PluginRuntimeState {
   protected readonly knownPluginManifests = new Map<string, PluginManifest>();
   protected readonly knownPluginAccessGrants = new Map<string, PluginAccessSpec | undefined>();
   protected readonly knownInstallAliases = new Map<string, Set<string>>();
+  protected readonly knownInstallClaims = new Map<string, string | null>();
   protected readonly knownToolOwners = new Map<string, string>();
   protected readonly knownEventOwners = new Map<string, string>();
   protected readonly failedPluginIds = new Set<string>();
@@ -416,12 +417,13 @@ export abstract class PluginRuntimeState {
 
   protected rememberPluginInstallAlias(pluginId: string, alias: string | undefined): void {
     const normalizedPluginId = pluginId.trim();
-    const normalizedAlias = alias?.trim();
-    if (!normalizedPluginId || !normalizedAlias) return;
+    const normalizedAlias = alias?.trim() || undefined;
+    if (!normalizedPluginId) return;
     this.assertPluginIdentityNamespace([
       { pluginId: normalizedPluginId, alias: normalizedAlias },
     ]);
-    if (normalizedAlias === normalizedPluginId) return;
+    this.knownInstallClaims.set(normalizedPluginId, normalizedAlias ?? null);
+    if (!normalizedAlias || normalizedAlias === normalizedPluginId) return;
     let aliases = this.knownInstallAliases.get(normalizedPluginId);
     if (!aliases) {
       aliases = new Set<string>();
@@ -453,6 +455,7 @@ export abstract class PluginRuntimeState {
       ...this.knownPluginManifests.keys(),
       ...this.plugins.keys(),
       ...this.knownInstallAliases.keys(),
+      ...this.knownInstallClaims.keys(),
     ]);
     const canonicalIds = new Set([
       ...existingCanonicalIds,
@@ -491,16 +494,19 @@ export abstract class PluginRuntimeState {
           `canonical id for '${pluginId}' and install alias for '${aliasOwner}'`,
         );
       }
-      if (existingCanonicalIds.has(pluginId) && alias) {
-        const knownAliases = this.knownInstallAliases.get(pluginId);
-        const reusesKnownIdentity =
-          alias === pluginId
-            ? !knownAliases || knownAliases.size === 0
-            : knownAliases?.has(alias) === true;
+      if (existingCanonicalIds.has(pluginId)) {
+        const incomingClaim = alias ?? null;
+        const reusesKnownIdentity = this.knownInstallClaims.has(pluginId)
+          ? this.knownInstallClaims.get(pluginId) === incomingClaim
+          : !alias
+            ? !(this.knownInstallAliases.get(pluginId)?.size)
+            : alias === pluginId
+            ? !(this.knownInstallAliases.get(pluginId)?.size)
+            : this.knownInstallAliases.get(pluginId)?.has(alias) === true;
         if (!reusesKnownIdentity) {
           throw this.pluginIdentityCollision(
-            alias,
-            `new install alias for existing canonical id '${pluginId}'`,
+            alias ?? pluginId,
+            `new artifact claim for existing canonical id '${pluginId}'`,
           );
         }
       }
@@ -696,6 +702,7 @@ export abstract class PluginRuntimeState {
     this.knownPluginManifests.clear();
     this.knownPluginAccessGrants.clear();
     this.knownInstallAliases.clear();
+    this.knownInstallClaims.clear();
     this.knownToolOwners.clear();
     this.knownEventOwners.clear();
     this.plugins.clear();
