@@ -92,6 +92,7 @@ type ConfigHostApi = {
   };
   emitEvent: (type: string, data?: unknown) => void;
   onEvent: (type: string, handler: (data: unknown) => void) => () => void;
+  getSecret: (key: string) => string | undefined | null;
 };
 
 type CreateHostApi = (
@@ -101,8 +102,14 @@ type CreateHostApi = (
     config?: Record<string, unknown>;
     configSchema?: { properties?: Record<string, { type?: string; format?: string; default?: unknown }> };
     capabilities?: string[];
+    emittedEvents?: string[];
   },
   pluginDataDir: string,
+  incarnation?: {
+    registerDisposer: (dispose: () => void) => void;
+    isActive: () => boolean;
+    isLifecycleHookActive: () => boolean;
+  },
 ) => ConfigHostApi;
 
 async function initAndGetFactory(settingsService: unknown): Promise<CreateHostApi> {
@@ -151,6 +158,14 @@ function makeSettingsService(store: Map<string, Record<string, unknown>>) {
   };
 }
 
+function activeIncarnation() {
+  return {
+    registerDisposer: vi.fn(),
+    isActive: () => true,
+    isLifecycleHookActive: () => false,
+  };
+}
+
 beforeEach(() => {
   runtimeTestState.readPluginRegistry.mockReset();
   runtimeTestState.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
@@ -171,6 +186,7 @@ describe("HostApi.config.get merged-read precedence", () => {
       "plugin-a",
       { id: "plugin-a", config: { a: "m", shared: "m" } },
       mkdtempSync("/tmp/lvis-cfg-"),
+      activeIncarnation(),
     );
 
     expect(api.config.get("a")).toBe("m");
@@ -199,6 +215,7 @@ describe("HostApi.config.get merged-read precedence", () => {
         },
       },
       mkdtempSync("/tmp/lvis-cfg-def-"),
+      activeIncarnation(),
     );
 
     // Unset schema-defaulted key now returns the author-declared default
@@ -280,6 +297,7 @@ describe("HostApi.config.set round-trip", () => {
     expect(settings.setPluginConfig).not.toHaveBeenCalled();
 
     runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+    expect(() => api.config.get("k")).toThrow(/plugin instance is no longer active/);
     release();
     await uninstall;
     await expect(write).rejects.toThrow(/plugin instance is no longer active/);
@@ -336,7 +354,12 @@ describe("HostApi.config.set round-trip", () => {
 describe("HostApi emitEvent/onEvent round-trip", () => {
   it("delivers an emitted event to a same-plugin subscriber with the pluginId injected, and unsubscribe stops delivery", async () => {
     const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
-    const api = createHostApi("plugin-a", { id: "plugin-a", config: {}, capabilities: [] }, mkdtempSync("/tmp/lvis-evt-"));
+    const api = createHostApi(
+      "plugin-a",
+      { id: "plugin-a", config: {}, capabilities: [] },
+      mkdtempSync("/tmp/lvis-evt-"),
+      activeIncarnation(),
+    );
 
     const handler = vi.fn();
     const unsubscribe = api.onEvent("plugin-a.updated", handler);
@@ -348,5 +371,27 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     unsubscribe();
     api.emitEvent("plugin-a.updated", { value: 8 });
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("revokes every callable HostApi surface when its incarnation is deactivated", async () => {
+    const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
+    let active = true;
+    const api = createHostApi(
+      "plugin-a",
+      { id: "plugin-a", config: {}, emittedEvents: ["plugin-a.updated"] },
+      mkdtempSync("/tmp/lvis-revoked-hostapi-"),
+      {
+        registerDisposer: vi.fn(),
+        isActive: () => active,
+        isLifecycleHookActive: () => false,
+      },
+    );
+    expect(api.config.get("before")).toBeUndefined();
+
+    active = false;
+    expect(() => api.config.get("after")).toThrow(/plugin instance is no longer active/);
+    expect(() => api.getSecret("token")).toThrow(/plugin instance is no longer active/);
+    expect(() => api.emitEvent("plugin-a.updated", {})).toThrow(/plugin instance is no longer active/);
+    expect(() => api.onEvent("plugin-a.updated", vi.fn())).toThrow(/plugin instance is no longer active/);
   });
 });

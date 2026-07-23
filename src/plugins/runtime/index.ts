@@ -28,7 +28,11 @@ import { updatePluginRegistry } from "../registry.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
 import { sessionContext } from "../../engine/session-context.js";
-import { runStartWithTimeout, SessionActivationTracker } from "./lifecycle-timeout.js";
+import {
+  runPluginFactoryWithTimeout,
+  runStartWithTimeout,
+  SessionActivationTracker,
+} from "./lifecycle-timeout.js";
 
 import {
   readEnabledManifestSnapshots,
@@ -59,7 +63,7 @@ const log = createLogger("plugin-runtime");
  */
 export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
-export { runStartWithTimeout };
+export { runPluginFactoryWithTimeout, runStartWithTimeout };
 export type { PluginPerfStats };
 
 export type { InstallPolicy };
@@ -749,6 +753,16 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
     return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
+  }
+
+  /** Canonical lifecycle identity for a marketplace/install alias. */
+  resolvePluginId(pluginId: string): string {
+    return this.resolveKnownPluginId(pluginId);
+  }
+
+  /** Final uninstall cleanup after stop-hook mutations have drained. */
+  clearConfigOverride(pluginId: string): void {
+    this.configStore.delete(this.resolveKnownPluginId(pluginId));
   }
 
   getApprovedPluginAccess(pluginId: string): PluginAccessSpec | undefined {

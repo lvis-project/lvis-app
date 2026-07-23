@@ -234,6 +234,57 @@ export default async function createPlugin() {
     await expect(runtime.call("lc_restart_timeout_ping")).resolves.toBe("old-still-live");
   });
 
+  it("revokes and unadvertises the old instance when its stop hook times out", async () => {
+    const pluginDir = join(installedDir, "lc-stop-timeout");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: { lc_stop_timeout_ping: async () => "pong" },
+    stop: async () => new Promise(() => {}),
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "lc-stop-timeout",
+        name: "Stop Timeout",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [{
+          name: "lc_stop_timeout_ping",
+          description: "stop timeout regression tool",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        }],
+        description: "Stop timeout regression.",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "lc-stop-timeout", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await expect(runtime.call("lc_stop_timeout_ping")).resolves.toBe("pong");
+
+    await expect(runtime.restartPlugin("lc-stop-timeout")).resolves.toBe("failed");
+
+    expect(runtime.listPluginIds()).not.toContain("lc-stop-timeout");
+    await expect(runtime.call("lc_stop_timeout_ping")).rejects.toThrow(/failed|not found/i);
+  }, 10_000);
+
   it("restartPlugin re-imports the latest on-disk module (ESM cache-bust)", async () => {
     // 회귀 가드: Node ESM 로더는 import URL 로 모듈을 메모이즈하므로,
     // `?reload=<ts>` 쿼리 없이 같은 file:// URL 을 다시 import 하면 옛

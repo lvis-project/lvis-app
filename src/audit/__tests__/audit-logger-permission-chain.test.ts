@@ -18,6 +18,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -32,9 +33,12 @@ vi.mock("node:os", async (importOriginal) => {
 import { AuditLogger } from "../audit-logger.js";
 import {
   buildChainedEntries,
+  computeDailySeal,
   computeLineHmac,
   GENESIS_MARKER,
   MemorySecretStore,
+  sealKeyName,
+  type SecretStore,
   verifyChain,
 } from "../hmac-chain.js";
 import {
@@ -365,7 +369,7 @@ describe("AuditLogger permission audit chain", () => {
     expect(rebooted.isPermissionAuditChainReady()).toBe(false);
   });
 
-  it("anchors a legacy tail in the seal store before accepting privileged writes", async () => {
+  it("archives an unsealed legacy tail instead of trust-on-first-use anchoring it", async () => {
     const logger = new AuditLogger();
     const file = logger.getPermissionAuditLogFile();
     const legacy = {
@@ -378,14 +382,136 @@ describe("AuditLogger permission audit chain", () => {
     writeFileSync(file, `${JSON.stringify(legacy)}\n`, "utf-8");
     const seals = new MemorySecretStore();
     await logger.setupPermissionAuditChain(SECRET, seals);
+    const archiveName = readdirSync(auditDir).find((name) =>
+      name.includes("permission-audit.legacy-unverified-"),
+    );
+    expect(archiveName).toBeDefined();
+    expect(readFileSync(join(auditDir, archiveName!), "utf-8"))
+      .toBe(`${JSON.stringify(legacy)}\n`);
+    expect(existsSync(file)).toBe(false);
 
-    legacy.auditId = "legacy-tail-tampered";
-    writeFileSync(file, `${JSON.stringify(legacy)}\n`, "utf-8");
+    const appended = await logger.appendPermissionAuditEntry({
+      decision: "allow",
+      auditId: "fresh-epoch",
+      ts: "2026-05-09T00:00:01.000Z",
+      trustOrigin: "user-keyboard",
+      tool: "fs_read",
+      source: "builtin",
+      category: "read",
+      layer: 1,
+    });
+    expect(appended.prevHash).toBe(computeLineHmac(SECRET, GENESIS_MARKER));
+  });
+
+  it("accepts a legacy tail only when a pre-existing external seal authenticates it", async () => {
+    const logger = new AuditLogger();
+    const file = logger.getPermissionAuditLogFile();
+    const legacy = JSON.stringify({
+      decision: "allow",
+      auditId: "externally-sealed-legacy",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      prevHash: computeLineHmac(SECRET, GENESIS_MARKER),
+    });
+    writeFileSync(file, `${legacy}\n`, "utf-8");
+    const seals = new MemorySecretStore();
+    const date = file.split("/").at(-1)!.slice(0, 10);
+    seals.write(sealKeyName(date), computeDailySeal(SECRET, legacy));
+
+    await expect(logger.setupPermissionAuditChain(SECRET, seals)).resolves.toBeUndefined();
+    expect(logger.isPermissionAuditChainReady()).toBe(true);
+  });
+
+  it("recovers a self-authenticated fsynced row after its seal write was interrupted", async () => {
+    const backing = new MemorySecretStore();
+    let failNextWrite = false;
+    const seals: SecretStore = {
+      read: (name, maxBytes) => backing.read(name, maxBytes),
+      write: (name, value) => {
+        if (failNextWrite) {
+          failNextWrite = false;
+          throw new Error("simulated seal commit interruption");
+        }
+        backing.write(name, value);
+      },
+    };
+    const logger = new AuditLogger();
+    await logger.setupPermissionAuditChain(SECRET, seals);
+    failNextWrite = true;
+    await expect(logger.appendPermissionAuditEntry({
+      decision: "allow",
+      auditId: "fsynced-before-seal",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      tool: "fs_read",
+      source: "builtin",
+      category: "read",
+      layer: 1,
+    })).rejects.toThrow("simulated seal commit interruption");
+
     const rebooted = new AuditLogger();
-    await expect(
-      rebooted.setupPermissionAuditChain(SECRET, seals),
-    ).rejects.toThrow(/active-tail seal mismatch/);
-    expect(rebooted.isPermissionAuditChainReady()).toBe(false);
+    await expect(rebooted.setupPermissionAuditChain(SECRET, seals)).resolves.toBeUndefined();
+    expect(rebooted.isPermissionAuditChainReady()).toBe(true);
+    expect(() => rebooted.assertPermissionAuditWritable()).not.toThrow();
+  });
+
+  it("rolls to a fresh UTC audit file and re-verifies an older epoch before reuse", async () => {
+    let now = new Date("2026-07-23T23:59:59.000Z");
+    const seals = new MemorySecretStore();
+    const logger = new AuditLogger(undefined, { now: () => now });
+    await logger.setupPermissionAuditChain(SECRET, seals);
+    await logger.appendPermissionAuditEntry({
+      decision: "allow", auditId: "day-a", ts: now.toISOString(),
+      trustOrigin: "user-keyboard", tool: "fs_read", source: "builtin",
+      category: "read", layer: 1,
+    });
+    const dayAPath = logger.getPermissionAuditLogFile();
+
+    now = new Date("2026-07-24T00:00:01.000Z");
+    expect(() => logger.assertPermissionAuditWritable()).not.toThrow();
+    await logger.appendPermissionAuditEntry({
+      decision: "allow", auditId: "day-b", ts: now.toISOString(),
+      trustOrigin: "user-keyboard", tool: "fs_read", source: "builtin",
+      category: "read", layer: 1,
+    });
+    const dayBPath = logger.getPermissionAuditLogFile();
+    expect(dayBPath).not.toBe(dayAPath);
+
+    const tampered = JSON.parse(readFileSync(dayAPath, "utf-8").trim()) as { auditId: string };
+    tampered.auditId = "tampered-day-a";
+    writeFileSync(dayAPath, `${JSON.stringify(tampered)}\n`, "utf-8");
+    now = new Date("2026-07-23T23:59:59.500Z");
+    await expect(logger.appendPermissionAuditEntry({
+      decision: "allow", auditId: "day-a-return", ts: now.toISOString(),
+      trustOrigin: "user-keyboard", tool: "fs_read", source: "builtin",
+      category: "read", layer: 1,
+    })).rejects.toThrow(/entry-hmac-mismatch/);
+  });
+
+  it("serializes concurrent appends across a UTC epoch transition", async () => {
+    let now = new Date("2026-07-23T23:59:59.000Z");
+    const seals = new MemorySecretStore();
+    const logger = new AuditLogger(undefined, { now: () => now });
+    await logger.setupPermissionAuditChain(SECRET, seals);
+
+    now = new Date("2026-07-24T00:00:01.000Z");
+    const entries = await Promise.all([
+      logger.appendPermissionAuditEntry({
+        decision: "allow", auditId: "rollover-a", ts: now.toISOString(),
+        trustOrigin: "user-keyboard", tool: "fs_read", source: "builtin",
+        category: "read", layer: 1,
+      }),
+      logger.appendPermissionAuditEntry({
+        decision: "allow", auditId: "rollover-b", ts: now.toISOString(),
+        trustOrigin: "user-keyboard", tool: "fs_read", source: "builtin",
+        category: "read", layer: 1,
+      }),
+    ]);
+
+    expect(entries.map((entry) => entry.auditId).sort())
+      .toEqual(["rollover-a", "rollover-b"]);
+    expect(readFileSync(logger.getPermissionAuditLogFile(), "utf-8").trim().split("\n"))
+      .toHaveLength(2);
   });
 
   it("rejects an unterminated active JSONL tail", async () => {

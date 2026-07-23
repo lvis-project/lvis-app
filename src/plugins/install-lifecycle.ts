@@ -5,11 +5,19 @@ import { AsyncLocalStorage } from "node:async_hooks";
 const inflightInstallLocks = new Map<string, Promise<unknown>>();
 interface HeldPluginInstallLock {
   active: boolean;
-  pendingReentrantOperations: Set<Promise<unknown>>;
+  pendingReentrantOperations: Set<TrackedReentrantOperation>;
+  reentrantFailures: unknown[];
+}
+
+interface TrackedReentrantOperation {
+  promise: Promise<unknown>;
+  parent?: TrackedReentrantOperation;
 }
 
 const heldPluginInstallLocks = new AsyncLocalStorage<ReadonlyMap<string, HeldPluginInstallLock>>();
+const currentReentrantOperation = new AsyncLocalStorage<TrackedReentrantOperation>();
 const ALL_PLUGIN_LOCK_KEY = "\0all-plugins";
+const PLUGIN_LIFECYCLE_DRAIN_TIMEOUT_MS = 10_000;
 let exclusiveLifecycleTail: Promise<void> = Promise.resolve();
 let queuedExclusiveLifecycleMutations = 0;
 let activePluginLifecycleMutations = 0;
@@ -25,6 +33,16 @@ class AppUpdateInstallInProgressError extends Error {
 
   constructor() {
     super(APP_UPDATE_INSTALL_IN_PROGRESS_MESSAGE);
+  }
+}
+
+class PluginLifecycleDrainTimeoutError extends Error {
+  readonly code = "plugin-lifecycle-drain-timeout";
+
+  constructor() {
+    super(
+      `Detached plugin lifecycle mutation did not settle within ${PLUGIN_LIFECYCLE_DRAIN_TIMEOUT_MS}ms`,
+    );
   }
 }
 
@@ -93,16 +111,28 @@ interface InstallLifecycleLogger {
  * addPlugin -> rollback-if-needed sequence for a plugin across IPC and
  * protocol install paths.
  */
-export async function withPluginInstallLock<T>(
+export function withPluginInstallLock<T>(
   pluginId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  assertAppUpdateInstallNotRequested();
+  try {
+    assertAppUpdateInstallNotRequested();
+  } catch (err) {
+    return Promise.reject(err);
+  }
   const heldLocks = heldPluginInstallLocks.getStore();
-  const heldLock = heldLocks?.get(ALL_PLUGIN_LOCK_KEY) ?? heldLocks?.get(pluginId);
-  if (heldLock?.active) {
+  const heldLock = selectActiveHeldLock(heldLocks, pluginId);
+  if (heldLock) {
     return trackReentrantOperation(heldLock, fn);
   }
+  return acquirePluginInstallLock(pluginId, fn, heldLocks);
+}
+
+async function acquirePluginInstallLock<T>(
+  pluginId: string,
+  fn: () => Promise<T>,
+  heldLocks: ReadonlyMap<string, HeldPluginInstallLock> | undefined,
+): Promise<T> {
   while (true) {
     const exclusiveGate = exclusiveLifecycleTail;
     await exclusiveGate;
@@ -118,24 +148,11 @@ export async function withPluginInstallLock<T>(
   });
   const tail = prev.then(() => next);
   inflightInstallLocks.set(pluginId, tail);
-  try {
-    await prev;
-    assertAppUpdateInstallNotRequested();
-    const token: HeldPluginInstallLock = {
-      active: true,
-      pendingReentrantOperations: new Set(),
-    };
-    const nextHeldLocks = new Map(heldLocks ?? []);
-    nextHeldLocks.set(pluginId, token);
-    try {
-      return await heldPluginInstallLocks.run(nextHeldLocks, fn);
-    } finally {
-      await drainReentrantOperations(token);
-      // Detached async resources inherit AsyncLocalStorage. Once the owner
-      // exits they must not be treated as re-entrant lock holders.
-      token.active = false;
-    }
-  } finally {
+  let releaseDeferred = false;
+  let finalized = false;
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
     release();
     pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
     activePluginLifecycleMutations = Math.max(0, activePluginLifecycleMutations - 1);
@@ -146,6 +163,42 @@ export async function withPluginInstallLock<T>(
     if (inflightInstallLocks.get(pluginId) === tail) {
       inflightInstallLocks.delete(pluginId);
     }
+  };
+  try {
+    await prev;
+    assertAppUpdateInstallNotRequested();
+    const token: HeldPluginInstallLock = {
+      active: true,
+      pendingReentrantOperations: new Set(),
+      reentrantFailures: [],
+    };
+    const nextHeldLocks = copyActiveHeldLocks(heldLocks);
+    nextHeldLocks.set(pluginId, token);
+    try {
+      return await heldPluginInstallLocks.run(nextHeldLocks, fn);
+    } finally {
+      try {
+        await drainReentrantOperations(token);
+        token.active = false;
+      } catch (err) {
+        if (err instanceof PluginLifecycleDrainTimeoutError) {
+          // Fail the caller within a bounded time, but retain the lock token and
+          // queue position until the already-started mutation really settles.
+          // Releasing here would allow uninstall cleanup to race that stale
+          // write. This is a fail-closed quarantine, not an event-loop wait.
+          releaseDeferred = true;
+          void settleReentrantOperations(token).finally(() => {
+            token.active = false;
+            finalize();
+          });
+        } else {
+          token.active = false;
+        }
+        throw err;
+      }
+    }
+  } finally {
+    if (!releaseDeferred) finalize();
   }
 }
 
@@ -162,18 +215,35 @@ export function isPluginInstallLockHeld(pluginId: string): boolean {
  */
 export async function drainPluginInstallLockOperations(pluginId: string): Promise<void> {
   const held = heldPluginInstallLocks.getStore();
-  const token = held?.get(ALL_PLUGIN_LOCK_KEY) ?? held?.get(pluginId);
-  if (!token?.active) return;
+  const token = selectActiveHeldLock(held, pluginId);
+  if (!token) return;
   await drainReentrantOperations(token);
 }
 
 /** Serialize a multi-plugin artifact mutation plus its full runtime rebuild. */
-export async function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promise<T> {
+export function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promise<T> {
   const heldLocks = heldPluginInstallLocks.getStore();
   const heldAllLock = heldLocks?.get(ALL_PLUGIN_LOCK_KEY);
   if (heldAllLock?.active) return trackReentrantOperation(heldAllLock, fn);
-  assertAppUpdateInstallNotRequested();
+  if ([...(heldLocks?.entries() ?? [])].some(([key, token]) =>
+    key !== ALL_PLUGIN_LOCK_KEY && token.active
+  )) {
+    return Promise.reject(
+      new Error("Cannot upgrade a held per-plugin lifecycle lock to the all-plugin lock"),
+    );
+  }
+  try {
+    assertAppUpdateInstallNotRequested();
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  return acquireAllPluginInstallLocks(fn, heldLocks);
+}
 
+async function acquireAllPluginInstallLocks<T>(
+  fn: () => Promise<T>,
+  heldLocks: ReadonlyMap<string, HeldPluginInstallLock> | undefined,
+): Promise<T> {
   const previousExclusive = exclusiveLifecycleTail;
   const canEnterSynchronously =
     queuedExclusiveLifecycleMutations === 0 && activePluginLifecycleMutations === 0;
@@ -192,21 +262,43 @@ export async function withAllPluginInstallLocks<T>(fn: () => Promise<T>): Promis
   const token: HeldPluginInstallLock = {
     active: true,
     pendingReentrantOperations: new Set(),
+    reentrantFailures: [],
   };
-  const nextHeldLocks = new Map(heldLocks ?? []);
+  const nextHeldLocks = copyActiveHeldLocks(heldLocks);
   nextHeldLocks.set(ALL_PLUGIN_LOCK_KEY, token);
-  try {
-    assertAppUpdateInstallNotRequested();
-    return await heldPluginInstallLocks.run(nextHeldLocks, fn);
-  } finally {
-    await drainReentrantOperations(token);
-    token.active = false;
+  let releaseDeferred = false;
+  let finalized = false;
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
     pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
     queuedExclusiveLifecycleMutations = Math.max(
       0,
       queuedExclusiveLifecycleMutations - 1,
     );
     releaseExclusive();
+  };
+  try {
+    assertAppUpdateInstallNotRequested();
+    return await heldPluginInstallLocks.run(nextHeldLocks, fn);
+  } finally {
+    try {
+      await drainReentrantOperations(token);
+      token.active = false;
+    } catch (err) {
+      if (err instanceof PluginLifecycleDrainTimeoutError) {
+        releaseDeferred = true;
+        void settleReentrantOperations(token).finally(() => {
+          token.active = false;
+          finalize();
+        });
+      } else {
+        token.active = false;
+      }
+      throw err;
+    } finally {
+      if (!releaseDeferred) finalize();
+    }
   }
 }
 
@@ -214,24 +306,80 @@ function trackReentrantOperation<T>(
   token: HeldPluginInstallLock,
   fn: () => Promise<T>,
 ): Promise<T> {
-  let operation: Promise<T>;
-  try {
-    operation = Promise.resolve(fn());
-  } catch (err) {
-    operation = Promise.reject(err);
-  }
-  token.pendingReentrantOperations.add(operation);
+  const tracked = {} as TrackedReentrantOperation;
+  const parent = currentReentrantOperation.getStore();
+  if (parent) tracked.parent = parent;
+  const operation = Promise.resolve().then(() =>
+    currentReentrantOperation.run(tracked, fn),
+  );
+  tracked.promise = operation;
+  token.pendingReentrantOperations.add(tracked);
   void operation.then(
-    () => token.pendingReentrantOperations.delete(operation),
-    () => token.pendingReentrantOperations.delete(operation),
+    () => token.pendingReentrantOperations.delete(tracked),
+    (err) => {
+      token.pendingReentrantOperations.delete(tracked);
+      token.reentrantFailures.push(err);
+    },
   );
   return operation;
 }
 
 async function drainReentrantOperations(token: HeldPluginInstallLock): Promise<void> {
-  while (token.pendingReentrantOperations.size > 0) {
-    await Promise.allSettled([...token.pendingReentrantOperations]);
+  const excluded = new Set<TrackedReentrantOperation>();
+  let current = currentReentrantOperation.getStore();
+  while (current) {
+    excluded.add(current);
+    current = current.parent;
   }
+  const deadline = Date.now() + PLUGIN_LIFECYCLE_DRAIN_TIMEOUT_MS;
+  while (true) {
+    const pending = [...token.pendingReentrantOperations]
+      .filter((operation) => !excluded.has(operation));
+    if (pending.length === 0) break;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new PluginLifecycleDrainTimeoutError();
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled(pending.map((operation) => operation.promise)),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new PluginLifecycleDrainTimeoutError()), remainingMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  if (token.reentrantFailures.length > 0) {
+    const failures = token.reentrantFailures.splice(0);
+    throw new AggregateError(failures, "Detached plugin lifecycle mutation failed");
+  }
+}
+
+async function settleReentrantOperations(token: HeldPluginInstallLock): Promise<void> {
+  while (token.pendingReentrantOperations.size > 0) {
+    await Promise.allSettled(
+      [...token.pendingReentrantOperations].map((operation) => operation.promise),
+    );
+  }
+}
+
+function selectActiveHeldLock(
+  heldLocks: ReadonlyMap<string, HeldPluginInstallLock> | undefined,
+  pluginId: string,
+): HeldPluginInstallLock | undefined {
+  const all = heldLocks?.get(ALL_PLUGIN_LOCK_KEY);
+  if (all?.active) return all;
+  const plugin = heldLocks?.get(pluginId);
+  return plugin?.active ? plugin : undefined;
+}
+
+function copyActiveHeldLocks(
+  heldLocks: ReadonlyMap<string, HeldPluginInstallLock> | undefined,
+): Map<string, HeldPluginInstallLock> {
+  return new Map(
+    [...(heldLocks?.entries() ?? [])].filter(([, token]) => token.active),
+  );
 }
 
 export function hasPluginInstallInFlight(): boolean {
