@@ -264,6 +264,14 @@ export class ToolExecutor {
     this.pluginOperationGrants.revokeGeneration(pluginId, generationId);
   }
 
+  revokePluginOperationAccount(
+    pluginId: string,
+    generationId: string,
+    accountHash: string,
+  ): void {
+    this.pluginOperationGrants.revokeAccount(pluginId, generationId, accountHash);
+  }
+
   private async tryUserApprovalMemorySkip(
     toolName: string,
     source: ToolSource,

@@ -56,7 +56,7 @@ interface PluginInstallRuntime {
 }
 
 interface PreparedActivationOptions {
-  activatePreparedArtifact?: (prepared: {
+  activatePreparedArtifact: (prepared: {
     pluginRoot: string;
     manifest: PluginManifest;
     receiptRaw: string;
@@ -70,14 +70,14 @@ interface PluginInstallMarketplace {
   getLiveCatalogVersion(pluginId: string): Promise<string | null>;
   install(
     pluginId: string,
-    onProgress?: (event: MarketplaceInstallerProgressEvent) => void,
-    options?: PreparedActivationOptions & {
+    onProgress: ((event: MarketplaceInstallerProgressEvent) => void) | undefined,
+    options: PreparedActivationOptions & {
       networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
     },
   ): Promise<{ pluginId: string; installed: true }>;
   rollbackPlugin(
     pluginId: string,
-    options?: PreparedActivationOptions,
+    options: PreparedActivationOptions,
   ): Promise<{ pluginId: string; rolledBackTo: string }>;
 }
 

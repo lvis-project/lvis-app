@@ -93,6 +93,26 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
     },
   });
+  const observePluginAuthResult = (
+    pluginId: string,
+    generationId: string,
+    toolName: string,
+    result: unknown,
+  ): void => {
+    const observed = pluginRuntime.observePluginAuthResult(
+      pluginId,
+      generationId,
+      toolName,
+      result,
+    );
+    if (observed.invalidatedAccountHash) {
+      pluginSurfaceExecutor.revokePluginOperationAccount(
+        pluginId,
+        generationId,
+        observed.invalidatedAccountHash,
+      );
+    }
+  };
   const invokePluginTool = async (
     toolName: string,
     payload: unknown,
@@ -127,7 +147,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           context,
         );
         if (context.ownerPluginId && context.ownerGenerationId) {
-          pluginRuntime.observePluginAuthResult(
+          observePluginAuthResult(
             context.ownerPluginId,
             context.ownerGenerationId,
             toolName,
@@ -206,7 +226,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       }
       if (Object.prototype.hasOwnProperty.call(result, "rawResult")) {
         if (ownerPluginId && context.ownerGenerationId) {
-          pluginRuntime.observePluginAuthResult(
+          observePluginAuthResult(
             ownerPluginId,
             context.ownerGenerationId,
             toolName,
@@ -216,7 +236,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
         return result.rawResult;
       }
       if (ownerPluginId && context.ownerGenerationId) {
-        pluginRuntime.observePluginAuthResult(
+        observePluginAuthResult(
           ownerPluginId,
           context.ownerGenerationId,
           toolName,
