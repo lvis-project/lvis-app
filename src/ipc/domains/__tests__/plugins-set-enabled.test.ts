@@ -94,11 +94,14 @@ describe("lvis:plugins:call", () => {
 
     const res = await invoke("lvis:plugins:call", "sample_ui_action", { id: 1 }, {
       userAction: true,
+      operationGrantToken: "opaque-token",
     });
 
     expect(res).toEqual({ ok: true });
     expect(callFromUi).toHaveBeenCalledWith("sample_ui_action", { id: 1 }, {
       userAction: true,
+      appSessionId: "plugin-ui:0:0",
+      operationGrantToken: "opaque-token",
     });
   });
 });

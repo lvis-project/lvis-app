@@ -773,7 +773,7 @@ export type LvisApi = {
   callPluginMethod: (
     m: string,
     p?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; operationGrantToken?: string },
   ) => Promise<unknown>;
   /**
    * Subscribe to plugin-emitted events forwarded by the host event bridge
