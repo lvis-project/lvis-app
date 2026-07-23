@@ -77,13 +77,7 @@ export function startPluginDevWatcher(
   for (const pluginId of opts.pluginRuntime.listPluginIds()) {
     const manifest = opts.pluginRuntime.getPluginManifest(pluginId);
     if (!manifest) continue;
-    // Watch the dist directory (parent of manifest.entry). Reuse entry to
-    // derive plugin root via runtime's internal paths is not exposed; instead
-    // we derive dist path from entry relative to a host-known plugin root by
-    // letting fs.watch accept the absolute entry directory.
-    // Callers wire pluginRuntime so getPluginInstance carries root info via
-    // manifest.entry; we use the runtime's resolvePluginEntry helper through
-    // a lookup on plugins. Simpler: watch the directory containing the entry.
+    // Watch the directory containing the resolved plugin entry.
     const entryDir = opts.pluginRuntime.getPluginEntryDir(pluginId);
     if (!entryDir) {
       localLog("warn", `[plugin-dev-watcher] skip ${pluginId}: no entryDir`);
