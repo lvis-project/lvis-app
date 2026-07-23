@@ -2,7 +2,7 @@ import AdmZip from "adm-zip";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { installAgentPackageFromMarketplace } from "../agent-installer.js";
 import { installSkillPackageFromMarketplace } from "../../skills/skill-installer.js";
@@ -11,6 +11,20 @@ import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { PluginMarketplaceItem } from "../../plugins/types.js";
 
 const TEST_INSTALL_ROOT = resolve(process.cwd(), ".lvis-package");
+const TEST_CACHE_ROOT = resolve(process.cwd(), ".lvis-package-cache");
+const TEST_AGENT_REGISTRY_PATH = resolve(process.cwd(), ".lvis-agent-registry.json");
+const TEST_SKILL_REGISTRY_PATH = resolve(process.cwd(), ".lvis-skill-registry.json");
+
+afterEach(() => {
+  for (const path of [
+    TEST_INSTALL_ROOT,
+    TEST_CACHE_ROOT,
+    TEST_AGENT_REGISTRY_PATH,
+    TEST_SKILL_REGISTRY_PATH,
+  ]) {
+    rmSync(path, { recursive: true, force: true });
+  }
+});
 
 function zipBuffer(files: Record<string, string>): Buffer {
   const zip = new AdmZip();
@@ -48,7 +62,7 @@ function makeStore(buffer: Buffer): PluginArtifactStore & {
   const installRoot = TEST_INSTALL_ROOT;
   const store = new PluginArtifactStore({
     installRoot,
-    cacheRoot: resolve(process.cwd(), ".lvis-package-cache"),
+    cacheRoot: TEST_CACHE_ROOT,
     fetcher: makeFetcher("agent"),
     publicKeys: {},
     tarballCacheBase: null,
@@ -170,7 +184,7 @@ describe("assistant package installers", () => {
       installAgentPackageFromMarketplace("reviewer", {
         fetcher: makeFetcher("agent"),
         store,
-        registryPath: resolve(process.cwd(), ".lvis-agent-registry.json"),
+        registryPath: TEST_AGENT_REGISTRY_PATH,
       }),
     ).rejects.toThrow(/empty AGENTS\.md body/);
 
@@ -187,7 +201,7 @@ describe("assistant package installers", () => {
       installSkillPackageFromMarketplace("audit", {
         fetcher: makeFetcher("skill"),
         store,
-        registryPath: resolve(process.cwd(), ".lvis-skill-registry.json"),
+        registryPath: TEST_SKILL_REGISTRY_PATH,
       }),
     ).rejects.toThrow(/empty SKILL\.md body/);
 
@@ -204,7 +218,7 @@ describe("assistant package installers", () => {
       installAgentPackageFromMarketplace("reviewer", {
         fetcher: makeFetcher("agent"),
         store,
-        registryPath: resolve(process.cwd(), ".lvis-agent-registry.json"),
+        registryPath: TEST_AGENT_REGISTRY_PATH,
       }),
     ).rejects.toThrow(/must match the package slug/);
 
@@ -221,7 +235,7 @@ describe("assistant package installers", () => {
       installSkillPackageFromMarketplace("audit", {
         fetcher: makeFetcher("skill"),
         store,
-        registryPath: resolve(process.cwd(), ".lvis-skill-registry.json"),
+        registryPath: TEST_SKILL_REGISTRY_PATH,
       }),
     ).rejects.toThrow(/must match the package slug/);
 
@@ -284,7 +298,7 @@ describe("assistant package installers", () => {
     await expect(installAgentPackageFromMarketplace("reviewer", {
       fetcher: makeFetcher("agent"),
       store: agentStore,
-      registryPath: resolve(process.cwd(), ".lvis-agent-registry.json"),
+      registryPath: TEST_AGENT_REGISTRY_PATH,
     })).rejects.toMatchObject({ code: "ARCHIVE_COMPRESSION_RATIO_EXCEEDED" });
     expect(agentStore.extractZip).not.toHaveBeenCalled();
 
@@ -295,7 +309,7 @@ describe("assistant package installers", () => {
     await expect(installSkillPackageFromMarketplace("audit", {
       fetcher: makeFetcher("skill"),
       store: skillStore,
-      registryPath: resolve(process.cwd(), ".lvis-skill-registry.json"),
+      registryPath: TEST_SKILL_REGISTRY_PATH,
     })).rejects.toMatchObject({ code: "ARCHIVE_COMPRESSION_RATIO_EXCEEDED" });
     expect(skillStore.extractZip).not.toHaveBeenCalled();
   });
