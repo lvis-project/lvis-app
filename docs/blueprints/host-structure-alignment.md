@@ -102,7 +102,13 @@ src/
 │   conversation-loop.ts      #   STAYS as class shell + assembler + re-export facade (byte-identical exports)
 │
 ├── tools/
-│   ├── executor.ts           #   STAYS as ToolExecutor facade + 7 public exports (executeAll/executeOne orchestrator stays)
+│   ├── executor.ts           #   STAYS as the stable public barrel (ToolExecutor + executor contracts)
+│   ├── executor-contract.ts  #   public invocation/result/callback contracts
+│   ├── executor-implementation.ts # constructor + batch/resume facade; delegates one invocation
+│   ├── invocation-runner.ts  #   preparation, path policy, and ordered stage orchestration
+│   ├── invocation-authorization.ts # permission/reviewer/rationale stage
+│   ├── invocation-execution.ts # rate-limit, execution, post-hook, DLP, and terminal audit stage
+│   ├── invocation-services.ts # explicit host service boundary shared by the stages
 │   ├── executor-ceiling.ts   #   UNCHANGED — owns runWithCeiling/ToolCeilingOutcome/ToolCeilingTerminationReason
 │   └── pipeline/             #   NEW — per-responsibility §4.5.6 pipeline units (path-extraction/approval-purpose/
 │                             #     audit-entries/display-mask/rate-limiter/reviewer-dispatch/
@@ -169,7 +175,7 @@ Each file's exact preserved-export set, extraction variant, and danger zones are
 | File | Variant | Danger zones (test-gated) |
 |---|---|---|
 | conversation-loop.ts | extract-to-free-fn + class stays assembler | Wave-4 `run-turn`/`query-loop` implicit `lastRound*/lastContext*` token-projection contract + turn-local closures migrate as one turn-context |
-| executor.ts | extract-to-free-fn (7 exports) | `invocation-context` (20 mutated closure locals + two mutually-exclusive sandbox-relaxation blocks + effect-ledger ALS); **do NOT re-home `runWithCeiling`/`ToolCeiling*` (owned by executor-ceiling.ts)**; keep Step-6 `runWithCeiling` wrap + Tool-Timeout SOT |
+| executor.ts | stable barrel + staged invocation runner | `invocation-runner` owns preparation/path policy, `invocation-authorization` owns permission/reviewer/rationale decisions, and `invocation-execution` owns rate-limit/execute/finalize. The two mutually-exclusive sandbox-relaxation blocks remain together in authorization; `runWithCeiling`/`ToolCeiling*` remain owned by executor-ceiling.ts and Step 6 keeps the Tool-Timeout SOT. |
 | plugins/runtime/index.ts | collaborator-CLASS composition + free helpers | 40 private fields → collaborators expose `clear()` in exact `resetLoadedState` order; `PreparationTracker` monotonic generation counter |
 | boot/steps/plugin-runtime.ts | barrel reexport + ref-boxes | `host-api-factory`/`lifecycle` capture `let pluginRuntime`/`let loopbackManager` by **mutable binding, lazy read** → pass getters/ref-boxes; preserve `enforceMutatingEffects(instrumentEffectsByPath(...))` nesting + hostFetch single-verb snapshot |
 | boot.ts | BootContext threading | `bootstrap()` has ZERO integration test → add electron-mocked test asserting `Object.keys(AppServices)` + construction order FIRST |

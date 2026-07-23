@@ -252,8 +252,10 @@ separate policy bypass.
 External MCP-server tools (`source:"mcp"`, `mcp-tool-adapter.ts`) and in-process
 plugin loopback tools (`source:"plugin"`, `plugin-tool-from-mcp.ts`) are
 registered into the one tool registry and executed through the single
-`ToolExecutor.executeOne` pipeline. Both sources converge at the same ordered
-chokepoints — Layer-1 deny, ApprovalGate, audit, and the effect-ledger shadow —
+`ToolExecutor` invocation pipeline. `executor.ts` is the stable public barrel;
+the implementation delegates preparation/path policy, authorization/rationale,
+and execute/finalize to explicit ordered stages. Both sources converge at the
+same ordered chokepoints — Layer-1 deny, ApprovalGate, audit, and the effect-ledger shadow —
 and the divergences between them are input-only, driven by host-derived
 source-identity signals, never a separate code path or policy bypass. An
 external MCP server is a lowest-trust foreign peer, so the host assigns it the
