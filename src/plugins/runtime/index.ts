@@ -742,67 +742,69 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * before its registry commit and generation publication linearize together.
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
-    if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
-      throw new Error(`Plugin not found: ${pluginId}`);
-    }
-    if (!this.inactivePluginIds.has(pluginId) === enabled) return;
-    const persist = async (): Promise<void> => {
-      if (this.registryPath) {
-        await updatePluginRegistry(this.registryPath, (registry) => {
-          const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
-          if (!entry) throw new Error(`Plugin not found in registry: ${pluginId}`);
-          entry.enabled = enabled;
-        });
-      }
-    };
     const generationLifecycle = this.requireGenerationLifecycle("plugin enabled-state change");
-    if (!enabled) {
-      if (!generationLifecycle.getActive(pluginId)) {
-        throw new Error(`cannot disable plugin without an active generation: ${pluginId}`);
+    await generationLifecycle.runInLifecycleQueue(pluginId, async () => {
+      if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
+        throw new Error(`Plugin not found: ${pluginId}`);
       }
-      await generationLifecycle.deactivateWithCommit(pluginId, persist);
-      this.inactivePluginIds.add(pluginId);
-      this.disabledPluginIds.add(pluginId);
-      await generationLifecycle.waitForRetirements();
-    } else {
-      if (generationLifecycle.getActive(pluginId)) {
-        throw new Error(`cannot re-enable plugin while a generation is active: ${pluginId}`);
+      if (!this.inactivePluginIds.has(pluginId) === enabled) return;
+      const persist = async (): Promise<void> => {
+        if (this.registryPath) {
+          await updatePluginRegistry(this.registryPath, (registry) => {
+            const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+            if (!entry) throw new Error(`Plugin not found in registry: ${pluginId}`);
+            entry.enabled = enabled;
+          });
+        }
+      };
+      if (!enabled) {
+        if (!generationLifecycle.getActive(pluginId)) {
+          throw new Error(`cannot disable plugin without an active generation: ${pluginId}`);
+        }
+        await generationLifecycle.deactivateWithCommit(pluginId, persist);
+        this.inactivePluginIds.add(pluginId);
+        this.disabledPluginIds.add(pluginId);
+        await generationLifecycle.waitForRetirements();
+      } else {
+        if (generationLifecycle.getActive(pluginId)) {
+          throw new Error(`cannot re-enable plugin while a generation is active: ${pluginId}`);
+        }
+        if (!this.installReceiptCacheRoot) {
+          throw new Error("plugin re-enable requires installReceiptCacheRoot");
+        }
+        const loadPlan = await this.resolveManifestLoadPlanInternal();
+        const targetPlan = loadPlan.find((plan) =>
+          plan.pluginIdHint === pluginId || this.matchesManifestPath(plan.manifestPath, pluginId));
+        if (!targetPlan) throw new Error(`Plugin not found in registry: ${pluginId}`);
+        const manifest = await this.readManifest(targetPlan.manifestPath);
+        if (manifest.id !== pluginId) {
+          throw new Error(`plugin re-enable manifest identity changed: expected ${pluginId}, got ${manifest.id}`);
+        }
+        const pluginRoot = dirname(targetPlan.manifestPath);
+        const integrity = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
+        if (!integrity.ok) {
+          throw new Error(`plugin re-enable receipt verification failed: ${pluginId}`);
+        }
+        const receiptRaw = await readFile(
+          installReceiptPath(this.installReceiptCacheRoot, pluginId),
+          "utf8",
+        );
+        await this.activatePreparedArtifact({
+          pluginRoot,
+          manifest,
+          receiptRaw,
+          approvedPluginAccess: targetPlan.approvedPluginAccess ?? this.knownPluginAccessGrants.get(pluginId),
+          durableCommit: persist,
+        });
+        this.inactivePluginIds.delete(pluginId);
+        this.disabledPluginIds.delete(pluginId);
       }
-      if (!this.installReceiptCacheRoot) {
-        throw new Error("plugin re-enable requires installReceiptCacheRoot");
-      }
-      const loadPlan = await this.resolveManifestLoadPlanInternal();
-      const targetPlan = loadPlan.find((plan) =>
-        plan.pluginIdHint === pluginId || this.matchesManifestPath(plan.manifestPath, pluginId));
-      if (!targetPlan) throw new Error(`Plugin not found in registry: ${pluginId}`);
-      const manifest = await this.readManifest(targetPlan.manifestPath);
-      if (manifest.id !== pluginId) {
-        throw new Error(`plugin re-enable manifest identity changed: expected ${pluginId}, got ${manifest.id}`);
-      }
-      const pluginRoot = dirname(targetPlan.manifestPath);
-      const integrity = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
-      if (!integrity.ok) {
-        throw new Error(`plugin re-enable receipt verification failed: ${pluginId}`);
-      }
-      const receiptRaw = await readFile(
-        installReceiptPath(this.installReceiptCacheRoot, pluginId),
-        "utf8",
-      );
-      await this.activatePreparedArtifact({
-        pluginRoot,
-        manifest,
-        receiptRaw,
-        approvedPluginAccess: targetPlan.approvedPluginAccess ?? this.knownPluginAccessGrants.get(pluginId),
-        durableCommit: persist,
-      });
-      this.inactivePluginIds.delete(pluginId);
-      this.disabledPluginIds.delete(pluginId);
-    }
-    // The generation pointer and durable registry are already committed. Keep
-    // this runtime view aligned even if a downstream host projection callback
-    // reports a post-commit fault; callers must see the error without reviving
-    // the predecessor state locally.
-    await this.onActiveStateChange?.(pluginId, enabled);
+      // The generation pointer and durable registry are already committed.
+      // Keep this runtime view aligned even if a downstream host projection
+      // callback reports a post-commit fault; later requests must queue behind
+      // that callback and observe the committed state.
+      await this.onActiveStateChange?.(pluginId, enabled);
+    });
   }
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {

@@ -14,6 +14,26 @@ import { join } from "node:path";
 import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
 import { buildInstallReceipt, writeInstallReceipt } from "../../plugin-install-receipt.js";
 
+const registryCommitGate = vi.hoisted(() => ({
+  started: undefined as (() => void) | undefined,
+  wait: undefined as Promise<void> | undefined,
+  release: undefined as (() => void) | undefined,
+}));
+
+vi.mock("../../registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../registry.js")>();
+  return {
+    ...actual,
+    updatePluginRegistry: async (
+      ...args: Parameters<typeof actual.updatePluginRegistry>
+    ) => {
+      registryCommitGate.started?.();
+      if (registryCommitGate.wait) await registryCommitGate.wait;
+      return actual.updatePluginRegistry(...args);
+    },
+  };
+});
+
 describe("PluginRuntime — active/inactive toggle (#1176)", () => {
   let testDir: string;
   let installedDir: string;
@@ -27,6 +47,36 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     for (const entry of await readdir(path, { withFileTypes: true })) {
       if (entry.isDirectory()) await makeTreeWritable(join(path, entry.name));
     }
+  }
+
+  function holdRegistryCommit(): { started: Promise<void>; release: () => void } {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const wait = new Promise<void>((resolve) => {
+      registryCommitGate.release = resolve;
+    });
+    registryCommitGate.started = markStarted;
+    registryCommitGate.wait = wait;
+    return {
+      started,
+      release: () => {
+        const release = registryCommitGate.release;
+        registryCommitGate.started = undefined;
+        registryCommitGate.wait = undefined;
+        registryCommitGate.release = undefined;
+        release?.();
+      },
+    };
+  }
+
+  function releaseRegistryCommit(): void {
+    const release = registryCommitGate.release;
+    registryCommitGate.started = undefined;
+    registryCommitGate.wait = undefined;
+    registryCommitGate.release = undefined;
+    release?.();
   }
 
   beforeEach(async () => {
@@ -74,6 +124,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
   });
 
   afterEach(async () => {
+    releaseRegistryCommit();
     await makeTreeWritable(testDir);
     await rm(testDir, { recursive: true, force: true });
   });
@@ -136,6 +187,48 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.loadStatus).toBe("loaded");
     expect(card?.runtimeLoaded).toBe(true);
     expect(card?.active).toBe(true);
+  });
+
+  it("preserves a later enable while an earlier disable commit is delayed", async () => {
+    const changes: boolean[] = [];
+    const runtime = makeRuntime({
+      onActiveStateChange: (_id, enabled) => changes.push(enabled),
+    });
+    await runtime.startAll();
+    const commit = holdRegistryCommit();
+
+    const disable = runtime.setPluginEnabled("se-plugin", false);
+    await commit.started;
+    const enable = runtime.setPluginEnabled("se-plugin", true);
+    commit.release();
+    await Promise.all([disable, enable]);
+
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    expect(changes).toEqual([false, true]);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(true);
+  });
+
+  it("preserves a later disable while an earlier enable commit is delayed", async () => {
+    const changes: boolean[] = [];
+    const runtime = makeRuntime({
+      onActiveStateChange: (_id, enabled) => changes.push(enabled),
+    });
+    await runtime.startAll();
+    await runtime.setPluginEnabled("se-plugin", false);
+    changes.length = 0;
+    const commit = holdRegistryCommit();
+
+    const enable = runtime.setPluginEnabled("se-plugin", true);
+    await commit.started;
+    const disable = runtime.setPluginEnabled("se-plugin", false);
+    commit.release();
+    await Promise.all([enable, disable]);
+
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    expect(changes).toEqual([true, false]);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);
   });
 
   it("admits no new runtime call after disable", async () => {

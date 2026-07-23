@@ -62,6 +62,12 @@ export interface PluginRuntimeGenerationAccess {
 }
 
 export interface PluginRuntimeGenerationLifecycle extends PluginRuntimeGenerationAccess {
+  /**
+   * Serialize a complete plugin lifecycle operation with generation
+   * transitions for the same plugin. Nested lifecycle calls for `pluginId`
+   * reuse the current queue slot.
+   */
+  runInLifecycleQueue<T>(pluginId: string, operation: () => Promise<T>): Promise<T>;
   replaceRuntime(runtime: PluginRuntimeGenerationProjection): Promise<void>;
   replaceRuntimeWithCommit<T>(
     runtime: PluginRuntimeGenerationProjection,
