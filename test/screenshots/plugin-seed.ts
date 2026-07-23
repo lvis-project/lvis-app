@@ -254,6 +254,11 @@ export async function seedRealPlugins(
     if (!realPython || !pythonBlock) {
       delete seededManifest.python;
     }
+    // Drop manifest fields the host's current SDK schema does not yet accept
+    // (e.g. `onboarding`, ahead of the host schema on some plugins). They are
+    // orthogonal to UI capture; leaving them would fail manifest validation at
+    // load and the plugin would never render. Remove here so the panel mounts.
+    delete seededManifest.onboarding;
     const pluginJsonPath = path.join(pluginDir, 'plugin.json');
     fs.writeFileSync(pluginJsonPath, `${JSON.stringify(seededManifest, null, 2)}\n`, 'utf-8');
     // Copy the ENTIRE built dist tree so UI bundle imports/assets resolve.
