@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.7
+
+ARG BUN_IMAGE=oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+
+FROM ${BUN_IMAGE}
+USER root
+RUN mkdir -p /evidence /export /trusted/control \
+    && chown 0:0 /evidence \
+    && chmod 1733 /evidence \
+    && chmod 0555 /trusted/control
+COPY --from=evidence --chown=0:0 --chmod=0444 \
+  input-bindings.json \
+  control-harness-manifest.json \
+  image-digests.json \
+  input-contract.json \
+  /evidence/
+COPY --from=control --chmod=0555 \
+  test/control/marketplace-e2e/normalize-evidence.mjs \
+  test/control/marketplace-e2e/write-container-exits.mjs \
+  test/control/marketplace-e2e/validate-evidence.mjs \
+  /trusted/control/
+USER 10003:10003
+ENTRYPOINT ["node"]

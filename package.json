@@ -64,6 +64,7 @@
     "check:a2a-p4-5:evidence": "bun run test:a2a-p4-5:evidence && bun run check:a2a-p4-5-contract",
     "test:a2a-p4-5:packaged-live": "node scripts/run-a2a-p4-5-packaged-live.mjs",
     "test:knip-gate": "node --test test/scripts/knip-baseline.test.mjs && node scripts/check-knip-gate-self-test.mjs",
+    "test:plugin-bundle-inputs": "node --test scripts/plugin-bundle-e2e-inputs.test.mjs",
     "check:no-inline-channels": "node scripts/check-no-inline-channels.mjs",
     "check:knip": "node scripts/check-knip-baseline.mjs",
     "check:knip:engine": "knip --config knip.jsonc --reporter json",

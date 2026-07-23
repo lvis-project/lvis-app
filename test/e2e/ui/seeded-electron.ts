@@ -1,13 +1,19 @@
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LLM_VENDOR_DEFAULTS, type LLMVendor } from "../../../src/shared/llm-vendor-defaults.js";
 import { DEFAULT_BUNDLE_ID } from "../../../src/shared/theme-bundles.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = resolve(HERE, "../../..");
+const CANDIDATE_APP_ROOT = process.env.CANDIDATE_APP_ROOT;
+if (CANDIDATE_APP_ROOT && !isAbsolute(CANDIDATE_APP_ROOT)) {
+  throw new Error("CANDIDATE_APP_ROOT must be an absolute path");
+}
+export const REPO_ROOT = CANDIDATE_APP_ROOT
+  ? resolve(CANDIDATE_APP_ROOT)
+  : resolve(HERE, "../../..");
 export const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
 
 type JsonObject = Record<string, unknown>;

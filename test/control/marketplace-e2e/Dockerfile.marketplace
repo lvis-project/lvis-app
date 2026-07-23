@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.7
+
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.6.14-python3.12-bookworm-slim@sha256:5c8edeb8b5644b618882e06ddaa8ddf509dcd1aa7d08fedac7155106116a9a9e
+
+FROM ${UV_IMAGE} AS dependencies
+WORKDIR /deps/server
+COPY --from=candidate server/pyproject.toml server/uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --all-groups --no-install-project
+
+FROM ${UV_IMAGE} AS candidate-build
+WORKDIR /candidate/marketplace
+COPY --from=candidate . .
+COPY --from=dependencies /deps/server/.venv server/.venv
+# Candidate code executes only after its dependency layer is complete and with
+# no network. BuildKit tears down this stage and every process when RUN exits.
+RUN --network=none cd server \
+    && .venv/bin/python ../scripts/build_schemas.py \
+    && test -s ../schemas/host/plugin-manifest.schema.json
+
+FROM ${UV_IMAGE} AS runtime
+RUN groupadd --gid 10001 lvis-e2e \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /tmp/home lvis-e2e
+COPY --from=candidate-build --chown=10001:10001 /candidate/marketplace /candidate/marketplace
+# The entrypoint is copied from the exact trusted workflow commit only after
+# all candidate RUN instructions have completed.
+COPY --from=control --chown=10001:10001 \
+  test/control/marketplace-e2e/run-marketplace.sh /trusted/run-marketplace.sh
+RUN chmod 0555 /trusted/run-marketplace.sh
+USER 10001:10001
+WORKDIR /candidate/marketplace/server
+ENTRYPOINT ["/trusted/run-marketplace.sh"]

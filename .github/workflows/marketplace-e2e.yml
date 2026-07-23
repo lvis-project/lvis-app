@@ -184,39 +184,46 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/lvis-app
-          path: lvis-app
+          path: .candidate/host
           ref: ${{ steps.candidates.outputs.host_sha }}
           fetch-depth: 0
+          lfs: false
+          submodules: false
           persist-credentials: false
 
       - name: Checkout exact lvis-marketplace candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/lvis-marketplace
-          path: lvis-marketplace
+          path: .candidate/marketplace
           ref: ${{ steps.candidates.outputs.marketplace_sha }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
           fetch-depth: 0
-          submodules: recursive
+          lfs: false
+          submodules: false
           persist-credentials: false
 
       - name: Checkout exact lvis-plugin-sdk candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/lvis-plugin-sdk
-          path: lvis-plugin-sdk
+          path: .candidate/sdk
           ref: ${{ steps.candidates.outputs.sdk_sha }}
           fetch-depth: 0
+          lfs: false
+          submodules: false
           persist-credentials: false
 
       - name: Checkout exact lvis-plugin-ep candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/lvis-plugin-ep
-          path: lvis-plugin-lge-api
+          path: .candidate/ep
           ref: ${{ steps.candidates.outputs.ep_sha }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
           fetch-depth: 0
+          lfs: false
+          submodules: false
           persist-credentials: false
 
       - name: Prove candidate checkout credentials are isolated
@@ -239,29 +246,19 @@ jobs:
           }
 
           for repo in \
-            lvis-app \
-            lvis-marketplace \
-            lvis-plugin-sdk \
-            lvis-plugin-lge-api
+            .candidate/host \
+            .candidate/marketplace \
+            .candidate/sdk \
+            .candidate/ep
           do
             assert_no_local_credentials "$repo"
-            # git expands $displaypath inside the submodule foreach shell.
-            # shellcheck disable=SC2016
-            git -C "$repo" submodule foreach --quiet --recursive '
-              if git config --local --get-regexp \
-                "^(http\\..*\\.extraheader|credential\\..*)$"
-              then
-                echo "::error::Credential-bearing local git config remains in $displaypath"
+            if [[ -e "$repo/.gitmodules" ]]; then
+              [[ -f "$repo/.gitmodules" && ! -L "$repo/.gitmodules" ]] || {
+                echo "::error::.gitmodules must remain inert regular data"
                 exit 1
-              fi
-              remote_url="$(git remote get-url origin)"
-              case "$remote_url" in
-                http://*@*|https://*@*)
-                  echo "::error::Credential-bearing origin URL remains in $displaypath"
-                  exit 1
-                  ;;
-              esac
-            '
+              }
+              sha256sum "$repo/.gitmodules" >/dev/null
+            fi
           done
 
       - name: Prove immutable checkout refs
@@ -274,235 +271,214 @@ jobs:
               exit 1
             fi
           done
-          test "$(git -C lvis-app rev-parse HEAD)" = "$HOST_SHA"
-          test "$(git -C lvis-marketplace rev-parse HEAD)" = "$MARKETPLACE_SHA"
-          test "$(git -C lvis-plugin-sdk rev-parse HEAD)" = "$SDK_SHA"
-          test "$(git -C lvis-plugin-lge-api rev-parse HEAD)" = "$EP_API_SHA"
-
-      - name: Setup Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12.13"
-
-      - name: Install marketplace server deps (uv)
-        working-directory: lvis-marketplace/server
-        run: |
-          pip install "uv==0.6.14"
-          uv sync --frozen --all-groups
-
-      - name: Build plugin schemas (production-equivalent of Dockerfile RUN)
-        working-directory: lvis-marketplace
-        run: |
-          # Production Dockerfile: COPY scripts/build_schemas.py /tmp/...
-          # then RUN python /tmp/build_schemas.py — script lives at marketplace
-          # repo root (scripts/), output goes to schemas/ at root.
-          # Use server's uv venv via --directory for cryptography/jsonref deps.
-          uv run --directory server --no-sync python /tmp/build_schemas_proxy.py 2>/dev/null || true
-          # Direct invocation (script reads vendor/lvis-plugin-sdk/schemas/ and writes schemas/)
-          (cd server && uv run python ../scripts/build_schemas.py)
-          ls -la schemas/
-
-      - name: Clean stale marketplace E2E DB
-        run: |
-          # github-hosted runners are ephemeral — there is no shared production
-          # marketplace to protect (this was a self-hosted-only concern). Use a
-          # dedicated port (8765, set below) and clean OUR pid file + sqlite DB
-          # for idempotent reruns within the ephemeral VM.
-          if [ -f /tmp/m4-marketplace.pid ]; then
-            kill "$(cat /tmp/m4-marketplace.pid)" 2>/dev/null || true
-            sleep 1
-          fi
-          rm -f /tmp/m4-marketplace.pid /tmp/m4-marketplace.db /tmp/m4-marketplace.db-wal /tmp/m4-marketplace.db-shm
-          echo "stale E2E DB + tracked pid cleaned"
-
-      - name: Seed publisher API key (before server start — avoids sqlite lock)
-        env:
-          MARKETPLACE_DB_URL: "sqlite+aiosqlite:////tmp/m4-marketplace.db"
-        working-directory: lvis-marketplace/server
-        run: |
-          uv run python scripts/seed_e2e_keys.py \
-            --publisher-key "$PUBLISHER_KEY" \
-            --admin-key "$ADMIN_KEY"
-
-      - name: Load committed poc-v1 test signer (loopback only)
-        working-directory: lvis-marketplace/server
-        run: |
-          signer_json="$(uv run python scripts/print_test_poc_signer_env.py --format json)"
-          signer="$(jq -er '.MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1' <<<"$signer_json")"
-          echo "::add-mask::$signer"
-          echo "MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1=$signer" >> "$GITHUB_ENV"
-
-      - name: Start marketplace server (sqlite, background)
-        working-directory: lvis-marketplace/server
-        env:
-          LVIS_MARKETPLACE_RATE_LIMIT_DISABLED: "1"
-          MARKETPLACE_DB_URL: "sqlite+aiosqlite:////tmp/m4-marketplace.db"
-          # bootstrap_on_startup runs managed-plugin git pulls + seeds an
-          # internal admin key (prefix "seed_dev"). For M4 e2e we only need
-          # the e2e-publisher row seeded above; bootstrap's concurrent DB
-          # writes contend with our pre-seeded row under SQLite single-writer
-          # semantics, leading to 401s after the seed step succeeds.
-          LVIS_MARKETPLACE_SKIP_BOOTSTRAP: "1"
-          # The immutable-input step proves the generated local schema matches
-          # Host + SDK. Do not replace that pinned schema with mutable main.
-          LVIS_MARKETPLACE_PLUGIN_SCHEMA_REMOTE_ENABLED: "false"
-        run: |
-          uv run uvicorn lvis_marketplace.main:create_app \
-            --factory --host 127.0.0.1 --port 8765 \
-            >/tmp/m4-server.log 2>&1 &
-          echo $! > /tmp/m4-marketplace.pid
-          # Wait for readiness.
-          for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8765/api/v1/health >/dev/null; then
-              echo "marketplace ready"; exit 0
-            fi
-            sleep 1
+          test "$(git -C .candidate/host rev-parse HEAD)" = "$HOST_SHA"
+          test "$(git -C .candidate/marketplace rev-parse HEAD)" = "$MARKETPLACE_SHA"
+          test "$(git -C .candidate/sdk rev-parse HEAD)" = "$SDK_SHA"
+          test "$(git -C .candidate/ep rev-parse HEAD)" = "$EP_API_SHA"
+          for repo in \
+            .candidate/host \
+            .candidate/marketplace \
+            .candidate/sdk \
+            .candidate/ep
+          do
+            test -z "$(
+              git -C "$repo" status --porcelain=v1 \
+                --untracked-files=all --ignore-submodules=none
+            )"
           done
-          echo "marketplace failed to start" >&2; exit 1
 
-      - name: Debug — inspect DB after seed + GET /me
-        run: |
-          sudo apt-get install -y sqlite3 >/dev/null 2>&1 || true
-          echo "=== DB file ==="
-          ls -la /tmp/m4-marketplace.db 2>&1 || echo "no DB file"
-          echo "=== api_keys rows ==="
-          sqlite3 /tmp/m4-marketplace.db "SELECT id,label,role,revoked_at,key_prefix,LENGTH(key_hash) FROM api_keys" 2>&1 || true
-          echo "=== publisher key length / first chars ==="
-          echo "len=$(printf '%s' "$PUBLISHER_KEY" | wc -c) prefix=$(printf '%s' "$PUBLISHER_KEY" | head -c 12)"
-          echo "=== GET /me via server background ==="
-          curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $PUBLISHER_KEY" http://127.0.0.1:8765/api/v1/me 2>&1 | head -5
-          echo "=== expected hash (sha256 of plaintext) ==="
-          printf '%s' "$PUBLISHER_KEY" | sha256sum | head -c 32 ; echo
-
-      - name: Setup Node (required by postinstall + build scripts)
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22.23.1"
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.3.14"
-
-      - name: Build and package exact EP attendance bundle
-        working-directory: lvis-plugin-lge-api
+      - name: Checkout exact trusted workflow control plane without credentials
+        shell: bash
         env:
-          EP_API_BUNDLE_PATH: /tmp/lvis-plugin-ep-${{ steps.candidates.outputs.ep_sha }}.zip
+          CONTROL_SHA: ${{ github.workflow_sha }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EP_API_SHA"
-          test -z "$(git status --porcelain --untracked-files=no)"
-          bun install --frozen-lockfile
-          bun run build
-          test -f dist/hostPlugin.js
-          test -f dist/ui/lge-control.js
-          rm -f "$EP_API_BUNDLE_PATH"
-          zip -X -q -r "$EP_API_BUNDLE_PATH" plugin.json dist skills
-          test -s "$EP_API_BUNDLE_PATH"
-          test -z "$(git status --porcelain --untracked-files=no)"
-          sha256sum "$EP_API_BUNDLE_PATH"
+          [[ "$CONTROL_SHA" =~ ^[0-9a-f]{40}$ ]]
+          install -d -m 0700 .control/git-home .control/trusted
+          export HOME="$PWD/.control/git-home"
+          export GIT_CONFIG_GLOBAL=/dev/null
+          export GIT_CONFIG_SYSTEM=/dev/null
+          export GIT_TERMINAL_PROMPT=0
+          git -C .control/trusted init --quiet
+          git -C .control/trusted remote add origin \
+            https://github.com/lvis-project/lvis-app.git
+          git -C .control/trusted \
+            -c credential.helper= \
+            -c http.extraHeader= \
+            fetch --quiet --depth=1 --no-tags origin "$CONTROL_SHA"
+          git -C .control/trusted checkout --quiet --detach FETCH_HEAD
+          test "$(git -C .control/trusted rev-parse HEAD)" = "$CONTROL_SHA"
+          test -z "$(git -C .control/trusted status --porcelain=v1)"
+          if git -C .control/trusted config --local --get-regexp \
+            '^(http\..*\.extraheader|credential\..*)$'
+          then
+            echo "::error::Trusted control checkout retained credentials"
+            exit 1
+          fi
 
-      - name: Install Electron display dependencies
+      - name: Seal exact candidate archives and bindings
+        shell: bash
+        env:
+          CONTROL_SHA: ${{ github.workflow_sha }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
-          bunx playwright install-deps chromium
+          set -euo pipefail
+          umask 077
+          install -d -m 0700 \
+            .control/snapshots \
+            .control/contexts \
+            .control/evidence \
+            .control/artifacts
 
-      - name: Install app deps
-        working-directory: lvis-app
-        run: bun install --frozen-lockfile
+          validate_archive() {
+            local archive="$1"
+            python3 - "$archive" <<'PY'
+          import posixpath
+          import sys
+          import tarfile
 
-      - name: Prove consumed SDK and cross-repository schema identity
-        working-directory: lvis-app
+          with tarfile.open(sys.argv[1], "r:") as archive:
+              for member in archive:
+                  normalized = posixpath.normpath(member.name)
+                  if (
+                      member.name.startswith("/")
+                      or normalized == ".."
+                      or normalized.startswith("../")
+                      or member.ischr()
+                      or member.isblk()
+                      or member.isfifo()
+                      or member.isdev()
+                      or member.islnk()
+                  ):
+                      raise SystemExit(f"unsafe archive member: {member.name!r}")
+                  if member.issym():
+                      target = posixpath.normpath(
+                          posixpath.join(posixpath.dirname(member.name), member.linkname)
+                      )
+                      if member.linkname.startswith("/") or target.startswith("../"):
+                          raise SystemExit(f"escaping archive symlink: {member.name!r}")
+          PY
+          }
+
+          archive_repo() {
+            local name="$1"
+            local repo="$2"
+            local expected="$3"
+            local archive=".control/snapshots/${name}.tar"
+            local context=".control/contexts/${name}"
+            local commit tree archive_sha gitmodules_sha
+            commit="$(git -C "$repo" rev-parse HEAD)"
+            tree="$(git -C "$repo" rev-parse 'HEAD^{tree}')"
+            [[ "$commit" == "$expected" ]]
+            git -C "$repo" archive --format=tar HEAD >"$archive"
+            validate_archive "$archive"
+            archive_sha="$(sha256sum "$archive" | cut -d' ' -f1)"
+            gitmodules_sha=null
+            if [[ -e "$repo/.gitmodules" ]]; then
+              [[ -f "$repo/.gitmodules" && ! -L "$repo/.gitmodules" ]]
+              gitmodules_sha="$(
+                sha256sum "$repo/.gitmodules" | cut -d' ' -f1
+              )"
+            fi
+            install -d -m 0700 "$context"
+            tar -xf "$archive" -C "$context"
+            find "$context" -name .git -print -quit | grep -q . && {
+              echo "::error::Candidate archive contained Git metadata"
+              exit 1
+            }
+            jq -n \
+              --arg key "$name" \
+              --arg commit "$commit" \
+              --arg tree "$tree" \
+              --arg archiveSha256 "$archive_sha" \
+              --arg gitmodulesSha256 "$gitmodules_sha" \
+              '{
+                key:$key,
+                value:{
+                  commit:$commit,
+                  tree:$tree,
+                  archiveSha256:$archiveSha256,
+                  gitmodulesSha256:
+                    (if $gitmodulesSha256 == "null"
+                     then null else $gitmodulesSha256 end)
+                }
+              }' \
+              >".control/snapshots/${name}.json"
+          }
+
+          archive_repo host .candidate/host "$HOST_SHA"
+          archive_repo marketplace .candidate/marketplace "$MARKETPLACE_SHA"
+          archive_repo sdk .candidate/sdk "$SDK_SHA"
+          archive_repo ep .candidate/ep "$EP_API_SHA"
+
+          rm -rf .control/contexts/marketplace/vendor/lvis-plugin-sdk
+          install -d -m 0700 \
+            .control/contexts/marketplace/vendor/lvis-plugin-sdk
+          tar -xf .control/snapshots/sdk.tar \
+            -C .control/contexts/marketplace/vendor/lvis-plugin-sdk
+
+          sdk_version="$(jq -er '.version' .candidate/sdk/package.json)"
+          sdk_schema_sha="$(
+            sha256sum .candidate/sdk/schemas/plugin-manifest.schema.json \
+              | cut -d' ' -f1
+          )"
+          jq -n \
+            --arg version "$sdk_version" \
+            --arg schemaSha256 "$sdk_schema_sha" \
+            '{version:$version,schemaSha256:$schemaSha256}' \
+            >.control/artifacts/sdk-evidence.json
+          jq -s \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg controlSha "$CONTROL_SHA" \
+            --arg workflowRef "$GITHUB_WORKFLOW_REF" \
+            --arg sdkVersion "$sdk_version" \
+            --arg sdkSchemaSha256 "$sdk_schema_sha" \
+            '{
+              schemaVersion:1,
+              repository:"lvis-project/lvis-app",
+              runId:$runId,
+              runAttempt:$runAttempt,
+              controlSha:$controlSha,
+              workflowRef:$workflowRef,
+              sdkVersion:$sdkVersion,
+              sdkSchemaSha256:$sdkSchemaSha256,
+              inputs:(map({(.key):.value}) | add)
+            }' \
+            .control/snapshots/host.json \
+            .control/snapshots/marketplace.json \
+            .control/snapshots/sdk.json \
+            .control/snapshots/ep.json \
+            >.control/evidence/input-bindings.json
+
+      - name: Prove sealed contract and trusted harness identity
+        shell: bash
         env:
-          HOST_ROOT: .
-          SDK_ROOT: ../lvis-plugin-sdk
-          MARKETPLACE_ROOT: ../lvis-marketplace
-          EP_API_ROOT: ../lvis-plugin-lge-api
-          BUNDLE_E2E_EVIDENCE_PATH: /tmp/marketplace-live-lifecycle-evidence.json
+          CONTROL_SHA: ${{ github.workflow_sha }}
+          HOST_ROOT: .candidate/host
+          SDK_ROOT: .candidate/sdk
+          MARKETPLACE_ROOT: .candidate/marketplace
+          EP_API_ROOT: .candidate/ep
+          BUNDLE_E2E_EVIDENCE_PATH: .control/evidence/input-contract.json
         run: |
-          bun run test:plugin-bundle-inputs
-          node scripts/plugin-bundle-e2e-inputs.mjs
+          set -euo pipefail
+          node .control/trusted/scripts/plugin-bundle-e2e-inputs.mjs
+          node \
+            .control/trusted/test/control/marketplace-e2e/create-harness-manifest.mjs \
+            .control/trusted \
+            "$CONTROL_SHA" \
+            .control/evidence/control-harness-manifest.json
 
-      - name: Build Host Electron bundle
-        working-directory: lvis-app
-        run: bun run build
-
-      - name: Prove secure evidence file handling
-        working-directory: lvis-app
+      - name: Run sealed container control and hostile containment rehearsal
+        shell: bash
         env:
-          M4_E2E: "1"
-        run: bun run test:vitest -- run test/e2e/evidence-file.test.ts
-
-      - name: Run live installer transport proof
-        working-directory: lvis-app
-        env:
-          M4_E2E: "1"
-          MARKETPLACE_URL: http://127.0.0.1:8765
-          MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
-          MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
+          CONTROL_SHA: ${{ github.workflow_sha }}
         run: |
-          M4_E2E=1 bun run test:vitest -- run --reporter=verbose \
-            test/e2e/marketplace-e2e-fixture.test.ts \
-            test/e2e/marketplace-e2e.test.ts
+          set -euo pipefail
+          bash .control/trusted/test/control/marketplace-e2e/orchestrate.sh
 
-      - name: Run live Electron IPC lifecycle
-        working-directory: lvis-app
-        env:
-          M4_E2E: "1"
-          MARKETPLACE_URL: http://127.0.0.1:8765
-          MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
-          MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
-          BUNDLE_E2E_EVIDENCE_PATH: /tmp/marketplace-live-lifecycle-evidence.json
-        run: >-
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24"
-          bunx playwright test test/e2e/ui/marketplace-live-lifecycle.spec.ts --workers=1
-
-      - name: Run exact EP attendance read-write-readback lifecycle
-        working-directory: lvis-app
-        env:
-          M4_E2E: "1"
-          MARKETPLACE_URL: http://127.0.0.1:8765
-          MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
-          MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
-          EP_API_BUNDLE_PATH: /tmp/lvis-plugin-ep-${{ steps.candidates.outputs.ep_sha }}.zip
-          BUNDLE_E2E_EVIDENCE_PATH: /tmp/marketplace-live-lifecycle-evidence.json
-        run: >-
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24"
-          bunx playwright test test/e2e/ui/ep-attendance-live.spec.ts --workers=1
-
-      - name: Run loopback reverse-containment rehearsal
-        working-directory: lvis-app
-        env:
-          M4_E2E: "1"
-          MARKETPLACE_URL: http://127.0.0.1:8765
-          MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
-          MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
-          SDK_ROOT: ../lvis-plugin-sdk
-          BUNDLE_E2E_EVIDENCE_PATH: /tmp/marketplace-live-lifecycle-evidence.json
-        run: >-
-          bun run test:vitest -- run --reporter=verbose
-          test/e2e/marketplace-containment-rehearsal.test.ts
-
-      - name: Dump marketplace server log (always)
-        if: always()
-        run: |
-          echo "=== /tmp/m4-server.log ==="
-          tail -200 /tmp/m4-server.log 2>&1 || echo "no server log"
-
-      - name: Upload immutable-ref evidence
-        if: always()
+      - name: Upload validated public evidence only
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: marketplace-live-lifecycle-evidence-${{ steps.candidates.outputs.host_sha }}
-          path: |
-            /tmp/marketplace-live-lifecycle-evidence.json
-            lvis-app/test-results/**
+          path: .control/export/validated-summary.json
           if-no-files-found: error
-
-      - name: Stop marketplace
-        if: always()
-        run: |
-          if [ -f /tmp/m4-marketplace.pid ]; then
-            kill "$(cat /tmp/m4-marketplace.pid)" || true
-          fi
