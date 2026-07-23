@@ -366,6 +366,22 @@ export abstract class PluginRuntimeState {
     return readEnabledManifestSnapshots(loadPlan, validator);
   }
 
+  protected async findStaticManifestPlan(
+    loadPlan: ManifestLoadPlan[],
+    pluginId: string,
+  ): Promise<ManifestLoadPlan | undefined> {
+    for (const plan of loadPlan) {
+      if (plan.pluginIdHint || !plan.enabled) continue;
+      try {
+        const manifest = await this.readManifest(plan.manifestPath, { report: false });
+        if (manifest.id === pluginId) return plan;
+      } catch {
+        // Snapshot loading already reports invalid static manifests.
+      }
+    }
+    return undefined;
+  }
+
   /**
    * #885 v6 — MODEL-ONLY (ratified security decision §2.4a). The `knownToolOwners`
    * map is the pre-runtime `??` fallback in `resolveToolOwner`, feeding the
@@ -590,6 +606,21 @@ export abstract class PluginRuntimeState {
     return [...aliases].sort();
   }
 
+  protected getPluginInstallClaim(pluginId: string): string | null | undefined {
+    return this.knownInstallClaims.get(pluginId);
+  }
+
+  protected assertPluginManifestIdentity(
+    expectedPluginId: string,
+    actualPluginId: string,
+  ): void {
+    if (expectedPluginId === actualPluginId) return;
+    throw this.pluginIdentityCollision(
+      actualPluginId,
+      `manifest id changed from active canonical id '${expectedPluginId}'`,
+    );
+  }
+
   protected beginPluginLifecycleOperation(pluginId: string): number {
     const generation = ++this.nextPluginLifecycleGeneration;
     const canonicalId = this.resolveKnownPluginId(pluginId);
@@ -637,13 +668,14 @@ export abstract class PluginRuntimeState {
     requestedPluginId: string,
     canonicalPluginId: string,
     generation: number,
+    installAlias: string | undefined,
   ): boolean {
     const requestedGeneration = this.pluginLifecycleGenerations.get(requestedPluginId);
     const canonicalGeneration = this.pluginLifecycleGenerations.get(canonicalPluginId);
     if (requestedGeneration !== generation || (canonicalGeneration !== undefined && canonicalGeneration > generation)) {
       return false;
     }
-    this.rememberPluginInstallAlias(canonicalPluginId, requestedPluginId);
+    this.rememberPluginInstallAlias(canonicalPluginId, installAlias);
     this.pluginLifecycleGenerations.set(canonicalPluginId, generation);
     this.pluginLifecycleGenerations.set(requestedPluginId, generation);
     for (const alias of this.knownInstallAliases.get(canonicalPluginId) ?? []) {
