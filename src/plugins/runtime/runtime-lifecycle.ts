@@ -495,20 +495,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       enabledSnapshots,
     );
     const knownAliases = new Set(this.getPluginInstallAliases(pluginId) ?? []);
-    const targetIdentity = registryIdentities.find(({ plan, snapshot }) =>
-      snapshot.manifest.id === pluginId
-      && (
-        knownAliases.size > 0
-          ? knownAliases.has(plan.pluginIdHint!)
-          : plan.pluginIdHint === pluginId
-      )
-    );
+    const targetIdentity = registryIdentities.find(({ plan, snapshot }) => {
+      if (snapshot.manifest.id !== pluginId) return false;
+      return knownAliases.size > 0
+        ? knownAliases.has(plan.pluginIdHint!)
+        : plan.pluginIdHint === pluginId;
+    });
     const snapshot = targetIdentity?.snapshot ?? enabledSnapshots.get(pluginId);
-    const targetPlan = targetIdentity?.plan ?? loadPlan.find(
-      (plan) =>
-        !plan.pluginIdHint
-        && plan.enabled
-        && this.matchesManifestPath(plan.manifestPath, pluginId),
+    const targetPlan = targetIdentity?.plan ?? loadPlan.find((plan) =>
+      !plan.pluginIdHint && plan.enabled
+      && resolve(dirname(plan.manifestPath)) === resolve(plugin.pluginRoot)
     );
     const pluginRoot = targetPlan ? dirname(targetPlan.manifestPath) : plugin.pluginRoot;
     const approvedPluginAccess =
@@ -516,7 +512,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       targetPlan?.approvedPluginAccess ??
       plugin.approvedPluginAccess ??
       this.knownPluginAccessGrants.get(pluginId);
-    const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
+    const receiptPluginId = targetPlan?.pluginIdHint ?? this.getPluginInstallClaim(pluginId);
+    const integrityResult: PluginIntegrityCheckResult = receiptPluginId
+      ? await this.verifyReceiptAndDevGuard(receiptPluginId, pluginRoot)
+      : { ok: true };
     if (!isCurrent()) return "failed";
     if (!integrityResult.ok) {
       return "failed";
@@ -530,6 +529,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
       return "failed";
     }
+    this.assertPluginManifestIdentity(pluginId, manifest.id);
     const restartPlan: ManifestLoadPlan = targetPlan ?? {
       pluginIdHint: pluginId,
       manifestPath: resolve(pluginRoot, "plugin.json"),
@@ -896,7 +896,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     const snapshot = enabledSnapshots.get(pluginId);
     const targetPlan = loadPlan.find(
       (p) => p.pluginIdHint === pluginId || (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
-    );
+    ) ?? await this.findStaticManifestPlan(loadPlan, pluginId);
     if (!snapshot) {
       if (targetPlan?.enabled) {
         await this.readManifest(targetPlan.manifestPath); // throws with the actual reason
@@ -908,7 +908,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
 
     const { manifest, approvedPluginAccess } = snapshot;
-    if (!this.adoptPluginLifecycleIdentity(pluginId, manifest.id, lifecycleGeneration)) {
+    if (!this.adoptPluginLifecycleIdentity(pluginId, manifest.id, lifecycleGeneration, targetPlan.pluginIdHint)) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
     const shouldCommit = () =>
