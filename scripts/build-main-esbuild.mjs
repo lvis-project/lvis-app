@@ -1,25 +1,39 @@
 #!/usr/bin/env node
 // esbuild main-process bundler. Replaces the per-file tsc emit so the
 // runtime dependency tree (`ai`, `@ai-sdk/*`, `zod`, `ajv`, `undici`,
-// `adm-zip`, `proper-lockfile`) inlines into a single ESM module. Externals
+// `adm-zip`, `proper-lockfile`) inlines into a split ESM graph. Externals
 // stay outside the bundle because they either ship native bindings, are
 // provided by Electron at runtime, must share a singleton across plugins, or
 // need real node_modules paths at runtime.
 import { build, context } from "esbuild";
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  MAIN_BUNDLE_BUDGETS,
+  analyzeMainBundleMetafile,
+  assertMainBundleBudget,
+  createMainBundleManifest,
+  formatMainBundleBudget,
+} from "./lib/main-bundle-budget.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
-const outfile = resolve(repoRoot, "dist", "src", "main", "main.js");
+const outdir = resolve(repoRoot, "dist", "src", "main");
+const outfile = resolve(outdir, "main.js");
+const chunksDir = resolve(outdir, "chunks");
+const manifestPath = resolve(outdir, "bundle-manifest.json");
 const watchMode = process.argv.includes("--watch");
 
 const buildOptions = {
-  entryPoints: [resolve(repoRoot, "src", "main.ts")],
-  outfile,
+  entryPoints: { main: resolve(repoRoot, "src", "main.ts") },
+  outdir,
+  entryNames: "[name]",
+  chunkNames: "chunks/[name]-[hash]",
   bundle: true,
   format: "esm",
+  splitting: true,
+  metafile: true,
   platform: "node",
   target: ["node22"],
   legalComments: "none",
@@ -62,9 +76,9 @@ const buildOptions = {
     // binaries (Linux seccomp loader, Windows srt-win.exe) filesystem-relative
     // to its module — `dist/sandbox/generate-seccomp-filter.js` does
     // `dirname(fileURLToPath(import.meta.url))` then joins `../../vendor/...`.
-    // Because this bundle is `bundle:true` + `format:esm` with no splitting,
-    // esbuild would INLINE a reachable dynamic import of ASRT into main.js,
-    // which rewrites `import.meta.url` to main.js's own path — so the
+    // Because this build is `bundle:true` + `format:esm`, esbuild would INLINE
+    // ASRT into an emitted chunk,
+    // which rewrites `import.meta.url` to that chunk's own path — so the
     // `../../vendor/...` walk resolves to the wrong directory and the vendor
     // binaries cannot be found at runtime (the same failure class pino hit).
     // Keeping ASRT external makes it a real node_modules entry that resolves
@@ -97,6 +111,8 @@ const buildOptions = {
 // initial build (and momentarily breaks fs.watch on the output).
 if (!watchMode) {
   rmSync(outfile, { force: true });
+  rmSync(chunksDir, { recursive: true, force: true });
+  rmSync(manifestPath, { force: true });
 }
 
 if (watchMode) {
@@ -122,6 +138,15 @@ if (watchMode) {
       process.exit(1);
     }
   }
+
+  const bundleMeasurement = analyzeMainBundleMetafile(result.metafile, {
+    entryPoint: resolve(repoRoot, "src", "main.ts"),
+    requiredAsyncEntryPoint: resolve(repoRoot, "src", "boot.ts"),
+  });
+  assertMainBundleBudget(bundleMeasurement, MAIN_BUNDLE_BUDGETS);
+  const bundleManifest = createMainBundleManifest(result.metafile, { outdir });
+  writeFileSync(manifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`, "utf8");
+  process.stdout.write(`${formatMainBundleBudget(bundleMeasurement)}\n`);
 
   process.stdout.write(`[esbuild-main] OK -> ${outfile}\n`);
 }
