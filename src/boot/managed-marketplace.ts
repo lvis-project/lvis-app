@@ -4,6 +4,7 @@ import type { PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
+import { withAllPluginInstallLocks } from "../plugins/install-lifecycle.js";
 const log = createLogger("lvis");
 
 export function resolveManagedPluginBootstrap(input: {
@@ -100,7 +101,12 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   }
   notifyBootstrapStatus(mainWindow, { phase: "start" });
   try {
-    const ensureResult = await pluginMarketplace.ensureManagedInstalled();
+    const ensureResult = await withAllPluginInstallLocks(async () => {
+      const result = await pluginMarketplace.ensureManagedInstalled();
+      const changed = result.installed.length > 0 || (result.updated?.length ?? 0) > 0;
+      if (changed) await pluginRuntime.restartAll();
+      return result;
+    });
     const updated = ensureResult.updated ?? [];
     if (ensureResult.installed.length > 0) {
       log.info(
@@ -114,9 +120,6 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     }
     // Reload the runtime once if anything was installed OR auto-updated so the
     // new versions are picked up without an app restart.
-    if (ensureResult.installed.length > 0 || updated.length > 0) {
-      await pluginRuntime.restartAll();
-    }
     if (ensureResult.failed.length > 0) {
       log.warn(
         `boot: managed plugin bootstrap failed ${ensureResult.failed.length}: %s`,

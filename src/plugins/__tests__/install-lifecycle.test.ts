@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   withPluginInstallLock,
+  withAllPluginInstallLocks,
   installMarketplacePluginWithLifecycle,
   startInstalledPluginWithLifecycle,
 } from "../install-lifecycle.js";
@@ -77,6 +78,60 @@ describe("installMarketplacePluginWithLifecycle", () => {
     });
 
     expect(install).not.toHaveBeenCalled();
+  });
+
+  it("allows a same-plugin lifecycle hook to re-enter its owned lock", async () => {
+    const order: string[] = [];
+    await expect(withPluginInstallLock("p", async () => {
+      order.push("outer:start");
+      await withPluginInstallLock("p", async () => {
+        order.push("inner");
+      });
+      order.push("outer:end");
+    })).resolves.toBeUndefined();
+    expect(order).toEqual(["outer:start", "inner", "outer:end"]);
+  });
+
+  it("gives multi-plugin bootstrap exclusive access across per-plugin mutations", async () => {
+    const order: string[] = [];
+    let releasePlugin!: () => void;
+    let pluginEntered!: () => void;
+    const pluginGate = new Promise<void>((resolve) => { releasePlugin = resolve; });
+    const pluginStarted = new Promise<void>((resolve) => { pluginEntered = resolve; });
+    const pluginMutation = withPluginInstallLock("p", async () => {
+      order.push("plugin:start");
+      pluginEntered();
+      await pluginGate;
+      order.push("plugin:end");
+    });
+    await pluginStarted;
+
+    let releaseAll!: () => void;
+    let allEntered!: () => void;
+    const allGate = new Promise<void>((resolve) => { releaseAll = resolve; });
+    const allStarted = new Promise<void>((resolve) => { allEntered = resolve; });
+    const allMutation = withAllPluginInstallLocks(async () => {
+      order.push("all:start");
+      allEntered();
+      await allGate;
+      order.push("all:end");
+    });
+    await Promise.resolve();
+    expect(order).toEqual(["plugin:start"]);
+
+    releasePlugin();
+    await pluginMutation;
+    await allStarted;
+    const otherMutation = withPluginInstallLock("other", async () => {
+      order.push("other");
+    });
+    await Promise.resolve();
+    expect(order).toEqual(["plugin:start", "plugin:end", "all:start"]);
+
+    releaseAll();
+    await allMutation;
+    await otherMutation;
+    expect(order).toEqual(["plugin:start", "plugin:end", "all:start", "all:end", "other"]);
   });
 
   it("stops a loaded plugin before marketplace patching and starts the installed result", async () => {

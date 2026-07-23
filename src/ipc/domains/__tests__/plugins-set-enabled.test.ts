@@ -57,13 +57,14 @@ async function setup() {
     return pluginConfig;
   });
   const restartPlugin = vi.fn(async () => "started" as const);
+  const pluginManifest = { id: "plugin-config" };
   const deps = {
     pluginMarketplace: { list: vi.fn(async () => []) },
     pluginRuntime: {
       listPluginIds: vi.fn((): string[] => ["com.example.meeting"]),
       setPluginEnabled,
       callFromUi,
-      getPluginManifest: vi.fn(() => ({ id: "plugin-config" })),
+      getPluginManifest: vi.fn(() => pluginManifest),
       setConfigOverride: vi.fn(),
       restartPlugin,
     },
@@ -271,5 +272,16 @@ describe("lvis:plugins:config:set", () => {
     });
     expect(setPluginConfig).not.toHaveBeenCalled();
     expect(restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("reports a saved config whose targeted runtime reload failed", async () => {
+    const { restartPlugin, setPluginConfig } = await setup();
+    restartPlugin.mockResolvedValueOnce("failed");
+
+    const result = await invoke("lvis:plugins:config:set", "plugin-config", { kept: "new" });
+
+    expect(result).toMatchObject({ ok: false, error: "plugin-config-save-failed" });
+    expect(result).toMatchObject({ message: expect.stringContaining("runtime reload returned failed") });
+    expect(setPluginConfig).toHaveBeenCalledOnce();
   });
 });

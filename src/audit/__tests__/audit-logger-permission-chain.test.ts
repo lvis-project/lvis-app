@@ -34,6 +34,7 @@ import {
   buildChainedEntries,
   computeLineHmac,
   GENESIS_MARKER,
+  MemorySecretStore,
   verifyChain,
 } from "../hmac-chain.js";
 import {
@@ -68,22 +69,22 @@ describe("AuditLogger permission audit chain", () => {
     expect(logger.isPermissionAuditChainReady()).toBe(false);
   });
 
-  it("isPermissionAuditChainReady is true after setupPermissionAuditChain", () => {
+  it("isPermissionAuditChainReady is true after setupPermissionAuditChain", async () => {
     const logger = new AuditLogger();
-    logger.setupPermissionAuditChain(SECRET);
+    await logger.setupPermissionAuditChain(SECRET);
     expect(logger.isPermissionAuditChainReady()).toBe(true);
   });
 
-  it("rejects a malformed existing chain and leaves privileged audit readiness false", () => {
+  it("rejects a malformed existing chain and leaves privileged audit readiness false", async () => {
     const logger = new AuditLogger();
     writeFileSync(logger.getPermissionAuditLogFile(), "{not-json}\n", "utf-8");
 
-    expect(() => logger.setupPermissionAuditChain(SECRET)).toThrow(/json-parse-error/);
+    await expect(logger.setupPermissionAuditChain(SECRET)).rejects.toThrow(/json-parse-error/);
     expect(logger.isPermissionAuditChainReady()).toBe(false);
     expect(() => logger.assertPermissionAuditWritable()).toThrow(/not initialized/);
   });
 
-  it("rejects an existing chain whose HMAC continuity is broken", () => {
+  it("rejects an existing chain whose HMAC continuity is broken", async () => {
     const logger = new AuditLogger();
     writeFileSync(
       logger.getPermissionAuditLogFile(),
@@ -91,17 +92,17 @@ describe("AuditLogger permission audit chain", () => {
       "utf-8",
     );
 
-    expect(() => logger.setupPermissionAuditChain(SECRET)).toThrow(/hmac-mismatch/);
+    await expect(logger.setupPermissionAuditChain(SECRET)).rejects.toThrow(/hmac-mismatch/);
     expect(logger.isPermissionAuditChainReady()).toBe(false);
   });
 
-  it.skipIf(process.platform === "win32")("propagates unreadable-chain failures without becoming ready", () => {
+  it.skipIf(process.platform === "win32")("propagates unreadable-chain failures without becoming ready", async () => {
     const logger = new AuditLogger();
     const file = logger.getPermissionAuditLogFile();
     writeFileSync(file, "{}\n", "utf-8");
     chmodSync(file, 0o000);
     try {
-      expect(() => logger.setupPermissionAuditChain(SECRET)).toThrow();
+      await expect(logger.setupPermissionAuditChain(SECRET)).rejects.toThrow();
       expect(logger.isPermissionAuditChainReady()).toBe(false);
     } finally {
       chmodSync(file, 0o600);
@@ -128,7 +129,7 @@ describe("AuditLogger permission audit chain", () => {
 
   it("appendPermissionAuditEntry on fresh file: first entry's prevHash = HMAC(genesis)", async () => {
     const logger = new AuditLogger();
-    logger.setupPermissionAuditChain(SECRET);
+    await logger.setupPermissionAuditChain(SECRET);
     const entry = await logger.appendPermissionAuditEntry({
       decision: "allow",
       auditId: "id-1",
@@ -150,7 +151,7 @@ describe("AuditLogger permission audit chain", () => {
 
   it("two sequential appends produce a valid chain", async () => {
     const logger = new AuditLogger();
-    logger.setupPermissionAuditChain(SECRET);
+    await logger.setupPermissionAuditChain(SECRET);
     await logger.appendPermissionAuditEntry({
       decision: "allow",
       auditId: "id-1",
@@ -180,7 +181,7 @@ describe("AuditLogger permission audit chain", () => {
 
   it("chains the allowlist-only Plan-B projection without leaking its capability reason", async () => {
     const logger = new AuditLogger();
-    logger.setupPermissionAuditChain(SECRET);
+    await logger.setupPermissionAuditChain(SECRET);
     const plan = buildHostShellExecutionPlan({
       platform: "win32",
       requestedSandbox: true,
@@ -243,7 +244,7 @@ describe("AuditLogger permission audit chain", () => {
   });
   it("appends deferred_resolve entries to the permission audit chain", async () => {
     const logger = new AuditLogger();
-    logger.setupPermissionAuditChain(SECRET);
+    await logger.setupPermissionAuditChain(SECRET);
     await logger.appendPermissionAuditEntry({
       decision: "deferred_resolve",
       auditId: "resolve-1",
@@ -280,7 +281,7 @@ describe("AuditLogger permission audit chain", () => {
     writeFileSync(file, existing.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
     const logger = new AuditLogger();
-    logger.setupPermissionAuditChain(SECRET);
+    await logger.setupPermissionAuditChain(SECRET);
     // The next entry must chain off the existing tail, not genesis.
     const entry = await logger.appendPermissionAuditEntry({
       decision: "ask",
@@ -303,9 +304,9 @@ describe("AuditLogger permission audit chain", () => {
     expect(verifyChain(SECRET, lines)).toEqual({ ok: true });
   });
 
-  it("ten-entry chain — tamper line 4 → verify catches at line 5", async () => {
+  it("ten-entry chain — tamper line 4 → self-authentication catches line 4", async () => {
     const logger = new AuditLogger();
-    logger.setupPermissionAuditChain(SECRET);
+    await logger.setupPermissionAuditChain(SECRET);
     for (let i = 0; i < 10; i++) {
       await logger.appendPermissionAuditEntry({
         decision: i % 2 === 0 ? "allow" : "deny",
@@ -331,11 +332,117 @@ describe("AuditLogger permission audit chain", () => {
     const result = verifyChain(SECRET, readPermissionAuditLines(file));
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      // Mutating line 4's payload keeps line 4's own prevHash valid
-      // (it was bound to line 3) but breaks line 5's prevHash.
-      expect(result.firstBrokenLineIndex).toBe(5);
+      expect(result.firstBrokenLineIndex).toBe(4);
+      expect(result.reason).toBe("entry-hmac-mismatch");
     }
   });
+
+  it("rejects payload tampering in the active tail without requiring a successor", async () => {
+    const logger = new AuditLogger();
+    await logger.setupPermissionAuditChain(SECRET);
+    await logger.appendPermissionAuditEntry({
+      decision: "allow",
+      auditId: "tail-original",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      tool: "fs_read",
+      source: "builtin",
+      category: "read",
+      layer: 1,
+    });
+    const file = logger.getPermissionAuditLogFile();
+    const lines = readPermissionAuditLines(file);
+    const tail = JSON.parse(lines.at(-1)!) as { auditId: string };
+    tail.auditId = "tail-tampered";
+    lines[lines.length - 1] = JSON.stringify(tail);
+    writeFileSync(file, lines.join("\n") + "\n", "utf-8");
+
+    expect(() => logger.assertPermissionAuditWritable()).toThrow(
+      /not self-authenticated/,
+    );
+    const rebooted = new AuditLogger();
+    await expect(rebooted.setupPermissionAuditChain(SECRET)).rejects.toThrow(/entry-hmac-mismatch/);
+    expect(rebooted.isPermissionAuditChainReady()).toBe(false);
+  });
+
+  it("anchors a legacy tail in the seal store before accepting privileged writes", async () => {
+    const logger = new AuditLogger();
+    const file = logger.getPermissionAuditLogFile();
+    const legacy = {
+      decision: "allow",
+      auditId: "legacy-tail",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      prevHash: computeLineHmac(SECRET, GENESIS_MARKER),
+    };
+    writeFileSync(file, `${JSON.stringify(legacy)}\n`, "utf-8");
+    const seals = new MemorySecretStore();
+    await logger.setupPermissionAuditChain(SECRET, seals);
+
+    legacy.auditId = "legacy-tail-tampered";
+    writeFileSync(file, `${JSON.stringify(legacy)}\n`, "utf-8");
+    const rebooted = new AuditLogger();
+    await expect(
+      rebooted.setupPermissionAuditChain(SECRET, seals),
+    ).rejects.toThrow(/active-tail seal mismatch/);
+    expect(rebooted.isPermissionAuditChainReady()).toBe(false);
+  });
+
+  it("rejects an unterminated active JSONL tail", async () => {
+    const logger = new AuditLogger();
+    const linked = {
+      decision: "allow",
+      auditId: "unterminated",
+      ts: "2026-05-09T00:00:00.000Z",
+      trustOrigin: "user-keyboard",
+      prevHash: computeLineHmac(SECRET, GENESIS_MARKER),
+    };
+    const row = {
+      ...linked,
+      entryHash: computeLineHmac(SECRET, JSON.stringify(linked)),
+    };
+    writeFileSync(logger.getPermissionAuditLogFile(), JSON.stringify(row), "utf-8");
+
+    await expect(logger.setupPermissionAuditChain(SECRET)).rejects.toThrow(
+      /unterminated tail/,
+    );
+  });
+
+  it("rejects an oversized audit row without reading the whole file into memory", async () => {
+    const logger = new AuditLogger();
+    writeFileSync(
+      logger.getPermissionAuditLogFile(),
+      `${"x".repeat(1024 * 1024 + 1)}\n`,
+      "utf-8",
+    );
+    await expect(logger.setupPermissionAuditChain(SECRET)).rejects.toThrow(
+      /maximum size/,
+    );
+    expect(logger.isPermissionAuditChainReady()).toBe(false);
+  });
+
+  it("streams a large existing chain and yields to the event loop", async () => {
+    const logger = new AuditLogger();
+    const file = logger.getPermissionAuditLogFile();
+    const entries = buildChainedEntries(
+      SECRET,
+      Array.from({ length: 20_000 }, (_, index) => ({
+        decision: "allow",
+        auditId: `large-${index}`,
+        ts: "2026-05-09T00:00:00.000Z",
+      })),
+    );
+    writeFileSync(file, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf-8");
+    let timerFired = false;
+    const timer = setTimeout(() => { timerFired = true; }, 0);
+    try {
+      await logger.setupPermissionAuditChain(SECRET);
+    } finally {
+      clearTimeout(timer);
+    }
+    expect(timerFired).toBe(true);
+    expect(logger.isPermissionAuditChainReady()).toBe(true);
+  }, 15_000);
 
   it("getPermissionAuditLogFile uses .permission-audit.jsonl extension within the audit dir", () => {
     const logger = new AuditLogger();

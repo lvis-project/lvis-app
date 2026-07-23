@@ -293,7 +293,7 @@ describe("verifyChain", () => {
     expect(verifyChain(secret, lines)).toEqual({ ok: true });
   });
 
-  it("detects a tampered MIDDLE line and reports its index+1 (next link breaks)", () => {
+  it("detects a tampered MIDDLE line at that row's entry hash", () => {
     const secret = "bb".repeat(32);
     const { lines } = buildFixture(secret, 12);
     // Tamper line 5 — flip a string field
@@ -303,11 +303,8 @@ describe("verifyChain", () => {
     const result = verifyChain(secret, lines);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      // Mutating line N keeps line N's own prevHash valid (the link
-      // chains forward from line N-1) but breaks line N+1 whose
-      // prevHash was computed against line N's *original* serialization.
-      expect(result.firstBrokenLineIndex).toBe(6);
-      expect(result.reason).toBe("hmac-mismatch");
+      expect(result.firstBrokenLineIndex).toBe(5);
+      expect(result.reason).toBe("entry-hmac-mismatch");
     }
   });
 
@@ -431,7 +428,7 @@ describe("daily seal lifecycle", () => {
     const result = verifyDailySeal(secret, store, filePath, date);
     expect(result.ok).toBe(false);
     if (!result.ok && result.reason === "chain-broken") {
-      expect(result.firstBrokenLineIndex).toBe(2);
+      expect(result.firstBrokenLineIndex).toBe(1);
     } else {
       throw new Error(`expected chain-broken, got ${JSON.stringify(result)}`);
     }

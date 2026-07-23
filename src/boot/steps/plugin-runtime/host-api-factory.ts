@@ -26,8 +26,12 @@ import { enforceMutatingEffects, gateMutatingEffect } from "../../../permissions
 import { recordEffect } from "../../../permissions/effect-ledger.js";
 import { methodEffect } from "../../../permissions/effect-kind.js";
 import type { PluginRegistryEntry } from "../../../plugins/types.js";
+import type { PluginHostApiIncarnation } from "../../../plugins/runtime/index.js";
 import { createPluginStorage } from "../../../plugins/storage.js";
-import { withPluginInstallLock } from "../../../plugins/install-lifecycle.js";
+import {
+  isPluginInstallLockHeld,
+  withPluginInstallLock,
+} from "../../../plugins/install-lifecycle.js";
 import { probePrivateHost } from "../../../plugins/private-host-probe.js";
 import { shouldBlockPluginSecretRead } from "../../../plugins/secret-shape.js";
 import {
@@ -127,7 +131,12 @@ export interface CreateHostApiFactoryDeps {
  */
 export function createHostApiFactory(
   deps: CreateHostApiFactoryDeps,
-): (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi {
+): (
+  pluginId: string,
+  manifest: PluginManifest,
+  pluginDataDir: string,
+  incarnation?: PluginHostApiIncarnation,
+) => PluginHostApi {
   const {
     getPluginRuntime,
     lateBinding,
@@ -150,12 +159,22 @@ export function createHostApiFactory(
     routinesStore,
   } = deps;
 
-  return (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
+  return (
+    pluginId: string,
+    manifest: PluginManifest,
+    pluginDataDir: string,
+    incarnation?: PluginHostApiIncarnation,
+  ): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
+    const hostIncarnation = incarnation ?? {
+      registerDisposer: (dispose: () => void) => pluginRuntime.registerDisposer(pluginId, dispose),
+      isActive: () => pluginRuntime.getPluginManifest(pluginId) === manifest,
+      isLifecycleHookActive: () => false,
+    };
       // #893 Stage 2 — manifest sha256 pin (Tier-3 whitelist check). The
       // whitelist registry stores `approvedManifestSha256` per pluginId; we
       // compare against the canonicalized JSON of the running manifest so a
@@ -243,11 +262,13 @@ export function createHostApiFactory(
               `[plugin:${pluginId}] config.set('${key}'): secret fields must be saved via hostApi.setSecret(), not config.set().`,
             );
           }
+          const nestedLifecycleMutation =
+            isPluginInstallLockHeld(pluginId) || hostIncarnation.isLifecycleHookActive();
           await withPluginInstallLock(pluginId, async () => {
             // The HostApi object belongs to this exact manifest incarnation.
             // A queued write from a stopped/uninstalled instance must not
             // recreate persisted config for a removed or reinstalled plugin.
-            if (pluginRuntime.getPluginManifest(pluginId) !== manifest) {
+            if (!hostIncarnation.isActive()) {
               throw new Error(
                 `[plugin:${pluginId}] config.set('${key}'): plugin instance is no longer active`,
               );
@@ -266,18 +287,25 @@ export function createHostApiFactory(
             // for the reload.
             pluginRuntime.setConfigOverride(pluginId, nextRecord);
             emitPluginConfigChange(pluginId, key, value);
-            // US-A3 — targeted restartPlugin (not restartAll) so changing one
-            // plugin's config does not wipe other plugins' in-memory state.
-            // ToolRegistry resync happens automatically via the runtime's
-            // wired `onEnable` callback.
-            try {
-              await pluginRuntime.restartPlugin(pluginId);
-            } catch (err) {
-              throw new Error(
-                `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
-              );
-            }
           });
+          // Lifecycle hooks inherit the owning mutation context. Persist their
+          // write, but never recursively restart the instance whose start/stop
+          // Promise is currently being awaited. A config-triggered replacement
+          // is likewise already the pending restart for this plugin.
+          if (nestedLifecycleMutation || pluginRuntime.isPluginRestartPending?.(pluginId)) return;
+          try {
+            const restartResult = await pluginRuntime.restartPlugin(
+              pluginId,
+              { skipPreparation: true },
+            );
+            if (restartResult !== "started") {
+              throw new Error(`runtime reload returned ${restartResult ?? "not-loaded"}`);
+            }
+          } catch (err) {
+            throw new Error(
+              `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
+            );
+          }
         },
         onChange: <T = unknown>(
           key: string,
@@ -291,7 +319,7 @@ export function createHostApiFactory(
             },
           );
           // Auto-cleanup on plugin disable to mirror onEvent semantics.
-          pluginRuntime.registerDisposer(pluginId, unsubscribe);
+          hostIncarnation.registerDisposer(unsubscribe);
           return unsubscribe;
         },
       },
@@ -332,7 +360,7 @@ export function createHostApiFactory(
       onEvent: (type, handler) => {
         pluginRuntime.assertPluginEventAccess(pluginId, type);
         const unsubscribe = onEvent(type, handler);
-        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        hostIncarnation.registerDisposer(unsubscribe);
         plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
         return unsubscribe;
       },
@@ -355,7 +383,7 @@ export function createHostApiFactory(
         const unsubInstalled = onEvent("plugin.installed", dispatchInstalled);
         const unsubUninstalled = onEvent("plugin.uninstalled", dispatchUninstalled);
         const unsubscribe = () => { unsubInstalled(); unsubUninstalled(); };
-        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        hostIncarnation.registerDisposer(unsubscribe);
         return unsubscribe;
       },
       // #893 Stage 2 — Host implementation of the SDK's `resolveApiKey`.
