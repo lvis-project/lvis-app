@@ -6,8 +6,9 @@ window before loading the full host-service graph. The legacy build emitted one
 locale code before `createWindow()` could run.
 
 The current build uses esbuild ESM splitting. `src/main.ts` creates the window,
-starts `import("./boot.js")`, verifies the corporate CA in parallel, and only
-then awaits the boot module. This changes loading order, not the ordered service
+starts `import("./boot.js")`, and prepares the corporate CA concurrently. Boot
+failures are observed immediately; after CA readiness updates the splash, startup
+awaits the boot result. This changes loading order, not the ordered service
 construction inside `bootstrap()`.
 
 ## Enforced Budgets

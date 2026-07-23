@@ -78,7 +78,7 @@ const buildOptions = {
     // `dirname(fileURLToPath(import.meta.url))` then joins `../../vendor/...`.
     // Because this build is `bundle:true` + `format:esm`, esbuild would INLINE
     // ASRT into an emitted chunk,
-    // which rewrites `import.meta.url` to main.js's own path — so the
+    // which rewrites `import.meta.url` to that chunk's own path — so the
     // `../../vendor/...` walk resolves to the wrong directory and the vendor
     // binaries cannot be found at runtime (the same failure class pino hit).
     // Keeping ASRT external makes it a real node_modules entry that resolves
