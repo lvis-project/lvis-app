@@ -14,8 +14,74 @@ import { tmpdir, platform } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SkillStore, SKILL_MAX_BODY_BYTES } from "../skill-store.js";
+import type { ActivePluginGeneration } from "../../plugins/plugin-generation-coordinator.js";
+
+function pluginGeneration(pluginId: string, generationId: string, body: string): ActivePluginGeneration {
+  const fingerprint = (generationId === "g1" ? "a" : "b").repeat(64);
+  return {
+    pluginId,
+    pluginVersion: generationId === "g1" ? "1.0.0" : "2.0.0",
+    generationId,
+    manifestSha256: "1".repeat(64),
+    receiptSha256: "2".repeat(64),
+    state: {},
+    contributions: [{
+      ownerPluginId: pluginId,
+      ownerVersion: generationId === "g1" ? "1.0.0" : "2.0.0",
+      kind: "skill",
+      localId: "attendance",
+      path: "skills/attendance",
+      fingerprint,
+      files: [{
+        path: "skills/attendance/SKILL.md",
+        content: `---\nname: attendance\ndescription: Attendance guidance\n---\n${body}`,
+        sha256: fingerprint,
+      }],
+    }],
+  };
+}
 
 describe("SkillStore — C2 traversal & allowlist", () => {
+  it("keeps same-local-id plugin Skills distinct without filesystem copies", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      const store = new SkillStore({ userDir: dir });
+      store.publishPluginGeneration(pluginGeneration("plugin-one", "g1", "one"));
+      store.publishPluginGeneration(pluginGeneration("plugin-two", "g1", "two"));
+      const one = await store.load("plugin:plugin-one:attendance");
+      const two = await store.load("plugin:plugin-two:attendance");
+      expect(one?.body).toBe("one");
+      expect(two?.body).toBe("two");
+      expect(one?.filePath).toBe("plugin://plugin-one/attendance/SKILL.md");
+      expect(one?.approvalKey).not.toBe(two?.approvalKey);
+      expect(store.listCatalogSync().map((entry) => entry.name)).toEqual([
+        "plugin:plugin-one:attendance",
+        "plugin:plugin-two:attendance",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates a plugin Skill cache identity on generation/content change", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      const store = new SkillStore({ userDir: dir });
+      store.publishPluginGeneration(pluginGeneration("plugin-one", "g1", "old"));
+      const old = await store.load("plugin:plugin-one:attendance");
+      store.publishPluginGeneration(pluginGeneration("plugin-one", "g2", "new"));
+      const current = await store.load("plugin:plugin-one:attendance");
+      expect(current?.body).toBe("new");
+      expect(current?.approvalKey).not.toBe(old?.approvalKey);
+      store.removePluginGeneration("plugin-one", "g1");
+      expect(await store.load("plugin:plugin-one:attendance")).toBe(current);
+      store.removePluginGeneration("plugin-one", "g2");
+      expect(await store.load("plugin:plugin-one:attendance")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects symlinks pointing outside the skills directory", async () => {
     // Symlink creation on Windows requires admin/dev-mode; skip if it errors.
     const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
