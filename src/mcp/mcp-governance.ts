@@ -84,6 +84,7 @@ const DEFAULT_POLICY: McpGovernancePolicy = {
 
 export class McpGovernance {
   private policy: McpGovernancePolicy;
+  private readonly runtimeApprovals = new Map<string, McpServerApproval>();
   private readonly policyPath: string;
   private refreshTimer: NodeJS.Timeout | null = null;
 
@@ -174,7 +175,7 @@ export class McpGovernance {
     }
 
     // L1-b: global server count limit
-    const activeCount = this.policy.servers.filter((s) => s.status === "approved").length;
+    const activeCount = this.policy.servers.filter((s) => s.status === "approved").length + this.runtimeApprovals.size;
     if (activeCount > this.policy.globalRules.maxServersTotal) {
       return { valid: false, reason: t("be_mcpGovernance.maxServersExceeded", { activeCount, maxServersTotal: this.policy.globalRules.maxServersTotal }), layer: 1 };
     }
@@ -375,10 +376,26 @@ export class McpGovernance {
     return this.findApproval(serverId);
   }
 
+  /** Register a host-owned, non-persistent approval for one active plugin generation. */
+  registerRuntimeApproval(approval: McpServerApproval): void {
+    if (this.policy.servers.some((entry) => entry.id === approval.id)) {
+      throw new Error(`runtime MCP approval '${approval.id}' collides with managed policy`);
+    }
+    const existing = this.runtimeApprovals.get(approval.id);
+    if (existing && JSON.stringify(existing) !== JSON.stringify(approval)) {
+      throw new Error(`runtime MCP approval '${approval.id}' has conflicting policy`);
+    }
+    this.runtimeApprovals.set(approval.id, Object.freeze({ ...approval }));
+  }
+
+  unregisterRuntimeApproval(serverId: string): void {
+    this.runtimeApprovals.delete(serverId);
+  }
+
   // ─── Private Validation ──────────────────────────
 
   private findApproval(serverId: string): McpServerApproval | undefined {
-    return this.policy.servers.find((s) => s.id === serverId);
+    return this.policy.servers.find((s) => s.id === serverId) ?? this.runtimeApprovals.get(serverId);
   }
 
   private validateStdioCommand(config: McpServerConfig, approval: McpServerApproval): ValidationResult {

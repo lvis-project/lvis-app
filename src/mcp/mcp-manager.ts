@@ -18,12 +18,14 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { MAX_SERVER_ID_LEN } from "../shared/mcp-app-partition.js";
 import { t } from "../i18n/index.js";
+import type { PluginMcpOwner, PluginMcpTrustStore, PreparedPluginMcpProjection } from "./plugin-mcp-projection.js";
 const log = createLogger("mcp-manager");
 
 const DEFAULT_CONFIG_PATH = join(lvisHome(), "mcp", "servers.json");
 
 export class McpManager {
   private readonly clients = new Map<string, McpClient>();
+  private readonly bundledOwners = new Map<string, PluginMcpOwner>();
   private readonly configPath: string;
   private readonly configLockPath: string;
   /** Serialises all config read-modify-write ops to prevent TOCTOU races */
@@ -212,6 +214,59 @@ export class McpManager {
     }
   }
 
+  async connectBundledServer(
+    projection: PreparedPluginMcpProjection,
+    trust: PluginMcpTrustStore,
+  ): Promise<
+    | { status: "approval_required"; serverId: string; owner: PluginMcpOwner; registeredTools: readonly [] }
+    | { status: "connected"; serverId: string; owner: PluginMcpOwner; registeredTools: readonly string[] }
+    | { status: "degraded"; serverId: string; owner: PluginMcpOwner; registeredTools: readonly []; error: string }
+  > {
+    if (!trust.isApproved(projection)) {
+      return { status: "approval_required", serverId: projection.serverId, owner: projection.owner, registeredTools: [] };
+    }
+    this.governance.registerRuntimeApproval(projection.approval);
+    try {
+      await this.connectServer(projection.config);
+      this.bundledOwners.set(projection.serverId, projection.owner);
+      return {
+        status: "connected",
+        serverId: projection.serverId,
+        owner: projection.owner,
+        registeredTools: Object.freeze([...(this.clients.get(projection.serverId)?.getState().registeredTools ?? [])]),
+      };
+    } catch (error) {
+      this.clients.delete(projection.serverId);
+      this.toolRegistry.unregisterByMcp(projection.serverId);
+      this.governance.unregisterRuntimeApproval(projection.serverId);
+      return {
+        status: "degraded",
+        serverId: projection.serverId,
+        owner: projection.owner,
+        registeredTools: [],
+        error: scrubSecrets(error instanceof Error ? error.message : String(error)),
+      };
+    }
+  }
+
+  /** Retire only MCP clients and tools owned by the selected immutable generation. */
+  async disconnectBundledGeneration(pluginId: string, generationId: string): Promise<void> {
+    const ids = [...this.bundledOwners]
+      .filter(([, owner]) => owner.pluginId === pluginId && owner.generationId === generationId)
+      .map(([serverId]) => serverId);
+    for (const serverId of ids) await this.disconnectBundledServer(serverId);
+  }
+
+  private async disconnectBundledServer(serverId: string): Promise<void> {
+    const client = this.clients.get(serverId);
+    if (client) await client.disconnect().catch((error) => log.warn(`bundled MCP disconnect failed (${serverId}): %s`, error));
+    this.clients.delete(serverId);
+    this.bundledOwners.delete(serverId);
+    this.toolRegistry.unregisterByMcp(serverId);
+    this.governance.unregisterRuntimeApproval(serverId);
+    this.onServerDisconnected?.(serverId);
+  }
+
   /** 모든 서버 연결 해제 */
   async disconnectAll(): Promise<void> {
     const ids = Array.from(this.clients.keys());
@@ -225,6 +280,8 @@ export class McpManager {
     }
     await Promise.all(promises);
     this.clients.clear();
+    for (const id of this.bundledOwners.keys()) this.governance.unregisterRuntimeApproval?.(id);
+    this.bundledOwners.clear();
     // b3 — teardown path: emit once per retired id AFTER client teardown.
     // Best-effort (may run at shutdown); the sink guards `isDestroyed()` and
     // swallows send errors so a send-after-window-destroy is a no-op.
@@ -282,6 +339,8 @@ export class McpManager {
 
     // 안전장치: ToolRegistry에서도 직접 제거 (중복 호출이지만 확실히 정리)
     this.toolRegistry.unregisterByMcp(serverId);
+    this.bundledOwners.delete(serverId);
+    this.governance.unregisterRuntimeApproval?.(serverId);
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
       sessionId: "mcp-manager",
