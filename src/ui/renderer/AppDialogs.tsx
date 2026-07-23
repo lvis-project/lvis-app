@@ -18,7 +18,7 @@ export function AppDialogs({
   tourCompleted,
   onTourComplete,
   onTourDismiss,
-  installedPluginIds,
+  pluginCards,
   onComposerSeedText,
 }: {
   api: Api;
@@ -29,7 +29,7 @@ export function AppDialogs({
   tourCompleted: boolean;
   onTourComplete: () => void;
   onTourDismiss: () => void;
-  installedPluginIds: string[];
+  pluginCards: Parameters<typeof PostTourFirstTask>[0]["pluginCards"];
   onComposerSeedText: (text: string) => void;
 }) {
   return (
@@ -42,8 +42,8 @@ export function AppDialogs({
         onDismiss={onTourDismiss}
       />
       <PostTourFirstTask
-        api={{ composerSeedText: onComposerSeedText }}
-        installedPluginIds={installedPluginIds}
+        onPrefillComposer={onComposerSeedText}
+        pluginCards={pluginCards}
         tourCompleted={tourCompleted}
       />
       <DevConsoleToggle />

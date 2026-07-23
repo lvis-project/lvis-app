@@ -44,6 +44,7 @@ import type { SidebarTab } from "../../shared/sidebar-tab.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
+import type { PluginOnboardingSpec } from "../../plugins/types.js";
 import type {
   LlmModelListRequest,
   LlmModelListResult,
@@ -155,6 +156,8 @@ export type PluginCardSummary = {
     reasoning?: string;
     allowPrivateNetworks?: boolean;
   };
+  /** Declarative first-run guidance copied unchanged from the manifest. */
+  onboarding?: PluginOnboardingSpec;
   /** Structured marketplace install failure classification for Doctor UI. */
   installFailureKind?: PluginInstallFailureKind;
   /** User-visible install/load failure detail preserved for Doctor diagnostics. */
