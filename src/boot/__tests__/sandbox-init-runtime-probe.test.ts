@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   checkDeps: vi.fn(),
   isProbeError: vi.fn(),
   logGate: vi.fn(),
+  flush: vi.fn(async () => undefined),
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -56,7 +57,7 @@ function makeContext(settingOn: boolean): BootContext {
           : undefined,
       ),
     },
-    bootAuditLogger: { logSandboxGate: h.logGate },
+    bootAuditLogger: { logSandboxGate: h.logGate, flush: h.flush },
     pluginRuntime: {
       listPluginIds: vi.fn(() => []),
       getPluginManifest: vi.fn(() => undefined),
@@ -73,6 +74,7 @@ beforeEach(() => {
   h.checkDeps.mockReset();
   h.isProbeError.mockReset();
   h.logGate.mockReset();
+  h.flush.mockClear();
   h.checkDeps.mockResolvedValue({ errors: [], warnings: [] });
   vi.stubEnv("LVIS_SANDBOX_ENABLED", "");
 });
@@ -124,7 +126,31 @@ describe("initSandboxGate — Linux ASRT runtime probe failures", () => {
       outcome: "abort",
       reason: "abort-linux-runtime-probe-failed",
     });
+    expect(h.flush).toHaveBeenCalledOnce();
+    expect(h.logGate.mock.invocationCallOrder[0]).toBeLessThan(
+      h.flush.mock.invocationCallOrder[0],
+    );
     expect(detectSandboxCapability()).toMatchObject({ kind: "none", platform: "linux" });
     expect(isSandboxRequestedAtBoot()).toBe(true);
+  });
+
+  it("drains the dependency-abort audit before rejecting explicit opt-in", async () => {
+    h.checkDeps.mockResolvedValue({ errors: ["missing bwrap"], warnings: [] });
+    vi.stubEnv("LVIS_SANDBOX_ENABLED", "1");
+
+    await expect(initSandboxGate(makeContext(false))).rejects.toThrow(
+      /dependencies are missing/,
+    );
+
+    expect(h.logGate).toHaveBeenCalledWith({
+      platform: "linux",
+      onSignal: "explicit-env",
+      outcome: "abort",
+      reason: expect.stringContaining("abort"),
+    });
+    expect(h.flush).toHaveBeenCalledOnce();
+    expect(h.logGate.mock.invocationCallOrder[0]).toBeLessThan(
+      h.flush.mock.invocationCallOrder[0],
+    );
   });
 });

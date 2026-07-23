@@ -453,6 +453,9 @@ vi.mock("../../audit/audit-logger.js", () => ({
     setupPermissionAuditChain = vi.fn();
     log = vi.fn();
     logSandboxGate = vi.fn();
+    flush = vi.fn(async () => {});
+    close = vi.fn(async () => {});
+    rotateAndPrune = vi.fn(async () => {});
     getAuditDir = vi.fn(() => "C:\\tmp\\lvis-boot-test\\audit");
     getPermissionAuditSecret = vi.fn(() => "s".repeat(64));
     getPermissionAuditSealStore = vi.fn(() => ({ read: vi.fn(() => null), write: vi.fn() }));

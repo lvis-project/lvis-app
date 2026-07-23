@@ -420,6 +420,7 @@ describe("foreground rationale real-stack integration", () => {
       expect(auditSink.assertWritable).toHaveBeenCalledTimes(1);
     } finally {
       hostService.shutdown();
+      await auditLogger.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -592,6 +593,7 @@ describe("foreground rationale real-stack integration", () => {
       expect(protectedSurfaces).not.toContain(RAW_ANCHOR_SECRET);
     } finally {
       hostService.shutdown();
+      await auditLogger.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -635,11 +637,12 @@ describe("foreground rationale real-stack integration", () => {
         });
       },
     };
+    const approvalAuditLogger = new AuditLogger(join(directory, "audit"));
     approvalGate = new ApprovalGate(
       webContents as never,
       undefined,
       5_000,
-      new AuditLogger(join(directory, "audit")),
+      approvalAuditLogger,
     );
     const materializeRationaleControl = vi.fn(() => null);
     const rationaleCoordinatorFactory = vi.fn((input) => ({
@@ -648,6 +651,7 @@ describe("foreground rationale real-stack integration", () => {
       materializeRationaleControl,
     }));
     const provider = new AttachmentDirectModalProvider();
+    const executorAuditLogger = new AuditLogger(join(directory, "executor-audit"));
     const loop = new ConversationLoop(({
       settingsService: {
         get: () => fakeLlmSettings(),
@@ -662,7 +666,7 @@ describe("foreground rationale real-stack integration", () => {
       toolRegistry: registry,
       permissionManager: createPermissionManager(directory),
       approvalGate,
-      auditLogger: new AuditLogger(join(directory, "executor-audit")),
+      auditLogger: executorAuditLogger,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
       disableSessionPersistence: true,
       rationaleCoordinatorFactory,
@@ -702,6 +706,10 @@ describe("foreground rationale real-stack integration", () => {
         toolCategory: "write",
       });
     } finally {
+      await Promise.all([
+        approvalAuditLogger.close(),
+        executorAuditLogger.close(),
+      ]);
       rmSync(directory, { recursive: true, force: true });
     }
   });

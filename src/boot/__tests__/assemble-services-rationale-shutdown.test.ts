@@ -41,6 +41,11 @@ describe("assembleAppServices rationale shutdown", () => {
           order.push("mcp");
         }),
       },
+      bootAuditLogger: {
+        close: vi.fn(async () => {
+          order.push("audit-writer");
+        }),
+      },
       auditService: {
         stop: vi.fn(async () => {
           order.push("audit");
@@ -66,6 +71,7 @@ describe("assembleAppServices rationale shutdown", () => {
       "ask",
       "mcp-policy",
       "mcp",
+      "audit-writer",
       "audit",
     ]);
     expect(services.shutdown()).toBe(shutdown);

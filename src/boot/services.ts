@@ -21,7 +21,6 @@ import { createMemoryWriteTool } from "../tools/memory-write.js";
 import { createBashOutputTool, createBashKillTool } from "../tools/background-shell-tools.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
-import { AuditLogger } from "../audit/audit-logger.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import { createLogger, initFileLogSink } from "../lib/logger.js";
 import { LOG_RETENTION_DAYS, LOG_MAX_BYTES, reprunePersistedRetention } from "../lib/log-file-sink.js";
@@ -135,21 +134,6 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   } catch {
     /* non-fatal */
   }
-
-  // §14.2 Audit log rotation + retention — boot-time check + 1h interval
-  const auditLogger = new AuditLogger();
-  const _runAuditMaintenance = () => {
-    const auditCfg = settingsService.get("audit");
-    void auditLogger.rotateAndPrune({
-      maxBytes: auditCfg.auditRotationMaxBytes,
-      retentionDays: auditCfg.auditRetentionDays,
-    }).catch((err: unknown) => {
-      log.warn({ err }, "rotateAndPrune failed");
-    });
-  };
-  _runAuditMaintenance();
-  const auditMaintenanceTimer = setInterval(_runAuditMaintenance, 60 * 60 * 1000); // 1 hour
-  auditMaintenanceTimer.unref?.();
 
   // §4.2 Step 5: Core Engines
   const memoryManager = new MemoryManager();
