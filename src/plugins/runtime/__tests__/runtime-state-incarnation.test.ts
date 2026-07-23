@@ -32,6 +32,28 @@ describe("pending HostApi incarnation lifecycle", () => {
     } as PluginRuntimeOptions)).toThrow(/requires an explicit createHostApi factory/);
   });
 
+  it("rejects an incomplete explicit HostApi instead of backfilling storage", () => {
+    const runtime = new IncarnationTestRuntime({
+      hostRoot: "/tmp/lvis-incarnation-host",
+      createHostApi: () => ({}) as import("../../types.js").PluginHostApi,
+    });
+    const manifest = {
+      id: "plugin-a",
+      name: "Plugin A",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      description: "test",
+      publisher: "test",
+      tools: [],
+    } satisfies PluginManifest;
+
+    expect(() => runtime.buildPending(
+      "plugin-a",
+      manifest,
+      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+    )).toThrow(/incomplete HostApi without storage: plugin-a/);
+  });
+
   it("revokes a factory-pending incarnation immediately on generation invalidation", () => {
     let captured!: PluginHostApiIncarnation;
     const runtime = new IncarnationTestRuntime({

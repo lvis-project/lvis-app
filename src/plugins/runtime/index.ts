@@ -267,6 +267,19 @@ export interface PluginRuntimeOptions {
 }
 
 export class PluginRuntime extends PluginRuntimeLifecycle {
+  /** Release a same-plugin lifecycle lock held by dependency preparation. */
+  cancelPendingRestart(pluginId: string): void {
+    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+  }
+
+  /** Release all pending per-plugin restarts before queuing a global mutation. */
+  cancelAllPendingRestarts(): void {
+    for (const cancellation of this.pendingRestartCancellations.values()) {
+      cancellation.cancel();
+    }
+  }
+
   setToolInvocationDelegate(delegate: PluginToolInvocationDelegate): void {
     this.toolInvocationDelegate = delegate;
   }

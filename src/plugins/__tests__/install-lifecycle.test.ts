@@ -21,6 +21,7 @@ function makeRuntime(initialPluginIds: string[] = []) {
       return "started" as const;
     }),
     waitForPluginReady: vi.fn(async () => {}),
+    cancelPendingRestart: vi.fn(),
     removePlugin: vi.fn(async (pluginId: string) => {
       pluginIds = pluginIds.filter((id) => id !== pluginId);
     }),
@@ -205,6 +206,26 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(error).toBe(nestedFailure);
   });
 
+  it.each(["then", "finally"] as const)(
+    "reports a detached failure propagated through .%s()",
+    async (chainMethod) => {
+      const detachedFailure = new Error(`${chainMethod} detached failure`);
+      const error = await withPluginInstallLock("p", async () => {
+        const detached = withPluginInstallLock("p", async () => {
+          throw detachedFailure;
+        });
+        if (chainMethod === "then") {
+          void detached.then(() => undefined);
+        } else {
+          void detached.finally(() => undefined);
+        }
+      }).catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toEqual([detachedFailure]);
+    },
+  );
+
   it("rejects a per-plugin to all-plugin lock upgrade instead of deadlocking", async () => {
     await expect(withPluginInstallLock("p", async () => {
       await withAllPluginInstallLocks(async () => undefined);
@@ -320,6 +341,33 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(order).toEqual(["plugin:start", "plugin:end", "all:start", "all:end", "other"]);
   });
 
+  it("cancels a pending restart before the outer install lock queues", async () => {
+    let releaseRestart!: () => void;
+    let restartEntered!: () => void;
+    const restartGate = new Promise<void>((resolve) => { releaseRestart = resolve; });
+    const restartStarted = new Promise<void>((resolve) => { restartEntered = resolve; });
+    const restart = withPluginInstallLock("p", async () => {
+      restartEntered();
+      await restartGate;
+    });
+    await restartStarted;
+
+    const runtime = makeRuntime();
+    runtime.cancelPendingRestart.mockImplementationOnce(() => releaseRestart());
+    const marketplace = makeMarketplace();
+
+    await expect(installMarketplacePluginWithLifecycle({
+      requestedPluginId: "p",
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    })).resolves.toEqual({ pluginId: "p", installed: true });
+    await restart;
+
+    expect(runtime.cancelPendingRestart).toHaveBeenCalledWith("p");
+    expect(runtime.cancelPendingRestart.mock.invocationCallOrder[0])
+      .toBeLessThan(marketplace.install.mock.invocationCallOrder[0]);
+  });
+
   it("stops a loaded plugin before marketplace patching and starts the installed result", async () => {
     const order: string[] = [];
     const runtime = makeRuntime(["p"]);
@@ -379,7 +427,9 @@ describe("installMarketplacePluginWithLifecycle", () => {
       broadcastInstallProgress: ({ slug, phase }) => order.push(`progress:${slug}:${phase}`),
     });
 
-    expect(runtime.removePlugin).toHaveBeenCalledWith("meeting");
+    expect(runtime.removePlugin).toHaveBeenCalledWith("meeting", {
+      preserveConfigOverride: true,
+    });
     expect(runtime.addPlugin).toHaveBeenCalledWith("meeting");
     expect(order).toEqual([
       "progress:lvis-plugin-meeting:restarting",
@@ -430,7 +480,9 @@ describe("installMarketplacePluginWithLifecycle", () => {
       pluginMarketplace: marketplace,
     });
 
-    expect(runtime.removePlugin).toHaveBeenCalledWith("p");
+    expect(runtime.removePlugin).toHaveBeenCalledWith("p", {
+      preserveConfigOverride: true,
+    });
     expect(runtime.addPlugin).toHaveBeenCalledWith("p");
     expect(marketplace.getLiveCatalogVersion).not.toHaveBeenCalled();
   });
@@ -622,7 +674,9 @@ describe("installMarketplacePluginWithLifecycle", () => {
       }),
     ).rejects.toThrow("download failed");
 
-    expect(runtime.removePlugin).toHaveBeenCalledWith("p");
+    expect(runtime.removePlugin).toHaveBeenCalledWith("p", {
+      preserveConfigOverride: true,
+    });
     expect(runtime.addPlugin).toHaveBeenCalledWith("p");
     expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
     expect(marketplace.uninstall).not.toHaveBeenCalled();
