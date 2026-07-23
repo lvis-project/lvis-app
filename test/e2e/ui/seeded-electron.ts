@@ -86,16 +86,23 @@ export function buildE2eBaseSettings(onboardingCompleted = true, locale: "ko" | 
  * implicitly; that path is gone, so e2e seeds an explicit key for every vendor
  * (covers whichever `llm.provider` a spec ends up with — default azure-foundry).
  *
- * The `plain:` prefix is honored by `getSecret` unconditionally (it is checked
- * before the safeStorage branch), so this works in headless CI where no OS
- * keychain / safeStorage is available.
+ * Electron is launched unpackaged for these fixtures, so boot explicitly
+ * selects the development secret policy. The canonical document therefore
+ * uses the development-only plaintext encoding without weakening packaged
+ * behavior when OS encryption is unavailable.
  */
-export function buildE2eSecrets(): Record<string, string> {
-  const secrets: Record<string, string> = {};
+export function buildE2eSecrets(): {
+  version: 1;
+  entries: Record<string, { encoding: "plain-development"; value: string }>;
+} {
+  const entries: Record<string, { encoding: "plain-development"; value: string }> = {};
   for (const vendor of Object.keys(LLM_VENDOR_DEFAULTS)) {
-    secrets[`llm.apiKey.${vendor}`] = `plain:sk-e2e-${vendor}`;
+    entries[`llm.apiKey.${vendor}`] = {
+      encoding: "plain-development",
+      value: `sk-e2e-${vendor}`,
+    };
   }
-  return secrets;
+  return { version: 1, entries };
 }
 
 export type SeededElectronContext = {
