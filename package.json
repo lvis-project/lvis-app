@@ -56,7 +56,7 @@
     "test:a2a-external": "bun scripts/run-a2a-external-smoke.ts",
     "check:i18n-catalog": "node --import tsx scripts/i18n-validate-catalog.ts",
     "check:sunset-inventory": "node scripts/check-sunset-inventory.mjs",
-    "check:import-cycles": "node scripts/check-import-cycles.mjs src",
+    "check:import-cycles": "node --test test/scripts/import-cycle-check.test.mjs && node scripts/check-import-cycles.mjs src",
     "check:a2a-p4-5-contract": "node scripts/check-a2a-p4-5-contract.mjs",
     "test:a2a-p4-5:deterministic": "node scripts/run-a2a-p4-5-deterministic.mjs",
     "test:a2a-p4-5:wire": "node scripts/run-a2a-p4-5-wire.mjs",

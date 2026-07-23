@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import ts from "typescript";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, relative, resolve, parse } from "node:path";
 import { pathToFileURL } from "node:url";
 
 function collectTypeScriptFiles(root) {
@@ -37,10 +37,57 @@ function isTypeOnlyExport(node) {
     && node.exportClause.elements.every((element) => element.isTypeOnly);
 }
 
-function resolveLocalImport(from, specifier, fileSet) {
-  if (!specifier.startsWith(".")) return null;
-  const base = resolve(dirname(from), specifier);
-  const candidates = [
+function findPackageConfig(start) {
+  let current = resolve(start);
+  const filesystemRoot = parse(current).root;
+  while (true) {
+    const path = resolve(current, "package.json");
+    if (existsSync(path)) {
+      const packageJson = JSON.parse(readFileSync(path, "utf8"));
+      return { root: current, imports: packageJson.imports ?? {} };
+    }
+    if (current === filesystemRoot) return null;
+    current = dirname(current);
+  }
+}
+
+function collectImportTargets(target) {
+  if (typeof target === "string") return [target];
+  if (Array.isArray(target)) return target.flatMap(collectImportTargets);
+  if (target && typeof target === "object") {
+    return Object.values(target).flatMap(collectImportTargets);
+  }
+  return [];
+}
+
+function resolvePackageImport(specifier, packageConfig) {
+  if (!specifier.startsWith("#") || !packageConfig) return [];
+  const matches = [];
+  for (const [pattern, target] of Object.entries(packageConfig.imports)) {
+    const wildcardIndex = pattern.indexOf("*");
+    let wildcard = "";
+    if (wildcardIndex === -1) {
+      if (specifier !== pattern) continue;
+    } else {
+      const prefix = pattern.slice(0, wildcardIndex);
+      const suffix = pattern.slice(wildcardIndex + 1);
+      if (!specifier.startsWith(prefix) || !specifier.endsWith(suffix)) continue;
+      wildcard = specifier.slice(prefix.length, specifier.length - suffix.length);
+    }
+    for (const candidate of collectImportTargets(target)) {
+      if (!candidate.startsWith("./")) continue;
+      matches.push(resolve(packageConfig.root, candidate.replace("*", wildcard)));
+    }
+  }
+  return matches;
+}
+
+function resolveLocalImport(from, specifier, fileSet, packageConfig) {
+  const bases = specifier.startsWith(".")
+    ? [resolve(dirname(from), specifier)]
+    : resolvePackageImport(specifier, packageConfig);
+  if (bases.length === 0) return null;
+  const candidates = bases.flatMap((base) => [
     base,
     `${base}.ts`,
     `${base}.tsx`,
@@ -48,7 +95,7 @@ function resolveLocalImport(from, specifier, fileSet) {
     base.replace(/\.js$/u, ".tsx"),
     resolve(base, "index.ts"),
     resolve(base, "index.tsx"),
-  ];
+  ]);
   return candidates.find((path) => fileSet.has(path)) ?? null;
 }
 
@@ -56,19 +103,20 @@ export function findRuntimeImportCycles(rootInput) {
   const root = resolve(rootInput);
   const files = collectTypeScriptFiles(root);
   const fileSet = new Set(files);
+  const packageConfig = findPackageConfig(root);
   const graph = new Map(files.map((file) => [file, new Set()]));
   for (const file of files) {
     const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
     for (const node of source.statements) {
       if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
         if (isTypeOnlyImport(node)) continue;
-        const target = resolveLocalImport(file, node.moduleSpecifier.text, fileSet);
+        const target = resolveLocalImport(file, node.moduleSpecifier.text, fileSet, packageConfig);
         if (target) graph.get(file).add(target);
         continue;
       }
       if (ts.isExportDeclaration(node) && node.moduleSpecifier
         && ts.isStringLiteral(node.moduleSpecifier) && !isTypeOnlyExport(node)) {
-        const target = resolveLocalImport(file, node.moduleSpecifier.text, fileSet);
+        const target = resolveLocalImport(file, node.moduleSpecifier.text, fileSet, packageConfig);
         if (target) graph.get(file).add(target);
       }
     }
