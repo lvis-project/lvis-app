@@ -222,6 +222,9 @@ export function createHostApiFactory(
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
+    const installPluginId = pluginRuntime.resolvePluginInstallId(pluginId);
+    const getCurrentRegistryEntry = () =>
+      installPluginId === null ? undefined : getRegistryEntry(installPluginId);
     const hostIncarnation = incarnation;
     const assertIssuedCapabilityActive = (memberPath: string): void => {
       if (!hostIncarnation.isActive()) {
@@ -540,7 +543,7 @@ export function createHostApiFactory(
               registryInstallSource?: "admin" | "user" | "local-dev";
               registryManifestSha256?: string;
             } => {
-              const entry = getRegistryEntry(pluginId);
+              const entry = getCurrentRegistryEntry();
               return {
                 ...(entry?.installSource !== undefined ? { registryInstallSource: entry.installSource } : {}),
                 ...(entry?.manifestSha256 !== undefined ? { registryManifestSha256: entry.manifestSha256 } : {}),
@@ -668,7 +671,7 @@ export function createHostApiFactory(
           // the plugin's writable surface so a malicious post-install
           // patch could flip `installPolicy:"admin"` and inherit Tier-3
           // bypass if manifest-only metadata were trusted here.
-          const registryEntry = getRegistryEntry(pluginId);
+          const registryEntry = getCurrentRegistryEntry();
           const registryInstallSource = registryEntry?.installSource;
           const effectiveInstallPolicy: "admin" | "user" =
             registryInstallSource === "admin" ? "admin" : "user";

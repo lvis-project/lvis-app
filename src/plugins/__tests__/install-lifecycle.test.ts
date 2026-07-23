@@ -17,6 +17,7 @@ function makeRuntime(initialPluginIds: string[] = []) {
   return {
     listPluginIds: vi.fn(() => [...pluginIds]),
     resolvePluginId: vi.fn((pluginId: string) => pluginId),
+    resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     addPlugin: vi.fn(async (pluginId: string) => {
       if (!pluginIds.includes(pluginId)) pluginIds.push(pluginId);
       return "started" as const;
@@ -421,6 +422,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
     }]);
     let releaseInstall!: () => void;
     let markInstallStarted!: () => void;
+    const installedEvents = vi.fn();
     const installGate = new Promise<void>((resolve) => {
       releaseInstall = resolve;
     });
@@ -437,6 +439,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
       requestedPluginId: installAlias,
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
+      emitPluginInstalled: installedEvents,
     });
     await installStarted;
 
@@ -447,8 +450,16 @@ describe("installMarketplacePluginWithLifecycle", () => {
         competingMutationEntered = true;
       },
     );
+    let competingAliasMutationEntered = false;
+    const competingAliasMutation = withPluginInstallLock(
+      installAlias,
+      async () => {
+        competingAliasMutationEntered = true;
+      },
+    );
     await Promise.resolve();
     expect(competingMutationEntered).toBe(false);
+    expect(competingAliasMutationEntered).toBe(false);
 
     releaseInstall();
     await expect(install).resolves.toEqual({
@@ -456,11 +467,42 @@ describe("installMarketplacePluginWithLifecycle", () => {
       installed: true,
     });
     await competingMutation;
+    await competingAliasMutation;
     expect(competingMutationEntered).toBe(true);
+    expect(competingAliasMutationEntered).toBe(true);
     expect(runtime.cancelPendingRestart).toHaveBeenCalledWith(canonicalPluginId);
     expect(runtime.removePlugin).toHaveBeenCalledWith(canonicalPluginId, {
       preserveConfigOverride: true,
     });
+    expect(runtime.addPlugin).toHaveBeenCalledWith(installAlias);
+    expect(installedEvents).toHaveBeenCalledWith({
+      pluginId: canonicalPluginId,
+      source: "marketplace",
+    });
+  });
+
+  it("rejects marketplace replacement of a loaded static plugin before mutation", async () => {
+    const runtime = makeRuntime(["p-static"]);
+    runtime.resolvePluginInstallId.mockReturnValue(null);
+    const marketplace = makeMarketplace();
+    marketplace.list.mockResolvedValue([{
+      id: "p-static",
+      slug: "p-static",
+      installed: false,
+      version: "2.0.0",
+    }]);
+
+    await expect(installMarketplacePluginWithLifecycle({
+      requestedPluginId: "p-static",
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    })).rejects.toThrow(
+      "Statically configured plugin cannot be replaced from the marketplace",
+    );
+
+    expect(runtime.cancelPendingRestart).not.toHaveBeenCalled();
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(marketplace.install).not.toHaveBeenCalled();
   });
 
   it("stops a loaded plugin before marketplace patching and starts the installed result", async () => {
@@ -567,6 +609,10 @@ describe("installMarketplacePluginWithLifecycle", () => {
     const runtime = makeRuntime();
     const marketplace = makeMarketplace();
     marketplace.list.mockResolvedValue([{ id: "p", slug: "lvis-plugin-p", installed: true, version: "2.0.0" }]);
+    marketplace.install.mockResolvedValueOnce({
+      pluginId: "p",
+      installed: true,
+    });
 
     await installMarketplacePluginWithLifecycle({
       requestedPluginId: "lvis-plugin-p",

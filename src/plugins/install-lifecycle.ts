@@ -129,6 +129,7 @@ class InstalledPluginVersionMismatchError extends Error {
 interface PluginInstallRuntime {
   listPluginIds(): string[];
   resolvePluginId(pluginId: string): string;
+  resolvePluginInstallId(pluginId: string): string | null;
   addPlugin(pluginId: string): Promise<InstalledPluginStartState>;
   waitForPluginReady(pluginId: string): Promise<void>;
   removePlugin(
@@ -183,6 +184,27 @@ export function withPluginInstallLock<T>(
     return trackReentrantOperation(heldLock, fn);
   }
   return acquirePluginInstallLock(pluginId, fn, heldLocks);
+}
+
+/**
+ * Hold every identity that can address one plugin for the full mutation.
+ * Sorting provides a single acquisition order, so alias/canonical callers
+ * cannot deadlock while an inner remove temporarily clears runtime aliases.
+ */
+export function withPluginInstallLocks<T>(
+  pluginIds: readonly string[],
+  fn: () => Promise<T>,
+): Promise<T> {
+  const lockKeys = [...new Set(pluginIds)].sort();
+  if (lockKeys.length === 0) {
+    throw new Error("plugin lifecycle mutation requires at least one identity");
+  }
+  const acquire = (index: number): Promise<T> => {
+    const lockKey = lockKeys[index];
+    if (lockKey === undefined) return fn();
+    return withPluginInstallLock(lockKey, () => acquire(index + 1));
+  };
+  return acquire(0);
 }
 
 async function acquirePluginInstallLock<T>(
@@ -666,13 +688,23 @@ export async function installMarketplacePluginWithLifecycle(options: {
   const resolvedLifecyclePluginId = pluginRuntime.resolvePluginId(
     lifecyclePluginId ?? catalogState.pluginId,
   );
+  if (
+    pluginRuntime.listPluginIds().includes(resolvedLifecyclePluginId)
+    && pluginRuntime.resolvePluginInstallId(resolvedLifecyclePluginId) === null
+  ) {
+    throw new Error(
+      `Statically configured plugin cannot be replaced from the marketplace: ${resolvedLifecyclePluginId}`,
+    );
+  }
   const progressSlug = eventSlug ?? resolvedLifecyclePluginId;
 
   // A pending restart can own this lifecycle lock while waiting on dependency
   // preparation. Cancel it before this outer lock queues; removePlugin cannot
   // reach its own cancellation boundary until after this callback starts.
   pluginRuntime.cancelPendingRestart(resolvedLifecyclePluginId);
-  return withPluginInstallLock(resolvedLifecyclePluginId, async () => {
+  return withPluginInstallLocks(
+    [resolvedLifecyclePluginId, catalogState.pluginId],
+    async () => {
     const currentCatalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
     const currentRuntimePluginId = pluginRuntime.resolvePluginId(currentCatalogState.pluginId);
     const expectedVersionForGuard = expectedVersion?.trim();
@@ -686,7 +718,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
     const hadExistingInstall =
       currentCatalogState.installed === true ||
       pluginRuntime.listPluginIds().includes(currentRuntimePluginId);
-    let restorePluginId = resolvedLifecyclePluginId;
+    let restorePluginId = currentCatalogState.pluginId;
     let startLifecycleAttempted = false;
     let versionVerificationFailed = false;
     let installedVersionBeforeInstall: string | null = null;
@@ -714,19 +746,19 @@ export async function installMarketplacePluginWithLifecycle(options: {
       }, {
         networkAccessAcknowledgement,
       });
-      const installedPluginId = result.pluginId === requestedPluginId ? resolvedLifecyclePluginId : result.pluginId;
-      restorePluginId = installedPluginId;
+      const installedInstallId = result.pluginId;
+      restorePluginId = installedInstallId;
       try {
         await assertInstalledMarketplacePluginVersion({
           pluginMarketplace,
-          pluginId: installedPluginId,
+          pluginId: installedInstallId,
           expectedVersion,
         });
       } catch (err) {
         versionVerificationFailed = true;
         try {
           await rollbackFailedVersionVerification({
-            pluginId: installedPluginId,
+            pluginId: installedInstallId,
             wasLoadedBeforeStart: hadExistingInstall,
             installedVersionBeforeInstall,
             installedVersionAfterFailure: err instanceof InstalledPluginVersionMismatchError
@@ -737,13 +769,13 @@ export async function installMarketplacePluginWithLifecycle(options: {
             log,
           });
         } catch (rollbackErr) {
-          throw new Error(`install version verification failed and rollback failed for ${installedPluginId}: ${errorMessage(rollbackErr)} (original: ${errorMessage(err)})`);
+          throw new Error(`install version verification failed and rollback failed for ${installedInstallId}: ${errorMessage(rollbackErr)} (original: ${errorMessage(err)})`);
         }
         throw err;
       }
       startLifecycleAttempted = true;
       await startInstalledPluginWithLifecycle({
-        pluginId: installedPluginId,
+        pluginId: installedInstallId,
         source: "marketplace",
         rollbackMode: "marketplace",
         wasLoadedBeforeStart: hadExistingInstall,
@@ -752,12 +784,18 @@ export async function installMarketplacePluginWithLifecycle(options: {
         broadcastInstallProgress: (payload) =>
           broadcastInstallProgress?.({ ...payload, slug: progressSlug }),
         emitPluginInstalled: emitPluginInstalled
-          ? (payload) => emitPluginInstalled({ pluginId: payload.pluginId, source: "marketplace" })
+          ? (payload) => emitPluginInstalled({
+              pluginId: pluginRuntime.resolvePluginId(payload.pluginId),
+              source: "marketplace",
+            })
           : undefined,
         refreshPluginNotifications,
         log,
       });
-      return { ...result, pluginId: installedPluginId };
+      return {
+        ...result,
+        pluginId: pluginRuntime.resolvePluginId(installedInstallId),
+      };
     } catch (err) {
       if (
         hadExistingInstall &&
@@ -774,7 +812,8 @@ export async function installMarketplacePluginWithLifecycle(options: {
       }
       throw err;
     }
-  });
+    },
+  );
 }
 
 async function rollbackFailedVersionVerification(options: {
