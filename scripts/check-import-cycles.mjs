@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import ts from "typescript";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, relative, resolve, parse } from "node:path";
+import { dirname, relative, resolve, parse, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 function collectTypeScriptFiles(root) {
@@ -76,7 +76,7 @@ function resolvePackageImport(specifier, packageConfig) {
     }
     for (const candidate of collectImportTargets(target)) {
       if (!candidate.startsWith("./")) continue;
-      matches.push(resolve(packageConfig.root, candidate.replace("*", wildcard)));
+      matches.push(resolve(packageConfig.root, candidate.replaceAll("*", () => wildcard)));
     }
   }
   return matches;
@@ -154,7 +154,7 @@ export function findRuntimeImportCycles(rootInput) {
   };
   for (const file of files) if (!indexes.has(file)) visit(file);
 
-  const display = (file) => relative(root, file);
+  const display = (file) => normalizeDisplayPath(relative(root, file));
   return components.map((members) => {
     const memberSet = new Set(members);
     return {
@@ -164,6 +164,10 @@ export function findRuntimeImportCycles(rootInput) {
         .map((to) => `${display(from)} -> ${display(to)}`)).sort(),
     };
   }).sort((a, b) => b.members.length - a.members.length || a.members[0].localeCompare(b.members[0]));
+}
+
+export function normalizeDisplayPath(path, pathSeparator = sep) {
+  return pathSeparator === "/" ? path : path.split(pathSeparator).join("/");
 }
 
 function runCli() {

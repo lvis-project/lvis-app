@@ -5,7 +5,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { findRuntimeImportCycles } from "../../scripts/check-import-cycles.mjs";
+import {
+  findRuntimeImportCycles,
+  normalizeDisplayPath,
+} from "../../scripts/check-import-cycles.mjs";
 
 const cycleChecker = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -62,6 +65,37 @@ test("detects cycles through package import aliases and self-imports", () => {
   } finally {
     rmSync(packageRoot, { recursive: true, force: true });
   }
+});
+
+test("substitutes every package-import wildcard literally", () => {
+  const packageRoot = mkdtempSync(join(tmpdir(), "lvis-import-repeated-wildcard-"));
+  const root = join(packageRoot, "src");
+  try {
+    mkdirSync(join(root, "features", "$&"), { recursive: true });
+    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({
+      type: "module",
+      imports: { "#feature/*": "./src/features/*/*.ts" },
+    }));
+    writeFileSync(
+      join(root, "entry.ts"),
+      'import { feature } from "#feature/$&"; export const entry = feature;\n',
+    );
+    writeFileSync(
+      join(root, "features", "$&", "$&.ts"),
+      'import { entry } from "../../entry.js"; export const feature = entry;\n',
+    );
+
+    assert.deepEqual(findRuntimeImportCycles(root), [{
+      members: ["entry.ts", "features/$&/$&.ts"],
+      edges: ["entry.ts -> features/$&/$&.ts", "features/$&/$&.ts -> entry.ts"],
+    }]);
+  } finally {
+    rmSync(packageRoot, { recursive: true, force: true });
+  }
+});
+
+test("normalizes Windows diagnostics to portable separators", () => {
+  assert.equal(normalizeDisplayPath("lib\\helper.ts", "\\"), "lib/helper.ts");
 });
 
 test("CLI rejects a cyclic source tree with a stable diagnostic", () => {
