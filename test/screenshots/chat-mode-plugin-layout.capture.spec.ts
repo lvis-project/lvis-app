@@ -103,6 +103,33 @@ async function openPlugin(page: Page, label: string): Promise<OpenResult> {
   return out;
 }
 
+/**
+ * A plugin panel fires several READ tools on mount (index_folders,
+ * index_scan_status, index_documents, index_get_settings / meeting_list_preps);
+ * the host classifies them write-category, so each raises an "Approve Tool
+ * Execution" modal that covers the panel — they queue one after another. Approve
+ * each (this-session scope; they are the panel's own empty-index reads, so this
+ * is non-destructive) until none remains, so the panel loads its real empty
+ * state for the capture instead of being covered by — or erroring under — a
+ * modal. Returns the number of modals cleared.
+ */
+async function clearMountApprovalModals(page: Page): Promise<number> {
+  const dialog = page.locator('[data-testid="tool-approval-dialog"]').first();
+  let cleared = 0;
+  for (let i = 0; i < 12; i++) {
+    if (!(await dialog.count()) || !(await dialog.isVisible().catch(() => false))) break;
+    const approve = dialog.locator('[data-testid="approve-button"]').first();
+    if (await approve.count()) {
+      await approve.click().catch(() => {});
+    } else {
+      break;
+    }
+    cleared++;
+    await page.waitForTimeout(500); // let the next queued modal (if any) surface
+  }
+  return cleared;
+}
+
 /** Collect layout metrics from the renderer DOM (CDP-backed page.evaluate). */
 async function collectLayout(page: Page): Promise<unknown> {
   return page.evaluate(() => {
@@ -213,6 +240,10 @@ async function inspectOne(
     webviewAttached = false;
   }
   await page.waitForTimeout(1_800); // let the guest bundle settle
+  // Approve the panel's mount-time read calls so the modals clear and the panel
+  // loads its real empty state (layout metrics are read off the DOM either way).
+  const approvalModalsCleared = await clearMountApprovalModals(page);
+  await page.waitForTimeout(600); // let the panel repaint after the last approval
 
   const windowsAfter = app.windows().length;
   const urlsAfter = urls();
@@ -231,6 +262,7 @@ async function inspectOne(
       urlsAfter,
       inlineChromeVisible, // MUST be true — plugin host renders in the main window
       webviewAttached,
+      approvalModalsCleared,
     },
     layout,
   };
