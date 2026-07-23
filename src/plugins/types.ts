@@ -1036,6 +1036,12 @@ export interface PluginHostApi {
      */
     onChange<T = unknown>(key: string, callback: (value: T | undefined) => void): () => void;
   };
+  /**
+   * Register discovery keywords for plugin-owned Skills. Matching may preload
+   * the associated Skill into model context; it never invokes a Tool and does
+   * not create a keyword-to-tool alias. Callable surfaces remain the manifest's
+   * pure Tool objects.
+   */
   registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
   emitEvent(eventType: string, data?: unknown): void;
   /**
