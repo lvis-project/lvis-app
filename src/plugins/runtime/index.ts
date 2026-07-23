@@ -271,6 +271,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   cancelPendingRestart(pluginId: string): void {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    this.pendingRestartPreparations.delete(canonicalPluginId);
   }
 
   /** Release all pending per-plugin restarts before queuing a global mutation. */
@@ -278,6 +279,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     for (const cancellation of this.pendingRestartCancellations.values()) {
       cancellation.cancel();
     }
+    this.pendingRestartPreparations.clear();
   }
 
   setToolInvocationDelegate(delegate: PluginToolInvocationDelegate): void {

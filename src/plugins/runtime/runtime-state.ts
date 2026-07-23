@@ -189,7 +189,7 @@ export abstract class PluginRuntimeState {
   }
 
   mergeConfigOverride(pluginId: string, config: Record<string, unknown>): void {
-    this.configStore.merge(pluginId, config);
+    this.configStore.merge(this.resolveKnownPluginId(pluginId), config);
   }
 
   /** Merge host-injected values into the wildcard (`"*"`) config slot. */

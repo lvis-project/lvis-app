@@ -2897,6 +2897,51 @@ export default async function createPlugin() {
     ).resolves.toBe("started");
   });
 
+  it.each(["single", "all"] as const)(
+    "evicts a cancelled restart preparation through the %s cancellation API",
+    async (scope) => {
+      const pluginId = `p-cancel-stale-preparation-${scope}`;
+      const manifestPath = await writePlugin(pluginId);
+      await writeFile(
+        registryPath,
+        JSON.stringify({
+          version: 1,
+          plugins: [{ id: pluginId, manifestPath, enabled: true }],
+        }),
+        "utf-8",
+      );
+      let mode: "boot" | "hang" | "fresh" = "boot";
+      let entered!: () => void;
+      const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
+      const neverSettles = new Promise<void>(() => {});
+      let preparationCalls = 0;
+      const runtime = makeRuntimeWithPreparation(() => {
+        if (mode === "boot") return undefined;
+        preparationCalls += 1;
+        if (mode === "hang") {
+          entered();
+          return neverSettles;
+        }
+        return undefined;
+      });
+      await runtime.startAll();
+      mode = "hang";
+
+      const staleRestart = runtime.restartPlugin(pluginId);
+      await preparationEntered;
+      mode = "fresh";
+      if (scope === "single") {
+        runtime.cancelPendingRestart(pluginId);
+      } else {
+        runtime.cancelAllPendingRestarts();
+      }
+
+      await expect(staleRestart).resolves.toBe("failed");
+      await expect(runtime.restartPlugin(pluginId)).resolves.toBe("started");
+      expect(preparationCalls).toBe(2);
+    },
+  );
+
   it("uninstall lifecycle cancels a never-settling restart before its outer lock", async () => {
     const pluginId = "p-uninstall-immortal-restart";
     const manifestPath = await writePlugin(pluginId);
@@ -3132,6 +3177,52 @@ export default async function createPlugin() {
     await expect(reload).resolves.toBeUndefined();
     await expect(runtime.restartPlugin(pluginId)).resolves.toBe("started");
     expect(restartPreparationCalls).toBe(2);
+  });
+
+  it("does not cancel a pending restart when disable authorization is denied", async () => {
+    const pluginId = "p-denied-disable-during-restart";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    let prepareRestart = false;
+    let entered!: () => void;
+    let release!: () => void;
+    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const preparationGate = new Promise<void>((resolve) => { release = resolve; });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+    vi.spyOn(guard, "canDisable").mockResolvedValue({
+      allowed: false,
+      reason: "disable denied by policy",
+    });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests,
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      deploymentGuard: guard,
+      preparePluginStart: () => {
+        if (!prepareRestart) return undefined;
+        entered();
+        return preparationGate;
+      },
+    });
+    await runtime.startAll();
+    prepareRestart = true;
+
+    const restart = runtime.restartPlugin(pluginId);
+    await preparationEntered;
+    await expect(runtime.disable(pluginId)).rejects.toThrow("disable denied by policy");
+    expect(runtime.isPluginRestartPending(pluginId)).toBe(true);
+
+    release();
+    await expect(restart).resolves.toBe("started");
+    expect(runtime.listPluginIds()).toContain(pluginId);
   });
 
   it("addPlugin restart path prepares dependencies before stopping the loaded plugin", async () => {

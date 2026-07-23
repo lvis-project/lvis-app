@@ -226,6 +226,22 @@ describe("installMarketplacePluginWithLifecycle", () => {
     },
   );
 
+  it("returns native Promise behavior for branches created after owner drain", async () => {
+    let nested!: Promise<void>;
+    await withPluginInstallLock("p", async () => {
+      nested = withPluginInstallLock("p", async () => undefined);
+      await nested;
+    });
+
+    const lateFailure = new Error("late branch failure");
+    const lateBranch = nested.then(() => {
+      throw lateFailure;
+    });
+
+    expect(Object.getPrototypeOf(lateBranch)).toBe(Promise.prototype);
+    await expect(lateBranch).rejects.toBe(lateFailure);
+  });
+
   it("rejects a per-plugin to all-plugin lock upgrade instead of deadlocking", async () => {
     await expect(withPluginInstallLock("p", async () => {
       await withAllPluginInstallLocks(async () => undefined);
@@ -339,6 +355,26 @@ describe("installMarketplacePluginWithLifecycle", () => {
     await allMutation;
     await otherMutation;
     expect(order).toEqual(["plugin:start", "plugin:end", "all:start", "all:end", "other"]);
+  });
+
+  it("atomically admits a plugin mutation before a global mutation can wait on it", async () => {
+    const order: string[] = [];
+    const pluginMutation = withPluginInstallLock("p", async () => {
+      order.push("plugin");
+    });
+    const allMutation = withAllPluginInstallLocks(async () => {
+      order.push("all:start");
+      await pluginMutation;
+      order.push("all:end");
+    });
+
+    await expect(Promise.race([
+      allMutation.then(() => "settled" as const),
+      new Promise<"timeout">((resolve) => {
+        setTimeout(() => resolve("timeout"), 1_000);
+      }),
+    ])).resolves.toBe("settled");
+    expect(order).toEqual(["plugin", "all:start", "all:end"]);
   });
 
   it("cancels a pending restart before the outer install lock queues", async () => {
