@@ -237,6 +237,61 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
     });
 
+    it("loads a plugin despite Python bytecode cache (__pycache__/*.pyc) absent from its receipt", async () => {
+      // A Python-backed plugin's worker compiles `.pyc` into `__pycache__/`
+      // inside its payload on first run — never part of the signed artifact and
+      // absent from the receipt. Those cache files must NOT fail integrity.
+      const pluginDir = join(pluginsRoot, "p-pyc");
+      const manifestPath = await writePluginAt(pluginDir, "tb-receipt-pyc");
+      await writeReceipt("tb-receipt-pyc", pluginDir);
+      await mkdir(join(pluginDir, "dist", "worker", "__pycache__"), { recursive: true });
+      await writeFile(
+        join(pluginDir, "dist", "worker", "__pycache__", "local_indexer.cpython-312.pyc"),
+        "\x00\x00\x00\x00compiled-bytecode",
+        "utf-8",
+      );
+      await writeTestPluginRegistry({ registryPath }, [{ id: "tb-receipt-pyc", manifestPath }]);
+
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+      });
+      await runtime.load();
+
+      expect(runtime.listPluginIds()).toContain("tb-receipt-pyc");
+    });
+
+    it("still rejects a non-bytecode file smuggled into a __pycache__/ directory", async () => {
+      // The exclusion is tight: only `.pyc`/`.pyo` inside `__pycache__/` are
+      // skipped. A non-bytecode executable hidden in `__pycache__/` is still an
+      // unlisted payload file and must be rejected — no evasion hole.
+      const pluginDir = join(pluginsRoot, "p-pyc-smuggle");
+      const manifestPath = await writePluginAt(pluginDir, "tb-receipt-pyc-smuggle");
+      await writeReceipt("tb-receipt-pyc-smuggle", pluginDir);
+      await mkdir(join(pluginDir, "dist", "worker", "__pycache__"), { recursive: true });
+      await writeFile(
+        join(pluginDir, "dist", "worker", "__pycache__", "evil.mjs"),
+        "export default 'injected';\n",
+        "utf-8",
+      );
+      await writeTestPluginRegistry({ registryPath }, [{ id: "tb-receipt-pyc-smuggle", manifestPath }]);
+
+      const auditCalls: Array<{ level: string; message: string }> = [];
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+        auditLog: (level, message) => auditCalls.push({ level, message }),
+      });
+      await runtime.load();
+
+      expect(runtime.listPluginIds()).not.toContain("tb-receipt-pyc-smuggle");
+      expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
+    });
+
     it("rejects malformed valid receipt JSON without aborting unrelated plugin startup", async () => {
       const malformedId = "tb-malformed-receipt";
       const validId = "tb-valid-neighbor";
