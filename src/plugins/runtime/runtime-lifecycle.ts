@@ -182,7 +182,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       const { plan } = outcome;
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
+      const pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
       if (!outcome.ok) {
         if (outcome.kind === "integrity") {
           if (plan.pluginIdHint) {
@@ -211,8 +211,6 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         continue;
       }
       const { manifest, approvedPluginAccess } = outcome;
-      // Reassign to manifest.id so all subsequent phases use the canonical id.
-      pluginId = manifest.id;
       this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
