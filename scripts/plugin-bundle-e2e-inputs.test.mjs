@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -89,6 +89,33 @@ test("CLI honors explicit checkout roots without appending repository names", ()
     },
   );
   assert.equal(JSON.parse(output).refs.epApi, f.epApiSha);
+});
+
+test("CLI creates a private evidence sink for later lifecycle merges", () => {
+  const f = fixture();
+  const evidencePath = join(f.hostRoot, "bundle-evidence.json");
+  execFileSync(
+    process.execPath,
+    [fileURLToPath(new URL("./plugin-bundle-e2e-inputs.mjs", import.meta.url))],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOST_ROOT: f.hostRoot,
+        SDK_ROOT: f.sdkRoot,
+        MARKETPLACE_ROOT: f.marketplaceRoot,
+        EP_API_ROOT: f.epApiRoot,
+        HOST_SHA: f.hostSha,
+        SDK_SHA: f.sdkSha,
+        MARKETPLACE_SHA: f.marketplaceSha,
+        EP_API_SHA: f.epApiSha,
+        BUNDLE_E2E_EVIDENCE_PATH: evidencePath,
+      },
+    },
+  );
+
+  assert.equal(JSON.parse(readFileSync(evidencePath, "utf8")).refs.epApi, f.epApiSha);
+  assert.equal(statSync(evidencePath).mode & 0o777, 0o600);
 });
 
 test("rejects an SDK ref that ep-api does not consume", () => {
