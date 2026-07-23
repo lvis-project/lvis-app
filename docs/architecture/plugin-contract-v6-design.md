@@ -1,7 +1,10 @@
 # Plugin Contract v6 — Pure MCP Tool Object (single SoT) + MCP Isolation Parity (#885)
 
-> Status: **Design / awaiting implementation** — decisions §0 ratified by the maintainer 2026-07-09
+> Status: **Implemented; amended 2026-07-23** — decisions §0 ratified by the maintainer 2026-07-09
 > (surface model + proprietary-field minimization ratified same day, second round).
+> The 2026-07-23 amendment adds one signed, restriction-only, colocated key,
+> `_meta["lvisai/operationPolicy"]`, for composite domain tools. It does not restore
+> a top-level tool map, `uiActions`, `toolSchemas`, or self-declared risk authority.
 > Issue: #885 (feat(sdk): plugin contract simplification + MCP server isolation parity).
 > Scope directive: this design **formally narrows** `docs/architecture/mcp-alignment-design.md` for the
 > plugin-contract axis — LVIS adopts the **MCP `Tool` object shape verbatim** (manifest shape == wire shape)
@@ -20,7 +23,7 @@
 | Q1 surface model | How the tool contract is expressed | **Single canonical `tools: Tool[]`** where each element is a **pure MCP `Tool` object** (`name, title?, description?, inputSchema, icons?, _meta?`). `toolSchemas` map and `uiActions` map are **deleted**. |
 | Q2 wire scope | Relationship to `mcp-alignment-design.md` full-wire migration | **Narrow to #885.** Adopt the MCP tool-**object** shape + isolation parity ONLY. No stateless `server/discover`/MRTR rewrite in this epic. Loopback stays (shipped). |
 | Q3 `category` | Fate of the deprecated per-tool `category` | **Removed.** `host-classifies-risk` is live; a plugin grading its own danger is not a control. |
-| **Q4 field minimization** | Fate of the remaining LVIS-proprietary tool fields | **6 → 1.** `model`+`ui` → folded into the **standard** `_meta.ui.visibility` (MCP Apps SEP-1865). `writesToOwnSandbox`, `workerId`, per-tool `version`, `deprecatedSince`/`replacedBy` → **removed from the manifest** (host-derived / host-assigned / plugin-level / YAGNI). Only `_meta["lvisai/pathFields"]` remains LVIS-proprietary. |
+| **Q4 field minimization** | Fate of the remaining LVIS-proprietary tool fields | **6 → 1 initially; 2 after the 2026-07-23 composite-tool amendment.** `model`+`ui` → standard `_meta.ui.visibility`. `writesToOwnSandbox`, `workerId`, per-tool `version`, `deprecatedSince`/`replacedBy` remain removed. `_meta["lvisai/pathFields"]` and signed `_meta["lvisai/operationPolicy"]` are the only LVIS keys. The latter can only raise risk, narrow app visibility, or require a prior read. |
 | **Q5 manifest form** | Authoring shape in `plugin.json` | **Pure form** — the manifest tool object IS the MCP `Tool` (including `_meta`). Manifest shape == wire shape; no top-level `model`/`ui` sugar, no translation layer for the new shape (`normalizeManifest` handles the LEGACY shape only). |
 | **Q6 visibility default** | Interpretation when `_meta.ui.visibility` is absent | **Standard SEP-1865 default `["model","app"]`** (round 3 — LVIS hosts external MCP tools with the same semantics; a host-private reinterpretation cannot be imposed on the ecosystem). Safe by construction: the default yields only governed dual routing; the ungoverned bypass requires an explicit `["app"]`-only declaration. Resolved to an explicit array once at load. |
 | b1 partition | MCP App UI partition isolation | **Per-server, ephemeral** — `lvis-mcp-app:<serverId>` (in-memory), replacing the shared `lvis-mcp-app`. |
@@ -65,9 +68,17 @@ Real-manifest scale (per-surface, verified 2026-07-09): meeting declares 28 `too
         // STANDARD (MCP Apps SEP-1865, extension io.modelcontextprotocol/ui):
         // which surfaces may invoke this tool. Replaces LVIS's tools[]/uiActions split.
         "ui": { "visibility": ["model", "app"] },
-        // The ONLY remaining LVIS-proprietary key: names the input-schema args that
+        // LVIS path restriction: names the input-schema args that
         // are filesystem paths, fed into the HOST-side allowed-directories check.
-        "lvisai/pathFields": ["attachmentPath"]
+        "lvisai/pathFields": ["attachmentPath"],
+        // Signed restrictions for a composite Tool. Operation names stay
+        // colocated with their rules; there is no parallel tool/action map.
+        "lvisai/operationPolicy": {
+          "discriminant": "operation",
+          "operations": {
+            "list": { "kind": "read", "minimumRisk": "read", "appVisible": true }
+          }
+        }
       }
     },
     {
@@ -151,7 +162,8 @@ visibility — it stays host-side, exactly as today.
 | LLM-facing? | `tools[].includes(name)` | `_meta.ui.visibility ∋ "model"` | **standard** (SEP-1865) |
 | UI-invokable? | `uiActions[name]` present | `_meta.ui.visibility ∋ "app"` | **standard** (SEP-1865); OpenAI Apps SDK production analog (`openai/widgetAccessible` → migrating to the same array) |
 | description / inputSchema / title / icons | `toolSchemas[name].*` | `tools[].*` (MCP fields) | — |
-| pathFields | `toolSchemas[name].pathFields?` | `_meta["lvisai/pathFields"]` — **the only LVIS key kept** | OpenAI `_meta["openai/fileParams"]` is a structural twin; the *gate* stays host-side (a lying declaration only adds checks, never bypasses one) |
+| pathFields | `toolSchemas[name].pathFields?` | `_meta["lvisai/pathFields"]` | OpenAI `_meta["openai/fileParams"]` is a structural twin; the *gate* stays host-side (a lying declaration only adds checks, never bypasses one) |
+| composite operation restrictions | none | `_meta["lvisai/operationPolicy"]` (2026-07-23 amendment) | signed Tool-local policy; `minimumRisk` is a floor, `appVisible` only narrows `_meta.ui.visibility`, and `requiresRead` only adds a prerequisite |
 | category | `toolSchemas[name].category?` | **removed** (Q3) | host-classifies-risk live; MCP MUST-untrusted rule |
 | writesToOwnSandbox | `toolSchemas[name].writesToOwnSandbox?` | **removed — host-derived.** Containment of resolved path args inside the plugin sandbox root is computed host-side per invocation (the runtime verification was always the real signal; the flag was an untrusted self-claim). LVIS already has the derivation (`sandboxFsContainedProvider` / `isActiveSandboxFilesystemContainedForPluginEffects`). | MCP MUST-untrusted rule; **Codex #7635 declined the analogous self-attested sandbox field (closed not-planned)**; census: **0 declarations** across all 6 plugins |
 | workerId | `toolSchemas[name].workerId?` | **removed as manifest input — host-assigned runtime binding only.** The real proof mechanism already exists: `spawnWorker`'s wrapped-spawn path registers `(pluginId, workerId)` in `sandbox-capability.ts`; the manifest field was advisory-only by its own JSDoc ("not an execution proof"). | no external per-tool worker concept exists; census: **0 declarations** |

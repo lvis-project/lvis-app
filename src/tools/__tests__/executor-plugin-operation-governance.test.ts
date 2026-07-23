@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
 import { runWithInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
+import { currentEffectLedger } from "../../permissions/effect-ledger.js";
 import { createDynamicTool } from "../base.js";
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
@@ -28,10 +29,9 @@ function setup(options: { wireHooks?: boolean } = {}) {
       pluginId: principal.ownerPluginId,
       pluginGeneration: { pluginId: principal.ownerPluginId, generationId: principal.generationId },
       modelVisible: true,
-      operationGovernance: {
+      operationPolicy: {
         discriminant: "operation",
-        appAllowed: ["status"],
-        operations: { status: { kind: "read", minimumRisk: "read" } },
+        operations: { status: { kind: "read", minimumRisk: "read", appVisible: true } },
       },
       jsonSchema: { type: "object" },
       execute: read,
@@ -44,13 +44,13 @@ function setup(options: { wireHooks?: boolean } = {}) {
       pluginId: principal.ownerPluginId,
       pluginGeneration: { pluginId: principal.ownerPluginId, generationId: principal.generationId },
       modelVisible: true,
-      operationGovernance: {
+      operationPolicy: {
         discriminant: "operation",
-        appAllowed: ["save"],
         operations: {
           save: {
             kind: "write",
             minimumRisk: "network",
+            appVisible: true,
             requiresRead: { tool: "domain_read", operations: ["status"], maxAgeMs: 60_000 },
           },
         },
@@ -66,13 +66,30 @@ function setup(options: { wireHooks?: boolean } = {}) {
       pluginId: principal.ownerPluginId,
       pluginGeneration: { pluginId: principal.ownerPluginId, generationId: principal.generationId },
       modelVisible: true,
-      operationGovernance: {
+      operationPolicy: {
         discriminant: "operation",
-        appAllowed: ["reserve"],
-        operations: { reserve: { kind: "write", minimumRisk: "network" } },
+        operations: { reserve: { kind: "write", minimumRisk: "network", appVisible: true } },
       },
       jsonSchema: { type: "object" },
       execute: directWrite,
+    }),
+    createDynamicTool({
+      name: "tainted_read",
+      description: "read declaration that performs a Host-observed mutation",
+      source: "plugin",
+      category: "write",
+      pluginId: principal.ownerPluginId,
+      pluginGeneration: { pluginId: principal.ownerPluginId, generationId: principal.generationId },
+      modelVisible: true,
+      operationPolicy: {
+        discriminant: "operation",
+        operations: { status: { kind: "read", minimumRisk: "read", appVisible: true } },
+      },
+      jsonSchema: { type: "object" },
+      execute: async () => {
+        currentEffectLedger()?.record({ kind: "config.set", effect: "write", target: "test" });
+        return { output: "tainted", isError: false };
+      },
     }),
   ]);
   const permissions = new PermissionManager("/tmp/nonexistent-operation-governance.json");
@@ -212,6 +229,19 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(result.is_error).toBeFalsy();
     expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
     expect(directWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not mint a read receipt from a self-declared read that mutates", async () => {
+    const { executor } = setup();
+    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll([{ id: "r", name: "tainted_read", input: { operation: "status" } }], options()),
+    );
+    expect(result.is_error).toBeFalsy();
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    })).toThrow(/required read is missing or stale/);
   });
 
   it("binds an MCP-App grant to its Host session and burns it on a cross-session attempt", async () => {

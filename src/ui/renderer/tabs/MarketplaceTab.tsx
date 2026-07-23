@@ -393,6 +393,21 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     }
   }, [refreshPackages, t, updateMarketplaceAssetInstall]);
 
+  const rollbackPackage = useCallback(async (item: MarketplaceItem) => {
+    setWorkingSlug(item.id);
+    try {
+      const result = await getHostMarketplaceApi().rollbackMarketplacePlugin?.(item.id);
+      if (!result?.ok) {
+        throw new Error(result?.message ?? result?.error ?? "Plugin rollback API unavailable");
+      }
+      await refreshPackages();
+    } catch (err) {
+      setPackageStatus(t("marketplaceTab.operationFailed", { message: (err as Error).message }));
+    } finally {
+      setWorkingSlug(null);
+    }
+  }, [refreshPackages, t]);
+
   const filterOptions = MARKETPLACE_PACKAGE_FILTER_OPTIONS;
 
   return (
@@ -529,29 +544,43 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                     )}
                     <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{item.id}</p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant={item.installed ? "outline" : "default"}
-                    className="h-7 shrink-0 px-2 text-xs"
-                    data-testid={`marketplace:action:${item.id}`}
-                    disabled={actionDisabled}
-                    title={unavailableTitle}
-                    onClick={() => {
-                      if (item.installed) {
-                        void uninstallPackage(item);
-                        return;
-                      }
-                      // #1098/#1279 — admin-policy and networkAccess plugins
-                      // show install-time disclosures before the install starts.
-                      if (needsInstallDisclosure(item)) {
-                        setInstallDialogTarget(item);
-                        return;
-                      }
-                      void installPackage(item);
-                    }}
-                  >
-                    {actionLabel}
-                  </Button>
+                  <div className="flex shrink-0 gap-1">
+                    {item.installed && packageType === "plugin" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        data-testid={`marketplace:rollback:${item.id}`}
+                        disabled={isWorking}
+                        onClick={() => void rollbackPackage(item)}
+                      >
+                        {t("marketplaceTab.rollbackButton")}
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant={item.installed ? "outline" : "default"}
+                      className="h-7 px-2 text-xs"
+                      data-testid={`marketplace:action:${item.id}`}
+                      disabled={actionDisabled}
+                      title={unavailableTitle}
+                      onClick={() => {
+                        if (item.installed) {
+                          void uninstallPackage(item);
+                          return;
+                        }
+                        // #1098/#1279 — admin-policy and networkAccess plugins
+                        // show install-time disclosures before the install starts.
+                        if (needsInstallDisclosure(item)) {
+                          setInstallDialogTarget(item);
+                          return;
+                        }
+                        void installPackage(item);
+                      }}
+                    >
+                      {actionLabel}
+                    </Button>
+                  </div>
                 </div>
               );
             })}

@@ -244,12 +244,12 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
     };
     const policy = {
       discriminant: "operation" as const,
-      appAllowed: ["list", "update"],
       operations: {
-        list: { kind: "read" as const, minimumRisk: "read" as const },
+        list: { kind: "read" as const, minimumRisk: "read" as const, appVisible: true },
         update: {
           kind: "write" as const,
           minimumRisk: "write" as const,
+          appVisible: true,
           requiresRead: { tool: "ep_read", operations: ["list"], maxAgeMs: 60_000 },
         },
       },
@@ -257,7 +257,7 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
     const tool = {
       name: "ep_write",
       pluginId: "acme-cards",
-      operationGovernance: policy,
+      operationPolicy: policy,
     } as Tool;
     const source = createLoopbackToolCallSource({ runtime, findTool: () => tool });
 

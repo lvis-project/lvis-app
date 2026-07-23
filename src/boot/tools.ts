@@ -36,6 +36,8 @@ import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
+import type { WorkerSearchClient } from "../main/hybrid-retriever.js";
+import type { KnowledgeWorkerClient } from "../tools/knowledge-search.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor } from "../main/idle-scheduler.js";
 import { createLogger } from "../lib/logger.js";
@@ -54,6 +56,10 @@ export interface KnowledgeWiringResult {
   knowledgeAvailable: boolean;
 }
 
+type KnowledgePluginInstance = {
+  getWorkerClient?: () => WorkerSearchClient & KnowledgeWorkerClient;
+};
+
 export async function wireKnowledgeAndIdleScheduler(opts: {
   pluginRuntime: PluginRuntime;
   toolRegistry: ToolRegistry;
@@ -63,39 +69,43 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
   let idleScheduler: IdleSchedulerService | undefined;
   let knowledgeAvailable = false;
   try {
-    // Public accessor (runtime.getPluginInstance) replaces the previous
-    // `(pluginRuntime as any).plugins?.get(...)` private reach-through.
     const workerClientPluginId = pluginRuntime.findPluginIdByCapability("worker-client");
-    const knowledgePlugin = workerClientPluginId
-      ? pluginRuntime.getPluginInstance<{
-      getWorkerClient?: () => {
-        listDocuments: () => Promise<unknown>;
-        getStructure: (docId: string) => Promise<unknown>;
-        getPageContent: (docId: string, pages: string) => Promise<unknown>;
+    const hasWorkerClient = workerClientPluginId
+      ? await pluginRuntime.withPluginInstanceLease<KnowledgePluginInstance, boolean>(
+          workerClientPluginId,
+          async (plugin) => typeof plugin.getWorkerClient === "function",
+        )
+      : false;
+    if (workerClientPluginId && hasWorkerClient) {
+      const withWorkerClient = async <T>(
+        operation: (client: WorkerSearchClient & KnowledgeWorkerClient) => Promise<T>,
+      ): Promise<T> => pluginRuntime.withPluginInstanceLease<KnowledgePluginInstance, T>(
+        workerClientPluginId,
+        async (plugin) => {
+          const client = plugin.getWorkerClient?.();
+          if (!client) {
+            throw new Error(`plugin '${workerClientPluginId}' no longer exposes getWorkerClient()`);
+          }
+          return operation(client);
+        },
+      );
+      const workerSearchClient: WorkerSearchClient = {
+        searchBm25: (query, topK) => withWorkerClient((client) => client.searchBm25(query, topK)),
+        searchVector: (query, topK) => withWorkerClient((client) => client.searchVector(query, topK)),
       };
-    }>(workerClientPluginId)
-      : undefined;
-    const workerClient = knowledgePlugin?.getWorkerClient?.() as
-      | {
-          listDocuments: () => Promise<unknown>;
-          getStructure: (docId: string) => Promise<unknown>;
-          getPageContent: (docId: string, pages: string) => Promise<unknown>;
-        }
-      | undefined;
-    if (workerClient) {
+      const knowledgeWorkerClient: KnowledgeWorkerClient = {
+        listDocuments: () => withWorkerClient((client) => client.listDocuments()),
+        getStructure: (docId) => withWorkerClient((client) => client.getStructure(docId)),
+        getPageContent: (docId, pages) => withWorkerClient((client) => client.getPageContent(docId, pages)),
+      };
       const cloudAdapter = new MockCloudIndexAdapter();
       const hybridRetriever = new HybridRetriever({
-        workerClient: workerClient as never,
+        workerClient: workerSearchClient,
         cloudAdapter,
       });
       const knowledgeTools = createKnowledgeSearchTools({
         hybridRetriever,
-        workerClient: {
-          listDocuments: () => workerClient.listDocuments() as never,
-          getStructure: (docId: string) => workerClient.getStructure(docId) as never,
-          getPageContent: (docId: string, pages: string) =>
-            workerClient.getPageContent(docId, pages) as never,
-        },
+        workerClient: knowledgeWorkerClient,
       });
       for (const tool of knowledgeTools) {
         toolRegistry.register(tool);

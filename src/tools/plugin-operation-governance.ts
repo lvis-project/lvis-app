@@ -81,8 +81,8 @@ export function resolvePluginOperation(
   const operation = input.operation;
   const rule = policy.operations[operation];
   if (!rule) throw new PluginOperationPolicyError(`unknown operation '${operation}'`);
-  if ((origin === "ui" || origin === "mcp-app") && !policy.appAllowed.includes(operation)) {
-    throw new PluginOperationPolicyError(`operation '${operation}' is not app-allowed`);
+  if ((origin === "ui" || origin === "mcp-app") && rule.appVisible !== true) {
+    throw new PluginOperationPolicyError(`operation '${operation}' is not app-visible`);
   }
   return { operation, rule, intentHash: pluginOperationIntentHash(input) };
 }

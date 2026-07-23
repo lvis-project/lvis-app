@@ -408,9 +408,8 @@ export function resolveManifestPathsFromRegistry(
   entries: PluginRegistryEntry[],
 ): string[] {
   const baseDir = dirname(registryPath);
-  // Do NOT filter on entry.enabled here — inactive plugins (enabled=false) are
-  // still loaded into memory; tool exposure is gated in PluginRuntime via
-  // inactivePluginIds, not by skipping the manifest path. (#1176)
+  // Keep inactive manifest paths discoverable as metadata. PluginRuntime does
+  // not instantiate them or assign an active generation pointer.
   return entries
     .filter((entry) => entry.pendingUpdate === undefined)
     .map((entry) => (isAbsolute(entry.manifestPath) ? entry.manifestPath : resolve(baseDir, entry.manifestPath)));

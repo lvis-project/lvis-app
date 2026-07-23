@@ -26,6 +26,7 @@ import {
   setIsPackaged,
 } from "../../boot/dev-flags.js";
 import {
+  makeTestTreeWritable,
   TestPluginRuntime as PluginRuntime,
   writeTestPluginRegistry,
 } from "./test-helpers.js";
@@ -52,6 +53,7 @@ describe("Phase 1 — plugin trust boundary", () => {
   });
 
   afterEach(async () => {
+    await makeTestTreeWritable(testDir);
     await rm(testDir, { recursive: true, force: true });
   });
 

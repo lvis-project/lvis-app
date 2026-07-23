@@ -29,7 +29,7 @@ on:
 
 jobs:
   marketplace-e2e:
-    name: Marketplace E2E (${{ matrix.lane }})
+    name: Marketplace E2E (live lifecycle + containment)
     # workflow_dispatch (manual), nightly schedule, OR same-repo PR labeled
     # `marketplace-e2e`. Sibling marketplace + signing-key secrets are not
     # exposed to forks.
@@ -40,11 +40,7 @@ jobs:
        github.event.label.name == 'marketplace-e2e' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        lane: [live-lifecycle, containment-rehearsal]
+    timeout-minutes: 35
     env:
       HOST_SHA: ${{ github.sha }}
       MARKETPLACE_SHA: ${{ inputs.marketplace_ref || vars.M4_MARKETPLACE_SHA }}
@@ -80,7 +76,7 @@ jobs:
       - name: Checkout lvis-plugin-lge-api
         uses: actions/checkout@v7
         with:
-          repository: lvis-project/lvis-plugin-lge-api
+          repository: lvis-project/lvis-plugin-ep
           path: lvis-plugin-lge-api
           ref: ${{ env.EP_API_SHA }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
@@ -164,6 +160,9 @@ jobs:
           # writes contend with our pre-seeded row under SQLite single-writer
           # semantics, leading to 401s after the seed step succeeds.
           LVIS_MARKETPLACE_SKIP_BOOTSTRAP: "1"
+          # The immutable-input step proves the generated local schema matches
+          # Host + SDK. Do not replace that pinned schema with mutable main.
+          LVIS_MARKETPLACE_PLUGIN_SCHEMA_REMOTE_ENABLED: "false"
         run: |
           uv run uvicorn lvis_marketplace.main:create_app \
             --factory --host 127.0.0.1 --port 8765 \
@@ -200,6 +199,12 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install Electron display dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          bunx playwright install-deps chromium
+
       - name: Install app deps
         working-directory: lvis-app
         run: bun install --frozen-lockfile
@@ -216,8 +221,11 @@ jobs:
           bun run test:plugin-bundle-inputs
           node scripts/plugin-bundle-e2e-inputs.mjs
 
-      - name: Run live install lifecycle
-        if: matrix.lane == 'live-lifecycle'
+      - name: Build Host Electron bundle
+        working-directory: lvis-app
+        run: bun run build
+
+      - name: Run live installer transport proof
         working-directory: lvis-app
         env:
           M4_E2E: "1"
@@ -225,14 +233,21 @@ jobs:
           MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
           MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
         run: |
-          echo "=== env debug ==="
-          echo "M4_E2E=$M4_E2E"
-          echo "MARKETPLACE_URL=$MARKETPLACE_URL"
-          echo "=== vitest collection (dry-run via --reporter=verbose, single file) ==="
           M4_E2E=1 bun run test:vitest -- run --reporter=verbose test/e2e/marketplace-e2e.test.ts
 
+      - name: Run live Electron IPC lifecycle
+        working-directory: lvis-app
+        env:
+          M4_E2E: "1"
+          MARKETPLACE_URL: http://127.0.0.1:8765
+          MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
+          MARKETPLACE_ADMIN_KEY: ${{ env.ADMIN_KEY }}
+          BUNDLE_E2E_EVIDENCE_PATH: /tmp/marketplace-live-lifecycle-evidence.json
+        run: >-
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24"
+          bunx playwright test test/e2e/ui/marketplace-live-lifecycle.spec.ts --workers=1
+
       - name: Run loopback reverse-containment rehearsal
-        if: matrix.lane == 'containment-rehearsal'
         working-directory: lvis-app
         env:
           M4_E2E: "1"
@@ -255,8 +270,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: marketplace-${{ matrix.lane }}-evidence-${{ github.sha }}
-          path: /tmp/marketplace-live-lifecycle-evidence.json
+          name: marketplace-live-lifecycle-evidence-${{ github.sha }}
+          path: |
+            /tmp/marketplace-live-lifecycle-evidence.json
+            lvis-app/test-results/**
           if-no-files-found: error
 
       - name: Stop marketplace

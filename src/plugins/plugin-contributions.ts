@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import type { PluginContributionDeclaration, PluginManifest } from "./types.js";
 import { verifyInstallReceiptRaw } from "./plugin-install-receipt.js";
@@ -288,7 +288,14 @@ export async function materializePluginGenerationRoot(
   const finalPayload = resolve(finalRoot, "payload");
   try {
     const existing = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
-    if (existing.ok) return finalPayload;
+    if (existing.ok) {
+      await sealRetainedGeneration(finalPayload);
+      const sealed = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
+      if (!sealed.ok) {
+        throw new Error(`plugin '${pluginId}' retained generation changed while sealing: ${sealed.reason}`);
+      }
+      return finalPayload;
+    }
     await lstat(finalRoot);
     throw new Error(`plugin '${pluginId}' retained generation failed verification: ${existing.reason}`);
   } catch (error) {
@@ -321,6 +328,9 @@ export async function materializePluginGenerationRoot(
     }
     const verified = await verifyInstallReceiptRaw(receiptRaw, pluginId, temporaryPayload);
     if (!verified.ok) throw new Error(`plugin '${pluginId}' retained generation verification failed: ${verified.reason}`);
+    await sealRetainedGeneration(temporaryPayload);
+    const sealed = await verifyInstallReceiptRaw(receiptRaw, pluginId, temporaryPayload);
+    if (!sealed.ok) throw new Error(`plugin '${pluginId}' retained generation changed while sealing: ${sealed.reason}`);
     try {
       await rename(temporaryRoot, finalRoot);
     } catch (error) {
@@ -329,10 +339,47 @@ export async function materializePluginGenerationRoot(
       }
       const raced = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
       if (!raced.ok) throw new Error(`plugin '${pluginId}' concurrent retained generation failed verification: ${raced.reason}`);
+      await sealRetainedGeneration(finalPayload);
+      const sealedRace = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
+      if (!sealedRace.ok) {
+        throw new Error(`plugin '${pluginId}' concurrent retained generation changed while sealing: ${sealedRace.reason}`);
+      }
     }
     return finalPayload;
   } finally {
+    await makeRetainedGenerationRemovable(temporaryRoot).catch(() => undefined);
     await rm(temporaryRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function sealRetainedGeneration(directory: string): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      await sealRetainedGeneration(path);
+    } else if (entry.isFile()) {
+      // Some bundled Hook/MCP commands are executed directly; owner read+exec
+      // preserves that contract while removing write access.
+      await chmod(path, 0o500);
+    } else {
+      throw new Error(`retained plugin generation contains unsupported member: ${entry.name}`);
+    }
+  }
+  await chmod(directory, 0o500);
+}
+
+async function makeRetainedGenerationRemovable(directory: string): Promise<void> {
+  const info = await lstat(directory).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!info) return;
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error("retained plugin generation removal target is not a directory");
+  }
+  await chmod(directory, 0o700);
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) await makeRetainedGenerationRemovable(resolve(directory, entry.name));
   }
 }
 
@@ -345,5 +392,6 @@ export async function removeRetainedPluginGeneration(
   const generationsRoot = resolve(cacheRoot, pluginId, "generations");
   const target = resolve(generationsRoot, generationId);
   if (dirname(target) !== generationsRoot) throw new Error("retained plugin generation path escaped cache root");
+  await makeRetainedGenerationRemovable(target);
   await rm(target, { recursive: true, force: true });
 }
