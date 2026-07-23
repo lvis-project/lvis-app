@@ -174,8 +174,11 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       };
       return api.lvisApi.getRuntimeCounts();
     });
-    const callLifecycleTool = (operation: "get_version" | "hook_probe") =>
-      ctx.page.evaluate(async ({ name, operation }) => {
+    const callLifecycleTool = async (
+      operation: "get_version" | "hook_probe",
+      options: { approvalExpected?: boolean } = {},
+    ) => {
+      const invocation = ctx.page.evaluate(async ({ name, operation }) => {
         const api = globalThis as unknown as {
           lvisApi: {
             callPluginMethod(
@@ -186,6 +189,28 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         };
         return api.lvisApi.callPluginMethod(name, { operation });
       }, { name: `${slug.replace(/-/g, "_")}_read`, operation });
+      const approvalDialog = ctx.page.getByTestId("tool-approval-dialog");
+      const approvalVisible = await approvalDialog
+        .waitFor({
+          state: "visible",
+          timeout: options.approvalExpected ? 10_000 : 1_000,
+        })
+        .then(() => true)
+        .catch(() => false);
+      if (options.approvalExpected) {
+        expect(approvalVisible).toBe(true);
+      }
+      if (approvalVisible) {
+        const justification = ctx.page.getByTestId("nl-justification-input");
+        if (await justification.isVisible().catch(() => false)) {
+          await justification.fill("Verify the installed bundle plugin generation.");
+        }
+        const approve = ctx.page.getByTestId("approve-button");
+        await expect(approve).toBeEnabled();
+        await approve.click();
+      }
+      return invocation;
+    };
     const permissionAudit = () => ctx.page.evaluate(async () => {
       const api = globalThis as unknown as {
         lvisApi: {
@@ -382,7 +407,9 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         status: "approval_required",
       }),
     ]));
-    await expect(callLifecycleTool("hook_probe")).resolves.toMatchObject({ ok: true });
+    await expect(callLifecycleTool("hook_probe", {
+      approvalExpected: true,
+    })).resolves.toMatchObject({ ok: true });
     await approveExecutableContributions();
     await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount + 1);
     activeMcpProbe = await callBundledMcp("1.0.0", {
