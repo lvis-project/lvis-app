@@ -97,10 +97,12 @@ jobs:
             }' \
             "$SNAPSHOT" | sha256sum | cut -d' ' -f1)
 
-          echo "path=${SNAPSHOT}" >> "$GITHUB_OUTPUT"
-          echo "digest=${SNAPSHOT_DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "head_sha=${LIVE_HEAD_SHA}" >> "$GITHUB_OUTPUT"
-          echo "base_sha=${LIVE_BASE_SHA}" >> "$GITHUB_OUTPUT"
+          {
+            echo "path=${SNAPSHOT}"
+            echo "digest=${SNAPSHOT_DIGEST}"
+            echo "head_sha=${LIVE_HEAD_SHA}"
+            echo "base_sha=${LIVE_BASE_SHA}"
+          } >> "$GITHUB_OUTPUT"
 
       # Run policy only from the trusted live base commit. Pull-request content
       # is inspected through read-only GitHub API data and is never executed.
@@ -145,9 +147,11 @@ jobs:
           VIOLATION=$(printf '%s' "$RESULT" | jq -er '.violation | if type == "boolean" then tostring else error("invalid .violation") end')
           VIOLATION_REASON=$(printf '%s' "$RESULT" | jq -er '.reason | if type == "string" then . else error("invalid .reason") end')
 
-          echo "sensitive_hit=${SENSITIVE_HIT}" >> "$GITHUB_OUTPUT"
-          echo "violation=${VIOLATION}" >> "$GITHUB_OUTPUT"
-          echo "violation_reason=${VIOLATION_REASON}" >> "$GITHUB_OUTPUT"
+          {
+            echo "sensitive_hit=${SENSITIVE_HIT}"
+            echo "violation=${VIOLATION}"
+            echo "violation_reason=${VIOLATION_REASON}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Check current cluster review attestation
         id: cluster-attestation
