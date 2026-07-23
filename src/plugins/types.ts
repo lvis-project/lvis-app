@@ -10,7 +10,7 @@ export type InstallPolicy = "admin" | "user";
 export type GovernedRiskFloor = "read" | "write" | "network" | "shell";
 
 /** Host-only rule for one member of a plugin tool's operation union. */
-export interface PluginToolOperationRule {
+interface PluginToolOperationRule {
   kind: "read" | "write";
   minimumRisk: GovernedRiskFloor;
   requiresRead?: {

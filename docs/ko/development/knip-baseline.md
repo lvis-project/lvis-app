@@ -35,8 +35,8 @@ bun run test:knip-gate
 staging 파일을 flush한 뒤 원자 교체하므로 중단된 갱신이 검토된 기준선을
 잘라내지 않는다.
 
-현재 snapshot은 file 25건, export 235건, type 370건, duplicate export group
-7건, devDependency 7건 등 총 644건을 허용한다. 기존 항목이 해소된 경우에는
+현재 snapshot은 file 25건, export 234건, type 367건, duplicate export group
+7건, devDependency 7건 등 총 640건을 허용한다. 기존 항목이 해소된 경우에는
 실패시키지 않고 기준선을 축소하라는 안내를 출력한다.
 
 `vitest.config.ts`는 계속 실제 runtime assertion 경계다. Knip은 순수한

@@ -74,7 +74,7 @@ export async function writeInstallReceipt(
   await writeInstallReceiptContent(path, receipt.pluginId, content);
 }
 
-export function serializeInstallReceipt(receipt: PluginInstallReceipt): string {
+function serializeInstallReceipt(receipt: PluginInstallReceipt): string {
   return `${JSON.stringify(receipt, null, 2)}\n`;
 }
 
