@@ -237,7 +237,7 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
     expect(runtime.callFromApp).toHaveBeenCalledWith("acme_auth_status", { q: 1 }, INVOCATION);
   });
 
-  it("identifies only read-backed writes from the Host registry as grant targets", () => {
+  it("identifies every write from the Host registry as a grant target", () => {
     const runtime = {
       resolveToolOwner: vi.fn(() => "acme-cards"),
       callFromApp: vi.fn(async () => "ok"),
@@ -252,6 +252,11 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
           appVisible: true,
           requiresRead: { tool: "ep_read", operations: ["list"], maxAgeMs: 60_000 },
         },
+        reserve: {
+          kind: "write" as const,
+          minimumRisk: "write" as const,
+          appVisible: true,
+        },
       },
     };
     const tool = {
@@ -264,6 +269,8 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
     expect(source.resolveOperationGrantTarget("acme-cards", "ep_write", { operation: "list" }))
       .toBeUndefined();
     expect(source.resolveOperationGrantTarget("acme-cards", "ep_write", { operation: "update" }))
+      .toEqual({ pluginId: "acme-cards", toolName: "ep_write" });
+    expect(source.resolveOperationGrantTarget("acme-cards", "ep_write", { operation: "reserve" }))
       .toEqual({ pluginId: "acme-cards", toolName: "ep_write" });
     expect(() => source.resolveOperationGrantTarget("acme-cards", "ep_write", { operation: "admin" }))
       .toThrow(/unknown operation/);

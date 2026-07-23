@@ -225,6 +225,12 @@ jobs:
         working-directory: lvis-app
         run: bun run build
 
+      - name: Prove secure evidence file handling
+        working-directory: lvis-app
+        env:
+          M4_E2E: "1"
+        run: bun run test:vitest -- run test/e2e/evidence-file.test.ts
+
       - name: Run live installer transport proof
         working-directory: lvis-app
         env:
