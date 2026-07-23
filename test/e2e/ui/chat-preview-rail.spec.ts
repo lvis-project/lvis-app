@@ -365,18 +365,25 @@ test.describe("chat preview rail", () => {
       const mainColumnBox = await ctx.page.getByTestId("chat-main-column").boundingBox();
       const actionBarBox = await ctx.page.getByTestId("input-action-bar").boundingBox();
       const railBox = await panel.boundingBox();
+      const finalSplitterBox = await ctx.page.getByTestId("chat-side-panel-width-splitter").boundingBox();
       expect(chatBox).not.toBeNull();
       expect(rootBox).not.toBeNull();
       expect(mainColumnBox).not.toBeNull();
       expect(actionBarBox).not.toBeNull();
       expect(railBox).not.toBeNull();
+      expect(finalSplitterBox).not.toBeNull();
       expect(railBox!.width).toBeGreaterThanOrEqual(300);
-      expect(railBox!.x).toBeGreaterThan(chatBox!.x + chatBox!.width - 8);
+      expect(Math.abs(railBox!.x - (mainColumnBox!.x + mainColumnBox!.width))).toBeLessThanOrEqual(2);
+      expect(railBox!.x).toBeGreaterThanOrEqual(chatBox!.x + chatBox!.width - 2);
       expect(railBox!.x).toBeGreaterThan(actionBarBox!.x + actionBarBox!.width - 8);
-      expect(Math.abs((railBox!.x + railBox!.width) - (rootBox!.x + rootBox!.width))).toBeLessThanOrEqual(2);
+      expect(finalSplitterBox!.width).toBeGreaterThanOrEqual(7);
+      expect(finalSplitterBox!.width).toBeLessThanOrEqual(9);
+      expect(Math.abs((finalSplitterBox!.x + finalSplitterBox!.width / 2) - railBox!.x)).toBeLessThanOrEqual(1);
+      // The docked rail is a floating card with Tailwind `mr-2` / `my-2`.
+      expect(Math.abs((rootBox!.x + rootBox!.width) - (railBox!.x + railBox!.width) - 8)).toBeLessThanOrEqual(2);
       expect(Math.abs(chatBox!.width - mainColumnBox!.width)).toBeLessThanOrEqual(2);
       expect(Math.abs(actionBarBox!.width - mainColumnBox!.width)).toBeLessThanOrEqual(48);
-      expect(Math.abs(railBox!.height - rootBox!.height)).toBeLessThanOrEqual(2);
+      expect(Math.abs(rootBox!.height - railBox!.height - 16)).toBeLessThanOrEqual(2);
       await expect(panel).not.toHaveCSS("position", "absolute");
 
       const actionRailBox = await ctx.page.getByTestId("action-panel-rail").boundingBox();

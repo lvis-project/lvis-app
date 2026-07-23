@@ -34,6 +34,7 @@ import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
 import type { RiskClassifier } from "../../permissions/reviewer/risk-classifier.js";
 import { HookRunner } from "../../hooks/hook-runner.js";
 import { BashAstValidator } from "../../main/bash-ast-validator.js";
+import { AuditLogger } from "../../audit/audit-logger.js";
 import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
@@ -2679,13 +2680,22 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     const previousHome = process.env.LVIS_HOME;
     const isolatedHome = mkdtempSync(join(tmpdir(), "lvis-executor-no-lifecycle-"));
     process.env.LVIS_HOME = isolatedHome;
+    const auditLogger = new AuditLogger(join(isolatedHome, "audit"));
     try {
       const executeSpy = vi.fn(async () => "ok");
       const registry = new ToolRegistry();
       registry.register(makeReadFileTool(executeSpy));
       const wc = makeMockWebContents();
       const gate = new ApprovalGate(wc as never);
-      const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        undefined,
+        undefined,
+        gate,
+        undefined,
+        auditLogger,
+      );
 
       const callPromise = executor.executeAll(
         [{
@@ -2718,6 +2728,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].content).toContain("workspace lifecycle unavailable");
       expect(executeSpy).not.toHaveBeenCalled();
     } finally {
+      await auditLogger.close();
       if (previousHome === undefined) delete process.env.LVIS_HOME;
       else process.env.LVIS_HOME = previousHome;
       rmSync(isolatedHome, { recursive: true, force: true });
