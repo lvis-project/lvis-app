@@ -1,8 +1,15 @@
 #!/usr/bin/env node
-import ts from "typescript";
+import {
+  isExportDeclaration,
+  isImportDeclaration,
+  isNamedExports,
+  isNamedImports,
+  isStringLiteral,
+} from "typescript/unstable/ast";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, relative, resolve, parse, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseSourceFiles } from "./lib/ts7-ast.mjs";
 
 function collectTypeScriptFiles(root) {
   const files = [];
@@ -24,7 +31,7 @@ function isTypeOnlyImport(node) {
   if (clause.isTypeOnly) return true;
   if (clause.name) return false;
   const bindings = clause.namedBindings;
-  return ts.isNamedImports(bindings)
+  return isNamedImports(bindings)
     && bindings.elements.length > 0
     && bindings.elements.every((element) => element.isTypeOnly);
 }
@@ -32,7 +39,7 @@ function isTypeOnlyImport(node) {
 function isTypeOnlyExport(node) {
   if (node.isTypeOnly) return true;
   return node.exportClause
-    && ts.isNamedExports(node.exportClause)
+    && isNamedExports(node.exportClause)
     && node.exportClause.elements.length > 0
     && node.exportClause.elements.every((element) => element.isTypeOnly);
 }
@@ -105,17 +112,19 @@ export function findRuntimeImportCycles(rootInput) {
   const fileSet = new Set(files);
   const packageConfig = findPackageConfig(root);
   const graph = new Map(files.map((file) => [file, new Set()]));
+  const sources = parseSourceFiles(files);
   for (const file of files) {
-    const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+    const source = sources.get(file);
+    if (!source) continue;
     for (const node of source.statements) {
-      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      if (isImportDeclaration(node) && isStringLiteral(node.moduleSpecifier)) {
         if (isTypeOnlyImport(node)) continue;
         const target = resolveLocalImport(file, node.moduleSpecifier.text, fileSet, packageConfig);
         if (target) graph.get(file).add(target);
         continue;
       }
-      if (ts.isExportDeclaration(node) && node.moduleSpecifier
-        && ts.isStringLiteral(node.moduleSpecifier) && !isTypeOnlyExport(node)) {
+      if (isExportDeclaration(node) && node.moduleSpecifier
+        && isStringLiteral(node.moduleSpecifier) && !isTypeOnlyExport(node)) {
         const target = resolveLocalImport(file, node.moduleSpecifier.text, fileSet, packageConfig);
         if (target) graph.get(file).add(target);
       }

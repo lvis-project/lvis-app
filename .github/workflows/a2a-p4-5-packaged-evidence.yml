@@ -556,31 +556,31 @@ jobs:
 
       - name: Attest macOS installer
         if: matrix.target == 'mac'
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: signed-release/*.dmg
 
       - name: Attest Windows installer
         if: matrix.target == 'win'
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: signed-release/*.exe
 
       - name: Attest Linux AppImage
         if: matrix.target == 'linux'
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: signed-release/*.AppImage
 
       - name: Attest Linux deb
         if: matrix.target == 'linux'
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: signed-release/*.deb
 
       - name: Attest Linux rpm
         if: matrix.target == 'linux'
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: signed-release/*.rpm
 
