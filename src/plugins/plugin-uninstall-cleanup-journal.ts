@@ -8,6 +8,7 @@ export interface PluginUninstallCleanupRecord {
   secretKeys: readonly string[];
   authPartitions: readonly string[];
   cleanupCache: boolean;
+  registryRemovalCommitted: boolean;
   recordedAt: string;
   attempts: number;
   completedPhases: readonly PluginUninstallCleanupPhase[];
@@ -21,8 +22,13 @@ export type PluginUninstallCleanupPhase =
   | "cache";
 
 interface JournalFile {
-  version: 1;
+  version: 2;
   cleanups: PluginUninstallCleanupRecord[];
+}
+
+interface LegacyJournalFile {
+  version: 1;
+  cleanups: Array<Omit<PluginUninstallCleanupRecord, "registryRemovalCommitted">>;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -77,14 +83,27 @@ export class PluginUninstallCleanupJournal {
 
   constructor(private readonly path: string) {
     try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as JournalFile;
-      if (parsed.version !== 1 || !Array.isArray(parsed.cleanups)) {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as JournalFile | LegacyJournalFile;
+      if (
+        (parsed.version !== 1 && parsed.version !== 2)
+        || !Array.isArray(parsed.cleanups)
+      ) {
         throw new Error("unsupported plugin uninstall cleanup journal");
       }
       if (parsed.cleanups.length > MAX_RECORDS) {
         throw new Error("plugin uninstall cleanup journal is too large");
       }
-      for (const record of parsed.cleanups) {
+      for (const persistedRecord of parsed.cleanups) {
+        // Version 1 existed only during the first durable-cleanup rollout.
+        // Registry presence/absence disambiguates its prepared state at recovery.
+        const record = {
+          ...persistedRecord,
+          registryRemovalCommitted:
+            parsed.version === 2
+              && "registryRemovalCommitted" in persistedRecord
+              ? persistedRecord.registryRemovalCommitted
+              : false,
+        };
         if (
           !record
           || typeof record.pluginId !== "string"
@@ -99,6 +118,7 @@ export class PluginUninstallCleanupJournal {
             (partition) => !isOwnedAuthPartition(record.pluginId, partition),
           )
           || typeof record.cleanupCache !== "boolean"
+          || typeof record.registryRemovalCommitted !== "boolean"
           || typeof record.recordedAt !== "string"
           || !Number.isSafeInteger(record.attempts)
           || record.attempts < 0
@@ -161,6 +181,7 @@ export class PluginUninstallCleanupJournal {
       ...input,
       secretKeys: [...new Set(input.secretKeys)],
       authPartitions: [...new Set(input.authPartitions)],
+      registryRemovalCommitted: false,
       recordedAt: new Date().toISOString(),
       attempts: 0,
       completedPhases: [],
@@ -175,6 +196,53 @@ export class PluginUninstallCleanupJournal {
     const next = freezeRecord({
       ...previous,
       attempts: previous.attempts + 1,
+    });
+    this.replaceRecord(next);
+    return freezeRecord(next);
+  }
+
+  markRegistryRemovalCommitted(
+    pluginId: string,
+    options: { cleanupCache?: boolean } = {},
+  ): PluginUninstallCleanupRecord {
+    const previous = this.require(pluginId);
+    const cleanupCache = previous.cleanupCache || options.cleanupCache === true;
+    if (
+      previous.registryRemovalCommitted
+      && cleanupCache === previous.cleanupCache
+    ) {
+      return freezeRecord(previous);
+    }
+    const next = freezeRecord({
+      ...previous,
+      cleanupCache,
+      registryRemovalCommitted: true,
+    });
+    this.replaceRecord(next);
+    return freezeRecord(next);
+  }
+
+  mergeAuthPartitions(
+    pluginId: string,
+    partitions: readonly string[],
+  ): PluginUninstallCleanupRecord {
+    const previous = this.require(pluginId);
+    const merged = [...new Set([...previous.authPartitions, ...partitions])];
+    if (
+      merged.length > MAX_VALUES_PER_RECORD
+      || merged.some((partition) => !isOwnedAuthPartition(pluginId, partition))
+    ) {
+      throw new Error(`invalid plugin uninstall auth partition plan: ${pluginId}`);
+    }
+    if (merged.length === previous.authPartitions.length) {
+      return freezeRecord(previous);
+    }
+    const next = freezeRecord({
+      ...previous,
+      authPartitions: merged,
+      completedPhases: previous.completedPhases.filter(
+        (phase) => phase !== "auth-tracker",
+      ),
     });
     this.replaceRecord(next);
     return freezeRecord(next);
@@ -242,7 +310,7 @@ export class PluginUninstallCleanupJournal {
   ): void {
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     const body: JournalFile = {
-      version: 1,
+      version: 2,
       cleanups: [...records.values()],
     };
     writeUtf8FileAtomicSync(

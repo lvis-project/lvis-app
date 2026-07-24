@@ -12,6 +12,8 @@ import {
   clearAppUpdateInstallRequested,
 } from "../../main/app-update-install-intent.js";
 
+const ensurePluginStateReadyForInstall = vi.fn(async () => {});
+
 function makeRuntime(initialPluginIds: string[] = []) {
   let pluginIds = [...initialPluginIds];
   return {
@@ -82,6 +84,8 @@ function makeMarketplace() {
 describe("installMarketplacePluginWithLifecycle", () => {
   afterEach(() => {
     clearAppUpdateInstallRequested();
+    ensurePluginStateReadyForInstall.mockReset();
+    ensurePluginStateReadyForInstall.mockResolvedValue(undefined);
   });
 
   it("rejects before touching marketplace state when app update install has started", async () => {
@@ -94,6 +98,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
         requestedPluginId: "p",
         pluginRuntime: runtime,
         pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
       }),
     ).rejects.toThrow("Plugin changes are paused while an app update is installing");
 
@@ -112,6 +117,25 @@ describe("installMarketplacePluginWithLifecycle", () => {
     });
 
     expect(install).not.toHaveBeenCalled();
+  });
+
+  it("blocks marketplace mutation until pending Host state cleanup succeeds", async () => {
+    const runtime = makeRuntime();
+    const marketplace = makeMarketplace();
+    const pendingCleanup = new Error("plugin uninstall cleanup pending: p");
+    ensurePluginStateReadyForInstall.mockRejectedValueOnce(pendingCleanup);
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
+      }),
+    ).rejects.toBe(pendingCleanup);
+
+    expect(ensurePluginStateReadyForInstall).toHaveBeenCalledWith("p");
+    expect(marketplace.install).not.toHaveBeenCalled();
   });
 
   it("allows a same-plugin lifecycle hook to re-enter its owned lock", async () => {
@@ -349,6 +373,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
       requestedPluginId: "p",
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
       broadcastInstallProgress: ({ phase }) => order.push(`progress:${phase}`),
       emitPluginInstalled: ({ pluginId, source }) => order.push(`installed:${pluginId}:${source}`),
       refreshPluginNotifications: () => order.push("refresh"),
@@ -390,6 +415,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
       eventSlug: "lvis-plugin-meeting",
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
       broadcastInstallProgress: ({ slug, phase }) => order.push(`progress:${slug}:${phase}`),
     });
 
@@ -425,6 +451,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
       networkAccessAcknowledgement: { allowedDomains: ["api.example.com"] },
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
     });
 
     expect(marketplace.install).toHaveBeenCalledWith(
@@ -447,6 +474,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
       eventSlug: "lvis-plugin-p",
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
     });
 
     expect(runtime.removePlugin).not.toHaveBeenCalled();
@@ -466,6 +494,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
         expectedVersion: "2.0.0",
         pluginRuntime: runtime,
         pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
       }),
     ).rejects.toThrow("version is stale");
 
@@ -492,6 +521,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
       expectedVersion: "2.0.0",
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
     });
 
     expect(result).toEqual({ pluginId: "p", installed: true });
@@ -519,6 +549,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
         expectedVersion: "2.0.0",
         pluginRuntime: runtime,
         pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
         emitPluginInstalled: installed,
       }),
     ).rejects.toThrow("version mismatch");
@@ -541,6 +572,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
         expectedVersion: "2.0.0",
         pluginRuntime: runtime,
         pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
       }),
     ).rejects.toThrow("version mismatch");
 
@@ -563,6 +595,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
         requestedPluginId: "p",
         pluginRuntime: runtime,
         pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
         log,
       }),
     ).rejects.toThrow("download failed");
@@ -584,6 +617,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
         requestedPluginId: "p",
         pluginRuntime: runtime,
         pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
       }),
     ).rejects.toThrow("start failed");
 

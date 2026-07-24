@@ -137,4 +137,52 @@ describe("PluginUninstallCleanupJournal", () => {
         .sort(),
     ).toEqual(["agent-hub", "ep-api"]);
   });
+
+  it("durably merges late auth partitions and reopens tracker cleanup", () => {
+    const { path } = fixture();
+    const journal = new PluginUninstallCleanupJournal(path);
+    journal.prepare({
+      pluginId: "ep-api",
+      installPluginId: "ep-api",
+      secretKeys: [],
+      authPartitions: ["persist:plugin-auth:ep-api"],
+      cleanupCache: false,
+    });
+    journal.completeAuthPartition("ep-api", "persist:plugin-auth:ep-api");
+    journal.completePhase("ep-api", "auth-tracker");
+
+    journal.mergeAuthPartitions("ep-api", [
+      "persist:plugin-auth:ep-api:late",
+    ]);
+    expect(new PluginUninstallCleanupJournal(path).find("ep-api")).toMatchObject({
+      authPartitions: [
+        "persist:plugin-auth:ep-api",
+        "persist:plugin-auth:ep-api:late",
+      ],
+      completedAuthPartitions: ["persist:plugin-auth:ep-api"],
+      completedPhases: [],
+    });
+    expect(() =>
+      journal.mergeAuthPartitions("ep-api", [
+        "persist:plugin-auth:other-plugin",
+      ])).toThrow(/invalid plugin uninstall auth partition plan/);
+  });
+
+  it("checkpoints registry removal and cache ownership in the durable record", () => {
+    const { path } = fixture();
+    const journal = new PluginUninstallCleanupJournal(path);
+    journal.prepare({
+      pluginId: "ep-api",
+      installPluginId: "ep-api",
+      secretKeys: [],
+      authPartitions: [],
+      cleanupCache: false,
+    });
+
+    journal.markRegistryRemovalCommitted("ep-api", { cleanupCache: true });
+    expect(new PluginUninstallCleanupJournal(path).find("ep-api")).toMatchObject({
+      registryRemovalCommitted: true,
+      cleanupCache: true,
+    });
+  });
 });

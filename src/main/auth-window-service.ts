@@ -235,11 +235,20 @@ export function getTrackedPluginAuthPartitions(pluginId: string): string[] {
 export async function forgetTrackedPluginAuthPartitions(
   pluginId: string,
 ): Promise<void> {
-  // Durable state must be removed before in-memory retry ownership is lost.
-  // A persistence failure remains fail-loud so uninstall cleanup can retain
-  // its journal checkpoint and retry safely.
-  await _persistDelete?.(pluginId);
+  const previous = trackedPluginAuthPartitions.get(pluginId);
   trackedPluginAuthPartitions.delete(pluginId);
+  try {
+    await _persistDelete?.(pluginId);
+  } catch (error) {
+    const concurrentlyObserved = trackedPluginAuthPartitions.get(pluginId);
+    if (previous || concurrentlyObserved) {
+      trackedPluginAuthPartitions.set(
+        pluginId,
+        new Set([...(previous ?? []), ...(concurrentlyObserved ?? [])]),
+      );
+    }
+    throw error;
+  }
 }
 
 function authShellPreloadPath(): string {

@@ -16,8 +16,14 @@ import { sendToWindow } from "../ipc/safe-send.js";
 import { emitEvent as emitHostEvent } from "../boot/types.js";
 import type { AppServices } from "../boot.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import { installMarketplacePluginWithLifecycle } from "../plugins/install-lifecycle.js";
-import { uninstallPluginWithLifecycle } from "../plugins/uninstall-lifecycle.js";
+import {
+  drainPluginInstallLockOperations,
+  installMarketplacePluginWithLifecycle,
+} from "../plugins/install-lifecycle.js";
+import {
+  ensurePluginStateReadyForInstall,
+  uninstallPluginWithLifecycle,
+} from "../plugins/uninstall-lifecycle.js";
 import {
   buildNetworkAccessAcknowledgement,
   hasNetworkAccessDisclosure,
@@ -557,6 +563,8 @@ export async function handleLvisUri(url: string) {
         clearAuthPartitionService: activeServices.clearAuthPartitionService,
         listPluginAuthPartitionsService: activeServices.listPluginAuthPartitionsService,
         forgetPluginAuthPartitionsService: activeServices.forgetPluginAuthPartitionsService,
+        drainPluginInstallLockOperationsService:
+          drainPluginInstallLockOperations,
         refreshPluginNotifications: activeServices.refreshPluginNotifications,
         emitHostEvent,
         log,
@@ -609,6 +617,23 @@ export async function handleLvisUri(url: string) {
       networkAccessAcknowledgement,
       pluginRuntime: activeServices.pluginRuntime,
       pluginMarketplace: activeServices.pluginMarketplace,
+      ensurePluginStateReadyForInstall: (candidatePluginId) =>
+        ensurePluginStateReadyForInstall(candidatePluginId, {
+          pluginMarketplace: activeServices.pluginMarketplace,
+          pluginRuntime: activeServices.pluginRuntime,
+          settingsService: activeServices.settingsService,
+          pluginPaths: activeServices.pluginPaths,
+          clearAuthPartitionService: activeServices.clearAuthPartitionService,
+          listPluginAuthPartitionsService:
+            activeServices.listPluginAuthPartitionsService,
+          forgetPluginAuthPartitionsService:
+            activeServices.forgetPluginAuthPartitionsService,
+          drainPluginInstallLockOperationsService:
+            drainPluginInstallLockOperations,
+          refreshPluginNotifications: activeServices.refreshPluginNotifications,
+          emitHostEvent,
+          log,
+        }),
       broadcastInstallProgress: (payload) =>
         broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
       emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),

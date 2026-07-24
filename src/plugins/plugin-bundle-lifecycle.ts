@@ -550,7 +550,34 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       );
     } catch (error) {
       candidate.state.runtime.hostEffects?.discard();
-      await this.deps.loopbackManager.discardGeneration(preparedLoopback);
+      const cleanupErrors: unknown[] = [];
+      try {
+        await this.deps.loopbackManager.discardGeneration(preparedLoopback);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      const activeGenerationId =
+        this.coordinator.getActive(pluginId)?.generationId;
+      if (
+        !activeBeforePreparation
+        && activeGenerationId !== candidate.generationId
+      ) {
+        try {
+          await removeRetainedPluginGeneration(
+            this.deps.receiptCacheRoot,
+            pluginId,
+            candidate.generationId,
+          );
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError);
+        }
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          `plugin generation commit and candidate cleanup failed: ${pluginId}:${candidate.generationId}`,
+        );
+      }
       throw error;
     }
     try {
