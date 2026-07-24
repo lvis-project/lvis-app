@@ -104,6 +104,7 @@ type CreateHostApi = (
     isActive: () => boolean;
     isLifecycleHookActive: () => boolean;
   },
+  installPluginId: string | null,
 ) => PluginHostApi;
 
 /** Build a REAL hostApi object via the production createHostApi factory. */
@@ -162,6 +163,7 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
       isActive: () => true,
       isLifecycleHookActive: () => false,
     },
+    null,
   );
 }
 
