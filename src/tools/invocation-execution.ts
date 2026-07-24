@@ -96,6 +96,7 @@ export interface ExecutionStageContext {
     input: Record<string, unknown>,
     blockedPermission?: PermissionCheckResult,
     hookChain?: import("../audit/audit-schema.js").HookResult[],
+    suppressPermissionDeniedLifecycle?: boolean,
   ) => Promise<ToolResult>;
   startTime: number;
   callbacks: ToolExecutorCallbacks | undefined;
@@ -275,10 +276,6 @@ export async function executeAuthorizedToolInvocation(
       operationExecutionDomain
         ? await services.pluginOperationGrants.acquireExecutionLease(
             operationExecutionDomain,
-            // A signed read declaration can still reach a Host-observed write
-            // effect. Serialize every governed operation so a dishonest or
-            // compromised handler cannot mutate under a shared read lease.
-            "write",
             pluginOperationPrincipal,
             abortSignal,
           )
@@ -290,6 +287,8 @@ export async function executeAuthorizedToolInvocation(
         `governed operation admission failed: ${msg}`,
         finalInput,
         permissionResult,
+        undefined,
+        true,
       );
     }
     const durationMs = Date.now() - startTime;
@@ -317,7 +316,10 @@ export async function executeAuthorizedToolInvocation(
       invocationCategory,
       executionCwd,
       undefined,
-      "error",
+      msg.includes("aborted") ? "user-abort" : "error",
+      undefined,
+      undefined,
+      true,
     );
     return withHostShellExecutionPlan({
       tool_use_id: toolUse.id,
@@ -754,7 +756,8 @@ export async function executeAuthorizedToolInvocation(
   }
   // A signed read declaration alone cannot mint freshness. Stage the receipt
   // only after a successful Host-observable plugin execution with no mutation.
-  // Publication waits until every post-hook boundary has completed below.
+  // Publication waits until post hooks and the required final audit are both
+  // durably complete below.
   if (
     !isError &&
     tool.source === "plugin" &&
@@ -906,6 +909,7 @@ export async function executeAuthorizedToolInvocation(
     return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
   }
 
+  try {
   // ── Step 7: PostHook + Feedback Merge ───────────
   let postHookBoundaryCompleted = false;
   let postHookMayHaveUnobservedEffects = services.hookRunner.postHookCount > 0;
@@ -950,33 +954,22 @@ export async function executeAuthorizedToolInvocation(
     }
     postHookBoundaryCompleted = true;
   } finally {
-    try {
-      if (
-        operationExecutionDomain &&
-        resolvedPluginOperation &&
-        (
-          !postHookBoundaryCompleted ||
-          postHookMayHaveUnobservedEffects
-        )
-      ) {
-        // Post hooks are arbitrary async callbacks or detached commands. The
-        // Host cannot prove that their descendants are settled or non-mutating,
-        // so every governed operation they observe leaves its domain
-        // indeterminate until that domain identity is retired.
-        services.pluginOperationGrants.poisonDomain(
-          operationExecutionDomain,
-        );
-      } else if (pendingReadReceipt) {
-        services.pluginOperationGrants.recordRead({
-          ...pendingReadReceipt.principal,
-          readTool: pendingReadReceipt.readTool,
-          readOperation: pendingReadReceipt.readOperation,
-        }, pendingReadReceipt.domainKey);
-      }
-    } finally {
-      if (releaseOperationLeaseAfterPostHooks) {
-        operationExecutionLease?.release();
-      }
+    if (
+      operationExecutionDomain &&
+      resolvedPluginOperation &&
+      (
+        !postHookBoundaryCompleted ||
+        postHookMayHaveUnobservedEffects
+      )
+    ) {
+      // Post hooks are arbitrary async callbacks or commands. The Host cannot
+      // prove remote side effects from their result alone, so every governed
+      // operation they observe poisons the plugin/account scope across
+      // generation updates and rollbacks.
+      services.pluginOperationGrants.poisonDomain(
+        operationExecutionDomain,
+      );
+      pendingReadReceipt = undefined;
     }
   }
 
@@ -1022,9 +1015,6 @@ export async function executeAuthorizedToolInvocation(
 
   // ── Step 8: Audit + Result (항상 실행) ──────────
   const durationMs = Date.now() - startTime;
-  if (!rationaleResumeContext?.started) {
-    callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
-  }
   // Redact the user's freeText answer before it lands in the audit
   // log. The DLP filter at Step 7b only catches structured patterns
   // (emails, IDs); a free-form answer ("내 비밀번호는 …") wouldn't match
@@ -1062,9 +1052,21 @@ export async function executeAuthorizedToolInvocation(
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs });
     }
   }
-  if (rationaleResumeContext?.started) {
-    callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
+  if (pendingReadReceipt) {
+    services.pluginOperationGrants.recordRead({
+      ...pendingReadReceipt.principal,
+      readTool: pendingReadReceipt.readTool,
+      readOperation: pendingReadReceipt.readOperation,
+    }, pendingReadReceipt.domainKey);
   }
+  callbacks?.onToolEnd?.(
+    toolUse.name,
+    displayContent,
+    isError,
+    meta,
+    uiPayload,
+    durationMs,
+  );
 
   return withHostShellExecutionPlan({
     tool_use_id: toolUse.id,
@@ -1075,4 +1077,22 @@ export async function executeAuthorizedToolInvocation(
     ...(image && { image }),
     durationMs,
   });
+  } catch (error) {
+    if (operationExecutionDomain && resolvedPluginOperation) {
+      try {
+        services.pluginOperationGrants.poisonDomain(operationExecutionDomain);
+      } catch (poisonError) {
+        log.error(
+          "failed to poison governed operation domain after final boundary failure for %s: %s",
+          toolUse.name,
+          poisonError instanceof Error ? poisonError.message : String(poisonError),
+        );
+      }
+    }
+    throw error;
+  } finally {
+    if (releaseOperationLeaseAfterPostHooks) {
+      operationExecutionLease?.release();
+    }
+  }
 }

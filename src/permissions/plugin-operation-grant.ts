@@ -58,7 +58,6 @@ export interface PluginOperationDomainTool {
 
 export interface PluginOperationExecutionLease {
   readonly domainKey: string;
-  readonly kind: "read" | "write";
   release(): void;
 }
 
@@ -126,7 +125,6 @@ export function pluginOperationExecutionDomain(
 }
 
 interface PendingExecutionLease {
-  readonly kind: "read" | "write";
   readonly principal: PluginOperationPrincipal;
   readonly resolve: (lease: PluginOperationExecutionLease) => void;
   readonly reject: (error: Error) => void;
@@ -135,8 +133,7 @@ interface PendingExecutionLease {
 }
 
 interface ExecutionDomainState {
-  readers: number;
-  writer: boolean;
+  held: boolean;
   queue: PendingExecutionLease[];
 }
 
@@ -161,10 +158,12 @@ export class PluginOperationGrantCoordinator {
   private readonly latestReadSequences = new Map<string, number>();
   private readonly executionDomains = new Map<string, ExecutionDomainState>();
   private readonly domainRevisions = new Map<string, ExecutionDomainRevision>();
+  private readonly poisonedOperationScopes = new Set<string>();
   private readonly revokedSessions = new Set<string>();
   private readonly revokedGenerations = new Set<string>();
   private readonly revokedAccounts = new Set<string>();
   private revocationCapacityExhausted = false;
+  private poisonCapacityExhausted = false;
   private nextReadSequence = 0;
 
   constructor(
@@ -433,22 +432,42 @@ export class PluginOperationGrantCoordinator {
    * Permanently fail closed for a domain whose state may still be changing
    * outside Host-observable effect boundaries.
    *
-   * A new read cannot clear this state. Only generation/account retirement can
-   * replace the domain identity, so detached or delayed work
-   * from an effect-capable post hook can never race a newly minted write grant.
+   * A new read, session reset, generation update, rollback, or account
+   * re-authentication cannot clear this state for the same Host-derived plugin
+   * and account identity. The poison scope deliberately omits version and
+   * generation so detached work from an old hook cannot race a replacement
+   * generation.
    */
   poisonDomain(domainKey: string): void {
     const domain = this.domainRevisions.get(domainKey);
     if (!domain) {
       throw new Error("plugin operation domain is not registered");
     }
-    domain.revision = randomUUID();
-    domain.poisoned = true;
+    const scopeKey = this.poisonScopeKey(domain.ownerPluginId, domain.accountHash);
+    if (!this.poisonedOperationScopes.has(scopeKey)) {
+      if (this.poisonedOperationScopes.size >= this.maxDomains) {
+        this.poisonedOperationScopes.clear();
+        this.poisonCapacityExhausted = true;
+      } else {
+        this.poisonedOperationScopes.add(scopeKey);
+      }
+    }
+    for (const candidate of this.domainRevisions.values()) {
+      if (
+        this.poisonCapacityExhausted ||
+        (
+          candidate.ownerPluginId === domain.ownerPluginId &&
+          candidate.accountHash === domain.accountHash
+        )
+      ) {
+        candidate.revision = randomUUID();
+        candidate.poisoned = true;
+      }
+    }
   }
 
   acquireExecutionLease(
     domainKey: string,
-    kind: "read" | "write",
     principal: PluginOperationPrincipal,
     signal?: AbortSignal,
   ): Promise<PluginOperationExecutionLease> {
@@ -468,15 +487,13 @@ export class PluginOperationGrantCoordinator {
       return Promise.reject(new Error("plugin operation execution lease aborted"));
     }
     const state = this.executionDomains.get(domainKey) ?? {
-      readers: 0,
-      writer: false,
+      held: false,
       queue: [],
     };
     this.executionDomains.set(domainKey, state);
 
     return new Promise<PluginOperationExecutionLease>((resolve, reject) => {
       const request: PendingExecutionLease = {
-        kind,
         principal: Object.freeze({ ...principal }),
         resolve,
         reject,
@@ -708,6 +725,14 @@ export class PluginOperationGrantCoordinator {
       if (existing.revoked) {
         throw new Error("plugin operation domain is revoked");
       }
+      if (
+        this.poisonCapacityExhausted ||
+        this.poisonedOperationScopes.has(
+          this.poisonScopeKey(existing.ownerPluginId, existing.accountHash),
+        )
+      ) {
+        existing.poisoned = true;
+      }
       return existing;
     }
     if (this.domainRevisions.size >= this.maxDomains) {
@@ -719,7 +744,10 @@ export class PluginOperationGrantCoordinator {
       accountHash: principal.accountHash,
       revision: randomUUID(),
       revoked: false,
-      poisoned: false,
+      poisoned: this.poisonCapacityExhausted ||
+        this.poisonedOperationScopes.has(
+          this.poisonScopeKey(principal.ownerPluginId, principal.accountHash),
+        ),
     };
     this.domainRevisions.set(domainKey, created);
     return created;
@@ -750,7 +778,7 @@ export class PluginOperationGrantCoordinator {
     domainKey: string,
     state: ExecutionDomainState,
   ): void {
-    if (state.writer) return;
+    if (state.held) return;
     while (state.queue.length > 0) {
       const request = state.queue[0]!;
       const domain = this.domainRevisions.get(domainKey);
@@ -773,14 +801,6 @@ export class PluginOperationGrantCoordinator {
       }
       request.reject(new Error(invalidReason));
     }
-    if (state.readers > 0) {
-      while (state.queue[0]?.kind === "read") {
-        const reader = state.queue.shift()!;
-        state.readers += 1;
-        this.resolveExecutionLease(domainKey, state, reader);
-      }
-      return;
-    }
     const first = state.queue[0];
     if (!first) {
       this.executionDomains.delete(domainKey);
@@ -789,17 +809,9 @@ export class PluginOperationGrantCoordinator {
       }
       return;
     }
-    if (first.kind === "write") {
-      state.queue.shift();
-      state.writer = true;
-      this.resolveExecutionLease(domainKey, state, first);
-      return;
-    }
-    while (state.queue[0]?.kind === "read") {
-      const reader = state.queue.shift()!;
-      state.readers += 1;
-      this.resolveExecutionLease(domainKey, state, reader);
-    }
+    state.queue.shift();
+    state.held = true;
+    this.resolveExecutionLease(domainKey, state, first);
   }
 
   private revokeDomain(
@@ -819,7 +831,7 @@ export class PluginOperationGrantCoordinator {
       }
       request.reject(new Error("plugin operation domain is revoked"));
     }
-    if (!state.writer && state.readers === 0) {
+    if (!state.held) {
       this.executionDomains.delete(domainKey);
       this.domainRevisions.delete(domainKey);
     }
@@ -835,8 +847,7 @@ export class PluginOperationGrantCoordinator {
     }
     const revocationReason = this.principalRevocationReason(request.principal);
     if (revocationReason) {
-      if (request.kind === "write") state.writer = false;
-      else state.readers = Math.max(0, state.readers - 1);
+      state.held = false;
       request.reject(new Error(revocationReason));
       this.drainExecutionDomain(domainKey, state);
       return;
@@ -844,12 +855,10 @@ export class PluginOperationGrantCoordinator {
     let released = false;
     request.resolve(Object.freeze({
       domainKey,
-      kind: request.kind,
       release: () => {
         if (released) return;
         released = true;
-        if (request.kind === "write") state.writer = false;
-        else state.readers = Math.max(0, state.readers - 1);
+        state.held = false;
         this.drainExecutionDomain(domainKey, state);
       },
     }));
@@ -868,6 +877,10 @@ export class PluginOperationGrantCoordinator {
     accountHash: string,
   ): string {
     return `${ownerPluginId}\0${generationId}\0${accountHash}`;
+  }
+
+  private poisonScopeKey(ownerPluginId: string, accountHash: string): string {
+    return `${ownerPluginId}\0${accountHash}`;
   }
 
   private principalRevocationReason(
