@@ -581,8 +581,13 @@ export class SystemPromptBuilder {
           );
           if (inScope.length === 0) return "";
           // Deterministic priority: user skills first, then plugin skills;
-          // alphabetical within each band. (Query-relevance ranking — §3 — is a
-          // follow-up: the system prompt does not yet carry the turn query.)
+          // alphabetical within each band. Query-relevance is intentionally NOT
+          // applied to the resident catalog (skill-loading-policy.md §3): the
+          // reference consensus (Claude Code / Codex / OpenCode) keeps the
+          // catalog stable and lets the model narrow via skill_load, and
+          // re-ordering it per turn would break Claude prompt-cache stable-prefix
+          // reuse. Query scoring stays in the reactive skill_load/tool_search
+          // path, not here.
           const ordered = inScope.slice().sort((a, b) => {
             const ap = a.pluginOwner ? 1 : 0;
             const bp = b.pluginOwner ? 1 : 0;
