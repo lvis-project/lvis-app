@@ -51,7 +51,7 @@
     "cli": "tsx scripts/lvis-cli.ts",
     "test:prepare": "bun run build:icons",
     "test:vitest": "node scripts/run-vitest-under-electron.mjs",
-    "test": "bun run test:prepare && bun run test:vitest -- run",
+    "test": "bun run test:prepare && node scripts/run-tests.mjs",
     "test:a2a-tck": "bun scripts/run-a2a-tck.ts",
     "test:a2a-external": "bun scripts/run-a2a-external-smoke.ts",
     "check:i18n-catalog": "node --import tsx scripts/i18n-validate-catalog.ts",

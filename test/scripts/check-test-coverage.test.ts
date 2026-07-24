@@ -197,7 +197,7 @@ describe("check-test-coverage", () => {
       "node scripts/run-vitest-under-electron.mjs",
     );
     expect(packageJson.scripts.test).toBe(
-      "bun run test:prepare && bun run test:vitest -- run",
+      "bun run test:prepare && node scripts/run-tests.mjs",
     );
     expect(packageJson.scripts["test:coverage"]).toBe(
       "bun run test:prepare && bun run test:vitest -- run --coverage",
