@@ -31,10 +31,10 @@ export const HOST_PACKAGED_RUNTIME_ASSETS = Object.freeze([
     reason: "The Electron main process imports better-sqlite3 at runtime.",
     targets: SUPPORTED_UV_TARGET_DIRS,
     packageResource: Object.freeze({
-      from: "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
-      to: "app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      from: "node_modules/better-sqlite3/prebuilds/<platform>-<arch>.node",
+      to: "app.asar.unpacked/node_modules/better-sqlite3/prebuilds/<platform>-<arch>.node",
     }),
-    stagedBy: "electron-builder native rebuild",
+    stagedBy: "npm-shipped N-API prebuild",
     materializedBy: "Electron app resources",
   }),
 ]);
