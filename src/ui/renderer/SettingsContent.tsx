@@ -18,6 +18,7 @@ import {
   Rocket,
   ChevronLeft,
   ChevronRight,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
@@ -135,10 +136,12 @@ export function SettingsContent({
   api,
   onSaved,
   initialTab = "llm",
+  onClose,
 }: {
   api: LvisApi;
   onSaved: () => void;
   initialTab?: string;
+  onClose?: () => void;
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
@@ -176,6 +179,16 @@ export function SettingsContent({
   const chatSave = useDebouncedSave(() => void s.save("chat"));
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
+  const flushPendingSaves = useCallback(() => {
+    llmSave.flush();
+    chatSave.flush();
+    webSave.flush();
+    marketplaceSave.flush();
+  }, [llmSave, chatSave, webSave, marketplaceSave]);
+  const handleClose = useCallback(() => {
+    flushPendingSaves();
+    onClose?.();
+  }, [flushPendingSaves, onClose]);
   const openMarketplaceTab = useCallback((filter: MarketplacePackageFilter = "all") => {
     setMarketplaceFilter(filter);
     setTab("marketplace");
@@ -198,19 +211,13 @@ export function SettingsContent({
   // cleanup also fires `cancel()`, so the pre-conversion Dialog
   // `open=false` cancel-effect was retired — see PR #890 review.)
   useEffect(() => {
-    const flushAll = () => {
-      llmSave.flush();
-      chatSave.flush();
-      webSave.flush();
-      marketplaceSave.flush();
-    };
-    window.addEventListener("beforeunload", flushAll);
-    window.addEventListener("pagehide", flushAll);
+    window.addEventListener("beforeunload", flushPendingSaves);
+    window.addEventListener("pagehide", flushPendingSaves);
     return () => {
-      window.removeEventListener("beforeunload", flushAll);
-      window.removeEventListener("pagehide", flushAll);
+      window.removeEventListener("beforeunload", flushPendingSaves);
+      window.removeEventListener("pagehide", flushPendingSaves);
     };
-  }, [llmSave, chatSave, webSave, marketplaceSave]);
+  }, [flushPendingSaves]);
 
   // Reset tab + clear stale error banner whenever a new `initialTab` arrives
   // (mount or IPC-driven tab change). Depending on the whole `s` orchestration
@@ -316,14 +323,14 @@ export function SettingsContent({
   // and the last control lands flush against the window edge. Active panels
   // are flex columns so split-pane children can still use `flex-1 min-h-0`.
   const tabContentCls =
-    "min-h-full shrink-0 outline-none data-[state=active]:flex data-[state=active]:flex-col";
+    "min-h-full min-w-0 w-full shrink-0 outline-none data-[state=active]:flex data-[state=active]:flex-col";
   // Common icon class so the 12 nav entries render at a uniform 16px.
   const navIconCls = "size-4 shrink-0";
 
   return (
     <SavedToastProvider value={notifySaved}>
+    <div ref={rootRef} className="relative flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
     <Tabs
-      ref={rootRef}
       orientation="vertical"
       // Keyboard activation: automatic on wide (arrowing a trigger instantly
       // reveals its pane beside the list). Manual on narrow so arrowing browses
@@ -338,7 +345,7 @@ export function SettingsContent({
       // the sidebar) so the layout reads as two regions of the dialog,
       // not two stacked cards. Simplified per user direction
 
-      className="relative flex h-full min-h-0"
+      className="relative flex h-full min-h-0 min-w-0 flex-1"
     >
       {/* Dialog-wide save feedback — anchored to the Tabs root (not the
           right pane) so the user sees it even after scrolling deep into
@@ -366,8 +373,26 @@ export function SettingsContent({
           so the sidebar h2 baseline aligns with the right-pane h2 of
           the active tab. `px-5` (20px) aligns the settings text-left with
           the nav-trigger icon-left (TabsList p-2 + trigger px-3 = 20). */}
-      <div className="px-5 pt-6 mb-6">
-        <h2 data-testid="settings-sidebar-heading" className="text-xl font-semibold leading-9 tracking-normal">{t("settingsContent.sidebarHeading")}</h2>
+      <div className="flex items-center gap-2 px-5 pt-6 mb-6">
+        <h2
+          data-testid="settings-sidebar-heading"
+          className="min-w-0 flex-1 truncate text-xl font-semibold leading-9 tracking-normal"
+        >
+          {t("settingsContent.sidebarHeading")}
+        </h2>
+        {onClose ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleClose}
+            aria-label={t("settingsContent.closeButton")}
+            data-testid="settings-close"
+            className="size-8 shrink-0"
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        ) : null}
       </div>
       {/* VerticalTabsList bakes in the shadcn vertical-sidebar override
           (flex-col + justify-start + rounded-none + bg-transparent); only
@@ -474,9 +499,22 @@ export function SettingsContent({
             <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />
             {t("settingsContent.sidebarHeading")}
           </button>
+          {onClose ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleClose}
+              aria-label={t("settingsContent.closeButton")}
+              data-testid="settings-mobile-close"
+              className="ml-auto size-8 shrink-0"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
       )}
-      <div ref={rightPaneRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto [scrollbar-gutter:stable] px-8 pt-2 pb-12 scroll-pb-12 lvis-settings-scroll">
+      <div ref={rightPaneRef} className="flex min-w-0 flex-1 min-h-0 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] px-4 pt-2 pb-12 scroll-pb-12 sm:px-8 lvis-settings-scroll">
         {s.lastSaveError && (
           <div
             role="alert"
@@ -625,6 +663,7 @@ export function SettingsContent({
       </div>
       </div>
     </Tabs>
+    </div>
     </SavedToastProvider>
   );
 }

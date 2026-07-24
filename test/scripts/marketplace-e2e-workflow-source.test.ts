@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const workflow = readFileSync(
   resolve(process.cwd(), ".github/workflows/marketplace-e2e.yml"),
   "utf8",
-);
+).replaceAll("\r\n", "\n");
 const hostDockerfile = readFileSync(
   resolve(process.cwd(), ".github/marketplace-e2e/host.Dockerfile"),
   "utf8",

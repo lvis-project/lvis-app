@@ -262,8 +262,8 @@ export function AuditTab() {
           )}
 
           {result.entries.length > 0 && (
-            <div className="rounded-md border text-xs">
-              <table className="w-full">
+            <div className="min-w-0 overflow-x-auto rounded-md border text-xs">
+              <table className="min-w-max w-full">
                 <thead>
                   <tr className="border-b bg-muted/(--opacity-medium)">
                     <th className="px-3 py-2 text-left font-medium">{t("auditTab.colTimestamp")}</th>
