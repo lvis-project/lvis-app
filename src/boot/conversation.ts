@@ -177,6 +177,8 @@ export interface ConversationDeps {
   hookRunner: HookRunner;
   scriptHookManager?: import("../hooks/script-hook-manager.js").ScriptHookManager;
   pluginRuntime: PluginRuntime;
+  pluginOperationGrants: import("../permissions/plugin-operation-grant.js").PluginOperationGrantCoordinator;
+  pluginOperationIdentityProvider: import("../tools/invocation-services.js").PluginOperationIdentityProvider;
   additionalDirectories?: readonly string[];
   getAdditionalDirectories?: () => readonly string[];
   isDefaultProjectRoot?: (projectRoot: string) => boolean;
@@ -239,6 +241,8 @@ export type RoutineConversationLoopDeps = Pick<
   | "scriptHookManager"
   | "bashAstValidator"
   | "pluginRuntime"
+  | "pluginOperationGrants"
+  | "pluginOperationIdentityProvider"
   | "llmFetch"
   | "auditLogger"
   | "isDefaultProjectRoot"
@@ -304,6 +308,8 @@ export function createRoutineConversationLoop(
     scriptHookManager: deps.scriptHookManager,
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
+    pluginOperationGrants: deps.pluginOperationGrants,
+    pluginOperationIdentityProvider: deps.pluginOperationIdentityProvider,
     auditLogger: deps.auditLogger,
     llmFetch: deps.llmFetch,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
@@ -354,6 +360,8 @@ export type SideChatConversationLoopDeps = Pick<
   | "scriptHookManager"
   | "bashAstValidator"
   | "pluginRuntime"
+  | "pluginOperationGrants"
+  | "pluginOperationIdentityProvider"
   | "llmFetch"
   | "rationaleCoordinatorFactory"
   | "closeRationaleSession"
@@ -403,6 +411,8 @@ export function createSideChatConversationLoop(
     scriptHookManager: deps.scriptHookManager,
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
+    pluginOperationGrants: deps.pluginOperationGrants,
+    pluginOperationIdentityProvider: deps.pluginOperationIdentityProvider,
     postTurnHookChain,
     auditLogger: deps.auditLogger,
     ...(deps.rationaleCoordinatorFactory
@@ -454,6 +464,8 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
 
     pluginRuntime: deps.pluginRuntime,
+    pluginOperationGrants: deps.pluginOperationGrants,
+    pluginOperationIdentityProvider: deps.pluginOperationIdentityProvider,
     skillOverlay: deps.skillOverlay,
     sessionTodoStore: deps.sessionTodoStore,
     notificationService: deps.notificationService,

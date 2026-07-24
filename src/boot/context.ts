@@ -68,6 +68,9 @@ import type { RationaleScopeReviewer } from "../permissions/reviewer/rationale-s
 import type { RationaleHostService } from "../tools/pipeline/rationale-host-service.js";
 import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
 import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
+import type { PluginBundleLifecycle } from "../plugins/plugin-bundle-lifecycle.js";
+import type { PluginOperationGrantCoordinator } from "../permissions/plugin-operation-grant.js";
+import type { PluginOperationIdentityProvider } from "../tools/invocation-services.js";
 
 type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
@@ -161,6 +164,23 @@ export class BootContext {
   // ── Hooks + plugin tool execution surface ──────────────────────────────────
   declare hookRunner: HookRunner;
   declare scriptHookManager: ScriptHookManager;
+  declare pluginBundleLifecycle: PluginBundleLifecycle | undefined;
+  declare pluginOperationGrants: PluginOperationGrantCoordinator;
+  declare pluginOperationIdentityProvider: PluginOperationIdentityProvider;
+  declare requestPluginOperationGrant: (request: {
+    pluginId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+    appSessionId: string;
+    origin?: "ui" | "mcp-app";
+    expectedGenerationId?: string;
+  }) => Promise<{
+    operationGrantToken: string;
+    grantId: string;
+    expiresAt: number;
+  }>;
+  declare revokePluginOperationGeneration: (pluginId: string, generationId: string) => void;
+  declare revokePluginOperationSession: (appSessionId: string) => void;
 
   // ── Conversation / agent loop ──────────────────────────────────────────────
   declare routineEngine: RoutineEngine;
@@ -261,6 +281,12 @@ const BOOT_CONTEXT_FIELDS = [
   "rewireReviewerAgent",
   "hookRunner",
   "scriptHookManager",
+  "pluginBundleLifecycle",
+  "pluginOperationGrants",
+  "pluginOperationIdentityProvider",
+  "requestPluginOperationGrant",
+  "revokePluginOperationGeneration",
+  "revokePluginOperationSession",
   "routineEngine",
   "postTurnHookChain",
   "conversationLoop",

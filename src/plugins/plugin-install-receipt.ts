@@ -70,8 +70,37 @@ export async function writeInstallReceipt(
   receipt: PluginInstallReceipt,
 ): Promise<void> {
   const path = installReceiptPath(cacheRoot, receipt.pluginId);
-  const content = `${JSON.stringify(receipt, null, 2)}\n`;
+  const content = serializeInstallReceipt(receipt);
   await writeInstallReceiptContent(path, receipt.pluginId, content);
+}
+
+function serializeInstallReceipt(receipt: PluginInstallReceipt): string {
+  return `${JSON.stringify(receipt, null, 2)}\n`;
+}
+
+export async function buildInstallReceipt(
+  pluginRoot: string,
+  input: {
+    pluginId: string;
+    version: string;
+    installSource: "marketplace" | "local-dev";
+    artifactSha256: string | null;
+    signerKeyId: string | null;
+    files: string[];
+    installedAt?: string;
+  },
+): Promise<{ receipt: PluginInstallReceipt; raw: string }> {
+  const receipt: PluginInstallReceipt = {
+    schemaVersion: 2,
+    pluginId: input.pluginId,
+    version: input.version,
+    installSource: input.installSource,
+    artifactSha256: input.artifactSha256,
+    signerKeyId: input.signerKeyId,
+    installedAt: input.installedAt ?? new Date().toISOString(),
+    files: await hashReceiptFiles(pluginRoot, input.files),
+  };
+  return { receipt, raw: serializeInstallReceipt(receipt) };
 }
 
 /** Restore an already-validated receipt snapshot without changing its bytes. */
@@ -277,6 +306,9 @@ export async function listFilesRecursive(
         await walk(abs);
       } else if (info.isFile()) {
         const rel = relative(root, abs).split(sep).join("/");
+        if (info.nlink > 1) {
+          throw new Error(`installed payload contains hard link: ${rel}`);
+        }
         // Python bytecode cache (`**​/__pycache__/<name>.pyc|pyo`) is compiled
         // in-place by the interpreter from the validated `.py` sources, is never
         // part of the signed install artifact, and regenerates whenever the

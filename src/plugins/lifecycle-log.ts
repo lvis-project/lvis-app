@@ -88,7 +88,6 @@ export const PluginPhase = {
 
   // restart — hot reload
   RESTART_REQUEST: "lifecycle:restart:request",
-  RESTART_STOP_OK: "lifecycle:restart:stop:ok",
   RESTART_STOP_FAIL: "lifecycle:restart:stop:fail",
   RESTART_RELOAD_OK: "lifecycle:restart:reload:ok",
   RESTART_RELOAD_FAIL: "lifecycle:restart:reload:fail",

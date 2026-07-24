@@ -1,27 +1,87 @@
 /**
  * #1176 — PluginRuntime.setPluginEnabled / isPluginEnabled.
  *
- * Verifies the active/inactive toggle is orthogonal to load state:
- *   - setPluginEnabled(false) marks the plugin inactive, persists enabled=false
- *     to the registry, fires onActiveStateChange(false), and reports
- *     loadStatus="disabled" — but keeps the plugin LOADED.
- *   - setPluginEnabled(true) re-activates, persists enabled=true, fires
- *     onActiveStateChange(true).
+ * Verifies enabled state is identical to immutable-generation admission:
+ *   - disable publishes the inactive pointer and drains teardown;
+ *   - re-enable reverifies receipt-covered bytes and publishes a new generation.
  *   - an unknown plugin id throws.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { chmod, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
-import { withPluginInstallLock } from "../../install-lifecycle.js";
+import {
+  buildInstallReceipt,
+  installReceiptPath,
+  writeInstallReceipt,
+} from "../../plugin-install-receipt.js";
+
+const registryCommitGate = vi.hoisted(() => ({
+  started: undefined as (() => void) | undefined,
+  wait: undefined as Promise<void> | undefined,
+  release: undefined as (() => void) | undefined,
+}));
+
+vi.mock("../../registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../registry.js")>();
+  return {
+    ...actual,
+    updatePluginRegistry: async (
+      ...args: Parameters<typeof actual.updatePluginRegistry>
+    ) => {
+      registryCommitGate.started?.();
+      if (registryCommitGate.wait) await registryCommitGate.wait;
+      return actual.updatePluginRegistry(...args);
+    },
+  };
+});
 
 describe("PluginRuntime — active/inactive toggle (#1176)", () => {
   let testDir: string;
   let installedDir: string;
   let registryPath: string;
   let manifestPath: string;
+
+  async function makeTreeWritable(path: string): Promise<void> {
+    const info = await lstat(path).catch(() => undefined);
+    if (!info?.isDirectory()) return;
+    await chmod(path, 0o700);
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      if (entry.isDirectory()) await makeTreeWritable(join(path, entry.name));
+    }
+  }
+
+  function holdRegistryCommit(): { started: Promise<void>; release: () => void } {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const wait = new Promise<void>((resolve) => {
+      registryCommitGate.release = resolve;
+    });
+    registryCommitGate.started = markStarted;
+    registryCommitGate.wait = wait;
+    return {
+      started,
+      release: () => {
+        const release = registryCommitGate.release;
+        registryCommitGate.started = undefined;
+        registryCommitGate.wait = undefined;
+        registryCommitGate.release = undefined;
+        release?.();
+      },
+    };
+  }
+
+  function releaseRegistryCommit(): void {
+    const release = registryCommitGate.release;
+    registryCommitGate.started = undefined;
+    registryCommitGate.wait = undefined;
+    registryCommitGate.release = undefined;
+    release?.();
+  }
 
   beforeEach(async () => {
     testDir = mkdtempSync(join(tmpdir(), "lvis-set-enabled-"));
@@ -55,18 +115,33 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       JSON.stringify({ version: 1, plugins: [{ id: "se-plugin", manifestPath, enabled: true }] }),
       "utf-8",
     );
+    const { receipt } = await buildInstallReceipt(pluginDir, {
+      pluginId: "se-plugin",
+      version: "1.0.0",
+      installSource: "marketplace",
+      artifactSha256: "a".repeat(64),
+      signerKeyId: "poc-v1",
+      files: ["entry.mjs", "plugin.json"],
+      installedAt: new Date(0).toISOString(),
+    });
+    await writeInstallReceipt(testDir, receipt);
   });
 
   afterEach(async () => {
+    releaseRegistryCommit();
+    await makeTreeWritable(testDir);
     await rm(testDir, { recursive: true, force: true });
   });
 
   function makeRuntime(opts: {
     onDisable?: (id: string) => void;
     onEnable?: (id: string) => void;
-    onActiveStateChange?: (id: string, enabled: boolean) => void;
+    onActiveStateChange?: (id: string, enabled: boolean) => Promise<void> | void;
   } = {}) {
-    return makeTestPluginRuntime({ rootDir: testDir, registryPath, pluginsRoot: installedDir }, opts);
+    return makeTestPluginRuntime(
+      { rootDir: testDir, registryPath, pluginsRoot: installedDir },
+      { ...opts, installReceiptCacheRoot: testDir },
+    );
   }
 
   it("defaults to active (enabled !== false) for a freshly loaded plugin", async () => {
@@ -75,7 +150,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
   });
 
-  it("disable marks inactive + persists enabled=false + fires active-state callback, plugin stays loaded", async () => {
+  it("disable publishes an inactive pointer, drains runtime, persists false, and fires the callback", async () => {
     const changes: Array<{ id: string; enabled: boolean }> = [];
     const runtime = makeRuntime({ onActiveStateChange: (id, enabled) => changes.push({ id, enabled }) });
     await runtime.startAll();
@@ -83,19 +158,19 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
 
     await runtime.setPluginEnabled("se-plugin", false);
 
-    // Active predicate flips, but the plugin is still loaded (no unload).
+    // No runtime instance or generation admission remains after terminal success.
     expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
-    expect(runtime.listPluginIds()).toContain("se-plugin");
+    expect(runtime.listPluginIds()).not.toContain("se-plugin");
     expect(changes).toEqual([{ id: "se-plugin", enabled: false }]);
 
     // Registry persisted enabled=false atomically.
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);
 
-    // Card reports "disabled" even though the plugin is loaded.
+    // Metadata remains discoverable for an explicit verified re-enable.
     const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
     expect(card?.loadStatus).toBe("disabled");
-    expect(card?.runtimeLoaded).toBe(true);
+    expect(card?.runtimeLoaded).toBe(false);
     expect(card?.active).toBe(false);
   });
 
@@ -118,151 +193,62 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.active).toBe(true);
   });
 
-  it("serializes registry and active-state changes with canonical lifecycle mutations", async () => {
-    const changes: Array<{ id: string; enabled: boolean }> = [];
-    const runtime = makeRuntime({
-      onActiveStateChange: (id, enabled) => changes.push({ id, enabled }),
-    });
-    await runtime.startAll();
-
-    let releaseMutation!: () => void;
-    let markMutationEntered!: () => void;
-    const mutationGate = new Promise<void>((resolve) => {
-      releaseMutation = resolve;
-    });
-    const mutationEntered = new Promise<void>((resolve) => {
-      markMutationEntered = resolve;
-    });
-    const mutation = withPluginInstallLock("se-plugin", async () => {
-      markMutationEntered();
-      await mutationGate;
-    });
-    await mutationEntered;
-
-    const toggle = runtime.setPluginEnabled("se-plugin", false);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
-    expect(changes).toEqual([]);
-    expect(
-      JSON.parse(await readFile(registryPath, "utf-8")).plugins[0].enabled,
-    ).toBe(true);
-
-    releaseMutation();
-    await mutation;
-    await toggle;
-    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
-    expect(changes).toEqual([{ id: "se-plugin", enabled: false }]);
-  });
-
-  it("cancels a pending restart before toggle lock admission", async () => {
-    let prepareRestart = false;
-    let markPreparationEntered!: () => void;
-    const preparationEntered = new Promise<void>((resolve) => {
-      markPreparationEntered = resolve;
-    });
-    const neverSettles = new Promise<void>(() => {});
-    const runtime = makeTestPluginRuntime(
-      { rootDir: testDir, registryPath, pluginsRoot: installedDir },
-      {
-        preparePluginStart: ({ pluginId }) => {
-          if (!prepareRestart || pluginId !== "se-plugin") return undefined;
-          markPreparationEntered();
-          return neverSettles;
-        },
-      },
-    );
-    await runtime.startAll();
-    prepareRestart = true;
-
-    const restart = runtime.restartPlugin("se-plugin");
-    await preparationEntered;
-
-    await expect(runtime.setPluginEnabled("se-plugin", false))
-      .resolves.toBeUndefined();
-    await expect(restart).resolves.toBe("failed");
-    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
-    expect(runtime.isPluginRestartPending("se-plugin")).toBe(false);
-  });
-
-  it("persists a canonical card toggle through its registry install alias", async () => {
-    const installAlias = "se-install-alias";
+  it("re-enables a canonical manifest through its raw registry alias receipt", async () => {
+    const installId = "se-plugin-marketplace";
+    const pluginDir = join(installedDir, "se-plugin");
     await writeFile(
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: installAlias, manifestPath, enabled: true }],
+        plugins: [{ id: installId, manifestPath, enabled: true }],
       }),
       "utf-8",
     );
-    const changes: Array<{ id: string; enabled: boolean }> = [];
-    const runtime = makeRuntime({
-      onActiveStateChange: (id, enabled) => changes.push({ id, enabled }),
+    await rm(installReceiptPath(testDir, "se-plugin"), { force: true });
+    const { receipt } = await buildInstallReceipt(pluginDir, {
+      pluginId: installId,
+      version: "1.0.0",
+      installSource: "marketplace",
+      artifactSha256: "b".repeat(64),
+      signerKeyId: "poc-v1",
+      files: ["entry.mjs", "plugin.json"],
+      installedAt: new Date(0).toISOString(),
     });
+    await writeInstallReceipt(testDir, receipt);
+
+    const runtime = makeRuntime();
     await runtime.startAll();
+    expect(runtime.resolvePluginInstallId("se-plugin")).toBe(installId);
 
-    await runtime.setPluginEnabled("se-plugin", false);
-    expect(runtime.isPluginEnabled(installAlias)).toBe(false);
-    let registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(registry.plugins[0]).toMatchObject({
-      id: installAlias,
-      enabled: false,
-    });
+    await runtime.setPluginEnabled(installId, false);
+    await runtime.setPluginEnabled(installId, true);
 
-    await runtime.setPluginEnabled(installAlias, true);
-    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
-    registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(registry.plugins[0]).toMatchObject({
-      id: installAlias,
-      enabled: true,
-    });
-    expect(changes).toEqual([
-      { id: "se-plugin", enabled: false },
-      { id: "se-plugin", enabled: true },
-    ]);
+    await expect(runtime.call("se_ping")).resolves.toBe("pong");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((plugin: { id: string }) => plugin.id === installId).enabled)
+      .toBe(true);
   });
 
-  it("toggles a configured static plugin without inventing a registry row", async () => {
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    const changes: Array<{ id: string; enabled: boolean }> = [];
-    const runtime = makeTestPluginRuntime(
-      { rootDir: testDir, registryPath, pluginsRoot: installedDir },
-      {
-        manifestPaths: [manifestPath],
-        onActiveStateChange: (id, enabled) => changes.push({ id, enabled }),
+  it("uninstalls an inactive plugin and permits a clean same-id reinstall", async () => {
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await runtime.setPluginEnabled("se-plugin", false);
+
+    const removed = await runtime.removePluginWithCommit(
+      "se-plugin",
+      async () => {
+        await writeFile(
+          registryPath,
+          JSON.stringify({ version: 1, plugins: [] }),
+          "utf-8",
+        );
+        return "removed";
       },
     );
-    await runtime.startAll();
 
-    await runtime.setPluginEnabled("se-plugin", false);
-    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
-    await runtime.setPluginEnabled("se-plugin", true);
-    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    expect(removed).toBe("removed");
+    expect(runtime.listPluginCards().find((card) => card.id === "se-plugin")).toBeUndefined();
 
-    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(registry.plugins).toEqual([]);
-    expect(changes).toEqual([
-      { id: "se-plugin", enabled: false },
-      { id: "se-plugin", enabled: true },
-    ]);
-  });
-
-  it("does not stop/reload the plugin instance on disable (call still resolves)", async () => {
-    const runtime = makeRuntime();
-    await runtime.startAll();
-    await runtime.setPluginEnabled("se-plugin", false);
-    // The instance is untouched — the underlying method still resolves.
-    await expect(runtime.call("se_ping")).resolves.toBe("pong");
-  });
-
-  it("clears stale inactive state when an enabled update removes and re-adds a plugin", async () => {
-    const runtime = makeRuntime();
-    await runtime.startAll();
-    await runtime.setPluginEnabled("se-plugin", false);
-    await runtime.removePlugin("se-plugin");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -271,15 +257,58 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       }),
       "utf-8",
     );
-
     await expect(runtime.addPlugin("se-plugin")).resolves.toBe("started");
     expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
-    expect(runtime.listPluginCards().find((card) => card.id === "se-plugin"))
-      .toMatchObject({
-        active: true,
-        loadStatus: "loaded",
-        runtimeLoaded: true,
-      });
+    await expect(runtime.call("se_ping")).resolves.toBe("pong");
+  });
+
+  it("preserves a later enable while an earlier disable commit is delayed", async () => {
+    const changes: boolean[] = [];
+    const runtime = makeRuntime({
+      onActiveStateChange: (_id, enabled) => changes.push(enabled),
+    });
+    await runtime.startAll();
+    const commit = holdRegistryCommit();
+
+    const disable = runtime.setPluginEnabled("se-plugin", false);
+    await commit.started;
+    const enable = runtime.setPluginEnabled("se-plugin", true);
+    commit.release();
+    await Promise.all([disable, enable]);
+
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    expect(changes).toEqual([false, true]);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(true);
+  });
+
+  it("preserves a later disable while an earlier enable commit is delayed", async () => {
+    const changes: boolean[] = [];
+    const runtime = makeRuntime({
+      onActiveStateChange: (_id, enabled) => changes.push(enabled),
+    });
+    await runtime.startAll();
+    await runtime.setPluginEnabled("se-plugin", false);
+    changes.length = 0;
+    const commit = holdRegistryCommit();
+
+    const enable = runtime.setPluginEnabled("se-plugin", true);
+    await commit.started;
+    const disable = runtime.setPluginEnabled("se-plugin", false);
+    commit.release();
+    await Promise.all([enable, disable]);
+
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    expect(changes).toEqual([true, false]);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);
+  });
+
+  it("admits no new runtime call after disable", async () => {
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await runtime.setPluginEnabled("se-plugin", false);
+    await expect(runtime.call("se_ping")).rejects.toThrow("Plugin method not found: se_ping");
   });
 
   it("throws for an unknown plugin id", async () => {
@@ -304,6 +333,47 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.active).toBe(true);
   });
 
+  it("keeps committed state aligned when a post-commit host callback fails", async () => {
+    const onActiveStateChange = vi.fn(async () => { throw new Error("MCP projection failed"); });
+    const runtime = makeRuntime({ onActiveStateChange });
+    await runtime.startAll();
+
+    await expect(runtime.setPluginEnabled("se-plugin", false)).rejects.toThrow("MCP projection failed");
+
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);
+  });
+
+  it("projects the committed inactive state even when runtime retirement fails", async () => {
+    const onActiveStateChange = vi.fn();
+    const runtime = makeRuntime({ onActiveStateChange });
+    await runtime.startAll();
+    const prepareRuntimeRetirement =
+      runtime.prepareRuntimeRetirement.bind(runtime);
+    vi.spyOn(runtime, "prepareRuntimeRetirement").mockImplementation(
+      (projection) =>
+        prepareRuntimeRetirement(projection).map((step) =>
+          step.phase === "runtime.drain"
+            ? Object.freeze({
+                ...step,
+                run: async () => {
+                  throw new Error("retirement drain failed");
+                },
+              })
+            : step),
+    );
+
+    await expect(runtime.setPluginEnabled("se-plugin", false)).rejects.toThrow(
+      /generation retirement failed/,
+    );
+
+    expect(onActiveStateChange).toHaveBeenCalledWith("se-plugin", false);
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);
+  });
+
   /**
    * M1 cross-restart regression — #1176.
    *
@@ -313,8 +383,8 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
    *   - isPluginEnabled("se-plugin") returned true (false negative)
    *   - setPluginEnabled("se-plugin", true) threw "Plugin not found"
    *
-   * After the fix, ALL installed plugins are loaded regardless of enabled=false;
-   * inactivePluginIds is seeded at boot from the persisted enabled=false value.
+   * After the fix, installed metadata remains discoverable while no runtime or
+   * active generation is admitted until the receipt is reverified.
    */
   describe("cross-restart: boot from persisted enabled=false", () => {
     let disabledCalls: string[];
@@ -338,22 +408,21 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       await runtime.startAll();
     });
 
-    it("(a) plugin IS loaded despite enabled=false", () => {
-      // The plugin should appear in listPluginIds (loaded into memory).
-      expect(runtime.listPluginIds()).toContain("se-plugin");
+    it("(a) plugin metadata is known but runtime is not loaded", () => {
+      expect(runtime.listPluginIds()).not.toContain("se-plugin");
+      expect(runtime.listPluginCards().find((card) => card.id === "se-plugin")).toBeDefined();
     });
 
     it("(b) isPluginEnabled returns false immediately after boot", () => {
       expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
       const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
       expect(card?.loadStatus).toBe("disabled");
-      expect(card?.runtimeLoaded).toBe(true);
+      expect(card?.runtimeLoaded).toBe(false);
       expect(card?.active).toBe(false);
     });
 
     it("(c) inactivePluginIds seeded at boot without lifecycle teardown callbacks", () => {
-      // Model exposure is gated by ConversationLoop scope, not by removing
-      // runtime tools from ToolRegistry. Boot only needs the active predicate.
+      // Boot publishes no runtime projection and fires no teardown callback.
       expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
       expect(disabledCalls).not.toContain("se-plugin");
     });
@@ -362,11 +431,20 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       // Before the M1 fix this threw "Plugin not found: se-plugin".
       await expect(runtime.setPluginEnabled("se-plugin", true)).resolves.toBeUndefined();
       expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
-      expect(enabledCalls).not.toContain("se-plugin");
+      expect(enabledCalls).toContain("se-plugin");
       const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
       expect(card?.loadStatus).toBe("loaded");
       expect(card?.runtimeLoaded).toBe(true);
       expect(card?.active).toBe(true);
+    });
+
+    it("(e) rejects tampered installed bytes and keeps the inactive registry state", async () => {
+      await writeFile(join(installedDir, "se-plugin", "entry.mjs"), "export default () => ({ handlers: {} });\n");
+      await expect(runtime.setPluginEnabled("se-plugin", true)).rejects.toThrow(/verification failed/);
+      expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+      expect(runtime.listPluginIds()).not.toContain("se-plugin");
+      const registry = JSON.parse(await readFile(registryPath, "utf8"));
+      expect(registry.plugins[0].enabled).toBe(false);
     });
   });
 });

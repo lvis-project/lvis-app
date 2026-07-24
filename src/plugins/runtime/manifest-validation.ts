@@ -20,6 +20,7 @@ import type { ValidateFunction } from "ajv";
 import manifestSchema from "../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 import type {
   PluginManifest,
+  PluginToolOperationPolicy,
   InstallPolicy,
   Tool,
 } from "../types.js";
@@ -29,6 +30,7 @@ import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import {
   marketplaceProviderPresetIdFromSecretKey,
 } from "../../shared/marketplace-package-assets.js";
+import { resolvePluginContributionDeclarations } from "../plugin-contributions.js";
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
@@ -278,25 +280,7 @@ export async function parsePluginJson(
     // it's the additional-property case (typical when SDK schema tightens
     // and a stale plugin install carries a deprecated field).
     const rawAjvErrors = validator.errors ?? [];
-    // #885 v6 — `tools` is a `oneOf` (legacy `string[]` | pure `Tool[]`). When the
-    // author WROTE the pure form (`tools[0]` is an object), the legacy arm's
-    // "/tools/N must be string" + the "must match exactly one schema in oneOf"
-    // errors are pure NOISE that bury the real pure-arm violation. Filter them so
-    // the user sees only the actionable pure-arm error(s).
-    // `validator` is an AJV type-guard, so inside this `!validator(parsed)` block
-    // TS narrows `parsed` to `never` — read `tools` back through a cast.
-    const toolsRaw = (parsed as { tools?: unknown }).tools;
-    const isPureShape = Array.isArray(toolsRaw) && typeof toolsRaw[0] === "object";
-    const filteredAjvErrors = isPureShape
-      ? rawAjvErrors.filter(
-          (e) =>
-            !(e.keyword === "type" && /^\/tools\/\d+$/.test(e.instancePath) && e.message === "must be string") &&
-            !(e.keyword === "oneOf" && e.instancePath === "/tools"),
-        )
-      : rawAjvErrors;
-    // Never let the filter swallow the entire message (defensive — a pure-shape
-    // failure always retains ≥1 pure-arm error, but fall back if it somehow does not).
-    const ajvErrors = filteredAjvErrors.length > 0 ? filteredAjvErrors : rawAjvErrors;
+    const ajvErrors = rawAjvErrors;
     const additionalProps: string[] = [];
     for (const e of ajvErrors) {
       if (e.keyword === "additionalProperties") {
@@ -371,8 +355,9 @@ export async function parsePluginJson(
   // message instead of letting it fall through to the downstream tool-name loop,
   // which would spread a bare string into a nameless object and throw the
   // confusing "Invalid tool name 'undefined'" (security-review nitpick a). The
-  // installed SDK validator may still accept the legacy shape during the migration
-  // window, so this host-side guard is the loud, author-facing fail-closed point.
+  // Host and SDK schemas both reject that legacy shape. Keep this host-side guard
+  // as a loud, author-facing error if validation is ever invoked with a custom
+  // validator that is accidentally more permissive than the Host source of truth.
   const preV6ToolIdx = (parsed.tools as unknown[]).findIndex(
     (t) => typeof t !== "object" || t === null || Array.isArray(t),
   );
@@ -405,6 +390,11 @@ export async function parsePluginJson(
   // never `parsed.tools`.
   const manifest = materializeManifest(parsed);
 
+  // Contribution paths and owner-local IDs are security-bearing cross-field
+  // contracts that JSON Schema alone cannot normalize or collision-check.
+  // Validate them before any runtime or subsystem can observe the manifest.
+  resolvePluginContributionDeclarations(manifest);
+
   // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor
   // requirement — kept as defence-in-depth vs a stale SDK schema, same rationale
   // as the hostSecrets/version re-checks). One pass also builds the by-name index
@@ -428,6 +418,63 @@ export async function parsePluginJson(
       fail(`tools[${i}].name`, `duplicate tool name '${name}'`, `each tools[] entry needs a unique name`);
     }
     byName.set(name, tool);
+  }
+
+  // Signed operation restrictions are colocated on each pure MCP Tool. This
+  // preserves manifest==wire and prevents a second tool-name keyed action map.
+  const operationPolicies = new Map<string, PluginToolOperationPolicy>();
+  for (const [toolName, tool] of byName) {
+    const policy = tool._meta?.["lvisai/operationPolicy"];
+    if (!policy) continue;
+    operationPolicies.set(toolName, policy);
+    const policyPath = `tools.${toolName}._meta.lvisai/operationPolicy`;
+    if (policy.discriminant !== "operation") {
+      fail(`${policyPath}.discriminant`, "must equal 'operation'", `"discriminant": "operation"`);
+    }
+    const operationNames = Object.keys(policy.operations ?? {});
+    if (operationNames.length === 0) {
+      fail(`${policyPath}.operations`, "must declare at least one operation", `"operations": { "list": { "kind": "read", "minimumRisk": "read" } }`);
+    }
+    const inputSchema = tool.inputSchema as { required?: unknown; properties?: Record<string, unknown> };
+    if (!Array.isArray(inputSchema.required) || !inputSchema.required.includes("operation")) {
+      fail(`tools.${toolName}.inputSchema.required`, "must require the top-level operation discriminant", `"required": ["operation"]`);
+    }
+    const operationSchema = inputSchema.properties?.operation as { type?: unknown; const?: unknown; enum?: unknown } | undefined;
+    if (!operationSchema || operationSchema.type !== "string") {
+      fail(`tools.${toolName}.inputSchema.properties.operation`, "must be a top-level string schema", `"operation": { "type": "string", "enum": [${operationNames.map((name) => JSON.stringify(name)).join(", ")}] }`);
+    }
+    const governedOperationSchema = operationSchema as { type: "string"; const?: unknown; enum?: unknown };
+    const schemaOperations = Array.isArray(governedOperationSchema.enum)
+      ? governedOperationSchema.enum.filter((value): value is string => typeof value === "string")
+      : typeof governedOperationSchema.const === "string"
+        ? [governedOperationSchema.const]
+        : [];
+    if (
+      schemaOperations.length !== operationNames.length ||
+      [...schemaOperations].sort().some((name, index) => name !== [...operationNames].sort()[index])
+    ) {
+      fail(`tools.${toolName}.inputSchema.properties.operation`, "enum/const must exactly match lvisai/operationPolicy operations", `use exactly ${JSON.stringify(operationNames.sort())}`);
+    }
+    const visibility = toolVisibility(tool);
+    for (const [operation, rule] of Object.entries(policy.operations)) {
+      if (rule.appVisible === true && !visibility.includes("app")) {
+        fail(`${policyPath}.operations.${operation}.appVisible`, "cannot expand a Tool that is not app-visible", `set tools[]. _meta.ui.visibility to include "app" or remove appVisible`);
+      }
+    }
+    for (const [operation, rule] of Object.entries(policy.operations)) {
+      if (!rule.requiresRead) continue;
+      const readTool = byName.get(rule.requiresRead.tool);
+      const readPolicy = operationPolicies.get(rule.requiresRead.tool) ??
+        readTool?._meta?.["lvisai/operationPolicy"];
+      if (!readTool || !readPolicy) {
+        fail(`${policyPath}.operations.${operation}.requiresRead.tool`, "must reference a declared Tool with lvisai/operationPolicy", `reference a governed tool in tools[]`);
+      }
+      for (const readOperation of rule.requiresRead.operations) {
+        if (readPolicy!.operations[readOperation]?.kind !== "read") {
+          fail(`${policyPath}.operations.${operation}.requiresRead.operations`, `'${readOperation}' must reference a read operation`, `choose a kind='read' operation from '${rule.requiresRead.tool}'`);
+        }
+      }
+    }
   }
 
   // Surface any remaining testMode flag in a protected plugin manifest.
@@ -527,8 +574,9 @@ export async function parsePluginJson(
     // rejected by `exactlyApp` (`model ∉ vis` required). No separate leak guard.
   }
 
-  // #885 v6 — keywords[].skillId must name a MODEL-VISIBLE tool (a skill keyword
-  // maps to an LLM-invocable tool). Replaces the old `parsed.tools.includes(sk)`
+  // #885 v6 — keywords[].skillId must name a MODEL-VISIBLE tool (a keyword
+  // preloads that exact Tool into the model's turn scope). Replaces the old
+  // `parsed.tools.includes(sk)`
   // string membership with a normalized-Tool[] lookup + visibility read. The
   // legacy `toolSchemas` key ⊆ all-declared-tools check is DELETED — structurally
   // impossible now that every tool IS its own object (no separate schema map).
@@ -539,7 +587,7 @@ export async function parsePluginJson(
     if (!tool || !isModelVisible(tool)) {
       fail(
         `keywords[${i}].skillId`,
-        `"${String(sk)}" must name a model-visible tool (a skill keyword maps to an LLM-invocable tool)`,
+        `"${String(sk)}" must name a model-visible tool for keyword preload`,
         `add a tools[] entry '${String(sk)}' whose visibility includes "model", or fix the skillId`,
       );
     }

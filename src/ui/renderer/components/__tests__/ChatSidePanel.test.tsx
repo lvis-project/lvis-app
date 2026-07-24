@@ -542,9 +542,9 @@ describe("ChatSidePanel", () => {
 
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-preview"));
     await waitFor(() => {
-      // Only (serverId, uri). The CSP is NOT a renderer-supplied argument: main
-      // derives it from the resource's own _meta.ui.csp that it just fetched.
-      expect(readUiResource).toHaveBeenCalledWith("server-a", "ui://server-a/card");
+      // The optional third value is an immutable loopback generation, not CSP.
+      // Main derives CSP from the resource's own _meta.ui.csp that it just fetched.
+      expect(readUiResource).toHaveBeenCalledWith("server-a", "ui://server-a/card", undefined);
     });
     const webview = await waitFor(() => {
       const el = container.querySelector("webview");

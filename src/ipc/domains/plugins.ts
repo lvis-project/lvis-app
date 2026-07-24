@@ -62,7 +62,7 @@ import {
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
   installMarketplacePluginWithLifecycle,
-  startInstalledPluginWithLifecycle,
+  rollbackMarketplacePluginWithLifecycle,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
 import {
@@ -73,7 +73,11 @@ import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../.
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import { isPluginInstallFailureKind, type PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
-import { handlePluginCards, handleMarketplaceList } from "../handlers/plugins.js";
+import {
+  handlePluginBundleE2eSnapshot,
+  handlePluginCards,
+  handleMarketplaceList,
+} from "../handlers/plugins.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
 const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
@@ -165,8 +169,12 @@ function validateSecretConfigValue(
 }
 interface PluginWebviewBinding {
   pluginId: string;
+  /** Exact runtime generation that minted this renderer authority. */
+  generationId: string;
   entryUrl: string;
   assetEntryUrl: string;
+  /** Host-minted authority scope; never accepted from the renderer/plugin. */
+  appSessionId: string;
   runtimeRevision: number;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
@@ -251,9 +259,27 @@ function clearPendingEntryUrl(webContentsId: number): void {
 }
 
 
-export function unregisterPluginWebview(webContentsId: number): void {
+export function unregisterPluginWebview(
+  webContentsId: number,
+  revokeSession: (appSessionId: string) => void,
+): void {
+  const binding = pluginWebviewRegistry.get(webContentsId);
+  if (binding) revokeSession(binding.appSessionId);
   pluginWebviewRegistry.delete(webContentsId);
   clearPendingEntryUrl(webContentsId);
+}
+
+/** Revoke every renderer authority minted by a superseded plugin generation. */
+export function revokePluginWebviewsForPlugin(
+  pluginId: string,
+  revokeSession: (appSessionId: string) => void,
+): void {
+  for (const [webContentsId, binding] of pluginWebviewRegistry) {
+    if (binding.pluginId !== pluginId) continue;
+    revokeSession(binding.appSessionId);
+    pluginWebviewRegistry.delete(webContentsId);
+    clearPendingEntryUrl(webContentsId);
+  }
 }
 
 export function registerPluginsHandlers(deps: IpcDeps): void {
@@ -387,7 +413,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
         emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
         refreshPluginNotifications,
-        log,
       });
     } catch (err) {
       const message = errMessage(err) || "addPlugin failed";
@@ -408,6 +433,20 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, { slug: lifecycleSlug, success: true });
     return result;
+  });
+
+  ipcMain.handle(CHANNELS.plugins.rollback, async (e, pluginId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.plugins.rollback, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const normalizedPluginId = typeof pluginId === "string" ? pluginId.trim() : "";
+    if (!normalizedPluginId) throw new Error("pluginId is required for rollback");
+    return rollbackMarketplacePluginWithLifecycle({
+      pluginId: normalizedPluginId,
+      pluginRuntime,
+      pluginMarketplace,
+    });
   });
 
   ipcMain.handle(CHANNELS.plugins.uninstall, async (e, pluginId: string, rawOptions?: unknown) => {
@@ -472,10 +511,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
-  // #1176 — toggle a plugin's active/inactive state. Persists `enabled` to the
-  // registry and broadcasts a lifecycle event so the renderer refreshes its
-  // plugin cards. The plugin stays loaded; only its per-turn tool exposure is
-  // gated (PluginRuntime.setPluginEnabled does not unload/reload).
+  // Toggle through the immutable generation lifecycle. Disable publishes an
+  // inactive pointer and drains teardown; re-enable reverifies installed bytes
+  // before atomically publishing a new generation.
   ipcMain.handle(
     CHANNELS.plugins.setEnabled,
     async (e, pluginId: unknown, enabled: unknown) => {
@@ -516,43 +554,35 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       message: t("mainDialog.installLocalPluginMessage"),
     });
     if (canceled || !filePaths[0]) return null;
-    // Atomic install — same rollback-on-addPlugin-fail contract as the
-    // marketplace install path above. local-dev installs are dev-mode
-    // only but a failed import (e.g. forgot to `bun run build` before
-    // selecting the dir) still left a dangling registry entry pre-fix.
+    // Local-dev uses the same staged generation transaction as marketplace:
+    // candidate import/start happens from immutable bytes before live payload,
+    // receipt, registry, or active pointer publication.
     const pluginId = await pluginMarketplace.resolveLocalInstallPluginId(filePaths[0]);
     pluginRuntime.cancelPendingRestart(pluginId);
     return await withPluginInstallLock(pluginId, async () => {
-      const result = await pluginMarketplace.installLocal(filePaths[0]);
       try {
-        await startInstalledPluginWithLifecycle({
-          pluginId: result.pluginId,
-          source: "local-dev",
-          rollbackMode: "local-dev",
-          pluginRuntime,
-          pluginMarketplace,
-          broadcastInstallProgress: (payload) =>
-            broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
-          emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
-          refreshPluginNotifications,
-          log,
+        const result = await pluginMarketplace.installLocal(filePaths[0], {
+          activatePreparedArtifact: (prepared) => pluginRuntime.activatePreparedArtifact<string>(prepared),
         });
+        if (!pluginRuntime.listPluginIds().includes(result.pluginId)) {
+          throw new Error(`atomic local install committed without active runtime: ${result.pluginId}`);
+        }
+        emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "local-dev" });
+        refreshPluginNotifications?.();
+        broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
+          slug: result.pluginId,
+          success: true,
+        });
+        return result;
       } catch (err) {
         const message = errMessage(err) || "addPlugin failed";
         broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
-          slug: result.pluginId,
+          slug: pluginId,
           success: false,
           error: message,
         });
         throw err;
       }
-      // Mirror the marketplace install path's renderer broadcast so
-      // `App.tsx` `onPluginInstallResult` listener fires `refreshViews()`.
-      broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
-        slug: result.pluginId,
-        success: true,
-      });
-      return result;
     });
   });
 
@@ -603,6 +633,57 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   // read-only, sender guard optional
   ipcMain.handle(CHANNELS.plugins.cards, () => handlePluginCards(deps));
+
+  ipcMain.handle(CHANNELS.plugins.contributionTrustList, (e, pluginId?: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.plugins.contributionTrustList, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (pluginId !== undefined && (typeof pluginId !== "string" || pluginId.length === 0)) {
+      return { ok: false, error: "invalid-plugin-id" };
+    }
+    const lifecycle = deps.pluginBundleLifecycle;
+    if (!lifecycle) return { ok: false, error: "plugin-bundle-lifecycle-unavailable" };
+    return {
+      ok: true,
+      rows: lifecycle.listContributionTrust(pluginId as string | undefined),
+    };
+  });
+
+  ipcMain.handle(CHANNELS.plugins.contributionTrustSet, async (e, input: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.plugins.contributionTrustSet, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const value = asPlainRecord(input);
+    const pluginId = value.pluginId;
+    const localId = value.localId;
+    const kind = value.kind;
+    const approved = value.approved;
+    if (
+      typeof pluginId !== "string" || !pluginId ||
+      typeof localId !== "string" || !localId ||
+      (kind !== "hook" && kind !== "mcpServer") ||
+      typeof approved !== "boolean"
+    ) {
+      return { ok: false, error: "invalid-contribution-trust-request" };
+    }
+    const lifecycle = deps.pluginBundleLifecycle;
+    if (!lifecycle) return { ok: false, error: "plugin-bundle-lifecycle-unavailable" };
+    try {
+      if (kind === "hook") {
+        if (approved) await lifecycle.approveHook(pluginId, localId);
+        else await lifecycle.revokeHook(pluginId, localId);
+      } else if (approved) {
+        await lifecycle.approveMcpServer(pluginId, localId);
+      } else {
+        await lifecycle.revokeMcpServer(pluginId, localId);
+      }
+      return { ok: true, pluginId, localId, kind, approved };
+    } catch (error) {
+      return { ok: false, error: "contribution-trust-update-failed", message: errMessage(error) };
+    }
+  });
 
   ipcMain.handle(CHANNELS.runtime.counts, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.counts, e); return UNAUTHORIZED_FRAME; }
@@ -947,13 +1028,42 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     e,
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; operationGrantToken?: string },
   ) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.call, e); return UNAUTHORIZED_FRAME; }
     return pluginRuntime.callFromUi(method, payload, {
       userAction: options?.userAction === true,
+      // Renderer cannot choose the authority-bearing session identity.
+      appSessionId: `plugin-ui:${e.sender?.id ?? `${e.processId}:${e.frameId}`}`,
+      ...(typeof options?.operationGrantToken === "string"
+        ? { operationGrantToken: options.operationGrantToken }
+        : {}),
     });
   });
+
+  ipcMain.handle(
+    CHANNELS.plugins.e2eBundleSnapshot,
+    async (
+      e,
+      pluginId: unknown,
+      skillLocalId: unknown,
+      hookProbeToolName: unknown,
+    ) => {
+      if (!validateHostRendererSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.plugins.e2eBundleSnapshot, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (process.env.LVIS_E2E !== "1") {
+        return { ok: false as const, error: "production-disabled" };
+      }
+      return handlePluginBundleE2eSnapshot(
+        deps,
+        pluginId,
+        skillLocalId,
+        hookProbeToolName,
+      );
+    },
+  );
 
   // ─── MCP ──────────────────────────────────────
 
@@ -999,9 +1109,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   const mcpUiSources = {
     loopback: {
       has: (serverId: string) => deps.pluginLoopbackManager.has(serverId),
+      assertCardGeneration: (serverId: string, generationId: string) =>
+        deps.pluginLoopbackManager.assertCardGeneration(serverId, generationId),
       readUiResource: (serverId: string, uri: string) =>
         deps.pluginLoopbackManager.readUiResource(serverId, uri),
-      ...createLoopbackToolCallSource(pluginRuntime),
+      ...createLoopbackToolCallSource({
+        runtime: pluginRuntime,
+        findTool: (name) => deps.toolRegistry.findByName(name),
+      }),
     },
     mcpManager: {
       readUiResource: (serverId: string, uri: string) => deps.mcpManager.readUiResource(serverId, uri),
@@ -1046,7 +1161,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configRemove, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.removeConfig(serverId);
   });
-  ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string) => {
+  ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string, generationId?: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
     // b1 — install the per-server network gate BEFORE the resource is read. (It is
     // the deny-by-default declared-origin gate now, not the old CDN allowlist.)
@@ -1065,7 +1180,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // the loopback host FIRST, else the external MCP client registry. ONE
     // resolver, shared with the oncalltool seam below — no duplicated backend
     // branch.
-    const backend = resolveMcpUiBackend(serverId, mcpUiSources);
+    const backend = resolveMcpUiBackend(serverId, mcpUiSources, generationId);
 
     // The resource carries its OWN `_meta.ui.csp` — main reads it here and never
     // accepts one from the renderer. A compromised renderer must not be able to
@@ -1113,7 +1228,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // validator (fails closed on an empty frame URL, rejects plugin-ui-shell frames),
   // exactly like `plugins.call` and `mcp.openDetached`. The MCP-app <webview> itself
   // is on the `lvis-mcp-app:` scheme and could never pass either validator.
-  ipcMain.handle(CHANNELS.mcp.callTool, async (e, serverId: unknown, name: unknown, args: unknown) => {
+  ipcMain.handle(CHANNELS.mcp.callTool, async (e, serverId: unknown, name: unknown, args: unknown, generationId?: unknown) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.mcp.callTool, e);
       return UNAUTHORIZED_FRAME;
@@ -1125,7 +1240,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: false, error: "invalid-tool-name", message: "tool name must be a non-empty string" } satisfies McpUiToolCallOutcome;
     }
 
-    const backend = resolveMcpUiBackend(serverId, mcpUiSources);
+    const backend = resolveMcpUiBackend(
+      serverId,
+      mcpUiSources,
+      typeof generationId === "string" ? generationId : undefined,
+    );
 
     // Invariant 2 — the card's server must OWN the tool it asks for.
     const owner = backend.resolveToolOwner(name);
@@ -1145,7 +1264,27 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
     try {
       // Invariants 3 + 4 live inside this call (visibility MUST, then the gate).
-      const result = await backend.callTool(name, asPlainRecord(args));
+      const input = asPlainRecord(args);
+      // The authority-bearing session is minted from Host-owned IPC identity plus
+      // the already-bound server. It is never accepted from the card or renderer.
+      const appSessionId = `mcp-app:${serverId}:${e.sender?.id ?? `${e.processId}:${e.frameId}`}`;
+      const grantTarget = backend.resolveOperationGrantTarget(name, input);
+      const grant = grantTarget
+        ? await deps.requestPluginOperationGrant({
+            pluginId: grantTarget.pluginId,
+            toolName: grantTarget.toolName,
+            input,
+            appSessionId,
+            origin: "mcp-app",
+            ...(grantTarget.expectedGenerationId
+              ? { expectedGenerationId: grantTarget.expectedGenerationId }
+              : {}),
+          })
+        : undefined;
+      const result = await backend.callTool(name, input, {
+        appSessionId,
+        ...(grant ? { operationGrantToken: grant.operationGrantToken } : {}),
+      });
       return { ok: true, result } satisfies McpUiToolCallOutcome;
     } catch (err) {
       // Every rejection — app-visibility denial, permission/consent denial, tool
@@ -1718,7 +1857,40 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       logRegisterReject("stale-runtime-revision", { webContentsId, pluginId, runtimeRevision });
       return { ok: false, error: "stale-runtime-revision" };
     }
-    const binding = { pluginId, entryUrl, assetEntryUrl: versionedAssetEntryUrl, runtimeRevision };
+    const generationAccess = pluginRuntime.getGenerationAccess();
+    const activeGeneration = generationAccess?.getActive(pluginId);
+    if (!activeGeneration) {
+      logRegisterReject("plugin-not-loaded", { webContentsId, pluginId, reason: "active-generation-missing" });
+      return { ok: false, error: "plugin-not-loaded" };
+    }
+    try {
+      const targetWebview = webContents.fromId(webContentsId);
+      if (
+        !targetWebview
+        || targetWebview.isDestroyed()
+        || targetWebview.getType() !== "webview"
+      ) {
+        logRegisterReject("webview-not-live", { webContentsId, pluginId });
+        plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
+        return { ok: false, error: "webview-not-live" };
+      }
+    } catch {
+      logRegisterReject("webview-not-live", { webContentsId, pluginId });
+      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
+      return { ok: false, error: "webview-not-live" };
+    }
+    const binding = {
+      pluginId,
+      generationId: activeGeneration.generationId,
+      entryUrl,
+      assetEntryUrl: versionedAssetEntryUrl,
+      appSessionId: `plugin-ui:${webContentsId}:${randomUUID()}`,
+      runtimeRevision,
+    };
+    const previousBinding = pluginWebviewRegistry.get(webContentsId);
+    if (previousBinding) {
+      deps.revokePluginOperationSession(previousBinding.appSessionId);
+    }
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
@@ -1734,7 +1906,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!validatePluginFrame(e)) return null;
     const senderId = e.sender?.id;
     if (typeof senderId !== "number") return null;
-    return pluginWebviewRegistry.get(senderId) ?? null;
+    const binding = pluginWebviewRegistry.get(senderId);
+    if (!binding) return null;
+    const activeGeneration = pluginRuntime.getGenerationAccess()?.getActive(binding.pluginId);
+    if (
+      activeGeneration?.generationId === binding.generationId
+      && pluginRuntime.isPluginUiRevisionCurrent(binding.pluginId, binding.runtimeRevision)
+    ) {
+      return binding;
+    }
+    pluginWebviewRegistry.delete(senderId);
+    deps.revokePluginOperationSession(binding.appSessionId);
+    return null;
   }
 
   ipcMain.handle(CHANNELS.pluginBridge.getEntryUrl, (e) => {
@@ -1822,7 +2005,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     e,
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; operationGrantToken?: string },
   ) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
@@ -1848,10 +2031,49 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     try {
       const result = await pluginRuntime.callFromUi(method, payload, {
         userAction: options?.userAction === true,
+        appSessionId: binding.appSessionId,
+        ...(typeof options?.operationGrantToken === "string"
+          ? { operationGrantToken: options.operationGrantToken }
+          : {}),
+        expectedGenerationId: binding.generationId,
       });
       return { ok: true, result };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.pluginBridge.requestOperationGrant, async (
+    e,
+    method: unknown,
+    payload: unknown,
+  ) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.requestOperationGrant, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof method !== "string" || !method.trim()) {
+      return { ok: false as const, error: "invalid-method" };
+    }
+    const ownerPluginId = pluginRuntime.resolveToolOwner(method);
+    if (ownerPluginId !== binding.pluginId) {
+      return { ok: false as const, error: "cross-plugin-call-denied" };
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { ok: false as const, error: "invalid-operation-input" };
+    }
+    try {
+      const result = await deps.requestPluginOperationGrant({
+        pluginId: binding.pluginId,
+        toolName: method,
+        input: payload as Record<string, unknown>,
+        appSessionId: binding.appSessionId,
+        expectedGenerationId: binding.generationId,
+      });
+      return { ok: true as const, result };
+    } catch (error) {
+      return { ok: false as const, error: errMessage(error) };
     }
   });
 
@@ -1943,13 +2165,21 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     const safeKey = sanitizeStorageKey(key);
     if (!safeKey) return { ok: false as const, error: "invalid-key" };
-    const storage = pluginRuntime.getPluginStorage(binding.pluginId);
-    if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+    const access = pluginRuntime.getGenerationAccess();
+    if (!access) return { ok: false as const, error: "unknown-plugin-id" };
+    let lease;
     try {
-      const value = await storage.readJson<unknown>(`ui-storage/${safeKey}.json`);
-      return { ok: true as const, value: value ?? undefined };
+      lease = await access.acquireExact(binding.pluginId, binding.generationId);
+      return await access.runWithLease(lease, async () => {
+        const storage = pluginRuntime.getPluginStorage(binding.pluginId);
+        if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+        const value = await storage.readJson<unknown>(`ui-storage/${safeKey}.json`);
+        return { ok: true as const, value: value ?? undefined };
+      });
     } catch (err) {
       return { ok: false as const, error: (err as Error).message };
+    } finally {
+      lease?.release();
     }
   });
   ipcMain.handle(CHANNELS.pluginBridge.storageSet, async (e, key: string, value: unknown) => {
@@ -1960,13 +2190,21 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     const safeKey = sanitizeStorageKey(key);
     if (!safeKey) return { ok: false as const, error: "invalid-key" };
-    const storage = pluginRuntime.getPluginStorage(binding.pluginId);
-    if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+    const access = pluginRuntime.getGenerationAccess();
+    if (!access) return { ok: false as const, error: "unknown-plugin-id" };
+    let lease;
     try {
-      await storage.writeJson(`ui-storage/${safeKey}.json`, value);
-      return { ok: true as const };
+      lease = await access.acquireExact(binding.pluginId, binding.generationId);
+      return await access.runWithLease(lease, async () => {
+        const storage = pluginRuntime.getPluginStorage(binding.pluginId);
+        if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+        await storage.writeJson(`ui-storage/${safeKey}.json`, value);
+        return { ok: true as const };
+      });
     } catch (err) {
       return { ok: false as const, error: (err as Error).message };
+    } finally {
+      lease?.release();
     }
   });
 

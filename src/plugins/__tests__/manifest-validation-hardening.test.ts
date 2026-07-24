@@ -13,9 +13,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { mkdtempSync } from "node:fs";
-import { compileLegacyToolSurface } from "./test-helpers.js";
+import {
+  compileLegacyToolSurface,
+  TestPluginRuntime as PluginRuntime,
+} from "./test-helpers.js";
 
 describe("runtime manifest validation hardening", () => {
   let testDir: string;
@@ -108,8 +110,7 @@ describe("runtime manifest validation hardening", () => {
       tools: ["pkw_hello", "pkw_bad", "pkw_good"],
       keywords: [{ keyword: "회의", skillId: "p_kw_missing" }],
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -121,6 +122,27 @@ describe("runtime manifest validation hardening", () => {
     expect(
       cap.errors.some((e) =>
         /keywords\[0\]\.skillId.*p_kw_missing.*must name a model-visible tool/.test(e),
+      ),
+    ).toBe(true);
+  });
+
+  it("1b) keywords[].skillId cannot preload an app-only tool", async () => {
+    await writePlugin("p-kw-app-only", {
+      tools: [],
+      uiActions: { p_kw_status: {} },
+      keywords: [{ keyword: "status", skillId: "p_kw_status" }],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const cap = captureErrors();
+    try {
+      await runtime.load();
+    } finally {
+      cap.restore();
+    }
+    expect(runtime.listPluginIds()).toHaveLength(0);
+    expect(
+      cap.errors.some((e) =>
+        /keywords\[0\]\.skillId.*p_kw_status.*must name a model-visible tool for keyword preload/.test(e),
       ),
     ).toBe(true);
   });
@@ -140,8 +162,7 @@ describe("runtime manifest validation hardening", () => {
         },
       },
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -159,8 +180,7 @@ describe("runtime manifest validation hardening", () => {
       eventSubscriptions: ["meeting.started"],
       notificationEvents: [{ event: "meeting.ghost" }],
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -185,8 +205,7 @@ describe("runtime manifest validation hardening", () => {
         { id: "c", slot: "sidebar", kind: "embedded-page", title: "C", page: "dist/c.html" },
       ],
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -216,8 +235,7 @@ describe("runtime manifest validation hardening", () => {
         { id: "z", slot: "sidebar", kind: "info-card", title: "Z" },
       ],
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -237,8 +255,7 @@ describe("runtime manifest validation hardening", () => {
       tools: ["puf_hello", "puf_bad", "puf_good"],
       startupTools: ["p_unknown_field_hello"],
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -261,7 +278,6 @@ describe("runtime manifest validation hardening", () => {
     });
     const auditLog = vi.fn();
     const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,

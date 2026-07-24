@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
-import { writeTestPluginRegistry } from "../../__tests__/test-helpers.js";
+import {
+  bindTestPluginRuntimeGeneration,
+  writeTestPluginRegistry,
+} from "../../__tests__/test-helpers.js";
 
 const PLUGIN_COUNT = 6;
 
@@ -65,18 +68,18 @@ describe("PluginRuntime boot preflight", () => {
 
   it("bounds receipt checks and reports staggered integrity failures in plan order", async () => {
     const integrityAuditPluginIds: string[] = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
       hostRoot,
       pluginsRoot,
       registryPath,
+      createHostApi: createNoopHostApiForTests,
       installReceiptCacheRoot: join(root, "receipts"),
       auditLog: (_level, message, data) => {
         if (message === "plugin_integrity_rejected") {
           integrityAuditPluginIds.push((data as { pluginId: string }).pluginId);
         }
       },
-    });
+    }));
     const internals = runtime as unknown as {
       verifyReceiptAndDevGuard(
         pluginId: string,
@@ -129,11 +132,11 @@ describe("PluginRuntime boot preflight", () => {
 
   it("isolates an unexpected receipt verifier rejection to its plugin", async () => {
     const rejected: Array<{ pluginId: string; reason: string }> = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
       hostRoot,
       pluginsRoot,
       registryPath,
+      createHostApi: createNoopHostApiForTests,
       installReceiptCacheRoot: join(root, "receipts"),
       auditLog: (_level, message, data) => {
         if (message === "plugin_integrity_rejected") {
@@ -141,7 +144,7 @@ describe("PluginRuntime boot preflight", () => {
           throw new Error("injected audit failure");
         }
       },
-    });
+    }));
     const internals = runtime as unknown as {
       verifyReceiptAndDevGuard(pluginId: string): Promise<{ ok: true }>;
       readManifest(path: string): Promise<PluginManifest>;
@@ -174,14 +177,14 @@ describe("PluginRuntime boot preflight", () => {
       manifestPath: join(pluginsRoot, pluginId, "plugin.json"),
     }]);
     const auditMessages: string[] = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
       hostRoot,
       pluginsRoot,
       registryPath,
+      createHostApi: createNoopHostApiForTests,
       installReceiptCacheRoot: join(root, "receipts"),
       auditLog: (_level, message) => auditMessages.push(message),
-    });
+    }));
     const internals = runtime as unknown as {
       verifyReceiptAndDevGuard(): Promise<{
         ok: true;
@@ -217,18 +220,18 @@ describe("PluginRuntime boot preflight", () => {
       manifestPath: join(pluginsRoot, id, "plugin.json"),
     })));
     const auditEvents: Array<{ message: string; pluginId: string }> = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
       hostRoot,
       pluginsRoot,
       registryPath,
+      createHostApi: createNoopHostApiForTests,
       installReceiptCacheRoot: join(root, "receipts"),
       auditLog: (_level, message, data) => {
         const record = data as { pluginId?: string; manifestPath?: string };
         const pluginId = record.pluginId ?? record.manifestPath?.split(/[\\/]/).at(-2);
         if (pluginId) auditEvents.push({ message, pluginId });
       },
-    });
+    }));
     const internals = runtime as unknown as {
       verifyReceiptAndDevGuard(): Promise<{
         ok: true;

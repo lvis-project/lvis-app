@@ -17,7 +17,9 @@ describe("installer smoke and packaging discipline", () => {
     expect(workflow).toContain("scripts/smoke-packaged-app.mjs --target");
     expect(workflow).toContain("xvfb-run -a");
     expect(workflow).toContain("sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb");
-    expect(workflow).toContain("actions/cache@v6");
+    expect(workflow).toContain(
+      "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+    );
     expect(workflow).toContain("~/.bun/install/cache");
     expect(workflow).toContain("ELECTRON_BUILDER_CACHE");
     expect(workflow).toContain("--skip-native-rebuild");
@@ -39,6 +41,58 @@ describe("installer smoke and packaging discipline", () => {
     expect(smokeScript).toContain('["agents", "skills", "prompts"]');
     expect(smokeScript).toContain("skills");
     expect(smokeScript).toContain("prompts");
+  });
+
+  it("does not persist cross-repository E2E checkout credentials into PR-controlled steps", () => {
+    const workflow = readRepoFile(".github/workflows/marketplace-e2e.yml");
+    const checkoutNames = [
+      "lvis-app",
+      "lvis-marketplace",
+      "lvis-plugin-sdk",
+      "lvis-plugin-lge-api",
+    ];
+
+    for (const name of checkoutNames) {
+      const start = workflow.indexOf(`- name: Checkout ${name}`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const nextStep = workflow.indexOf("\n      - name:", start + 1);
+      const block = workflow.slice(start, nextStep);
+      expect(block).toContain("persist-credentials: false");
+    }
+
+    const sdkStart = workflow.indexOf("- name: Checkout lvis-plugin-sdk");
+    const sdkEnd = workflow.indexOf("\n      - name:", sdkStart + 1);
+    const sdkCheckout = workflow.slice(sdkStart, sdkEnd);
+    expect(sdkCheckout).not.toContain("M4_MARKETPLACE_CHECKOUT_TOKEN");
+  });
+
+  it("keeps privileged workflows on trusted default-branch events", () => {
+    for (const path of [
+      ".github/workflows/marketplace-e2e.yml",
+      ".github/workflows/e2e.yml",
+      ".github/workflows/a2a-p4-5-packaged-evidence.yml",
+      ".github/workflows/web-deploy.yml",
+    ]) {
+      const workflow = readRepoFile(path);
+      expect(workflow).toContain("repository_dispatch:");
+      expect(workflow).not.toContain("workflow_dispatch:");
+      expect(workflow).not.toContain("pull_request:");
+    }
+
+    const marketplaceE2e = readRepoFile(".github/workflows/marketplace-e2e.yml");
+    expect(marketplaceE2e).toContain("merge-base --is-ancestor");
+    expect(marketplaceE2e).toContain("persist-credentials: false");
+
+    const signing = readRepoFile(
+      ".github/workflows/a2a-p4-5-packaged-evidence.yml",
+    );
+    expect(signing).toContain("environment: release-signing");
+    expect(signing).toContain("merge-base --is-ancestor");
+
+    const coreCi = readRepoFile(".github/workflows/ci.yml");
+    expect(coreCi).not.toContain("LVIS_REPO_READ_TOKEN");
+    const webCi = readRepoFile(".github/workflows/web-ci.yml");
+    expect(webCi).not.toContain("CLOUDFLARE_API_TOKEN");
   });
 
 

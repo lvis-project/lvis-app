@@ -34,13 +34,34 @@ export interface McpUiBackend {
    */
   resolveToolOwner(toolName: string): string | undefined;
   /**
+   * Return the plugin-owned governed write that needs a Host-issued one-shot
+   * operation grant, or `undefined` when this invocation is not such a write.
+   * The returned identity is derived from the registry, never from the app.
+   */
+  resolveOperationGrantTarget(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): {
+    pluginId: string;
+    toolName: string;
+    expectedGenerationId?: string;
+  } | undefined;
+  /**
    * Invoke `toolName` through the host's EXISTING gated tool path (risk
    * classification → reviewer/approval → audit). Never a raw `mcpManager.callTool`
    * / raw plugin handler call: both source implementations funnel into the
    * ToolExecutor. Rejects when the tool is not app-callable (the spec's
    * `_meta.ui.visibility` MUST) or the gate denies it.
    */
-  callTool(toolName: string, args: Record<string, unknown>): Promise<unknown>;
+  callTool(
+    toolName: string,
+    args: Record<string, unknown>,
+    invocation: {
+      appSessionId: string;
+      operationGrantToken?: string;
+      expectedGenerationId?: string;
+    },
+  ): Promise<unknown>;
 }
 
 /**
@@ -50,7 +71,25 @@ export interface McpUiBackend {
 export interface ExternalUiSource {
   readUiResource(serverId: string, uri: string): Promise<McpUiResourceRead>;
   resolveToolOwner(serverId: string, toolName: string): string | undefined;
-  callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
+  resolveOperationGrantTarget(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): {
+    pluginId: string;
+    toolName: string;
+    expectedGenerationId?: string;
+  } | undefined;
+  callTool(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    invocation: {
+      appSessionId: string;
+      operationGrantToken?: string;
+      expectedGenerationId?: string;
+    },
+  ): Promise<unknown>;
 }
 
 /**
@@ -61,6 +100,7 @@ export interface ExternalUiSource {
  */
 export interface LoopbackUiSource extends ExternalUiSource {
   has(serverId: string): boolean;
+  assertCardGeneration(serverId: string, generationId: string): void;
 }
 
 /**
@@ -72,13 +112,31 @@ export interface LoopbackUiSource extends ExternalUiSource {
 export function resolveMcpUiBackend(
   serverId: string,
   sources: { loopback: LoopbackUiSource; mcpManager: ExternalUiSource },
+  generationId?: string,
 ): McpUiBackend {
-  const source: ExternalUiSource = sources.loopback.has(serverId)
-    ? sources.loopback
-    : sources.mcpManager;
+  const loopback = sources.loopback.has(serverId);
+  if (loopback && !generationId) {
+    throw new Error(`[plugin-loopback] card is missing its immutable generation id for '${serverId}'`);
+  }
+  const source: ExternalUiSource = loopback ? sources.loopback : sources.mcpManager;
+  if (loopback) sources.loopback.assertCardGeneration(serverId, generationId!);
   return {
     readUiResource: (uri) => source.readUiResource(serverId, uri),
     resolveToolOwner: (toolName) => source.resolveToolOwner(serverId, toolName),
-    callTool: (toolName, args) => source.callTool(serverId, toolName, args),
+    resolveOperationGrantTarget: (toolName, args) => {
+      const target = source.resolveOperationGrantTarget(serverId, toolName, args);
+      return target && loopback
+        ? { ...target, expectedGenerationId: generationId! }
+        : target;
+    },
+    callTool: (toolName, args, invocation) =>
+      source.callTool(
+        serverId,
+        toolName,
+        args,
+        loopback
+          ? { ...invocation, expectedGenerationId: generationId! }
+          : invocation,
+      ),
   };
 }

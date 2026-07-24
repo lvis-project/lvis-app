@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SkillStore } from "../main/skill-store.js";
-import { SKILL_NAME_ALLOWLIST } from "../main/skill-store.js";
+import { SKILL_SELECTOR_ALLOWLIST } from "../main/skill-store.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
@@ -47,6 +47,13 @@ export interface SkillLoadToolDeps {
   getApprovalGate: () => ApprovalGate | undefined;
   /** Renderer event sink — used by the chat to render the SkillBadge. */
   emit: (event: SkillLoadEvent) => void;
+  /** Exact generation lease held from materialized body read through overlay registration. */
+  acquirePluginGeneration?: (
+    owner: { pluginId: string; localId: string },
+  ) => Promise<{
+    generation: import("../plugins/plugin-generation-coordinator.js").ActivePluginGeneration;
+    release(): void;
+  }>;
 }
 
 export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
@@ -89,21 +96,42 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // C2(b): allowlist check before doing any filesystem work — defense in
       // depth even though SkillStore enforces the same constraint on file
       // discovery.
-      if (!SKILL_NAME_ALLOWLIST.test(skillName)) {
+      if (!SKILL_SELECTOR_ALLOWLIST.test(skillName)) {
         return {
           output: JSON.stringify({
-            error: `invalid skillName: must match ${SKILL_NAME_ALLOWLIST.source}`,
+            error: `invalid skillName: must match ${SKILL_SELECTOR_ALLOWLIST.source}`,
           }),
           isError: true,
         };
       }
-      const skill = await deps.store.load(skillName);
+      const selectorMatch = /^plugin:([^:]+):([^:]+)$/.exec(skillName);
+      if (selectorMatch && !deps.acquirePluginGeneration) {
+        return {
+          output: JSON.stringify({
+            error: "skill_load: plugin generation access unavailable",
+          }),
+          isError: true,
+        };
+      }
+      const generationLease = selectorMatch
+        ? await deps.acquirePluginGeneration!({
+            pluginId: selectorMatch[1],
+            localId: selectorMatch[2],
+          })
+        : undefined;
+      const skill = generationLease
+        ? deps.store.loadPluginGeneration(generationLease.generation, skillName)
+        : await deps.store.load(skillName);
       if (!skill) {
+        generationLease?.release();
         return {
           output: JSON.stringify({ error: `skill not found: ${skillName}` }),
           isError: true,
         };
       }
+
+      let generationLeaseTransferred = false;
+      try {
 
       // C2(d): every skill body is user-editable on disk — seeded built-in
       // files included — so the approval gate runs uniformly. R2-CR-3:
@@ -113,7 +141,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // post-approval body mutations would silently inherit the previous
       // "yes."
       const alreadyApproved = await deps.approvals.isApproved(
-        skill.name,
+        skill.approvalKey ?? skill.name,
         skill.body,
       );
       if (!alreadyApproved) {
@@ -146,7 +174,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         }
         // R2-CR-3: persist approval BOUND TO the current body's sha256.
         // A subsequent body swap will invalidate this record.
-        await deps.approvals.approve(skill.name, skill.body).catch((err) => {
+        await deps.approvals.approve(skill.approvalKey ?? skill.name, skill.body).catch((err) => {
           log.warn(
             "skill_load: approval persistence failed (non-fatal): %s",
             (err as Error).message,
@@ -174,7 +202,8 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // Register in the current-turn overlay. SystemPromptBuilder reads this
       // on subsequent assistant rounds, and ConversationLoop clears it at the
       // user-turn boundary so the body does not become ambient session context.
-      deps.overlay.register(sessionId, skill);
+      deps.overlay.register(sessionId, skill, generationLease);
+      generationLeaseTransferred = Boolean(generationLease);
 
       deps.emit({
         name: skill.name,
@@ -189,6 +218,9 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         }),
         isError: false,
       };
+      } finally {
+        if (!generationLeaseTransferred) generationLease?.release();
+      }
     },
   });
 }

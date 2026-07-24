@@ -52,13 +52,14 @@ function makeWindow(options: { destroyed?: boolean } = {}) {
   };
 }
 
-async function setup() {
+async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } = {}) {
   handlers.clear();
   vi.clearAllMocks();
   process.env.LVIS_DEV = "1";
   const devFlags = await import("../../../boot/dev-flags.js");
   devFlags.setIsPackaged(false);
-  const appWindows = [makeWindow(), makeWindow()];
+  const appWindows = options.appWindows ?? [makeWindow(), makeWindow()];
+  const activePluginIds = new Set<string>();
   const deps = {
     pluginMarketplace: {
       list: vi.fn(async () => [
@@ -67,30 +68,41 @@ async function setup() {
       ]),
       getLiveCatalogVersion: vi.fn(async () => "1.0.0"),
       getInstalledVersion: vi.fn(async () => "1.0.0"),
-      install: vi.fn(async (...args: unknown[]) => {
-        emitRegisteringProgress(args);
-        return { pluginId: "agent-hub", installed: true };
-      }),
+      install: vi.fn(),
       uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
       getInstallFailureDiagnostics: vi.fn(() => []),
       clearInstallFailureDiagnostic: vi.fn(() => true),
-      rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "0.0.1" })),
+      rollbackPlugin: vi.fn(async (pluginId: string, options) => {
+        await options?.activatePreparedArtifact?.({
+          installId: pluginId,
+          pluginRoot: `/staged/${pluginId}`,
+          manifest: { id: pluginId, version: "0.0.1" },
+          receiptRaw: "{}",
+          durableCommit: async () => pluginId,
+        });
+        return { pluginId, rolledBackTo: "0.0.1" };
+      }),
       rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true })),
       clearLocalInstallRollback: vi.fn(async () => undefined),
       resolveLocalInstallPluginId: vi.fn(async () => "local-plugin"),
-      installLocal: vi.fn(async () => ({ pluginId: "local-plugin", installed: true })),
+      installLocal: vi.fn(),
     },
     pluginRuntime: {
       resolvePluginId: vi.fn((pluginId: string) => pluginId),
       resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
       resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
       cancelPendingRestart: vi.fn(),
+      cancelAllPendingRestarts: vi.fn(),
       clearConfigOverride: vi.fn(),
-      getConfigOverride: vi.fn(() => undefined),
       addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
       waitForPluginReady: vi.fn(async () => undefined),
       removePlugin: vi.fn(async () => undefined),
-      listPluginIds: vi.fn((): string[] => []),
+      removePluginWithCommit: vi.fn(async (
+        _pluginId: string,
+        durableCommit: () => Promise<unknown>,
+      ) => durableCommit()),
+      listPluginIds: vi.fn((): string[] => [...activePluginIds]),
+      activatePreparedArtifact: vi.fn(),
       mergeConfigOverride: vi.fn(),
       setConfigOverride: vi.fn(),
       getPluginManifest: vi.fn(() => ({
@@ -124,9 +136,49 @@ async function setup() {
     getMainWindow: vi.fn(() => appWindows[0]),
     getAppWindows: vi.fn(() => appWindows),
   };
+  const runActivation = async (args: unknown[], pluginId: string): Promise<void> => {
+    const options = args.find((arg): arg is {
+      activatePreparedArtifact?: (prepared: {
+        pluginRoot: string;
+        manifest: { id: string; version: string };
+        receiptRaw: string;
+        registryEntry: { installSource?: "admin" | "user" | "local-dev"; manifestSha256?: string };
+        durableCommit(): Promise<string>;
+      }) => Promise<unknown>;
+    } => typeof arg === "object" && arg !== null && "activatePreparedArtifact" in arg);
+    if (!options?.activatePreparedArtifact) throw new Error("test install omitted atomic activation seam");
+    await options.activatePreparedArtifact({
+      installId: pluginId,
+      pluginRoot: `/staged/${pluginId}`,
+      manifest: { id: pluginId, version: "1.0.0" },
+      receiptRaw: "{}",
+      registryEntry: { installSource: "user" },
+      durableCommit: async () => `${pluginId}/plugin.json`,
+    });
+  };
+  deps.pluginRuntime.activatePreparedArtifact.mockImplementation(async (prepared: {
+    installId: string;
+    manifest: { id: string };
+    durableCommit(): Promise<string>;
+  }) => {
+    const state = await deps.pluginRuntime.addPlugin(prepared.manifest.id);
+    if (state === "preparing") await deps.pluginRuntime.waitForPluginReady(prepared.manifest.id);
+    const result = await prepared.durableCommit();
+    activePluginIds.add(prepared.manifest.id);
+    return { result, retirement: Promise.resolve() };
+  });
+  deps.pluginMarketplace.install.mockImplementation(async (...args: unknown[]) => {
+    emitRegisteringProgress(args);
+    await runActivation(args, "agent-hub");
+    return { pluginId: "agent-hub", installed: true };
+  });
+  deps.pluginMarketplace.installLocal.mockImplementation(async (...args: unknown[]) => {
+    await runActivation(args, "local-plugin");
+    return { pluginId: "local-plugin", installed: true };
+  });
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, appWindows };
+  return { deps, appWindows, runActivation };
 }
 
 beforeEach(() => {
@@ -151,10 +203,6 @@ describe("plugins IPC lifecycle broadcast", () => {
         { slug: "agent-hub", phase: "registering" },
       );
       expect(win.webContents.send).toHaveBeenCalledWith(
-        "lvis:plugins:install-progress",
-        { slug: "agent-hub", phase: "restarting" },
-      );
-      expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:install-result",
         { slug: "agent-hub", success: true },
       );
@@ -162,9 +210,10 @@ describe("plugins IPC lifecycle broadcast", () => {
   });
 
   it("uses the requested marketplace slug for every install lifecycle event when it resolves to a different plugin id", async () => {
-    const { deps, appWindows } = await setup();
+    const { deps, appWindows, runActivation } = await setup();
     deps.pluginMarketplace.install.mockImplementationOnce(async (...args: unknown[]) => {
       emitRegisteringProgress(args);
+      await runActivation(args, "meeting");
       return { pluginId: "meeting", installed: true };
     });
 
@@ -181,10 +230,6 @@ describe("plugins IPC lifecycle broadcast", () => {
         { slug: "lvis-plugin-meeting", phase: "registering" },
       );
       expect(win.webContents.send).toHaveBeenCalledWith(
-        "lvis:plugins:install-progress",
-        { slug: "lvis-plugin-meeting", phase: "restarting" },
-      );
-      expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:install-result",
         { slug: "lvis-plugin-meeting", success: true },
       );
@@ -199,21 +244,20 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("uses the canonical plugin id for pre-stop and rollback when an alias update is already loaded", async () => {
-    const { deps, appWindows } = await setup();
+  it("keeps the canonical plugin generation active when an alias candidate fails before commit", async () => {
+    const { deps, appWindows, runActivation } = await setup();
     deps.pluginRuntime.listPluginIds.mockReturnValue(["meeting"]);
     deps.pluginMarketplace.install.mockImplementationOnce(async (...args: unknown[]) => {
       emitRegisteringProgress(args);
+      await runActivation(args, "meeting");
       return { pluginId: "meeting", installed: true };
     });
     deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("restart failed"));
 
     await expect(invoke("lvis:plugins:install", "lvis-plugin-meeting")).rejects.toThrow("restart failed");
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("meeting", {
-      preserveConfigOverride: true,
-    });
-    expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("meeting");
+    expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
+    expect(deps.pluginMarketplace.rollbackPlugin).not.toHaveBeenCalled();
     expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("meeting");
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
@@ -246,13 +290,14 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("broadcasts marketplace install failure when runtime add rolls back", async () => {
+  it("broadcasts marketplace candidate activation failure without durable compensation", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("runtime failed"));
 
     await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("runtime failed");
 
-    expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalled();
+    expect(deps.pluginMarketplace.rollbackPlugin).not.toHaveBeenCalled();
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:install-result",
@@ -298,14 +343,14 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("rolls back marketplace install when async dependency preparation fails", async () => {
+  it("preserves marketplace durable state when async candidate preparation fails", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginRuntime.addPlugin.mockResolvedValueOnce("preparing");
     deps.pluginRuntime.waitForPluginReady.mockRejectedValueOnce(new Error("prepare failed"));
 
     await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("prepare failed");
 
-    expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalled();
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:install-result",
@@ -314,20 +359,15 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("stops the loaded plugin before marketplace update and rolls back when restart fails", async () => {
+  it("keeps the loaded plugin generation active while a marketplace candidate is rejected", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginRuntime.listPluginIds.mockReturnValue(["agent-hub"]);
     deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("prepare failed"));
 
     await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("prepare failed");
 
-    expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("agent-hub");
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub", {
-      preserveConfigOverride: true,
-    });
-    expect(deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0]).toBeLessThan(
-      deps.pluginMarketplace.install.mock.invocationCallOrder[0],
-    );
+    expect(deps.pluginMarketplace.rollbackPlugin).not.toHaveBeenCalled();
+    expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
     expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("agent-hub");
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
@@ -372,9 +412,10 @@ describe("plugins IPC lifecycle broadcast", () => {
     await invoke("lvis:plugins:uninstall", "agent-hub");
 
     expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("agent-hub");
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub", {
-      preserveConfigOverride: true,
-    });
+    expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledWith(
+      "agent-hub",
+      expect.any(Function),
+    );
     expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledWith("agent-hub");
     expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledWith("agent-hub", new Set(["apiKey", "sttApiKey"]));
     expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:agent-hub");
@@ -390,9 +431,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up catalog grant mismatch diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
-    deps.pluginMarketplace.getInstalledVersion
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstalledVersion.mockResolvedValue(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",
@@ -436,9 +475,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up manifest validation diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
-    deps.pluginMarketplace.getInstalledVersion
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstalledVersion.mockResolvedValue(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",
@@ -512,7 +549,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await invoke("lvis:plugins:uninstall", "agent-hub");
 
-    const removePluginOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
+    const removePluginOrder = deps.pluginRuntime.removePluginWithCommit.mock.invocationCallOrder[0];
     const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
     expect(removePluginOrder).toBeLessThan(uninstallOrder);
   });
@@ -526,7 +563,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     // otherwise registry mutation happens while runtime tracking still
     // references the plugin, leaving listPluginCards showing a ghost card.
     const { deps, appWindows } = await setup();
-    deps.pluginRuntime.removePlugin.mockRejectedValueOnce(new Error("dispose chain failed"));
+    deps.pluginRuntime.removePluginWithCommit.mockRejectedValueOnce(new Error("dispose chain failed"));
 
     await expect(invoke("lvis:plugins:uninstall", "agent-hub")).rejects.toThrow("dispose chain failed");
 
@@ -550,9 +587,10 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await expect(invoke("lvis:plugins:uninstall", "agent-hub")).rejects.toThrow("EACCES");
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub", {
-      preserveConfigOverride: true,
-    });
+    expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledWith(
+      "agent-hub",
+      expect.any(Function),
+    );
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",
@@ -561,21 +599,32 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("install rollback runs removePlugin BEFORE marketplace.uninstall", async () => {
-    // Architect M1 regression guard: failed addPlugin may have partially
-    // started the plugin (DB open, worker spawned). Rollback must follow
-    // the same lifecycle order as user-driven uninstall — runtime cleanup
-    // first, then marketplace rm — to avoid the same Windows EBUSY class.
+  it("candidate start failure does not run legacy remove/uninstall compensation", async () => {
     const { deps } = await setup();
     deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("start exception"));
 
     await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("start exception");
 
-    const removePluginOrder = deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0];
-    const uninstallOrder = deps.pluginMarketplace.uninstall.mock.invocationCallOrder[0];
-    expect(removePluginOrder).toBeDefined();
-    expect(uninstallOrder).toBeDefined();
-    expect(removePluginOrder).toBeLessThan(uninstallOrder);
+    expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalled();
+  });
+
+  it("routes marketplace rollback through the atomic runtime activation seam", async () => {
+    const { deps, runActivation } = await setup();
+    deps.pluginMarketplace.rollbackPlugin.mockImplementationOnce(async (...args: unknown[]) => {
+      await runActivation(args, "agent-hub");
+      return { pluginId: "agent-hub", rolledBackTo: "0.0.1" };
+    });
+
+    await expect(invoke("lvis:plugins:rollback", "agent-hub")).resolves.toEqual({
+      pluginId: "agent-hub",
+      rolledBackTo: "0.0.1",
+    });
+    expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith(
+      "agent-hub",
+      { activatePreparedArtifact: expect.any(Function) },
+    );
+    expect(deps.pluginRuntime.activatePreparedArtifact).toHaveBeenCalledOnce();
   });
 
   it("broadcasts idempotent uninstall success when marketplace entry is already gone", async () => {
@@ -587,9 +636,10 @@ describe("plugins IPC lifecycle broadcast", () => {
       uninstalled: true,
     });
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub", {
-      preserveConfigOverride: true,
-    });
+    expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledWith(
+      "agent-hub",
+      expect.any(Function),
+    );
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",
@@ -607,7 +657,10 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await invoke("lvis:plugins:install-local");
 
-    expect(deps.pluginMarketplace.installLocal).toHaveBeenCalledWith("/tmp/local-plugin");
+    expect(deps.pluginMarketplace.installLocal).toHaveBeenCalledWith(
+      "/tmp/local-plugin",
+      { activatePreparedArtifact: expect.any(Function) },
+    );
     expect(deps.pluginRuntime.addPlugin).toHaveBeenCalledWith("local-plugin");
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
@@ -617,7 +670,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("broadcasts local install failure after rollback when runtime add fails", async () => {
+  it("broadcasts local staged activation failure without durable compensation", async () => {
     const { deps, appWindows } = await setup();
     electronMocks.showOpenDialog.mockResolvedValueOnce({
       canceled: false,
@@ -627,7 +680,8 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await expect(invoke("lvis:plugins:install-local")).rejects.toThrow("local runtime failed");
 
-    expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("local-plugin");
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalled();
+    expect(deps.pluginMarketplace.rollbackLocalInstall).not.toHaveBeenCalled();
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:install-result",
@@ -636,7 +690,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("rolls back local reinstall on disk when loaded plugin activation fails", async () => {
+  it("keeps local reinstall durable state untouched when candidate activation fails", async () => {
     const { deps, appWindows } = await setup();
     electronMocks.showOpenDialog.mockResolvedValueOnce({
       canceled: false,
@@ -647,7 +701,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await expect(invoke("lvis:plugins:install-local")).rejects.toThrow("local runtime failed");
 
-    expect(deps.pluginMarketplace.rollbackLocalInstall).toHaveBeenCalledWith("local-plugin");
+    expect(deps.pluginMarketplace.rollbackLocalInstall).not.toHaveBeenCalled();
     expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("local-plugin");
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
@@ -658,54 +712,9 @@ describe("plugins IPC lifecycle broadcast", () => {
   });
 
   it("skips destroyed app windows during lifecycle broadcast", async () => {
-    handlers.clear();
-    vi.clearAllMocks();
-    process.env.LVIS_DEV = "1";
-    const devFlags = await import("../../../boot/dev-flags.js");
-    devFlags.setIsPackaged(false);
     const liveWindow = makeWindow();
     const destroyedWindow = makeWindow({ destroyed: true });
-    const deps = {
-      pluginMarketplace: {
-        list: vi.fn(async () => [
-          { id: "agent-hub", slug: "lvis-plugin-agent-hub" },
-        ]),
-        getLiveCatalogVersion: vi.fn(async () => "1.0.0"),
-        getInstalledVersion: vi.fn(async () => "1.0.0"),
-        install: vi.fn(async (...args: unknown[]) => {
-          emitRegisteringProgress(args);
-          return { pluginId: "agent-hub", installed: true };
-        }),
-        uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
-        rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "0.0.1" })),
-        rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true })),
-        clearLocalInstallRollback: vi.fn(async () => undefined),
-        resolveLocalInstallPluginId: vi.fn(async () => "local-plugin"),
-        installLocal: vi.fn(async () => ({ pluginId: "local-plugin", installed: true })),
-      },
-      pluginRuntime: {
-        resolvePluginId: vi.fn((pluginId: string) => pluginId),
-        resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
-        cancelPendingRestart: vi.fn(),
-        addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
-        waitForPluginReady: vi.fn(async () => undefined),
-        removePlugin: vi.fn(async () => undefined),
-        listPluginIds: vi.fn((): string[] => []),
-        mergeConfigOverride: vi.fn(),
-      setConfigOverride: vi.fn(),
-      },
-      settingsService: {
-        get: vi.fn(() => ({ backend: "real-cloud", cloudBaseUrl: "https://marketplace.example" })),
-      },
-      auditLogger: {
-        log: vi.fn(),
-      },
-      refreshPluginNotifications: vi.fn(),
-      getMainWindow: vi.fn(() => liveWindow),
-      getAppWindows: vi.fn(() => [liveWindow, destroyedWindow]),
-    };
-    const { registerPluginsHandlers } = await import("../plugins.js");
-    registerPluginsHandlers(deps as never);
+    await setup({ appWindows: [liveWindow, destroyedWindow] });
 
     await invoke("lvis:plugins:install", "agent-hub");
 

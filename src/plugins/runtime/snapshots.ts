@@ -84,6 +84,8 @@ export async function resolveManifestLoadPlan(opts: {
         manifestPath,
         enabled: entry.enabled !== false,
         approvedPluginAccess: entry.approvedPluginAccess as PluginAccessSpec | undefined,
+        installSource: entry.installSource,
+        manifestSha256: entry.manifestSha256,
       }];
     }),
   );
@@ -95,10 +97,9 @@ export async function resolveManifestLoadPlan(opts: {
  * Returns a map keyed by pluginIdHint (or manifest.id when no hint). Failed
  * reads are skipped with a warning.
  *
- * Previously named "readEnabledManifestSnapshots" and gated on plan.enabled —
- * dropped in #1176 so inactive plugins (enabled=false) are still loaded into
- * memory; their tools are hidden via the inactivePluginIds gate in
- * PluginRuntime, not by skipping the load.
+ * Inactive manifests are parsed into metadata so settings can offer re-enable,
+ * but PluginRuntime does not instantiate or publish them until receipt and
+ * package bytes have been reverified.
  */
 export async function readEnabledManifestSnapshots(
   loadPlan: ManifestLoadPlan[],

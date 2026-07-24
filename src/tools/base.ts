@@ -23,6 +23,12 @@ import type {
   ToolExecutionContext,
   ToolResult,
 } from "./types.js";
+import type { PluginToolOperationPolicy } from "./plugin-operation-governance.js";
+
+interface PluginToolGenerationOwner {
+  readonly pluginId: string;
+  readonly generationId: string;
+}
 
 // Re-export governance types so downstream modules can grab the full
 // tool surface from a single import path (tools/base.js).
@@ -62,6 +68,8 @@ export interface Tool {
    */
   readonly parallelSafe?: boolean;
   readonly pluginId?: string;
+  /** Exact immutable plugin generation that produced this registry entry. */
+  readonly pluginGeneration?: PluginToolGenerationOwner;
   /**
    * Host-owned plugin worker identity for plugin tools whose side effects are
    * actually routed through a long-lived worker. Paired with `pluginId` so the
@@ -71,6 +79,8 @@ export interface Tool {
    */
   readonly workerId?: string;
   readonly mcpServerId?: string;
+  /** Host-only policy sidecar. It is never serialized onto MCP or passed to plugin input. */
+  readonly operationPolicy?: PluginToolOperationPolicy;
   /**
    * MCP Apps — may this tool's OWN app call it (`_meta.ui.visibility` ∋ `"app"`)?
    *
@@ -221,8 +231,10 @@ export interface DynamicToolSpec {
   decisionOverride?: ToolDecisionOverride;
   parallelSafe?: boolean;
   pluginId?: string;
+  pluginGeneration?: PluginToolGenerationOwner;
   workerId?: string;
   mcpServerId?: string;
+  operationPolicy?: PluginToolOperationPolicy;
   /** MCP Apps app→server `tools/call` gate — see {@link Tool.appInvokable}. */
   appInvokable?: boolean;
   /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
@@ -258,8 +270,10 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     decisionOverride: spec.decisionOverride,
     parallelSafe: spec.parallelSafe,
     pluginId: spec.pluginId,
+    pluginGeneration: spec.pluginGeneration,
     workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,
+    operationPolicy: spec.operationPolicy,
     appInvokable: spec.appInvokable,
     modelVisible: spec.modelVisible,
     pathFields: spec.pathFields,

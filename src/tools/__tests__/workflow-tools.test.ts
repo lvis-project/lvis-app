@@ -1522,4 +1522,23 @@ describe("skill_load tool", () => {
     const parsed = JSON.parse(r.output);
     expect(parsed.error).toContain("invalid skillName");
   });
+
+  it("fails closed for plugin Skills when exact generation access is not wired", async () => {
+    const store = new SkillStore({});
+    const load = vi.spyOn(store, "load");
+    const tool = createSkillLoadTool({
+      store,
+      overlay: new SkillOverlay(),
+      approvals: stubApprovals,
+      getApprovalGate: () => undefined,
+      emit: () => undefined,
+    });
+    const result = await tool.execute(
+      { skillName: "plugin:ep-api:attendance" },
+      ctx("sess-plugin"),
+    );
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output).error).toContain("generation access unavailable");
+    expect(load).not.toHaveBeenCalled();
+  });
 });

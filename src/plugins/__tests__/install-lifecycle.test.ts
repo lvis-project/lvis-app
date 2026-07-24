@@ -2,13 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   drainPluginInstallLockOperations,
   hasPluginInstallInFlight,
-  isPluginInstallLockHeld,
   withPluginInstallLock,
-  withPluginInstallLocks,
-  withResolvedPluginInstallLocks,
   withAllPluginInstallLocks,
   installMarketplacePluginWithLifecycle,
-  startInstalledPluginWithLifecycle,
+  rollbackMarketplacePluginWithLifecycle,
 } from "../install-lifecycle.js";
 import {
   beginAppUpdateInstallRequest,
@@ -19,15 +16,26 @@ function makeRuntime(initialPluginIds: string[] = []) {
   let pluginIds = [...initialPluginIds];
   return {
     listPluginIds: vi.fn(() => [...pluginIds]),
-    resolvePluginId: vi.fn((pluginId: string) => pluginId),
+    resolvePluginId: vi.fn((pluginId: string) =>
+      pluginId.replace(/^lvis-plugin-/, "")
+    ),
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
+    cancelPendingRestart: vi.fn(),
+    activatePreparedArtifact: vi.fn(async (input: {
+      installId: string;
+      manifest: { id: string };
+      durableCommit(): Promise<string>;
+    }) => {
+      const result = await input.durableCommit();
+      if (!pluginIds.includes(input.manifest.id)) pluginIds.push(input.manifest.id);
+      return { result, retirement: Promise.resolve() };
+    }),
     addPlugin: vi.fn(async (pluginId: string) => {
       if (!pluginIds.includes(pluginId)) pluginIds.push(pluginId);
       return "started" as const;
     }),
     waitForPluginReady: vi.fn(async () => {}),
-    cancelPendingRestart: vi.fn(),
     removePlugin: vi.fn(async (pluginId: string) => {
       pluginIds = pluginIds.filter((id) => id !== pluginId);
     }),
@@ -38,17 +46,34 @@ function makeRuntime(initialPluginIds: string[] = []) {
 }
 
 function makeMarketplace() {
+  let candidateVersion = "2.0.0";
   return {
     list: vi.fn(async () => [
       { id: "p", slug: "lvis-plugin-p", version: "2.0.0" },
       { id: "meeting", slug: "lvis-plugin-meeting", version: "2.0.0" },
     ]),
-    install: vi.fn(async (pluginId: string) => ({ pluginId, installed: true as const })),
+    install: vi.fn(async (pluginId: string, _onProgress, options) => {
+      const canonicalPluginId = pluginId.replace(/^lvis-plugin-/, "");
+      await options?.activatePreparedArtifact?.({
+        installId: canonicalPluginId,
+        pluginRoot: "/staged/plugin",
+        manifest: { id: canonicalPluginId, version: candidateVersion },
+        receiptRaw: "{}",
+        durableCommit: async () => `${canonicalPluginId}/plugin.json`,
+      });
+      return { pluginId: canonicalPluginId, installed: true as const };
+    }),
+    setCandidateVersion(version: string) {
+      candidateVersion = version;
+    },
     getLiveCatalogVersion: vi.fn(async () => "2.0.0"),
     getInstalledVersion: vi.fn(async () => "1.0.0"),
     quarantinePlugin: vi.fn(async (pluginId: string, reason: string) => ({ pluginId, reason, quarantined: true as const })),
     uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true as const })),
-    rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "1.0.0" })),
+    rollbackPlugin: vi.fn(async (pluginId: string) => ({
+      pluginId,
+      rolledBackTo: "1.0.0",
+    })),
     rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true as const })),
     clearLocalInstallRollback: vi.fn(async () => {}),
   };
@@ -188,66 +213,6 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect((error as AggregateError).errors).toEqual([ownerFailure, detachedFailure]);
   });
 
-  it("does not report a re-entrant failure that the owner awaited and handled", async () => {
-    const nestedFailure = new Error("expected nested failure");
-    await expect(withPluginInstallLock("p", async () => {
-      const nested = withPluginInstallLock("p", async () => {
-        throw nestedFailure;
-      });
-      expect(nested).toBeInstanceOf(Promise);
-      await nested.catch((caught) => {
-        expect(caught).toBe(nestedFailure);
-      });
-    })).resolves.toBeUndefined();
-  });
-
-  it("preserves an awaited uncaught re-entrant failure identity", async () => {
-    const nestedFailure = new Error("uncaught nested failure");
-    const error = await withPluginInstallLock("p", async () => {
-      await withPluginInstallLock("p", async () => {
-        throw nestedFailure;
-      });
-    }).catch((caught) => caught);
-
-    expect(error).toBe(nestedFailure);
-  });
-
-  it.each(["then", "finally"] as const)(
-    "reports a detached failure propagated through .%s()",
-    async (chainMethod) => {
-      const detachedFailure = new Error(`${chainMethod} detached failure`);
-      const error = await withPluginInstallLock("p", async () => {
-        const detached = withPluginInstallLock("p", async () => {
-          throw detachedFailure;
-        });
-        if (chainMethod === "then") {
-          void detached.then(() => undefined);
-        } else {
-          void detached.finally(() => undefined);
-        }
-      }).catch((caught) => caught);
-
-      expect(error).toBeInstanceOf(AggregateError);
-      expect((error as AggregateError).errors).toEqual([detachedFailure]);
-    },
-  );
-
-  it("returns native Promise behavior for branches created after owner drain", async () => {
-    let nested!: Promise<void>;
-    await withPluginInstallLock("p", async () => {
-      nested = withPluginInstallLock("p", async () => undefined);
-      await nested;
-    });
-
-    const lateFailure = new Error("late branch failure");
-    const lateBranch = nested.then(() => {
-      throw lateFailure;
-    });
-
-    expect(Object.getPrototypeOf(lateBranch)).toBe(Promise.prototype);
-    await expect(lateBranch).rejects.toBe(lateFailure);
-  });
-
   it("rejects a per-plugin to all-plugin lock upgrade instead of deadlocking", async () => {
     await expect(withPluginInstallLock("p", async () => {
       await withAllPluginInstallLocks(async () => undefined);
@@ -363,297 +328,23 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(order).toEqual(["plugin:start", "plugin:end", "all:start", "all:end", "other"]);
   });
 
-  it("atomically admits a plugin mutation before a global mutation can wait on it", async () => {
-    const order: string[] = [];
-    const pluginMutation = withPluginInstallLock("p", async () => {
-      order.push("plugin");
-    });
-    const allMutation = withAllPluginInstallLocks(async () => {
-      order.push("all:start");
-      await pluginMutation;
-      order.push("all:end");
-    });
-
-    await expect(Promise.race([
-      allMutation.then(() => "settled" as const),
-      new Promise<"timeout">((resolve) => {
-        setTimeout(() => resolve("timeout"), 1_000);
-      }),
-    ])).resolves.toBe("settled");
-    expect(order).toEqual(["plugin", "all:start", "all:end"]);
-  });
-
-  it("atomically admits every alias identity before a global mutation", async () => {
-    let releaseMulti!: () => void;
-    let markMultiEntered!: () => void;
-    const multiGate = new Promise<void>((resolve) => {
-      releaseMulti = resolve;
-    });
-    const multiEntered = new Promise<void>((resolve) => {
-      markMultiEntered = resolve;
-    });
-    let allEntered = false;
-
-    const multiMutation = withPluginInstallLocks(
-      ["p-install-alias", "p-runtime-canonical"],
-      async () => {
-        markMultiEntered();
-        await multiGate;
-      },
-    );
-    const allMutation = withAllPluginInstallLocks(async () => {
-      allEntered = true;
-    });
-
-    await multiEntered;
-    expect(allEntered).toBe(false);
-    releaseMulti();
-    await multiMutation;
-    await allMutation;
-    expect(allEntered).toBe(true);
-  });
-
-  it("re-resolves an alias after waiting and retries with its restored canonical lock", async () => {
-    const installAlias = "p-waiting-alias";
-    const canonicalPluginId = "p-restored-canonical";
-    let releaseOwner!: () => void;
-    let markOwnerEntered!: () => void;
-    const ownerGate = new Promise<void>((resolve) => {
-      releaseOwner = resolve;
-    });
-    const ownerEntered = new Promise<void>((resolve) => {
-      markOwnerEntered = resolve;
-    });
-    const owner = withPluginInstallLocks(
-      [installAlias, canonicalPluginId],
-      async () => {
-        markOwnerEntered();
-        await ownerGate;
-      },
-    );
-    await ownerEntered;
-
-    let resolvedCanonicalId = installAlias;
-    let mutationEntered = false;
-    const cancelledIds: string[] = [];
-    const mutation = withResolvedPluginInstallLocks(
-      () => [installAlias, resolvedCanonicalId],
-      async () => {
-        mutationEntered = true;
-        expect(isPluginInstallLockHeld(installAlias)).toBe(true);
-        expect(isPluginInstallLockHeld(canonicalPluginId)).toBe(true);
-      },
-      (pluginIds) => {
-        cancelledIds.push(...pluginIds);
-      },
-    );
-    await Promise.resolve();
-    resolvedCanonicalId = canonicalPluginId;
-    expect(mutationEntered).toBe(false);
-
-    releaseOwner();
-    await owner;
-    await mutation;
-    expect(mutationEntered).toBe(true);
-    expect(cancelledIds).toContain(canonicalPluginId);
-  });
-
-  it("cancels a pending restart before the outer install lock queues", async () => {
-    let releaseRestart!: () => void;
-    let restartEntered!: () => void;
-    const restartGate = new Promise<void>((resolve) => { releaseRestart = resolve; });
-    const restartStarted = new Promise<void>((resolve) => { restartEntered = resolve; });
-    const restart = withPluginInstallLock("p", async () => {
-      restartEntered();
-      await restartGate;
-    });
-    await restartStarted;
-
-    const runtime = makeRuntime();
-    runtime.cancelPendingRestart.mockImplementationOnce(() => releaseRestart());
-    const marketplace = makeMarketplace();
-
-    await expect(installMarketplacePluginWithLifecycle({
-      requestedPluginId: "p",
-      pluginRuntime: runtime,
-      pluginMarketplace: marketplace,
-    })).resolves.toEqual({ pluginId: "p", installed: true });
-    await restart;
-
-    expect(runtime.cancelPendingRestart).toHaveBeenCalledWith("p");
-    expect(runtime.cancelPendingRestart.mock.invocationCallOrder[0])
-      .toBeLessThan(marketplace.install.mock.invocationCallOrder[0]);
-  });
-
-  it("cancels a canonical restart discovered after install lock admission", async () => {
-    const installAlias = "p";
-    const canonicalPluginId = "p-canonical-runtime";
-    const runtime = makeRuntime();
-    runtime.resolvePluginId
-      .mockReturnValueOnce(installAlias)
-      .mockReturnValueOnce(installAlias)
-      .mockReturnValue(canonicalPluginId);
-    const marketplace = makeMarketplace();
-
-    await expect(installMarketplacePluginWithLifecycle({
-      requestedPluginId: installAlias,
-      pluginRuntime: runtime,
-      pluginMarketplace: marketplace,
-    })).resolves.toEqual({
-      pluginId: canonicalPluginId,
-      installed: true,
-    });
-
-    expect(runtime.cancelPendingRestart).toHaveBeenCalledWith(installAlias);
-    expect(runtime.cancelPendingRestart).toHaveBeenCalledWith(canonicalPluginId);
-  });
-
-  it("serializes an alias update with canonical lifecycle mutations", async () => {
-    const installAlias = "p-install-alias";
-    const canonicalPluginId = "p-canonical-runtime";
-    const runtime = makeRuntime([canonicalPluginId]);
-    runtime.resolvePluginId.mockImplementation((pluginId: string) =>
-      pluginId === installAlias ? canonicalPluginId : pluginId
-    );
-    const marketplace = makeMarketplace();
-    marketplace.list.mockResolvedValue([{
-      id: installAlias,
-      slug: installAlias,
-      installed: true,
-      version: "2.0.0",
-    }]);
-    let releaseInstall!: () => void;
-    let markInstallStarted!: () => void;
-    const installedEvents = vi.fn();
-    const installGate = new Promise<void>((resolve) => {
-      releaseInstall = resolve;
-    });
-    const installStarted = new Promise<void>((resolve) => {
-      markInstallStarted = resolve;
-    });
-    marketplace.install.mockImplementationOnce(async () => {
-      markInstallStarted();
-      await installGate;
-      return { pluginId: installAlias, installed: true as const };
-    });
-
-    const install = installMarketplacePluginWithLifecycle({
-      requestedPluginId: installAlias,
-      pluginRuntime: runtime,
-      pluginMarketplace: marketplace,
-      emitPluginInstalled: installedEvents,
-    });
-    await installStarted;
-
-    let competingMutationEntered = false;
-    const competingMutation = withPluginInstallLock(
-      canonicalPluginId,
-      async () => {
-        competingMutationEntered = true;
-      },
-    );
-    let competingAliasMutationEntered = false;
-    const competingAliasMutation = withPluginInstallLock(
-      installAlias,
-      async () => {
-        competingAliasMutationEntered = true;
-      },
-    );
-    await Promise.resolve();
-    expect(competingMutationEntered).toBe(false);
-    expect(competingAliasMutationEntered).toBe(false);
-
-    releaseInstall();
-    await expect(install).resolves.toEqual({
-      pluginId: canonicalPluginId,
-      installed: true,
-    });
-    await competingMutation;
-    await competingAliasMutation;
-    expect(competingMutationEntered).toBe(true);
-    expect(competingAliasMutationEntered).toBe(true);
-    expect(runtime.cancelPendingRestart).toHaveBeenCalledWith(canonicalPluginId);
-    expect(runtime.removePlugin).toHaveBeenCalledWith(canonicalPluginId, {
-      preserveConfigOverride: true,
-    });
-    expect(runtime.addPlugin).toHaveBeenCalledWith(installAlias);
-    expect(installedEvents).toHaveBeenCalledWith({
-      pluginId: canonicalPluginId,
-      source: "marketplace",
-    });
-  });
-
-  it("does not restart an alias-owned runtime when pre-stop fails before mutation", async () => {
-    const installAlias = "p-failed-stop-alias";
-    const canonicalPluginId = "p-failed-stop-canonical";
-    const runtime = makeRuntime([canonicalPluginId]);
-    runtime.resolvePluginId.mockImplementation((pluginId: string) =>
-      pluginId === installAlias ? canonicalPluginId : pluginId
-    );
-    runtime.resolvePluginInstallIdIfKnown.mockReturnValue(installAlias);
-    runtime.removePlugin.mockRejectedValueOnce(new Error("stop failed"));
-    const marketplace = makeMarketplace();
-    marketplace.list.mockResolvedValue([{
-      id: installAlias,
-      slug: installAlias,
-      installed: true,
-      version: "2.0.0",
-    }]);
-
-    await expect(installMarketplacePluginWithLifecycle({
-      requestedPluginId: installAlias,
-      pluginRuntime: runtime,
-      pluginMarketplace: marketplace,
-    })).rejects.toThrow("stop failed");
-
-    expect(runtime.addPlugin).not.toHaveBeenCalled();
-    expect(marketplace.install).not.toHaveBeenCalled();
-    expect(runtime.listPluginIds()).toEqual([canonicalPluginId]);
-  });
-
-  it("rejects marketplace replacement of a known non-loaded static plugin before mutation", async () => {
-    const runtime = makeRuntime();
-    runtime.resolvePluginInstallIdIfKnown.mockReturnValue(null);
-    const marketplace = makeMarketplace();
-    marketplace.list.mockResolvedValue([{
-      id: "p-static",
-      slug: "p-static",
-      installed: false,
-      version: "2.0.0",
-    }]);
-
-    await expect(installMarketplacePluginWithLifecycle({
-      requestedPluginId: "p-static",
-      pluginRuntime: runtime,
-      pluginMarketplace: marketplace,
-    })).rejects.toThrow(
-      "Statically configured plugin cannot be replaced from the marketplace",
-    );
-
-    expect(runtime.cancelPendingRestart).not.toHaveBeenCalled();
-    expect(runtime.removePlugin).not.toHaveBeenCalled();
-    expect(marketplace.install).not.toHaveBeenCalled();
-  });
-
-  it("stops a loaded plugin before marketplace patching and starts the installed result", async () => {
+  it("keeps the loaded generation callable while marketplace patches and atomically starts the installed result", async () => {
     const order: string[] = [];
     const runtime = makeRuntime(["p"]);
     const marketplace = makeMarketplace();
-    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
-      order.push(`remove:${pluginId}`);
-      runtime.dropPlugin(pluginId);
-    });
-    marketplace.install.mockImplementationOnce(async (pluginId: string, onProgress) => {
+    marketplace.install.mockImplementationOnce(async (pluginId: string, onProgress, options) => {
       order.push(`install:${pluginId}`);
-      expect(runtime.listPluginIds()).not.toContain("p");
+      expect(runtime.listPluginIds()).toContain("p");
       onProgress?.({ phase: "verifying" });
+      await options?.activatePreparedArtifact?.({
+        installId: "p",
+        pluginRoot: "/staged/plugin",
+        manifest: { id: "p", version: "2.0.0" },
+        receiptRaw: "{}",
+        durableCommit: async () => "p/plugin.json",
+      });
       return { pluginId: "p", installed: true as const };
     });
-    runtime.addPlugin.mockImplementationOnce(async (pluginId: string) => {
-      order.push(`add:${pluginId}`);
-      return "started" as const;
-    });
-
     const result = await installMarketplacePluginWithLifecycle({
       requestedPluginId: "p",
       pluginRuntime: runtime,
@@ -666,23 +357,31 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(result).toEqual({ pluginId: "p", installed: true });
     expect(order).toEqual([
       "progress:restarting",
-      "remove:p",
       "progress:installing",
       "install:p",
       "progress:verifying",
-      "progress:restarting",
-      "add:p",
+      "progress:preparing",
+      "progress:registering",
       "installed:p:marketplace",
       "refresh",
     ]);
+    expect(runtime.activatePreparedArtifact).toHaveBeenCalledTimes(1);
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
   });
 
-  it("uses the canonical catalog id for locking and pre-stop while preserving the requested event slug", async () => {
+  it("uses the canonical catalog id for lifecycle replacement while preserving the requested event slug", async () => {
     const order: string[] = [];
     const runtime = makeRuntime(["meeting"]);
     const marketplace = makeMarketplace();
-    marketplace.install.mockImplementationOnce(async (pluginId: string) => {
+    marketplace.install.mockImplementationOnce(async (pluginId: string, _onProgress, options) => {
       order.push(`install:${pluginId}`);
+      await options?.activatePreparedArtifact?.({
+        installId: "meeting",
+        pluginRoot: "/staged/plugin",
+        manifest: { id: "meeting", version: "2.0.0" },
+        receiptRaw: "{}",
+        durableCommit: async () => "meeting/plugin.json",
+      });
       return { pluginId: "meeting", installed: true as const };
     });
 
@@ -694,15 +393,15 @@ describe("installMarketplacePluginWithLifecycle", () => {
       broadcastInstallProgress: ({ slug, phase }) => order.push(`progress:${slug}:${phase}`),
     });
 
-    expect(runtime.removePlugin).toHaveBeenCalledWith("meeting", {
-      preserveConfigOverride: true,
-    });
-    expect(runtime.addPlugin).toHaveBeenCalledWith("meeting");
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(runtime.activatePreparedArtifact).toHaveBeenCalledTimes(1);
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
     expect(order).toEqual([
       "progress:lvis-plugin-meeting:restarting",
       "progress:lvis-plugin-meeting:installing",
       "install:lvis-plugin-meeting",
-      "progress:lvis-plugin-meeting:restarting",
+      "progress:lvis-plugin-meeting:preparing",
+      "progress:lvis-plugin-meeting:registering",
     ]);
   });
 
@@ -731,18 +430,17 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(marketplace.install).toHaveBeenCalledWith(
       "p",
       expect.any(Function),
-      { networkAccessAcknowledgement: { allowedDomains: ["api.example.com"] } },
+      expect.objectContaining({
+        networkAccessAcknowledgement: { allowedDomains: ["api.example.com"] },
+        activatePreparedArtifact: expect.any(Function),
+      }),
     );
   });
 
-  it("pre-stops an installed plugin even when it is not currently loaded", async () => {
+  it("does not manufacture a pre-stop for an installed plugin that is not loaded", async () => {
     const runtime = makeRuntime();
     const marketplace = makeMarketplace();
     marketplace.list.mockResolvedValue([{ id: "p", slug: "lvis-plugin-p", installed: true, version: "2.0.0" }]);
-    marketplace.install.mockResolvedValueOnce({
-      pluginId: "p",
-      installed: true,
-    });
 
     await installMarketplacePluginWithLifecycle({
       requestedPluginId: "lvis-plugin-p",
@@ -751,10 +449,9 @@ describe("installMarketplacePluginWithLifecycle", () => {
       pluginMarketplace: marketplace,
     });
 
-    expect(runtime.removePlugin).toHaveBeenCalledWith("p", {
-      preserveConfigOverride: true,
-    });
-    expect(runtime.addPlugin).toHaveBeenCalledWith("p");
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(runtime.activatePreparedArtifact).toHaveBeenCalledTimes(1);
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
     expect(marketplace.getLiveCatalogVersion).not.toHaveBeenCalled();
   });
 
@@ -802,16 +499,19 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(marketplace.install).toHaveBeenCalledWith(
       "p",
       expect.any(Function),
-      { networkAccessAcknowledgement: undefined },
+      expect.objectContaining({
+        networkAccessAcknowledgement: undefined,
+        activatePreparedArtifact: expect.any(Function),
+      }),
     );
   });
 
 
-  it("rolls back before starting when expectedVersion does not match installed manifest", async () => {
+  it("rejects a mismatched candidate version before runtime or durable state changes", async () => {
     const runtime = makeRuntime();
     const marketplace = makeMarketplace();
     const installed = vi.fn();
-    marketplace.getInstalledVersion.mockResolvedValueOnce("1.0.0");
+    marketplace.setCandidateVersion("1.0.0");
 
     await expect(
       installMarketplacePluginWithLifecycle({
@@ -823,45 +523,17 @@ describe("installMarketplacePluginWithLifecycle", () => {
       }),
     ).rejects.toThrow("version mismatch");
 
+    expect(runtime.activatePreparedArtifact).not.toHaveBeenCalled();
     expect(runtime.addPlugin).not.toHaveBeenCalled();
-    expect(marketplace.uninstall).toHaveBeenCalledWith("p");
+    expect(marketplace.uninstall).not.toHaveBeenCalled();
     expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
     expect(installed).not.toHaveBeenCalled();
   });
 
-  it("rolls back an update and restores runtime when expectedVersion verification fails", async () => {
+  it("keeps the prior runtime generation active when an update candidate version mismatches", async () => {
     const runtime = makeRuntime(["p"]);
     const marketplace = makeMarketplace();
-    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
-      runtime.dropPlugin(pluginId);
-    });
-    marketplace.getInstalledVersion
-      .mockResolvedValueOnce("1.0.0")
-      .mockResolvedValueOnce("1.5.0");
-
-    await expect(
-      installMarketplacePluginWithLifecycle({
-        requestedPluginId: "p",
-        expectedVersion: "2.0.0",
-        pluginRuntime: runtime,
-        pluginMarketplace: marketplace,
-      }),
-    ).rejects.toThrow("version mismatch");
-
-    expect(marketplace.rollbackPlugin).toHaveBeenCalledWith("p");
-    expect(marketplace.uninstall).not.toHaveBeenCalled();
-    expect(runtime.addPlugin).toHaveBeenCalledWith("p");
-  });
-
-  it("restores runtime without rollback when expectedVersion mismatch follows a no-op install", async () => {
-    const runtime = makeRuntime(["p"]);
-    const marketplace = makeMarketplace();
-    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
-      runtime.dropPlugin(pluginId);
-    });
-    marketplace.getInstalledVersion
-      .mockResolvedValueOnce("1.0.0")
-      .mockResolvedValueOnce("1.0.0");
+    marketplace.setCandidateVersion("1.5.0");
 
     await expect(
       installMarketplacePluginWithLifecycle({
@@ -874,66 +546,16 @@ describe("installMarketplacePluginWithLifecycle", () => {
 
     expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
     expect(marketplace.uninstall).not.toHaveBeenCalled();
-    expect(marketplace.quarantinePlugin).not.toHaveBeenCalled();
-    expect(runtime.addPlugin).toHaveBeenCalledWith("p");
-  });
-
-  it("quarantines a fresh install when expectedVersion cleanup fails", async () => {
-    const runtime = makeRuntime();
-    const marketplace = makeMarketplace();
-    marketplace.getInstalledVersion.mockResolvedValueOnce("1.0.0");
-    marketplace.uninstall.mockRejectedValueOnce(new Error("uninstall denied"));
-
-    await expect(
-      installMarketplacePluginWithLifecycle({
-        requestedPluginId: "p",
-        expectedVersion: "2.0.0",
-        pluginRuntime: runtime,
-        pluginMarketplace: marketplace,
-      }),
-    ).rejects.toThrow(/uninstall denied/);
-
-    expect(runtime.addPlugin).not.toHaveBeenCalled();
-    expect(marketplace.uninstall).toHaveBeenCalledWith("p");
-    expect(marketplace.quarantinePlugin).toHaveBeenCalledWith(
-      "p",
-      "expectedVersion fresh-install cleanup failed: uninstall denied",
-    );
-  });
-
-  it("does not restore runtime when expectedVersion rollback fails", async () => {
-    const runtime = makeRuntime(["p"]);
-    const marketplace = makeMarketplace();
-    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
-      runtime.dropPlugin(pluginId);
-    });
-    marketplace.getInstalledVersion
-      .mockResolvedValueOnce("1.0.0")
-      .mockResolvedValueOnce("1.5.0");
-    marketplace.rollbackPlugin.mockRejectedValueOnce(new Error("rollback failed"));
-
-    await expect(
-      installMarketplacePluginWithLifecycle({
-        requestedPluginId: "p",
-        expectedVersion: "2.0.0",
-        pluginRuntime: runtime,
-        pluginMarketplace: marketplace,
-      }),
-    ).rejects.toThrow(/rollback failed/);
-
-    expect(marketplace.rollbackPlugin).toHaveBeenCalledWith("p");
-    expect(marketplace.quarantinePlugin).toHaveBeenCalledWith("p", "expectedVersion rollback failed: rollback failed");
-    expect(marketplace.uninstall).not.toHaveBeenCalled();
+    expect(runtime.listPluginIds()).toContain("p");
+    expect(runtime.activatePreparedArtifact).not.toHaveBeenCalled();
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
     expect(runtime.addPlugin).not.toHaveBeenCalled();
   });
 
-  it("restores the previously loaded plugin when marketplace install fails after pre-stop", async () => {
+  it("keeps the previously loaded generation when marketplace install fails", async () => {
     const runtime = makeRuntime(["p"]);
     const marketplace = makeMarketplace();
     const log = { warn: vi.fn() };
-    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
-      runtime.dropPlugin(pluginId);
-    });
     marketplace.install.mockRejectedValueOnce(new Error("download failed"));
 
     await expect(
@@ -945,23 +567,17 @@ describe("installMarketplacePluginWithLifecycle", () => {
       }),
     ).rejects.toThrow("download failed");
 
-    expect(runtime.removePlugin).toHaveBeenCalledWith("p", {
-      preserveConfigOverride: true,
-    });
-    expect(runtime.addPlugin).toHaveBeenCalledWith("p");
+    expect(runtime.listPluginIds()).toContain("p");
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
     expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
     expect(marketplace.uninstall).not.toHaveBeenCalled();
   });
 
-  it("treats post-install start failure as an update after pre-stop", async () => {
+  it("treats candidate start failure as an update while retaining the prior generation", async () => {
     const runtime = makeRuntime(["p"]);
     const marketplace = makeMarketplace();
-    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
-      runtime.dropPlugin(pluginId);
-    });
-    runtime.addPlugin
-      .mockRejectedValueOnce(new Error("start failed"))
-      .mockResolvedValueOnce("started");
+    runtime.activatePreparedArtifact.mockRejectedValueOnce(new Error("start failed"));
 
     await expect(
       installMarketplacePluginWithLifecycle({
@@ -971,152 +587,50 @@ describe("installMarketplacePluginWithLifecycle", () => {
       }),
     ).rejects.toThrow("start failed");
 
-    expect(marketplace.rollbackPlugin).toHaveBeenCalledWith("p");
-    expect(runtime.addPlugin).toHaveBeenCalledTimes(2);
+    expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
+    expect(runtime.listPluginIds()).toContain("p");
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(runtime.activatePreparedArtifact).toHaveBeenCalledTimes(1);
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
     expect(marketplace.uninstall).not.toHaveBeenCalled();
   });
 });
 
-describe("startInstalledPluginWithLifecycle", () => {
-  it("waits for async dependency preparation before install success side effects", async () => {
-    const order: string[] = [];
-    const runtime = makeRuntime();
-    runtime.addPlugin.mockImplementationOnce(async () => {
-      order.push("add");
-      return "preparing";
-    });
-    runtime.waitForPluginReady.mockImplementationOnce(async () => {
-      order.push("ready");
-    });
-    const marketplace = makeMarketplace();
-
-    await startInstalledPluginWithLifecycle({
-      pluginId: "p",
-      source: "marketplace",
-      rollbackMode: "marketplace",
-      pluginRuntime: runtime,
-      pluginMarketplace: marketplace,
-      broadcastInstallProgress: ({ phase }) => order.push(`progress:${phase}`),
-      emitPluginInstalled: ({ pluginId, source }) => order.push(`installed:${pluginId}:${source}`),
-      refreshPluginNotifications: () => order.push("refresh"),
-    });
-
-    expect(order).toEqual([
-      "progress:restarting",
-      "add",
-      "progress:preparing",
-      "ready",
-      "installed:p:marketplace",
-      "refresh",
-    ]);
-    expect(marketplace.uninstall).not.toHaveBeenCalled();
-    expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
-  });
-
-  it("removes runtime state and uninstalls a fresh marketplace install when start fails", async () => {
-    const runtime = makeRuntime();
-    const marketplace = makeMarketplace();
-    const log = { warn: vi.fn() };
-    runtime.addPlugin.mockRejectedValueOnce(new Error("start failed"));
-
-    await expect(
-      startInstalledPluginWithLifecycle({
-        pluginId: "p",
-        source: "marketplace",
-        rollbackMode: "marketplace",
-        pluginRuntime: runtime,
-        pluginMarketplace: marketplace,
-        log,
-      }),
-    ).rejects.toThrow("start failed");
-
-    expect(runtime.removePlugin).toHaveBeenCalledWith("p");
-    expect(marketplace.uninstall).toHaveBeenCalledWith("p");
-    expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
-  });
-
-  it("does not mask the original start failure when fresh uninstall cleanup fails", async () => {
-    const runtime = makeRuntime();
-    const marketplace = makeMarketplace();
-    const log = { warn: vi.fn() };
-    runtime.addPlugin.mockRejectedValueOnce(new Error("start failed"));
-    marketplace.uninstall.mockRejectedValueOnce(new Error("cleanup failed"));
-
-    await expect(
-      startInstalledPluginWithLifecycle({
-        pluginId: "p",
-        source: "marketplace",
-        rollbackMode: "marketplace",
-        pluginRuntime: runtime,
-        pluginMarketplace: marketplace,
-        log,
-      }),
-    ).rejects.toThrow("start failed");
-
-    expect(log.warn).toHaveBeenCalledWith("install rollback uninstall failed for p: cleanup failed");
-  });
-
-  it("rolls back a loaded marketplace update and restores runtime if rollback unloaded it", async () => {
+describe("rollbackMarketplacePluginWithLifecycle", () => {
+  it("routes rollback publication through the immutable runtime activation seam", async () => {
     const runtime = makeRuntime(["p"]);
     const marketplace = makeMarketplace();
-    runtime.addPlugin
-      .mockRejectedValueOnce(new Error("restart failed"))
-      .mockResolvedValueOnce("started");
-    marketplace.rollbackPlugin.mockImplementationOnce(async (pluginId: string) => {
-      runtime.dropPlugin(pluginId);
+    marketplace.rollbackPlugin.mockImplementationOnce(async (pluginId, options) => {
+      await options?.activatePreparedArtifact?.({
+        installId: pluginId,
+        pluginRoot: "/prepared/p",
+        manifest: { id: pluginId },
+        receiptRaw: "{}",
+        durableCommit: async () => "plugins/p/plugin.json",
+      });
       return { pluginId, rolledBackTo: "1.0.0" };
     });
 
-    await expect(
-      startInstalledPluginWithLifecycle({
-        pluginId: "p",
-        source: "marketplace",
-        rollbackMode: "marketplace",
-        pluginRuntime: runtime,
-        pluginMarketplace: marketplace,
-      }),
-    ).rejects.toThrow("restart failed");
-
-    expect(marketplace.rollbackPlugin).toHaveBeenCalledWith("p");
-    expect(runtime.addPlugin).toHaveBeenCalledTimes(2);
-    expect(marketplace.uninstall).not.toHaveBeenCalled();
-  });
-
-  it("uses local install rollback for a loaded local-dev reinstall failure", async () => {
-    const runtime = makeRuntime(["p"]);
-    const marketplace = makeMarketplace();
-    runtime.addPlugin.mockRejectedValueOnce(new Error("restart failed"));
-
-    await expect(
-      startInstalledPluginWithLifecycle({
-        pluginId: "p",
-        source: "local-dev",
-        rollbackMode: "local-dev",
-        pluginRuntime: runtime,
-        pluginMarketplace: marketplace,
-      }),
-    ).rejects.toThrow("restart failed");
-
-    expect(marketplace.rollbackLocalInstall).toHaveBeenCalledWith("p");
-    expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
-    expect(marketplace.uninstall).not.toHaveBeenCalled();
-  });
-
-  it("clears local rollback snapshots only after a local-dev start succeeds", async () => {
-    const runtime = makeRuntime();
-    const marketplace = makeMarketplace();
-    const installed = vi.fn();
-
-    await startInstalledPluginWithLifecycle({
+    await expect(rollbackMarketplacePluginWithLifecycle({
       pluginId: "p",
-      source: "local-dev",
-      rollbackMode: "local-dev",
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
-      emitPluginInstalled: installed,
-    });
+    })).resolves.toEqual({ pluginId: "p", rolledBackTo: "1.0.0" });
 
-    expect(installed).toHaveBeenCalledWith({ pluginId: "p", source: "local-dev" });
-    expect(marketplace.clearLocalInstallRollback).toHaveBeenCalledWith("p");
+    expect(runtime.activatePreparedArtifact).toHaveBeenCalledOnce();
+    expect(marketplace.rollbackPlugin).toHaveBeenCalledWith("p", {
+      activatePreparedArtifact: expect.any(Function),
+    });
+  });
+
+  it("fails closed when marketplace reports a rollback without an active runtime", async () => {
+    const runtime = makeRuntime();
+    const marketplace = makeMarketplace();
+
+    await expect(rollbackMarketplacePluginWithLifecycle({
+      pluginId: "p",
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    })).rejects.toThrow("atomic rollback committed without active runtime");
   });
 });

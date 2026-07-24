@@ -7,7 +7,10 @@ import { PluginMarketplaceService } from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import {
+  makeTestPluginPaths,
+  TestPluginMarketplaceService,
+} from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
 
@@ -86,7 +89,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
 
   function makeService(fetcher = new StubFetcher()) {
     const paths = makeTestPluginPaths({ rootDir: testDir, cacheRoot });
-    const svc = new PluginMarketplaceService(paths, fetcher);
+    const svc = new TestPluginMarketplaceService(paths, fetcher);
     // Stub installArtifact: write a versioned plugin.json under the live
     // install dir and return the registry-relative path. Mirrors the
     // post-extraction state of the real signed-zip pipeline.
@@ -95,14 +98,42 @@ describe("PluginMarketplaceService install → update → rollback", () => {
         plugin: PluginMarketplaceItem,
         version: string,
         onProgress?: unknown,
-        opts?: { commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void> },
-      ) => Promise<string>;
+        opts?: {
+          commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void>;
+          activatePreparedArtifact?: (prepared: {
+            installId: string;
+            pluginRoot: string;
+            manifest: ReturnType<typeof sampleManifest>;
+            receiptRaw: string;
+            registryEntry: { installSource?: "admin" | "user" | "local-dev"; manifestSha256?: string };
+            durableCommit(): Promise<string>;
+          }) => Promise<{ result: string; retirement: Promise<void> }>;
+        },
+      ) => Promise<{ manifestPath: string; predecessorRetired: boolean }>;
     }, "installArtifact").mockImplementation(async (_plugin, version, _onProgress, opts) => {
-      await mkdir(pluginDir, { recursive: true });
-      const manifestFile = join(pluginDir, "plugin.json");
-      await writeFile(manifestFile, JSON.stringify(sampleManifest(version)), "utf-8");
-      await opts?.commit?.("example-sample/plugin.json", manifestFile);
-      return "example-sample/plugin.json";
+      if (!opts?.activatePreparedArtifact) {
+        throw new Error("test install omitted mandatory generation activation");
+      }
+      const candidateDir = join(testDir, `candidate-${version}`);
+      const manifest = sampleManifest(version);
+      await mkdir(candidateDir, { recursive: true });
+      await writeFile(join(candidateDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
+      const coordinated = await opts.activatePreparedArtifact({
+        installId: _plugin.id,
+        pluginRoot: candidateDir,
+        manifest,
+        receiptRaw: "{}",
+        registryEntry: { installSource: "user" },
+        durableCommit: async () => {
+          await mkdir(pluginDir, { recursive: true });
+          const manifestFile = join(pluginDir, "plugin.json");
+          await writeFile(manifestFile, JSON.stringify(manifest), "utf-8");
+          await opts.commit?.("example-sample/plugin.json", manifestFile);
+          return "example-sample/plugin.json";
+        },
+      });
+      await coordinated.retirement;
+      return { manifestPath: coordinated.result, predecessorRetired: true };
     });
     return svc;
   }

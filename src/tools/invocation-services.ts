@@ -14,6 +14,17 @@ import type { AuditWriter } from "./pipeline/audit-writer.js";
 import type { RateLimiter } from "./pipeline/rate-limiter.js";
 import { resolveEnforcedCategory as resolveEnforcedCategoryImpl } from "./pipeline/risk-classification.js";
 import { tryUserApprovalMemorySkip as tryUserApprovalMemorySkipImpl } from "./pipeline/approval-memory-skip.js";
+import {
+  PluginOperationGrantCoordinator,
+} from "../permissions/plugin-operation-grant.js";
+import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
+import type { GovernedRiskFloor } from "./plugin-operation-governance.js";
+import type { PluginOperationInvocationContext } from "./plugin-operation-governance.js";
+
+export type PluginOperationIdentityProvider = (
+  tool: Tool,
+  sessionId: string | undefined,
+) => PluginOperationInvocationContext | undefined;
 
 export interface InvocationRunnerServices {
   readonly toolRegistry: ToolRegistry;
@@ -30,6 +41,9 @@ export interface InvocationRunnerServices {
   readonly workspaceRootLifecycleProvider: () => PermissionDirectoryLifecycle | undefined;
   readonly auditWriter: AuditWriter;
   readonly tryUserApprovalMemorySkip: typeof tryUserApprovalMemorySkipImpl;
+  readonly pluginOperationGrants: PluginOperationGrantCoordinator;
+  readonly pluginGenerationAccessProvider: () => PluginRuntimeGenerationAccess | undefined;
+  readonly pluginOperationIdentityProvider: PluginOperationIdentityProvider;
 }
 
 export function currentApprovalMode(
@@ -48,6 +62,7 @@ export function resolveEnforcedCategory(
   finalInput: Record<string, unknown>,
   allowedDirectories: readonly string[],
   correlationId: string,
+  operationFloor?: GovernedRiskFloor,
 ): ToolCategory {
   return resolveEnforcedCategoryImpl({
     tool,
@@ -57,6 +72,7 @@ export function resolveEnforcedCategory(
     correlationId,
     hostClassifiesRisk: services.hostClassifiesRiskProvider(),
     auditLogger: services.auditLogger,
+    operationFloor,
   });
 }
 
@@ -73,8 +89,14 @@ export async function runScriptHook(
   pluginId?: string,
   toolOutput?: string,
   isError?: boolean,
+  generationOwned = false,
 ): Promise<HookDispatchResult> {
   if (!scriptHookManager) {
+    if (generationOwned) {
+      throw new Error(
+        `[plugin-hooks] script Hook manager is not wired for generation-owned tool '${toolName}'`,
+      );
+    }
     return { decision: "allow", reason: "script hooks not wired", results: [] };
   }
   const payload = {

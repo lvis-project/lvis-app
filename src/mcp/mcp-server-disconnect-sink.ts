@@ -4,7 +4,7 @@
  *
  *   - external servers  → `McpManager` (kill-switch / remove / disconnectAll),
  *   - first-party plugins running as in-process loopback MCP servers →
- *     `PluginLoopbackManager.stop()` (plugin disable / uninstall / re-sync).
+ *     `PluginLoopbackManager.retireGeneration()` (plugin disable / uninstall / re-sync).
  *
  * Before this was shared, only the external arm emitted: disabling a plugin tore
  * its loopback server down SILENTLY, leaving its live MCP-App cards rendered and

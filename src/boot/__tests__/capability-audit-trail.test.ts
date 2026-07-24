@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createNoopHostApiForTests, PluginRuntime } from "../../plugins/runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "../../plugins/__tests__/test-helpers.js";
 import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { registerManifestEventSubscriptions } from "../plugins.js";
@@ -131,8 +131,7 @@ describe("M4 — capability violation audit trail", () => {
 
   it("emitEvent without required capability writes an audit error", async () => {
     await writePlugin("p-no-mail", { emittedEvents: ["custom.ping"] });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
@@ -148,8 +147,7 @@ describe("M4 — capability violation audit trail", () => {
 
   it("legitimate emit with the right capability does NOT audit-log", async () => {
     await writePlugin("p-mail", { emittedEvents: ["email.new"] });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
@@ -162,8 +160,7 @@ describe("M4 — capability violation audit trail", () => {
 
   it("neutral namespace emit (no capability required) does NOT audit-log", async () => {
     await writePlugin("p-any", { emittedEvents: [] });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
@@ -178,8 +175,7 @@ describe("M4 — capability violation audit trail", () => {
     await writePlugin("p-priv", {
       eventSubscriptions: ["memory.private.leaked"],
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
@@ -201,8 +197,7 @@ describe("M4 — capability violation audit trail", () => {
 
   it("public subscription does NOT audit-log", async () => {
     await writePlugin("p-pub", { eventSubscriptions: ["email.new"] });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { entries, logger } = collectingAudit();

@@ -58,6 +58,7 @@ import {
 } from "../plugins/runtime/tool-visibility.js";
 import { createLogger } from "../lib/logger.js";
 import type { McpUiPayload } from "./types.js";
+import type { PluginToolOperationPolicy } from "../tools/plugin-operation-governance.js";
 
 const log = createLogger("plugin-tool-from-mcp");
 
@@ -144,6 +145,8 @@ export function mcpToolToPluginTool(
   pluginId: string,
   tool: DiscoveredMcpTool,
   invoke: PluginMcpInvoke,
+  operationPolicy?: PluginToolOperationPolicy,
+  generationId?: string,
 ): Tool {
   const meta = tool._meta ?? {};
   // #885 — the host does NOT trust a plugin's self-declared per-tool category.
@@ -159,6 +162,8 @@ export function mcpToolToPluginTool(
     source: "plugin",
     category,
     pluginId,
+    ...(generationId ? { pluginGeneration: { pluginId, generationId } } : {}),
+    operationPolicy,
     pathFields: readPathFields(meta),
     // MCP Apps `_meta.ui.visibility` ∌ "model" ⇒ app-only: the tool IS registered
     // (that is what puts its card's call under risk → reviewer/approval → audit) but
@@ -186,9 +191,8 @@ export function mcpToolToPluginTool(
       const args = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>;
       try {
         const { text, uiPayload, rawResult } = await invoke(tool.name, args);
-        // Preserve the legacy `metadata.rawResult` / `metadata.uiPayload` channel
-        // (executor.ts + boot.ts read rawResult). rawResult is present iff the
-        // call succeeded, matching buildPluginTool's success-only metadata.
+        // Preserve the host's structured `metadata.rawResult` /
+        // `metadata.uiPayload` channel. rawResult is present only on success.
         const metadata: Record<string, unknown> = {};
         if (uiPayload) metadata.uiPayload = uiPayload;
         if (rawResult) metadata.rawResult = rawResult.value;

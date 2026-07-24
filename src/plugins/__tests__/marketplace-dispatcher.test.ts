@@ -20,18 +20,24 @@ import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem, PluginRegistryEntry } from "../types.js";
 import { setCachedCatalog } from "../offline-cache.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import {
+  makeTestPluginPaths,
+  TestPluginMarketplaceService,
+} from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
 
-function makePluginZip(manifest: Record<string, unknown>): Buffer {
+function makePluginZip(manifest: Record<string, unknown>, files: Record<string, string> = {}): Buffer {
   const zip = new AdmZip();
   zip.addFile("plugin.json", Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf-8"));
   zip.addFile(
     "dist/hostPlugin.js",
     Buffer.from("export default async function createPlugin() { return { handlers: {} }; }\n", "utf-8"),
   );
+  for (const [path, content] of Object.entries(files)) {
+    zip.addFile(path, Buffer.from(content, "utf-8"));
+  }
   return zip.toBuffer();
 }
 
@@ -106,7 +112,7 @@ describe("PluginMarketplaceService install()", () => {
       pluginsRoot: installedDir,
       cacheRoot,
     });
-    const service = new PluginMarketplaceService(paths, fetcher);
+    const service = new TestPluginMarketplaceService(paths, fetcher);
     // Phase 2-final: npm install no longer exists on the service. Tests
     // that previously asserted "npm was not called" now check there's no
     // such method to call. The mock is kept as a tombstone so existing
@@ -193,6 +199,48 @@ describe("PluginMarketplaceService install()", () => {
     ) as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
+  });
+
+  it("rejects and rolls back an artifact whose declared Skill is absent", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/test-plugin@1.2.3",
+      packageName: "@lvis/test-plugin",
+      tools: ["ping"],
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+      skills: [{ id: "attendance", path: "skills/attendance" }],
+    });
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
+    };
+
+    const { service } = makeService(fetcher);
+    await expect(service.install(plugin.id)).rejects.toThrow(/declared_directory_missing/);
+    expect(existsSync(join(installedDir, plugin.id))).toBe(false);
+    expect(existsSync(join(cacheRoot, plugin.id, "install-receipt.json"))).toBe(false);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: unknown[] };
+    expect(registry.plugins).toEqual([]);
   });
 
   it("uses the canonical catalog id for alias replacement history and receipt-cache invalidation", async () => {
@@ -749,14 +797,17 @@ describe("PluginMarketplaceService install()", () => {
     let promotionStarted!: () => void;
     const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
     let pauseOnce = true;
-    vi.spyOn(store, "extractZipWithCommit").mockImplementation(async (slug, zip, commit) =>
-      originalExtract(slug, zip, async (installDir, files) => {
-        if (pauseOnce) {
-          pauseOnce = false;
-          promotionStarted();
-          await promotionGate;
-        }
-        return commit(installDir, files);
+    vi.spyOn(store, "extractZipWithCommit").mockImplementation(async (slug, zip, commit, options) =>
+      originalExtract(slug, zip, commit, {
+        ...options,
+        beforePromote: async (oldDir) => {
+          if (pauseOnce) {
+            pauseOnce = false;
+            promotionStarted();
+            await promotionGate;
+          }
+          await options?.beforePromote?.(oldDir);
+        },
       }),
     );
 
@@ -839,11 +890,14 @@ describe("PluginMarketplaceService install()", () => {
     const promotionGate = new Promise<void>((resolveGate) => { releasePromotion = resolveGate; });
     let promotionStarted!: () => void;
     const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
-    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit) =>
-      originalExtract(slug, zip, async (installDir, files) => {
-        promotionStarted();
-        await promotionGate;
-        return commit(installDir, files);
+    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit, options) =>
+      originalExtract(slug, zip, commit, {
+        ...options,
+        beforePromote: async (oldDir) => {
+          promotionStarted();
+          await promotionGate;
+          await options?.beforePromote?.(oldDir);
+        },
       }),
     );
 
@@ -902,11 +956,14 @@ describe("PluginMarketplaceService install()", () => {
     const promotionGate = new Promise<void>((resolveGate) => { releasePromotion = resolveGate; });
     let promotionStarted!: () => void;
     const promotionStartedPromise = new Promise<void>((resolveStarted) => { promotionStarted = resolveStarted; });
-    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit) =>
-      originalExtract(slug, zip, async (installDir, files) => {
-        promotionStarted();
-        await promotionGate;
-        return commit(installDir, files);
+    vi.spyOn(store, "extractZipWithCommit").mockImplementationOnce(async (slug, zip, commit, options) =>
+      originalExtract(slug, zip, commit, {
+        ...options,
+        beforePromote: async (oldDir) => {
+          promotionStarted();
+          await promotionGate;
+          await options?.beforePromote?.(oldDir);
+        },
       }),
     );
 
@@ -969,9 +1026,9 @@ describe("PluginMarketplaceService install()", () => {
 
     const { service } = makeService(fetcher);
     const store = (service as unknown as {
-      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+      artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
     }).artifactStore;
-    vi.spyOn(store, "writeInstallReceipt").mockRejectedValueOnce(new Error("receipt write failed"));
+    vi.spyOn(store, "persistPreparedInstallReceipt").mockRejectedValueOnce(new Error("receipt write failed"));
 
     await expect(service.install("test-plugin")).rejects.toThrow("receipt write failed");
 

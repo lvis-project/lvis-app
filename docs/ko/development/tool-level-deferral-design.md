@@ -4,6 +4,14 @@
 > §6.1 (KeywordEngine), §4.5 (Conversation Query Loop). Companion to the existing plugin-level lazy
 > scoping (`request_plugin`). Loading policy lives in
 > `docs/development/tool-loading-policy.md`.
+>
+> `SkillKeyword.skillId`, manifest `keywords[]`, and
+> `PluginHostApi.registerKeywords` are legacy names for deprecated
+> keyword-to-Tool-schema preload. They do not discover or preload bundled
+> Skills. Bundled instruction discovery belongs to `manifest.skills`. Owner:
+> `lvis-app` plugin runtime. Remove the keyword surface after every supported
+> plugin has migrated to bundled `manifest.skills` and no active manifest
+> declares `keywords`.
 
 ## Update (#1176) — eager exposure restored; deferral is now a HIGH-threshold gate
 
@@ -52,9 +60,11 @@ genuinely large tool surface (≥200 eligible) that warrants per-tool deferral.
 
 Two cooperating mechanisms, both **host-only** (no plugin-repo manifest change required at this stage):
 
-- **(B) Keyword→tool preload** — reuse the existing `SkillKeyword.skillId`. When `matchAllPluginIds` matches a
+- **(B) Deprecated keyword→Tool-schema preload** — reuse the legacy-named
+  `SkillKeyword.skillId`. When `matchAllPluginIds` matches a
   plugin, the *same* matched keywords already carry a `skillId` that resolves (via `toolRegistry.findByName`) to a
-  specific tool. Preload only those tools' full schemas. No round-trip.
+  specific model-visible Tool. Preload only those Tools' full schemas. This is
+  not bundled Skill discovery and never invokes the Tool. No round-trip.
 - **(A) `tool_search` meta-tool** — for everything not preloaded, the model sees a compact **catalog** (name +
   1-line description, no JSON schema). Calling `tool_search({ query })` promotes matching tools into the live
   `tools[]` for the next round. Mirrors `request_plugin` exactly.
@@ -116,7 +126,7 @@ sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply firs
    - `run-turn.ts`가 follow-up용 carry-forward scope를 보존한다.
    - `query-loop.ts`가 `handleToolSearch`와 `handleRequestPlugin`을 함께 연결한다: same intercept→promote→
      `rebuildToolSchemas(scope)` pattern, sharing the round-refund (`round--`) and counter logic.
-2. **`src/core/keyword-engine.ts`**: add `matchToolNames(input): Set<string>` — scan `skillKeywords`, return
+2. **`src/core/keyword-engine.ts`**: add `matchToolNames(input): Set<string>` — scan the legacy-named `skillKeywords`, return
    `skillId`s whose keyword appears in input AND that resolve to a registered plugin/mcp tool. (Companion to
    `matchAllPluginIds`; reuses the same registration data, no new manifest field.)
 3. **`src/tools/registry.ts`**: `getToolSchemasForScope` tool-level filtering + `getToolCatalogForScope`.
@@ -166,7 +176,8 @@ sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply firs
 ## Phasing
 
 - **Host-only stage**: landed the mechanism behind the settings field with tests.
-- **Cross-repo follow-up (optional)**: richer manifest `keywords[].tools?: string[]` (multiple preload tools per
-  keyword, not just `skillId`) or manifest `toolGroups[]` for small logical namespaces in SDK schema + all plugin
-  repos + template + marketplace validation. Field-Addition Sweep + companion PRs.
+- **Deprecation removal**: do not add a richer `keywords` surface. Migrate
+  instruction discovery to bundled `manifest.skills`; remove `keywords[]` and
+  `registerKeywords` after every supported plugin has migrated and no active
+  manifest declares `keywords`.
 - **Default-on cutover**: enable by default and remove the legacy branch.

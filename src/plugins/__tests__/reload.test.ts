@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as nodeFs from "node:fs";
-import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
 
 // ---------------------------------------------------------------------------
@@ -94,8 +94,7 @@ describe("PluginRuntime.reloadPlugin", () => {
     const manifestPath = await writePlugin("p-reload", "a");
     await writeRegistry([{ id: "p-reload", manifestPath }]);
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.startAll();
 
     expect(await runtime.call("p_reload_hello")).toBe("v-a");
@@ -124,13 +123,12 @@ describe("PluginRuntime.reloadPlugin", () => {
     expect(await runtime.call("p_reload_hello")).toBe("v-b");
   });
 
-  it("reload fires onDisable hook for host-side cleanup", async () => {
+  it("reload keeps the published generation active until replacement publication", async () => {
     const manifestPath = await writePlugin("p-hook", "a");
     await writeRegistry([{ id: "p-hook", manifestPath }]);
 
     const disabled: string[] = [];
     const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -140,18 +138,17 @@ describe("PluginRuntime.reloadPlugin", () => {
 
     await runtime.reloadPlugin("p-hook");
 
-    expect(disabled).toEqual(["p-hook"]);
+    expect(disabled).toEqual([]);
     // After reload the plugin is re-loaded so call() still works.
     expect(runtime.listPluginIds()).toContain("p-hook");
   });
 
-  it("reload start failure unloads the failed replacement and fires cleanup", async () => {
+  it("reload start failure preserves the last published generation", async () => {
     const manifestPath = await writePlugin("p-reload-fail", "a");
     await writeRegistry([{ id: "p-reload-fail", manifestPath }]);
 
     const disabled: string[] = [];
     const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -166,25 +163,23 @@ describe("PluginRuntime.reloadPlugin", () => {
 
     await expect(runtime.reloadPlugin("p-reload-fail")).rejects.toThrow("reload boom");
 
-    expect(runtime.listPluginIds()).not.toContain("p-reload-fail");
-    expect(runtime.listToolNames()).not.toContain("p_reload_fail_hello");
-    expect(disabled).toEqual(["p-reload-fail", "p-reload-fail"]);
-    await expect(runtime.call("p_reload_fail_hello")).rejects.toThrow("Plugin method not found");
+    expect(runtime.listPluginIds()).toContain("p-reload-fail");
+    expect(runtime.listToolNames()).toContain("p_reload_fail_hello");
+    expect(disabled).toEqual([]);
+    await expect(runtime.call("p_reload_fail_hello")).resolves.toBe("v-a");
   });
 
   it("reload on unknown plugin throws", async () => {
     await writeRegistry([]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.startAll();
-    await expect(runtime.reloadPlugin("missing")).rejects.toThrow(/not loaded/);
+    await expect(runtime.reloadPlugin("missing")).rejects.toThrow(/not-loaded/);
   });
 
   it("getPluginEntryDir returns dist directory for loaded plugin", async () => {
     const manifestPath = await writePlugin("p-dir", "a");
     await writeRegistry([{ id: "p-dir", manifestPath }]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.startAll();
     const dir = runtime.getPluginEntryDir("p-dir");
     expect(dir).toBe(join(installedDir, "p-dir"));
@@ -195,8 +190,7 @@ describe("PluginRuntime.reloadPlugin", () => {
     const manifestPath = await writePlugin("p-realpath", "a");
     await writeRegistry([{ id: "p-realpath", manifestPath }]);
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.startAll();
 
     // Clear call history accumulated during load() so we only observe calls

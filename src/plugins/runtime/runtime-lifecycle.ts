@@ -1,4 +1,6 @@
 import { basename, dirname, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type {
   PluginAccessSpec,
   PluginManifest,
@@ -9,6 +11,15 @@ import type {
 import type { Actor } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
 import { updatePluginRegistry } from "../registry.js";
+import type {
+  CommittedPluginGeneration,
+  PluginRuntimeGenerationProjection,
+} from "../plugin-host-generation.js";
+import { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
+import {
+  materializePluginGenerationRoot,
+  removeRetainedPluginGeneration,
+} from "../plugin-contributions.js";
 import {
   PluginFactoryTimeoutError,
   PluginImportTimeoutError,
@@ -17,9 +28,13 @@ import {
   runPluginImportWithTimeout,
   runStartWithTimeout,
 } from "./lifecycle-timeout.js";
-
-import { getDeclaredEmittedEvents } from "./manifest-validation.js";
-import { buildPluginContext, resolveRealEntryPath } from "./sandbox.js";
+import {
+  getDeclaredEmittedEvents,
+} from "./manifest-validation.js";
+import {
+  buildPluginContext,
+  resolveRealEntryPath,
+} from "./sandbox.js";
 import type { ManifestLoadPlan, ManifestSnapshot, SinglePluginStartResult } from "./types.js";
 import {
   buildMethodMap,
@@ -39,13 +54,13 @@ import {
   type PendingRestartCancellation,
   type RestartPluginResult,
 } from "./runtime-state.js";
+import type { PreparedArtifactRuntimeActivationInput } from "./index.js";
 import {
   preflightPluginLoadPlan,
   type BootPreflightOutcome,
   type PluginIntegrityCheckResult,
 } from "./runtime-preflight.js";
-import { reportPluginIntegrity, verifyPluginIntegrity } from "./runtime-integrity.js";
-
+import { commitAtomicPluginRemoval } from "./atomic-removal.js";
 const log = createLogger("plugin-runtime");
 export class PluginRuntimeLifecycle extends PluginRuntimeState {
   private async importPluginFactoryForLifecycle(
@@ -86,6 +101,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   }
 
   async load(): Promise<void> {
+    this.requireGenerationLifecycle("plugin load");
     if (this.loaded) return;
     const loadPlan = await this.resolveManifestLoadPlanInternal();
     for (const plan of loadPlan) {
@@ -134,7 +150,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       const { plan } = outcome;
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      const pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
+      let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
       if (!outcome.ok) {
         if (outcome.kind === "integrity") {
           if (plan.pluginIdHint) {
@@ -162,22 +178,34 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         }
         continue;
       }
+      if (!plan.enabled) {
+        pluginId = outcome.manifest.id;
+        this.rememberPluginInstallAlias(pluginId, plan.pluginIdHint);
+        this.rememberPluginManifest(
+          pluginId,
+          outcome.manifest,
+          outcome.approvedPluginAccess,
+        );
+        this.inactivePluginIds.add(pluginId);
+        this.disabledPluginIds.add(pluginId);
+        this.failedPluginIds.delete(pluginId);
+        this.failedPluginStubs.delete(pluginId);
+        this.loadFailureInfo.delete(pluginId);
+        plog(
+          "debug",
+          { pluginId, phase: PluginPhase.LOAD_OK, reason: "inactive_pointer" },
+          "plugin retained as inactive metadata without runtime admission",
+        );
+        continue;
+      }
       const { manifest, approvedPluginAccess } = outcome;
+      // Reassign to manifest.id so all subsequent phases use the canonical id.
+      pluginId = manifest.id;
       this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
       this.loadFailureInfo.delete(manifest.id);
-      // #1176 M1 fix: inactive plugins (enabled=false) are LOADED just like
-      // active ones — only model exposure is gated. Seed inactivePluginIds here
-      // so isPluginEnabled() is correct immediately after boot; the boot
-      // ToolRegistry sync and hostApi.registerKeywords gate suppress inactive
-      // tools/keywords without stop/reload churn.
-      if (!plan.enabled) {
-        this.inactivePluginIds.add(manifest.id);
-      } else {
-        // Ensure a previously-inactive plugin becomes active on re-enable.
-        this.inactivePluginIds.delete(manifest.id);
-      }
+      this.inactivePluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
       this.failedPluginIds.delete(manifest.id);
       // Plugin↔app minimum-version gate — HARD BLOCK at LOAD. A plugin already
@@ -211,9 +239,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       if (this.preparation.deferStart(plan, manifest, approvedPluginAccess)) {
         continue;
       }
+      const activationId = randomUUID();
+      const runtimeRoot = await this.materializeImmutableRuntimeRoot(
+        manifest.id,
+        pluginRoot,
+        activationId,
+        plan.pluginIdHint ?? manifest.id,
+      );
       let entryPath: string;
       try {
-        entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
+        entryPath = this.resolveEntryPathForPlugin(runtimeRoot, manifest.entry);
       } catch (err) {
         const reason = (err as Error).message;
         plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "entry_path" }, "entry path rejected");
@@ -223,6 +258,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           reason,
         });
         this.markFailed(manifest.id);
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
         continue;
       }
       const resolvedEntryPath = resolveRealEntryPath(entryPath);
@@ -239,17 +275,20 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           reason: (err as Error).message,
         });
         this.markFailed(manifest.id);
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
         continue;
       }
       if (!createPlugin) {
         plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin");
         this.markFailed(manifest.id);
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
         continue;
       }
 
       const pluginDataDir = this.ensureDataDir(manifest.id, pluginRoot);
+      const hostEffects = new HostApiGenerationScope(manifest.id);
       const { hostApi, disposers, deactivate, drainOperations, commit, lifecycleHookScope } =
-        this.buildHostApiIncarnation(manifest.id, manifest, pluginDataDir);
+        this.buildHostApiIncarnation(manifest.id, manifest, pluginDataDir, hostEffects);
 
       let instance: RuntimePlugin;
       try {
@@ -259,7 +298,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
             () => createPlugin(
               buildPluginContext({
                 pluginId: manifest.id,
-                pluginRoot,
+                pluginRoot: runtimeRoot,
                 hostRoot: this.hostRoot,
                 pluginDataDir,
                 manifest,
@@ -275,6 +314,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         );
       } catch (err) {
         deactivate();
+        hostEffects.discard();
         if (err instanceof PluginFactoryTimeoutError) {
           this.quarantinePluginLifecycle(manifest.id, err.message);
         }
@@ -282,9 +322,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         await this.drainPluginHostApiOperations(manifest.id, {
           drainHostApiOperations: drainOperations,
         });
-        plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "factory" }, "plugin factory failed");
         this.markFailed(manifest.id);
-        throw err;
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+        plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "factory" }, "plugin factory failed");
+        continue;
       }
 
       const methods = new Map<string, PluginToolHandler>();
@@ -297,11 +338,13 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         methods.set(toolName, handler);
         if (this.methodMap.has(toolName)) {
           deactivate();
+          hostEffects.discard();
           await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
           this.runDisposerList(disposers, "duplicate load method");
           await this.drainPluginHostApiOperations(manifest.id, {
             drainHostApiOperations: drainOperations,
           });
+          await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
           throw new Error(`Duplicate plugin method registered: ${toolName}`);
         }
       }
@@ -317,11 +360,13 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
       commit();
       this.plugins.set(manifest.id, {
+        activationId,
         manifest,
-        pluginRoot,
+        pluginRoot: runtimeRoot,
         instance,
         methods,
         approvedPluginAccess,
+        hostEffects,
         started: false,
         deactivateHostApi: deactivate,
         drainHostApiOperations: drainOperations,
@@ -341,6 +386,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   }
 
   async startAll(): Promise<void> {
+    const generationLifecycle = this.requireGenerationLifecycle("plugin start");
     await this.load();
     const SLOW_THRESHOLD_MS = 5000;
     const failed: Array<{ id: string; reason: string }> = [];
@@ -404,11 +450,27 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       if (!item.ok) failed.push({ id: item.id, reason: item.reason });
     }
 
+    for (const plugin of [...this.plugins.values()]) {
+      if (!plugin.started || failed.some((entry) => entry.id === plugin.manifest.id)) continue;
+      const projection = this.getRuntimeGenerationProjection(plugin.manifest.id);
+      if (!projection) continue;
+      try {
+        await generationLifecycle.replaceRuntime(projection);
+      } catch (error) {
+        failed.push({
+          id: plugin.manifest.id,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     for (const { id, reason } of failed) {
       plog("error", { pluginId: id, phase: PluginPhase.START_FAIL, reason }, "plugin start failed");
       const plugin = this.plugins.get(id);
       if (!plugin) continue;
       await this.failClosedLoadedPlugin(id, plugin, "start failure cleanup");
+      if (plugin.hostEffects?.isPreparing()) plugin.hostEffects.discard();
+      await this.removeUnpublishedRuntimeRoot(id, plugin.pluginRoot);
     }
   }
 
@@ -426,9 +488,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   }
 
   async restartAll(): Promise<void> {
-    // An individual restart may own its plugin lock while waiting on a
-    // never-settling dependency preparation. Cancel before the global lock
-    // waits for per-plugin mutations to drain.
+    this.requireGenerationLifecycle("plugin restartAll");
+    // Cancel dependency-held plugin locks before the global mutation queues.
     for (const cancellation of this.pendingRestartCancellations.values()) {
       cancellation.cancel();
     }
@@ -443,34 +504,30 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     ]);
     for (const pluginId of lifecycleIds) this.beginPluginLifecycleOperation(pluginId);
     await Promise.allSettled([...this.pendingRestarts.values()]);
-    const loadedPluginIds = [...this.plugins.keys()];
-    await this.stopAll();
-    for (const pluginId of loadedPluginIds) {
-      this.onDisable?.(pluginId);
+    const loadPlan = await this.resolveManifestLoadPlanInternal();
+    const currentIdentities = await this.assertCurrentPluginIdentityLoadPlan(loadPlan);
+    const targetIds = new Set(
+      currentIdentities
+        .filter(({ plan }) => plan.enabled)
+        .map(({ snapshot }) => snapshot.manifest.id),
+    );
+    for (const pluginId of [...this.plugins.keys()]) {
+      if (!targetIds.has(pluginId)) await this.removePlugin(pluginId);
     }
-    this.resetLoadedState();
-    await this.startAll();
-    // Symmetric to the per-plugin onDisable fan-out above: fire onEnable for
-    // each plugin that survived the restart so the host's ToolRegistry sync
-    // (wired in boot/steps/plugin-runtime.ts) runs without callers having to
-    // remember a follow-up sync. Initial boot's `startAll` is the only path
-    // that intentionally bypasses onEnable — registration there flows through
-    // PluginLoopbackManager (each plugin runs as an in-process MCP server),
-    // wired in boot/steps/plugin-runtime.ts, which owns that one-shot.
-    // See architecture.md §9.3a.
-    if (this.onEnable) {
-      for (const pluginId of this.plugins.keys()) {
-        this.onEnable(pluginId);
+    for (const pluginId of targetIds) {
+      if (this.plugins.has(pluginId)) {
+        const result = await this.restartPlugin(pluginId);
+        if (result === "failed") throw new Error(`restartAll failed for ${pluginId}`);
+      } else {
+        await this.addPlugin(pluginId);
       }
     }
   }
 
-  /**
-   * US-3c.2 — Targeted single-plugin restart.
-   */
+  /** US-3c.2 — Targeted single-plugin restart. */
   async restartPlugin(
     pluginId: string,
-    opts: { skipPreparation?: boolean } = {},
+    opts: { skipPreparation?: boolean; throwOnFailure?: boolean } = {},
   ): Promise<RestartPluginResult> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
@@ -485,19 +542,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
     const pending = this.pendingRestarts.get(canonicalPluginId);
     if (pending) return pending;
-    let resolveCancellation!: () => void;
-    const cancellation: PendingRestartCancellation = {
-      generation: 0,
-      cancelled: false,
-      promise: new Promise<void>((resolve) => {
-        resolveCancellation = resolve;
-      }),
-      cancel() {
-        if (this.cancelled) return;
-        this.cancelled = true;
-        resolveCancellation();
-      },
-    };
+    const cancellation = this.createPendingRestartCancellation();
     this.pendingRestartCancellations.set(canonicalPluginId, cancellation);
     const restart = withPluginInstallLock(canonicalPluginId, async () => {
       const generation = this.beginPluginLifecycleOperation(
@@ -528,8 +573,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     pluginId: string,
     generation: number,
     cancellation: PendingRestartCancellation,
-    opts: { skipPreparation?: boolean } = {},
+    opts: { skipPreparation?: boolean; throwOnFailure?: boolean } = {},
   ): Promise<RestartPluginResult> {
+    const generationLifecycle = this.requireGenerationLifecycle("plugin restart");
     plog("info", { pluginId, phase: PluginPhase.RESTART_REQUEST }, "restart requested");
     const plugin = this.plugins.get(pluginId);
     if (!plugin) {
@@ -626,12 +672,23 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
 
     if (!isCurrent()) return "failed";
-
-    const entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
+    const activationId = randomUUID();
+    const runtimeRoot = await this.materializeImmutableRuntimeRoot(
+      pluginId,
+      pluginRoot,
+      activationId,
+      receiptPluginId ?? pluginId,
+    );
+    let entryPath: string;
+    try {
+      entryPath = this.resolveEntryPathForPlugin(runtimeRoot, manifest.entry);
+    } catch (error) {
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err: error, reason: "entry_path" }, "entry path rejected during restart");
+      return "failed";
+    }
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
-    // Cache-bust: Node ESM loader memoizes by URL — without it
-    // restart re-runs createPlugin against the OLD module's closures
-    // even when the on-disk bundle changed. Mirrors `reloadPlugin`.
+    // Cache-bust so restart imports the new bundle rather than memoized ESM.
     let createPlugin: RuntimePluginFactory | undefined;
     try {
       createPlugin = await this.importPluginFactoryForLifecycle(
@@ -641,25 +698,24 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       );
       plog("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");
     } catch (err) {
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
-      if (err instanceof PluginImportTimeoutError) {
-        await this.failClosedLoadedPlugin(
-          pluginId,
-          plugin,
-          "restart import timeout",
-        );
-      }
       return "failed";
     }
 
-    if (!isCurrent()) return "failed";
+    if (!isCurrent()) {
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
+      return "failed";
+    }
 
     if (!createPlugin) {
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin after restart");
       return "failed";
     }
 
     const pluginDataDir = this.ensureDataDir(pluginId, pluginRoot);
+    const hostEffects = new HostApiGenerationScope(pluginId);
     const {
       hostApi,
       disposers: replacementDisposers,
@@ -671,6 +727,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       pluginId,
       manifest,
       pluginDataDir,
+      hostEffects,
     );
 
     let instance: RuntimePlugin;
@@ -681,7 +738,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           () => createPlugin(
             buildPluginContext({
               pluginId,
-              pluginRoot,
+              pluginRoot: runtimeRoot,
               hostRoot: this.hostRoot,
               pluginDataDir,
               manifest,
@@ -701,28 +758,29 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       );
     } catch (err) {
       deactivateReplacementHostApi();
+      hostEffects.discard();
       if (err instanceof PluginFactoryTimeoutError) {
         this.quarantinePluginLifecycle(pluginId, err.message);
       }
-      const oldCleanup = err instanceof PluginFactoryTimeoutError
-        ? this.failClosedLoadedPlugin(pluginId, plugin, "restart factory timeout")
-        : null;
       this.runDisposerList(replacementDisposers, "failed restart factory");
       await this.drainPluginHostApiOperations(pluginId, {
         drainHostApiOperations: drainReplacementHostApiOperations,
       });
-      await oldCleanup;
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
+      if (opts.throwOnFailure) throw err;
       return "failed";
     }
 
     if (!isCurrent()) {
       deactivateReplacementHostApi();
+      hostEffects.discard();
       await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "stale restart factory");
       await this.drainPluginHostApiOperations(pluginId, {
         drainHostApiOperations: drainReplacementHostApiOperations,
       });
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
       return "failed";
     }
 
@@ -747,120 +805,65 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
       plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
       deactivateReplacementHostApi();
-      const oldCleanup = err instanceof PluginStartupTimeoutError
-        ? this.failClosedLoadedPlugin(pluginId, plugin, "restart start timeout")
-        : null;
+      hostEffects.discard();
       await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "failed restart start");
       await this.drainPluginHostApiOperations(pluginId, {
         drainHostApiOperations: drainReplacementHostApiOperations,
       });
-      await oldCleanup;
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
+      if (opts.throwOnFailure) throw err;
       return "failed";
     }
 
     if (!isCurrent()) {
       deactivateReplacementHostApi();
+      hostEffects.discard();
       await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
       this.runDisposerList(replacementDisposers, "stale restart start");
       await this.drainPluginHostApiOperations(pluginId, {
         drainHostApiOperations: drainReplacementHostApiOperations,
       });
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
       return "failed";
-    }
-
-    const previousStopped = await this.stopAfterStartFailure(
-      pluginId,
-      plugin.instance,
-      plugin.lifecycleHookScope,
-    );
-    if (previousStopped) {
-      plog("debug", { pluginId, phase: PluginPhase.RESTART_STOP_OK }, "stopped previous instance");
-    } else {
-      plog("error", { pluginId, phase: PluginPhase.RESTART_STOP_FAIL }, "previous instance stop failed");
-      // A timed-out/failed stop has an uncertain execution state. Revoke its
-      // HostApi and remove every advertised method before returning; keeping
-      // the old instance visible would expose capabilities from an incarnation
-      // the host can no longer govern.
-      plugin.deactivateHostApi?.();
-      for (const method of plugin.methods.keys()) {
-        this.methodMap.delete(method);
-      }
-      this.plugins.delete(pluginId);
-      this.runPluginDisposers(pluginId, "restartPlugin uncertain previous stop");
-      await this.drainPluginHostApiOperations(pluginId, plugin);
-      this.onDisable?.(pluginId);
-      this.markFailed(pluginId);
-      deactivateReplacementHostApi();
-      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
-      this.runDisposerList(replacementDisposers, "failed restart previous stop");
-      await this.drainPluginHostApiOperations(pluginId, {
-        drainHostApiOperations: drainReplacementHostApiOperations,
-      });
-      return "failed";
-    }
-    if (!isCurrent()) {
-      deactivateReplacementHostApi();
-      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
-      this.runDisposerList(replacementDisposers, "stale restart swap");
-      await this.drainPluginHostApiOperations(pluginId, {
-        drainHostApiOperations: drainReplacementHostApiOperations,
-      });
-      return "failed";
-    }
-    plugin.deactivateHostApi?.();
-
-    for (const method of plugin.methods.keys()) {
-      this.methodMap.delete(method);
-    }
-    this.plugins.delete(pluginId);
-
-    this.runPluginDisposers(pluginId, "restartPlugin");
-
-    const previousOperationsDrained = await this.drainPluginHostApiOperations(pluginId, plugin);
-    if (!previousOperationsDrained) {
-      deactivateReplacementHostApi();
-      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
-      this.runDisposerList(replacementDisposers, "failed restart HostApi drain");
-      await this.drainPluginHostApiOperations(pluginId, {
-        drainHostApiOperations: drainReplacementHostApiOperations,
-      });
-      this.onDisable?.(pluginId);
-      return "failed";
-    }
-
-    this.onDisable?.(pluginId);
-
-    this.rememberPluginManifest(pluginId, manifest, approvedPluginAccess);
-    for (const [toolName, handler] of methods) {
-      this.methodMap.set(toolName, { pluginId, handler });
     }
     if (manifest.keywords && manifest.keywords.length > 0) {
       hostApi.registerKeywords(manifest.keywords);
     }
-    commitReplacementHostApi();
-    this.plugins.set(pluginId, {
+    const candidate: PluginRuntimeGenerationProjection = Object.freeze({
+      activationId,
+      installId: this.requirePluginInstallClaim(pluginId),
       manifest,
-      pluginRoot,
+      pluginRoot: runtimeRoot,
       instance,
-      methods,
-      approvedPluginAccess,
-      started: true,
+      methods: new Map(methods),
+      ...(approvedPluginAccess ? { approvedPluginAccess } : {}),
+      hostEffects,
+      disposers: replacementDisposers,
       deactivateHostApi: deactivateReplacementHostApi,
       drainHostApiOperations: drainReplacementHostApiOperations,
       lifecycleHookScope: replacementLifecycleHookScope,
     });
-    this.disposers.set(pluginId, replacementDisposers);
-    this.markPluginUiRevision(pluginId);
-    this.failedPluginIds.delete(pluginId);
-    this.disabledPluginIds.delete(pluginId);
+    commitReplacementHostApi();
+    try {
+      await generationLifecycle.replaceRuntime(candidate);
+    } catch (error) {
+      deactivateReplacementHostApi();
+      if (hostEffects.isPreparing()) hostEffects.discard();
+      await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
+      this.runDisposerList(replacementDisposers, "failed restart publication");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: drainReplacementHostApiOperations,
+      });
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err: error, reason: "publication" }, "runtime generation publication failed");
+      return "failed";
+    }
     this.onEnable?.(pluginId);
     return "started";
   }
 
-  /**
-   * US-A3 — Targeted single-plugin add for install / install-local paths.
-   */
+  /** US-A3 — Targeted single-plugin add for install / install-local paths. */
   async addPlugin(pluginId: string): Promise<"started" | "preparing"> {
     const knownPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(knownPluginId);
@@ -912,7 +915,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
 
     const { manifest, approvedPluginAccess } = snapshot;
-    if (!this.adoptPluginLifecycleIdentity(pluginId, manifest.id, lifecycleGeneration, targetPlan.pluginIdHint)) {
+    if (!this.adoptPluginLifecycleIdentity(
+      pluginId,
+      manifest.id,
+      lifecycleGeneration,
+      targetPlan.pluginIdHint,
+    )) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
     const shouldCommit = () =>
@@ -931,24 +939,18 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
 
-    // Throw if the plugin landed in failed state — caller (IPC install
-    // handler) catches to roll back marketplace state. boot-time `load()`
-    // doesn't take this path; it inlines its own iteration.
+    // IPC install callers need a hard failure signal for rollback.
     this.throwIfPluginFailedAfterAdd(manifest.id);
     return "started";
   }
 
-  /**
-   * US-A3 — Targeted single-plugin remove for uninstall paths.
-   */
+  /** US-A3 — Targeted single-plugin remove for uninstall paths. */
   async removePlugin(
     pluginId: string,
     options: { preserveConfigOverride?: boolean } = {},
   ): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
-    // A restart can be waiting on an intentionally non-cancellable dependency
-    // preparation while it owns the lifecycle lock. Signal cancellation before
-    // queuing removal so that restart can settle and release the lock.
+    // Cancel dependency-held restart work before entering the lifecycle lock.
     this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
     return withPluginInstallLock(canonicalPluginId, () =>
       this.removePluginLocked(pluginId, canonicalPluginId, options)
@@ -964,47 +966,14 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.beginPluginLifecycleOperation(canonicalPluginId);
     this.preparation.clearFor(canonicalPluginId);
     this.pendingRestartPreparations.delete(canonicalPluginId);
-    // Replacement HostApi disposers are incarnation-scoped. Once the
-    // generation is invalidated, uninstall does not wait for a dependency
-    // preparation or start Promise that may never settle; any late replacement
-    // continuation can only clean its private disposer list.
-    // Plugin may be in one of three states when uninstall is requested:
-    //   - loaded (`this.plugins` has it) → run stop + dispose, then clean
-    //     all tracking maps below
-    //   - failed-load (in `failedPluginIds` / `failedPluginStubs` /
-    //     `knownPluginManifests` but NOT in `this.plugins`) → skip the
-    //     stop/dispose path but still clean tracking so `listPluginCards`
-    //     stops surfacing a stale entry after marketplace registry purge
-    //   - not tracked at all (no-op)
-    //
-    // Pre-fix: an early `return` when `this.plugins` lacked the entry
-    // left failed-load plugins in `failedPluginStubs` / `knownPluginManifests`
-    // forever — UI showed the ghost card and a second uninstall click hit
-    // `Plugin not found` from the deployment guard against the already-purged
-    // marketplace registry.
+    // Late incarnations own private disposers; tracked state can be purged
+    // without waiting on an invalidated preparation that may never settle.
     const plugin = this.plugins.get(canonicalPluginId);
+    let retirementError: unknown;
     if (plugin) {
-      const stopped = await this.stopAfterStartFailure(
-        canonicalPluginId,
-        plugin.instance,
-        plugin.lifecycleHookScope,
-      );
-      plugin.deactivateHostApi?.();
-
-      for (const method of plugin.methods.keys()) {
-        this.methodMap.delete(method);
-      }
-      this.plugins.delete(canonicalPluginId);
-      this.runPluginDisposers(canonicalPluginId, "removePlugin");
-      const operationsDrained = await this.drainPluginHostApiOperations(
-        canonicalPluginId,
-        plugin,
-      );
-      if (!stopped || !operationsDrained) {
-        throw new Error(
-          `removePlugin blocked while the previous instance remains uncertain: ${canonicalPluginId}`,
-        );
-      }
+      const generationLifecycle = this.requireGenerationLifecycle("plugin removal");
+      const { retirement } = await generationLifecycle.deactivateWithCommit(canonicalPluginId, async () => undefined);
+      retirementError = await this.captureCommittedRetirementFailure(canonicalPluginId, retirement, "plugin removal");
     } else if (
       !this.knownPluginManifests.has(canonicalPluginId) &&
       !this.failedPluginIds.has(canonicalPluginId) &&
@@ -1012,9 +981,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       !this.disabledPluginIds.has(canonicalPluginId)
     ) {
       log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
-      this.inactivePluginIds.delete(canonicalPluginId);
       this.knownInstallAliases.delete(canonicalPluginId);
       this.knownInstallClaims.delete(canonicalPluginId);
+      this.inactivePluginIds.delete(canonicalPluginId);
       if (!options.preserveConfigOverride) {
         this.configStore.delete(canonicalPluginId);
       }
@@ -1042,32 +1011,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.loadFailureInfo.delete(canonicalPluginId);
     this.disabledPluginIds.delete(canonicalPluginId);
     this.inactivePluginIds.delete(canonicalPluginId);
-    this.pluginUiRevisions.delete(canonicalPluginId);
+    this.invalidatePluginUiRevision(canonicalPluginId);
     this.knownInstallAliases.delete(canonicalPluginId);
     this.knownInstallClaims.delete(canonicalPluginId);
 
     this.onDisable?.(canonicalPluginId);
-  }
-
-  protected async verifyReceiptAndDevGuard(
-    pluginId: string,
-    pluginRoot: string,
-    options: { report?: boolean } = {},
-  ): Promise<PluginIntegrityCheckResult> {
-    const result = await verifyPluginIntegrity(
-      this.installReceiptCacheRoot,
-      pluginId,
-      pluginRoot,
-    );
-    if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
-    return result;
-  }
-
-  protected reportPluginIntegrityResult(
-    pluginId: string,
-    result: PluginIntegrityCheckResult,
-  ): void {
-    reportPluginIntegrity(pluginId, result, this.auditLog);
+    if (retirementError !== undefined) throw retirementError;
   }
 
   /** Instantiate and start one post-boot plugin without rebuilding its peers. */
@@ -1077,6 +1026,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     approvedPluginAccess: PluginAccessSpec | undefined,
     opts: { skipPreparation?: boolean; cacheBust?: boolean; shouldCommit?: () => boolean } = {},
   ): Promise<SinglePluginStartResult> {
+    const generationLifecycle = this.requireGenerationLifecycle("plugin add");
     const pluginRoot = dirname(plan.manifestPath);
     const canCommit = () => opts.shouldCommit?.() ?? true;
     if (!canCommit()) return "cancelled";
@@ -1126,11 +1076,21 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       return "deferred";
     }
 
+    const activationId = randomUUID();
+    const runtimeRoot = await this.materializeImmutableRuntimeRoot(
+      manifest.id,
+      pluginRoot,
+      activationId,
+      plan.pluginIdHint ?? manifest.id,
+    );
     let entryPath: string;
     try {
-      entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
+      entryPath = this.resolveEntryPathForPlugin(runtimeRoot, manifest.entry);
     } catch (err) {
-      if (!canCommit()) return "cancelled";
+      if (!canCommit()) {
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+        return "cancelled";
+      }
       const reason = (err as Error).message;
       log.error(`${manifest.id} rejected: ${reason}`);
       this.auditLog?.("error", "plugin_entry_path_rejected", {
@@ -1139,6 +1099,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         reason,
       });
       this.markFailed(manifest.id);
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
       return "failed";
     }
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
@@ -1151,28 +1112,38 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         opts.cacheBust,
       );
     } catch (err) {
-      if (!canCommit()) return "cancelled";
+      if (!canCommit()) {
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+        return "cancelled";
+      }
       log.error(`${manifest.id} import failed: %s`, (err as Error).message);
       this.auditLog?.("error", "plugin_import_failed", {
         pluginId: manifest.id,
         reason: (err as Error).message,
       });
       this.markFailed(manifest.id);
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
       return "failed";
     }
-    if (!canCommit()) return "cancelled";
+    if (!canCommit()) {
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+      return "cancelled";
+    }
     if (!createPlugin) {
       log.error(`${manifest.id} entry does not export default/createPlugin — skipped`);
       this.markFailed(manifest.id);
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
       return "failed";
     }
 
     const pluginDataDir = this.ensureDataDir(manifest.id, pluginRoot);
+    const hostEffects = new HostApiGenerationScope(manifest.id);
     const { hostApi, disposers, deactivate, drainOperations, commit, lifecycleHookScope } =
       this.buildHostApiIncarnation(
         manifest.id,
         manifest,
         pluginDataDir,
+        hostEffects,
       );
 
     let instance: RuntimePlugin;
@@ -1183,7 +1154,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           () => createPlugin(
             buildPluginContext({
               pluginId: manifest.id,
-              pluginRoot,
+              pluginRoot: runtimeRoot,
               hostRoot: this.hostRoot,
               pluginDataDir,
               manifest,
@@ -1199,6 +1170,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       );
     } catch (err) {
       deactivate();
+      hostEffects.discard();
       if (err instanceof PluginFactoryTimeoutError) {
         this.quarantinePluginLifecycle(manifest.id, err.message);
       }
@@ -1206,9 +1178,13 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       await this.drainPluginHostApiOperations(manifest.id, {
         drainHostApiOperations: drainOperations,
       });
-      if (!canCommit()) return "cancelled";
+      if (!canCommit()) {
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+        return "cancelled";
+      }
       log.error(`${manifest.id} createPlugin failed: %s`, (err as Error).message);
       this.markFailed(manifest.id);
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
       return "failed";
     }
 
@@ -1220,24 +1196,29 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         continue;
       }
       methods.set(toolName, handler);
-      if (this.methodMap.has(toolName)) {
+      const owner = this.methodMap.get(toolName)?.pluginId;
+      if (owner && owner !== manifest.id) {
         deactivate();
+        hostEffects.discard();
         await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
         this.runDisposerList(disposers, "duplicate add method");
         await this.drainPluginHostApiOperations(manifest.id, {
           drainHostApiOperations: drainOperations,
         });
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
         throw new Error(`Duplicate plugin method registered: ${toolName}`);
       }
     }
 
     if (!canCommit()) {
       deactivate();
+      hostEffects.discard();
       await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
       this.runDisposerList(disposers, "stale add factory");
       await this.drainPluginHostApiOperations(manifest.id, {
         drainHostApiOperations: drainOperations,
       });
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
       return "cancelled";
     }
 
@@ -1255,6 +1236,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         startupMs = Date.now() - startedAt;
       } catch (err) {
         deactivate();
+        hostEffects.discard();
         if (err instanceof PluginStartupTimeoutError) {
           this.quarantinePluginLifecycle(manifest.id, err.message);
         }
@@ -1264,6 +1246,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           await this.drainPluginHostApiOperations(manifest.id, {
             drainHostApiOperations: drainOperations,
           });
+          await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
           return "cancelled";
         }
         log.error(`start during addPlugin failed: %s`, (err as Error).message);
@@ -1273,259 +1256,96 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         await this.drainPluginHostApiOperations(manifest.id, {
           drainHostApiOperations: drainOperations,
         });
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
         return "failed";
       }
     }
     if (!canCommit()) {
       deactivate();
+      hostEffects.discard();
       await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
       this.runDisposerList(disposers, "stale add commit");
       await this.drainPluginHostApiOperations(manifest.id, {
         drainHostApiOperations: drainOperations,
       });
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
       return "cancelled";
     }
     for (const toolName of methods.keys()) {
-      if (this.methodMap.has(toolName)) {
+      const owner = this.methodMap.get(toolName)?.pluginId;
+      if (owner && owner !== manifest.id) {
         deactivate();
+        hostEffects.discard();
         await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
         this.runDisposerList(disposers, "duplicate add method");
         await this.drainPluginHostApiOperations(manifest.id, {
           drainHostApiOperations: drainOperations,
         });
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
         throw new Error(`Duplicate plugin method registered: ${toolName}`);
       }
     }
-    for (const [toolName, handler] of methods) {
-      this.methodMap.set(toolName, { pluginId: manifest.id, handler });
-    }
-
     if (manifest.keywords && manifest.keywords.length > 0) {
       hostApi.registerKeywords(manifest.keywords);
     }
-
-    commit();
-    this.plugins.set(manifest.id, {
+    const candidate: PluginRuntimeGenerationProjection = Object.freeze({
+      activationId,
+      installId: this.requirePluginInstallClaim(manifest.id),
       manifest,
-      pluginRoot,
+      pluginRoot: runtimeRoot,
       instance,
-      methods,
-      approvedPluginAccess,
-      started: true,
+      methods: new Map(methods),
+      ...(approvedPluginAccess ? { approvedPluginAccess } : {}),
+      hostEffects,
+      disposers,
       deactivateHostApi: deactivate,
       drainHostApiOperations: drainOperations,
       lifecycleHookScope,
     });
-    this.disposers.set(manifest.id, disposers);
-    this.markPluginUiRevision(manifest.id);
-    this.failedPluginIds.delete(manifest.id);
-    this.loadFailureInfo.delete(manifest.id);
-    this.disabledPluginIds.delete(manifest.id);
+    commit();
+    try {
+      await generationLifecycle.replaceRuntime(candidate);
+    } catch (error) {
+      deactivate();
+      if (hostEffects.isPreparing()) hostEffects.discard();
+      await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
+      this.runDisposerList(disposers, "failed add publication");
+      await this.drainPluginHostApiOperations(manifest.id, {
+        drainHostApiOperations: drainOperations,
+      });
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+      throw error;
+    }
     this.inactivePluginIds.delete(manifest.id);
-
     this.perf.recordStartup(manifest.id, startupMs);
     this.onEnable?.(manifest.id);
     return "started";
   }
 
-  /**
-   * I2 — Plugin live-reload (dev only).
-   */
+  /** I2 — Plugin live-reload (dev only). */
   async reloadPlugin(pluginId: string): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
-    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
-    return withPluginInstallLock(canonicalPluginId, () =>
-      this.reloadPluginLocked(pluginId, canonicalPluginId)
-    );
-  }
-
-  private async reloadPluginLocked(
-    pluginId: string,
-    canonicalPluginId: string,
-  ): Promise<void> {
-    const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
-    this.pendingRestartPreparations.delete(canonicalPluginId);
-    const isCurrent = () =>
-      this.isPluginLifecycleOperationCurrent(canonicalPluginId, generation);
-    const plugin = this.plugins.get(canonicalPluginId);
-    if (!plugin) {
-      throw new Error(`Plugin not loaded: ${pluginId}`);
+    this.requireGenerationLifecycle("plugin reload");
+    const pendingRestart = this.pendingRestarts.get(canonicalPluginId);
+    if (pendingRestart) {
+      this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+      await pendingRestart;
     }
-    const { manifest, pluginRoot } = plugin;
-
-    const previousStopped = await this.stopAfterStartFailure(
-      canonicalPluginId,
-      plugin.instance,
-      plugin.lifecycleHookScope,
-    );
-    plugin.deactivateHostApi?.();
-
-    if (plugin) {
-      for (const method of plugin.methods.keys()) {
-        this.methodMap.delete(method);
-      }
-    }
-    this.plugins.delete(canonicalPluginId);
-    this.runPluginDisposers(canonicalPluginId, "reload");
-
-    const operationsDrained = await this.drainPluginHostApiOperations(
-      canonicalPluginId,
-      plugin,
-    );
-
-    this.onDisable?.(canonicalPluginId);
-
-    if (!previousStopped || !operationsDrained) {
-      this.markFailed(canonicalPluginId);
-      throw new Error(
-        `reloadPlugin blocked because the previous instance did not stop cleanly: ${canonicalPluginId}`,
-      );
-    }
-
-    const entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
-    const resolvedEntryPath = resolveRealEntryPath(entryPath);
-    // cache-bust for dev reload
-    const createPlugin = await this.importPluginFactoryForLifecycle(
-      canonicalPluginId,
-      resolvedEntryPath,
-      true,
-    );
-    if (!isCurrent()) {
-      throw new Error(`reloadPlugin cancelled for ${canonicalPluginId}`);
-    }
-    if (!createPlugin) {
-      throw new Error(`Plugin entry does not export default/createPlugin: ${canonicalPluginId}`);
-    }
-
-    const pluginDataDir = this.ensureDataDir(canonicalPluginId, pluginRoot);
-    const { hostApi, disposers, deactivate, drainOperations, commit, lifecycleHookScope } =
-      this.buildHostApiIncarnation(canonicalPluginId, manifest, pluginDataDir);
-    let instance: RuntimePlugin;
-    try {
-      instance = await runPluginFactoryWithTimeout(
-        () => this.runPluginLifecycleHook(
-          lifecycleHookScope,
-          () => createPlugin(
-            buildPluginContext({
-              pluginId: canonicalPluginId,
-              pluginRoot,
-              hostRoot: this.hostRoot,
-              pluginDataDir,
-              manifest,
-              configOverrides: this.configOverrides,
-              hostApi,
-            }),
-          ),
-        ),
-        async (lateInstance) => {
-          deactivate();
-          await this.stopAfterStartFailure(
-            canonicalPluginId,
-            lateInstance,
-            lifecycleHookScope,
-          );
-        },
-      );
-    } catch (err) {
-      deactivate();
-      if (err instanceof PluginFactoryTimeoutError) {
-        this.quarantinePluginLifecycle(canonicalPluginId, err.message);
-      }
-      this.runDisposerList(disposers, "failed reload factory");
-      await this.drainPluginHostApiOperations(canonicalPluginId, {
-        drainHostApiOperations: drainOperations,
-      });
-      if (isCurrent()) {
-        this.markFailed(canonicalPluginId);
-        this.onDisable?.(canonicalPluginId);
-      }
-      throw err;
-    }
-    if (!isCurrent()) {
-      deactivate();
-      await this.stopAfterStartFailure(canonicalPluginId, instance, lifecycleHookScope);
-      this.runDisposerList(disposers, "stale reload factory");
-      await this.drainPluginHostApiOperations(canonicalPluginId, {
-        drainHostApiOperations: drainOperations,
-      });
-      throw new Error(`reloadPlugin cancelled for ${canonicalPluginId}`);
-    }
-
-    const methods = buildMethodMap(manifest, instance, (toolName) =>
-      log.warn(`missing handler '${toolName}' after reload — tool disabled`),
-    );
-    try {
-      if (instance.start) {
-        await runStartWithTimeout(
-          () => this.runPluginLifecycleHook(
-            lifecycleHookScope,
-            instance.start!.bind(instance),
-          ),
-          manifest.startupTimeoutMs,
-        );
-      }
-    } catch (err) {
-      deactivate();
-      if (err instanceof PluginStartupTimeoutError) {
-        this.quarantinePluginLifecycle(canonicalPluginId, err.message);
-      }
-      log.error(`start after reload failed: %s`, (err as Error).message);
-      this.runDisposerList(disposers, "failed reload start");
-      await this.drainPluginHostApiOperations(canonicalPluginId, {
-        drainHostApiOperations: drainOperations,
-      });
-      await this.stopAfterStartFailure(canonicalPluginId, instance, lifecycleHookScope);
-      if (isCurrent()) {
-        this.markFailed(canonicalPluginId);
-        this.onDisable?.(canonicalPluginId);
-      }
-      throw err;
-    }
-    if (!isCurrent()) {
-      deactivate();
-      await this.stopAfterStartFailure(canonicalPluginId, instance, lifecycleHookScope);
-      this.runDisposerList(disposers, "stale reload start");
-      await this.drainPluginHostApiOperations(canonicalPluginId, {
-        drainHostApiOperations: drainOperations,
-      });
-      throw new Error(`reloadPlugin cancelled for ${canonicalPluginId}`);
-    }
-    for (const [toolName, handler] of methods) {
-      this.methodMap.set(toolName, { pluginId: canonicalPluginId, handler });
-    }
-    if (manifest.keywords && manifest.keywords.length > 0) {
-      hostApi.registerKeywords(manifest.keywords);
-    }
-    commit();
-    this.plugins.set(canonicalPluginId, {
-      manifest,
-      pluginRoot,
-      instance,
-      methods,
-      approvedPluginAccess:
-        plugin.approvedPluginAccess ?? this.knownPluginAccessGrants.get(canonicalPluginId),
-      started: true,
-      deactivateHostApi: deactivate,
-      drainHostApiOperations: drainOperations,
-      lifecycleHookScope,
+    const result = await this.restartPlugin(canonicalPluginId, {
+      skipPreparation: true,
+      throwOnFailure: true,
     });
-    this.disposers.set(canonicalPluginId, disposers);
-    this.markPluginUiRevision(canonicalPluginId);
-    this.onEnable?.(canonicalPluginId);
+    if (result !== "started") {
+      throw new Error(
+        `reloadPlugin failed for ${canonicalPluginId}: ${result ?? "not-loaded"}`,
+      );
+    }
   }
 
-  /**
-   * Disable a loaded plugin at runtime.
-   */
+  /** Disable a loaded plugin at runtime. */
   async disable(pluginId: string, actor: Actor = "user"): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
-    if (this.deploymentGuard) {
-      const result = await this.deploymentGuard.canDisable(pluginId, actor);
-      if (!result.allowed) {
-        throw new Error(result.reason ?? `Plugin disable denied: ${pluginId}`);
-      }
-    }
     this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
     return withPluginInstallLock(canonicalPluginId, () =>
       this.disableLocked(pluginId, canonicalPluginId, actor)
@@ -1547,51 +1367,230 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.beginPluginLifecycleOperation(canonicalPluginId);
     this.preparation.clearFor(canonicalPluginId);
 
-    const plugin = this.plugins.get(canonicalPluginId);
-    if (!plugin) {
+    if (!this.plugins.has(canonicalPluginId)) {
       throw new Error(`Plugin not loaded: ${pluginId}`);
     }
 
-    // Durable state is the source of truth. Do not tear down the live plugin
-    // until the registry transaction commits successfully.
-    if (this.registryPath) {
+    const generationLifecycle = this.requireGenerationLifecycle("plugin disable");
+    const { retirement } = await generationLifecycle.deactivateWithCommit(canonicalPluginId, async () => {
+      if (!this.registryPath) return;
       await updatePluginRegistry(this.registryPath, (registry) => {
         const aliases = new Set([
           canonicalPluginId,
           ...(this.knownInstallAliases.get(canonicalPluginId) ?? []),
         ]);
-        const entry = registry.plugins.find((p) => aliases.has(p.id));
+        const entry = registry.plugins.find((candidate) => aliases.has(candidate.id));
         if (entry) entry.enabled = false;
       });
-    }
+    });
 
-    const stopped = await this.stopAfterStartFailure(
-      canonicalPluginId,
-      plugin.instance,
-      plugin.lifecycleHookScope,
-    );
-    plugin.deactivateHostApi?.();
-
-    for (const method of plugin.methods.keys()) {
-      this.methodMap.delete(method);
-    }
-    this.plugins.delete(canonicalPluginId);
-
-    this.runPluginDisposers(canonicalPluginId, "disable");
-    const operationsDrained = await this.drainPluginHostApiOperations(
-      canonicalPluginId,
-      plugin,
-    );
     this.disabledPluginIds.add(canonicalPluginId);
     this.failedPluginIds.delete(canonicalPluginId);
-    this.pluginUiRevisions.delete(canonicalPluginId);
-
+    this.invalidatePluginUiRevision(canonicalPluginId);
     this.onDisable?.(canonicalPluginId);
-    if (!stopped || !operationsDrained) {
-      throw new Error(
-        `disable completed with a quarantined plugin lifecycle: ${canonicalPluginId}`,
-      );
+    await this.settleCommittedRetirement(canonicalPluginId, retirement, "plugin disable");
+  }
+
+  /** Prepare and atomically publish one immutable marketplace generation. */
+  async activatePreparedArtifact<T>(
+    input: PreparedArtifactRuntimeActivationInput<T>,
+  ): Promise<CommittedPluginGeneration<T>> {
+    const generationLifecycle = this.requireGenerationLifecycle("prepared artifact activation");
+    if (!this.installReceiptCacheRoot) throw new Error("prepared artifact activation requires installReceiptCacheRoot");
+    const manifestRaw = await readFile(resolve(input.pluginRoot, "plugin.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as PluginManifest;
+    if (manifest.id !== input.manifest.id || manifest.version !== input.manifest.version) {
+      throw new Error(`prepared artifact manifest identity changed for '${input.manifest.id}'`);
     }
+    return this.withPreparedInstallIdentity(manifest.id, input.installId, async (installId) => {
+    const candidateRegistryEntry = this.validatePreparedRegistryEntry(manifest, input.registryEntry);
+    const activationId = randomUUID();
+    const artifactGenerationId = createHash("sha256")
+      .update(manifestRaw)
+      .update("\0")
+      .update(input.receiptRaw)
+      .digest("hex");
+    const generationId = createHash("sha256")
+      .update(artifactGenerationId)
+      .update("\0")
+      .update(activationId)
+      .digest("hex");
+    const payloadRoot = await materializePluginGenerationRoot(
+      input.pluginRoot,
+      this.installReceiptCacheRoot!,
+      manifest.id,
+      generationId,
+      input.receiptRaw,
+      installId,
+    );
+    let createPlugin: RuntimePluginFactory | undefined;
+    try {
+      const entryPath = this.resolveEntryPathForPlugin(payloadRoot, manifest.entry);
+      createPlugin = await this.importPluginFactoryForLifecycle(
+        manifest.id,
+        resolveRealEntryPath(entryPath),
+        true,
+      );
+    } catch (error) {
+      await removeRetainedPluginGeneration(
+        this.installReceiptCacheRoot!,
+        manifest.id,
+        generationId,
+      );
+      throw error;
+    }
+    if (!createPlugin) {
+      await removeRetainedPluginGeneration(
+        this.installReceiptCacheRoot!,
+        manifest.id,
+        generationId,
+      );
+      throw new Error(`prepared artifact '${manifest.id}' has no default/createPlugin export`);
+    }
+    const hostEffects = new HostApiGenerationScope(manifest.id);
+    let pluginDataDir: string;
+    let hostApiIncarnation: ReturnType<PluginRuntimeLifecycle["buildHostApiIncarnation"]>;
+    try {
+      pluginDataDir = this.ensureDataDir(manifest.id, payloadRoot);
+      hostApiIncarnation = this.buildHostApiIncarnation(
+        manifest.id,
+        manifest,
+        pluginDataDir,
+        hostEffects,
+        installId,
+        candidateRegistryEntry,
+      );
+    } catch (error) {
+      hostEffects.discard();
+      await removeRetainedPluginGeneration(
+        this.installReceiptCacheRoot!,
+        manifest.id,
+        generationId,
+      );
+      throw error;
+    }
+    const {
+      hostApi,
+      disposers,
+      deactivate,
+      drainOperations,
+      commit,
+      lifecycleHookScope,
+    } = hostApiIncarnation;
+    let instance: RuntimePlugin | undefined;
+    try {
+      instance = await runPluginFactoryWithTimeout(
+        () => this.runPluginLifecycleHook(
+          lifecycleHookScope,
+          () => createPlugin(buildPluginContext({
+            pluginId: manifest.id,
+            pluginRoot: payloadRoot,
+            hostRoot: this.hostRoot,
+            pluginDataDir,
+            manifest,
+            configOverrides: this.configOverrides,
+            hostApi,
+          })),
+        ),
+        async (lateInstance) => {
+          deactivate();
+          await this.stopAfterStartFailure(manifest.id, lateInstance, lifecycleHookScope);
+        },
+      );
+      const methods = buildMethodMap(manifest, instance, (toolName) =>
+        plog(
+          "warn",
+          { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" },
+          "tool disabled — missing handler in prepared artifact",
+        ),
+      );
+      if (manifest.keywords && manifest.keywords.length > 0) {
+        hostApi.registerKeywords(manifest.keywords);
+      }
+      if (instance.start) {
+        await runStartWithTimeout(
+          () => this.runPluginLifecycleHook(
+            lifecycleHookScope,
+            instance!.start!.bind(instance),
+          ),
+          manifest.startupTimeoutMs,
+        );
+      }
+      const projection: PluginRuntimeGenerationProjection = Object.freeze({
+        activationId,
+        installId,
+        manifest,
+        pluginRoot: payloadRoot,
+        instance,
+        methods: new Map(methods),
+        ...(input.approvedPluginAccess ? { approvedPluginAccess: input.approvedPluginAccess } : {}),
+        hostEffects,
+        disposers,
+        deactivateHostApi: deactivate,
+        drainHostApiOperations: drainOperations,
+        lifecycleHookScope,
+      });
+      commit();
+      const result = await generationLifecycle.replaceRuntimeWithCommit(
+        projection,
+        input.receiptRaw,
+        input.durableCommit,
+      );
+      this.onEnable?.(manifest.id);
+      return result;
+    } catch (error) {
+      if (
+        error instanceof PluginFactoryTimeoutError
+        || error instanceof PluginStartupTimeoutError
+      ) {
+        this.quarantinePluginLifecycle(manifest.id, error.message);
+      }
+      const committed = generationLifecycle.getActive(manifest.id)?.generationId === generationId;
+      if (!committed) {
+        deactivate();
+        if (hostEffects.isPreparing()) hostEffects.discard();
+        if (instance) {
+          await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
+        }
+        this.runDisposerList(disposers, "failed prepared artifact activation");
+        await this.drainPluginHostApiOperations(manifest.id, {
+          drainHostApiOperations: drainOperations,
+        });
+        await removeRetainedPluginGeneration(
+          this.installReceiptCacheRoot!,
+          manifest.id,
+          generationId,
+        );
+      }
+      throw error;
+    }
+    });
+  }
+
+  async removePluginWithCommit<T>(
+    pluginId: string,
+    durableCommit: () => Promise<T>,
+  ): Promise<T> {
+    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    const generationLifecycle = this.requireGenerationLifecycle("atomic plugin removal");
+    return generationLifecycle.runInLifecycleQueue(canonicalPluginId, () =>
+      commitAtomicPluginRemoval({
+        requestedPluginId: pluginId,
+        loaded: this.plugins.has(canonicalPluginId),
+        known: this.hasTrackedPluginState(canonicalPluginId),
+        hasActiveGeneration: () => Boolean(generationLifecycle.getActive(canonicalPluginId)),
+        durableCommit,
+        deactivateWithCommit: () =>
+          generationLifecycle.deactivateWithCommit(canonicalPluginId, durableCommit),
+        captureRetirementFailure: (retirement) =>
+          this.captureCommittedRetirementFailure(
+            canonicalPluginId,
+            retirement,
+            "atomic plugin removal",
+          ),
+        purgeRuntimeState: () => this.removePlugin(canonicalPluginId),
+      }),
+    );
   }
 
   // ─── Dispatcher / Bridge ───────────────────────────────────────────────────

@@ -12,7 +12,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
-import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "./test-helpers.js";
 import { PluginPhase } from "../lifecycle-log.js";
 import {
   emitPluginConfigChange,
@@ -163,7 +163,6 @@ describe("US-3c.2 — PluginRuntime.restartPlugin", () => {
     ]);
 
     const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -191,7 +190,6 @@ describe("US-3c.2 — PluginRuntime.restartPlugin", () => {
     const mpA = await writeFakePlugin("plugin-a");
     await writeRegistry([{ id: "plugin-a", manifestPath: mpA, enabled: true }]);
     const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -219,7 +217,6 @@ describe("US-3c.2 — PluginRuntime.restartPlugin", () => {
       { id: "plugin-b", manifestPath: mpB, enabled: true },
     ]);
     const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
