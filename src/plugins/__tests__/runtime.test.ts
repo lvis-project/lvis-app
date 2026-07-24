@@ -10,14 +10,19 @@ import {
   makeTestPluginEntrySource,
   makeTestPluginRuntime,
   bindTestPluginRuntimeGeneration,
+  createTestHostApiFactory,
   writeTestPlugin,
   writeTestPluginRegistry,
 } from "./test-helpers.js";
 
 function makeGenerationBoundRuntime(
-  options: ConstructorParameters<typeof PluginRuntime>[0],
+  options: Omit<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi">
+    & Partial<Pick<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi">>,
 ): PluginRuntime {
-  return bindTestPluginRuntimeGeneration(new PluginRuntime(options));
+  return bindTestPluginRuntimeGeneration(new PluginRuntime({
+    ...options,
+    createHostApi: createTestHostApiFactory(options.createHostApi),
+  }));
 }
 
 /**

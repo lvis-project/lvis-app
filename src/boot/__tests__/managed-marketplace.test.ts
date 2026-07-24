@@ -50,7 +50,10 @@ describe("runManagedBootstrap concurrency", () => {
     );
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
     const activatePreparedArtifact = vi.fn();
-    const pluginRuntime = { activatePreparedArtifact } as unknown as PluginRuntime;
+    const pluginRuntime = {
+      activatePreparedArtifact,
+      cancelAllPendingRestarts: vi.fn(),
+    } as unknown as PluginRuntime;
 
     const input = {
       pluginMarketplace,
@@ -86,7 +89,10 @@ describe("runManagedBootstrap concurrency", () => {
     const ensureManagedInstalled = vi.fn(async () => ensureResult);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
     const activatePreparedArtifact = vi.fn();
-    const pluginRuntime = { activatePreparedArtifact } as unknown as PluginRuntime;
+    const pluginRuntime = {
+      activatePreparedArtifact,
+      cancelAllPendingRestarts: vi.fn(),
+    } as unknown as PluginRuntime;
 
     await runManagedBootstrap({
       pluginMarketplace,
@@ -108,7 +114,10 @@ describe("runManagedBootstrap concurrency", () => {
     const ensureResult = { installed: [], failed: [] };
     const ensureManagedInstalled = vi.fn(async () => ensureResult);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const pluginRuntime = { activatePreparedArtifact: vi.fn() } as unknown as PluginRuntime;
+    const pluginRuntime = {
+      activatePreparedArtifact: vi.fn(),
+      cancelAllPendingRestarts: vi.fn(),
+    } as unknown as PluginRuntime;
 
     const input = {
       pluginMarketplace,

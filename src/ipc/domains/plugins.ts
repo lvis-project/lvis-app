@@ -558,6 +558,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // candidate import/start happens from immutable bytes before live payload,
     // receipt, registry, or active pointer publication.
     const pluginId = await pluginMarketplace.resolveLocalInstallPluginId(filePaths[0]);
+    pluginRuntime.cancelPendingRestart(pluginId);
     return await withPluginInstallLock(pluginId, async () => {
       try {
         const result = await pluginMarketplace.installLocal(filePaths[0], {

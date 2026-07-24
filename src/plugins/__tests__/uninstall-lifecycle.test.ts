@@ -9,6 +9,11 @@ import { withPluginInstallLock } from "../install-lifecycle.js";
 function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
   const pluginRuntime = {
     resolvePluginId: vi.fn((requestedPluginId: string) => requestedPluginId),
+    resolvePluginInstallId: vi.fn((requestedPluginId: string) => requestedPluginId),
+    resolvePluginInstallIdIfKnown: vi.fn(
+      (requestedPluginId: string) => requestedPluginId,
+    ),
+    cancelPendingRestart: vi.fn(),
     clearConfigOverride: vi.fn(),
     getPluginManifest: vi.fn(() => ({
       configSchema: {

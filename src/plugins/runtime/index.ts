@@ -26,6 +26,7 @@ import { createPluginStorage } from "../storage.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
 import { installReceiptPath } from "../plugin-install-receipt.js";
 import type { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
+import { withResolvedPluginInstallLocks } from "../install-lifecycle.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { updatePluginRegistry } from "../registry.js";
@@ -249,7 +250,7 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** Plugin-scoped HostApi factory — injected by boot.ts */
-  createHostApi?: (
+  createHostApi: (
     pluginId: string,
     manifest: PluginManifest,
     pluginDataDir: string,
@@ -298,6 +299,21 @@ export interface PluginRuntimeOptions {
 }
 
 export class PluginRuntime extends PluginRuntimeLifecycle {
+  /** Release a same-plugin lifecycle lock held by dependency preparation. */
+  cancelPendingRestart(pluginId: string): void {
+    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    this.pendingRestartPreparations.delete(canonicalPluginId);
+  }
+
+  /** Release all pending per-plugin restarts before queuing a global mutation. */
+  cancelAllPendingRestarts(): void {
+    for (const cancellation of this.pendingRestartCancellations.values()) {
+      cancellation.cancel();
+    }
+    this.pendingRestartPreparations.clear();
+  }
+
   setToolInvocationDelegate(delegate: PluginToolInvocationDelegate): void {
     this.toolInvocationDelegate = delegate;
   }
@@ -728,7 +744,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * per-turn `resolveToolScope` gate read it without touching disk.
    */
   isPluginEnabled(pluginId: string): boolean {
-    return !this.inactivePluginIds.has(pluginId);
+    return !this.inactivePluginIds.has(this.resolveKnownPluginId(pluginId));
   }
 
   /**
@@ -774,94 +790,153 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * before its registry commit and generation publication linearize together.
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
-    const generationLifecycle = this.requireGenerationLifecycle("plugin enabled-state change");
-    await generationLifecycle.runInLifecycleQueue(pluginId, async () => {
-      if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
-        throw new Error(`Plugin not found: ${pluginId}`);
-      }
-      if (!this.inactivePluginIds.has(pluginId) === enabled) return;
-      const persist = async (): Promise<void> => {
-        if (this.registryPath) {
-          await updatePluginRegistry(this.registryPath, (registry) => {
-            const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
-            if (!entry) throw new Error(`Plugin not found in registry: ${pluginId}`);
-            entry.enabled = enabled;
-          });
-        }
-      };
-      let retirementError: unknown;
-      if (!enabled) {
-        if (!generationLifecycle.getActive(pluginId)) {
-          throw new Error(`cannot disable plugin without an active generation: ${pluginId}`);
-        }
-        const { retirement } = await generationLifecycle.deactivateWithCommit(pluginId, persist);
-        this.inactivePluginIds.add(pluginId);
-        this.disabledPluginIds.add(pluginId);
-        retirementError = await this.captureCommittedRetirementFailure(
+    // A restart may own the already-known canonical lock while dependency
+    // preparation is still pending. Cancel it before admission; the retry
+    // callback below only runs after an initial lock has been acquired.
+    this.cancelPendingRestart(this.resolveKnownPluginId(pluginId));
+    return withResolvedPluginInstallLocks(
+      () => {
+        const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+        const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+        return [
           pluginId,
-          retirement,
-          "plugin enabled-state disable",
+          canonicalPluginId,
+          ...(typeof installClaim === "string" ? [installClaim] : []),
+        ];
+      },
+      async () => {
+        const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+        if (
+          !this.knownPluginManifests.has(canonicalPluginId)
+          && !this.plugins.has(canonicalPluginId)
+        ) {
+          throw new Error(`Plugin not found: ${pluginId}`);
+        }
+        const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+        if (installClaim === undefined) {
+          throw new Error(`Plugin install provenance unknown: ${pluginId}`);
+        }
+        const generationLifecycle = this.requireGenerationLifecycle(
+          "plugin enabled-state change",
         );
-      } else {
-        if (generationLifecycle.getActive(pluginId)) {
-          throw new Error(`cannot re-enable plugin while a generation is active: ${pluginId}`);
-        }
-        if (!this.installReceiptCacheRoot) {
-          throw new Error("plugin re-enable requires installReceiptCacheRoot");
-        }
-        const loadPlan = await this.resolveManifestLoadPlanInternal();
-        const targetPlan = loadPlan.find((plan) =>
-          plan.pluginIdHint === pluginId || this.matchesManifestPath(plan.manifestPath, pluginId));
-        if (!targetPlan) throw new Error(`Plugin not found in registry: ${pluginId}`);
-        const manifest = await this.readManifest(targetPlan.manifestPath);
-        if (manifest.id !== pluginId) {
-          throw new Error(`plugin re-enable manifest identity changed: expected ${pluginId}, got ${manifest.id}`);
-        }
-        const pluginRoot = dirname(targetPlan.manifestPath);
-        const integrity = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
-        if (!integrity.ok) {
-          throw new Error(`plugin re-enable receipt verification failed: ${pluginId}`);
-        }
-        const receiptRaw = await readFile(
-          installReceiptPath(this.installReceiptCacheRoot, pluginId),
-          "utf8",
-        );
-        await this.activatePreparedArtifact({
-          pluginRoot,
-          manifest,
-          receiptRaw,
-          approvedPluginAccess: targetPlan.approvedPluginAccess ?? this.knownPluginAccessGrants.get(pluginId),
-          durableCommit: persist,
+        await generationLifecycle.runInLifecycleQueue(canonicalPluginId, async () => {
+          if (!this.inactivePluginIds.has(canonicalPluginId) === enabled) return;
+          const persist = async (): Promise<void> => {
+            // Static manifests have no registry row, so their active toggle is
+            // session-local. Registry installs persist through their raw install id.
+            if (this.registryPath && installClaim !== null) {
+              await updatePluginRegistry(this.registryPath, (registry) => {
+                const entry = registry.plugins.find(({ id }) => id === installClaim);
+                if (!entry) {
+                  throw new Error(`Plugin not found in registry: ${installClaim}`);
+                }
+                entry.enabled = enabled;
+              });
+            }
+          };
+
+          let retirementError: unknown;
+          if (!enabled) {
+            if (!generationLifecycle.getActive(canonicalPluginId)) {
+              throw new Error(
+                `cannot disable plugin without an active generation: ${canonicalPluginId}`,
+              );
+            }
+            const { retirement } = await generationLifecycle.deactivateWithCommit(
+              canonicalPluginId,
+              persist,
+            );
+            this.inactivePluginIds.add(canonicalPluginId);
+            this.disabledPluginIds.add(canonicalPluginId);
+            retirementError = await this.captureCommittedRetirementFailure(
+              canonicalPluginId,
+              retirement,
+              "plugin enabled-state disable",
+            );
+          } else {
+            if (generationLifecycle.getActive(canonicalPluginId)) {
+              throw new Error(
+                `cannot re-enable plugin while a generation is active: ${canonicalPluginId}`,
+              );
+            }
+            if (!this.installReceiptCacheRoot) {
+              throw new Error("plugin re-enable requires installReceiptCacheRoot");
+            }
+            const loadPlan = await this.resolveManifestLoadPlanInternal();
+            const targetPlan = loadPlan.find((plan) =>
+              plan.pluginIdHint === canonicalPluginId
+              || (installClaim !== null && plan.pluginIdHint === installClaim)
+              || this.matchesManifestPath(plan.manifestPath, canonicalPluginId)
+            );
+            if (!targetPlan) {
+              throw new Error(`Plugin not found in registry: ${canonicalPluginId}`);
+            }
+            const manifest = await this.readManifest(targetPlan.manifestPath);
+            if (manifest.id !== canonicalPluginId) {
+              throw new Error(
+                `plugin re-enable manifest identity changed: expected ${canonicalPluginId}, got ${manifest.id}`,
+              );
+            }
+            const pluginRoot = dirname(targetPlan.manifestPath);
+            const integrity = await this.verifyReceiptAndDevGuard(
+              canonicalPluginId,
+              pluginRoot,
+            );
+            if (!integrity.ok) {
+              throw new Error(
+                `plugin re-enable receipt verification failed: ${canonicalPluginId}`,
+              );
+            }
+            const receiptRaw = await readFile(
+              installReceiptPath(this.installReceiptCacheRoot, canonicalPluginId),
+              "utf8",
+            );
+            await this.activatePreparedArtifact({
+              pluginRoot,
+              manifest,
+              receiptRaw,
+              approvedPluginAccess:
+                targetPlan.approvedPluginAccess
+                ?? this.knownPluginAccessGrants.get(canonicalPluginId),
+              durableCommit: persist,
+            });
+            this.inactivePluginIds.delete(canonicalPluginId);
+            this.disabledPluginIds.delete(canonicalPluginId);
+          }
+
+          // The generation pointer and durable registry are already committed.
+          // Keep this runtime view aligned even if a downstream host projection
+          // callback reports a post-commit fault; later requests must queue behind
+          // that callback and observe the committed state.
+          let callbackError: unknown;
+          try {
+            await this.onActiveStateChange?.(canonicalPluginId, enabled);
+          } catch (error) {
+            callbackError = error;
+          }
+          if (retirementError !== undefined && callbackError !== undefined) {
+            throw new AggregateError(
+              [
+                retirementError instanceof Error
+                  ? retirementError
+                  : new Error(String(retirementError)),
+                callbackError instanceof Error
+                  ? callbackError
+                  : new Error(String(callbackError)),
+              ],
+              `plugin '${canonicalPluginId}' committed disable cleanup failed`,
+            );
+          }
+          if (retirementError !== undefined) throw retirementError;
+          if (callbackError !== undefined) throw callbackError;
         });
-        this.inactivePluginIds.delete(pluginId);
-        this.disabledPluginIds.delete(pluginId);
-      }
-      // The generation pointer and durable registry are already committed.
-      // Keep this runtime view aligned even if a downstream host projection
-      // callback reports a post-commit fault; later requests must queue behind
-      // that callback and observe the committed state.
-      let callbackError: unknown;
-      try {
-        await this.onActiveStateChange?.(pluginId, enabled);
-      } catch (error) {
-        callbackError = error;
-      }
-      if (retirementError !== undefined && callbackError !== undefined) {
-        throw new AggregateError(
-          [
-            retirementError instanceof Error
-              ? retirementError
-              : new Error(String(retirementError)),
-            callbackError instanceof Error
-              ? callbackError
-              : new Error(String(callbackError)),
-          ],
-          `plugin '${pluginId}' committed disable cleanup failed`,
-        );
-      }
-      if (retirementError !== undefined) throw retirementError;
-      if (callbackError !== undefined) throw callbackError;
-    });
+      },
+      (pluginIds) => {
+        for (const discoveredPluginId of pluginIds) {
+          this.cancelPendingRestart(discoveredPluginId);
+        }
+      },
+    );
   }
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
@@ -871,6 +946,23 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   /** Canonical lifecycle identity for a marketplace/install alias. */
   resolvePluginId(pluginId: string): string {
     return this.resolveKnownPluginId(pluginId);
+  }
+
+  /** Raw registry identity for a canonical/alias plugin id; null for static roots. */
+  resolvePluginInstallId(pluginId: string): string | null {
+    const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+    if (installClaim === undefined) {
+      throw new Error(`Plugin install provenance unknown: ${pluginId}`);
+    }
+    return installClaim;
+  }
+
+  /** Registry/static provenance when known; undefined for a fresh identity. */
+  resolvePluginInstallIdIfKnown(
+    pluginId: string,
+  ): string | null | undefined {
+    return this.getPluginInstallClaim(this.resolveKnownPluginId(pluginId));
   }
 
   /** Final uninstall cleanup after stop-hook mutations have drained. */

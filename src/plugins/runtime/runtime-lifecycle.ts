@@ -10,8 +10,6 @@ import type {
 } from "../types.js";
 import type { Actor } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
-import { isDevModeUnlocked } from "../../boot/dev-flags.js";
-import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 import type {
   CommittedPluginGeneration,
@@ -46,7 +44,17 @@ import {
 } from "./plugin-loader.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
-import { PluginRuntimeState, type RestartPluginResult } from "./runtime-state.js";
+import {
+  hasExclusivePluginLifecycleMutation,
+  isPluginInstallLockHeld,
+  withAllPluginInstallLocks,
+  withPluginInstallLock,
+} from "../install-lifecycle.js";
+import {
+  PluginRuntimeState,
+  type PendingRestartCancellation,
+  type RestartPluginResult,
+} from "./runtime-state.js";
 import type { PreparedArtifactRuntimeActivationInput } from "./index.js";
 import {
   preflightPluginLoadPlan,
@@ -104,6 +112,15 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
     }
     const preflight = await this.preflightBootLoadPlan(loadPlan);
+    this.assertPluginIdentityNamespace(
+      preflight
+        .filter((outcome) => outcome.ok)
+        .map((outcome) => ({
+          pluginId: outcome.manifest.id,
+          alias: outcome.plan.pluginIdHint,
+        })),
+      loadPlan.flatMap((plan) => plan.pluginIdHint ? [plan.pluginIdHint] : []),
+    );
     const enabledManifestSnapshots = new Map<string, ManifestSnapshot>();
     for (const outcome of preflight) {
       if (
@@ -474,6 +491,14 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
   async restartAll(): Promise<void> {
     this.requireGenerationLifecycle("plugin restartAll");
+    // Cancel dependency-held plugin locks before the global mutation queues.
+    for (const cancellation of this.pendingRestartCancellations.values()) {
+      cancellation.cancel();
+    }
+    return withAllPluginInstallLocks(() => this.restartAllLocked());
+  }
+
+  private async restartAllLocked(): Promise<void> {
     const lifecycleIds = new Set([
       ...this.plugins.keys(),
       ...this.pendingRestarts.keys(),
@@ -482,8 +507,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     for (const pluginId of lifecycleIds) this.beginPluginLifecycleOperation(pluginId);
     await Promise.allSettled([...this.pendingRestarts.values()]);
     const loadPlan = await this.resolveManifestLoadPlanInternal();
-    const snapshots = await this.readSnapshotsInternal(loadPlan);
-    const targetIds = new Set(snapshots.keys());
+    const currentIdentities = await this.assertCurrentPluginIdentityLoadPlan(loadPlan);
+    const targetIds = new Set(
+      currentIdentities
+        .filter(({ plan }) => plan.enabled)
+        .map(({ snapshot }) => snapshot.manifest.id),
+    );
     for (const pluginId of [...this.plugins.keys()]) {
       if (!targetIds.has(pluginId)) await this.removePlugin(pluginId);
     }
@@ -497,21 +526,45 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
   }
 
-  /**
-   * US-3c.2 — Targeted single-plugin restart.
-   */
+  /** US-3c.2 — Targeted single-plugin restart. */
   async restartPlugin(
     pluginId: string,
     opts: { skipPreparation?: boolean; throwOnFailure?: boolean } = {},
   ): Promise<RestartPluginResult> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
+    if (
+      hasExclusivePluginLifecycleMutation()
+      && !isPluginInstallLockHeld(canonicalPluginId)
+    ) {
+      log.warn(
+        `restartPlugin rejected while an all-plugin lifecycle mutation is queued: ${canonicalPluginId}`,
+      );
+      return "failed";
+    }
     const pending = this.pendingRestarts.get(canonicalPluginId);
     if (pending) return pending;
-    const generation = this.beginPluginLifecycleOperation(canonicalPluginId);
-    const restart = this.restartPluginInternal(canonicalPluginId, generation, opts).finally(() => {
+    const cancellation = this.createPendingRestartCancellation();
+    this.pendingRestartCancellations.set(canonicalPluginId, cancellation);
+    const restart = withPluginInstallLock(canonicalPluginId, async () => {
+      const generation = this.beginPluginLifecycleOperation(
+        canonicalPluginId,
+        cancellation,
+      );
+      cancellation.generation = generation;
+      if (cancellation.cancelled) return "failed";
+      return this.restartPluginInternal(
+        canonicalPluginId,
+        generation,
+        cancellation,
+        opts,
+      );
+    }).finally(() => {
       if (this.pendingRestarts.get(canonicalPluginId) === restart) {
         this.pendingRestarts.delete(canonicalPluginId);
+      }
+      if (this.pendingRestartCancellations.get(canonicalPluginId) === cancellation) {
+        this.pendingRestartCancellations.delete(canonicalPluginId);
       }
     });
     this.pendingRestarts.set(canonicalPluginId, restart);
@@ -521,6 +574,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
   protected async restartPluginInternal(
     pluginId: string,
     generation: number,
+    cancellation: PendingRestartCancellation,
     opts: { skipPreparation?: boolean; throwOnFailure?: boolean } = {},
   ): Promise<RestartPluginResult> {
     const generationLifecycle = this.requireGenerationLifecycle("plugin restart");
@@ -530,25 +584,34 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("warn", { pluginId, phase: PluginPhase.RESTART_REQUEST, reason: "not_loaded" }, "restart no-op — plugin not loaded");
       return undefined;
     }
-    const isCurrent = () => this.isPluginLifecycleOperationCurrent(pluginId, generation);
+    const isCurrent = () =>
+      !cancellation.cancelled
+      && this.isPluginLifecycleOperationCurrent(pluginId, generation);
 
     const loadPlan = await this.resolveManifestLoadPlanInternal();
     if (!isCurrent()) return "failed";
-    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
+    const currentIdentities = await this.assertCurrentPluginIdentityLoadPlan(loadPlan);
     if (!isCurrent()) return "failed";
-    const snapshot = enabledSnapshots.get(pluginId);
-    const targetPlan = loadPlan.find(
-      (p) =>
-        p.pluginIdHint === pluginId ||
-        (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
-    );
+    const installClaim = this.getPluginInstallClaim(pluginId);
+    const targetIdentity = currentIdentities.find(({ plan, snapshot }) => {
+      if (snapshot.manifest.id !== pluginId) return false;
+      return installClaim === null
+        ? !plan.pluginIdHint
+          && resolve(dirname(plan.manifestPath)) === resolve(plugin.pluginRoot)
+        : plan.pluginIdHint === (installClaim ?? pluginId);
+    });
+    const snapshot = targetIdentity?.snapshot;
+    const targetPlan = targetIdentity?.plan;
     const pluginRoot = targetPlan ? dirname(targetPlan.manifestPath) : plugin.pluginRoot;
     const approvedPluginAccess =
       snapshot?.approvedPluginAccess ??
       targetPlan?.approvedPluginAccess ??
       plugin.approvedPluginAccess ??
       this.knownPluginAccessGrants.get(pluginId);
-    const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
+    const receiptPluginId = targetPlan?.pluginIdHint ?? this.getPluginInstallClaim(pluginId);
+    const integrityResult: PluginIntegrityCheckResult = receiptPluginId
+      ? await this.verifyReceiptAndDevGuard(receiptPluginId, pluginRoot)
+      : { ok: true };
     if (!isCurrent()) return "failed";
     if (!integrityResult.ok) {
       return "failed";
@@ -562,6 +625,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
       return "failed";
     }
+    this.assertPluginManifestIdentity(pluginId, manifest.id);
     const restartPlan: ManifestLoadPlan = targetPlan ?? {
       pluginIdHint: pluginId,
       manifestPath: resolve(pluginRoot, "plugin.json"),
@@ -597,7 +661,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
       if (preparation) {
         try {
-          await preparation;
+          const outcome = await Promise.race([
+            preparation.then(() => "prepared" as const),
+            cancellation.promise.then(() => "cancelled" as const),
+          ]);
+          if (outcome === "cancelled") return "failed";
         } catch (err) {
           plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
           return "failed";
@@ -621,9 +689,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       return "failed";
     }
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
-    // Cache-bust: Node ESM loader memoizes by URL — without it
-    // restart re-runs createPlugin against the OLD module's closures
-    // even when the on-disk bundle changed. Mirrors `reloadPlugin`.
+    // Cache-bust so restart imports the new bundle rather than memoized ESM.
     let createPlugin: RuntimePluginFactory | undefined;
     try {
       createPlugin = await this.importPluginFactoryForLifecycle(
@@ -797,37 +863,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     return "started";
   }
 
-  /** Live config-override view retained for compatibility and tests. */
-  protected get configOverrides(): Record<string, Record<string, unknown>> {
-    return this.configStore.all();
-  }
-
-  setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
-    this.configStore.set(pluginId, config);
-  }
-
-  mergeConfigOverride(pluginId: string, config: Record<string, unknown>): void {
-    this.configStore.merge(pluginId, config);
-  }
-
-  /** Merge host-public wildcard config without clobbering unrelated keys. */
-  setWildcardConfigOverride(config: Record<string, unknown>): void {
-    this.configStore.setWildcard(config);
-  }
-
-  /** Return a shallow copy of host-public wildcard config. */
-  getWildcardConfigOverride(): Record<string, unknown> {
-    return this.configStore.getWildcard();
-  }
-
-  /** Clear only named wildcard keys. */
-  clearWildcardConfigOverride(keys: string[]): void {
-    this.configStore.clearWildcard(keys);
-  }
-
-  /**
-   * US-A3 — Targeted single-plugin add for install / install-local paths.
-   */
+  /** US-A3 — Targeted single-plugin add for install / install-local paths. */
   async addPlugin(pluginId: string): Promise<"started" | "preparing"> {
     const knownPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(knownPluginId);
@@ -839,6 +875,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           throw new Error(`restartPlugin failed for ${pluginId}`);
         }
       } catch (err) {
+        if ((err as { code?: string })?.code === "plugin-identity-collision") throw err;
         throw new Error(`addPlugin failed for ${pluginId}: ${(err as Error).message}`);
       }
       this.throwIfPluginFailedAfterAdd(knownPluginId);
@@ -855,17 +892,21 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     if (this.pluginLifecycleGenerations.get(pluginId) !== lifecycleGeneration) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
-    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
+    const currentIdentities = await this.assertCurrentPluginIdentityLoadPlan(loadPlan);
     if (this.pluginLifecycleGenerations.get(pluginId) !== lifecycleGeneration) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
-    const snapshot = enabledSnapshots.get(pluginId);
-    const targetPlan = loadPlan.find(
-      (p) => p.pluginIdHint === pluginId || (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
+    const targetIdentity = currentIdentities.find(({ plan }) =>
+      plan.enabled && plan.pluginIdHint === pluginId
+    ) ?? currentIdentities.find(({ plan, snapshot }) =>
+      !plan.pluginIdHint && plan.enabled && snapshot.manifest.id === pluginId
     );
+    const snapshot = targetIdentity?.snapshot;
+    const targetPlan = targetIdentity?.plan;
     if (!snapshot) {
-      if (targetPlan?.enabled) {
-        await this.readManifest(targetPlan.manifestPath); // throws with the actual reason
+      const requestedPlan = loadPlan.find((plan) => plan.pluginIdHint === pluginId);
+      if (requestedPlan?.enabled) {
+        await this.readManifest(requestedPlan.manifestPath); // throws with the actual reason
       }
       throw new Error(`addPlugin: plugin not found in registry or disabled: ${pluginId}`);
     }
@@ -874,7 +915,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
 
     const { manifest, approvedPluginAccess } = snapshot;
-    if (!this.adoptPluginLifecycleIdentity(pluginId, manifest.id, lifecycleGeneration)) {
+    if (!this.adoptPluginLifecycleIdentity(
+      pluginId,
+      manifest.id,
+      lifecycleGeneration,
+      targetPlan.pluginIdHint,
+    )) {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
     const shouldCommit = () =>
@@ -893,29 +939,35 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       throw new Error(`addPlugin cancelled for ${pluginId}`);
     }
 
-    // Throw if the plugin landed in failed state — caller (IPC install
-    // handler) catches to roll back marketplace state. boot-time `load()`
-    // doesn't take this path; it inlines its own iteration.
+    // IPC install callers need a hard failure signal for rollback.
     this.throwIfPluginFailedAfterAdd(manifest.id);
     return "started";
   }
 
-  /**
-   * US-A3 — Targeted single-plugin remove for uninstall paths.
-   */
-  async removePlugin(pluginId: string): Promise<void> {
+  /** US-A3 — Targeted single-plugin remove for uninstall paths. */
+  async removePlugin(
+    pluginId: string,
+    options: { preserveConfigOverride?: boolean } = {},
+  ): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    // Cancel dependency-held restart work before entering the lifecycle lock.
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    return withPluginInstallLock(canonicalPluginId, () =>
+      this.removePluginLocked(pluginId, canonicalPluginId, options)
+    );
+  }
+
+  private async removePluginLocked(
+    pluginId: string,
+    canonicalPluginId: string,
+    options: { preserveConfigOverride?: boolean },
+  ): Promise<void> {
     // Invalidate in-flight add/restart continuations before the first await.
     this.beginPluginLifecycleOperation(canonicalPluginId);
     this.preparation.clearFor(canonicalPluginId);
     this.pendingRestartPreparations.delete(canonicalPluginId);
-    // Replacement HostApi disposers are incarnation-scoped. Once the
-    // generation is invalidated, uninstall does not wait for a dependency
-    // preparation or start Promise that may never settle; any late replacement
-    // continuation can only clean its private disposer list.
-    // Loaded plugins retire before cleanup. Failed-load and disabled plugins
-    // skip stop/dispose but still purge every tracking map so the UI cannot
-    // retain a ghost card after marketplace removal. Unknown ids are a no-op.
+    // Late incarnations own private disposers; tracked state can be purged
+    // without waiting on an invalidated preparation that may never settle.
     const plugin = this.plugins.get(canonicalPluginId);
     let retirementError: unknown;
     if (plugin) {
@@ -930,7 +982,11 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     ) {
       log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
       this.knownInstallAliases.delete(canonicalPluginId);
-      this.configStore.delete(canonicalPluginId);
+      this.knownInstallClaims.delete(canonicalPluginId);
+      this.inactivePluginIds.delete(canonicalPluginId);
+      if (!options.preserveConfigOverride) {
+        this.configStore.delete(canonicalPluginId);
+      }
       return;
     } else {
       log.info(`removePlugin: plugin in non-loaded state (failed/disabled), purging tracking — ${pluginId}`);
@@ -938,7 +994,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
 
     // stop() may persist configuration while releasing resources. Delete the
     // runtime override only after that hook has been bounded and deactivated.
-    this.configStore.delete(canonicalPluginId);
+    if (!options.preserveConfigOverride) {
+      this.configStore.delete(canonicalPluginId);
+    }
 
     this.knownPluginManifests.delete(canonicalPluginId);
     this.knownPluginAccessGrants.delete(canonicalPluginId);
@@ -955,83 +1013,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     this.inactivePluginIds.delete(canonicalPluginId);
     this.invalidatePluginUiRevision(canonicalPluginId);
     this.knownInstallAliases.delete(canonicalPluginId);
+    this.knownInstallClaims.delete(canonicalPluginId);
 
     this.onDisable?.(canonicalPluginId);
     if (retirementError !== undefined) throw retirementError;
-  }
-
-  /** Helper: does a manifest path's directory name suggest it owns `pluginId`? */
-  protected matchesManifestPath(manifestPath: string, pluginId: string): boolean {
-    const parent = dirname(manifestPath);
-    const dirName = parent.split(/[\\/]/).pop() ?? "";
-    return dirName === pluginId || dirName === pluginId.replace(/[^a-zA-Z0-9._-]/g, "-");
-  }
-
-  /** Verify installed bytes and reject local-dev receipts outside dev mode. */
-  protected async verifyReceiptAndDevGuard(
-    pluginId: string,
-    pluginRoot: string,
-    options: { report?: boolean } = {},
-  ): Promise<PluginIntegrityCheckResult> {
-    if (!this.installReceiptCacheRoot) {
-      return { ok: true };
-    }
-    const receiptResult = await verifyInstallReceipt(
-      this.installReceiptCacheRoot,
-      pluginId,
-      pluginRoot,
-    );
-    if (!receiptResult.ok) {
-      const result = { ok: false as const, reason: receiptResult.reason };
-      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
-      return result;
-    }
-    const { installSource, signerKeyId, artifactSha256 } = receiptResult.receipt;
-    // Policy gate: local-dev receipts are only valid in unpackaged dev builds.
-    // verifyInstallReceipt is a pure integrity verifier; environment-based
-    // policy (packaged vs dev) is enforced here in the runtime layer.
-    if (installSource === "local-dev" && !isDevModeUnlocked()) {
-      const reason = "local-dev install rejected in packaged build";
-      const result = { ok: false as const, reason };
-      if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
-      return result;
-    }
-    const result: PluginIntegrityCheckResult = {
-      ok: true,
-      verified: { installSource, artifactSha256, signerKeyId },
-    };
-    if (options.report !== false) this.reportPluginIntegrityResult(pluginId, result);
-    return result;
-  }
-
-  protected reportPluginIntegrityResult(
-    pluginId: string,
-    result: PluginIntegrityCheckResult,
-  ): void {
-    if (!result.ok) {
-      log.error(
-        { pluginId, reason: result.reason, ...(result.error === undefined ? {} : { err: result.error }) },
-        `${pluginId} rejected — install receipt integrity failed`,
-      );
-      try {
-        this.auditLog?.("error", "plugin_integrity_rejected", {
-          pluginId,
-          reason: result.reason,
-        });
-      } catch (error) {
-        log.error({ pluginId, err: error }, "plugin integrity rejection audit failed");
-      }
-      return;
-    }
-    if (!result.verified) return;
-    try {
-      this.auditLog?.("info", "plugin_integrity_verified", {
-        pluginId,
-        ...result.verified,
-      });
-    } catch (error) {
-      log.error({ pluginId, err: error }, "plugin integrity verification audit failed");
-    }
   }
 
   /** Instantiate and start one post-boot plugin without rebuilding its peers. */
@@ -1329,18 +1314,22 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
       throw error;
     }
+    this.inactivePluginIds.delete(manifest.id);
     this.perf.recordStartup(manifest.id, startupMs);
     this.onEnable?.(manifest.id);
     return "started";
   }
 
-  /**
-   * I2 — Plugin live-reload (dev only).
-   */
+  /** I2 — Plugin live-reload (dev only). */
   async reloadPlugin(pluginId: string): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
     this.requireGenerationLifecycle("plugin reload");
+    const pendingRestart = this.pendingRestarts.get(canonicalPluginId);
+    if (pendingRestart) {
+      this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+      await pendingRestart;
+    }
     const result = await this.restartPlugin(canonicalPluginId, {
       skipPreparation: true,
       throwOnFailure: true,
@@ -1352,17 +1341,27 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
   }
 
-  /**
-   * Disable a loaded plugin at runtime.
-   */
+  /** Disable a loaded plugin at runtime. */
   async disable(pluginId: string, actor: Actor = "user"): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+    this.pendingRestartCancellations.get(canonicalPluginId)?.cancel();
+    return withPluginInstallLock(canonicalPluginId, () =>
+      this.disableLocked(pluginId, canonicalPluginId, actor)
+    );
+  }
+
+  private async disableLocked(
+    pluginId: string,
+    canonicalPluginId: string,
+    actor: Actor,
+  ): Promise<void> {
     if (this.deploymentGuard) {
       const result = await this.deploymentGuard.canDisable(pluginId, actor);
       if (!result.allowed) {
         throw new Error(result.reason ?? `Plugin disable denied: ${pluginId}`);
       }
     }
+    this.pendingRestartPreparations.delete(canonicalPluginId);
     this.beginPluginLifecycleOperation(canonicalPluginId);
     this.preparation.clearFor(canonicalPluginId);
 
@@ -1390,12 +1389,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     await this.settleCommittedRetirement(canonicalPluginId, retirement, "plugin disable");
   }
 
-  /**
-   * Prepare a marketplace artifact from an immutable generation root, then
-   * publish it in the same coordinator transaction as the durable install
-   * commit. No runtime map, tool, Skill, Hook, MCP, receipt, registry, or live
-   * payload changes before every candidate preparation step succeeds.
-   */
+  /** Prepare and atomically publish one immutable marketplace generation. */
   async activatePreparedArtifact<T>(
     input: PreparedArtifactRuntimeActivationInput<T>,
   ): Promise<CommittedPluginGeneration<T>> {
