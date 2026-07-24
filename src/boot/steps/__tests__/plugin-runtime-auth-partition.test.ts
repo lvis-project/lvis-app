@@ -18,8 +18,10 @@ const runtimeTestState = vi.hoisted(() => ({
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
     listPluginIds: vi.fn(() => [] as string[]),
-    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
-    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
+    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>,
+    ),
+    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`,
+    ),
     getPluginManifest: vi.fn(() => null),
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     isPluginEnabled: vi.fn(() => true),
@@ -36,7 +38,11 @@ const runtimeTestState = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => ({
-  app: { getPath: vi.fn(() => "/tmp/lvis-test"), isPackaged: false, prependOnceListener: vi.fn() },
+  app: {
+    getPath: vi.fn(() => "/tmp/lvis-test"),
+    isPackaged: false,
+    prependOnceListener: vi.fn(),
+  },
   BrowserWindow: Object.assign(vi.fn(), {
     getAllWindows: vi.fn(() => []),
     getFocusedWindow: vi.fn(() => null),
@@ -45,14 +51,21 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("../../../plugins/runtime.js", () => ({
-  PluginRuntime: vi.fn().mockImplementation(function (this: unknown, options: Record<string, unknown>) {
+  PluginRuntime: vi.fn().mockImplementation(function (
+    this: unknown,
+    options: Record<string, unknown>,
+  ) {
     runtimeTestState.capturedRuntimeOptions = options;
     return runtimeTestState.runtime;
   }),
 }));
 
-vi.mock("../../../plugins/dev-watcher.js", () => ({ startPluginDevWatcher: vi.fn(() => ({ stop: vi.fn() })) }));
-vi.mock("../../../main/html-preview-partition.js", () => ({ installPluginPartitionPolicy: vi.fn() }));
+vi.mock("../../../plugins/dev-watcher.js", () => ({
+  startPluginDevWatcher: vi.fn(() => ({ stop: vi.fn() })),
+}));
+vi.mock("../../../main/html-preview-partition.js", () => ({
+  installPluginPartitionPolicy: vi.fn(),
+}));
 vi.mock("../../../plugins/plugin-paths.js", () => ({
   resolvePluginPaths: vi.fn(() => ({
     pluginsRoot: "/tmp/lvis-test/plugins",
@@ -67,13 +80,20 @@ vi.mock("../../../plugins/registry.js", () => ({
 import { initPluginRuntime } from "../plugin-runtime.js";
 
 type AuthHostApi = {
-  openAuthWindow: (opts: { url: string; cookieHosts?: string[] }) => Promise<unknown>;
+  openAuthWindow: (opts: {
+    url: string;
+    cookieHosts?: string[];
+  }) => Promise<unknown>;
   clearAuthPartition: (partition: string) => Promise<void>;
 };
 
 type CreateHostApi = (
   pluginId: string,
-  manifest: { id: string; config?: Record<string, unknown>; capabilities?: string[] },
+  manifest: {
+    id: string;
+    config?: Record<string, unknown>;
+    capabilities?: string[];
+  },
   pluginDataDir: string,
   incarnation: {
     registerDisposer: (dispose: () => void) => void;
@@ -105,7 +125,6 @@ async function initAndGetFactory(): Promise<CreateHostApi> {
       setPluginConfig: vi.fn(),
     } as never,
     memoryManager: {} as never,
-    keywordEngine: { registerKeywords: vi.fn(), unregisterByPlugin: vi.fn() } as never,
     toolRegistry: {
       unregisterByPlugin: vi.fn(),
       register: vi.fn(),
@@ -125,7 +144,11 @@ async function initAndGetFactory(): Promise<CreateHostApi> {
     approvalGate: { requestAndWait: vi.fn() } as never,
     routinesStore: { list: () => [] } as never,
   });
-  const createHostApi = (runtimeTestState.capturedRuntimeOptions as { createHostApi?: CreateHostApi } | null)?.createHostApi;
+  const createHostApi = (
+    runtimeTestState.capturedRuntimeOptions as {
+      createHostApi?: CreateHostApi;
+    } | null
+  )?.createHostApi;
   expect(createHostApi).toBeDefined();
   return createHostApi!;
 }
@@ -144,9 +167,9 @@ describe("HostApi openAuthWindow capability gate", () => {
       ACTIVE_INCARNATION,
       "plugin-a",
     );
-    await expect(api.openAuthWindow({ url: "https://idp.example.com/authorize" })).rejects.toThrow(
-      /capability not declared: external-auth-consumer/,
-    );
+    await expect(
+      api.openAuthWindow({ url: "https://idp.example.com/authorize" }),
+    ).rejects.toThrow(/capability not declared: external-auth-consumer/);
   });
 });
 
@@ -160,9 +183,9 @@ describe("HostApi clearAuthPartition capability + partition gates", () => {
       ACTIVE_INCARNATION,
       "plugin-a",
     );
-    await expect(api.clearAuthPartition("persist:plugin-auth:plugin-a")).rejects.toThrow(
-      /capability not declared: external-auth-consumer/,
-    );
+    await expect(
+      api.clearAuthPartition("persist:plugin-auth:plugin-a"),
+    ).rejects.toThrow(/capability not declared: external-auth-consumer/);
     expect(runtimeTestState.clearAuthPartitionService).not.toHaveBeenCalled();
   });
 
@@ -175,9 +198,9 @@ describe("HostApi clearAuthPartition capability + partition gates", () => {
       ACTIVE_INCARNATION,
       "plugin-a",
     );
-    await expect(api.clearAuthPartition("persist:plugin-auth:other-plugin")).rejects.toThrow(
-      /partition must be 'persist:plugin-auth:plugin-a'/,
-    );
+    await expect(
+      api.clearAuthPartition("persist:plugin-auth:other-plugin"),
+    ).rejects.toThrow(/partition must be 'persist:plugin-auth:plugin-a'/);
     expect(runtimeTestState.clearAuthPartitionService).not.toHaveBeenCalled();
   });
 

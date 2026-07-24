@@ -23,7 +23,8 @@
  *      the full-overwrite spread preserves sourceTools/profile*.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConversationLoop } from "../conversation-loop.js";
@@ -31,10 +32,11 @@ import { MemoryManager } from "../../memory/memory-manager.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { SubAgentRunner } from "../subagent-runner.js";
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams,
+} from "../llm/types.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
 import { createAgentSendTool } from "../../tools/agent-send.js";
@@ -92,8 +94,8 @@ class AbortAwareBlockingProvider implements LLMProvider {
 }
 
 function buildLoopDeps(toolRegistry: ToolRegistry) {
-  const keywordEngine = new KeywordEngine();
-  const routeEngine = new RouteEngine({ toolRegistry });
+  const inputClassifier = new InputClassifier();
+  const routeEngine = new RouteEngine();
   return {
     settingsService: {
       get: () => fakeLlmSettings(),
@@ -106,7 +108,7 @@ function buildLoopDeps(toolRegistry: ToolRegistry) {
       setActiveSessionId: () => undefined,
       setSummaryPreamble: () => undefined,
     },
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager: {
@@ -119,10 +121,12 @@ function buildLoopDeps(toolRegistry: ToolRegistry) {
 /** Register the fake provider onto every ConversationLoop the runner builds. */
 function patchProvider(provider: LLMProvider) {
   const hasProviderSpy = vi
-    .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+    .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider",
+    )
     .mockReturnValue(true);
   const refreshProviderSpy = vi
-    .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider")
+    .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider",
+    )
     .mockImplementation(function (this: ConversationLoop) {
       (this as { provider: LLMProvider | null }).provider = provider;
     });
@@ -164,7 +168,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   });
 
   function makeSubStore(): MemoryManager {
-    const store = new MemoryManager({ lvisDir: openFeatureNamespace("subagent").dir });
+    const store = new MemoryManager({
+      lvisDir: openFeatureNamespace("subagent").dir,
+    });
     store.load();
     return store;
   }
@@ -213,7 +219,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         role: "ROLE_AGENT",
         parts: [{ text: "idle sibling guidance" }],
       },
-      formattedText: "[Sub-Agent message from sender-worker]\nidle sibling guidance",
+      formattedText:
+        "[Sub-Agent message from sender-worker]\nidle sibling guidance",
       approvalLabel: "[Sub-Agent: sender-worker]",
     };
   }
@@ -226,21 +233,27 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     const observedCwds: string[] = [];
     const toolRegistry = new ToolRegistry();
-    toolRegistry.register(createDynamicTool({
-      name: "cwd_probe",
-      description: "capture the child cwd",
-      source: "builtin",
-      category: "read",
-      isReadOnly: () => true,
-      jsonSchema: { type: "object", properties: {} },
-      execute: async (_input, ctx) => {
-        observedCwds.push(ctx.cwd);
-        return { output: "cwd-ok", isError: false };
-      },
-    }));
+    toolRegistry.register(
+      createDynamicTool({
+        name: "cwd_probe",
+        description: "capture the child cwd",
+        source: "builtin",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        execute: async (_input, ctx) => {
+          observedCwds.push(ctx.cwd);
+          return { output: "cwd-ok", isError: false };
+        },
+      }),
+    );
     const authorizeProject = vi.fn((projectRoot: string) =>
       projectRoot === explicitRoot
-        ? { projectRoot: explicitRoot, projectName: "agent-connector", isDefault: false }
+        ? {
+            projectRoot: explicitRoot,
+            projectName: "agent-connector",
+            isDefault: false,
+          }
         : null,
     );
     const parentDeps = {
@@ -250,7 +263,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         projectName: "workspace",
         isDefault: true,
       }),
-      isDefaultProjectRoot: (projectRoot: string) => projectRoot === defaultRoot,
+      isDefaultProjectRoot: (projectRoot: string) =>
+        projectRoot === defaultRoot,
       authorizeProject,
     };
     const subStore = makeSubStore();
@@ -260,10 +274,14 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    let restore = patchProvider(new ScriptedProvider([[
-      { type: "tool_call", id: "spawn-cwd", name: "cwd_probe", input: {} },
-      { type: "message_complete", stopReason: "tool_use" },
-    ]]));
+    let restore = patchProvider(
+      new ScriptedProvider([
+        [
+          { type: "tool_call", id: "spawn-cwd", name: "cwd_probe", input: {} },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+      ]),
+    );
     let spawned: Awaited<ReturnType<SubAgentRunner["spawn"]>>;
     try {
       spawned = await runner.spawn({
@@ -285,16 +303,18 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       projectName: "agent-connector",
     });
 
-    restore = patchProvider(new ScriptedProvider([
-      [
-        { type: "tool_call", id: "resume-cwd", name: "cwd_probe", input: {} },
-        { type: "message_complete", stopReason: "tool_use" },
-      ],
-      [
-        { type: "text_delta", text: "resumed" },
-        { type: "message_complete", stopReason: "end_turn" },
-      ],
-    ]));
+    restore = patchProvider(
+      new ScriptedProvider([
+        [
+          { type: "tool_call", id: "resume-cwd", name: "cwd_probe", input: {} },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "resumed" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ]),
+    );
     try {
       const resumed = await runner.resume(
         spawned.childSessionId,
@@ -307,8 +327,13 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
 
     expect(observedCwds).toEqual([explicitRoot, explicitRoot]);
-    expect(authorizeProject).toHaveBeenCalledWith(explicitRoot, "agent-connector");
-    expect(authorizeProject.mock.calls.filter(([root]) => root === explicitRoot)).toHaveLength(2);
+    expect(authorizeProject).toHaveBeenCalledWith(
+      explicitRoot,
+      "agent-connector",
+    );
+    expect(
+      authorizeProject.mock.calls.filter(([root]) => root === explicitRoot),
+    ).toHaveLength(2);
   });
 
   it("binds an unscoped child to the default workspace without persisting it as explicit", async () => {
@@ -325,10 +350,15 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
           projectName: "workspace",
           isDefault: true,
         }),
-        isDefaultProjectRoot: (projectRoot: string) => projectRoot === defaultRoot,
+        isDefaultProjectRoot: (projectRoot: string) =>
+          projectRoot === defaultRoot,
         authorizeProject: (projectRoot: string) =>
           projectRoot === defaultRoot
-            ? { projectRoot: defaultRoot, projectName: "workspace", isDefault: true }
+            ? {
+                projectRoot: defaultRoot,
+                projectName: "workspace",
+                isDefault: true,
+              }
             : null,
       },
       toolRegistry,
@@ -387,16 +417,26 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       if (transcript.ok) {
         expect(transcript.childSessionId).toBe(result.childSessionId);
         expect(transcript.messages[0]?.role).toBe("user");
-        expect(transcript.messages.some((message) => message.role === "assistant")).toBe(true);
-        expect(transcript.messages.map((message) => message.content).join("\n")).toContain("partial-0");
+        expect(
+          transcript.messages.some((message) => message.role === "assistant"),
+        ).toBe(true);
+        expect(
+          transcript.messages.map((message) => message.content).join("\n"),
+        ).toContain("partial-0");
       }
-      expect(runner.listRunStatuses("parent-session-1").map((run) => run.childSessionId)).toEqual([
-        result.childSessionId,
-      ]);
+      expect(
+        runner
+          .listRunStatuses("parent-session-1")
+          .map((run) => run.childSessionId),
+      ).toEqual([result.childSessionId]);
       expect(runner.listRunStatuses("other-parent-session")).toEqual([]);
-      expect(runner.getRunStatus("spawn-1", "parent-session-1")?.childSessionId).toBe(result.childSessionId);
+      expect(
+        runner.getRunStatus("spawn-1", "parent-session-1")?.childSessionId,
+      ).toBe(result.childSessionId);
       expect(runner.getRunStatus("spawn-1", "other-parent-session")).toBeNull();
-      expect(runner.interruptRun("spawn-1", "other-parent-session")).toMatchObject({
+      expect(
+        runner.interruptRun("spawn-1", "other-parent-session"),
+      ).toMatchObject({
         ok: false,
         message: "sub-agent run not found: spawn-1",
       });
@@ -412,7 +452,11 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(directTranscript.ok).toBe(true);
       if (directTranscript.ok) {
         expect(directTranscript.childSessionId).toBe(result.childSessionId);
-        expect(directTranscript.messages.map((message) => message.content).join("\n")).toContain("partial-0");
+        expect(
+          directTranscript.messages
+            .map((message) => message.content)
+            .join("\n"),
+        ).toContain("partial-0");
       }
       const crossOriginDirectTranscript = runner.getPersistedTranscript({
         originSessionId: "other-parent-session",
@@ -463,20 +507,27 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       });
       await provider.started;
 
-      const interrupted = runner.interruptRun("spawn-interrupt", "parent-session-1");
+      const interrupted = runner.interruptRun(
+        "spawn-interrupt",
+        "parent-session-1",
+      );
 
       expect(interrupted).toMatchObject({
         ok: true,
         run: { status: "interrupted", stopReason: "interrupted" },
       });
-      expect(runner.getRunStatus("spawn-interrupt", "parent-session-1")).toMatchObject({
+      expect(
+        runner.getRunStatus("spawn-interrupt", "parent-session-1"),
+      ).toMatchObject({
         status: "interrupted",
         stopReason: "interrupted",
       });
 
       const final = await spawnPromise;
       expect(final.stopReason).toBe("interrupted");
-      expect(runner.getRunStatus("spawn-interrupt", "parent-session-1")).toMatchObject({
+      expect(
+        runner.getRunStatus("spawn-interrupt", "parent-session-1"),
+      ).toMatchObject({
         status: "interrupted",
         stopReason: "interrupted",
       });
@@ -490,81 +541,91 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     "TASK_STATE_FAILED",
     "TASK_STATE_CANCELED",
     "TASK_STATE_REJECTED",
-  ] as const)("rejects persisted terminal state %s before linking or parent delivery", async (taskState) => {
-    const originSessionId = "parent-terminal-resume";
-    const deliverToParent = vi.fn();
-    const toolRegistry = new ToolRegistry();
-    toolRegistry.register(noopTool("noop"));
-    const subStore = makeSubStore();
-    const runner = new SubAgentRunner({
-      parentDeps: buildLoopDeps(toolRegistry),
-      toolRegistry,
-      subAgentMemoryManager: subStore,
-      messageBus: { deliverToParent } as never,
-    });
+  ] as const)(
+    "rejects persisted terminal state %s before linking or parent delivery",
+    async (taskState) => {
+      const originSessionId = "parent-terminal-resume";
+      const deliverToParent = vi.fn();
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(noopTool("noop"));
+      const subStore = makeSubStore();
+      const runner = new SubAgentRunner({
+        parentDeps: buildLoopDeps(toolRegistry),
+        toolRegistry,
+        subAgentMemoryManager: subStore,
+        messageBus: { deliverToParent } as never,
+      });
 
-    let restore = patchProvider(waitingSpawnProvider());
-    const spawn = await runner.spawn({
-      title: "terminal-resume",
-      instructions: "wait",
-      sourceTools: ["noop"],
-      maxRounds: 2,
-      originSessionId,
-    });
-    restore();
-    const meta = subStore.loadSessionMetadata(spawn.childSessionId)!;
-    await subStore.saveSessionMetadata(spawn.childSessionId, {
-      ...meta,
-      subAgentTaskState: taskState,
-      subAgentSuspensionReason: undefined,
-    });
-
-    const guard = cleanSpawnProvider();
-    restore = patchProvider(guard);
-    const events: AgentSpawnEvent[] = [];
-    const tool = createAgentSpawnTool({
-      getRunner: () => runner,
-      emit: (event) => events.push(event),
-    });
-    try {
-      const handleResult = await tool.execute(
-        {
-          title: "terminal-resume",
-          instructions: "must not run",
-          resumeId: spawn.childSessionId,
-          background: true,
-        },
-        {
-          cwd: process.cwd(),
-          extraAllowedDirectories: [],
-          metadata: {
-            sessionId: originSessionId,
-            spawnDepth: 0,
-            supportsA2AParentDelivery: true,
-          },
-        },
-      );
-      const handle = JSON.parse(handleResult.output) as Record<string, unknown>;
-      expect(handleResult.isError).toBe(false);
-      expect(handle.status).toBe("error");
-      expect(handle.taskState).toBe("TASK_STATE_FAILED");
-      expect(handle).not.toHaveProperty("childSessionId");
-
-      await vi.waitFor(() =>
-        expect(events.some((event) => event.type === "error")).toBe(true));
-      expect(guard.turnsServed).toBe(0);
-      expect(events.some((event) => event.type === "activity")).toBe(false);
-      expect(events.find((event) => event.type === "error"))
-        .not.toHaveProperty("childSessionId");
-      expect(deliverToParent).not.toHaveBeenCalled();
-      expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+      let restore = patchProvider(waitingSpawnProvider());
+      const spawn = await runner.spawn({
+        title: "terminal-resume",
+        instructions: "wait",
+        sourceTools: ["noop"],
+        maxRounds: 2,
+        originSessionId,
+      });
+      restore();
+      const meta = subStore.loadSessionMetadata(spawn.childSessionId)!;
+      await subStore.saveSessionMetadata(spawn.childSessionId, {
+        ...meta,
         subAgentTaskState: taskState,
         subAgentSuspensionReason: undefined,
       });
-    } finally {
-      restore();
-    }
-  });
+
+      const guard = cleanSpawnProvider();
+      restore = patchProvider(guard);
+      const events: AgentSpawnEvent[] = [];
+      const tool = createAgentSpawnTool({
+        getRunner: () => runner,
+        emit: (event) => events.push(event),
+      });
+      try {
+        const handleResult = await tool.execute(
+          {
+            title: "terminal-resume",
+            instructions: "must not run",
+            resumeId: spawn.childSessionId,
+            background: true,
+          },
+          {
+            cwd: process.cwd(),
+            extraAllowedDirectories: [],
+            metadata: {
+              sessionId: originSessionId,
+              spawnDepth: 0,
+              supportsA2AParentDelivery: true,
+            },
+          },
+        );
+        const handle = JSON.parse(handleResult.output) as Record<
+          string,
+          unknown
+        >;
+        expect(handleResult.isError).toBe(false);
+        expect(handle.status).toBe("error");
+        expect(handle.taskState).toBe("TASK_STATE_FAILED");
+        expect(handle).not.toHaveProperty("childSessionId");
+
+        await vi.waitFor(() =>
+          expect(events.some((event) => event.type === "error")).toBe(true),
+        );
+        expect(guard.turnsServed).toBe(0);
+        expect(events.some((event) => event.type === "activity")).toBe(false);
+        expect(
+          events.find((event) => event.type === "error"),
+        ).not.toHaveProperty("childSessionId");
+        expect(deliverToParent).not.toHaveBeenCalled();
+        expect(
+          subStore.loadSessionMetadata(spawn.childSessionId),
+        ).toMatchObject({
+          subAgentTaskState: taskState,
+          subAgentSuspensionReason: undefined,
+        });
+      } finally {
+        restore();
+      }
+    },
+  );
   // ── 1) full-history restore ─────────────────────────
   it("re-hydrates the original spawn's full history into the continuation turn (tool-pair valid, no loss)", async () => {
     const toolRegistry = new ToolRegistry();
@@ -623,12 +684,19 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const origRunTurn = ConversationLoop.prototype.runTurn;
     const runTurnSpy = vi
       .spyOn(ConversationLoop.prototype, "runTurn")
-      .mockImplementation(function (this: ConversationLoop, ...args: Parameters<typeof origRunTurn>) {
+      .mockImplementation(function (
+        this: ConversationLoop,
+        ...args: Parameters<typeof origRunTurn>
+      ) {
         historyLenAtResumeEntry = this.history.length;
         return origRunTurn.apply(this, args);
       });
     try {
-      const resumed = await runner.resume(resumeId, "continue the work", "hist");
+      const resumed = await runner.resume(
+        resumeId,
+        "continue the work",
+        "hist",
+      );
       expect(resumed.ok).toBe(true);
       expect(resumed.summary).toContain("resumed answer");
     } finally {
@@ -645,8 +713,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("read_only"));
     toolRegistry.register({ ...noopTool("agent_send"), modelVisible: false });
-    expect(toolRegistry.getToolSchemas().map((schema) => schema.name))
-      .not.toContain("agent_send");
+    expect(
+      toolRegistry.getToolSchemas().map((schema) => schema.name),
+    ).not.toContain("agent_send");
     toolRegistry.register(
       createDynamicTool({
         name: "bash",
@@ -673,7 +742,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
     restore();
     const resumeId = spawn.childSessionId;
-    expect(subStore.loadSessionMetadata(resumeId)?.sourceTools).toEqual(["read_only", "agent_send"]);
+    expect(subStore.loadSessionMetadata(resumeId)?.sourceTools).toEqual([
+      "read_only",
+      "agent_send",
+    ]);
 
     const resumeProvider = new ScriptedProvider([
       [
@@ -688,7 +760,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       restore();
     }
     // The resumed child's LLM schema saw exactly ["read_only"] — never "bash".
-    expect(resumeProvider.observedToolNames[0]).toEqual(["read_only", "agent_send"]);
+    expect(resumeProvider.observedToolNames[0]).toEqual([
+      "read_only",
+      "agent_send",
+    ]);
     expect(resumeProvider.observedToolNames[0]).not.toContain("bash");
   });
 
@@ -730,7 +805,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       restore();
     }
     expect(resumeProvider.observedToolNames[0]).toEqual(["orig_tool"]);
-    expect(resumeProvider.observedToolNames[0]).not.toContain("newly_added_tool");
+    expect(resumeProvider.observedToolNames[0]).not.toContain(
+      "newly_added_tool",
+    );
   });
 
   // ── 4) depth stays 1 + 5) no agent_spawn ────────────
@@ -767,7 +844,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     restore();
     const resumeId = spawn.childSessionId;
     // The persisted frozen scope already excludes agent_spawn (spawn stripped it).
-    expect(subStore.loadSessionMetadata(resumeId)?.sourceTools).toEqual(["noop"]);
+    expect(subStore.loadSessionMetadata(resumeId)?.sourceTools).toEqual([
+      "noop",
+    ]);
 
     let spawnDepthAtResume: unknown = "unset";
     const resumeProvider = new ScriptedProvider([
@@ -780,7 +859,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const origRunTurn = ConversationLoop.prototype.runTurn;
     const runTurnSpy = vi
       .spyOn(ConversationLoop.prototype, "runTurn")
-      .mockImplementation(function (this: ConversationLoop, ...args: Parameters<typeof origRunTurn>) {
+      .mockImplementation(function (
+        this: ConversationLoop,
+        ...args: Parameters<typeof origRunTurn>
+      ) {
         // options is the 4th positional arg.
         const opts = args[3] as { spawnDepth?: number } | undefined;
         spawnDepthAtResume = opts?.spawnDepth;
@@ -823,11 +905,17 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const legacyMeta = { ...subStore.loadSessionMetadata(resumeId)! };
     delete legacyMeta.budgetResumeCount;
     delete legacyMeta.questionAnswerCount;
-    await subStore.saveSessionMetadata(resumeId, { ...legacyMeta, resumeCount: 3 });
+    await subStore.saveSessionMetadata(resumeId, {
+      ...legacyMeta,
+      resumeCount: 3,
+    });
 
     // A provider that would fail the test if a turn actually ran.
     const guard = new ScriptedProvider([
-      [{ type: "text_delta", text: "SHOULD NOT RUN" }, { type: "message_complete", stopReason: "end_turn" }],
+      [
+        { type: "text_delta", text: "SHOULD NOT RUN" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
     ]);
     const restore2 = patchProvider(guard);
     try {
@@ -841,7 +929,6 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       restore2();
     }
   });
-
 
   it("fails closed when an INPUT_REQUIRED question was not staged by agent_send", async () => {
     const originSessionId = "parent-question";
@@ -857,19 +944,26 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const restore = patchProvider(cleanSpawnProvider());
     const runTurnSpy = vi
       .spyOn(ConversationLoop.prototype, "runTurn")
-      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
-        const callbacks = args[1] as
-          | { onAssistantRound?: (round: { thought?: string; text: string }) => void }
-          | undefined;
-        callbacks?.onAssistantRound?.({ text: "waiting for the parent" });
-        return {
-          text: "I need the parent to choose.",
-          toolCalls: [],
-          route: "default",
-          stopReason: "input-required",
-          inputRequired: { reason: "question", prompt: "Which path?" },
-        };
-      });
+      .mockImplementation(
+        async (...args: Parameters<typeof originalRunTurn>) => {
+          const callbacks = args[1] as
+            | {
+                onAssistantRound?: (round: {
+                  thought?: string;
+                  text: string;
+                }) => void;
+              }
+            | undefined;
+          callbacks?.onAssistantRound?.({ text: "waiting for the parent" });
+          return {
+            text: "I need the parent to choose.",
+            toolCalls: [],
+            route: "default",
+            stopReason: "input-required",
+            inputRequired: { reason: "question", prompt: "Which path?" },
+          };
+        },
+      );
 
     try {
       const result = await runner.spawn({
@@ -882,10 +976,12 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         ok: false,
         error: expect.stringContaining("question delivery was not staged"),
       });
-      expect(subStore.loadSessionMetadata(result.childSessionId)).toMatchObject({
-        subAgentTaskState: "TASK_STATE_FAILED",
-        subAgentSuspensionReason: undefined,
-      });
+      expect(subStore.loadSessionMetadata(result.childSessionId)).toMatchObject(
+        {
+          subAgentTaskState: "TASK_STATE_FAILED",
+          subAgentSuspensionReason: undefined,
+        },
+      );
     } finally {
       runTurnSpy.mockRestore();
       restore();
@@ -919,19 +1015,28 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentSuspensionReason: "budget",
     });
 
-    const senderLoop = { hasActiveTurn: () => true } as unknown as ConversationLoop;
-    const recipientLoop = { hasActiveTurn: () => true } as unknown as ConversationLoop;
-    const activeChildren = (runner as unknown as {
-      activeChildren: Map<string, {
-        lease: symbol;
-        childSessionId: string;
-        originSessionId?: string;
-        title: string;
-        loop: ConversationLoop;
-        background: boolean;
-        questionWait?: { token: symbol; prompt: string };
-      }>;
-    }).activeChildren;
+    const senderLoop = {
+      hasActiveTurn: () => true,
+    } as unknown as ConversationLoop;
+    const recipientLoop = {
+      hasActiveTurn: () => true,
+    } as unknown as ConversationLoop;
+    const activeChildren = (
+      runner as unknown as {
+        activeChildren: Map<
+          string,
+          {
+            lease: symbol;
+            childSessionId: string;
+            originSessionId?: string;
+            title: string;
+            loop: ConversationLoop;
+            background: boolean;
+            questionWait?: { token: symbol; prompt: string };
+          }
+        >;
+      }
+    ).activeChildren;
     activeChildren.set(senderChildSessionId, {
       lease: Symbol("sender"),
       childSessionId: senderChildSessionId,
@@ -962,7 +1067,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         activeLoop: recipientLoop,
       },
     });
-    await expect(runner.resolveSubAgentSender(senderChildSessionId)).resolves.toMatchObject({
+    await expect(
+      runner.resolveSubAgentSender(senderChildSessionId),
+    ).resolves.toMatchObject({
       childSessionId: senderChildSessionId,
       originSessionId,
       background: true,
@@ -971,7 +1078,6 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     expect(runner.isSubAgentOriginActive(originSessionId)).toBe(true);
     expect(runner.isSubAgentOriginActive("other-origin")).toBe(false);
 
-
     const secret = "ghp_" + "b".repeat(24);
     const first = runner.reserveQuestionWait(
       senderChildSessionId,
@@ -979,7 +1085,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     );
     expect(first.ok).toBe(true);
     if (!first.ok) throw new Error("question reservation unexpectedly failed");
-    const reservedPrompt = activeChildren.get(senderChildSessionId)?.questionWait?.prompt;
+    const reservedPrompt =
+      activeChildren.get(senderChildSessionId)?.questionWait?.prompt;
     expect(reservedPrompt).toHaveLength(8_000);
     expect(reservedPrompt).not.toContain(secret);
     expect(first).not.toHaveProperty("prompt");
@@ -987,24 +1094,26 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       ok: false,
       reason: "question-already-outstanding",
     });
-    await expect(runner.cancelQuestionWait(senderChildSessionId, Symbol("wrong")))
-      .resolves.toBe(false);
-    await expect(runner.cancelQuestionWait(senderChildSessionId, first.token))
-      .resolves.toBe(true);
-    expect(runner.reserveQuestionWait(senderChildSessionId, "second").ok).toBe(true);
+    await expect(
+      runner.cancelQuestionWait(senderChildSessionId, Symbol("wrong")),
+    ).resolves.toBe(false);
+    await expect(
+      runner.cancelQuestionWait(senderChildSessionId, first.token),
+    ).resolves.toBe(true);
+    expect(runner.reserveQuestionWait(senderChildSessionId, "second").ok).toBe(
+      true,
+    );
 
     await subStore.saveSessionMetadata(recipientChildSessionId, {
       ...subStore.loadSessionMetadata(recipientChildSessionId)!,
       originSessionId: "other-parent",
     });
-    await expect(runner.resolveSubAgentPeer(
-      senderChildSessionId,
-      recipientChildSessionId,
-    )).resolves.toEqual({ ok: false, reason: "cross-origin" });
-    await expect(runner.resolveSubAgentPeer(
-      senderChildSessionId,
-      "sub-unknown",
-    )).resolves.toEqual({ ok: false, reason: "unknown-recipient" });
+    await expect(
+      runner.resolveSubAgentPeer(senderChildSessionId, recipientChildSessionId),
+    ).resolves.toEqual({ ok: false, reason: "cross-origin" });
+    await expect(
+      runner.resolveSubAgentPeer(senderChildSessionId, "sub-unknown"),
+    ).resolves.toEqual({ ok: false, reason: "unknown-recipient" });
   });
   it("preserves a persisted INPUT_REQUIRED tree across restart pressure and evicts terminal ownership", async () => {
     const activeOrigin = "parent-restart-active";
@@ -1055,14 +1164,18 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       },
       childDir: async (name: string) => name,
     } as never);
-    const allocate = (originSessionId: string) => mailbox.allocateEnvelope({
-      version: 1,
-      originSessionId,
-      senderChildSessionId: "sub-persisted-sender",
-      recipientChildSessionId: "parent",
-      hopCount: 1,
-    }, (candidateOriginSessionId) =>
-      restartedRunner.isSubAgentOriginActive(candidateOriginSessionId));
+    const allocate = (originSessionId: string) =>
+      mailbox.allocateEnvelope(
+        {
+          version: 1,
+          originSessionId,
+          senderChildSessionId: "sub-persisted-sender",
+          recipientChildSessionId: "parent",
+          hopCount: 1,
+        },
+        (candidateOriginSessionId) =>
+          restartedRunner.isSubAgentOriginActive(candidateOriginSessionId),
+      );
 
     for (let sequence = 1; sequence <= 5; sequence += 1) {
       await expect(allocate(activeOrigin)).resolves.toMatchObject({
@@ -1103,16 +1216,21 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
     const parentDeps = {
       ...buildLoopDeps(toolRegistry),
-      getAdditionalDirectories: () => rootRegistered ? [removedRoot] : [],
+      getAdditionalDirectories: () => (rootRegistered ? [removedRoot] : []),
       getDefaultProject: () => ({
         projectRoot: fallbackRoot,
         projectName: "fallback",
         isDefault: true,
       }),
-      isDefaultProjectRoot: (projectRoot: string) => projectRoot === fallbackRoot,
+      isDefaultProjectRoot: (projectRoot: string) =>
+        projectRoot === fallbackRoot,
       authorizeProject: (projectRoot: string, projectName?: string) =>
         rootRegistered && projectRoot === removedRoot
-          ? { projectRoot: removedRoot, projectName: projectName ?? "removed", isDefault: false }
+          ? {
+              projectRoot: removedRoot,
+              projectName: projectName ?? "removed",
+              isDefault: false,
+            }
           : null,
     };
     const runner = new SubAgentRunner({
@@ -1139,7 +1257,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     expect(spawned.incomplete).toBe(true);
 
     const directoriesAtRuns: Array<readonly string[]> = [];
-    const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockImplementation(async function (this: ConversationLoop) {
         directoriesAtRuns.push(this.getTurnAdditionalDirectories());
         const firstResume = directoriesAtRuns.length === 1;
@@ -1147,11 +1266,15 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
           text: firstResume ? "still waiting" : "safe",
           toolCalls: [],
           route: "default",
-          stopReason: firstResume ? "round-cap" as const : "end_turn" as const,
+          stopReason: firstResume
+            ? ("round-cap" as const)
+            : ("end_turn" as const),
         };
       });
     restore = patchProvider(cleanSpawnProvider());
-    let resumePromise: Promise<Awaited<ReturnType<SubAgentRunner["resume"]>>> | undefined;
+    let resumePromise:
+      | Promise<Awaited<ReturnType<SubAgentRunner["resume"]>>>
+      | undefined;
 
     try {
       resumePromise = runner.resume(
@@ -1159,14 +1282,20 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         "continue",
         "resume removal race",
       );
-      await vi.waitFor(() => expect(peekRecipientMailbox).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() =>
+        expect(peekRecipientMailbox).toHaveBeenCalledTimes(1),
+      );
       expect(runTurnSpy).not.toHaveBeenCalled();
 
-      await expect(runner.detachSessionsFromProject(removedRoot)).resolves.toBe(1);
+      await expect(runner.detachSessionsFromProject(removedRoot)).resolves.toBe(
+        1,
+      );
       rootRegistered = false;
-      expect(runner.revokeWorkspaceRoot(removedRoot, {
-        globalScopeWasAuthorized: true,
-      })).toMatchObject({
+      expect(
+        runner.revokeWorkspaceRoot(removedRoot, {
+          globalScopeWasAuthorized: true,
+        }),
+      ).toMatchObject({
         activeChildrenVisited: 1,
       });
 
@@ -1183,7 +1312,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(runTurnSpy).toHaveBeenCalledTimes(1);
       expect(directoriesAtRuns[0]).toContain(fallbackRoot);
       expect(directoriesAtRuns[0]).not.toContain(removedRoot);
-      expect(subStore.loadSessionMetadata(spawned.childSessionId)).toMatchObject({
+      expect(
+        subStore.loadSessionMetadata(spawned.childSessionId),
+      ).toMatchObject({
         projectRoot: undefined,
         subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
         subAgentSuspensionReason: "budget",
@@ -1198,12 +1329,16 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(runTurnSpy).toHaveBeenCalledTimes(2);
       expect(directoriesAtRuns[1]).toContain(fallbackRoot);
       expect(directoriesAtRuns[1]).not.toContain(removedRoot);
-      expect(subStore.loadSessionMetadata(spawned.childSessionId)).toMatchObject({
+      expect(
+        subStore.loadSessionMetadata(spawned.childSessionId),
+      ).toMatchObject({
         projectRoot: undefined,
         subAgentTaskState: "TASK_STATE_COMPLETED",
       });
-      expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
-        .toBe(0);
+      expect(
+        (runner as unknown as { activeChildren: Map<string, unknown> })
+          .activeChildren.size,
+      ).toBe(0);
     } finally {
       releaseMailbox();
       await resumePromise?.catch(() => undefined);
@@ -1218,19 +1353,27 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
     let mailboxEntry: A2AAgentMailboxEntry | undefined;
-    const peekRecipientMailbox = vi.fn(async (recipientChildSessionId: string) => {
-      expect(subStore.loadSessionMetadata(recipientChildSessionId)?.subAgentTaskState)
-        .toBe("TASK_STATE_INPUT_REQUIRED");
-      return mailboxEntry ? [mailboxEntry] : [];
-    });
-    const acknowledgeRecipientMailbox = vi.fn(async (
-      recipientChildSessionId: string,
-      entries: readonly A2AAgentMailboxEntry[],
-    ) => {
-      expect(subStore.loadSessionMetadata(recipientChildSessionId)?.subAgentTaskState)
-        .toBe("TASK_STATE_COMPLETED");
-      return entries.length;
-    });
+    const peekRecipientMailbox = vi.fn(
+      async (recipientChildSessionId: string) => {
+        expect(
+          subStore.loadSessionMetadata(recipientChildSessionId)
+            ?.subAgentTaskState,
+        ).toBe("TASK_STATE_INPUT_REQUIRED");
+        return mailboxEntry ? [mailboxEntry] : [];
+      },
+    );
+    const acknowledgeRecipientMailbox = vi.fn(
+      async (
+        recipientChildSessionId: string,
+        entries: readonly A2AAgentMailboxEntry[],
+      ) => {
+        expect(
+          subStore.loadSessionMetadata(recipientChildSessionId)
+            ?.subAgentTaskState,
+        ).toBe("TASK_STATE_COMPLETED");
+        return entries.length;
+      },
+    );
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
@@ -1259,11 +1402,13 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentSuspensionPrompt: "Which option?",
     });
 
-    let observedOptions: {
-      initialGuidance?: string;
-      approvalReasonPrefix?: string;
-      a2aCausalContext?: unknown;
-    } | undefined;
+    let observedOptions:
+      | {
+          initialGuidance?: string;
+          approvalReasonPrefix?: string;
+          a2aCausalContext?: unknown;
+        }
+      | undefined;
     restore = patchProvider(cleanSpawnProvider());
     const originalRunTurn = ConversationLoop.prototype.runTurn;
     const runTurnSpy = vi
@@ -1309,8 +1454,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       spawned.childSessionId,
       [mailboxEntry],
     );
-    expect(JSON.stringify(subStore.loadSession(spawned.childSessionId)))
-      .toContain("idle sibling guidance");
+    expect(
+      JSON.stringify(subStore.loadSession(spawned.childSessionId)),
+    ).toContain("idle sibling guidance");
   });
 
   it.each(["round-cap", "interrupted", "stream-error"] as const)(
@@ -1328,7 +1474,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         subAgentMemoryManager: subStore,
         agentMessageBus: {
           peekRecipientMailbox: vi.fn(async () =>
-            mailboxEntry ? [mailboxEntry] : []),
+            mailboxEntry ? [mailboxEntry] : [],
+          ),
           acknowledgeRecipientMailbox,
         } as never,
       });
@@ -1401,10 +1548,12 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
     const waiting = subStore.loadSessionMetadata(spawn.childSessionId)!;
 
-    const guard = new ScriptedProvider([[
-      { type: "text_delta", text: "MUST-NOT-RUN" },
-      { type: "message_complete", stopReason: "end_turn" },
-    ]]);
+    const guard = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "MUST-NOT-RUN" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
     restore = patchProvider(guard);
     try {
       for (const invalidAnswer of ["", "x".repeat(9_000)]) {
@@ -1418,7 +1567,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
           turnCount: 0,
           error: expect.stringContaining("question answer must be non-empty"),
         });
-        expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+        expect(
+          subStore.loadSessionMetadata(spawn.childSessionId),
+        ).toMatchObject({
           subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
           subAgentSuspensionReason: "question",
           subAgentSuspensionPrompt: "Which option?",
@@ -1451,17 +1602,19 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const originSessionId = "parent-question-answer-security";
     const execute = vi.fn(async () => ({ output: "ran", isError: false }));
     const toolRegistry = new ToolRegistry();
-    toolRegistry.register(createDynamicTool({
-      name: "question_probe",
-      description: "question answer security probe",
-      source: "builtin",
-      category: "meta",
-      modelVisible: true,
-      decisionOverride: "always-allow-with-audit",
-      isReadOnly: () => true,
-      jsonSchema: { type: "object", properties: {} },
-      execute,
-    }));
+    toolRegistry.register(
+      createDynamicTool({
+        name: "question_probe",
+        description: "question answer security probe",
+        source: "builtin",
+        category: "meta",
+        modelVisible: true,
+        decisionOverride: "always-allow-with-audit",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        execute,
+      }),
+    );
     const requestAndWait = vi.fn(async (req: { id: string }) => ({
       requestId: req.id,
       choice: "deny-once" as const,
@@ -1477,10 +1630,19 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
     });
 
-    let restore = patchProvider(new ScriptedProvider([[
-      { type: "tool_call", id: "spawn-probe", name: "question_probe", input: {} },
-      { type: "message_complete", stopReason: "tool_use" },
-    ]]));
+    let restore = patchProvider(
+      new ScriptedProvider([
+        [
+          {
+            type: "tool_call",
+            id: "spawn-probe",
+            name: "question_probe",
+            input: {},
+          },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+      ]),
+    );
     const spawn = await runner.spawn({
       title: "question-security",
       instructions: "wait",
@@ -1501,7 +1663,12 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     const resumeProvider = new ScriptedProvider([
       [
-        { type: "tool_call", id: "resume-probe", name: "question_probe", input: {} },
+        {
+          type: "tool_call",
+          id: "resume-probe",
+          name: "question_probe",
+          input: {},
+        },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -1525,10 +1692,12 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     }
 
     expect(execute).not.toHaveBeenCalled();
-    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
-      reason: expect.stringContaining("[Sub-Agent: parent]"),
-      trustOrigin: "agent-message",
-    }));
+    expect(requestAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: expect.stringContaining("[Sub-Agent: parent]"),
+        trustOrigin: "agent-message",
+      }),
+    );
     const providerInput = JSON.stringify(resumeProvider.observedMessages);
     expect(providerInput).toContain("[REDACTED:TOKEN]");
     expect(providerInput).not.toContain(secret);
@@ -1585,7 +1754,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       );
       expect(resumed.ok).toBe(true);
       expect(resumeProvider.turnsServed).toBe(1);
-      expect(onLinked).toHaveBeenCalledWith({ childSessionId: spawn.childSessionId });
+      expect(onLinked).toHaveBeenCalledWith({
+        childSessionId: spawn.childSessionId,
+      });
     } finally {
       restore();
     }
@@ -1623,12 +1794,14 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       const before = subStore.loadSessionMetadata(spawn.childSessionId)!;
 
       restore = patchProvider(cleanSpawnProvider());
-      const runTurnSpy = vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue({
-        text: "",
-        toolCalls: [],
-        route: "default",
-        stopReason,
-      });
+      const runTurnSpy = vi
+        .spyOn(ConversationLoop.prototype, "runTurn")
+        .mockResolvedValue({
+          text: "",
+          toolCalls: [],
+          route: "default",
+          stopReason,
+        });
       try {
         const resumed = await runner.resume(
           spawn.childSessionId,
@@ -1643,12 +1816,16 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
           stopReason,
           turnCount: 0,
         });
-        expect(runner.getRunStatus(spawn.childSessionId, originSessionId)).toMatchObject({
+        expect(
+          runner.getRunStatus(spawn.childSessionId, originSessionId),
+        ).toMatchObject({
           status: "error",
           taskState: "TASK_STATE_FAILED",
           error: `sub-agent resume stopped with ${stopReason}`,
         });
-        expect(subStore.loadSessionMetadata(spawn.childSessionId)).toMatchObject({
+        expect(
+          subStore.loadSessionMetadata(spawn.childSessionId),
+        ).toMatchObject({
           budgetResumeCount: before.budgetResumeCount,
           questionAnswerCount: before.questionAnswerCount,
           cumulativeRounds: before.cumulativeRounds,
@@ -1683,10 +1860,16 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const resumeId = spawn.childSessionId;
     const meta = subStore.loadSessionMetadata(resumeId)!;
     // 4 * MAX_TURNS_CAP(30) = 120. Set exactly at the ceiling.
-    await subStore.saveSessionMetadata(resumeId, { ...meta, cumulativeRounds: 120 });
+    await subStore.saveSessionMetadata(resumeId, {
+      ...meta,
+      cumulativeRounds: 120,
+    });
 
     const guard = new ScriptedProvider([
-      [{ type: "text_delta", text: "SHOULD NOT RUN" }, { type: "message_complete", stopReason: "end_turn" }],
+      [
+        { type: "text_delta", text: "SHOULD NOT RUN" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
     ]);
     const restore2 = patchProvider(guard);
     try {
@@ -1698,8 +1881,6 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       restore2();
     }
   });
-
-
 
   it("caps a near-ceiling resume to the remaining round and waiting adds no extra rounds", async () => {
     const toolRegistry = new ToolRegistry();
@@ -1735,20 +1916,26 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     restore = patchProvider(cleanSpawnProvider());
     const runTurnSpy = vi
       .spyOn(ConversationLoop.prototype, "runTurn")
-      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
-        const callbacks = args[1] as
-          | {
-              onAssistantRound?: (round: { thought?: string; text: string }) => void;
-            }
-          | undefined;
-        observedMaxRounds = (args[3] as { maxRounds?: number } | undefined)?.maxRounds;
-        callbacks?.onAssistantRound?.({ text: "last allowed round" });
-        return {
-          text: "partial at cumulative ceiling",
-          toolCalls: [],
-          stopReason: "round-cap",
-        } as Awaited<ReturnType<typeof originalRunTurn>>;
-      });
+      .mockImplementation(
+        async (...args: Parameters<typeof originalRunTurn>) => {
+          const callbacks = args[1] as
+            | {
+                onAssistantRound?: (round: {
+                  thought?: string;
+                  text: string;
+                }) => void;
+              }
+            | undefined;
+          observedMaxRounds = (args[3] as { maxRounds?: number } | undefined)
+            ?.maxRounds;
+          callbacks?.onAssistantRound?.({ text: "last allowed round" });
+          return {
+            text: "partial at cumulative ceiling",
+            toolCalls: [],
+            stopReason: "round-cap",
+          } as Awaited<ReturnType<typeof originalRunTurn>>;
+        },
+      );
 
     try {
       const waiting = await runner.resume(resumeId, "continue", "near-ceiling");
@@ -1764,18 +1951,23 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(atCeiling.resumeCount).toBe(1);
       expect(atCeiling.questionAnswerCount).toBe(4);
 
-      const refused = await runner.resume(resumeId, "continue again", "near-ceiling");
+      const refused = await runner.resume(
+        resumeId,
+        "continue again",
+        "near-ceiling",
+      );
       expect(refused.ok).toBe(false);
       expect(refused.resumeExhausted).toBe(true);
       expect(refused.turnCount).toBe(0);
       expect(runTurnSpy).toHaveBeenCalledTimes(1);
-      expect(subStore.loadSessionMetadata(resumeId)?.cumulativeRounds).toBe(120);
+      expect(subStore.loadSessionMetadata(resumeId)?.cumulativeRounds).toBe(
+        120,
+      );
     } finally {
       runTurnSpy.mockRestore();
       restore();
     }
   });
-
 
   it("accounts assistant rounds completed before a spawn throws", async () => {
     const toolRegistry = new ToolRegistry();
@@ -1791,15 +1983,20 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const restore = patchProvider(cleanSpawnProvider());
     const runTurnSpy = vi
       .spyOn(ConversationLoop.prototype, "runTurn")
-      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
-        const callbacks = args[1] as
-          | {
-              onAssistantRound?: (round: { thought?: string; text: string }) => void;
-            }
-          | undefined;
-        callbacks?.onAssistantRound?.({ text: "completed before failure" });
-        throw new Error("partial spawn failure");
-      });
+      .mockImplementation(
+        async (...args: Parameters<typeof originalRunTurn>) => {
+          const callbacks = args[1] as
+            | {
+                onAssistantRound?: (round: {
+                  thought?: string;
+                  text: string;
+                }) => void;
+              }
+            | undefined;
+          callbacks?.onAssistantRound?.({ text: "completed before failure" });
+          throw new Error("partial spawn failure");
+        },
+      );
 
     let spawn: Awaited<ReturnType<SubAgentRunner["spawn"]>>;
     try {
@@ -1824,7 +2021,6 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       cumulativeRounds: 1,
     });
   });
-
 
   it("accounts partial-failure rounds without merging budget and question counters", async () => {
     const toolRegistry = new ToolRegistry();
@@ -1861,19 +2057,30 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     restore = patchProvider(cleanSpawnProvider());
     const runTurnSpy = vi
       .spyOn(ConversationLoop.prototype, "runTurn")
-      .mockImplementation(async (...args: Parameters<typeof originalRunTurn>) => {
-        const callbacks = args[1] as
-          | {
-              onAssistantRound?: (round: { thought?: string; text: string }) => void;
-            }
-          | undefined;
-        callbacks?.onAssistantRound?.({ text: "completed before resume failure" });
-        throw new Error("partial resume failure");
-      });
+      .mockImplementation(
+        async (...args: Parameters<typeof originalRunTurn>) => {
+          const callbacks = args[1] as
+            | {
+                onAssistantRound?: (round: {
+                  thought?: string;
+                  text: string;
+                }) => void;
+              }
+            | undefined;
+          callbacks?.onAssistantRound?.({
+            text: "completed before resume failure",
+          });
+          throw new Error("partial resume failure");
+        },
+      );
 
     let resumed: Awaited<ReturnType<SubAgentRunner["resume"]>>;
     try {
-      resumed = await runner.resume(resumeId, "answer the child", "partial-resume");
+      resumed = await runner.resume(
+        resumeId,
+        "answer the child",
+        "partial-resume",
+      );
     } finally {
       runTurnSpy.mockRestore();
       restore();
@@ -1921,7 +2128,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       async *streamTurn() {
         await new Promise((r) => setTimeout(r, 20));
         yield { type: "text_delta", text: "resumed" } as StreamEvent;
-        yield { type: "message_complete", stopReason: "end_turn" } as StreamEvent;
+        yield {
+          type: "message_complete",
+          stopReason: "end_turn",
+        } as StreamEvent;
       },
     };
     restore = patchProvider(slowProvider);
@@ -2079,36 +2289,50 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         taskState: "TASK_STATE_FAILED",
       });
       expect(loser).not.toHaveProperty("childSessionId");
-      expect(runner.getRunStatus(loser.spawnId, originSessionId)).toMatchObject({
-        status: "error",
-        taskState: "TASK_STATE_FAILED",
-        error: expect.stringContaining("already in flight"),
-      });
-      expect(runner.getRunStatus(spawn.childSessionId, originSessionId)).toMatchObject({
+      expect(runner.getRunStatus(loser.spawnId, originSessionId)).toMatchObject(
+        {
+          status: "error",
+          taskState: "TASK_STATE_FAILED",
+          error: expect.stringContaining("already in flight"),
+        },
+      );
+      expect(
+        runner.getRunStatus(spawn.childSessionId, originSessionId),
+      ).toMatchObject({
         spawnId: winner.spawnId,
         status: "running",
         taskState: "TASK_STATE_WORKING",
       });
       await vi.waitFor(() =>
-        expect(events.some(
-          (event) => event.spawnId === loser.spawnId && event.type === "error",
-        )).toBe(true));
+        expect(
+          events.some(
+            (event) =>
+              event.spawnId === loser.spawnId && event.type === "error",
+          ),
+        ).toBe(true),
+      );
       expect(deliverToParent).not.toHaveBeenCalled();
 
       releaseWinner();
       await vi.waitFor(() => expect(deliverToParent).toHaveBeenCalledTimes(1));
       await vi.waitFor(() =>
-        expect(events.some(
-          (event) => event.spawnId === winner.spawnId && event.type === "done",
-        )).toBe(true));
+        expect(
+          events.some(
+            (event) =>
+              event.spawnId === winner.spawnId && event.type === "done",
+          ),
+        ).toBe(true),
+      );
 
       const winnerTerminal = events.filter(
-        (event) => event.spawnId === winner.spawnId
-          && (event.type === "done" || event.type === "error"),
+        (event) =>
+          event.spawnId === winner.spawnId &&
+          (event.type === "done" || event.type === "error"),
       );
       const loserTerminal = events.filter(
-        (event) => event.spawnId === loser.spawnId
-          && (event.type === "done" || event.type === "error"),
+        (event) =>
+          event.spawnId === loser.spawnId &&
+          (event.type === "done" || event.type === "error"),
       );
       expect(winnerTerminal).toHaveLength(1);
       expect(winnerTerminal[0]).toMatchObject({
@@ -2157,7 +2381,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const originalSave = subStore.saveSessionMetadata.bind(subStore);
     let saveCount = 0;
     const savedStates: unknown[] = [];
-    const saveSpy = vi.spyOn(subStore, "saveSessionMetadata")
+    const saveSpy = vi
+      .spyOn(subStore, "saveSessionMetadata")
       .mockImplementation(async (sessionId, next) => {
         saveCount += 1;
         savedStates.push(next.subAgentTaskState);
@@ -2186,10 +2411,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         "TASK_STATE_COMPLETED",
         "TASK_STATE_FAILED",
       ]);
-      expect(runner.getRunStatus(
-        "resume-final-save-attempt",
-        originSessionId,
-      )).toMatchObject({
+      expect(
+        runner.getRunStatus("resume-final-save-attempt", originSessionId),
+      ).toMatchObject({
         status: "error",
         taskState: "TASK_STATE_FAILED",
         error: "final metadata write failed",
@@ -2251,7 +2475,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const finalSaveGate = new Promise<void>((resolve) => {
       releaseFinalSave = resolve;
     });
-    const saveSpy = vi.spyOn(subStore, "saveSessionMetadata")
+    const saveSpy = vi
+      .spyOn(subStore, "saveSessionMetadata")
       .mockImplementation(async (sessionId, next) => {
         saveCount += 1;
         savedStates.push(next.subAgentTaskState);
@@ -2263,7 +2488,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       });
     const provider = cleanSpawnProvider();
     restore = patchProvider(provider);
-    let pending: Promise<Awaited<ReturnType<SubAgentRunner["resume"]>>> | undefined;
+    let pending:
+      | Promise<Awaited<ReturnType<SubAgentRunner["resume"]>>>
+      | undefined;
     try {
       pending = runner.resume(
         spawn.childSessionId,
@@ -2275,10 +2502,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       );
       await finalSaveEntered;
 
-      expect(runner.interruptRun(
-        "resume-commit-cutoff",
-        originSessionId,
-      )).toMatchObject({
+      expect(
+        runner.interruptRun("resume-commit-cutoff", originSessionId),
+      ).toMatchObject({
         ok: false,
         run: {
           status: "running",
@@ -2297,10 +2523,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         "TASK_STATE_WORKING",
         "TASK_STATE_COMPLETED",
       ]);
-      expect(runner.getRunStatus(
-        "resume-commit-cutoff",
-        originSessionId,
-      )).toMatchObject({
+      expect(
+        runner.getRunStatus("resume-commit-cutoff", originSessionId),
+      ).toMatchObject({
         status: "done",
         taskState: "TASK_STATE_COMPLETED",
       });
@@ -2435,7 +2660,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     expect(afterResume.resumeCount).toBe(1);
     expect(afterResume.budgetResumeCount).toBe(1);
     expect(afterResume.questionAnswerCount).toBe(7);
-    expect(afterResume.cumulativeRounds).toBe(afterSpawn.cumulativeRounds! + resumed.turnCount);
+    expect(afterResume.cumulativeRounds).toBe(
+      afterSpawn.cumulativeRounds! + resumed.turnCount,
+    );
     // Full-overwrite spread preserved the frozen scope + profile fields — a
     // dropped spread would corrupt the scope for the NEXT resume.
     expect(afterResume.sourceTools).toEqual(["noop"]);
@@ -2530,13 +2757,22 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     // A provider that must NOT run (if it does, the test fails).
     const guardProvider = new ScriptedProvider([
-      [{ type: "text_delta", text: "CROSS-SESSION-MUST-NOT-RUN" }, { type: "message_complete", stopReason: "end_turn" }],
+      [
+        { type: "text_delta", text: "CROSS-SESSION-MUST-NOT-RUN" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
     ]);
     const restoreGuard = patchProvider(guardProvider);
     try {
       // Conversation B tries to resume with a DIFFERENT originSessionId.
       const originB = "session-B";
-      const result = await runner.resume(resumeId, "hijack attempt", "attacker", undefined, originB);
+      const result = await runner.resume(
+        resumeId,
+        "hijack attempt",
+        "attacker",
+        undefined,
+        originB,
+      );
       expect(result.ok).toBe(false);
       expect(result.error).toMatch(/does not belong to this session/i);
       // No turn was run — the guard fires before the LLM is invoked.
@@ -2547,11 +2783,20 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     // Positive: same origin (conversation A) CAN resume its own sub-agent.
     const resumeProvider = new ScriptedProvider([
-      [{ type: "text_delta", text: "legitimate resume" }, { type: "message_complete", stopReason: "end_turn" }],
+      [
+        { type: "text_delta", text: "legitimate resume" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
     ]);
     const restoreResume = patchProvider(resumeProvider);
     try {
-      const result = await runner.resume(resumeId, "legitimate continuation", "owner", undefined, originA);
+      const result = await runner.resume(
+        resumeId,
+        "legitimate continuation",
+        "owner",
+        undefined,
+        originA,
+      );
       expect(result.ok).toBe(true);
       expect(result.summary).toContain("legitimate resume");
     } finally {
@@ -2572,7 +2817,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
 
     const callerOrigin = "session-A";
-    const tag = createHash("sha256").update(callerOrigin).digest("hex").slice(0, 8);
+    const tag = createHash("sha256")
+      .update(callerOrigin)
+      .digest("hex")
+      .slice(0, 8);
     const resumeId = createDlpSafeUuid("sub-" + tag);
     await subStore.saveSessionMetadata(resumeId, {
       sessionKind: "subagent",
@@ -2601,7 +2849,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         callerOrigin,
       );
       expect(result.ok).toBe(false);
-      expect(result.error).toMatch(/origin session metadata does not match caller/i);
+      expect(result.error).toMatch(
+        /origin session metadata does not match caller/i,
+      );
       expect(guardProvider.turnsServed).toBe(0);
     } finally {
       restore();
@@ -2635,11 +2885,20 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     // A caller with an explicit originSessionId is refused (the id has no tag
     // to match against, so idTag="" but expectedTag is non-empty).
     const guardProvider = new ScriptedProvider([
-      [{ type: "text_delta", text: "SHOULD-NOT-RUN" }, { type: "message_complete", stopReason: "end_turn" }],
+      [
+        { type: "text_delta", text: "SHOULD-NOT-RUN" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
     ]);
     restore = patchProvider(guardProvider);
     try {
-      const result = await runner.resume(resumeId, "attempt", "caller", undefined, "some-session-id");
+      const result = await runner.resume(
+        resumeId,
+        "attempt",
+        "caller",
+        undefined,
+        "some-session-id",
+      );
       expect(result.ok).toBe(false);
       expect(result.error).toMatch(/does not belong to this session/i);
       expect(guardProvider.turnsServed).toBe(0);
@@ -2649,11 +2908,18 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     // No-origin caller (undefined) CAN resume it.
     const okProvider = new ScriptedProvider([
-      [{ type: "text_delta", text: "ok" }, { type: "message_complete", stopReason: "end_turn" }],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
     ]);
     restore = patchProvider(okProvider);
     try {
-      const result = await runner.resume(resumeId, "no-origin continue", "untagged-caller");
+      const result = await runner.resume(
+        resumeId,
+        "no-origin continue",
+        "untagged-caller",
+      );
       expect(result.ok).toBe(true);
     } finally {
       restore();
@@ -2688,7 +2954,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     });
 
     const guardProvider = new ScriptedProvider([
-      [{ type: "text_delta", text: "MUST-NOT-RUN" }, { type: "message_complete", stopReason: "end_turn" }],
+      [
+        { type: "text_delta", text: "MUST-NOT-RUN" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
     ]);
     const restore = patchProvider(guardProvider);
     try {
@@ -2707,12 +2976,14 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
-    const cleanupTerminalRecipientMailbox = vi.fn(async (childSessionId: string) => {
-      expect(subStore.loadSessionMetadata(childSessionId)).toMatchObject({
-        subAgentTaskState: "TASK_STATE_COMPLETED",
-      });
-      return { ok: true as const, removed: 1, retained: 0 };
-    });
+    const cleanupTerminalRecipientMailbox = vi.fn(
+      async (childSessionId: string) => {
+        expect(subStore.loadSessionMetadata(childSessionId)).toMatchObject({
+          subAgentTaskState: "TASK_STATE_COMPLETED",
+        });
+        return { ok: true as const, removed: 1, retained: 0 };
+      },
+    );
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
@@ -2727,8 +2998,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         instructions: "finish",
       });
       expect(completed.ok).toBe(true);
-      expect(cleanupTerminalRecipientMailbox)
-        .toHaveBeenCalledWith(completed.childSessionId);
+      expect(cleanupTerminalRecipientMailbox).toHaveBeenCalledWith(
+        completed.childSessionId,
+      );
     } finally {
       restore();
     }
@@ -2762,38 +3034,44 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const namespace = openFeatureNamespace("subagent-messaging");
     const mailbox = new A2AAgentMessageMailbox(namespace);
     const audit = vi.fn();
-    const parentDeliver = vi.fn(async (input: {
-      childSessionId: string;
-      message: { metadata?: unknown; messageId: string; parts: unknown[] };
-    }) => {
-      expect(subStore.loadSessionMetadata(input.childSessionId)).toMatchObject({
-        subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
-        subAgentSuspensionReason: "question",
-        subAgentSuspensionPrompt: "Which option?",
-      });
-      expect(input.message).toMatchObject({
-        parts: [{ text: "Which option?" }],
-        metadata: {
-          taskState: "TASK_STATE_INPUT_REQUIRED",
-          suspension: {
-            reason: "question",
-            prompt: "Which option?",
-            resumeId: input.childSessionId,
+    const parentDeliver = vi.fn(
+      async (input: {
+        childSessionId: string;
+        message: { metadata?: unknown; messageId: string; parts: unknown[] };
+      }) => {
+        expect(
+          subStore.loadSessionMetadata(input.childSessionId),
+        ).toMatchObject({
+          subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+          subAgentSuspensionReason: "question",
+          subAgentSuspensionPrompt: "Which option?",
+        });
+        expect(input.message).toMatchObject({
+          parts: [{ text: "Which option?" }],
+          metadata: {
+            taskState: "TASK_STATE_INPUT_REQUIRED",
+            suspension: {
+              reason: "question",
+              prompt: "Which option?",
+              resumeId: input.childSessionId,
+            },
           },
-        },
-      });
-      return {
-        ok: true as const,
-        disposition: "mailbox" as const,
-        messageId: input.message.messageId,
-      };
-    });
+        });
+        return {
+          ok: true as const,
+          disposition: "mailbox" as const,
+          messageId: input.message.messageId,
+        };
+      },
+    );
     const bus = new A2AAgentMessageBus({
       parentBus: { deliverToParent: parentDeliver } as never,
       mailbox,
       auditLogger: { log: audit } as never,
-      resolveSender: (childSessionId) => runner.resolveSubAgentSender(childSessionId),
-      resolvePeer: (sender, recipient) => runner.resolveSubAgentPeer(sender, recipient),
+      resolveSender: (childSessionId) =>
+        runner.resolveSubAgentSender(childSessionId),
+      resolvePeer: (sender, recipient) =>
+        runner.resolveSubAgentPeer(sender, recipient),
       isOriginActive: (origin) => runner.isSubAgentOriginActive(origin),
     });
     runner = new SubAgentRunner({
@@ -2802,19 +3080,21 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       subAgentMemoryManager: subStore,
       agentMessageBus: bus,
     });
-    const provider = new ScriptedProvider([[
-      {
-        type: "tool_call",
-        id: "question-send",
-        name: "agent_send",
-        input: {
-          to: "parent",
-          parts: [{ text: "Which option?" }],
-          waitForReply: true,
+    const provider = new ScriptedProvider([
+      [
+        {
+          type: "tool_call",
+          id: "question-send",
+          name: "agent_send",
+          input: {
+            to: "parent",
+            parts: [{ text: "Which option?" }],
+            waitForReply: true,
+          },
         },
-      },
-      { type: "message_complete", stopReason: "tool_use" },
-    ]]);
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+    ]);
     const restore = patchProvider(provider);
     try {
       const result = await runner.spawn({
@@ -2834,8 +3114,11 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         trees: Array<{ originSessionId: string; messageCount: number }>;
       }>("agent-mailbox.json", { trees: [] });
       expect(stored.trees).toEqual([{ originSessionId, messageCount: 1 }]);
-      expect(audit.mock.calls.filter(([entry]) =>
-        String(entry.input).includes("delivered:parent"))).toHaveLength(1);
+      expect(
+        audit.mock.calls.filter(([entry]) =>
+          String(entry.input).includes("delivered:parent"),
+        ),
+      ).toHaveLength(1);
     } finally {
       restore();
     }
@@ -2857,8 +3140,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       parentBus: { deliverToParent: parentDeliver } as never,
       mailbox,
       auditLogger: { log: vi.fn() } as never,
-      resolveSender: (childSessionId) => runner.resolveSubAgentSender(childSessionId),
-      resolvePeer: (sender, recipient) => runner.resolveSubAgentPeer(sender, recipient),
+      resolveSender: (childSessionId) =>
+        runner.resolveSubAgentSender(childSessionId),
+      resolvePeer: (sender, recipient) =>
+        runner.resolveSubAgentPeer(sender, recipient),
       isOriginActive: (origin) => runner.isSubAgentOriginActive(origin),
     });
     runner = new SubAgentRunner({
@@ -2868,25 +3153,29 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       agentMessageBus: bus,
     });
     const originalSave = subStore.saveSessionMetadata.bind(subStore);
-    vi.spyOn(subStore, "saveSessionMetadata").mockImplementation(async (id, meta) => {
-      if (meta.subAgentTaskState === "TASK_STATE_FAILED") {
-        throw new Error("terminal overwrite failed");
-      }
-      await originalSave(id, meta);
-    });
-    const provider = new ScriptedProvider([[
-      {
-        type: "tool_call",
-        id: "question-send-fallback",
-        name: "agent_send",
-        input: {
-          to: "parent",
-          parts: [{ text: "Which option?" }],
-          waitForReply: true,
-        },
+    vi.spyOn(subStore, "saveSessionMetadata").mockImplementation(
+      async (id, meta) => {
+        if (meta.subAgentTaskState === "TASK_STATE_FAILED") {
+          throw new Error("terminal overwrite failed");
+        }
+        await originalSave(id, meta);
       },
-      { type: "message_complete", stopReason: "tool_use" },
-    ]]);
+    );
+    const provider = new ScriptedProvider([
+      [
+        {
+          type: "tool_call",
+          id: "question-send-fallback",
+          name: "agent_send",
+          input: {
+            to: "parent",
+            parts: [{ text: "Which option?" }],
+            waitForReply: true,
+          },
+        },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+    ]);
     const restore = patchProvider(provider);
     try {
       const result = await runner.spawn({
@@ -2900,11 +3189,15 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         stopReason: "input-required",
         suspension: { reason: "question", prompt: "Which option?" },
       });
-      expect(subStore.loadSessionMetadata(result.childSessionId)).toMatchObject({
-        subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
-        subAgentSuspensionReason: "question",
-      });
-      expect(runner.getRunStatus(result.childSessionId, originSessionId)).toMatchObject({
+      expect(subStore.loadSessionMetadata(result.childSessionId)).toMatchObject(
+        {
+          subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+          subAgentSuspensionReason: "question",
+        },
+      );
+      expect(
+        runner.getRunStatus(result.childSessionId, originSessionId),
+      ).toMatchObject({
         taskState: "TASK_STATE_INPUT_REQUIRED",
         status: "waiting",
       });
@@ -2918,7 +3211,6 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       restore();
     }
   });
-
 });
 
 // ─── 9) agent_spawn tool — resumeId surface + routing ─────────────────────────
@@ -2944,7 +3236,11 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     });
     const r = await tool.execute(
       { title: "budget", instructions: "big task" },
-      { cwd: process.cwd(), metadata: { sessionId: "parent", spawnDepth: 0 }, extraAllowedDirectories: [] },
+      {
+        cwd: process.cwd(),
+        metadata: { sessionId: "parent", spawnDepth: 0 },
+        extraAllowedDirectories: [],
+      },
     );
     expect(r.isError).toBe(false);
     const parsed = JSON.parse(r.output);
@@ -2970,7 +3266,11 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     });
     const r = await tool.execute(
       { title: "clean", instructions: "small task" },
-      { cwd: process.cwd(), metadata: { sessionId: "parent", spawnDepth: 0 }, extraAllowedDirectories: [] },
+      {
+        cwd: process.cwd(),
+        metadata: { sessionId: "parent", spawnDepth: 0 },
+        extraAllowedDirectories: [],
+      },
     );
     const parsed = JSON.parse(r.output);
     expect(parsed.incomplete).toBeUndefined();
@@ -2994,7 +3294,11 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     });
     const r = await tool.execute(
       { instructions: "keep going", resumeId: "sub-resume-me" },
-      { cwd: process.cwd(), metadata: { sessionId: "parent", spawnDepth: 0 }, extraAllowedDirectories: [] },
+      {
+        cwd: process.cwd(),
+        metadata: { sessionId: "parent", spawnDepth: 0 },
+        extraAllowedDirectories: [],
+      },
     );
     expect(r.isError).toBe(false);
     // resume() called with (resumeId, continuationInstructions, title, callbacks, originSessionId).
@@ -3028,7 +3332,11 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     });
     const r = await tool.execute(
       { instructions: "continue", resumeId: "sub-exhausted" },
-      { cwd: process.cwd(), metadata: { sessionId: "parent", spawnDepth: 0 }, extraAllowedDirectories: [] },
+      {
+        cwd: process.cwd(),
+        metadata: { sessionId: "parent", spawnDepth: 0 },
+        extraAllowedDirectories: [],
+      },
     );
     expect(r.isError).toBe(true);
     const parsed = JSON.parse(r.output);
@@ -3045,11 +3353,16 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     // agent_spawn at all — the depth guard refuses before routing to resume.
     const r = await tool.execute(
       { instructions: "nested resume", resumeId: "sub-x" },
-      { cwd: process.cwd(), metadata: { sessionId: "child", spawnDepth: 1 }, extraAllowedDirectories: [] },
+      {
+        cwd: process.cwd(),
+        metadata: { sessionId: "child", spawnDepth: 1 },
+        extraAllowedDirectories: [],
+      },
     );
     expect(r.isError).toBe(true);
-    expect(JSON.parse(r.output).error).toContain("cannot be invoked from a sub-agent");
+    expect(JSON.parse(r.output).error).toContain(
+      "cannot be invoked from a sub-agent",
+    );
     expect(resumeSpy).not.toHaveBeenCalled();
   });
-
 });

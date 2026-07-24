@@ -11,10 +11,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams,
+} from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
@@ -49,19 +50,19 @@ class HangingProvider implements LLMProvider {
 
 function buildLoop(provider: LLMProvider | null): ConversationLoop {
   const toolRegistry = new ToolRegistry();
-  const keywordEngine = new KeywordEngine();
-  const routeEngine = new RouteEngine({ toolRegistry });
-  const loop = new ConversationLoop(({
+  const inputClassifier = new InputClassifier();
+  const routeEngine = new RouteEngine();
+  const loop = new ConversationLoop({
     settingsService: {
       get: () => fakeLlmSettings(),
       getSecret: () => "test-key",
     },
     systemPromptBuilder: { build: () => "system" },
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as unknown as { provider: LLMProvider | null }).provider = provider;
   return loop;
 }
@@ -83,7 +84,8 @@ describe("ConversationLoop.pingProvider error branches", () => {
       vendor: "openai",
       error: "boom-ping",
     });
-    expect((result as { latencyMs: number }).latencyMs).toBeGreaterThanOrEqual(0);
+    expect((result as { latencyMs: number }).latencyMs).toBeGreaterThanOrEqual(0,
+    );
   });
 
   it("stream ends with no message_complete/error → error:'stream-ended'", async () => {

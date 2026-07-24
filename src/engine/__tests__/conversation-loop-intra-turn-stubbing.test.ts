@@ -9,11 +9,12 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams,
+} from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -40,7 +41,12 @@ class RecordingToolLoopProvider implements LLMProvider {
     const round = this.index++;
     if (round < this.toolRounds) {
       yield { type: "text_delta", text: `round ${round}` };
-      yield { type: "tool_call", id: `tu-${round}`, name: "probe", input: { n: round } };
+      yield {
+        type: "tool_call",
+        id: `tu-${round}`,
+        name: "probe",
+        input: { n: round },
+      };
       yield { type: "message_complete", stopReason: "tool_use" };
       return;
     }
@@ -61,38 +67,50 @@ describe("ConversationLoop intra-turn tool-result stubbing (issue #1171)", () =>
     process.env.LVIS_DEV_PREFLIGHT_OVERRIDE = "2000";
 
     const toolRegistry = new ToolRegistry();
-    toolRegistry.register(createDynamicTool({
-      name: "probe",
-      description: "returns a sizeable result",
-      source: "builtin",
-      category: "read",
-      isReadOnly: () => true,
-      jsonSchema: { type: "object", properties: { n: { type: "number" } } },
-      // Each result well above the 200-char minStubThreshold so marking frees real tokens.
-      execute: async () => ({ output: "RESULT " + "x".repeat(400), isError: false }),
-    }));
+    toolRegistry.register(
+      createDynamicTool({
+        name: "probe",
+        description: "returns a sizeable result",
+        source: "builtin",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: { n: { type: "number" } } },
+        // Each result well above the 200-char minStubThreshold so marking frees real tokens.
+        execute: async () => ({
+          output: "RESULT " + "x".repeat(400),
+          isError: false,
+        }),
+      }),
+    );
 
     // Run more rounds than the protect window (16) so older results actually
     // age out and get stubbed — the deep-indexer turn shape from #1171.
     const TOOL_ROUNDS = 24;
     const provider = new RecordingToolLoopProvider(TOOL_ROUNDS);
-    const loop = new ConversationLoop(({
-      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+    const loop = new ConversationLoop({
+      settingsService: {
+        get: () => fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
       disableSessionPersistence: true,
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
 
-    await loop.runTurn("deep tool loop", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("deep tool loop", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     const tokens = provider.perRoundWireTokens;
     // Sanity: the loop ran enough rounds to exceed the protect window so older
     // results actually age out and get stubbed.
-    expect(tokens.length).toBeGreaterThan(INTRA_TURN_PRESERVE_RECENT_RESULTS + 4);
+    expect(tokens.length).toBeGreaterThan(
+      INTRA_TURN_PRESERVE_RECENT_RESULTS + 4,
+    );
 
     // Per-round growth slope. While the protect window (16) is filling, each
     // round appends one full verbatim tool_result — a fixed ~constant slope.
@@ -102,7 +120,10 @@ describe("ConversationLoop intra-turn tool-result stubbing (issue #1171)", () =>
     // removed intra-turn stubbing would keep the full slope to the last round.
     const deltas = tokens.slice(1).map((t, i) => t - tokens[i]);
     // Pre-stub slope: rounds while the window is still filling (results <= 16).
-    const fillingDeltas = deltas.slice(2, INTRA_TURN_PRESERVE_RECENT_RESULTS - 2);
+    const fillingDeltas = deltas.slice(
+      2,
+      INTRA_TURN_PRESERVE_RECENT_RESULTS - 2,
+    );
     // Post-stub slope: the tail where stubbing is actively aging results out.
     const stubbingDeltas = deltas.slice(-4);
     const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;

@@ -57,28 +57,46 @@ describe("PluginRuntime.disable", () => {
     const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_hello`;
     const manifest: Record<string, unknown> = {};
     if (installPolicy) manifest.installPolicy = installPolicy;
-    const { manifestPath } = await writeTestPlugin({
-      rootDir: testDir,
-      pluginsRoot: installedDir,
-      registryPath,
-    }, {
-      id,
-      tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-      entrySource: makeTestPluginEntrySource({ [methodName]: JSON.stringify(`hi-${id}`) }),
-      manifest,
-    });
+    const { manifestPath } = await writeTestPlugin(
+      {
+        rootDir: testDir,
+        pluginsRoot: installedDir,
+        registryPath,
+      },
+      {
+        id,
+        tools: [
+          {
+            name: methodName,
+            description: `${methodName} tool`,
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+        entrySource: makeTestPluginEntrySource({
+          [methodName]: JSON.stringify(`hi-${id}`),
+        }),
+        manifest,
+      },
+    );
     return manifestPath;
   }
 
   function makeRuntime(): PluginRuntime {
-    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
-    return makeTestPluginRuntime({
-      rootDir: testDir,
+    const guard = new PluginDeploymentGuard({
       registryPath,
       pluginsRoot: installedDir,
-    }, {
-      deploymentGuard: guard,
     });
+    return makeTestPluginRuntime(
+      {
+        rootDir: testDir,
+        registryPath,
+        pluginsRoot: installedDir,
+      },
+      {
+        deploymentGuard: guard,
+      },
+    );
   }
 
   it("deactivates a live generation when durable uninstall is already missing", async () => {
@@ -100,10 +118,22 @@ describe("PluginRuntime.disable", () => {
     await expect(uninstallPluginWithLifecycle(pluginId, {
       pluginRuntime: runtime,
       pluginMarketplace: {
+        getInstalledVersion: vi.fn(async () => null),
         uninstall: vi.fn(async () => {
           throw new Error(`Plugin not installed: ${pluginId}`);
         }),
       },
+      settingsService: {
+        deletePluginConfig: vi.fn(async () => undefined),
+        deletePluginSecrets: vi.fn(async () => 0),
+      },
+      pluginPaths: { cacheRoot: join(testDir, ".cache") },
+      clearAuthPartitionService: vi.fn(async () => undefined),
+      listPluginAuthPartitionsService: vi.fn(() => [
+        `persist:plugin-auth:${encodeURIComponent(pluginId)}`,
+      ]),
+      forgetPluginAuthPartitionsService: vi.fn(async () => undefined),
+      drainPluginInstallLockOperationsService: vi.fn(async () => undefined),
     })).resolves.toEqual({ pluginId, uninstalled: true });
 
     expect(runtime.listPluginIds()).not.toContain(pluginId);
@@ -116,22 +146,34 @@ describe("PluginRuntime.disable", () => {
     entrySource: string,
     manifest: Record<string, unknown> = {},
   ): Promise<string> {
-    const { manifestPath } = await writeTestPlugin({
-      rootDir: testDir,
-      pluginsRoot: installedDir,
-      registryPath,
-    }, {
-      id,
-      tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-      entrySource,
-      manifest,
-    });
+    const { manifestPath } = await writeTestPlugin(
+      {
+        rootDir: testDir,
+        pluginsRoot: installedDir,
+        registryPath,
+      },
+      {
+        id,
+        tools: [
+          {
+            name: methodName,
+            description: `${methodName} tool`,
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+        entrySource,
+        manifest,
+      },
+    );
     return manifestPath;
   }
 
   it("disable removes methods + marks registry enabled=false for user plugin", async () => {
     const manifestPath = await writeFakePlugin("p-user");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "p-user", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "p-user", manifestPath, enabled: true },
+    ]);
     const runtime = makeRuntime();
     await runtime.startAll();
 
@@ -144,30 +186,40 @@ describe("PluginRuntime.disable", () => {
     expect(runtime.listToolNames()).not.toContain("p_user_hello");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    const entry = registry.plugins.find((p: { id: string }) => p.id === "p-user");
+    const entry = registry.plugins.find(
+      (p: { id: string }) => p.id === "p-user",
+    );
     expect(entry.enabled).toBe(false);
   });
 
   it("disable rejects managed plugin with guard error and leaves state unchanged", async () => {
     const manifestPath = await writeFakePlugin("p-managed", "admin");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "p-managed", manifestPath, enabled: true },
+    ]);
     const runtime = makeRuntime();
     await runtime.startAll();
 
-    await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Admin plugin/);
+    await expect(runtime.disable("p-managed", "user")).rejects.toThrow(
+      /Admin plugin/,
+    );
 
     expect(runtime.listPluginIds()).toContain("p-managed");
     expect(runtime.listToolNames()).toContain("p_managed_hello");
 
     // registry should NOT have enabled=false
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    const entry = registry.plugins.find((p: { id: string }) => p.id === "p-managed");
+    const entry = registry.plugins.find(
+      (p: { id: string }) => p.id === "p-managed",
+    );
     expect(entry.enabled).toBe(true);
   });
 
   it("disable allows it-admin actor to disable a managed plugin", async () => {
     const manifestPath = await writeFakePlugin("p-managed", "admin");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "p-managed", manifestPath, enabled: true },
+    ]);
     const runtime = makeRuntime();
     await runtime.startAll();
 
@@ -175,13 +227,17 @@ describe("PluginRuntime.disable", () => {
 
     expect(runtime.listPluginIds()).not.toContain("p-managed");
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    const entry = registry.plugins.find((p: { id: string }) => p.id === "p-managed");
+    const entry = registry.plugins.find(
+      (p: { id: string }) => p.id === "p-managed",
+    );
     expect(entry.enabled).toBe(false);
   });
 
   it("disable throws 'not found' for unknown pluginId without mutating state", async () => {
     const manifestPath = await writeFakePlugin("p-existing");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "p-existing", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "p-existing", manifestPath, enabled: true },
+    ]);
     const runtime = makeRuntime();
     await runtime.startAll();
 
@@ -211,10 +267,27 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "com_example_test_hello", description: "com_example_test_hello tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Test plugin fixture.", publisher: "Test fixture" };
+    const manifest = {
+      id: pluginId,
+      name: "Test",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: [
+        {
+          name: "com_example_test_hello",
+          description: "com_example_test_hello tool",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        },
+      ],
+      description: "Test plugin fixture.",
+      publisher: "Test fixture",
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeTestPluginRegistry({ registryPath }, [{ id: pluginId, manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: pluginId, manifestPath, enabled: true },
+    ]);
 
     const runtime = makeRuntime();
     await runtime.startAll();
@@ -237,10 +310,20 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad.method"], description: "Test fixture.", publisher: "Test fixture" };
+    const manifest = {
+      id: "bad-plugin",
+      name: "Bad",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: ["bad.method"],
+      description: "Test fixture.",
+      publisher: "Test fixture",
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "bad-plugin", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "bad-plugin", manifestPath, enabled: true },
+    ]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -266,10 +349,20 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["1bad_name"], description: "Test fixture.", publisher: "Test fixture" };
+    const manifest = {
+      id: "bad-leading-digit",
+      name: "Bad",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: ["1bad_name"],
+      description: "Test fixture.",
+      publisher: "Test fixture",
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "bad-leading-digit", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "bad-leading-digit", manifestPath, enabled: true },
+    ]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -295,10 +388,20 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad-name"], description: "Test fixture.", publisher: "Test fixture" };
+    const manifest = {
+      id: "bad-hyphen",
+      name: "Bad",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: ["bad-name"],
+      description: "Test fixture.",
+      publisher: "Test fixture",
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "bad-hyphen", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "bad-hyphen", manifestPath, enabled: true },
+    ]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -323,10 +426,25 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "no-description", name: "No Desc", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "no_desc_ping", description: "no_desc_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }] };
+    const manifest = {
+      id: "no-description",
+      name: "No Desc",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: [
+        {
+          name: "no_desc_ping",
+          description: "no_desc_ping tool",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        },
+      ],
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "no-description", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "no-description", manifestPath, enabled: true },
+    ]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -351,10 +469,27 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "empty-description", name: "Empty Desc", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "empty_desc_ping", description: "empty_desc_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "", publisher: "Test fixture" };
+    const manifest = {
+      id: "empty-description",
+      name: "Empty Desc",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: [
+        {
+          name: "empty_desc_ping",
+          description: "empty_desc_ping tool",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        },
+      ],
+      description: "",
+      publisher: "Test fixture",
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "empty-description", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "empty-description", manifestPath, enabled: true },
+    ]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -400,21 +535,35 @@ describe("PluginRuntime.disable", () => {
         entry: "entry.mjs",
         tools: [
           // uic_get is UI-invokable (dual) — reachable from callFromUi.
-          { name: "uic_get", description: "uic_get tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } },
+          {
+            name: "uic_get",
+            description: "uic_get tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
           // uic_private is model-only — NOT reachable from the UI bypass.
-          { name: "uic_private", description: "uic_private tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model"] } } },
+          {
+            name: "uic_private",
+            description: "uic_private tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model"] } },
+          },
         ],
       }),
       "utf-8",
     );
 
-    await writeTestPluginRegistry({ registryPath }, [{ id: "ui-actions", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "ui-actions", manifestPath, enabled: true },
+    ]);
     const runtime = makeRuntime();
     await runtime.startAll();
     const delegate = vi.fn((method, payload) => runtime.call(method, payload));
     runtime.setToolInvocationDelegate(delegate);
 
-    await expect(runtime.callFromUi("uic_get", undefined, { userAction: true })).resolves.toBe("public-ok");
+    await expect(
+      runtime.callFromUi("uic_get", undefined, { userAction: true }),
+    ).resolves.toBe("public-ok");
     expect(delegate).toHaveBeenCalledWith(
       "uic_get",
       undefined,
@@ -425,7 +574,7 @@ describe("PluginRuntime.disable", () => {
       }),
     );
     await expect(runtime.callFromUi("uic_private")).rejects.toThrow(
-      /not declared as a UI action/,
+      /not an app-visible Tool/,
     );
     // Normal call() path (ConversationLoop) still works for both.
     await expect(runtime.call("uic_private")).resolves.toBe("private-ok");
@@ -460,18 +609,29 @@ describe("PluginRuntime.disable", () => {
         entry: "entry.mjs",
         // UI-only method: app-only visibility, not model-visible (not an LLM tool).
         tools: [
-          { name: "uio_upload_chunk", description: "uio_upload_chunk tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+          {
+            name: "uio_upload_chunk",
+            description: "uio_upload_chunk tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["app"] } },
+          },
         ],
       }),
       "utf-8",
     );
 
-    await writeTestPluginRegistry({ registryPath }, [{ id: "ui-only-method", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "ui-only-method", manifestPath, enabled: true },
+    ]);
     const runtime = makeRuntime();
     await runtime.startAll();
-    runtime.setToolInvocationDelegate((method, payload) => runtime.call(method, payload));
+    runtime.setToolInvocationDelegate((method, payload) =>
+      runtime.call(method, payload),
+    );
 
-    await expect(runtime.callFromUi("uio_upload_chunk")).resolves.toBe("ui-only-ok");
+    await expect(runtime.callFromUi("uio_upload_chunk")).resolves.toBe(
+      "ui-only-ok",
+    );
   });
 
   it("exposes capability/manifest/ipc binding metadata from loaded plugins", async () => {
@@ -501,19 +661,32 @@ describe("PluginRuntime.disable", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: [{ name: "meta_ping", description: "meta_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        tools: [
+          {
+            name: "meta_ping",
+            description: "meta_ping tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
         capabilities: ["worker-client"],
       }),
       "utf-8",
     );
 
-    await writeTestPluginRegistry({ registryPath }, [{ id: "meta-plugin", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "meta-plugin", manifestPath, enabled: true },
+    ]);
 
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.findPluginIdByCapability("worker-client")).toBe("meta-plugin");
-    expect(runtime.listPluginIdsByCapability("worker-client")).toEqual(["meta-plugin"]);
+    expect(runtime.findPluginIdByCapability("worker-client")).toBe(
+      "meta-plugin",
+    );
+    expect(runtime.listPluginIdsByCapability("worker-client")).toEqual([
+      "meta-plugin",
+    ]);
 
     const manifest = runtime.getPluginManifest("meta-plugin");
     expect(manifest?.capabilities).toEqual(["worker-client"]);
@@ -534,14 +707,34 @@ describe("PluginRuntime.disable", () => {
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(
         manifestPath,
-        JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "calltool_ping", description: "calltool_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Test fixture.", publisher: "Test fixture" }),
+        JSON.stringify({
+          id: "calltool-plugin",
+          name: "calltool-plugin",
+          version: "1.0.0",
+          entry: "entry.mjs",
+          tools: [
+            {
+              name: "calltool_ping",
+              description: "calltool_ping tool",
+              inputSchema: { type: "object", properties: {} },
+              _meta: { ui: { visibility: ["model", "app"] } },
+            },
+          ],
+          description: "Test fixture.",
+          publisher: "Test fixture",
+        }),
         "utf-8",
       );
-      await writeTestPluginRegistry({ registryPath }, [{ id: "calltool-plugin", manifestPath, enabled: true }]);
+      await writeTestPluginRegistry({ registryPath }, [
+        { id: "calltool-plugin", manifestPath, enabled: true },
+      ]);
 
       let injectedHostApi: Record<string, unknown> | undefined;
 
-      const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+      const guard = new PluginDeploymentGuard({
+        registryPath,
+        pluginsRoot: installedDir,
+      });
       const runtime = makeGenerationBoundRuntime({
         hostRoot: testDir,
         registryPath,
@@ -549,12 +742,13 @@ describe("PluginRuntime.disable", () => {
         pluginsRoot: installedDir,
         createHostApi: (_pluginId, _manifest) => {
           const hostApi = {
-            registerKeywords: () => {},
             emitEvent: () => {},
             onEvent: () => () => {},
             saveMemory: async () => {},
             getSecret: () => null,
-            callLlm: async () => { throw new Error("not available"); },
+            callLlm: async () => {
+              throw new Error("not available");
+            },
             logEvent: () => {},
             onShutdown: () => {},
           };
@@ -583,24 +777,45 @@ describe("PluginRuntime.disable", () => {
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(
         manifestPath,
-        JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: [{ name: "calltool_echo", description: "calltool_echo tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Test fixture.", publisher: "Test fixture" }),
+        JSON.stringify({
+          id: "calltool-delegate",
+          name: "calltool-delegate",
+          version: "1.0.0",
+          entry: "entry.mjs",
+          tools: [
+            {
+              name: "calltool_echo",
+              description: "calltool_echo tool",
+              inputSchema: { type: "object", properties: {} },
+              _meta: { ui: { visibility: ["model", "app"] } },
+            },
+          ],
+          description: "Test fixture.",
+          publisher: "Test fixture",
+        }),
         "utf-8",
       );
-      await writeTestPluginRegistry({ registryPath }, [{ id: "calltool-delegate", manifestPath, enabled: true }]);
+      await writeTestPluginRegistry({ registryPath }, [
+        { id: "calltool-delegate", manifestPath, enabled: true },
+      ]);
 
-      const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+      const guard = new PluginDeploymentGuard({
+        registryPath,
+        pluginsRoot: installedDir,
+      });
       const runtime = makeGenerationBoundRuntime({
         hostRoot: testDir,
         registryPath,
         deploymentGuard: guard,
         pluginsRoot: installedDir,
         createHostApi: (_pluginId, _manifest) => ({
-          registerKeywords: () => {},
           emitEvent: () => {},
           onEvent: () => () => {},
           saveMemory: async () => {},
           getSecret: () => null,
-          callLlm: async () => { throw new Error("not available"); },
+          callLlm: async () => {
+            throw new Error("not available");
+          },
           logEvent: () => {},
           onShutdown: () => {},
         }),
@@ -648,7 +863,14 @@ describe("PluginRuntime.disable", () => {
           description: "Test fixture.",
           publisher: "Test fixture",
           entry: "entry.mjs",
-          tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+          tools: [
+            {
+              name: methodName,
+              description: `${methodName} tool`,
+              inputSchema: { type: "object", properties: {} },
+              _meta: { ui: { visibility: ["model", "app"] } },
+            },
+          ],
           ...extraManifest,
         }),
         "utf-8",
@@ -664,20 +886,29 @@ describe("PluginRuntime.disable", () => {
         pluginAccess: {
           plugins: [
             { pluginId: "email", events: ["email.action.needed"] },
-            { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
+            {
+              pluginId: "meeting",
+              events: ["meeting.summary.created", "meeting.ended"],
+            },
             { pluginId: "ms-graph", events: ["ms-graph.snapshot.ready"] },
           ],
         },
       },
     );
-    const calendarManifestPath = await writePlugin("calendar", "calendar_today");
+    const calendarManifestPath = await writePlugin(
+      "calendar",
+      "calendar_today",
+    );
     const emailManifestPath = await writePlugin("email", "email_ping");
     const meetingManifestPath = await writePlugin("meeting", "meeting_ping");
     const msGraphManifestPath = await writePlugin("ms-graph", "msgraph_ping", {
       emittedEvents: ["ms-graph.snapshot.ready"],
       pluginAccess: {
         plugins: [
-          { pluginId: "work-assistant", events: ["work_assistant.snapshot.requested"] },
+          {
+            pluginId: "work-assistant",
+            events: ["work_assistant.snapshot.requested"],
+          },
         ],
       },
     });
@@ -689,7 +920,10 @@ describe("PluginRuntime.disable", () => {
         approvedPluginAccess: {
           plugins: [
             { pluginId: "email", events: ["email.action.needed"] },
-            { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
+            {
+              pluginId: "meeting",
+              events: ["meeting.summary.created", "meeting.ended"],
+            },
             { pluginId: "ms-graph", events: ["ms-graph.snapshot.ready"] },
           ],
         },
@@ -703,7 +937,10 @@ describe("PluginRuntime.disable", () => {
         enabled: true,
         approvedPluginAccess: {
           plugins: [
-            { pluginId: "work-assistant", events: ["work_assistant.snapshot.requested"] },
+            {
+              pluginId: "work-assistant",
+              events: ["work_assistant.snapshot.requested"],
+            },
           ],
         },
       },
@@ -712,12 +949,36 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(() => runtime.assertPluginEventAccess("work-assistant", "email.action.needed")).not.toThrow();
-    expect(() => runtime.assertPluginEventAccess("work-assistant", "meeting.summary.created")).not.toThrow();
-    expect(() => runtime.assertPluginEventAccess("work-assistant", "ms-graph.snapshot.ready")).not.toThrow();
-    expect(() => runtime.assertPluginEventAccess("ms-graph", "work_assistant.snapshot.requested")).not.toThrow();
-    expect(() => runtime.assertPluginEventAccess("calendar", "work_assistant.snapshot.requested")).toThrow(/not allowed/i);
-    expect(() => runtime.assertPluginEventAccess("calendar", "email.action.needed")).toThrow(/not allowed/i);
+    expect(() =>
+      runtime.assertPluginEventAccess("work-assistant", "email.action.needed"),
+    ).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventAccess(
+        "work-assistant",
+        "meeting.summary.created",
+      ),
+    ).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventAccess(
+        "work-assistant",
+        "ms-graph.snapshot.ready",
+      ),
+    ).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventAccess(
+        "ms-graph",
+        "work_assistant.snapshot.requested",
+      ),
+    ).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventAccess(
+        "calendar",
+        "work_assistant.snapshot.requested",
+      ),
+    ).toThrow(/not allowed/i);
+    expect(() =>
+      runtime.assertPluginEventAccess("calendar", "email.action.needed"),
+    ).toThrow(/not allowed/i);
   });
 
   it("allows work-assistant to subscribe to granted calendar events (P4 detector grants)", async () => {
@@ -753,7 +1014,14 @@ describe("PluginRuntime.disable", () => {
         publisher: "Test fixture",
         installPolicy: "user",
         entry: relative(pluginDir, entryPath),
-        tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        tools: [
+          {
+            name: methodName,
+            description: `${methodName} tool`,
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
         ...extraManifest,
       };
       await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
@@ -764,17 +1032,24 @@ describe("PluginRuntime.disable", () => {
       "calendar.event.upcoming",
       "calendar.event.conflict.detected",
     ];
-    const workManifestPath = await writePlugin("work-assistant", "work_assistant_ping", {
-      pluginAccess: {
-        plugins: [
-          {
-            pluginId: "calendar",
-            events: grantedEvents,
-          },
-        ],
+    const workManifestPath = await writePlugin(
+      "work-assistant",
+      "work_assistant_ping",
+      {
+        pluginAccess: {
+          plugins: [
+            {
+              pluginId: "calendar",
+              events: grantedEvents,
+            },
+          ],
+        },
       },
-    });
-    const calendarManifestPath = await writePlugin("calendar", "calendar_today");
+    );
+    const calendarManifestPath = await writePlugin(
+      "calendar",
+      "calendar_today",
+    );
     await writeTestPluginRegistry({ registryPath }, [
       {
         id: "work-assistant",
@@ -805,7 +1080,10 @@ describe("PluginRuntime.disable", () => {
     // listed in the grant pass. `calendar.event.starting` is also a
     // calendar event but NOT in the grant, so the runtime denies.
     expect(() =>
-      runtime.assertPluginEventAccess("work-assistant", "calendar.event.starting"),
+      runtime.assertPluginEventAccess(
+        "work-assistant",
+        "calendar.event.starting",
+      ),
     ).toThrow(/not allowed/i);
   });
 
@@ -858,16 +1136,21 @@ describe("PluginRuntime.disable", () => {
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
-      deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
-      createHostApi: (pluginId) => ({
-        registerKeywords: () => {},
-        emitEvent: () => {},
-        onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
-        getSecret: () => null,
-      } as unknown as import("../types.js").PluginHostApi),
+      deploymentGuard: new PluginDeploymentGuard({
+        registryPath,
+        pluginsRoot: installedDir,
+      }),
+      createHostApi: (pluginId) =>
+        ({
+          emitEvent: () => {},
+          onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
+          getSecret: () => null,
+        }) as unknown as import("../types.js").PluginHostApi,
     });
     await expect(runtime.load()).resolves.toBeUndefined();
-    expect(() => runtime.assertPluginEventAccess("calendar", "email.analyzed")).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventAccess("calendar", "email.analyzed"),
+    ).not.toThrow();
   });
 
   it("blocks load-time event subscriptions to later-loaded plugins without pluginAccess", async () => {
@@ -907,13 +1190,16 @@ describe("PluginRuntime.disable", () => {
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
-      deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
-      createHostApi: (pluginId) => ({
-        registerKeywords: () => {},
-        emitEvent: () => {},
-        onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
-        getSecret: () => null,
-      } as unknown as import("../types.js").PluginHostApi),
+      deploymentGuard: new PluginDeploymentGuard({
+        registryPath,
+        pluginsRoot: installedDir,
+      }),
+      createHostApi: (pluginId) =>
+        ({
+          emitEvent: () => {},
+          onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
+          getSecret: () => null,
+        }) as unknown as import("../types.js").PluginHostApi,
     });
     await expect(runtime.load()).resolves.toBeUndefined();
     expect(runtime.listPluginIds()).not.toContain("calendar");
@@ -934,8 +1220,12 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(() => runtime.assertPluginEventEmitAccess("email", "email.analyzed")).not.toThrow();
-    expect(() => runtime.assertPluginEventEmitAccess("calendar", "email.analyzed")).toThrow(/not allowed to emit/i);
+    expect(() =>
+      runtime.assertPluginEventEmitAccess("email", "email.analyzed"),
+    ).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventEmitAccess("calendar", "email.analyzed"),
+    ).toThrow(/not allowed to emit/i);
   });
 
   it("drops plugins whose required capabilities are not provided by enabled manifests", async () => {
@@ -963,7 +1253,14 @@ describe("PluginRuntime.disable", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: [{ name: "cap_provider_ping", description: "cap_provider_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        tools: [
+          {
+            name: "cap_provider_ping",
+            description: "cap_provider_ping tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
         capabilities: ["calendar-source"],
       }),
       "utf-8",
@@ -993,7 +1290,14 @@ describe("PluginRuntime.disable", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: [{ name: "needs_calendar_ping", description: "needs_calendar_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        tools: [
+          {
+            name: "needs_calendar_ping",
+            description: "needs_calendar_ping tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
         requires: { capabilities: ["calendar-source", "mail-source"] },
       }),
       "utf-8",
@@ -1001,7 +1305,11 @@ describe("PluginRuntime.disable", () => {
 
     await writeTestPluginRegistry({ registryPath }, [
       { id: "cap-provider", manifestPath: providerManifestPath, enabled: true },
-      { id: "needs-calendar", manifestPath: consumerManifestPath, enabled: true },
+      {
+        id: "needs-calendar",
+        manifestPath: consumerManifestPath,
+        enabled: true,
+      },
     ]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1043,7 +1351,10 @@ describe("PluginRuntime registry trusted-path", () => {
     vi.restoreAllMocks();
   });
 
-  async function writeMinimalPlugin(rootDir: string, id: string): Promise<string> {
+  async function writeMinimalPlugin(
+    rootDir: string,
+    id: string,
+  ): Promise<string> {
     const pluginDir = join(rootDir, id);
     await mkdir(pluginDir, { recursive: true });
     const entryPath = join(pluginDir, "entry.mjs");
@@ -1065,7 +1376,14 @@ describe("PluginRuntime registry trusted-path", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         entry: "entry.mjs",
-        tools: [{ name: `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`, description: "minimal ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        tools: [
+          {
+            name: `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`,
+            description: "minimal ping tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
       }),
       "utf-8",
     );
@@ -1076,10 +1394,17 @@ describe("PluginRuntime registry trusted-path", () => {
     const manifestPath = await writeMinimalPlugin(pluginsRoot, "cloud-plugin");
     await writeFile(
       registryPath,
-      JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }],
+      }),
       "utf-8",
     );
-    const runtime = makeGenerationBoundRuntime({ hostRoot, pluginsRoot, registryPath });
+    const runtime = makeGenerationBoundRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+    });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("cloud-plugin");
   });
@@ -1088,7 +1413,10 @@ describe("PluginRuntime registry trusted-path", () => {
     const manifestPath = await writeMinimalPlugin(pluginsRoot, "cloud-plugin");
     await writeFile(
       registryPath,
-      JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }],
+      }),
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1096,7 +1424,9 @@ describe("PluginRuntime registry trusted-path", () => {
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("cloud-plugin");
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/untrusted registry manifest path for cloud-plugin/),
+      expect.stringMatching(
+        /untrusted registry manifest path for cloud-plugin/,
+      ),
     );
     warnSpy.mockRestore();
   });
@@ -1108,11 +1438,18 @@ describe("PluginRuntime registry trusted-path", () => {
     const manifestPath = await writeMinimalPlugin(escapeDir, "evil");
     await writeFile(
       registryPath,
-      JSON.stringify({ version: 1, plugins: [{ id: "evil", manifestPath, enabled: true }] }),
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "evil", manifestPath, enabled: true }],
+      }),
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runtime = makeGenerationBoundRuntime({ hostRoot, pluginsRoot, registryPath });
+    const runtime = makeGenerationBoundRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+    });
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("evil");
     expect(warnSpy).toHaveBeenCalledWith(
@@ -1170,13 +1507,30 @@ export default async function createPlugin(ctx) {
 `,
       "utf-8",
     );
-    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Test fixture.", publisher: "Test fixture" };
+    const manifest = {
+      id,
+      name: id,
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: [
+        {
+          name: methodName,
+          description: `${methodName} tool`,
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        },
+      ],
+      description: "Test fixture.",
+      publisher: "Test fixture",
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;
   }
 
-  async function writeStartFailingPlugin(id: string): Promise<{ manifestPath: string; stoppedPath: string }> {
+  async function writeStartFailingPlugin(
+    id: string,
+  ): Promise<{ manifestPath: string; stoppedPath: string }> {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
     const stoppedPath = join(pluginDir, "stopped.txt");
@@ -1194,7 +1548,22 @@ export default async function createPlugin() {
 `,
       "utf-8",
     );
-    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Start failure fixture.", publisher: "Test fixture" };
+    const manifest = {
+      id,
+      name: id,
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: [
+        {
+          name: methodName,
+          description: `${methodName} tool`,
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        },
+      ],
+      description: "Start failure fixture.",
+      publisher: "Test fixture",
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return { manifestPath, stoppedPath };
@@ -1223,7 +1592,22 @@ export default async function createPlugin({ hostApi }) {
 `,
       "utf-8",
     );
-    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }], description: "Start failure fixture.", publisher: "Test fixture" };
+    const manifest = {
+      id,
+      name: id,
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: [
+        {
+          name: methodName,
+          description: `${methodName} tool`,
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        },
+      ],
+      description: "Start failure fixture.",
+      publisher: "Test fixture",
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return { manifestPath, stoppedPath };
@@ -1238,7 +1622,9 @@ export default async function createPlugin({ hostApi }) {
   }
 
   function makeRuntimeWithPreparation(
-    preparePluginStart: ConstructorParameters<typeof PluginRuntime>[0]["preparePluginStart"],
+    preparePluginStart: ConstructorParameters<
+      typeof PluginRuntime
+    >[0]["preparePluginStart"],
   ): PluginRuntime {
     return makeGenerationBoundRuntime({
       hostRoot: testDir,
@@ -1273,7 +1659,6 @@ export default async function createPlugin({ hostApi }) {
       pluginsRoot: installedDir,
       onDisable: (pluginId) => disabled.push(pluginId),
       createHostApi: (pluginId, _manifest, _pluginDataDir, incarnation) => ({
-        registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: () => {
           const dispose = () => disposed.push(pluginId);
@@ -1311,20 +1696,32 @@ export default async function createPlugin({ hostApi }) {
       "utf-8",
     );
     const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(manifestPath, JSON.stringify({
-      id,
-      name: id,
-      version: "1.0.0",
-      entry: "entry.mjs",
-      tools: [{ name: methodName, description: "Test disposer tool.", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-      description: "Disposer incarnation fixture.",
-      publisher: "Test fixture",
-    }), "utf-8");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id,
+        name: id,
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [
+          {
+            name: methodName,
+            description: "Test disposer tool.",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+        description: "Disposer incarnation fixture.",
+        publisher: "Test fixture",
+      }),
+      "utf-8",
+    );
     return manifestPath;
   }
 
   it("startAll stops a plugin instance whose start fails", async () => {
-    const { manifestPath, stoppedPath } = await writeStartFailingPlugin("p-start-fails");
+    const { manifestPath, stoppedPath } =
+      await writeStartFailingPlugin("p-start-fails");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -1342,12 +1739,15 @@ export default async function createPlugin({ hostApi }) {
   });
 
   it("startAll start failure cleans runtime-managed disposers before unload", async () => {
-    const { manifestPath, stoppedPath } = await writeHostDisposerStartFailingPlugin("p-start-disposer-fails");
+    const { manifestPath, stoppedPath } =
+      await writeHostDisposerStartFailingPlugin("p-start-disposer-fails");
     await writeFile(
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "p-start-disposer-fails", manifestPath, enabled: true }],
+        plugins: [
+          { id: "p-start-disposer-fails", manifestPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
@@ -1384,27 +1784,50 @@ export default async function createPlugin({ hostApi }) {
 }\n`,
       "utf-8",
     );
-    const manifestFor = (id: string, tool: string, startupTimeoutMs: number) => ({
+    const manifestFor = (
+      id: string,
+      tool: string,
+      startupTimeoutMs: number,
+    ) => ({
       id,
       name: id,
       version: "1.0.0",
       entry: "entry.mjs",
       startupTimeoutMs,
-      tools: [{ name: tool, description: `${tool} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+      tools: [
+        {
+          name: tool,
+          description: `${tool} tool`,
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        },
+      ],
       description: "Boot timeout revocation fixture.",
       publisher: "Test fixture",
     });
     const timedManifestPath = join(timedDir, "plugin.json");
     const slowManifestPath = join(slowDir, "plugin.json");
-    await writeFile(timedManifestPath, JSON.stringify(manifestFor(timedId, "p_start_timeout_revoked_ping", 30)), "utf-8");
-    await writeFile(slowManifestPath, JSON.stringify(manifestFor(slowId, "p_start_slow_peer_ping", 1_000)), "utf-8");
-    await writeFile(registryPath, JSON.stringify({
-      version: 1,
-      plugins: [
-        { id: timedId, manifestPath: timedManifestPath, enabled: true },
-        { id: slowId, manifestPath: slowManifestPath, enabled: true },
-      ],
-    }), "utf-8");
+    await writeFile(
+      timedManifestPath,
+      JSON.stringify(manifestFor(timedId, "p_start_timeout_revoked_ping", 30)),
+      "utf-8",
+    );
+    await writeFile(
+      slowManifestPath,
+      JSON.stringify(manifestFor(slowId, "p_start_slow_peer_ping", 1_000)),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: timedId, manifestPath: timedManifestPath, enabled: true },
+          { id: slowId, manifestPath: slowManifestPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
 
     let timedHostApi: { getSecret(key: string): null } | undefined;
     let timedIncarnation: { isLifecycleHookActive(): boolean } | undefined;
@@ -1414,11 +1837,11 @@ export default async function createPlugin({ hostApi }) {
       pluginsRoot: installedDir,
       createHostApi: (pluginId, _manifest, _pluginDataDir, incarnation) => {
         const getSecret = (_key: string): null => {
-          if (!incarnation.isActive()) throw new Error("plugin instance is no longer active");
+          if (!incarnation.isActive())
+            throw new Error("plugin instance is no longer active");
           return null;
         };
         const hostApi = {
-          registerKeywords: () => {},
           emitEvent: () => {},
           onEvent: () => () => {},
           getInstalledPluginIds: () => [],
@@ -1437,16 +1860,24 @@ export default async function createPlugin({ hostApi }) {
       },
     });
     let settled = false;
-    const starting = runtime.startAll().finally(() => { settled = true; });
+    const starting = runtime.startAll().finally(() => {
+      settled = true;
+    });
 
-    for (let attempt = 0; attempt < 100 && !timedIncarnation?.isLifecycleHookActive(); attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 100 && !timedIncarnation?.isLifecycleHookActive();
+      attempt += 1
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     expect(timedIncarnation?.isLifecycleHookActive()).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(settled).toBe(false);
     expect(timedHostApi).toBeDefined();
-    expect(() => timedHostApi!.getSecret("late-write")).toThrow(/no longer active/);
+    expect(() => timedHostApi!.getSecret("late-write")).toThrow(
+      /no longer active/,
+    );
 
     await starting;
     expect(runtime.listPluginIds()).not.toContain(timedId);
@@ -1456,10 +1887,14 @@ export default async function createPlugin({ hostApi }) {
   it("restart disposes only the previous HostApi incarnation", async () => {
     const pluginId = "p-incarnation-disposer";
     const manifestPath = await writeHostDisposerPlugin(pluginId);
-    await writeFile(registryPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: pluginId, manifestPath, enabled: true }],
-    }), "utf-8");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
     const disposed: string[] = [];
     const runtime = makeRuntimeWithTrackedHostDisposer(disposed, []);
 
@@ -1468,7 +1903,9 @@ export default async function createPlugin({ hostApi }) {
     await waitUntil(() => {
       expect(disposed).toEqual([pluginId]);
     });
-    await expect(runtime.call(`${pluginId.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`)).resolves.toBe("ok");
+    await expect(
+      runtime.call(`${pluginId.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`),
+    ).resolves.toBe("ok");
 
     await runtime.removePlugin(pluginId);
     expect(disposed).toEqual([pluginId, pluginId]);
@@ -1488,18 +1925,21 @@ export default async function createPlugin({ hostApi }) {
 }`,
       "utf-8",
     );
-    await writeFile(registryPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: pluginId, manifestPath, enabled: true }],
-    }), "utf-8");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
     const runtime = makeRuntime();
     await runtime.startAll();
     await expect(runtime.call(toolName)).resolves.toBe("active");
 
-    await expect(runtime.removePluginWithCommit(
-      pluginId,
-      async () => "durably-removed",
-    )).rejects.toThrow(/generation retirement failed/);
+    await expect(
+      runtime.removePluginWithCommit(pluginId, async () => "durably-removed"),
+    ).rejects.toThrow(/generation retirement failed/);
 
     expect(runtime.listPluginIds()).not.toContain(pluginId);
     await expect(runtime.call(toolName)).rejects.toThrow(/not found/);
@@ -1517,14 +1957,17 @@ export default async function createPlugin({ hostApi }) {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "p-existing", manifestPath: existingPath, enabled: true }],
+        plugins: [
+          { id: "p-existing", manifestPath: existingPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
     const runtime = makeRuntime();
     await runtime.startAll();
 
-    const { manifestPath, stoppedPath } = await writeStartFailingPlugin("p-new-broken");
+    const { manifestPath, stoppedPath } =
+      await writeStartFailingPlugin("p-new-broken");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -1537,7 +1980,9 @@ export default async function createPlugin({ hostApi }) {
       "utf-8",
     );
 
-    await expect(runtime.addPlugin("p-new-broken")).rejects.toThrow(/addPlugin failed/);
+    await expect(runtime.addPlugin("p-new-broken")).rejects.toThrow(
+      /addPlugin failed/,
+    );
     await expect(readFile(stoppedPath, "utf-8")).resolves.toBe("stopped");
     expect(runtime.listPluginIds()).toEqual(["p-existing"]);
   });
@@ -1546,15 +1991,21 @@ export default async function createPlugin({ hostApi }) {
     const canonicalId = "p-canonical-runtime";
     const alias = "catalog-install-alias";
     const manifestPath = await writePlugin(canonicalId);
-    await writeFile(registryPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: alias, manifestPath, enabled: true }],
-    }), "utf-8");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: alias, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
     const runtime = makeRuntime();
 
     await expect(runtime.addPlugin(alias)).resolves.toBe("started");
     expect(runtime.listPluginIds()).toEqual([canonicalId]);
-    await expect(runtime.call("p_canonical_runtime_ping")).resolves.toContain("hi-p-canonical-runtime");
+    await expect(runtime.call("p_canonical_runtime_ping")).resolves.toContain(
+      "hi-p-canonical-runtime",
+    );
     await expect(runtime.waitForPluginReady(alias)).resolves.toBeUndefined();
   });
 
@@ -1562,12 +2013,18 @@ export default async function createPlugin({ hostApi }) {
     const canonicalId = "p-canonical-pending";
     const alias = "catalog-pending-alias";
     const manifestPath = await writePlugin(canonicalId);
-    await writeFile(registryPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: alias, manifestPath, enabled: true }],
-    }), "utf-8");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: alias, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
     let release!: () => void;
-    const preparation = new Promise<void>((resolve) => { release = resolve; });
+    const preparation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const runtime = makeRuntimeWithPreparation(() => preparation);
 
     await expect(runtime.addPlugin(alias)).resolves.toBe("preparing");
@@ -1577,7 +2034,9 @@ export default async function createPlugin({ hostApi }) {
 
     await expect(ready).rejects.toThrow(/cancelled/);
     expect(runtime.listPluginIds()).not.toContain(canonicalId);
-    await expect(runtime.call("p_canonical_pending_ping")).rejects.toThrow(/not found/);
+    await expect(runtime.call("p_canonical_pending_ping")).rejects.toThrow(
+      /not found/,
+    );
     const state = runtime as unknown as {
       knownPluginManifests: Map<string, unknown>;
       knownPluginAccessGrants: Map<string, unknown>;
@@ -1604,7 +2063,9 @@ export default async function createPlugin({ hostApi }) {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "p-restart-broken", manifestPath: existingPath, enabled: true }],
+        plugins: [
+          { id: "p-restart-broken", manifestPath: existingPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
@@ -1612,14 +2073,21 @@ export default async function createPlugin({ hostApi }) {
     const disabled: string[] = [];
     const runtime = makeRuntimeWithTrackedHostDisposer(disposed, disabled);
     await runtime.startAll();
-    expect(await runtime.call("p_restart_broken_ping")).toBe("hi-p-restart-broken-1");
+    expect(await runtime.call("p_restart_broken_ping")).toBe(
+      "hi-p-restart-broken-1",
+    );
 
-    const { stoppedPath } = await writeHostDisposerStartFailingPlugin("p-restart-broken");
+    const { stoppedPath } =
+      await writeHostDisposerStartFailingPlugin("p-restart-broken");
 
-    await expect(runtime.addPlugin("p-restart-broken")).rejects.toThrow(/addPlugin failed/);
+    await expect(runtime.addPlugin("p-restart-broken")).rejects.toThrow(
+      /addPlugin failed/,
+    );
 
     expect(runtime.listPluginIds()).toEqual(["p-restart-broken"]);
-    expect(await runtime.call("p_restart_broken_ping")).toBe("hi-p-restart-broken-1");
+    expect(await runtime.call("p_restart_broken_ping")).toBe(
+      "hi-p-restart-broken-1",
+    );
     // The failed replacement's private subscription is cleaned while the
     // still-active original incarnation remains registered.
     expect(disposed).toEqual(["p-restart-broken"]);
@@ -1647,7 +2115,9 @@ export default async function createPlugin({ hostApi }) {
 
     await runtime.startAll();
 
-    await expect(runtime.call("p_start_guard_ping")).resolves.toBe("hi-p-start-guard-1");
+    await expect(runtime.call("p_start_guard_ping")).resolves.toBe(
+      "hi-p-start-guard-1",
+    );
   });
 
   it("setting plugin A config does not restart plugin B (single-plugin lifecycle)", async () => {
@@ -1698,7 +2168,9 @@ export default async function createPlugin({ hostApi }) {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "p-existing", manifestPath: existingPath, enabled: true }],
+        plugins: [
+          { id: "p-existing", manifestPath: existingPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
@@ -1750,15 +2222,27 @@ export default async function createPlugin({ hostApi }) {
     await runtime.startAll();
 
     expect(runtime.listPluginIds()).toEqual([]);
-    expect(runtime.listPluginManifests().map((entry) => entry.pluginId)).toEqual(["p-deferred"]);
-    expect(runtime.listPluginCards().find((card) => card.id === "p-deferred")?.loadStatus).toBe("preparing");
-    await expect(runtime.call("p_deferred_ping")).rejects.toThrow(/still installing its runtime dependencies/);
+    expect(
+      runtime.listPluginManifests().map((entry) => entry.pluginId),
+    ).toEqual(["p-deferred"]);
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-deferred")
+        ?.loadStatus,
+    ).toBe("preparing");
+    await expect(runtime.call("p_deferred_ping")).rejects.toThrow(
+      /still installing its runtime dependencies/,
+    );
 
     resolvePrepare();
 
-    await expect(runtime.waitForPluginReady("p-deferred")).resolves.toBeUndefined();
+    await expect(
+      runtime.waitForPluginReady("p-deferred"),
+    ).resolves.toBeUndefined();
     expect(await runtime.call("p_deferred_ping")).toBe("hi-p-deferred-1");
-    expect(runtime.listPluginCards().find((card) => card.id === "p-deferred")?.loadStatus).toBe("loaded");
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-deferred")
+        ?.loadStatus,
+    ).toBe("loaded");
   });
 
   it("surfaces dependency preparation progress on plugin cards", async () => {
@@ -1776,19 +2260,23 @@ export default async function createPlugin({ hostApi }) {
     const preparePromise = new Promise<void>((resolve) => {
       resolvePrepare = resolve;
     });
-    const runtime = makeRuntimeWithPreparation(({ pluginId, reportProgress }) => {
-      if (pluginId !== "p-progress") return undefined;
-      reportProgress?.({
-        phase: "installing-deps",
-        message: "의존성 설치 중 (최초 1회)...",
-        progressPct: 40.4,
-      });
-      return preparePromise;
-    });
+    const runtime = makeRuntimeWithPreparation(
+      ({ pluginId, reportProgress }) => {
+        if (pluginId !== "p-progress") return undefined;
+        reportProgress?.({
+          phase: "installing-deps",
+          message: "의존성 설치 중 (최초 1회)...",
+          progressPct: 40.4,
+        });
+        return preparePromise;
+      },
+    );
 
     await runtime.startAll();
 
-    const preparingCard = runtime.listPluginCards().find((card) => card.id === "p-progress");
+    const preparingCard = runtime
+      .listPluginCards()
+      .find((card) => card.id === "p-progress");
     expect(preparingCard?.loadStatus).toBe("preparing");
     expect(preparingCard?.preparationStatus).toMatchObject({
       phase: "installing-deps",
@@ -1797,8 +2285,12 @@ export default async function createPlugin({ hostApi }) {
     });
 
     resolvePrepare();
-    await expect(runtime.waitForPluginReady("p-progress")).resolves.toBeUndefined();
-    const loadedCard = runtime.listPluginCards().find((card) => card.id === "p-progress");
+    await expect(
+      runtime.waitForPluginReady("p-progress"),
+    ).resolves.toBeUndefined();
+    const loadedCard = runtime
+      .listPluginCards()
+      .find((card) => card.id === "p-progress");
     expect(loadedCard?.loadStatus).toBe("loaded");
     expect(loadedCard?.preparationStatus).toBeUndefined();
   });
@@ -1814,26 +2306,42 @@ export default async function createPlugin({ hostApi }) {
       "utf-8",
     );
 
-    const progressReporters: Array<NonNullable<Parameters<
-      NonNullable<ConstructorParameters<typeof PluginRuntime>[0]["preparePluginStart"]>
-    >[0]["reportProgress"]>> = [];
+    const progressReporters: Array<
+      NonNullable<
+        Parameters<
+          NonNullable<
+            ConstructorParameters<typeof PluginRuntime>[0]["preparePluginStart"]
+          >
+        >[0]["reportProgress"]
+      >
+    > = [];
     const prepareResolves: Array<() => void> = [];
-    const runtime = makeRuntimeWithPreparation(({ pluginId, reportProgress }) => {
-      if (pluginId !== "p-stale-progress") return undefined;
-      if (reportProgress) progressReporters.push(reportProgress);
-      return new Promise<void>((resolve) => {
-        prepareResolves.push(resolve);
-      });
-    });
+    const runtime = makeRuntimeWithPreparation(
+      ({ pluginId, reportProgress }) => {
+        if (pluginId !== "p-stale-progress") return undefined;
+        if (reportProgress) progressReporters.push(reportProgress);
+        return new Promise<void>((resolve) => {
+          prepareResolves.push(resolve);
+        });
+      },
+    );
 
-    await expect(runtime.addPlugin("p-stale-progress")).resolves.toBe("preparing");
+    await expect(runtime.addPlugin("p-stale-progress")).resolves.toBe(
+      "preparing",
+    );
     progressReporters[0]?.({
       phase: "installing-deps",
       message: "첫 번째 준비 작업",
       progressPct: 20,
     });
-    expect(runtime.listPluginCards().find((card) => card.id === "p-stale-progress")?.preparationStatus)
-      .toMatchObject({ phase: "installing-deps", message: "첫 번째 준비 작업", progressPct: 20 });
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-stale-progress")
+        ?.preparationStatus,
+    ).toMatchObject({
+      phase: "installing-deps",
+      message: "첫 번째 준비 작업",
+      progressPct: 20,
+    });
 
     await runtime.removePlugin("p-stale-progress");
     await writeFile(
@@ -1845,7 +2353,9 @@ export default async function createPlugin({ hostApi }) {
       "utf-8",
     );
 
-    await expect(runtime.addPlugin("p-stale-progress")).resolves.toBe("preparing");
+    await expect(runtime.addPlugin("p-stale-progress")).resolves.toBe(
+      "preparing",
+    );
     progressReporters[1]?.({
       phase: "verifying",
       message: "두 번째 준비 작업",
@@ -1857,11 +2367,19 @@ export default async function createPlugin({ hostApi }) {
       progressPct: 99,
     });
 
-    expect(runtime.listPluginCards().find((card) => card.id === "p-stale-progress")?.preparationStatus)
-      .toMatchObject({ phase: "verifying", message: "두 번째 준비 작업", progressPct: 70 });
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-stale-progress")
+        ?.preparationStatus,
+    ).toMatchObject({
+      phase: "verifying",
+      message: "두 번째 준비 작업",
+      progressPct: 70,
+    });
 
     prepareResolves[1]?.();
-    await expect(runtime.waitForPluginReady("p-stale-progress")).resolves.toBeUndefined();
+    await expect(
+      runtime.waitForPluginReady("p-stale-progress"),
+    ).resolves.toBeUndefined();
     prepareResolves[0]?.();
   });
 
@@ -1871,7 +2389,9 @@ export default async function createPlugin({ hostApi }) {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "p-existing", manifestPath: existingPath, enabled: true }],
+        plugins: [
+          { id: "p-existing", manifestPath: existingPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
@@ -1902,8 +2422,12 @@ export default async function createPlugin({ hostApi }) {
     await expect(runtime.addPlugin("p-new")).resolves.toBe("preparing");
 
     expect(runtime.listPluginIds()).toEqual(["p-existing"]);
-    expect(runtime.listPluginCards().find((card) => card.id === "p-new")?.loadStatus).toBe("preparing");
-    await expect(runtime.call("p_new_ping")).rejects.toThrow(/still installing its runtime dependencies/);
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-new")?.loadStatus,
+    ).toBe("preparing");
+    await expect(runtime.call("p_new_ping")).rejects.toThrow(
+      /still installing its runtime dependencies/,
+    );
 
     resolvePrepare();
 
@@ -1937,7 +2461,9 @@ export default async function createPlugin({ hostApi }) {
 
     expect(preparePluginStart).toHaveBeenCalledOnce();
     resolvePrepare();
-    await expect(runtime.waitForPluginReady("p-dedup-prep")).resolves.toBeUndefined();
+    await expect(
+      runtime.waitForPluginReady("p-dedup-prep"),
+    ).resolves.toBeUndefined();
     expect(await runtime.call("p_dedup_prep_ping")).toBe("hi-p-dedup-prep-1");
   });
 
@@ -1960,16 +2486,25 @@ export default async function createPlugin({ hostApi }) {
       pluginId === "p-pending-remove" ? preparePromise : undefined,
     );
 
-    await expect(runtime.addPlugin("p-pending-remove")).resolves.toBe("preparing");
-    expect(runtime.listPluginCards().find((card) => card.id === "p-pending-remove")?.loadStatus).toBe("preparing");
+    await expect(runtime.addPlugin("p-pending-remove")).resolves.toBe(
+      "preparing",
+    );
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-pending-remove")
+        ?.loadStatus,
+    ).toBe("preparing");
 
     await runtime.removePlugin("p-pending-remove");
     resolvePrepare();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(runtime.listPluginIds()).toEqual([]);
-    expect(runtime.listPluginCards().find((card) => card.id === "p-pending-remove")).toBeUndefined();
-    await expect(runtime.call("p_pending_remove_ping")).rejects.toThrow(/Plugin method not found/);
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-pending-remove"),
+    ).toBeUndefined();
+    await expect(runtime.call("p_pending_remove_ping")).rejects.toThrow(
+      /Plugin method not found/,
+    );
   });
 
   it("removePlugin cancellation does not invalidate another plugin preparation", async () => {
@@ -2008,11 +2543,17 @@ export default async function createPlugin({ hostApi }) {
     resolveRemoved();
     resolveKept();
 
-    await expect(runtime.waitForPluginReady("p-keep-one")).resolves.toBeUndefined();
+    await expect(
+      runtime.waitForPluginReady("p-keep-one"),
+    ).resolves.toBeUndefined();
     expect(await runtime.call("p_keep_one_ping")).toBe("hi-p-keep-one-1");
     expect(runtime.listPluginIds()).toEqual(["p-keep-one"]);
-    expect(runtime.listPluginCards().find((card) => card.id === "p-remove-one")).toBeUndefined();
-    await expect(runtime.call("p_remove_one_ping")).rejects.toThrow(/Plugin method not found/);
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-remove-one"),
+    ).toBeUndefined();
+    await expect(runtime.call("p_remove_one_ping")).rejects.toThrow(
+      /Plugin method not found/,
+    );
   });
 
   it("stale prepared start failure does not mark a newer generation failed", async () => {
@@ -2066,7 +2607,14 @@ export default async function createPlugin() {
           name: pluginId,
           version: "1.0.0",
           entry: "entry.mjs",
-          tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+          tools: [
+            {
+              name: methodName,
+              description: `${methodName} tool`,
+              inputSchema: { type: "object", properties: {} },
+              _meta: { ui: { visibility: ["model", "app"] } },
+            },
+          ],
           description: "stale start fixture",
           publisher: "Test fixture",
         }),
@@ -2074,7 +2622,12 @@ export default async function createPlugin() {
       );
       await writeFile(
         registryPath,
-        JSON.stringify({ version: 1, plugins: [{ id: pluginId, manifestPath: staleManifestPath, enabled: true }] }),
+        JSON.stringify({
+          version: 1,
+          plugins: [
+            { id: pluginId, manifestPath: staleManifestPath, enabled: true },
+          ],
+        }),
         "utf-8",
       );
 
@@ -2083,11 +2636,13 @@ export default async function createPlugin() {
         resolvePrepare = resolve;
       });
       let firstPrepare = true;
-      const runtime = makeRuntimeWithPreparation(({ pluginId: requestedId }) => {
-        if (requestedId !== pluginId || !firstPrepare) return undefined;
-        firstPrepare = false;
-        return preparePromise;
-      });
+      const runtime = makeRuntimeWithPreparation(
+        ({ pluginId: requestedId }) => {
+          if (requestedId !== pluginId || !firstPrepare) return undefined;
+          firstPrepare = false;
+          return preparePromise;
+        },
+      );
 
       await expect(runtime.addPlugin(pluginId)).resolves.toBe("preparing");
       resolvePrepare();
@@ -2117,7 +2672,14 @@ export default async function createPlugin() {
           name: pluginId,
           version: "1.0.1",
           entry: "entry.mjs",
-          tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+          tools: [
+            {
+              name: methodName,
+              description: `${methodName} tool`,
+              inputSchema: { type: "object", properties: {} },
+              _meta: { ui: { visibility: ["model", "app"] } },
+            },
+          ],
           description: "fresh start fixture",
           publisher: "Test fixture",
         }),
@@ -2125,7 +2687,12 @@ export default async function createPlugin() {
       );
       await writeFile(
         registryPath,
-        JSON.stringify({ version: 1, plugins: [{ id: pluginId, manifestPath: freshManifestPath, enabled: true }] }),
+        JSON.stringify({
+          version: 1,
+          plugins: [
+            { id: pluginId, manifestPath: freshManifestPath, enabled: true },
+          ],
+        }),
         "utf-8",
       );
 
@@ -2135,7 +2702,9 @@ export default async function createPlugin() {
       rejectStart();
       await staleStoppedPromise;
 
-      const failedPluginIds = (runtime as unknown as { failedPluginIds: Set<string> }).failedPluginIds;
+      const failedPluginIds = (
+        runtime as unknown as { failedPluginIds: Set<string> }
+      ).failedPluginIds;
       expect(failedPluginIds.has(pluginId)).toBe(false);
       await expect(runtime.call(methodName)).resolves.toBe("fresh");
     } finally {
@@ -2149,24 +2718,33 @@ export default async function createPlugin() {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "p-restart-prepare-fails", manifestPath, enabled: true }],
+        plugins: [
+          { id: "p-restart-prepare-fails", manifestPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
 
     let failRestartPreparation = false;
     const runtime = makeRuntimeWithPreparation(({ pluginId }) => {
-      if (!failRestartPreparation || pluginId !== "p-restart-prepare-fails") return undefined;
+      if (!failRestartPreparation || pluginId !== "p-restart-prepare-fails")
+        return undefined;
       return Promise.reject(new Error("prepare failed"));
     });
     await runtime.startAll();
-    expect(await runtime.call("p_restart_prepare_fails_ping")).toBe("hi-p-restart-prepare-fails-1");
+    expect(await runtime.call("p_restart_prepare_fails_ping")).toBe(
+      "hi-p-restart-prepare-fails-1",
+    );
 
     failRestartPreparation = true;
-    await expect(runtime.restartPlugin("p-restart-prepare-fails")).resolves.toBe("failed");
+    await expect(
+      runtime.restartPlugin("p-restart-prepare-fails"),
+    ).resolves.toBe("failed");
 
     expect(runtime.listPluginIds()).toEqual(["p-restart-prepare-fails"]);
-    expect(await runtime.call("p_restart_prepare_fails_ping")).toBe("hi-p-restart-prepare-fails-1");
+    expect(await runtime.call("p_restart_prepare_fails_ping")).toBe(
+      "hi-p-restart-prepare-fails-1",
+    );
   });
 
   it("removePlugin does not wait for an invalidated restart preparation", async () => {
@@ -2183,8 +2761,12 @@ export default async function createPlugin() {
     let prepareRestart = false;
     let entered!: () => void;
     let release!: () => void;
-    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
-    const preparationGate = new Promise<void>((resolve) => { release = resolve; });
+    const preparationEntered = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const preparationGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const runtime = makeRuntimeWithPreparation(() => {
       if (!prepareRestart) return undefined;
       entered();
@@ -2219,28 +2801,41 @@ export default async function createPlugin() {
       resolvePrepare = resolve;
     });
     const runtime = makeRuntimeWithPreparation(({ pluginId }) =>
-      prepareRestart && pluginId === "p-restart-prep" ? preparePromise : undefined,
+      prepareRestart && pluginId === "p-restart-prep"
+        ? preparePromise
+        : undefined,
     );
     await runtime.startAll();
-    expect(await runtime.call("p_restart_prep_ping")).toBe("hi-p-restart-prep-1");
+    expect(await runtime.call("p_restart_prep_ping")).toBe(
+      "hi-p-restart-prep-1",
+    );
 
     prepareRestart = true;
     let restartCompleted = false;
-    const restartPromise = runtime.addPlugin("p-restart-prep").then((result) => {
-      restartCompleted = true;
-      return result;
-    });
+    const restartPromise = runtime
+      .addPlugin("p-restart-prep")
+      .then((result) => {
+        restartCompleted = true;
+        return result;
+      });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(runtime.listPluginIds()).toEqual(["p-restart-prep"]);
-    expect(runtime.listPluginCards().find((card) => card.id === "p-restart-prep")?.loadStatus).toBe("loaded");
-    expect(await runtime.call("p_restart_prep_ping")).toBe("hi-p-restart-prep-1");
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-restart-prep")
+        ?.loadStatus,
+    ).toBe("loaded");
+    expect(await runtime.call("p_restart_prep_ping")).toBe(
+      "hi-p-restart-prep-1",
+    );
     expect(restartCompleted).toBe(false);
 
     resolvePrepare();
 
     await expect(restartPromise).resolves.toBe("started");
-    await expect(waitUntil(() => runtime.call("p_restart_prep_ping"))).resolves.toBe("hi-p-restart-prep-1");
+    await expect(
+      waitUntil(() => runtime.call("p_restart_prep_ping")),
+    ).resolves.toBe("hi-p-restart-prep-1");
   });
 
   it("addPlugin restart path preserves the loaded plugin when dependency preparation fails", async () => {
@@ -2249,24 +2844,33 @@ export default async function createPlugin() {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "p-restart-add-prepare-fails", manifestPath, enabled: true }],
+        plugins: [
+          { id: "p-restart-add-prepare-fails", manifestPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
 
     let failRestartPreparation = false;
     const runtime = makeRuntimeWithPreparation(({ pluginId }) => {
-      if (!failRestartPreparation || pluginId !== "p-restart-add-prepare-fails") return undefined;
+      if (!failRestartPreparation || pluginId !== "p-restart-add-prepare-fails")
+        return undefined;
       return Promise.reject(new Error("prepare failed"));
     });
     await runtime.startAll();
-    expect(await runtime.call("p_restart_add_prepare_fails_ping")).toBe("hi-p-restart-add-prepare-fails-1");
+    expect(await runtime.call("p_restart_add_prepare_fails_ping")).toBe(
+      "hi-p-restart-add-prepare-fails-1",
+    );
 
     failRestartPreparation = true;
-    await expect(runtime.addPlugin("p-restart-add-prepare-fails")).rejects.toThrow(/addPlugin failed/);
+    await expect(
+      runtime.addPlugin("p-restart-add-prepare-fails"),
+    ).rejects.toThrow(/addPlugin failed/);
 
     expect(runtime.listPluginIds()).toEqual(["p-restart-add-prepare-fails"]);
-    expect(await runtime.call("p_restart_add_prepare_fails_ping")).toBe("hi-p-restart-add-prepare-fails-1");
+    expect(await runtime.call("p_restart_add_prepare_fails_ping")).toBe(
+      "hi-p-restart-add-prepare-fails-1",
+    );
   });
 
   it("restartPlugin coalesces concurrent dependency preparation for a loaded plugin", async () => {
@@ -2286,7 +2890,9 @@ export default async function createPlugin() {
       resolvePrepare = resolve;
     });
     const preparePluginStart = vi.fn(({ pluginId }) =>
-      prepareRestart && pluginId === "p-restart-dedup-prep" ? preparePromise : undefined,
+      prepareRestart && pluginId === "p-restart-dedup-prep"
+        ? preparePromise
+        : undefined,
     );
     const runtime = makeRuntimeWithPreparation(preparePluginStart);
     await runtime.startAll();
@@ -2303,7 +2909,9 @@ export default async function createPlugin() {
 
     expect(preparePluginStart).toHaveBeenCalledTimes(1);
     expect(runtime.listPluginIds()).toEqual(["p-restart-dedup-prep"]);
-    expect(await runtime.call("p_restart_dedup_prep_ping")).toBe("hi-p-restart-dedup-prep-1");
+    expect(await runtime.call("p_restart_dedup_prep_ping")).toBe(
+      "hi-p-restart-dedup-prep-1",
+    );
 
     resolvePrepare();
 
@@ -2386,8 +2994,14 @@ export default async function createPlugin() {
   it("addPlugin throws when registry has no entry for the id", async () => {
     const runtime = makeRuntime();
     // Empty registry — no plugin to add.
-    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
-    await expect(runtime.addPlugin("ghost")).rejects.toThrow(/not found in registry/);
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    await expect(runtime.addPlugin("ghost")).rejects.toThrow(
+      /not found in registry/,
+    );
   });
 
   it("addPlugin surfaces the manifest read error when registry entry exists but manifest is invalid (update-banner regression)", async () => {
@@ -2398,7 +3012,13 @@ export default async function createPlugin() {
     const pluginDir = join(installedDir, "p-broken");
     await mkdir(pluginDir, { recursive: true });
     // Write an invalid manifest (tool name has a dot, which fails schema validation).
-    const badManifest = { id: "p-broken", name: "Broken", version: "1.0.0", entry: "entry.mjs", tools: ["bad.tool"] };
+    const badManifest = {
+      id: "p-broken",
+      name: "Broken",
+      version: "1.0.0",
+      entry: "entry.mjs",
+      tools: ["bad.tool"],
+    };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(badManifest), "utf-8");
     await writeFile(
@@ -2412,7 +3032,9 @@ export default async function createPlugin() {
     const runtime = makeRuntime();
 
     // Must throw the real schema error, not "not found in registry or disabled".
-    await expect(runtime.addPlugin("p-broken")).rejects.toThrow(/schema validation failed|Invalid tool name/);
+    await expect(runtime.addPlugin("p-broken")).rejects.toThrow(
+      /schema validation failed|Invalid tool name/,
+    );
   });
 
   it("addPlugin throws when the entry module fails to import (atomic-install rollback signal)", async () => {
@@ -2441,7 +3063,14 @@ export default async function createPlugin() { return {}; }`,
         name: "Broken Entry",
         version: "1.0.0",
         entry: "entry.mjs",
-        tools: [{ name: "broken_entry_hello", description: "broken_entry_hello tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        tools: [
+          {
+            name: "broken_entry_hello",
+            description: "broken_entry_hello tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
         description: "test fixture for addPlugin import-fail rollback signal",
         publisher: "test",
       }),
@@ -2457,7 +3086,9 @@ export default async function createPlugin() { return {}; }`,
     );
     const runtime = makeRuntime();
 
-    await expect(runtime.addPlugin("p-broken-entry")).rejects.toThrow(/addPlugin failed/);
+    await expect(runtime.addPlugin("p-broken-entry")).rejects.toThrow(
+      /addPlugin failed/,
+    );
   });
 
   it("addPlugin on a running plugin re-reads manifest from disk (update entry-point regression)", async () => {
@@ -2468,7 +3099,9 @@ export default async function createPlugin() { return {}; }`,
     const manifestPath = join(pluginDir, "plugin.json");
 
     // v1: entry.mjs returns "v1"
-    await writeFile(join(pluginDir, "entry-v1.mjs"), `
+    await writeFile(
+      join(pluginDir, "entry-v1.mjs"),
+      `
 let started = 0;
 export default async function createPlugin() {
   return {
@@ -2477,18 +3110,34 @@ export default async function createPlugin() {
     stop: async () => {},
   };
 }
-`, "utf-8");
-    await writeFile(manifestPath, JSON.stringify({
-      id: "p-update", name: "Update", version: "1.0.0",
-      description: "regression fixture",
-      publisher: "Test fixture",
-      entry: "entry-v1.mjs", tools: [{ name: "p_update_ping", description: "p_update_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-      configSchema: {
-        properties: {
-          endpoint: { type: "string", title: "endpoint" },
+`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "p-update",
+        name: "Update",
+        version: "1.0.0",
+        description: "regression fixture",
+        publisher: "Test fixture",
+        entry: "entry-v1.mjs",
+        tools: [
+          {
+            name: "p_update_ping",
+            description: "p_update_ping tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+        configSchema: {
+          properties: {
+            endpoint: { type: "string", title: "endpoint" },
+          },
         },
-      },
-    }), "utf-8");
+      }),
+      "utf-8",
+    );
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -2500,11 +3149,15 @@ export default async function createPlugin() {
     const runtime = makeRuntime();
     await runtime.startAll();
     expect(await runtime.call("p_update_ping")).toBe("v1-1");
-    expect(runtime.listPluginCards().find((card) => card.id === "p-update")?.configSchema?.properties)
-      .toHaveProperty("endpoint");
+    expect(
+      runtime.listPluginCards().find((card) => card.id === "p-update")
+        ?.configSchema?.properties,
+    ).toHaveProperty("endpoint");
 
     // Simulate marketplace update: write v2 entry and update manifest on disk.
-    await writeFile(join(pluginDir, "entry-v2.mjs"), `
+    await writeFile(
+      join(pluginDir, "entry-v2.mjs"),
+      `
 let started = 0;
 export default async function createPlugin() {
   return {
@@ -2513,19 +3166,35 @@ export default async function createPlugin() {
     stop: async () => {},
   };
 }
-`, "utf-8");
+`,
+      "utf-8",
+    );
     // Update manifest.entry to point to the new entry file.
-    await writeFile(manifestPath, JSON.stringify({
-      id: "p-update", name: "Update", version: "2.0.0",
-      description: "regression fixture v2",
-      publisher: "Test fixture",
-      entry: "entry-v2.mjs", tools: [{ name: "p_update_ping", description: "p_update_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-      configSchema: {
-        properties: {
-          baseUrl: { type: "string", title: "baseUrl" },
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "p-update",
+        name: "Update",
+        version: "2.0.0",
+        description: "regression fixture v2",
+        publisher: "Test fixture",
+        entry: "entry-v2.mjs",
+        tools: [
+          {
+            name: "p_update_ping",
+            description: "p_update_ping tool",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+        configSchema: {
+          properties: {
+            baseUrl: { type: "string", title: "baseUrl" },
+          },
         },
-      },
-    }), "utf-8");
+      }),
+      "utf-8",
+    );
 
     // addPlugin sees it's loaded → calls restartPlugin → must re-read manifest from disk.
     await runtime.addPlugin("p-update");
@@ -2534,7 +3203,9 @@ export default async function createPlugin() {
     // Note: ESM module caching means we can't test the v2 handler body here
     // (same URL = cached module), but we verify the plugin is re-started (counter resets).
     expect(runtime.listPluginIds()).toContain("p-update");
-    const card = runtime.listPluginCards().find((candidate) => candidate.id === "p-update");
+    const card = runtime
+      .listPluginCards()
+      .find((candidate) => candidate.id === "p-update");
     expect(card?.version).toBe("2.0.0");
     expect(card?.configSchema?.properties).toHaveProperty("baseUrl");
     expect(card?.configSchema?.properties).not.toHaveProperty("endpoint");
@@ -2544,7 +3215,10 @@ export default async function createPlugin() {
     const pluginId = "p-update-schema";
     const toolName = "p_update_schema_ping";
 
-    async function writeVersion(version: string, fieldName: string): Promise<string> {
+    async function writeVersion(
+      version: string,
+      fieldName: string,
+    ): Promise<string> {
       const pluginDir = join(installedDir, pluginId, version);
       await mkdir(pluginDir, { recursive: true });
       await writeFile(
@@ -2569,7 +3243,14 @@ export default async function createPlugin() {
           description: `schema fixture ${version}`,
           publisher: "Test fixture",
           entry: "entry.mjs",
-          tools: [{ name: toolName, description: `${toolName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+          tools: [
+            {
+              name: toolName,
+              description: `${toolName} tool`,
+              inputSchema: { type: "object", properties: {} },
+              _meta: { ui: { visibility: ["model", "app"] } },
+            },
+          ],
           configSchema: {
             properties: {
               [fieldName]: { type: "string", title: fieldName },
@@ -2586,29 +3267,39 @@ export default async function createPlugin() {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: pluginId, manifestPath: v1ManifestPath, enabled: true }],
+        plugins: [
+          { id: pluginId, manifestPath: v1ManifestPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
 
     const runtime = makeRuntime();
     await runtime.startAll();
-    expect(runtime.listPluginCards().find((card) => card.id === pluginId)?.version).toBe("1.0.0");
+    expect(
+      runtime.listPluginCards().find((card) => card.id === pluginId)?.version,
+    ).toBe("1.0.0");
 
     const v2ManifestPath = await writeVersion("2.0.0", "baseUrl");
     await writeFile(
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: pluginId, manifestPath: v2ManifestPath, enabled: true }],
+        plugins: [
+          { id: pluginId, manifestPath: v2ManifestPath, enabled: true },
+        ],
       }),
       "utf-8",
     );
 
     await runtime.addPlugin(pluginId);
 
-    const card = runtime.listPluginCards().find((candidate) => candidate.id === pluginId);
-    expect(runtime.getPluginRoot(pluginId)).toBe(join(installedDir, pluginId, "2.0.0"));
+    const card = runtime
+      .listPluginCards()
+      .find((candidate) => candidate.id === pluginId);
+    expect(runtime.getPluginRoot(pluginId)).toBe(
+      join(installedDir, pluginId, "2.0.0"),
+    );
     expect(card?.version).toBe("2.0.0");
     expect(card?.configSchema?.properties).toHaveProperty("baseUrl");
     expect(card?.configSchema?.properties).not.toHaveProperty("endpoint");
@@ -2636,30 +3327,54 @@ describe("PluginRuntime lifecycle plog emission", () => {
 
   async function writeFakePlugin(id: string): Promise<string> {
     const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_hello`;
-    const { manifestPath } = await writeTestPlugin({
-      rootDir: testDir,
-      pluginsRoot: installedDir,
-      registryPath,
-    }, {
-      id,
-      tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-      entrySource: makeTestPluginEntrySource({ [methodName]: JSON.stringify("hi") }),
-    });
+    const { manifestPath } = await writeTestPlugin(
+      {
+        rootDir: testDir,
+        pluginsRoot: installedDir,
+        registryPath,
+      },
+      {
+        id,
+        tools: [
+          {
+            name: methodName,
+            description: `${methodName} tool`,
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+        entrySource: makeTestPluginEntrySource({
+          [methodName]: JSON.stringify("hi"),
+        }),
+      },
+    );
     return manifestPath;
   }
 
   it("emits LOAD_START phase for each plugin entry during load()", async () => {
     const manifestPath = await writeFakePlugin("plog-test");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-test", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "plog-test", manifestPath, enabled: true },
+    ]);
     // In test mode, createLogger maps debug→console.log.
     // The ctx object is passed as 2nd arg; check the message string + ctx via JSON.
     const calls: unknown[][] = [];
-    const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
+      calls.push(args);
+    });
+    const runtime = makeGenerationBoundRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
     await runtime.load();
     const hasLoadStart = calls.some((args) => {
-      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
-      return flat.includes(PluginPhase.LOAD_START) || flat.includes("loading plugin");
+      const flat = args
+        .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
+        .join(" ");
+      return (
+        flat.includes(PluginPhase.LOAD_START) || flat.includes("loading plugin")
+      );
     });
     expect(hasLoadStart).toBe(true);
     spy.mockRestore();
@@ -2667,14 +3382,26 @@ describe("PluginRuntime lifecycle plog emission", () => {
 
   it("emits LOAD_OK phase after a plugin successfully loads", async () => {
     const manifestPath = await writeFakePlugin("plog-ok");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-ok", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "plog-ok", manifestPath, enabled: true },
+    ]);
     const calls: unknown[][] = [];
-    const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
+      calls.push(args);
+    });
+    const runtime = makeGenerationBoundRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
     await runtime.load();
     const hasLoadOk = calls.some((args) => {
-      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
-      return flat.includes(PluginPhase.LOAD_OK) || flat.includes("plugin loaded");
+      const flat = args
+        .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
+        .join(" ");
+      return (
+        flat.includes(PluginPhase.LOAD_OK) || flat.includes("plugin loaded")
+      );
     });
     expect(hasLoadOk).toBe(true);
     spy.mockRestore();
@@ -2682,18 +3409,30 @@ describe("PluginRuntime lifecycle plog emission", () => {
 
   it("emits RESTART_REQUEST phase when restartPlugin is called", async () => {
     const manifestPath = await writeFakePlugin("plog-restart");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-restart", manifestPath, enabled: true }]);
-    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "plog-restart", manifestPath, enabled: true },
+    ]);
+    const runtime = makeGenerationBoundRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
     await runtime.load();
     const calls: unknown[][] = [];
-    const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
+    const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => {
+      calls.push(args);
+    });
     await runtime.restartPlugin("plog-restart");
     const hasRestartRequest = calls.some((args) => {
-      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
-      return flat.includes(PluginPhase.RESTART_REQUEST) || flat.includes("restart requested");
+      const flat = args
+        .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
+        .join(" ");
+      return (
+        flat.includes(PluginPhase.RESTART_REQUEST) ||
+        flat.includes("restart requested")
+      );
     });
     expect(hasRestartRequest).toBe(true);
     spyLog.mockRestore();
   });
-
 });

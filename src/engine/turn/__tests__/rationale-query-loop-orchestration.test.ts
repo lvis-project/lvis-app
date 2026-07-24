@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { KeywordEngine } from "../../../core/keyword-engine.js";
+import { InputClassifier } from "../../../core/input-classifier.js";
 import { RouteEngine } from "../../../core/route-engine.js";
 import { createDynamicTool } from "../../../tools/base.js";
-import type { ToolExecutor, ToolResult, ToolUseBlock } from "../../../tools/executor.js";
+import type { ToolExecutor, ToolResult, ToolUseBlock,
+} from "../../../tools/executor.js";
 import type { RationaleExecutorControlOutcome } from "../../../tools/pipeline/rationale-pr1-contract.js";
 import type { SealedRationaleResumeRequest } from "../../../tools/pipeline/rationale-resume-contract.js";
 import { ToolRegistry } from "../../../tools/registry.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { ConversationLoop } from "../../conversation-loop.js";
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams,
+} from "../../llm/types.js";
 import {
   RATIONALE_SIBLING_CANCELLED_RESULT,
   RATIONALE_SIBLING_REPLAY_BLOCKED_RESULT,
@@ -54,20 +56,21 @@ function makeLoop(
       jsonSchema: { type: "object", properties: {} },
       isReadOnly: () => readOnly,
       execute: async () => ({ output: "unused", isError: false }),
-    }));
+    }),
+    );
   }
   const provider = new Provider(turns);
-  const loop = new ConversationLoop(({
+  const loop = new ConversationLoop({
     settingsService: { get: () => fakeLlmSettings(), getSecret: () => "key" },
     systemPromptBuilder: { build: () => "system", setToolScope: vi.fn() },
-    keywordEngine: new KeywordEngine(),
-    routeEngine: new RouteEngine({ toolRegistry: registry }),
+    inputClassifier: new InputClassifier(),
+    routeEngine: new RouteEngine(),
     toolRegistry: registry,
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
     disableSessionPersistence: true,
     ...(factory ? { rationaleCoordinatorFactory: factory } : {}),
     ...(enabled ? { enableDormantRationaleForTesting: true } : {}),
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
   return { loop, provider };
 }
@@ -81,16 +84,20 @@ const toolRound = (
     name: "read_file" | "bash" | "write_file" | "request_plugin";
     input?: Record<string, unknown>;
   }>,
-  usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number },
+  usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number;
+  },
 ): StreamEvent[] => [
   ...calls.map(({ id, name, input }) => ({
     type: "tool_call" as const, id, name, input: input ?? {},
   })),
-  { type: "message_complete", stopReason: "tool_use", ...(usage ? { usage } : {}) },
+  { type: "message_complete", stopReason: "tool_use", ...(usage ? { usage } : {}),
+  },
 ];
-const endRound = (usage?: { inputTokens: number; outputTokens: number }): StreamEvent[] => [
+const endRound = (usage?: { inputTokens: number; outputTokens: number;
+}): StreamEvent[] => [
   { type: "text_delta", text: "done" },
-  { type: "message_complete", stopReason: "end_turn", ...(usage ? { usage } : {}) },
+  { type: "message_complete", stopReason: "end_turn", ...(usage ? { usage } : {}),
+  },
 ];
 
 function runtime(
@@ -105,7 +112,8 @@ function runtime(
     handleRationaleRoundResult: vi.fn(async () => ({ status: "ready" })),
     promptForApproval: prompt,
     createSealedResume: vi.fn(async () => ({
-      resumeRequest: { ticketId: "hidden-ticket" } as unknown as SealedRationaleResumeRequest,
+      resumeRequest: { ticketId: "hidden-ticket",
+      } as unknown as SealedRationaleResumeRequest,
     })),
     abort: vi.fn(),
   };
@@ -115,13 +123,14 @@ const control = (id: string) => ({
   control: {
     ticketId: "hidden-ticket",
     sealedAction: { toolUseId: id },
-    eligibilityContext: { headless: false, forceModal: false, approvalReasonPrefix: null },
+    eligibilityContext: { headless: false, forceModal: false, approvalReasonPrefix: null,
+      },
   },
   channel: "executor-control",
   outcome: "rationale-required",
   transcriptVisibility: "hidden",
   ordinaryToolResult: null,
-} as unknown as RationaleExecutorControlOutcome);
+}) as unknown as RationaleExecutorControlOutcome;
 
 beforeEach(() => vi.mocked(runRationaleOnlyRound).mockReset());
 afterEach(() => vi.unstubAllEnvs());
@@ -129,15 +138,17 @@ afterEach(() => vi.unstubAllEnvs());
 describe("ConversationLoop rationale orchestration", () => {
   it("activates guarded production when a host coordinator factory is available", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input));
+    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input),
+    );
     const fixture = makeLoop([
       toolRound([{ id: "prod-bash", name: "bash" }]),
-      endRound(),
-    ], factory);
+      endRound()], factory,
+    );
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
       outcome: "completed" as const,
       results: toolUses.map(({ id }) => tr(id, "legacy")),
-    }));
+    }),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -165,7 +176,8 @@ describe("ConversationLoop rationale orchestration", () => {
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
       outcome: "completed" as const,
       results: toolUses.map(({ id }) => tr(id, "legacy")),
-    }));
+    }),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -192,14 +204,17 @@ describe("ConversationLoop rationale orchestration", () => {
     const fixture = makeLoop([
       toolRound([
         { id: "shell", name: "bash" },
-        { id: "late-plugin", name: "request_plugin", input: { pluginId: "missing" } },
+        { id: "late-plugin", name: "request_plugin", input: { pluginId: "missing" },
+          },
       ]),
       endRound(),
-    ], factory);
+    ], factory,
+    );
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
       outcome: "completed" as const,
       results: toolUses.map(({ id }) => tr(id, "legacy")),
-    }));
+    }),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -231,14 +246,17 @@ describe("ConversationLoop rationale orchestration", () => {
     const fixture = makeLoop([
       toolRound([
         { id: "shell", name: "bash" },
-        { id: "late-plugin", name: "request_plugin", input: { pluginId: "missing" } },
+        { id: "late-plugin", name: "request_plugin", input: { pluginId: "missing" },
+          },
       ]),
       endRound(),
-    ], factory);
+    ], factory,
+    );
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
       outcome: "completed" as const,
       results: toolUses.map(({ id }) => tr(id, "legacy")),
-    }));
+    }),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -266,22 +284,26 @@ describe("ConversationLoop rationale orchestration", () => {
     vi.stubEnv("NODE_ENV", "test");
     const prompt = vi.fn(async () => ({ outcome: "allowed-once" as const }));
     const factory = vi.fn((input: RationaleCoordinatorFactoryInput) =>
-      runtime(input, prompt));
+      runtime(input, prompt),
+    );
     const fixture = makeLoop([
       toolRound([
         { id: "prefix", name: "read_file" },
         { id: "trigger", name: "bash" },
         { id: "sibling", name: "write_file" },
-      ], { inputTokens: 10, outputTokens: 2 }),
+      ], { inputTokens: 10, outputTokens: 2 },
+        ),
       endRound({ inputTokens: 4, outputTokens: 1 }),
-    ], factory, true);
+    ], factory, true,
+    );
     const executeConversationBatch = vi.fn(async () => ({
       outcome: "rationale-required" as const,
       completedResults: [tr("prefix", "prefix-ok")],
       control: control("trigger"),
     }));
     const executeSealedRationaleResume = vi.fn(async () =>
-      tr("trigger", "trigger-ok"));
+      tr("trigger", "trigger-ok"),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -307,7 +329,8 @@ describe("ConversationLoop rationale orchestration", () => {
     const result = await fixture.loop.runTurn("run the batch", undefined, undefined, {
       inputOrigin: "user-keyboard",
       requestAnchorRawIntent: "run the batch",
-    });
+    },
+    );
 
     expect(factory).toHaveBeenCalledTimes(1);
     expect(factory.mock.calls[0]?.[0].rationaleProvenance).toEqual({
@@ -333,17 +356,21 @@ describe("ConversationLoop rationale orchestration", () => {
 
   it("rebuilds the coordinator per batch from the current monotonic taint", async () => {
     vi.stubEnv("NODE_ENV", "test");
-    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input));
+    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input),
+    );
     const fixture = makeLoop([
       toolRound([{ id: "read", name: "read_file" }]),
       toolRound([{ id: "shell", name: "bash" }]),
       endRound(),
-    ], factory, true);
+    ], factory, true,
+    );
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
       outcome: "completed" as const,
       results: toolUses.map(({ id, name }) =>
-        tr(id, name === "read_file" ? "untrusted file content" : "shell-ok")),
-    }));
+        tr(id, name === "read_file" ? "untrusted file content" : "shell-ok"),
+        ),
+    }),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -356,7 +383,8 @@ describe("ConversationLoop rationale orchestration", () => {
     });
 
     expect(factory).toHaveBeenCalledTimes(2);
-    expect(factory.mock.calls.map(([input]) => input.rationaleProvenance)).toEqual([
+    expect(factory.mock.calls.map(([input]) => input.rationaleProvenance),
+    ).toEqual([
       { startedFromUserKeyboard: true, taint: "none" },
       { startedFromUserKeyboard: true, taint: "file-content" },
     ]);
@@ -364,14 +392,16 @@ describe("ConversationLoop rationale orchestration", () => {
   });
   it("defers a later intercepted meta-tool until the preceding rationale action resolves", async () => {
     vi.stubEnv("NODE_ENV", "test");
-    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input));
+    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input),
+    );
     const fixture = makeLoop([
       toolRound([
         { id: "trigger", name: "bash" },
         { id: "later-meta", name: "request_plugin" },
       ]),
       endRound(),
-    ], factory, true);
+    ], factory, true,
+    );
     const executeConversationBatch = vi.fn(
       async (toolUses: ToolUseBlock[], _options?: unknown) => ({
         outcome: "rationale-required" as const,
@@ -380,7 +410,8 @@ describe("ConversationLoop rationale orchestration", () => {
       }),
     );
     const executeSealedRationaleResume = vi.fn(async () =>
-      tr("trigger", "trigger-ok"));
+      tr("trigger", "trigger-ok"),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -425,7 +456,8 @@ describe("ConversationLoop rationale orchestration", () => {
 
   it("blocks every cancelled sibling when ids and sibling order change", async () => {
     vi.stubEnv("NODE_ENV", "test");
-    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input));
+    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input),
+    );
     const siblingA = { path: "a.txt", content: "alpha" };
     const siblingB = { path: "b.txt", content: "beta" };
     const fixture = makeLoop([
@@ -439,7 +471,8 @@ describe("ConversationLoop rationale orchestration", () => {
         { id: "replay-a-new-id", name: "write_file", input: siblingA },
       ]),
       endRound(),
-    ], factory, true);
+    ], factory, true,
+    );
     let batchCalls = 0;
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => {
       batchCalls += 1;
@@ -456,7 +489,8 @@ describe("ConversationLoop rationale orchestration", () => {
       };
     });
     const executeSealedRationaleResume = vi.fn(async () =>
-      tr("trigger", "trigger-ok"));
+      tr("trigger", "trigger-ok"),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -495,7 +529,8 @@ describe("ConversationLoop rationale orchestration", () => {
 
   it("allows a cancelled sibling when its actual input changes", async () => {
     vi.stubEnv("NODE_ENV", "test");
-    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input));
+    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input),
+    );
     const changedInput = { path: "changed.txt", content: "new content" };
     const fixture = makeLoop([
       toolRound([
@@ -510,7 +545,8 @@ describe("ConversationLoop rationale orchestration", () => {
         { id: "changed-write", name: "write_file", input: changedInput },
       ]),
       endRound(),
-    ], factory, true);
+    ], factory, true,
+    );
     let batchCalls = 0;
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => {
       batchCalls += 1;
@@ -527,7 +563,8 @@ describe("ConversationLoop rationale orchestration", () => {
       };
     });
     const executeSealedRationaleResume = vi.fn(async () =>
-      tr("trigger", "trigger-ok"));
+      tr("trigger", "trigger-ok"),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -567,7 +604,8 @@ describe("ConversationLoop rationale orchestration", () => {
 
   it("resets cancelled-sibling guards for a new user-keyboard turn", async () => {
     vi.stubEnv("NODE_ENV", "test");
-    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input));
+    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input),
+    );
     const repeatedInput = { path: "same.txt", content: "same content" };
     const fixture = makeLoop([
       toolRound([
@@ -579,7 +617,8 @@ describe("ConversationLoop rationale orchestration", () => {
         { id: "fresh-turn-write", name: "write_file", input: repeatedInput },
       ]),
       endRound(),
-    ], factory, true);
+    ], factory, true,
+    );
     let batchCalls = 0;
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => {
       batchCalls += 1;
@@ -596,7 +635,8 @@ describe("ConversationLoop rationale orchestration", () => {
       };
     });
     const executeSealedRationaleResume = vi.fn(async () =>
-      tr("trigger", "trigger-ok"));
+      tr("trigger", "trigger-ok"),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -644,10 +684,11 @@ describe("ConversationLoop rationale orchestration", () => {
 
   it("fails later same-anchor proposals closed when sibling fingerprints are incomplete", async () => {
     vi.stubEnv("NODE_ENV", "test");
-    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input));
+    const factory = vi.fn((input: RationaleCoordinatorFactoryInput) => runtime(input),
+    );
     const secretMarker = "raw-secret-sentinel";
     const oversizedInput = {
-      payload: secretMarker + "x".repeat((1024 * 1024) + 1),
+      payload: secretMarker + "x".repeat(1024 * 1024 + 1),
     };
     const noncanonicalInput: Record<string, unknown> = {
       path: "noncanonical.txt",
@@ -656,7 +697,8 @@ describe("ConversationLoop rationale orchestration", () => {
     const fixture = makeLoop([
       toolRound([
         { id: "trigger", name: "bash", input: { command: "prepare" } },
-        { id: "oversized-sibling", name: "write_file", input: oversizedInput },
+        { id: "oversized-sibling", name: "write_file", input: oversizedInput,
+          },
         {
           id: "noncanonical-sibling",
           name: "write_file",
@@ -671,14 +713,17 @@ describe("ConversationLoop rationale orchestration", () => {
         },
       ]),
       endRound(),
-    ], factory, true);
+    ], factory, true,
+    );
     const executeConversationBatch = vi.fn(async (toolUses: ToolUseBlock[]) => ({
       outcome: "rationale-required" as const,
       completedResults: [],
       control: control(toolUses[0]!.id),
-    }));
+    }),
+    );
     const executeSealedRationaleResume = vi.fn(async () =>
-      tr("trigger", "trigger-ok"));
+      tr("trigger", "trigger-ok"),
+    );
     (
       fixture.loop.toolExecutor as unknown as {
         executeConversationBatch: typeof executeConversationBatch;
@@ -715,7 +760,8 @@ describe("ConversationLoop rationale orchestration", () => {
         RATIONALE_SIBLING_REPLAY_BLOCKED_RESULT,
       ]);
       const warningText = JSON.stringify(warnSpy.mock.calls);
-      expect(warningText).toContain("rationale cancelled sibling replay blocked");
+      expect(warningText).toContain("rationale cancelled sibling replay blocked",
+      );
       expect(warningText).not.toContain(secretMarker);
       expect(warningText).not.toContain("safe-target.txt");
     } finally {

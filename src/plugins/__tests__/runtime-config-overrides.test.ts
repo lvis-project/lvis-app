@@ -7,7 +7,6 @@ import {
   writeTestPluginRegistry,
   type TestPluginRuntimeFixture,
 } from "./test-helpers.js";
-import { createNoopHostApiForTests } from "../runtime.js";
 
 describe("PluginRuntime config overrides", () => {
   let fixture: TestPluginRuntimeFixture;
@@ -113,19 +112,12 @@ describe("PluginRuntime config overrides", () => {
 `,
       manifest: {
         name: "Cleanup Plugin",
-        keywords: [{ keyword: "cleanup", skillId: "cleanup_echo" }],
       },
     });
 
     const events: string[] = [];
     const runtime = makeTestPluginRuntime(fixture, {
       onDisable: (pluginId) => events.push(`disable:${pluginId}`),
-      createHostApi: (pluginId, manifest, pluginDataDir) => ({
-        ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
-        registerKeywords: () => {
-          events.push(`register:${pluginId}`);
-        },
-      }),
     });
 
     await runtime.startAll();
@@ -135,7 +127,7 @@ describe("PluginRuntime config overrides", () => {
     // Replacement publishes the candidate before retiring predecessor-scoped
     // effects. A global onDisable here would erase the freshly published host
     // projection, so it is reserved for actual plugin removal/disable.
-    expect(events).toEqual(["register:cleanup-plugin"]);
+    expect(events).toEqual([]);
     await expect(runtime.call("cleanup_echo")).resolves.toBe("ok");
   });
 

@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { GenericMessage, LLMProvider, StreamEvent, ToolSchema } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent, ToolSchema,
+} from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -31,15 +32,15 @@ function createLoopWithRegistry(
   toolRegistry: ToolRegistry,
   overrides: Partial<ConstructorParameters<typeof ConversationLoop>[0]> = {},
 ): ConversationLoop {
-  const keywordEngine = new KeywordEngine();
-  const routeEngine = new RouteEngine({ toolRegistry });
-  const loop = new ConversationLoop(({
+  const inputClassifier = new InputClassifier();
+  const routeEngine = new RouteEngine();
+  const loop = new ConversationLoop({
     settingsService: {
       get: () => fakeLlmSettings(),
       getSecret: () => "test-key",
     },
     systemPromptBuilder: { build: () => "system" },
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager: {
@@ -47,7 +48,7 @@ function createLoopWithRegistry(
       listSessions: () => [],
     },
     ...overrides,
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
   return loop;
 }
@@ -72,19 +73,23 @@ describe("ConversationLoop onTurnSummary", () => {
       description: "List files",
       source: "builtin",
       category: "read",
-      jsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      jsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"],
+        },
       isReadOnly: () => true,
       execute: async () => ({ output: "src\npackage.json", isError: false }),
-    }));
+    }),
+    );
     toolRegistry.register(createDynamicTool({
       name: "read_file",
       description: "Read file",
       source: "builtin",
       category: "read",
-      jsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      jsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"],
+        },
       isReadOnly: () => true,
       execute: async () => ({ output: "contents", isError: false }),
-    }));
+    }),
+    );
 
     // Round 1: 2 tools (list_directory + read_file in parallel),
     // Round 2: 1 tool (read_file again),
@@ -92,24 +97,29 @@ describe("ConversationLoop onTurnSummary", () => {
     const provider = new FakeProvider([
       [
         { type: "text_delta", text: "looking" },
-        { type: "tool_call", id: "t-1", name: "list_directory", input: { path: "src" } },
-        { type: "tool_call", id: "t-2", name: "read_file", input: { path: "a" } },
-        { type: "message_complete", stopReason: "tool_use", usage: { inputTokens: 100, outputTokens: 20 } },
+        { type: "tool_call", id: "t-1", name: "list_directory", input: { path: "src" },
+        },
+        { type: "tool_call", id: "t-2", name: "read_file", input: { path: "a" },
+        },
+        { type: "message_complete", stopReason: "tool_use", usage: { inputTokens: 100, outputTokens: 20 },
+        },
       ],
       [
         { type: "text_delta", text: "more" },
-        { type: "tool_call", id: "t-3", name: "read_file", input: { path: "b" } },
-        { type: "message_complete", stopReason: "tool_use", usage: { inputTokens: 80, outputTokens: 15 } },
+        { type: "tool_call", id: "t-3", name: "read_file", input: { path: "b" },
+        },
+        { type: "message_complete", stopReason: "tool_use", usage: { inputTokens: 80, outputTokens: 15 },
+        },
       ],
       [
         { type: "text_delta", text: "answer" },
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 60, outputTokens: 10 } },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 60, outputTokens: 10 },
+        },
       ],
     ]);
     const loop = createLoopWithRegistry(provider, toolRegistry);
 
-    let summary:
-      | {
+    let summary: {
           turnDurationMs: number;
           toolCount: number;
           cumulativeToolMs: number;
@@ -125,7 +135,8 @@ describe("ConversationLoop onTurnSummary", () => {
       onTurnSummary: (s) => {
         summary = s;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
     expect(summary).not.toBeNull();
     expect(summary!.toolCount).toBe(3);
@@ -154,7 +165,8 @@ describe("ConversationLoop onTurnSummary", () => {
     const provider = new FakeProvider([
       [
         // No text — empty assistant response.
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 0 } },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 0 },
+        },
       ],
     ]);
     const loop = createLoopWithRegistry(provider, toolRegistry);
@@ -164,7 +176,8 @@ describe("ConversationLoop onTurnSummary", () => {
       onTurnSummary: () => {
         calls += 1;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
     // Turn produced no assistant text → footer suppressed (mirrors the
     // notification-gate so dropped/aborted turns don't render footers).
@@ -176,7 +189,8 @@ describe("ConversationLoop onTurnSummary", () => {
     const provider = new FakeProvider([
       [
         { type: "text_delta", text: "저장된 답변" },
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 42, outputTokens: 7 } },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 42, outputTokens: 7 },
+        },
       ],
     ]);
     const saveSession = vi.fn(async () => {});
@@ -200,7 +214,8 @@ describe("ConversationLoop onTurnSummary", () => {
       vendorProvider: "openai",
       vendorModel: "gpt-5.4-mini",
     });
-    expect(finalAssistant?.meta?.turnSummary?.tokensIn ?? 0).toBeGreaterThan(42);
+    expect(finalAssistant?.meta?.turnSummary?.tokensIn ?? 0).toBeGreaterThan(42,
+    );
   });
 
   it("attributes fallback-served turns to the provider/model that actually streamed", async () => {
@@ -209,13 +224,15 @@ describe("ConversationLoop onTurnSummary", () => {
     const primary: LLMProvider = {
       vendor: "claude",
       streamTurn: async function* () {
-        yield { type: "error", error: "500 internal server error", classification: "network" };
+        yield { type: "error", error: "500 internal server error", classification: "network",
+        };
       },
     };
     const fallback = new FakeProvider([
       [
         { type: "text_delta", text: "fallback answer" },
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2 } },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2 },
+        },
       ],
     ]);
     const provider = new FallbackProvider(
@@ -239,14 +256,14 @@ describe("ConversationLoop onTurnSummary", () => {
       auditLogger: auditLogger as never,
     });
 
-    let summary:
-      | { vendorProvider?: string; vendorModel?: string }
+    let summary: { vendorProvider?: string; vendorModel?: string }
       | null = null;
     const pending = loop.runTurn("질문", {
       onTurnSummary: (s) => {
         summary = s;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
     await vi.advanceTimersByTimeAsync(5_000);
     await pending;
     vi.useRealTimers();
@@ -255,7 +272,8 @@ describe("ConversationLoop onTurnSummary", () => {
       vendorProvider: "openai",
       vendorModel: "gpt-5.4-mini",
     });
-    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as
+      | GenericMessage[] | undefined;
     const finalAssistant = savedMessages?.slice().reverse().find((message) => message.role === "assistant");
     expect(finalAssistant?.meta?.turnSummary).toMatchObject({
       vendorProvider: "openai",
@@ -274,27 +292,33 @@ describe("ConversationLoop onTurnSummary", () => {
       description: "Read file",
       source: "builtin",
       category: "read",
-      jsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      jsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"],
+        },
       isReadOnly: () => true,
       execute: async () => ({ output: "contents", isError: false }),
-    }));
+    }),
+    );
     let primaryCalls = 0;
     const primary: LLMProvider = {
       vendor: "claude",
       streamTurn: async function* () {
         primaryCalls += 1;
         if (primaryCalls === 1) {
-          yield { type: "tool_call", id: "t-1", name: "read_file", input: { path: "a" } };
-          yield { type: "message_complete", stopReason: "tool_use", usage: { inputTokens: 100, outputTokens: 10 } };
+          yield { type: "tool_call", id: "t-1", name: "read_file", input: { path: "a" },
+          };
+          yield { type: "message_complete", stopReason: "tool_use", usage: { inputTokens: 100, outputTokens: 10 },
+          };
           return;
         }
-        yield { type: "error", error: "500 internal server error", classification: "network" };
+        yield { type: "error", error: "500 internal server error", classification: "network",
+        };
       },
     };
     const fallback = new FakeProvider([
       [
         { type: "text_delta", text: "fallback final" },
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 20, outputTokens: 5 } },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 20, outputTokens: 5 },
+        },
       ],
     ]);
     const provider = new FallbackProvider(
@@ -318,14 +342,14 @@ describe("ConversationLoop onTurnSummary", () => {
       auditLogger: auditLogger as never,
     });
 
-    let summary:
-      | { vendorProvider?: string; vendorModel?: string }
+    let summary: { vendorProvider?: string; vendorModel?: string }
       | null = null;
     const pending = loop.runTurn("질문", {
       onTurnSummary: (s) => {
         summary = s;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
     await vi.advanceTimersByTimeAsync(5_000);
     await pending;
     vi.useRealTimers();
@@ -335,8 +359,10 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(auditLogger.logTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         usageByModel: [
-          expect.objectContaining({ vendorProvider: "claude", vendorModel: "claude-sonnet-4-6" }),
-          expect.objectContaining({ vendorProvider: "openai", vendorModel: "gpt-5.4-mini" }),
+          expect.objectContaining({ vendorProvider: "claude", vendorModel: "claude-sonnet-4-6",
+          }),
+          expect.objectContaining({ vendorProvider: "openai", vendorModel: "gpt-5.4-mini",
+          }),
         ],
       }),
     );
@@ -346,8 +372,10 @@ describe("ConversationLoop onTurnSummary", () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "정리 완료<title>숨김 제목</title>[checkpoint]" },
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 30, outputTokens: 6 } },
+        { type: "text_delta", text: "정리 완료<title>숨김 제목</title>[checkpoint]",
+        },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 30, outputTokens: 6 },
+        },
       ],
     ]);
     const saveSession = vi.fn(async () => {});
@@ -372,7 +400,8 @@ describe("ConversationLoop onTurnSummary", () => {
 
     await loop.runTurn("질문", {}, undefined, { inputOrigin: "user-keyboard" });
 
-    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as
+      | GenericMessage[] | undefined;
     const finalAssistant = savedMessages?.slice().reverse().find((message) => message.role === "assistant");
     expect(finalAssistant?.content).toBe("정리 완료");
     expect(finalAssistant?.content).not.toContain("<title>");
@@ -384,7 +413,8 @@ describe("ConversationLoop onTurnSummary", () => {
       vendorProvider: "openai",
       vendorModel: "gpt-5.4-mini",
     });
-    expect(finalAssistant?.meta?.turnSummary?.tokensIn ?? 0).toBeGreaterThan(30);
+    expect(finalAssistant?.meta?.turnSummary?.tokensIn ?? 0).toBeGreaterThan(30,
+    );
   });
 
   it("does not emit a turnSummary footer when the durable final save fails", async () => {
@@ -392,7 +422,8 @@ describe("ConversationLoop onTurnSummary", () => {
     const provider = new FakeProvider([
       [
         { type: "text_delta", text: "저장 실패 답변" },
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 9, outputTokens: 2 } },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 9, outputTokens: 2 },
+        },
       ],
     ]);
     const saveSession = vi.fn(async () => {
@@ -420,7 +451,8 @@ describe("ConversationLoop onTurnSummary", () => {
       onTurnSummary: () => {
         summaryCalls += 1;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
     expect(result.text).toBe("저장 실패 답변");
     expect(summaryCalls).toBe(0);
@@ -432,7 +464,8 @@ describe("ConversationLoop onTurnSummary", () => {
     const provider = new FakeProvider([
       [
         { type: "text_delta", text: "처리했습니다" },
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 3 } },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 3 },
+        },
       ],
     ]);
     const saveSession = vi.fn(async () => {});
@@ -443,7 +476,8 @@ describe("ConversationLoop onTurnSummary", () => {
 
     await loop.runTurn(input, {}, undefined, { inputOrigin: "plugin-emitted" });
 
-    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as
+      | GenericMessage[] | undefined;
     const savedUser = savedMessages?.find((message) => message.role === "user");
     expect(savedUser?.meta?.displayText).toBe("오늘 브리핑");
     expect(savedUser?.meta?.importedTrigger).toMatchObject({
@@ -454,32 +488,28 @@ describe("ConversationLoop onTurnSummary", () => {
     });
   });
 
-  it("persists skill routing provenance separately from visible user text", async () => {
+  it("persists natural-language input without host keyword routing metadata", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
         { type: "text_delta", text: "메일을 확인했습니다" },
-        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 12, outputTokens: 4 } },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 12, outputTokens: 4 },
+        },
       ],
     ]);
     const saveSession = vi.fn(async () => {});
     const loop = createLoopWithRegistry(provider, toolRegistry, {
-      keywordEngine: {
-        classify: () => ({ type: "skill", text: "지금 메일 읽어줘" }),
-        matchAllPluginIds: () => new Set<string>(),
-        matchToolNames: () => new Set<string>(),
-      } as never,
-      routeEngine: { route: () => ({ route: "skill", skillId: "msgraph_email_list" }) } as never,
       memoryManager: { saveSession, listSessions: () => [] } as never,
     });
 
-    await loop.runTurn("지금 메일 읽어줘", {}, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("지금 메일 읽어줘", {}, undefined, { inputOrigin: "user-keyboard",
+    });
 
-    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as
+      | GenericMessage[] | undefined;
     const savedUser = savedMessages?.find((message) => message.role === "user");
-    expect(savedUser?.content).toBe("[스킬: msgraph_email_list] 지금 메일 읽어줘");
-    expect(savedUser?.meta?.displayText).toBe("지금 메일 읽어줘");
-    expect(savedUser?.meta?.routeSkill?.skillId).toBe("msgraph_email_list");
+    expect(savedUser?.content).toBe("지금 메일 읽어줘");
+    expect(savedUser?.meta?.displayText).toBeUndefined();
   });
 
   it("does not emit a summary or notification when stopReason is context-error", async () => {
@@ -491,7 +521,8 @@ describe("ConversationLoop onTurnSummary", () => {
       [
         // Emit a context-length error — triggers stream-collector context_error branch.
         // Must match isContextLengthError() patterns (see auto-compact.ts).
-        { type: "error", error: "prompt is too long for this model" } as StreamEvent,
+        { type: "error", error: "prompt is too long for this model",
+        } as StreamEvent,
       ],
     ]);
     const loop = createLoopWithRegistry(provider, toolRegistry);
@@ -501,7 +532,8 @@ describe("ConversationLoop onTurnSummary", () => {
       onTurnSummary: () => {
         summaryCallCount += 1;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
     // stopReason must be "context-error" (not undefined / "end_turn")
     expect(result.stopReason).toBe("context-error");
@@ -522,14 +554,15 @@ describe("ConversationLoop onTurnSummary", () => {
     ]);
     const loop = createLoopWithRegistry(provider, toolRegistry);
 
-    let summary:
-      | { tokensIn: number; tokensOut: number; toolCount: number }
+    let summary: { tokensIn: number; tokensOut: number; toolCount: number;
+    }
       | null = null;
     await loop.runTurn("질문", {
       onTurnSummary: (s) => {
         summary = s;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
     expect(summary).not.toBeNull();
     expect(summary!.tokensIn).toBeGreaterThan(0);
@@ -541,7 +574,8 @@ describe("ConversationLoop onTurnSummary", () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(createDynamicTool({
       name: "large_schema_tool",
-      description: "Tool with intentionally large schema description ".repeat(200),
+      description: "Tool with intentionally large schema description ".repeat(200,
+        ),
       source: "builtin",
       category: "read",
       jsonSchema: {
@@ -553,7 +587,8 @@ describe("ConversationLoop onTurnSummary", () => {
       },
       isReadOnly: () => true,
       execute: async () => ({ output: "ok", isError: false }),
-    }));
+    }),
+    );
     const provider = new FakeProvider([
       [
         { type: "text_delta", text: "ok" },
@@ -570,14 +605,15 @@ describe("ConversationLoop onTurnSummary", () => {
       } as never,
     });
 
-    let summary:
-      | { tokensIn: number; tokensOut: number; toolCount: number }
+    let summary: { tokensIn: number; tokensOut: number; toolCount: number;
+    }
       | null = null;
     await loop.runTurn("질문", {
       onTurnSummary: (s) => {
         summary = s;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
     expect(summary).not.toBeNull();
     expect(summary!.tokensIn).toBeGreaterThan(3_000);
@@ -592,14 +628,17 @@ describe("ConversationLoop onTurnSummary", () => {
       description: "Return a large search result",
       source: "builtin",
       category: "read",
-      jsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      jsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"],
+        },
       isReadOnly: () => true,
       execute: async () => ({ output: largeToolResult, isError: false }),
-    }));
+    }),
+    );
     const provider = new FakeProvider([
       [
         { type: "text_delta", text: "searching" },
-        { type: "tool_call", id: "large-1", name: "large_search", input: { query: "budget" } },
+        { type: "tool_call", id: "large-1", name: "large_search", input: { query: "budget" },
+        },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -612,18 +651,21 @@ describe("ConversationLoop onTurnSummary", () => {
       memoryManager: { saveSession, listSessions: () => [] } as never,
     });
 
-    let summary:
-      | { tokensIn: number; tokensOut: number; freshInputTokens: number }
+    let summary: { tokensIn: number; tokensOut: number; freshInputTokens: number;
+    }
       | null = null;
     await loop.runTurn("큰 검색 결과를 요약해줘", {
       onTurnSummary: (s) => {
         summary = s;
       },
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
-    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as
+      | GenericMessage[] | undefined;
     expect(savedMessages).toBeDefined();
-    const toolResult = savedMessages?.find((message) => message.role === "tool_result");
+    const toolResult = savedMessages?.find((message) => message.role === "tool_result",
+    );
     expect(toolResult?.content).toBe(largeToolResult);
     expect(toolResult?.meta?.truncated).toBeUndefined();
     const expectedProjection = estimateRequestInputProjection({
@@ -638,6 +680,7 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(summary!.tokensIn).toBeGreaterThan(1_000);
     expect(summary!.tokensOut).toBe(0);
     expect(summary!.freshInputTokens).toBe(0);
-    expect(savedAssistant?.meta?.turnSummary?.tokensIn).toBe(expectedProjection.totalTokens);
+    expect(savedAssistant?.meta?.turnSummary?.tokensIn).toBe(expectedProjection.totalTokens,
+    );
   });
 });

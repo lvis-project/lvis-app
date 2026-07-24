@@ -36,17 +36,7 @@ export function buildPluginCard(
     : modelTools;
   const filteredNames = filteredTools.map((t) => t.name);
   const sampleTools = filteredNames.slice(0, 3);
-  let description: string;
-  if (manifest.description) {
-    description = manifest.description;
-  } else {
-    // v6: `toolSchemas` is gone — fall back to the first-3 tools' own descriptions.
-    const parts = filteredTools
-      .slice(0, 3)
-      .map((t) => t.description)
-      .filter((d): d is string => !!d);
-    description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
-  }
+  const description = manifest.description;
   const toolDescriptions: Record<string, string> = {};
   for (const t of filteredTools) {
     if (t.description) toolDescriptions[t.name] = t.description;

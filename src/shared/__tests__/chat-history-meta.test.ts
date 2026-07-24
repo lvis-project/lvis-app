@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { serializeHistoryMessage, type SerializedHistoryMessage } from "../chat-history.js";
+import { serializeHistoryMessage, type SerializedHistoryMessage,
+} from "../chat-history.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 
 describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
@@ -73,11 +74,14 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
     const serializedAssistant = serializeHistoryMessage(assistant, 20);
     const serializedToolResult = serializeHistoryMessage(toolResult, 21);
 
-    expect(serializedAssistant.content).toBe("현재 빌트인 도구에는 `tool_search` 가 있습니다.");
-    expect(serializedAssistant.thought).toBe("tool_search 노출 여부를 확인합니다.");
+    expect(serializedAssistant.content).toBe("현재 빌트인 도구에는 `tool_search` 가 있습니다.",
+    );
+    expect(serializedAssistant.thought).toBe("tool_search 노출 여부를 확인합니다.",
+    );
     expect(serializedAssistant.toolCalls?.[0]?.name).toBe("tool_search");
     expect(serializedToolResult.toolName).toBe("tool_search");
-    expect(serializedToolResult.content).toBe("필요한 도구는 tool_search 로 로드하세요.");
+    expect(serializedToolResult.content).toBe("필요한 도구는 tool_search 로 로드하세요.",
+    );
   });
 
   it("preserves systemNotice marker through serialization (Issue #911)", () => {
@@ -90,19 +94,17 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
     expect(s.systemNotice).toBe("context-error");
   });
 
-  it("projects user display/provenance meta for transcript replay", () => {
+  it("projects explicit user display text for transcript replay", () => {
     const m: GenericMessage = {
       role: "user",
-      content: "[스킬: msgraph_email_list] 지금 메일 읽어줘",
+      content: "durable prompt-bearing wrapper",
       meta: {
         displayText: "지금 메일 읽어줘",
-        routeSkill: { skillId: "msgraph_email_list" },
       },
-    };
+      };
     const s = serializeHistoryMessage(m, 5);
-    expect(s.content).toContain("[스킬:");
+    expect(s.content).toBe("durable prompt-bearing wrapper");
     expect(s.displayText).toBe("지금 메일 읽어줘");
-    expect(s.routeSkill?.skillId).toBe("msgraph_email_list");
   });
 
   it("projects imported trigger and keeps persisted tool display metadata inert", () => {
@@ -136,12 +138,17 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
       },
     };
 
-    expect(serializeHistoryMessage(imported, 6).importedTrigger?.source).toBe("overlay:work-assistant");
+    expect(serializeHistoryMessage(imported, 6).importedTrigger?.source).toBe("overlay:work-assistant",
+    );
     expect(serializeHistoryMessage(tool, 7).toolDisplay?.durationMs).toBe(123);
-    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("source");
-    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("category");
-    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("pluginId");
-    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("uiPayload");
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("source",
+    );
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("category",
+    );
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("pluginId",
+    );
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("uiPayload",
+    );
   });
 
   it("drops forged tool provenance from user-writable persisted history", () => {
@@ -161,7 +168,8 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
       },
     };
 
-    expect(serializeHistoryMessage(forged, 10).toolDisplay).toEqual({ durationMs: 10 });
+    expect(serializeHistoryMessage(forged, 10).toolDisplay).toEqual({ durationMs: 10,
+    });
   });
 
   it("drops invalid persisted provenance metadata at the history IPC boundary", () => {
@@ -170,7 +178,6 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
       content: "spoofed",
       meta: {
         displayText: 123,
-        routeSkill: { skillId: "../bad" },
         importedTrigger: {
           sessionId: "trigger-1",
           source: "plugin:fake",
@@ -189,7 +196,6 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
 
     const serializedImported = serializeHistoryMessage(imported, 8);
     expect(serializedImported.displayText).toBeUndefined();
-    expect(serializedImported.routeSkill).toBeUndefined();
     expect(serializedImported.importedTrigger).toBeUndefined();
     expect(serializeHistoryMessage(notice, 9).systemNotice).toBeUndefined();
   });

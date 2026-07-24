@@ -51,11 +51,9 @@ import type { PluginPerfStats } from "./perf-stats.js";
 import {
   assertEventEmitAccess,
   assertEventSubscribeAccess,
-  assertUiActionInvokable,
+  assertAppVisibleToolInvokable,
 } from "./access-control.js";
-import {
-  declaredUiInvokableMethods,
-} from "./plugin-loader.js";
+import { declaredAppVisibleToolMethods } from "./plugin-loader.js";
 import type { InvocationOrigin } from "./origin-chain.js";
 import { createLogger } from "../../lib/logger.js";
 import { PluginRuntimeLifecycle } from "./runtime-lifecycle.js";
@@ -273,8 +271,8 @@ export interface PluginRuntimeOptions {
    * `restartAll` stop phase per plugin, `disable`, `removePlugin`,
    * `reloadPlugin` stop phase, and `failClosedLoadedPlugin` when a
    * fresh start fails mid-`restartAll`). The host wires this to
-   * `toolRegistry.unregisterByPlugin` + `keywordEngine.unregisterByPlugin`
-   * + `conversationLoop.onPluginDisabled` so transient runtime state stays
+   * `toolRegistry.unregisterByPlugin` +
+   * `conversationLoop.onPluginDisabled` so transient runtime state stays
    * in sync with the runtime's plugin map.
    *
    * May fire more than once per logical cycle for the same pluginId — e.g.,
@@ -364,9 +362,9 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   }
 
   /**
-   * Invoke a plugin method declared as a UI action directly against the runtime,
+   * Invoke an app-visible plugin Tool directly against the runtime,
    * enforcing the app-visible allowlist (#885 v6 — tools whose
-   * `_meta.ui.visibility` includes `"app"`, via `declaredUiInvokableMethods`).
+   * `_meta.ui.visibility` includes `"app"`, via `declaredAppVisibleToolMethods`).
    * Used by the boot plugin-tool executor for UI-only runtime methods that bypass
    * the reviewer surface.
    *
@@ -404,10 +402,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       throw new Error(`Plugin method not found: ${method}`);
     }
     return this.withPinnedGeneration(entry.pluginId, async (projection) => {
-      assertUiActionInvokable({
+      assertAppVisibleToolInvokable({
         method,
         pluginId: entry.pluginId,
-        uiInvokable: declaredUiInvokableMethods(projection.manifest),
+        appVisibleTools: declaredAppVisibleToolMethods(projection.manifest),
       });
       const handler = projection.methods.get(method);
       if (!handler) throw new Error(`Plugin method not found in active generation: ${method}`);
@@ -453,10 +451,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     }
     return this.withPinnedGeneration(entry.pluginId, async (projection, generationId) => {
       const manifest = projection.manifest;
-      assertUiActionInvokable({
+      assertAppVisibleToolInvokable({
         method,
         pluginId: entry.pluginId,
-        uiInvokable: declaredUiInvokableMethods(manifest),
+        appVisibleTools: declaredAppVisibleToolMethods(manifest),
       });
       if (!this.toolInvocationDelegate) {
         throw new Error("Plugin tool executor is not wired; UI plugin call denied");
@@ -505,7 +503,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * fail-closed deny existed only because an app-only tool had NO registry entry and
    * therefore no gate; giving it one removes the reason to deny it, without giving
    * the card the panel's ungoverned path.) The app-visibility allow-list
-   * (`assertUiActionInvokable`, the spec MUST) still bounds the surface: a
+   * (`assertAppVisibleToolInvokable`, the spec MUST) still bounds the surface: a
    * MODEL-ONLY tool is not app-callable.
    *
    * ── DELIBERATE NARROWING below the spec's `["app"]` semantics: the auth trio ──
@@ -528,7 +526,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    *    having it.
    *  - So: registry membership (governed execution, reachable from the panel) is
    *    right, and card reachability is not. This is that one exception, named and
-   *    contained to this method — `assertUiActionInvokable`, the `"ui"` panel path,
+   *    contained to this method — `assertAppVisibleToolInvokable`, the `"ui"` panel path,
    *    and `isAppOnlyRuntimeInvocation` are untouched.
    */
   async callFromApp(
@@ -547,10 +545,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     }
     return this.withPinnedGeneration(entry.pluginId, async (projection, generationId) => {
       const manifest = projection.manifest;
-      assertUiActionInvokable({
+      assertAppVisibleToolInvokable({
         method,
         pluginId: entry.pluginId,
-        uiInvokable: declaredUiInvokableMethods(manifest),
+        appVisibleTools: declaredAppVisibleToolMethods(manifest),
       });
       const auth = manifest?.auth;
       if (auth && (method === auth.statusTool || method === auth.loginTool || method === auth.logoutTool)) {

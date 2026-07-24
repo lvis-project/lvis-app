@@ -35,7 +35,7 @@ documented primary-product contract.
 ## Layer Map
 
 | Layer | Scope | Primary Responsibilities |
-| --- | --- | --- |
+| ----------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | User and desktop shell | Electron windows, tray, titlebar, settings, dialogs | Present the app, collect consent, and keep foreground/background behavior predictable. |
 | Renderer app | Chat, Insights, Projects, Work Board, plugin slots | Render state from host APIs, never bypass host policy, and keep app workflows ergonomic. |
 | Preload and IPC contracts | `src/preload`, `src/ipc`, shared channel constants | Expose narrow typed APIs from the main process to renderer code. |
@@ -182,13 +182,9 @@ Key boundaries:
 - plugin tools must declare schemas (pure MCP `Tool` objects); per-tool category
   is not a manifest field — the host classifies the effective category per
   invocation;
-- deprecated `keywords[].skillId` must exactly name a model-visible manifest
-  Tool. A matching keyword preloads that Tool schema into the model-visible
-  turn scope; it never invokes the Tool directly and cannot target an app-only
-  Tool. This is separate from bundled `manifest.skills` instruction discovery.
-  Owner: `lvis-app` plugin runtime. Remove after every supported plugin has
-  migrated to bundled `manifest.skills` and no active manifest declares
-  `keywords`;
+- natural-language keywords never activate plugin scope or preload a Tool.
+  Bundled `manifest.skills` contribute instructions, while host-selected plugin
+  scope and `tool_search` control model-visible Tool discovery;
 - plugin UI can render in host slots but cannot bypass permission review;
 - optional `manifest.onboarding.firstTask` copy is inert, localized metadata:
   the host may prefill the visible composer, but it never auto-submits or invokes
@@ -276,7 +272,7 @@ The remaining high-churn surfaces keep one state owner while delegating focused
 implementation units:
 
 | Stable surface | Focused owners |
-|---|---|
+|------------------------------------------ |------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `engine/turn/query-loop.ts` | `intercepted-meta-gate.ts` owns cross-agent meta-tool approval; `tool-scope.ts`, `knowledge-cap.ts`, and `compaction.ts` own their respective policies |
 | `plugins/runtime/index.ts` | invocation/query facade over `runtime-lifecycle.ts` and the single shared state owner in `runtime-state.ts` |
 | `preload/internal-surface.ts` | stable world builders and first-frame primes; `internal-api-surface.ts` owns the internal renderer API object |
@@ -320,7 +316,7 @@ ledger records a plugin invocation as host-observable but an out-of-process MCP
 invocation as `hostObservable:false`; and the identity field is `pluginId` for a
 plugin versus `mcpServerId` for an MCP tool.
 
-The one asymmetry that is a *path* fork rather than a pure input difference is the
+The one asymmetry that is a _path_ fork rather than a pure input difference is the
 foreground reviewer AUTO-APPROVE lane, and it is a direct consequence of the
 sanctioned trust-tier split: `PermissionManager.categoryBasedDecision`
 short-circuits every low-trust (MCP) invocation with a bare `ask` carrying no

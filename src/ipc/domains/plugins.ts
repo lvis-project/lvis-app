@@ -61,12 +61,14 @@ import {
 } from "../../boot/steps/plugin-runtime/trigger-gate.js";
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
+  drainPluginInstallLockOperations,
   installMarketplacePluginWithLifecycle,
   rollbackMarketplacePluginWithLifecycle,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
 import {
   cleanupFailedPluginInstallWithLifecycle,
+  ensurePluginStateReadyForInstall,
   uninstallPluginWithLifecycle,
 } from "../../plugins/uninstall-lifecycle.js";
 import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
@@ -304,6 +306,36 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       sendToWindow(win, channel, payload, log);
     }
   };
+  const requireCleanupServices = () => {
+    if (
+      !pluginPaths
+      || !clearAuthPartitionService
+      || !listPluginAuthPartitionsService
+      || !forgetPluginAuthPartitionsService
+    ) {
+      throw new Error("plugin lifecycle cleanup services are not fully wired");
+    }
+    return {
+      pluginPaths,
+      clearAuthPartitionService,
+      listPluginAuthPartitionsService,
+      forgetPluginAuthPartitionsService,
+    };
+  };
+  const ensureInstallStateReady = (pluginId: string) => {
+    const cleanupServices = requireCleanupServices();
+    return ensurePluginStateReadyForInstall(pluginId, {
+      pluginMarketplace,
+      pluginRuntime,
+      settingsService,
+      ...cleanupServices,
+      drainPluginInstallLockOperationsService:
+        drainPluginInstallLockOperations,
+      refreshPluginNotifications,
+      emitHostEvent,
+      log,
+    });
+  };
   let marketplacePingCache:
     | { key: string; result: MarketplacePingResult; timestampMs: number }
     | null = null;
@@ -378,6 +410,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     await runManagedBootstrap({
       pluginMarketplace,
       pluginRuntime,
+      ensurePluginStateReadyForInstall: ensureInstallStateReady,
       mainWindow: getMainWindow(),
       marketplace,
     });
@@ -409,6 +442,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         networkAccessAcknowledgement,
         pluginRuntime,
         pluginMarketplace,
+        ensurePluginStateReadyForInstall: ensureInstallStateReady,
         broadcastInstallProgress: (payload) =>
           broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
         emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
@@ -446,6 +480,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       pluginId: normalizedPluginId,
       pluginRuntime,
       pluginMarketplace,
+      ensurePluginStateReadyForInstall: ensureInstallStateReady,
     });
   });
 
@@ -474,10 +509,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           pluginMarketplace,
           pluginRuntime,
           settingsService,
-          pluginPaths,
-          clearAuthPartitionService,
-          listPluginAuthPartitionsService,
-          forgetPluginAuthPartitionsService,
+          ...requireCleanupServices(),
+          drainPluginInstallLockOperationsService:
+            drainPluginInstallLockOperations,
           refreshPluginNotifications,
           emitHostEvent,
           log,
@@ -486,18 +520,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         return result;
       }
 
-      // Lifecycle ordering lives in uninstallPluginWithLifecycle:
-      // runtime remove (stop/dispose) first, marketplace file removal second,
-      // then best-effort host state cleanup. This keeps the Windows EBUSY
-      // defense from PR #734 while centralizing config/secret/auth cleanup.
+      // Lifecycle ordering lives in uninstallPluginWithLifecycle: durable
+      // marketplace removal runs inside the runtime generation barrier, then
+      // journaled config/secret/auth/cache cleanup completes or stays
+      // explicitly retryable. This preserves the Windows EBUSY defense while
+      // preventing a partial cleanup from being reported as success.
       const result = await uninstallPluginWithLifecycle(pluginId, {
         pluginMarketplace,
         pluginRuntime,
         settingsService,
-        pluginPaths,
-        clearAuthPartitionService,
-        listPluginAuthPartitionsService,
-        forgetPluginAuthPartitionsService,
+        ...requireCleanupServices(),
+        drainPluginInstallLockOperationsService:
+          drainPluginInstallLockOperations,
         refreshPluginNotifications,
         emitHostEvent,
         log,
@@ -561,6 +595,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     pluginRuntime.cancelPendingRestart(pluginId);
     return await withPluginInstallLock(pluginId, async () => {
       try {
+        await ensureInstallStateReady(pluginId);
         const result = await pluginMarketplace.installLocal(filePaths[0], {
           activatePreparedArtifact: (prepared) => pluginRuntime.activatePreparedArtifact<string>(prepared),
         });
@@ -1212,7 +1247,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //     and the registry entry's `mcpServerId` on the external arm). A call for
   //     another server's tool, a host builtin, or an unknown name is denied.
   //  3. App-visibility (`_meta.ui.visibility` ∋ "app") — the SPEC MUST, enforced
-  //     inside each backend's call path: `assertUiActionInvokable` (loopback) /
+  //     inside each backend's call path: `assertAppVisibleToolInvokable` (loopback) /
   //     the `appInvokable` check (external). NOT re-checked here: one site per path.
   //  4. Risk + consent — the SAME ToolExecutor gate every host tool call takes, entered
   //     under a DISTINCT `"mcp-app"` invocation origin. That origin is what makes the

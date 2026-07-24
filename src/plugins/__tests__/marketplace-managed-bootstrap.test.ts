@@ -208,6 +208,39 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     );
   }
 
+  it("blocks a managed reinstall before registry or artifact mutation while cleanup is pending", async () => {
+    await writeAdminCatalog("2.0.0");
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<unknown>;
+      },
+      "installWithDependencies",
+    );
+    const cleanupFailure = new Error("committed uninstall cleanup pending");
+    const cleanupGate = vi.fn(async () => {
+      throw cleanupFailure;
+    });
+
+    const result = await service.ensureManagedInstalled({
+      activatePreparedArtifact: vi.fn() as never,
+      ensurePluginStateReadyForInstall: cleanupGate,
+    });
+
+    expect(cleanupGate).toHaveBeenCalledWith("meeting");
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      installed: [],
+      updated: [],
+      failed: [{ id: "meeting", error: cleanupFailure.message }],
+    });
+  });
+
   function spyInstalledAtVersion(service: PluginMarketplaceService, installedVersion: string) {
     vi.spyOn(
       service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
@@ -375,6 +408,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
     const result = await service.ensureManagedInstalled({
       activatePreparedArtifact: activatePreparedArtifact as never,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
     });
 
     expect(result).toMatchObject({

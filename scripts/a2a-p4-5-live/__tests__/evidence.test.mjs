@@ -747,32 +747,141 @@ test("packaged-live output rejects a symlinked ancestor before writing", () => {
   );
 });
 
-test("isolated evidence workflow is dispatch-only, immutable-action pinned, exact-head/lock pinned, publisher-verified, and independently attested", () => {
+test("evidence workflow separates secret-free unsigned candidate execution from fresh signing and attestation", () => {
   const workflow = readFileSync(resolve(ROOT, ".github/workflows/a2a-p4-5-packaged-evidence.yml"), "utf8");
   for (const required of [
-    "head_sha:", "agent_hub_head_sha:", "platform:", "select Linux ARM64 separately", "linux-arm64", "ubuntu-24.04-arm",
-    "runs-on: ubuntu-latest", "PLATFORM_PROFILE: ${{ inputs.platform }}", 'case "$PLATFORM_PROFILE" in',
-    "fromJSON(needs.plan.outputs.matrix)", "matrix.artifact_name", "contents: read", "id-token: write", "attestations: write",
-    "git rev-parse HEAD", "git -C .evidence/agent-hub rev-parse HEAD", ".evidence/agent-hub/server/bun.lock", "AGENT_HUB_LOCK_DIGEST_SHA256",
-    "readRegularFile", "Agent Hub server lock", "loadBytes:false",
-    "repository: lvis-project/agent-hub", "codesign --verify --deep --strict", "spctl --assess", "Get-AuthenticodeSignature",
-    "dpkg-deb --field", "rpm -qp", "readelf --file-header", "actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4", "gh attestation verify",
-    "write-installer-provenance.mjs", "codesign --display --verbose=4 \"$mount_point/LVIS.app\"",
-    "hdiutil attach -readonly -nobrowse -plist", "plutil -convert json -o - -", "system-entities",
-    "spctl --assess --type execute", "Verify Windows Authenticode signature validity", "--source-digest \"$REQUESTED_HEAD\"",
-    "--signer-workflow lvis-project/lvis-app/.github/workflows/a2a-p4-5-packaged-evidence.yml", "--deny-self-hosted-runners",
-    "--predicate-type https://slsa.dev/provenance/v1", "Requested head must equal the immutable workflow source head",
-    "LVIS_MAC_SIGNER_CERT_SHA256", "LVIS_WINDOWS_PUBLISHER_SUBJECT", "LVIS_WINDOWS_SIGNER_THUMBPRINT", "env -u GH_TOKEN node",
+    "repository_dispatch:",
+    "PLATFORM_PROFILE: ${{ github.event.client_payload.platform }}",
+    "linux-arm64",
+    "ubuntu-24.04-arm",
+    "unsigned-installers:",
+    "sign-and-attest:",
+    "verify-evidence:",
+    "needs: [plan, unsigned-installers]",
+    "needs: [plan, sign-and-attest]",
+    "fromJSON(needs.plan.outputs.matrix)",
+    "Requested head must equal the immutable workflow source head",
+    "repository: lvis-project/agent-hub",
+    "AGENT_HUB_LOCK_DIGEST_SHA256",
+    "--skip-code-sign",
+    "Smoke launch unsigned candidate",
+    "Upload sealed unsigned payload",
+    "Download sealed unsigned payload",
+    "release.sha256",
+    "PACKAGE_JSON_SHA256",
+    "BUN_LOCK_SHA256",
+    "Install fixed signing packager without lifecycle scripts",
+    "--ignore-scripts",
+    "electron-builder@26.15.3",
+    "--prepackaged",
+    "Checkout trusted signing and verification policy",
+    "environment: release-signing",
+    "id-token: write",
+    "attestations: write",
+    "codesign --verify --deep --strict",
+    "spctl --assess",
+    "Get-AuthenticodeSignature",
+    "dpkg-deb --field",
+    "rpm -qp",
+    "readelf --file-header",
+    "actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4",
+    "gh attestation verify",
+    "node scripts/write-installer-provenance.mjs",
+    "--source-digest \"$REQUESTED_HEAD\"",
+    "--signer-workflow lvis-project/lvis-app/.github/workflows/a2a-p4-5-packaged-evidence.yml",
+    "--deny-self-hosted-runners",
+    "-u ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "LVIS_MAC_SIGNER_CERT_SHA256",
+    "LVIS_WINDOWS_PUBLISHER_SUBJECT",
+    "LVIS_WINDOWS_SIGNER_THUMBPRINT",
   ]) assert.ok(workflow.includes(required), `missing workflow invariant: ${required}`);
-  for (const forbidden of ["skip_code_sign", "--skip-code-sign", "graceful degradation", "inputs.ref", 'case "${{ inputs.platform }}" in', "\n  push:", "publish-release", "softprops/action-gh-release", "vars.AGENT_HUB_RELEASE_HEAD_SHA", "actions/checkout@v7", "actions/cache@v6", "actions/attest@v4", "actions/upload-artifact@v7", "oven-sh/setup-bun@v2", "awk -F '\\t'"]) {
+
+  for (const forbidden of [
+    "workflow_dispatch:",
+    "\n  push:",
+    "pull_request:",
+    "publish-release",
+    "softprops/action-gh-release",
+    "actions/checkout@v7",
+    "actions/cache@v6",
+    "actions/attest@v4",
+    "actions/upload-artifact@v7",
+    "oven-sh/setup-bun@v2",
+  ]) {
     assert.ok(!workflow.includes(forbidden), `forbidden workflow fallback: ${forbidden}`);
   }
-  assert.ok(!workflow.includes("readFileSync(process.argv[1])"), "Hub lock digest must use descriptor-safe canonical file reading");
-  const installerJobEnv = workflow.slice(workflow.indexOf("jobs:"), workflow.indexOf("    steps:"));
-  for (const secretName of ["CSC_LINK", "APPLE_ID", "WIN_CSC_LINK"]) assert.ok(!installerJobEnv.includes(secretName), `${secretName} leaked into job-wide env`);
+
+  const unsignedJob = workflow.slice(
+    workflow.indexOf("  unsigned-installers:"),
+    workflow.indexOf("  sign-and-attest:"),
+  );
+  for (const secretReference of [
+    "secrets.",
+    "environment: release-signing",
+    "id-token: write",
+    "attestations: write",
+  ]) {
+    assert.ok(
+      !unsignedJob.includes(secretReference),
+      `unsigned candidate job gained privileged input: ${secretReference}`,
+    );
+  }
+
+  const signingJob = workflow.slice(
+    workflow.indexOf("  sign-and-attest:"),
+    workflow.indexOf("  verify-evidence:"),
+  );
+  for (const candidateExecution of [
+    "bun install",
+    "node scripts/build-installers.mjs",
+    "scripts/smoke-packaged-app.mjs",
+    "node scripts/",
+    "node trusted-policy/scripts/",
+    "working-directory: unsigned-release",
+  ]) {
+    assert.ok(
+      !signingJob.includes(candidateExecution),
+      `signing job executes candidate source: ${candidateExecution}`,
+    );
+  }
+  assert.ok(
+    signingJob.indexOf("Download sealed unsigned payload")
+      < signingJob.indexOf("Require platform signing credentials"),
+    "the signing job must digest-verify its artifact before receiving a secret",
+  );
+  assert.ok(
+    signingJob.indexOf("Verify exact metadata and safely expand unsigned payload")
+      < signingJob.indexOf("Package and sign prebuilt candidate without candidate scripts"),
+    "the signing job must verify exact source metadata before packaging",
+  );
+
+  const verifierJob = workflow.slice(workflow.indexOf("  verify-evidence:"));
+  assert.ok(
+    verifierJob.includes("node scripts/write-installer-provenance.mjs"),
+    "candidate verifier must execute only in the fresh unprivileged job",
+  );
+  for (const privilegedInput of [
+    "secrets.",
+    "environment: release-signing",
+    "id-token: write",
+    "attestations: write",
+    "CLOUDFLARE_API_TOKEN",
+    "CSC_KEY_PASSWORD",
+    "APPLE_APP_SPECIFIC_PASSWORD",
+    "WIN_CSC_KEY_PASSWORD",
+  ]) {
+    assert.ok(
+      !verifierJob.includes(privilegedInput),
+      `unprivileged verifier gained privileged input: ${privilegedInput}`,
+    );
+  }
 
   const releaseWorkflow = readFileSync(resolve(ROOT, ".github/workflows/build-installers.yml"), "utf8");
-  for (const existingBehavior of ["skip_code_sign:", "inputs.ref", "publish-release:", "softprops/action-gh-release@v3"]) {
+  for (const existingBehavior of [
+    "skip_code_sign:",
+    "publish-release:",
+    "softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1",
+  ]) {
     assert.ok(releaseWorkflow.includes(existingBehavior), `existing installer workflow behavior changed: ${existingBehavior}`);
   }
 

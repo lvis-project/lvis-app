@@ -28,7 +28,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
@@ -71,23 +71,26 @@ function makeLoop(
     category: "read",
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "ok", isError: false }),
-  }));
+  }),
+  );
   configureTools?.(toolRegistry);
-  const loop = new ConversationLoop(({
-    settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+  const loop = new ConversationLoop({
+    settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key",
+    },
     systemPromptBuilder: { build: () => "system" },
-    keywordEngine: new KeywordEngine(),
-    routeEngine: new RouteEngine({ toolRegistry }),
+    inputClassifier: new InputClassifier(),
+    routeEngine: new RouteEngine(),
     toolRegistry,
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
     ...overrides,
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
   return loop;
 }
 
 function getHistory(loop: ConversationLoop) {
-  return (loop as unknown as { history: { getMessages: () => Array<{ role: string; content: unknown }> } }).history.getMessages();
+  return (loop as unknown as { history: { getMessages: () => Array<{ role: string; content: unknown }> };
+    }).history.getMessages();
 }
 
 function cloneHistoryLikeAppliedCompaction(loop: ConversationLoop): void {
@@ -100,7 +103,8 @@ function cloneHistoryLikeAppliedCompaction(loop: ConversationLoop): void {
   history.restore(history.getMessages().map((message) => ({
     ...message,
     ...(message.meta ? { meta: { ...message.meta } } : {}),
-  })));
+  })),
+  );
 }
 
 class DeferredGate<T> {
@@ -122,7 +126,8 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       // Round 0: emit tool_call so the loop runs a second round.
       [
         { type: "text_delta", text: "보고를 시작합니다." } as StreamEvent,
-        { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+        { type: "tool_call", id: "t1", name: "noop_tool", input: {},
+        } as StreamEvent,
         { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
       ],
       // Round 1 (after tool result): final text.
@@ -166,13 +171,23 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     expect(dispositions).toEqual(["injected"]);
     expect(injectedAckFinished).toBe(true);
     const userMessages = getHistory(loop).filter((m) => m.role === "user");
-    expect(userMessages.some((m) => typeof m.content === "string" && m.content.includes("더 짧게 요약"))).toBe(true);
+    expect(
+      userMessages.some(
+        (m) =>
+          typeof m.content === "string" && m.content.includes("더 짧게 요약"),
+      ),
+    ).toBe(true);
   });
 
   it("joins multiple queued utterances at the same boundary with blank-line separators", async () => {
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+        {
+          type: "tool_call",
+          id: "t1",
+          name: "noop_tool",
+          input: {},
+        } as StreamEvent,
         { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
       ],
       [
@@ -217,7 +232,10 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     const dropped: string[] = [];
     const turnPromise = loop.runTurn(
       "질문",
-      { onGuidanceInjected: (t) => injected.push(t), onGuidanceDropped: (t) => dropped.push(t) },
+      {
+        onGuidanceInjected: (t) => injected.push(t),
+        onGuidanceDropped: (t) => dropped.push(t),
+      },
       undefined,
       { inputOrigin: "user-keyboard" },
     );
@@ -232,11 +250,21 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
   it("propagates injected A2A provenance to receiver ApprovalGate on the next round", async () => {
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+        {
+          type: "tool_call",
+          id: "t1",
+          name: "noop_tool",
+          input: {},
+        } as StreamEvent,
         { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
       ],
       [
-        { type: "tool_call", id: "t2", name: "noop_tool", input: {} } as StreamEvent,
+        {
+          type: "tool_call",
+          id: "t2",
+          name: "noop_tool",
+          input: {},
+        } as StreamEvent,
         { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
       ],
       [
@@ -245,7 +273,9 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       ],
     ]);
     const dir = mkdtempSync(join(tmpdir(), "lvis-a2a-guidance-gate-"));
-    const permissionManager = new PermissionManager(join(dir, "permissions.json"));
+    const permissionManager = new PermissionManager(
+      join(dir, "permissions.json"),
+    );
     permissionManager.checkDetailed = () => ({
       decision: "allow",
       reason: "receiver auto-allow",
@@ -263,17 +293,15 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     });
 
     try {
-      const turnPromise = loop.runTurn(
-        "start",
-        undefined,
-        undefined,
-        { inputOrigin: "user-keyboard" },
-      );
+      const turnPromise = loop.runTurn("start", undefined, undefined, {
+        inputOrigin: "user-keyboard",
+      });
       await Promise.resolve();
-      expect(loop.queueGuidanceWithDisposition(
-        "[Sub-Agent: researcher] finished",
-        { approvalReasonPrefix: "[Sub-Agent: researcher]" },
-      )).toBe("queued");
+      expect(
+        loop.queueGuidanceWithDisposition("[Sub-Agent: researcher] finished", {
+          approvalReasonPrefix: "[Sub-Agent: researcher]",
+        }),
+      ).toBe("queued");
       await turnPromise;
 
       expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
@@ -290,8 +318,18 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
   it("gates intercepted request_plugin and tool_search calls with A2A provenance", async () => {
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "meta-1", name: "request_plugin", input: { pluginId: "missing" } } as StreamEvent,
-        { type: "tool_call", id: "meta-2", name: "tool_search", input: { query: "noop_tool" } } as StreamEvent,
+        {
+          type: "tool_call",
+          id: "meta-1",
+          name: "request_plugin",
+          input: { pluginId: "missing" },
+        } as StreamEvent,
+        {
+          type: "tool_call",
+          id: "meta-2",
+          name: "tool_search",
+          input: { query: "noop_tool" },
+        } as StreamEvent,
         { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
       ],
       [
@@ -305,37 +343,35 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
         choice: "allow-once" as const,
       })),
     };
-    const loop = makeLoop(
-      provider,
-      { approvalGate },
-      (toolRegistry) => {
-        for (const name of ["request_plugin", "tool_search"]) {
-          toolRegistry.register(createDynamicTool({
+    const loop = makeLoop(provider, { approvalGate }, (toolRegistry) => {
+      for (const name of ["request_plugin", "tool_search"]) {
+        toolRegistry.register(
+          createDynamicTool({
             name,
             description: name,
             source: "builtin",
             category: "read",
             isReadOnly: () => true,
             jsonSchema: { type: "object", properties: {} },
-            execute: async () => ({ output: "interception-regressed", isError: true }),
-          }));
-        }
-      },
-    );
+            execute: async () => ({
+              output: "interception-regressed",
+              isError: true,
+            }),
+          }),
+        );
+      }
+    });
 
-    await loop.runTurn(
-      "start",
-      undefined,
-      undefined,
-      {
-        inputOrigin: "agent-message",
-        initialGuidance: "[Sub-Agent: researcher] delivered work",
-        approvalReasonPrefix: "[Sub-Agent: researcher]",
-      },
-    );
+    await loop.runTurn("start", undefined, undefined, {
+      inputOrigin: "agent-message",
+      initialGuidance: "[Sub-Agent: researcher] delivered work",
+      approvalReasonPrefix: "[Sub-Agent: researcher]",
+    });
 
     expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(2);
-    const requests = approvalGate.requestAndWait.mock.calls.map(([request]) => request);
+    const requests = approvalGate.requestAndWait.mock.calls.map(
+      ([request]) => request,
+    );
     expect(requests.map((request) => request.toolName).sort()).toEqual([
       "request_plugin",
       "tool_search",
@@ -355,7 +391,9 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     // No active turn — IPC handler must surface this so renderer keeps text.
     expect(loop.queueGuidance("뭔가")).toBe("no-active-turn");
     // Synthesize an active turn for the rest of the matrix.
-    (loop as { currentAbortController: AbortController | null }).currentAbortController = new AbortController();
+    (
+      loop as { currentAbortController: AbortController | null }
+    ).currentAbortController = new AbortController();
     expect(loop.queueGuidance("")).toBe("empty");
     expect(loop.queueGuidance("   \n\t  ")).toBe("empty");
     expect(loop.queueGuidance("a".repeat(8_001))).toBe("too-long");
@@ -364,7 +402,9 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
 
   it("queue-full rejection at GUIDE_MAX_ENTRIES (16)", () => {
     const loop = makeLoop(new FakeProvider([]));
-    (loop as { currentAbortController: AbortController | null }).currentAbortController = new AbortController();
+    (
+      loop as { currentAbortController: AbortController | null }
+    ).currentAbortController = new AbortController();
     for (let i = 0; i < 16; i++) {
       expect(loop.queueGuidance(`g${i}`)).toBe("queued");
     }
@@ -387,7 +427,10 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     const dispositions: string[] = [];
     const turnPromise = loop.runTurn(
       "q",
-      { onGuidanceInjected: (t) => injected.push(t), onGuidanceDropped: (t) => dropped.push(t) },
+      {
+        onGuidanceInjected: (t) => injected.push(t),
+        onGuidanceDropped: (t) => dropped.push(t),
+      },
       undefined,
       { inputOrigin: "user-keyboard", maxRounds: 1 },
     );
@@ -412,23 +455,32 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     ]);
     const loop = makeLoop(provider);
     expect(loop.hasActiveTurn()).toBe(false);
-    const p = loop.runTurn("test", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const p = loop.runTurn("test", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
     await p;
     expect(loop.hasActiveTurn()).toBe(false);
   });
   it("drops guidance queued during a deferred prompt denial and never leaks it into session B", async () => {
-    const provider = new FakeProvider([[
-      { type: "text_delta", text: "session B response" } as StreamEvent,
-      { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
-    ]]);
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "session B response" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
     const skillOverlay = { clear: vi.fn() };
     const loop = makeLoop(provider, { skillOverlay });
-    const gate = new DeferredGate<{ decision: "allow" | "deny"; reason: string }>();
+    const gate = new DeferredGate<{
+      decision: "allow" | "deny";
+      reason: string;
+    }>();
     const gateEntered = new DeferredGate<void>();
-    const promptSpy = vi.spyOn(loop, "fireUserPromptSubmit").mockImplementation(() => {
-      gateEntered.resolve(undefined);
-      return gate.promise;
-    });
+    const promptSpy = vi
+      .spyOn(loop, "fireUserPromptSubmit")
+      .mockImplementation(() => {
+        gateEntered.resolve(undefined);
+        return gate.promise;
+      });
     const disposition = vi.fn();
     const rendererDropped = vi.fn();
 
@@ -439,9 +491,11 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       { inputOrigin: "user-keyboard" },
     );
     await gateEntered.promise;
-    expect(loop.queueGuidanceWithDisposition("A-only guidance", {
-      onDropped: disposition,
-    })).toBe("queued");
+    expect(
+      loop.queueGuidanceWithDisposition("A-only guidance", {
+        onDropped: disposition,
+      }),
+    ).toBe("queued");
     loop.turnAdditionalDirectories = ["temporary-grant"];
     gate.resolve({ decision: "deny", reason: "policy deny" });
 
@@ -465,8 +519,11 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
 
     expect(injectedInB).not.toHaveBeenCalled();
     expect(
-      getHistory(loop).some((message) =>
-        typeof message.content === "string" && message.content.includes("A-only guidance")),
+      getHistory(loop).some(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("A-only guidance"),
+      ),
     ).toBe(false);
     expect(skillOverlay.clear).toHaveBeenLastCalledWith(loop.getSessionId());
   });
@@ -489,9 +546,11 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       { inputOrigin: "user-keyboard" },
     );
     await lifecycleEntered.promise;
-    expect(loop.queueGuidanceWithDisposition("queued during SessionStart", {
-      onDropped: disposition,
-    })).toBe("queued");
+    expect(
+      loop.queueGuidanceWithDisposition("queued during SessionStart", {
+        onDropped: disposition,
+      }),
+    ).toBe("queued");
     lifecycleGate.reject(new Error("SessionStart failure"));
 
     await expect(turn).rejects.toThrow("SessionStart failure");
@@ -519,9 +578,11 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       { inputOrigin: "user-keyboard" },
     );
     await preflightEntered.promise;
-    expect(loop.queueGuidanceWithDisposition("queued during preflight", {
-      onDropped: disposition,
-    })).toBe("queued");
+    expect(
+      loop.queueGuidanceWithDisposition("queued during preflight", {
+        onDropped: disposition,
+      }),
+    ).toBe("queued");
     preflightGate.reject(new Error("preflight failure"));
 
     await expect(turn).rejects.toThrow("preflight failure");
@@ -532,10 +593,17 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
   });
 
   it("drops drained guidance when its round-boundary preflight throws", async () => {
-    const provider = new FakeProvider([[
-      { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
-      { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
-    ]]);
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "t1",
+          name: "noop_tool",
+          input: {},
+        } as StreamEvent,
+        { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+      ],
+    ]);
     const loop = makeLoop(provider);
     const injectionPreflight = new DeferredGate<boolean>();
     const injectionPreflightEntered = new DeferredGate<void>();
@@ -556,9 +624,11 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       { inputOrigin: "user-keyboard" },
     );
     await Promise.resolve();
-    expect(loop.queueGuidanceWithDisposition("drained before preflight", {
-      onDropped: disposition,
-    })).toBe("queued");
+    expect(
+      loop.queueGuidanceWithDisposition("drained before preflight", {
+        onDropped: disposition,
+      }),
+    ).toBe("queued");
     await injectionPreflightEntered.promise;
     injectionPreflight.reject(new Error("injection preflight failure"));
 
@@ -568,20 +638,26 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     expect(rendererDropped).toHaveBeenCalledTimes(1);
     expect(loop.guidanceQueue).toEqual([]);
     expect(
-      getHistory(loop).some((message) =>
-        typeof message.content === "string" && message.content.includes("drained before preflight")),
+      getHistory(loop).some(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("drained before preflight"),
+      ),
     ).toBe(false);
   });
 
   it("acknowledges running guidance only after a successful provider round commit", async () => {
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+        {
+          type: "tool_call",
+          id: "t1",
+          name: "noop_tool",
+          input: {},
+        } as StreamEvent,
         { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
       ],
-      [
-        { type: "error", error: "synthetic provider failure" } as StreamEvent,
-      ],
+      [{ type: "error", error: "synthetic provider failure" } as StreamEvent],
       [
         { type: "text_delta", text: "retry base response" } as StreamEvent,
         { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
@@ -607,20 +683,27 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       { inputOrigin: "user-keyboard" },
     );
     await Promise.resolve();
-    expect(loop.queueGuidanceWithDisposition("durable child result", {
-      onInjected: injected,
-      onDropped: dropped,
-    })).toBe("queued");
+    expect(
+      loop.queueGuidanceWithDisposition("durable child result", {
+        onInjected: injected,
+        onDropped: dropped,
+      }),
+    ).toBe("queued");
 
-    await expect(failedTurn).resolves.toMatchObject({ stopReason: "stream-error" });
+    await expect(failedTurn).resolves.toMatchObject({
+      stopReason: "stream-error",
+    });
     expect(injected).not.toHaveBeenCalled();
     expect(dropped).toHaveBeenCalledTimes(1);
     expect(dropped).toHaveBeenCalledWith("turn-ended");
     expect(rendererInjected).not.toHaveBeenCalled();
     expect(rendererDropped).toHaveBeenCalledTimes(1);
     expect(
-      getHistory(loop).some((message) =>
-        typeof message.content === "string" && message.content.includes("durable child result")),
+      getHistory(loop).some(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("durable child result"),
+      ),
     ).toBe(false);
 
     const retriedTurn = loop.runTurn(
@@ -630,25 +713,37 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       { inputOrigin: "user-keyboard" },
     );
     await Promise.resolve();
-    expect(loop.queueGuidanceWithDisposition("durable child result", {
-      onInjected: injected,
-      onDropped: dropped,
-    })).toBe("queued");
-    await expect(retriedTurn).resolves.toMatchObject({ stopReason: "end_turn" });
+    expect(
+      loop.queueGuidanceWithDisposition("durable child result", {
+        onInjected: injected,
+        onDropped: dropped,
+      }),
+    ).toBe("queued");
+    await expect(retriedTurn).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
 
     expect(injected).toHaveBeenCalledTimes(1);
     expect(dropped).toHaveBeenCalledTimes(1);
     expect(rendererInjected).toHaveBeenCalledTimes(1);
     expect(rendererInjected).toHaveBeenCalledWith("durable child result");
     expect(
-      getHistory(loop).filter((message) =>
-        typeof message.content === "string" && message.content.includes("durable child result")),
+      getHistory(loop).filter(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("durable child result"),
+      ),
     ).toHaveLength(1);
   });
 
   it("rolls back failed initialGuidance after an applied-compaction clone and retains one successful reinjection", async () => {
     const provider = new FakeProvider([
-      [{ type: "error", error: "initial guidance provider failure" } as StreamEvent],
+      [
+        {
+          type: "error",
+          error: "initial guidance provider failure",
+        } as StreamEvent,
+      ],
       [
         { type: "text_delta", text: "consumed" } as StreamEvent,
         { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
@@ -661,42 +756,46 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     });
     const initialGuidance = "[Sub-Agent: Researcher]\ndurable child result";
 
-    await expect(loop.runTurn(
-      "parent request",
-      undefined,
-      undefined,
-      {
+    await expect(
+      loop.runTurn("parent request", undefined, undefined, {
         inputOrigin: "user-keyboard",
         initialGuidance,
         approvalReasonPrefix: "[Sub-Agent: Researcher]",
-      },
-    )).resolves.toMatchObject({ stopReason: "stream-error" });
+      }),
+    ).resolves.toMatchObject({ stopReason: "stream-error" });
     expect(
-      getHistory(loop).filter((message) =>
-        typeof message.content === "string" && message.content.includes("durable child result")),
+      getHistory(loop).filter(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("durable child result"),
+      ),
     ).toHaveLength(0);
 
-    await expect(loop.runTurn(
-      "parent request",
-      undefined,
-      undefined,
-      {
+    await expect(
+      loop.runTurn("parent request", undefined, undefined, {
         inputOrigin: "user-keyboard",
         initialGuidance,
         approvalReasonPrefix: "[Sub-Agent: Researcher]",
-      },
-    )).resolves.toMatchObject({ stopReason: "end_turn" });
+      }),
+    ).resolves.toMatchObject({ stopReason: "end_turn" });
 
-    const guidanceHistory = getHistory(loop).filter((message) =>
-      typeof message.content === "string"
-      && message.content.includes("durable child result"));
+    const guidanceHistory = getHistory(loop).filter(
+      (message) =>
+        typeof message.content === "string" &&
+        message.content.includes("durable child result"),
+    );
     // Only the successful turn retains the separate guidance-injection row.
     expect(guidanceHistory).toHaveLength(1);
   });
 
   it("rolls back a failed agent-message input after an applied-compaction clone and retains one successful retry", async () => {
     const provider = new FakeProvider([
-      [{ type: "error", error: "agent message provider failure" } as StreamEvent],
+      [
+        {
+          type: "error",
+          error: "agent message provider failure",
+        } as StreamEvent,
+      ],
       [
         { type: "text_delta", text: "consumed" } as StreamEvent,
         { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
@@ -707,37 +806,36 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
       cloneHistoryLikeAppliedCompaction(loop);
       return true;
     });
-    const mailboxInput = "[Sub-Agent: Researcher]\ndurable autonomous wake result";
+    const mailboxInput =
+      "[Sub-Agent: Researcher]\ndurable autonomous wake result";
 
-    await expect(loop.runTurn(
-      mailboxInput,
-      undefined,
-      undefined,
-      {
+    await expect(
+      loop.runTurn(mailboxInput, undefined, undefined, {
         inputOrigin: "agent-message",
         approvalReasonPrefix: "[Sub-Agent: Researcher]",
-      },
-    )).resolves.toMatchObject({ stopReason: "stream-error" });
+      }),
+    ).resolves.toMatchObject({ stopReason: "stream-error" });
     expect(
-      getHistory(loop).filter((message) =>
-        typeof message.content === "string"
-        && message.content.includes("durable autonomous wake result")),
+      getHistory(loop).filter(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("durable autonomous wake result"),
+      ),
     ).toHaveLength(0);
 
-    await expect(loop.runTurn(
-      mailboxInput,
-      undefined,
-      undefined,
-      {
+    await expect(
+      loop.runTurn(mailboxInput, undefined, undefined, {
         inputOrigin: "agent-message",
         approvalReasonPrefix: "[Sub-Agent: Researcher]",
-      },
-    )).resolves.toMatchObject({ stopReason: "end_turn" });
+      }),
+    ).resolves.toMatchObject({ stopReason: "end_turn" });
 
     expect(
-      getHistory(loop).filter((message) =>
-        typeof message.content === "string"
-        && message.content.includes("durable autonomous wake result")),
+      getHistory(loop).filter(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("durable autonomous wake result"),
+      ),
     ).toHaveLength(1);
   });
 
@@ -761,55 +859,72 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
         approvalReasonPrefix: "[Sub-Agent: Researcher]",
       },
     },
-  ])("durably rolls back $label when post-turn fails after saving the injected row", async ({
-    input,
-    injectedText,
-    options,
-  }) => {
-    const dir = mkdtempSync(join(tmpdir(), "lvis-host-injection-rollback-"));
-    const memoryManager = new MemoryManager({ lvisDir: dir });
-    memoryManager.load();
-    const provider = new FakeProvider([
-      [
-        { type: "text_delta", text: "completed before post-turn failure" } as StreamEvent,
-        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
-      ],
-    ]);
-    let dirtySnapshotSaved = false;
-    const loop = makeLoop(provider, {
-      memoryManager,
-      postTurnHookChain: {
-        run: async ({ sessionId, messages }: {
-          sessionId: string;
-          messages: GenericMessage[];
-        }) => {
-          expect(messages.some((message) =>
-            typeof message.content === "string"
-            && message.content.includes(injectedText))).toBe(true);
-          await memoryManager.saveSession(sessionId, messages);
-          dirtySnapshotSaved = true;
-          throw new Error("synthetic post-turn failure");
+  ])(
+    "durably rolls back $label when post-turn fails after saving the injected row",
+    async ({ input, injectedText, options }) => {
+      const dir = mkdtempSync(join(tmpdir(), "lvis-host-injection-rollback-"));
+      const memoryManager = new MemoryManager({ lvisDir: dir });
+      memoryManager.load();
+      const provider = new FakeProvider([
+        [
+          {
+            type: "text_delta",
+            text: "completed before post-turn failure",
+          } as StreamEvent,
+          { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+        ],
+      ]);
+      let dirtySnapshotSaved = false;
+      const loop = makeLoop(provider, {
+        memoryManager,
+        postTurnHookChain: {
+          run: async ({
+            sessionId,
+            messages,
+          }: {
+            sessionId: string;
+            messages: GenericMessage[];
+          }) => {
+            expect(
+              messages.some(
+                (message) =>
+                  typeof message.content === "string" &&
+                  message.content.includes(injectedText),
+              ),
+            ).toBe(true);
+            await memoryManager.saveSession(sessionId, messages);
+            dirtySnapshotSaved = true;
+            throw new Error("synthetic post-turn failure");
+          },
         },
-      },
-    });
+      });
 
-    try {
-      await expect(loop.runTurn(input, undefined, undefined, options))
-        .rejects.toThrow("synthetic post-turn failure");
-      expect(dirtySnapshotSaved).toBe(true);
+      try {
+        await expect(
+          loop.runTurn(input, undefined, undefined, options),
+        ).rejects.toThrow("synthetic post-turn failure");
+        expect(dirtySnapshotSaved).toBe(true);
 
-      const persisted = memoryManager.loadSession(loop.getSessionId()) ?? [];
-      expect(persisted.some((message) => {
-        if (message === null || typeof message !== "object") return false;
-        const content = (message as { content?: unknown }).content;
-        return typeof content === "string" && content.includes(injectedText);
-      })).toBe(false);
-      expect(getHistory(loop).some((message) =>
-        typeof message.content === "string"
-        && message.content.includes(injectedText))).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
+        const persisted = memoryManager.loadSession(loop.getSessionId()) ?? [];
+        expect(
+          persisted.some((message) => {
+            if (message === null || typeof message !== "object") return false;
+            const content = (message as { content?: unknown }).content;
+            return (
+              typeof content === "string" && content.includes(injectedText)
+            );
+          }),
+        ).toBe(false);
+        expect(
+          getHistory(loop).some(
+            (message) =>
+              typeof message.content === "string" &&
+              message.content.includes(injectedText),
+          ),
+        ).toBe(false);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

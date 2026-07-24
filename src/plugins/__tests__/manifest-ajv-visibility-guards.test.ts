@@ -1,14 +1,4 @@
-/**
- * Sprint 4-B unit tests — AJV wiring (B-1), uiActions structural
- * validation (B-3), capability gate (B-5 — tested via manifest field), and
- * rate-limit (B-7 — tested in sprint4b-rate-limit.test.ts).
- *
- * NOTE: The legacy suffix-based "destructive verb" gate has been removed.
- * uiActions validation is now structural: every entry must be a valid
- * runtime method name. UI-only methods may stay out of tools[] so they are
- * not registered as LLM tools. Security relies on code review + marketplace
- * approval + signature verification — not on naming patterns.
- */
+/** AJV wiring and pure Tool visibility validation. */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,11 +6,11 @@ import { join } from "node:path";
 import { PluginPhase } from "../lifecycle-log.js";
 import { mkdtempSync } from "node:fs";
 import {
-  compileLegacyToolSurface,
+  pureTool,
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
 
-describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
+describe("manifest AJV and Tool visibility guards", () => {
   let testDir: string;
   let installedDir: string;
   let registryPath: string;
@@ -46,6 +36,9 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
 }`,
       "utf-8",
     );
+    const overrideTools = Array.isArray(manifestOverrides.tools)
+      ? manifestOverrides.tools
+      : [`${id}_hello`, `${id}_delete`];
     const manifest: Record<string, unknown> = {
       id,
       name: id,
@@ -53,20 +46,10 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [`${id}_hello`, `${id}_delete`],
       ...manifestOverrides,
+      tools: overrideTools.map((tool) =>
+        typeof tool === "string" ? pureTool(tool) : tool),
     };
-    // Pure v6: compile any legacy tools[]/uiActions/toolSchemas surface into Tool[].
-    const toolNames = Array.isArray(manifest.tools)
-      ? (manifest.tools as unknown[]).filter((t): t is string => typeof t === "string")
-      : [];
-    manifest.tools = compileLegacyToolSurface({
-      tools: toolNames,
-      uiActions: manifest.uiActions as Record<string, { description?: string }> | undefined,
-      toolSchemas: manifest.toolSchemas as Record<string, Record<string, unknown>> | undefined,
-    });
-    delete manifest.uiActions;
-    delete manifest.toolSchemas;
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
     await mkdir(join(testDir, "plugins"), { recursive: true });
     await writeFile(
@@ -108,8 +91,14 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
     expect(runtime.listPluginIds()).toHaveLength(0);
   });
 
-  it("B-3: uiActions not in tools[] is accepted as UI-only runtime method", async () => {
-    await writePlugin("p-ui-missing", { tools: ["pum_hello", "pum_delete"], uiActions: { p_ui_missing_ghost: {} } });
+  it("accepts an app-only Tool that is not model-visible", async () => {
+    await writePlugin("p-ui-missing", {
+      tools: [
+        pureTool("pum_hello"),
+        pureTool("pum_delete"),
+        pureTool("p_ui_missing_ghost", ["app"]),
+      ],
+    });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const origErr = console.error;
     const ctxArgs: unknown[] = [];
@@ -123,10 +112,9 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
     expect(ctxArgs.some((c) => (c as Record<string, unknown>)?.phase === PluginPhase.VALIDATION_FAIL)).toBe(false);
   });
 
-  it("B-3: any suffix in uiActions accepted when tool is in tools[]", async () => {
+  it("accepts any suffix for a model-and-app-visible Tool", async () => {
     await writePlugin("p-destructive", {
-      tools: ["pd_hello", "pd_delete"],
-      uiActions: { pd_delete: {} },
+      tools: [pureTool("pd_hello"), pureTool("pd_delete")],
       installPolicy: "user",
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
@@ -134,8 +122,11 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
     expect(runtime.listPluginIds()).toContain("p-destructive");
   });
 
-  it("B-3: read-like uiActions tool is permitted", async () => {
-    await writePlugin("p-ok", { tools: ["pok_get", "pok_delete"], uiActions: { pok_get: {} }, installPolicy: "user" });
+  it("accepts a read-like app-visible Tool", async () => {
+    await writePlugin("p-ok", {
+      tools: [pureTool("pok_get"), pureTool("pok_delete", ["model"])],
+      installPolicy: "user",
+    });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("p-ok");

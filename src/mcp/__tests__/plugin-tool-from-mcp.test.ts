@@ -132,7 +132,7 @@ describe("mcpToolToPluginTool — v6 reverse projection from _meta", () => {
     expect(tools.find((t) => t.name === "files_read")!.modelVisible).toBe(true);
     expect(tools.find((t) => t.name === "files_toggle")!.modelVisible).toBe(true);
     expect(tools.find((t) => t.name === "files_ui_rows")!.modelVisible).toBe(false);
-    // The app-visibility MUST stays with `assertUiActionInvokable` inside
+    // The app-visibility MUST stays with `assertAppVisibleToolInvokable` inside
     // PluginRuntime.callFromApp (the plugin arm's single enforcement site), so this
     // arm deliberately leaves `appInvokable` unset.
     for (const t of tools) expect(t.appInvokable).toBeUndefined();

@@ -5,7 +5,7 @@
  * the three plugin trust boundaries the runtime enforces:
  *   - event subscription across plugins (`assertEventSubscribeAccess`)
  *   - event emission of another plugin's event (`assertEventEmitAccess`)
- *   - renderer→plugin invocation allowlist (`assertUiActionInvokable`)
+ *   - renderer→plugin invocation allowlist (`assertAppVisibleToolInvokable`)
  *
  * Each function is pure given its resolved inputs; the runtime resolves the
  * owner/grant/state and delegates the policy decision here so the rules and
@@ -91,16 +91,16 @@ export function assertEventEmitAccess(opts: {
 /**
  * Enforce the renderer→plugin allowlist: only tools whose `_meta.ui.visibility`
  * includes `"app"` (#885 v6 — app-visible / dual) may be invoked from the UI IPC
- * bridge. `uiInvokable` is derived by `declaredUiInvokableMethods`.
+ * bridge. `appVisibleTools` is derived by `declaredAppVisibleToolMethods`.
  */
-export function assertUiActionInvokable(opts: {
+export function assertAppVisibleToolInvokable(opts: {
   method: string;
   pluginId: string;
-  uiInvokable: string[];
+  appVisibleTools: string[];
 }): void {
-  if (!opts.uiInvokable.includes(opts.method)) {
+  if (!opts.appVisibleTools.includes(opts.method)) {
     throw new Error(
-      `Method '${opts.method}' is not declared as a UI action for plugin '${opts.pluginId}'. ` +
+      `Method '${opts.method}' is not an app-visible Tool for plugin '${opts.pluginId}'. ` +
         `Give its tools[] entry "_meta":{"ui":{"visibility":["app"]}} (or ["model","app"]) to allow renderer invocation.`,
     );
   }

@@ -52,6 +52,10 @@ export const activateAndCommitPreparedPluginForTest: PreparedMarketplacePluginAc
 export const preparedActivationOptionsForTest = Object.freeze({
   activatePreparedArtifact: activateAndCommitPreparedPluginForTest,
 });
+export const preparedManagedActivationOptionsForTest = Object.freeze({
+  ...preparedActivationOptionsForTest,
+  ensurePluginStateReadyForInstall: async (_pluginId: string) => undefined,
+});
 
 /**
  * Storage/unit-test service with an explicit test lifecycle default. Keeping
@@ -71,7 +75,9 @@ export class TestPluginMarketplaceService extends PluginMarketplaceService {
   override ensureManagedInstalled(
     ...args: Parameters<PluginMarketplaceService["ensureManagedInstalled"]>
   ) {
-    return super.ensureManagedInstalled(args[0] ?? preparedActivationOptionsForTest);
+    return super.ensureManagedInstalled(
+      args[0] ?? preparedManagedActivationOptionsForTest,
+    );
   }
 
   override installPlugin(...args: Parameters<PluginMarketplaceService["installPlugin"]>) {
@@ -125,48 +131,6 @@ export function pureTools(...names: string[]): Tool[] {
   return names.map((n) => pureTool(n));
 }
 
-/**
- * Compile a legacy `{ tools: string[], uiActions, toolSchemas }` surface into the
- * pure v6 `Tool[]` — the same derivation the removed pre-v6 legacy-shape reader
- * performed. Visibility: model if in `tools[]`, app if in `uiActions`;
- * description/inputSchema sourced from `toolSchemas`/`uiActions`; non-empty
- * `pathFields` moved to `_meta["lvisai/pathFields"]`; removed fields dropped.
- * Tests that historically declared the legacy surface use this to emit the pure
- * shape the host now reads.
- */
-export function compileLegacyToolSurface(spec: {
-  tools?: string[];
-  uiActions?: Record<string, { description?: string } | undefined>;
-  toolSchemas?: Record<
-    string,
-    { description?: string; pathFields?: string[]; inputSchema?: unknown } & Record<string, unknown>
-  >;
-}): Tool[] {
-  const names = spec.tools ?? [];
-  const uiActions = spec.uiActions ?? {};
-  const uiNames = Object.keys(uiActions);
-  const schemas = spec.toolSchemas ?? {};
-  const all = [...names, ...uiNames.filter((n) => !names.includes(n))];
-  return all.map((name): Tool => {
-    const schema = schemas[name];
-    const visibility: Array<"model" | "app"> = [
-      ...(names.includes(name) ? (["model"] as const) : []),
-      ...(uiNames.includes(name) ? (["app"] as const) : []),
-    ];
-    const meta: Tool["_meta"] = { ui: { visibility } };
-    if (schema?.pathFields && schema.pathFields.length > 0) {
-      meta!["lvisai/pathFields"] = schema.pathFields;
-    }
-    const description = schema?.description ?? uiActions[name]?.description;
-    return {
-      name,
-      ...(description !== undefined ? { description } : {}),
-      inputSchema: (schema?.inputSchema as Tool["inputSchema"]) ?? { type: "object", properties: {} },
-      _meta: meta,
-    };
-  });
-}
-
 /** Accept either bare names (ergonomic) or already-pure `Tool` objects. */
 function normalizeTestTools(
   tools: ReadonlyArray<string | Tool> | undefined,
@@ -206,26 +170,10 @@ export function makeTestManifest(
   overrides: Partial<Omit<PluginManifest, "tools">> &
     Pick<PluginManifest, "id"> & {
       tools?: ReadonlyArray<string | Tool>;
-      /** Legacy compat: tests may still express the surface as uiActions/toolSchemas maps. */
-      uiActions?: Record<string, { description?: string } | undefined>;
-      toolSchemas?: Record<string, Record<string, unknown>>;
     },
 ): PluginManifest {
-  const { tools: overrideTools, uiActions, toolSchemas, ...rest } = overrides as typeof overrides & {
-    uiActions?: Record<string, { description?: string } | undefined>;
-    toolSchemas?: Record<string, Record<string, unknown>>;
-  };
-  // If a test still declares the legacy `uiActions`/`toolSchemas` surface, compile
-  // it (plus any tool-name list) into pure Tool[] and drop the legacy maps — the
-  // host reads pure form only (#885 Phase R).
-  const hasLegacyMaps = uiActions !== undefined || toolSchemas !== undefined;
-  const tools = hasLegacyMaps
-    ? compileLegacyToolSurface({
-        tools: (overrideTools ?? []).filter((t): t is string => typeof t === "string"),
-        uiActions,
-        toolSchemas: toolSchemas as Parameters<typeof compileLegacyToolSurface>[0]["toolSchemas"],
-      })
-    : normalizeTestTools(overrideTools);
+  const { tools: overrideTools, ...rest } = overrides;
+  const tools = normalizeTestTools(overrideTools);
   return {
     name: overrides.id,
     version: "0.0.0",
