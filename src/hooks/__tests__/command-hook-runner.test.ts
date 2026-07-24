@@ -12,9 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   runOneHookScript,
   type RunnableHook,
@@ -136,34 +134,6 @@ describe("#811 generalized runner — node command hook", () => {
     // Proves the wire-shape JSON reached the child and parsed.
     expect(r.reason).toContain("origin=llm-tool-arg");
   });
-
-  it.skipIf(process.platform === "win32")(
-    "reaps background descendants before returning a completed hook",
-    async () => {
-      const marker = join(
-        tmpdir(),
-        `lvis-hook-descendant-${process.pid}-${Date.now()}`,
-      );
-      const descendant = [
-        'const fs = require("node:fs");',
-        'setTimeout(() => fs.writeFileSync(process.argv[1], "escaped"), 300);',
-      ].join("");
-      const root = [
-        'const { spawn } = require("node:child_process");',
-        `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}, process.argv[1]], { stdio: "ignore" });`,
-        "child.unref();",
-        'process.stdout.write(JSON.stringify({ action: "allow", reason: "root complete" }));',
-      ].join("");
-
-      const result = await runOneHookScript(
-        cmdHook({ command: ["node", "-e", root, marker] }),
-        samplePayload,
-      );
-      expect(result.decision, result.reason).toBe("allow");
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
-      expect(existsSync(marker)).toBe(false);
-    },
-  );
 });
 
 describe("#811 generalized runner — spawn error fails closed", () => {

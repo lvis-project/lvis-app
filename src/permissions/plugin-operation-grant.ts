@@ -6,6 +6,11 @@ export interface PluginOperationPrincipal {
   ownerVersion: string;
   generationId: string;
   appSessionId: string;
+  /**
+   * Stable Host-private identity used only for cross-generation serialization
+   * and poison. Authority remains bound to the revocable `accountHash`.
+   */
+  accountScopeHash: string;
   accountHash: string;
 }
 
@@ -61,6 +66,13 @@ export interface PluginOperationExecutionLease {
   release(): void;
 }
 
+export class PluginOperationExecutionLeaseAbortedError extends Error {
+  constructor() {
+    super("plugin operation execution lease aborted");
+    this.name = "PluginOperationExecutionLeaseAbortedError";
+  }
+}
+
 interface ReadSnapshot {
   revision: string;
   recordedAt: number;
@@ -83,7 +95,14 @@ function hash(value: string): string {
 }
 
 function principalKey(value: PluginOperationPrincipal): string {
-  return [value.ownerPluginId, value.ownerVersion, value.generationId, value.appSessionId, value.accountHash].join("\0");
+  return [
+    value.ownerPluginId,
+    value.ownerVersion,
+    value.generationId,
+    value.appSessionId,
+    value.accountScopeHash,
+    value.accountHash,
+  ].join("\0");
 }
 
 function snapshotKey(value: PluginReadSnapshotKey): string {
@@ -120,11 +139,13 @@ export function pluginOperationExecutionDomain(
     principal.ownerPluginId,
     principal.ownerVersion,
     principal.generationId,
+    principal.accountScopeHash,
     principal.accountHash,
   ].join("\0"));
 }
 
 interface PendingExecutionLease {
+  readonly domainKey: string;
   readonly principal: PluginOperationPrincipal;
   readonly resolve: (lease: PluginOperationExecutionLease) => void;
   readonly reject: (error: Error) => void;
@@ -134,12 +155,14 @@ interface PendingExecutionLease {
 
 interface ExecutionDomainState {
   held: boolean;
+  heldDomainKey?: string;
   queue: PendingExecutionLease[];
 }
 
 interface ExecutionDomainRevision {
   readonly ownerPluginId: string;
   readonly generationId: string;
+  readonly accountScopeHash: string;
   readonly accountHash: string;
   revision: string;
   revoked: boolean;
@@ -320,7 +343,7 @@ export class PluginOperationGrantCoordinator {
     if (binding.expiresAt <= this.now()) return { ok: false, reason: "operation grant expired", grantId: stored.id };
     for (const field of [
       "ownerPluginId", "ownerVersion", "generationId", "toolName", "operation",
-      "intentHash", "appSessionId", "accountHash",
+      "intentHash", "appSessionId", "accountScopeHash", "accountHash",
     ] as const) {
       if (binding[field] !== expected[field]) {
         return { ok: false, reason: `operation grant ${field} mismatch`, grantId: stored.id };
@@ -434,16 +457,19 @@ export class PluginOperationGrantCoordinator {
    *
    * A new read, session reset, generation update, rollback, or account
    * re-authentication cannot clear this state for the same Host-derived plugin
-   * and account identity. The poison scope deliberately omits version and
-   * generation so detached work from an old hook cannot race a replacement
-   * generation.
+   * and account identity. The poison scope uses the stable Host-private account
+   * identity and deliberately omits the revocable principal, version, and
+   * generation so reauthentication or replacement cannot clear it.
    */
   poisonDomain(domainKey: string): void {
     const domain = this.domainRevisions.get(domainKey);
     if (!domain) {
       throw new Error("plugin operation domain is not registered");
     }
-    const scopeKey = this.poisonScopeKey(domain.ownerPluginId, domain.accountHash);
+    const scopeKey = this.poisonScopeKey(
+      domain.ownerPluginId,
+      domain.accountScopeHash,
+    );
     if (!this.poisonedOperationScopes.has(scopeKey)) {
       if (this.poisonedOperationScopes.size >= this.maxDomains) {
         this.poisonedOperationScopes.clear();
@@ -457,7 +483,7 @@ export class PluginOperationGrantCoordinator {
         this.poisonCapacityExhausted ||
         (
           candidate.ownerPluginId === domain.ownerPluginId &&
-          candidate.accountHash === domain.accountHash
+          candidate.accountScopeHash === domain.accountScopeHash
         )
       ) {
         candidate.revision = randomUUID();
@@ -484,16 +510,21 @@ export class PluginOperationGrantCoordinator {
       return Promise.reject(error);
     }
     if (signal?.aborted) {
-      return Promise.reject(new Error("plugin operation execution lease aborted"));
+      return Promise.reject(new PluginOperationExecutionLeaseAbortedError());
     }
-    const state = this.executionDomains.get(domainKey) ?? {
+    const executionScopeKey = this.executionScopeKey(
+      principal.ownerPluginId,
+      principal.accountScopeHash,
+    );
+    const state = this.executionDomains.get(executionScopeKey) ?? {
       held: false,
       queue: [],
     };
-    this.executionDomains.set(domainKey, state);
+    this.executionDomains.set(executionScopeKey, state);
 
     return new Promise<PluginOperationExecutionLease>((resolve, reject) => {
       const request: PendingExecutionLease = {
+        domainKey,
         principal: Object.freeze({ ...principal }),
         resolve,
         reject,
@@ -504,13 +535,13 @@ export class PluginOperationGrantCoordinator {
           const index = state.queue.indexOf(request);
           if (index < 0) return;
           state.queue.splice(index, 1);
-          reject(new Error("plugin operation execution lease aborted"));
-          this.drainExecutionDomain(domainKey, state);
+          reject(new PluginOperationExecutionLeaseAbortedError());
+          this.drainExecutionDomain(executionScopeKey, state);
         };
         signal.addEventListener("abort", request.onAbort, { once: true });
       }
       state.queue.push(request);
-      this.drainExecutionDomain(domainKey, state);
+      this.drainExecutionDomain(executionScopeKey, state);
     });
   }
 
@@ -577,6 +608,7 @@ export class PluginOperationGrantCoordinator {
       !domain.poisoned &&
       domain.ownerPluginId === principal.ownerPluginId &&
       domain.generationId === principal.generationId &&
+      domain.accountScopeHash === principal.accountScopeHash &&
       domain.accountHash === principal.accountHash;
   }
 
@@ -645,6 +677,7 @@ export class PluginOperationGrantCoordinator {
     if (
       domain.ownerPluginId !== principal.ownerPluginId ||
       domain.generationId !== principal.generationId ||
+      domain.accountScopeHash !== principal.accountScopeHash ||
       domain.accountHash !== principal.accountHash
     ) {
       throw new Error("plugin operation domain owner mismatch");
@@ -718,6 +751,7 @@ export class PluginOperationGrantCoordinator {
       if (
         existing.ownerPluginId !== principal.ownerPluginId ||
         existing.generationId !== principal.generationId ||
+        existing.accountScopeHash !== principal.accountScopeHash ||
         existing.accountHash !== principal.accountHash
       ) {
         throw new Error("plugin operation domain owner mismatch");
@@ -728,7 +762,10 @@ export class PluginOperationGrantCoordinator {
       if (
         this.poisonCapacityExhausted ||
         this.poisonedOperationScopes.has(
-          this.poisonScopeKey(existing.ownerPluginId, existing.accountHash),
+          this.poisonScopeKey(
+            existing.ownerPluginId,
+            existing.accountScopeHash,
+          ),
         )
       ) {
         existing.poisoned = true;
@@ -741,12 +778,16 @@ export class PluginOperationGrantCoordinator {
     const created: ExecutionDomainRevision = {
       ownerPluginId: principal.ownerPluginId,
       generationId: principal.generationId,
+      accountScopeHash: principal.accountScopeHash,
       accountHash: principal.accountHash,
       revision: randomUUID(),
       revoked: false,
       poisoned: this.poisonCapacityExhausted ||
         this.poisonedOperationScopes.has(
-          this.poisonScopeKey(principal.ownerPluginId, principal.accountHash),
+          this.poisonScopeKey(
+            principal.ownerPluginId,
+            principal.accountScopeHash,
+          ),
         ),
     };
     this.domainRevisions.set(domainKey, created);
@@ -775,43 +816,41 @@ export class PluginOperationGrantCoordinator {
   }
 
   private drainExecutionDomain(
-    domainKey: string,
+    executionScopeKey: string,
     state: ExecutionDomainState,
   ): void {
     if (state.held) return;
     while (state.queue.length > 0) {
       const request = state.queue[0]!;
-      const domain = this.domainRevisions.get(domainKey);
+      const domain = this.domainRevisions.get(request.domainKey);
       const principalRevocationReason =
         this.principalRevocationReason(request.principal);
-      const invalidReason =
+      const invalidError =
         principalRevocationReason
-          ? principalRevocationReason
+          ? new Error(principalRevocationReason)
           : !domain || domain.revoked
-            ? "plugin operation domain is revoked"
+            ? new Error("plugin operation domain is revoked")
             : domain.poisoned
-              ? "plugin operation domain is indeterminate"
+              ? new Error("plugin operation domain is indeterminate")
               : request.signal?.aborted
-                ? "plugin operation execution lease aborted"
+                ? new PluginOperationExecutionLeaseAbortedError()
                 : undefined;
-      if (!invalidReason) break;
+      if (!invalidError) break;
       state.queue.shift();
       if (request.signal && request.onAbort) {
         request.signal.removeEventListener("abort", request.onAbort);
       }
-      request.reject(new Error(invalidReason));
+      request.reject(invalidError);
     }
     const first = state.queue[0];
     if (!first) {
-      this.executionDomains.delete(domainKey);
-      if (this.domainRevisions.get(domainKey)?.revoked) {
-        this.domainRevisions.delete(domainKey);
-      }
+      this.executionDomains.delete(executionScopeKey);
       return;
     }
     state.queue.shift();
     state.held = true;
-    this.resolveExecutionLease(domainKey, state, first);
+    state.heldDomainKey = first.domainKey;
+    this.resolveExecutionLease(executionScopeKey, state, first);
   }
 
   private revokeDomain(
@@ -820,25 +859,35 @@ export class PluginOperationGrantCoordinator {
   ): void {
     domain.revision = randomUUID();
     domain.revoked = true;
-    const state = this.executionDomains.get(domainKey);
+    const executionScopeKey = this.executionScopeKey(
+      domain.ownerPluginId,
+      domain.accountScopeHash,
+    );
+    const state = this.executionDomains.get(executionScopeKey);
     if (!state) {
       this.domainRevisions.delete(domainKey);
       return;
     }
-    for (const request of state.queue.splice(0)) {
+    const retained: PendingExecutionLease[] = [];
+    for (const request of state.queue) {
+      if (request.domainKey !== domainKey) {
+        retained.push(request);
+        continue;
+      }
       if (request.signal && request.onAbort) {
         request.signal.removeEventListener("abort", request.onAbort);
       }
       request.reject(new Error("plugin operation domain is revoked"));
     }
-    if (!state.held) {
-      this.executionDomains.delete(domainKey);
+    state.queue = retained;
+    if (state.heldDomainKey !== domainKey) {
       this.domainRevisions.delete(domainKey);
     }
+    if (!state.held) this.drainExecutionDomain(executionScopeKey, state);
   }
 
   private resolveExecutionLease(
-    domainKey: string,
+    executionScopeKey: string,
     state: ExecutionDomainState,
     request: PendingExecutionLease,
   ): void {
@@ -848,18 +897,26 @@ export class PluginOperationGrantCoordinator {
     const revocationReason = this.principalRevocationReason(request.principal);
     if (revocationReason) {
       state.held = false;
+      state.heldDomainKey = undefined;
       request.reject(new Error(revocationReason));
-      this.drainExecutionDomain(domainKey, state);
+      if (this.domainRevisions.get(request.domainKey)?.revoked) {
+        this.domainRevisions.delete(request.domainKey);
+      }
+      this.drainExecutionDomain(executionScopeKey, state);
       return;
     }
     let released = false;
     request.resolve(Object.freeze({
-      domainKey,
+      domainKey: request.domainKey,
       release: () => {
         if (released) return;
         released = true;
         state.held = false;
-        this.drainExecutionDomain(domainKey, state);
+        state.heldDomainKey = undefined;
+        if (this.domainRevisions.get(request.domainKey)?.revoked) {
+          this.domainRevisions.delete(request.domainKey);
+        }
+        this.drainExecutionDomain(executionScopeKey, state);
       },
     }));
   }
@@ -879,8 +936,22 @@ export class PluginOperationGrantCoordinator {
     return `${ownerPluginId}\0${generationId}\0${accountHash}`;
   }
 
-  private poisonScopeKey(ownerPluginId: string, accountHash: string): string {
-    return `${ownerPluginId}\0${accountHash}`;
+  private executionScopeKey(
+    ownerPluginId: string,
+    accountScopeHash: string,
+  ): string {
+    return hash([
+      "plugin-operation-execution-scope/v1",
+      ownerPluginId,
+      accountScopeHash,
+    ].join("\0"));
+  }
+
+  private poisonScopeKey(
+    ownerPluginId: string,
+    accountScopeHash: string,
+  ): string {
+    return `${ownerPluginId}\0${accountScopeHash}`;
   }
 
   private principalRevocationReason(

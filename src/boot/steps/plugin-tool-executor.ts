@@ -34,7 +34,7 @@ import {
   isAppOnlyRuntimeInvocation,
 } from "../plugin-tool-invocation.js";
 import type { BootContext } from "../context.js";
-import { resolvePluginOperationAccountHash } from "./plugin-operation-account.js";
+import { resolvePluginOperationAccount } from "./plugin-operation-account.js";
 import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
 import type { PluginOperationIdentityProvider } from "../../tools/invocation-services.js";
 
@@ -77,19 +77,19 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     }
     const active = ctx.pluginBundleLifecycle?.getActive(pluginId);
     if (!active || active.generationId !== generationId) return undefined;
-    const accountHash = resolvePluginOperationAccountHash(
+    const account = resolvePluginOperationAccount(
       pluginRuntime,
       active.manifest,
       pluginId,
       generationId,
     );
-    if (!accountHash) return undefined;
+    if (!account) return undefined;
     return {
       ownerVersion: active.manifest.version,
       generationId,
       appSessionId:
         sessionId ?? `model-${pluginId}-${generationId}`,
-      accountHash,
+      ...account,
       appGrantRequired: false,
     };
   };
@@ -225,8 +225,8 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
         ? activeGeneration
         : undefined;
       const manifest = invocationGeneration?.manifest;
-      const accountHash = ownerPluginId && context.ownerGenerationId
-        ? resolvePluginOperationAccountHash(
+      const account = ownerPluginId && context.ownerGenerationId
+        ? resolvePluginOperationAccount(
             pluginRuntime,
             manifest,
             ownerPluginId,
@@ -238,13 +238,13 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       const pluginOperation = ownerPluginId &&
         manifest &&
         invocationGeneration &&
-        accountHash &&
+        account &&
         (!appOrigin || appInvocation)
         ? {
             ownerVersion: manifest.version,
             generationId: invocationGeneration.generationId,
             appSessionId: appInvocation?.sessionId ?? invocationSessionId,
-            accountHash,
+            ...account,
             appGrantRequired: appOrigin,
             ...(appInvocation?.operationGrantToken
               ? { grantToken: appInvocation.operationGrantToken }
@@ -335,13 +335,13 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       return await lifecycle.runWithLease(generationLease, async () => {
         const activeGeneration = generationLease.generation;
         const manifest = activeGeneration.state.runtime.manifest;
-        const accountHash = resolvePluginOperationAccountHash(
+        const account = resolvePluginOperationAccount(
           pluginRuntime,
           manifest,
           pluginId,
           activeGeneration.generationId,
         );
-        if (!accountHash) {
+        if (!account) {
           throw new Error("[plugin-operation-policy] fresh authenticated account status is required");
         }
         const principal = {
@@ -349,7 +349,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           ownerVersion: manifest.version,
           generationId: activeGeneration.generationId,
           appSessionId,
-          accountHash,
+          ...account,
         };
         const inspected = pluginSurfaceExecutor.inspectPluginOperationGrant({
           toolName,

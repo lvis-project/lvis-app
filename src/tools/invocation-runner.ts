@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import type { Tool } from "./base.js";
+import type { HookRunner } from "../hooks/hook-runner.js";
 import { isModelExposedTool } from "./base.js";
 import { isCanonicalBashTool } from "./bash.js";
 import { isCanonicalPowerShellTool } from "./powershell.js";
@@ -430,10 +431,17 @@ export async function runToolInvocation(
     }
 
     // ── Step 2: PreToolUse Hook ─────────────────────
-    const preResult = await services.hookRunner.runPreHooks({
-      toolName: toolUse.name,
-      toolInput: toolUse.input,
-    });
+    // Governed plugin operations never dispatch effect-capable extension
+    // hooks. Their provider state is protected by a Host-owned serialized
+    // account scope; arbitrary hook code cannot participate in that proof or
+    // be made crash-contained on every supported OS.
+    const preResult: Awaited<ReturnType<HookRunner["runPreHooks"]>> =
+      tool.operationPolicy
+        ? { action: "allow" }
+        : await services.hookRunner.runPreHooks({
+            toolName: toolUse.name,
+            toolInput: toolUse.input,
+          });
 
     if (preResult.action === "deny") {
       if (rationaleResumeContext) {
@@ -485,6 +493,7 @@ export async function runToolInvocation(
             ownerVersion: hostContext.ownerVersion,
             generationId: hostContext.generationId,
             appSessionId: hostContext.appSessionId,
+            accountScopeHash: hostContext.accountScopeHash,
             accountHash: hostContext.accountHash,
           };
         } else {

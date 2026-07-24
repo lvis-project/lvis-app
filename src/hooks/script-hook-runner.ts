@@ -45,10 +45,7 @@ import {
   ShellMismatchError,
 } from "../lib/shell-resolver.js";
 import { createLogger } from "../lib/logger.js";
-import {
-  forceKillManagedChildProcess,
-  trackManagedChildProcess,
-} from "../main/managed-child-processes.js";
+import { trackManagedChildProcess } from "../main/managed-child-processes.js";
 import {
   DEFAULT_HOOK_TIMEOUT_MS,
   MAX_HOOK_STDOUT_BYTES,
@@ -318,23 +315,6 @@ export async function runOneHookScript(
       settled = true;
       if (timer) clearTimeout(timer);
       if (timeoutFallback) clearTimeout(timeoutFallback);
-      try {
-        // Root completion is the hook's effect boundary. Reap any background
-        // descendants before returning the verdict so a generation update
-        // cannot admit new governed work while old hook code is still alive.
-        forceKillManagedChildProcess(child, {
-          killProcessGroup: process.platform !== "win32",
-        });
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== "ESRCH") {
-          log.warn(
-            "hook descendant cleanup failed: %s (%s)",
-            runnable.id,
-            err instanceof Error ? err.message : String(err),
-          );
-        }
-      }
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
       const durationMs = Date.now() - start;
@@ -355,11 +335,7 @@ export async function runOneHookScript(
 
       if (code !== 0) {
         // Fail-safe: non-zero exit → deny. Stderr surfaces the cause.
-        const tail = stderr.length > 0
-          ? stderr.trim().slice(0, 200)
-          : child.signalCode
-            ? `signal ${child.signalCode}`
-            : `exit ${code}`;
+        const tail = stderr.length > 0 ? stderr.trim().slice(0, 200) : `exit ${code}`;
         resolve({
           ...forensics,
           decision: "deny",
@@ -420,13 +396,6 @@ export async function runOneHookScript(
       settled = true;
       if (timer) clearTimeout(timer);
       if (timeoutFallback) clearTimeout(timeoutFallback);
-      try {
-        forceKillManagedChildProcess(child, {
-          killProcessGroup: process.platform !== "win32",
-        });
-      } catch {
-        // Spawn failed or the process tree has already disappeared.
-      }
       resolve({
         ...forensics,
         decision: "deny",
@@ -443,13 +412,7 @@ export async function runOneHookScript(
       child.stdin?.end();
     } catch (err) {
       clearTimeout(timer);
-      try {
-        forceKillManagedChildProcess(child, {
-          killProcessGroup: process.platform !== "win32",
-        });
-      } catch {
-        // Already exited.
-      }
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
       resolve({
         ...forensics,
         decision: "deny",

@@ -37,6 +37,12 @@ The manifest should include:
 `_meta.ui.visibility`; operation restrictions belong on the same Tool at
 `_meta["lvisai/operationPolicy"]`.
 
+Manifest-governed operations do not dispatch PreToolUse, PostToolUse,
+PostToolUseFailure, or PermissionDenied extension hooks. Their external state
+boundary is the Host-owned operation policy, stable account serialization
+scope, final audit, and read/write receipt flow; arbitrary hook commands cannot
+participate in that proof.
+
 `keywords[]` is retired and schema-rejected. Model guidance belongs in
 plugin-owned instruction bundles declared by `manifest.skills`; callable
 behavior remains in typed `tools[]`. Skills can guide the model to the relevant

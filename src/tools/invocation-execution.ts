@@ -38,6 +38,7 @@ import {
   redactAskUserAuditOutput,
 } from "./pipeline/audit-entries.js";
 import { emitToolStart } from "./pipeline/display-mask.js";
+import { returnUserAbort } from "./pipeline/invocation-context.js";
 import {
   finishRationaleResume,
   startRationaleResume,
@@ -59,6 +60,7 @@ import {
 import type { RationaleResumeExecutionContext } from "./invocation-runner.js";
 import type { ResolvedPluginOperation } from "./plugin-operation-governance.js";
 import {
+  PluginOperationExecutionLeaseAbortedError,
   pluginOperationExecutionDomain,
   type PluginOperationPrincipal,
 } from "../permissions/plugin-operation-grant.js";
@@ -167,21 +169,27 @@ export async function executeAuthorizedToolInvocation(
   } = context;
 
 
-  const scriptPre = await runScriptHook(
-    services.scriptHookManager,
-    "pre",
-    toolUse.name,
-    source,
-    invocationCategory,
-    finalInput,
-    sessionId,
-    invocationPermissionContext,
-    tool.mcpServerId,
-    tool.pluginId,
-    undefined,
-    undefined,
-    tool.pluginGeneration !== undefined,
-  );
+  const scriptPre = resolvedPluginOperation
+    ? {
+        decision: "allow" as const,
+        reason: "governed operation hooks are disabled",
+        results: [],
+      }
+    : await runScriptHook(
+        services.scriptHookManager,
+        "pre",
+        toolUse.name,
+        source,
+        invocationCategory,
+        finalInput,
+        sessionId,
+        invocationPermissionContext,
+        tool.mcpServerId,
+        tool.pluginId,
+        undefined,
+        undefined,
+        tool.pluginGeneration !== undefined,
+      );
   if (scriptPre.decision === "deny") {
     if (rationaleResumeContext) {
       return returnRationaleResumeBlock(
@@ -281,6 +289,23 @@ export async function executeAuthorizedToolInvocation(
           )
         : undefined;
   } catch (error) {
+    if (error instanceof PluginOperationExecutionLeaseAbortedError) {
+      return withHostShellExecutionPlan(await returnUserAbort({
+        input: finalInput,
+        toolUse,
+        meta,
+        callbacks,
+        source,
+        trust,
+        invocationCategory,
+        sessionId,
+        permissionContext: invocationPermissionContext,
+        executionCwd,
+        startTime,
+        auditWriter: services.auditWriter,
+        audit: currentAuditMetadata(),
+      }));
+    }
     const msg = error instanceof Error ? error.message : String(error);
     if (rationaleResumeContext) {
       return returnRationaleResumeBlock(
@@ -316,7 +341,7 @@ export async function executeAuthorizedToolInvocation(
       invocationCategory,
       executionCwd,
       undefined,
-      msg.includes("aborted") ? "user-abort" : "error",
+      "error",
       undefined,
       undefined,
       true,
@@ -343,7 +368,12 @@ export async function executeAuthorizedToolInvocation(
   let deferredOperationSettlement: Promise<unknown> | undefined;
   let indeterminateAuditPersisted = false;
   let interruptionReason: "ceiling" | "user-abort" | undefined;
-  let releaseOperationLeaseAfterPostHooks = false;
+  let holdOperationLeaseForFinalBoundary = false;
+  const releaseOperationLeaseAfterFinalBoundary = (): void => {
+    if (!holdOperationLeaseForFinalBoundary) return;
+    holdOperationLeaseForFinalBoundary = false;
+    operationExecutionLease?.release();
+  };
   let pendingReadReceipt:
     | {
         principal: PluginOperationPrincipal;
@@ -801,12 +831,12 @@ export async function executeAuthorizedToolInvocation(
   }
   if (
     operationExecutionLease &&
-    !deferredOperationSettlement &&
-    interruptionReason !== "user-abort"
+    !deferredOperationSettlement
   ) {
-    // PostToolUse callbacks and script hooks are effect-capable boundaries.
-    // Keep the exclusive governed-operation lease until they finish.
-    releaseOperationLeaseAfterPostHooks = true;
+    // Keep the exclusive governed-operation lease through every terminal audit,
+    // rationale transition, receipt publication, and callback. User-abort is a
+    // terminal result too; it cannot release before its final audit persists.
+    holdOperationLeaseForFinalBoundary = true;
   }
   } finally {
     if (
@@ -866,54 +896,61 @@ export async function executeAuthorizedToolInvocation(
         "plugin operation interruption audit failed; domain remains poisoned for %s",
         toolUse.name,
       );
-    } else if (!releaseOperationLeaseAfterPostHooks) {
+    } else if (!holdOperationLeaseForFinalBoundary) {
       operationExecutionLease?.release();
     }
   }
 
   if (interruptionReason === "user-abort") {
     const durationMs = Date.now() - startTime;
-    if (!rationaleResumeContext?.started) {
-      callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
-    }
-    await auditCurrentToolCall(
-      sessionId,
-      toolUse.name,
-      source,
-      trust,
-      finalInput,
-      content,
-      true,
-      startTime,
-      permissionResult,
-      rateResult.remaining,
-      invocationPermissionContext,
-      invocationCategory,
-      executionCwd,
-      targetFilePath,
-      terminationReason,
-    );
-    if (rationaleResumeContext?.started) {
-      rationaleResumeContext.terminalizationAttempted = true;
-      const terminalCommitted = await finishRationaleResume(
-        rationaleResumeContext.started,
-        false,
-      );
-      rationaleResumeContext.terminalized = terminalCommitted;
-      if (!terminalCommitted) {
-        callbacks?.onToolEnd?.(toolUse.name, RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, true, meta, undefined, durationMs);
-        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs });
+    try {
+      if (!rationaleResumeContext?.started) {
+        callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
       }
-      callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        finalInput,
+        content,
+        true,
+        startTime,
+        permissionResult,
+        rateResult.remaining,
+        invocationPermissionContext,
+        invocationCategory,
+        executionCwd,
+        targetFilePath,
+        terminationReason,
+      );
+      if (rationaleResumeContext?.started) {
+        rationaleResumeContext.terminalizationAttempted = true;
+        const terminalCommitted = await finishRationaleResume(
+          rationaleResumeContext.started,
+          false,
+        );
+        rationaleResumeContext.terminalized = terminalCommitted;
+        if (!terminalCommitted) {
+          callbacks?.onToolEnd?.(toolUse.name, RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, true, meta, undefined, durationMs);
+          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs });
+        }
+        callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      }
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
+    } catch (error) {
+      if (operationExecutionDomain && resolvedPluginOperation) {
+        services.pluginOperationGrants.poisonDomain(operationExecutionDomain);
+      }
+      throw error;
+    } finally {
+      releaseOperationLeaseAfterFinalBoundary();
     }
-    return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
   }
 
   try {
   // ── Step 7: PostHook + Feedback Merge ───────────
-  let postHookBoundaryCompleted = false;
-  let postHookMayHaveUnobservedEffects = services.hookRunner.postHookCount > 0;
-  try {
+  if (!resolvedPluginOperation) {
     postFeedback = await services.hookRunner.runPostHooks({
       toolName: toolUse.name,
       toolInput: finalInput,
@@ -935,41 +972,17 @@ export async function executeAuthorizedToolInvocation(
       isError,
       tool.pluginGeneration !== undefined,
     );
-    postHookMayHaveUnobservedEffects ||= scriptPost.results.length > 0;
     if (isError) {
-      const failureLifecycle =
-        await services.auditWriter.fireLifecycleEvent(
-          "PostToolUseFailure",
-          sessionId,
-          invocationPermissionContext,
-          {
-            toolName: toolUse.name,
-            errorMessage: content,
-            durationMs: Date.now() - startTime,
-          },
-        );
-      postHookMayHaveUnobservedEffects ||=
-        failureLifecycle.status === "executed" ||
-        failureLifecycle.status === "uncertain";
-    }
-    postHookBoundaryCompleted = true;
-  } finally {
-    if (
-      operationExecutionDomain &&
-      resolvedPluginOperation &&
-      (
-        !postHookBoundaryCompleted ||
-        postHookMayHaveUnobservedEffects
-      )
-    ) {
-      // Post hooks are arbitrary async callbacks or commands. The Host cannot
-      // prove remote side effects from their result alone, so every governed
-      // operation they observe poisons the plugin/account scope across
-      // generation updates and rollbacks.
-      services.pluginOperationGrants.poisonDomain(
-        operationExecutionDomain,
+      await services.auditWriter.fireLifecycleEvent(
+        "PostToolUseFailure",
+        sessionId,
+        invocationPermissionContext,
+        {
+          toolName: toolUse.name,
+          errorMessage: content,
+          durationMs: Date.now() - startTime,
+        },
       );
-      pendingReadReceipt = undefined;
     }
   }
 
@@ -1091,8 +1104,6 @@ export async function executeAuthorizedToolInvocation(
     }
     throw error;
   } finally {
-    if (releaseOperationLeaseAfterPostHooks) {
-      operationExecutionLease?.release();
-    }
+    releaseOperationLeaseAfterFinalBoundary();
   }
 }

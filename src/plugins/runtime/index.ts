@@ -1183,8 +1183,15 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     }, expectedGenerationId);
   }
 
-  getPluginOperationAccountHash(pluginId: string, generationId: string): string | undefined {
-    return this.pluginAccountHashes.get(`${pluginId}\0${generationId}`)?.principalHash;
+  getPluginOperationAccountIdentity(
+    pluginId: string,
+    generationId: string,
+  ): {
+    readonly identityHash: string;
+    readonly principalHash: string;
+  } | undefined {
+    const identity = this.pluginAccountHashes.get(`${pluginId}\0${generationId}`);
+    return identity ? { ...identity } : undefined;
   }
 
   /**
