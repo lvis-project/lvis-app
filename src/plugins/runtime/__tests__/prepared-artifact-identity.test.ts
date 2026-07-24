@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,7 @@ import {
   type PluginRuntimeOptions,
 } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
+import { canonicalJSON } from "../../whitelist/canonical-json.js";
 
 const roots: string[] = [];
 
@@ -32,6 +34,10 @@ async function writePreparedPlugin(
   pluginRoot: string;
   manifest: PluginManifest;
   receiptRaw: string;
+  registryEntry: {
+    installSource: "user";
+    manifestSha256: string;
+  };
 }> {
   const pluginRoot = join(root, `staging-${manifestId}`);
   await mkdir(pluginRoot, { recursive: true });
@@ -68,7 +74,17 @@ async function writePreparedPlugin(
     files: ["entry.mjs", "plugin.json"],
     installedAt: new Date(0).toISOString(),
   });
-  return { pluginRoot, manifest, receiptRaw: JSON.stringify(receipt) };
+  return {
+    pluginRoot,
+    manifest,
+    receiptRaw: JSON.stringify(receipt),
+    registryEntry: {
+      installSource: "user",
+      manifestSha256: createHash("sha256")
+        .update(canonicalJSON(manifest))
+        .digest("hex"),
+    },
+  };
 }
 
 describe("prepared artifact install identity", () => {
@@ -79,14 +95,17 @@ describe("prepared artifact install identity", () => {
     const canonicalId = "manifest-fresh";
     const prepared = await writePreparedPlugin(root, canonicalId, installId);
     const observedInstallIds: Array<string | null> = [];
+    const observedRegistryEntries: unknown[] = [];
     const createHostApi: PluginRuntimeOptions["createHostApi"] = (
       pluginId,
       manifest,
       dataDir,
       _incarnation,
       candidateInstallId,
+      candidateRegistryEntry,
     ) => {
       observedInstallIds.push(candidateInstallId);
+      observedRegistryEntries.push(candidateRegistryEntry);
       return createNoopHostApiForTests(pluginId, manifest, dataDir);
     };
     const runtime = makeTestPluginRuntime(
@@ -112,6 +131,7 @@ describe("prepared artifact install identity", () => {
     expect(activated.result).toBe("committed");
     expect(durableCommit).toHaveBeenCalledOnce();
     expect(observedInstallIds).toEqual([installId]);
+    expect(observedRegistryEntries).toEqual([prepared.registryEntry]);
     expect(runtime.resolvePluginInstallId(canonicalId)).toBe(installId);
     await expect(runtime.call("manifest_fresh_ping")).resolves.toBe("pong");
   });
@@ -147,5 +167,61 @@ describe("prepared artifact install identity", () => {
     })).rejects.toMatchObject({ code: "plugin-identity-collision" });
     expect(durableCommit).not.toHaveBeenCalled();
     expect(runtime.resolvePluginId("claimed-alias")).toBe("canonical-owner");
+  });
+
+  it("atomically reserves canonical and install identities until durable publication", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lvis-prepared-concurrent-collision-"));
+    roots.push(root);
+    const runtime = makeTestPluginRuntime(
+      {
+        rootDir: root,
+        registryPath: join(root, "plugins", "registry.json"),
+        pluginsRoot: join(root, "plugins"),
+      },
+      { installReceiptCacheRoot: join(root, "cache") },
+    );
+    const owner = await writePreparedPlugin(
+      root,
+      "concurrent-owner",
+      "shared-identity",
+    );
+    const collision = await writePreparedPlugin(
+      root,
+      "shared-identity",
+      "second-install",
+    );
+    let releaseCommit!: () => void;
+    const holdCommit = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let signalCommitEntered!: () => void;
+    const commitEntered = new Promise<void>((resolve) => {
+      signalCommitEntered = resolve;
+    });
+    const ownerCommit = vi.fn(async () => {
+      signalCommitEntered();
+      await holdCommit;
+      return "owner-committed";
+    });
+    const collisionCommit = vi.fn(async () => "must-not-commit");
+
+    const ownerActivation = runtime.activatePreparedArtifact({
+      installId: "shared-identity",
+      ...owner,
+      durableCommit: ownerCommit,
+    });
+    await commitEntered;
+    await expect(runtime.activatePreparedArtifact({
+      installId: "second-install",
+      ...collision,
+      durableCommit: collisionCommit,
+    })).rejects.toMatchObject({ code: "plugin-identity-collision" });
+    expect(ownerCommit).toHaveBeenCalledOnce();
+    expect(collisionCommit).not.toHaveBeenCalled();
+    releaseCommit();
+    const activated = await ownerActivation;
+    await activated.retirement;
+    expect(runtime.resolvePluginInstallId("concurrent-owner"))
+      .toBe("shared-identity");
   });
 });

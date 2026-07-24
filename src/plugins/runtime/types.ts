@@ -7,6 +7,7 @@
 import type {
   PluginAccessSpec,
   PluginManifest,
+  PluginRegistryEntryInstallSource,
   PluginToolHandler,
   RuntimePlugin,
 } from "../types.js";
@@ -48,6 +49,8 @@ export type ManifestLoadPlan = {
   manifestPath: string;
   enabled: boolean;
   approvedPluginAccess?: PluginAccessSpec;
+  installSource?: PluginRegistryEntryInstallSource;
+  manifestSha256?: string;
 };
 
 /**

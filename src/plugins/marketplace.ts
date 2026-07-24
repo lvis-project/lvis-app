@@ -84,6 +84,9 @@ export interface PreparedMarketplacePluginArtifact {
   readonly pluginRoot: string;
   readonly manifest: PluginManifest;
   readonly receiptRaw: string;
+  readonly registryEntry: Readonly<
+    Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+  >;
   readonly approvedPluginAccess?: PluginAccessSpec;
   durableCommit(): Promise<string>;
 }
@@ -880,6 +883,7 @@ export class PluginMarketplaceService {
     let pendingEntry: PluginRegistryEntry | null = null;
     const installOutcome = await this.installArtifact(plugin, dlVersion, onProgress, {
       activatePreparedArtifact,
+      registryInstallSource: actor === "it-admin" ? "admin" : "user",
       signal,
       beforePromote: async (recoveryBackupDir) => {
         pendingEntry = await this.markMarketplaceRegistryEntryPending(
@@ -1235,6 +1239,7 @@ export class PluginMarketplaceService {
       let pendingEntry: PluginRegistryEntry | null = null;
       const installOutcome = await this.installArtifact(plugin, version, undefined, {
         activatePreparedArtifact,
+        registryInstallSource: "user",
         signal: options?.signal,
         beforePromote: async (recoveryBackupDir) => {
           pendingEntry = await this.markMarketplaceRegistryEntryPending(existingEntry, recoveryBackupDir);
@@ -1319,6 +1324,10 @@ export class PluginMarketplaceService {
       const installOutcome = await this.installArtifact(plugin, priorVersion, undefined, {
           validateCatalogMetadata: false,
           activatePreparedArtifact,
+          registryInstallSource: resolveRollbackInstallSource(
+            existingEntry?.installSource,
+            registrySnapshot?.installSource,
+          ),
           beforePromote: async (recoveryBackupDir) => {
             pendingEntry = await this.markMarketplaceRegistryEntryPending(existingEntry, recoveryBackupDir);
           },
@@ -1749,6 +1758,7 @@ export class PluginMarketplaceService {
       beforePromote?: (recoveryBackupDir: string) => Promise<void>;
       commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void>;
       activatePreparedArtifact: PreparedMarketplacePluginActivation;
+      registryInstallSource: PluginRegistryEntryInstallSource;
       signal?: AbortSignal;
     },
   ): Promise<{ manifestPath: string; predecessorRetired: boolean }> {
@@ -1820,6 +1830,10 @@ export class PluginMarketplaceService {
                   pluginRoot,
                   manifest: preparedManifest,
                   receiptRaw: preparedReceiptRaw,
+                  registryEntry: {
+                    installSource: opts.registryInstallSource,
+                    manifestSha256: shaOfManifest(preparedManifest),
+                  },
                   ...(plugin.pluginAccess ? { approvedPluginAccess: plugin.pluginAccess } : {}),
                   durableCommit,
                 });
@@ -2319,6 +2333,10 @@ export class PluginMarketplaceService {
           pluginRoot: stagingDir,
           manifest,
           receiptRaw: localReceiptRaw,
+          registryEntry: {
+            installSource: localInstallSource,
+            manifestSha256,
+          },
           ...(approvedPluginAccess ? { approvedPluginAccess } : {}),
           durableCommit,
         });

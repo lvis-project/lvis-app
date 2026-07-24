@@ -105,6 +105,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
             pluginRoot: string;
             manifest: ReturnType<typeof sampleManifest>;
             receiptRaw: string;
+            registryEntry: { installSource?: "admin" | "user" | "local-dev"; manifestSha256?: string };
             durableCommit(): Promise<string>;
           }) => Promise<{ result: string; retirement: Promise<void> }>;
         },
@@ -122,6 +123,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
         pluginRoot: candidateDir,
         manifest,
         receiptRaw: "{}",
+        registryEntry: { installSource: "user" },
         durableCommit: async () => {
           await mkdir(pluginDir, { recursive: true });
           const manifestFile = join(pluginDir, "plugin.json");

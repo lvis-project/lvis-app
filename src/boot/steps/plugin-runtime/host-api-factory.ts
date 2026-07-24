@@ -189,6 +189,9 @@ export function createHostApiFactory(
   pluginDataDir: string,
   incarnation: PluginHostApiIncarnation,
   installPluginId: string | null,
+  candidateRegistryEntry?: Readonly<
+    Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+  >,
 ) => PluginHostApi {
   const {
     getPluginRuntime,
@@ -218,20 +221,23 @@ export function createHostApiFactory(
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
     installPluginId: string | null,
+    candidateRegistryEntry?: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    >,
   ): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
-    const resolvedInstallPluginId =
-      installPluginId === undefined
-        ? pluginRuntime.resolvePluginInstallId(pluginId)
-        : installPluginId;
+    if (installPluginId === undefined) {
+      throw new Error(`HostApi install provenance missing: ${pluginId}`);
+    }
     const getCurrentRegistryEntry = () =>
-      resolvedInstallPluginId === null
+      candidateRegistryEntry
+      ?? (installPluginId === null
         ? undefined
-        : getRegistryEntry(resolvedInstallPluginId);
+        : getRegistryEntry(installPluginId));
     const hostIncarnation = incarnation;
     const hostEffects = hostIncarnation.generationScope;
     const registerOwnedDisposer = (dispose: () => void): (() => void) => {

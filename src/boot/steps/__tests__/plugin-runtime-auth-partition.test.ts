@@ -142,6 +142,7 @@ describe("HostApi openAuthWindow capability gate", () => {
       { id: "plugin-a", config: {}, capabilities: [] },
       mkdtempSync("/tmp/lvis-auth-"),
       ACTIVE_INCARNATION,
+      "plugin-a",
     );
     await expect(api.openAuthWindow({ url: "https://idp.example.com/authorize" })).rejects.toThrow(
       /capability not declared: external-auth-consumer/,
@@ -157,6 +158,7 @@ describe("HostApi clearAuthPartition capability + partition gates", () => {
       { id: "plugin-a", config: {}, capabilities: [] },
       mkdtempSync("/tmp/lvis-auth-"),
       ACTIVE_INCARNATION,
+      "plugin-a",
     );
     await expect(api.clearAuthPartition("persist:plugin-auth:plugin-a")).rejects.toThrow(
       /capability not declared: external-auth-consumer/,
@@ -171,6 +173,7 @@ describe("HostApi clearAuthPartition capability + partition gates", () => {
       { id: "plugin-a", config: {}, capabilities: ["external-auth-consumer"] },
       mkdtempSync("/tmp/lvis-auth-"),
       ACTIVE_INCARNATION,
+      "plugin-a",
     );
     await expect(api.clearAuthPartition("persist:plugin-auth:other-plugin")).rejects.toThrow(
       /partition must be 'persist:plugin-auth:plugin-a'/,
@@ -185,6 +188,7 @@ describe("HostApi clearAuthPartition capability + partition gates", () => {
       { id: "plugin-a", config: {}, capabilities: ["external-auth-consumer"] },
       mkdtempSync("/tmp/lvis-auth-"),
       ACTIVE_INCARNATION,
+      "plugin-a",
     );
     await api.clearAuthPartition("persist:plugin-auth:plugin-a:tenant-1");
     expect(runtimeTestState.clearAuthPartitionService).toHaveBeenCalledWith(

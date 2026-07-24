@@ -84,6 +84,8 @@ export async function resolveManifestLoadPlan(opts: {
         manifestPath,
         enabled: entry.enabled !== false,
         approvedPluginAccess: entry.approvedPluginAccess as PluginAccessSpec | undefined,
+        installSource: entry.installSource,
+        manifestSha256: entry.manifestSha256,
       }];
     }),
   );

@@ -28,7 +28,6 @@ import {
   runPluginImportWithTimeout,
   runStartWithTimeout,
 } from "./lifecycle-timeout.js";
-
 import {
   getDeclaredEmittedEvents,
 } from "./manifest-validation.js";
@@ -62,9 +61,7 @@ import {
   type PluginIntegrityCheckResult,
 } from "./runtime-preflight.js";
 import { commitAtomicPluginRemoval } from "./atomic-removal.js";
-
 const log = createLogger("plugin-runtime");
-
 export class PluginRuntimeLifecycle extends PluginRuntimeState {
   private async importPluginFactoryForLifecycle(
     pluginId: string,
@@ -1405,7 +1402,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     if (manifest.id !== input.manifest.id || manifest.version !== input.manifest.version) {
       throw new Error(`prepared artifact manifest identity changed for '${input.manifest.id}'`);
     }
-    const installId = this.validatePreparedInstallIdentity(manifest.id, input.installId);
+    return this.withPreparedInstallIdentity(manifest.id, input.installId, async (installId) => {
+    const candidateRegistryEntry = this.validatePreparedRegistryEntry(manifest, input.registryEntry);
     const activationId = randomUUID();
     const artifactGenerationId = createHash("sha256")
       .update(manifestRaw)
@@ -1419,7 +1417,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       .digest("hex");
     const payloadRoot = await materializePluginGenerationRoot(
       input.pluginRoot,
-      this.installReceiptCacheRoot,
+      this.installReceiptCacheRoot!,
       manifest.id,
       generationId,
       input.receiptRaw,
@@ -1435,7 +1433,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       );
     } catch (error) {
       await removeRetainedPluginGeneration(
-        this.installReceiptCacheRoot,
+        this.installReceiptCacheRoot!,
         manifest.id,
         generationId,
       );
@@ -1443,7 +1441,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
     if (!createPlugin) {
       await removeRetainedPluginGeneration(
-        this.installReceiptCacheRoot,
+        this.installReceiptCacheRoot!,
         manifest.id,
         generationId,
       );
@@ -1460,11 +1458,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         pluginDataDir,
         hostEffects,
         installId,
+        candidateRegistryEntry,
       );
     } catch (error) {
       hostEffects.discard();
       await removeRetainedPluginGeneration(
-        this.installReceiptCacheRoot,
+        this.installReceiptCacheRoot!,
         manifest.id,
         generationId,
       );
@@ -1558,13 +1557,14 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           drainHostApiOperations: drainOperations,
         });
         await removeRetainedPluginGeneration(
-          this.installReceiptCacheRoot,
+          this.installReceiptCacheRoot!,
           manifest.id,
           generationId,
         );
       }
       throw error;
     }
+    });
   }
 
   async removePluginWithCommit<T>(
