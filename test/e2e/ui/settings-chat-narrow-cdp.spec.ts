@@ -362,4 +362,18 @@ test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)',
     await back.click();
     await expect(mainWindow.getByTestId('settings-mobile-list')).toBeVisible();
   }
+
+  await root.getByRole('tab').first().click();
+  const mobileClose = mainWindow.getByTestId('settings-mobile-close');
+  await expect(mobileClose).toBeVisible();
+  const mobileCloseAlignment = await mobileClose.evaluate((button) => {
+    const parent = button.parentElement?.getBoundingClientRect();
+    const rect = button.getBoundingClientRect();
+    return {
+      rightInset: parent ? Math.round(parent.right - rect.right) : Number.POSITIVE_INFINITY,
+    };
+  });
+  expect(mobileCloseAlignment.rightInset, 'narrow settings close is right-aligned').toBeLessThanOrEqual(16);
+  await mobileClose.click();
+  await expect(root).toHaveCount(0);
 });
