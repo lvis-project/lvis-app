@@ -125,7 +125,7 @@ function untrackViewer(partition: string, win: BrowserWindow): void {
  * Electron confirms that its webContents are gone. Partition storage must not
  * be cleared before this barrier or a live page could immediately recreate it.
  */
-export async function closeAuthPartitionViewers(
+async function closeAuthPartitionViewers(
   partition: string,
 ): Promise<void> {
   const viewers = [...(activeViewersByPartition.get(partition) ?? [])];
