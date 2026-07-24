@@ -54,7 +54,10 @@ import {
   forgetTrackedPluginAuthPartitions,
   getTrackedPluginAuthPartitions,
 } from "./main/auth-window-service.js";
-import { recoverPendingPluginUninstallCleanups } from "./plugins/uninstall-lifecycle.js";
+import {
+  ensurePluginStateReadyForInstall,
+  recoverPendingPluginUninstallCleanups,
+} from "./plugins/uninstall-lifecycle.js";
 import { drainPluginInstallLockOperations } from "./plugins/install-lifecycle.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
@@ -614,6 +617,20 @@ export async function bootstrap(
   await runManagedBootstrap({
     pluginMarketplace: ctx.pluginMarketplace,
     pluginRuntime,
+    ensurePluginStateReadyForInstall: (pluginId) =>
+      ensurePluginStateReadyForInstall(pluginId, {
+        pluginMarketplace: ctx.pluginMarketplace,
+        pluginRuntime,
+        settingsService,
+        pluginPaths,
+        clearAuthPartitionService,
+        listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
+        forgetPluginAuthPartitionsService:
+          forgetTrackedPluginAuthPartitions,
+        drainPluginInstallLockOperationsService:
+          drainPluginInstallLockOperations,
+        log,
+      }),
     mainWindow,
     marketplace: ctx.settingsService.get("marketplace"),
   });

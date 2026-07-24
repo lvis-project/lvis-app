@@ -193,9 +193,16 @@ export async function rollbackMarketplacePluginWithLifecycle(options: {
   pluginId: string;
   pluginRuntime: PluginInstallRuntime;
   pluginMarketplace: Pick<PluginInstallMarketplace, "rollbackPlugin">;
+  ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
 }): Promise<{ pluginId: string; rolledBackTo: string }> {
-  const { pluginId, pluginRuntime, pluginMarketplace } = options;
+  const {
+    pluginId,
+    pluginRuntime,
+    pluginMarketplace,
+    ensurePluginStateReadyForInstall,
+  } = options;
   return withPluginInstallLock(pluginId, async () => {
+    await ensurePluginStateReadyForInstall(pluginId);
     const result = await pluginMarketplace.rollbackPlugin(pluginId, {
       activatePreparedArtifact: (prepared) =>
         pluginRuntime.activatePreparedArtifact(prepared),

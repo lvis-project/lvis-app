@@ -942,6 +942,7 @@ export class PluginMarketplaceService {
    */
   async ensureManagedInstalled(options: {
     activatePreparedArtifact: PreparedMarketplacePluginActivation;
+    ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
   }): Promise<{
     installed: string[];
     updated: string[];
@@ -951,6 +952,13 @@ export class PluginMarketplaceService {
       options?.activatePreparedArtifact,
       "managed marketplace install",
     );
+    if (typeof options?.ensurePluginStateReadyForInstall !== "function") {
+      throw new Error(
+        "managed marketplace install requires pending-cleanup reconciliation",
+      );
+    }
+    const ensurePluginStateReadyForInstall =
+      options.ensurePluginStateReadyForInstall;
     const result = {
       installed: [] as string[],
       updated: [] as string[],
@@ -991,6 +999,7 @@ export class PluginMarketplaceService {
         const installKind = await this.withPluginLock(
           plugin.id,
           async (): Promise<"installed" | "updated" | "skipped"> => {
+            await ensurePluginStateReadyForInstall(plugin.id);
             const currentRegistry = await readPluginRegistry(this.registryPath);
             const installedIds = await this.resolveInstalledIds(currentRegistry.plugins);
             if (installedIds.has(plugin.id)) {

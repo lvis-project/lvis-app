@@ -301,11 +301,34 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     getMainWindow,
     getAppWindows,
   } = deps;
+  if (
+    !pluginPaths
+    || !clearAuthPartitionService
+    || !listPluginAuthPartitionsService
+    || !forgetPluginAuthPartitionsService
+  ) {
+    throw new Error("plugin lifecycle cleanup services are not fully wired");
+  }
   const broadcastPluginLifecycleEvent = (channel: string, payload: unknown) => {
     for (const win of getAppWindows?.() ?? [getMainWindow()]) {
       sendToWindow(win, channel, payload, log);
     }
   };
+  const ensureInstallStateReady = (pluginId: string) =>
+    ensurePluginStateReadyForInstall(pluginId, {
+      pluginMarketplace,
+      pluginRuntime,
+      settingsService,
+      pluginPaths,
+      clearAuthPartitionService,
+      listPluginAuthPartitionsService,
+      forgetPluginAuthPartitionsService,
+      drainPluginInstallLockOperationsService:
+        drainPluginInstallLockOperations,
+      refreshPluginNotifications,
+      emitHostEvent,
+      log,
+    });
   let marketplacePingCache:
     | { key: string; result: MarketplacePingResult; timestampMs: number }
     | null = null;
@@ -380,6 +403,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     await runManagedBootstrap({
       pluginMarketplace,
       pluginRuntime,
+      ensurePluginStateReadyForInstall: ensureInstallStateReady,
       mainWindow: getMainWindow(),
       marketplace,
     });
@@ -411,21 +435,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         networkAccessAcknowledgement,
         pluginRuntime,
         pluginMarketplace,
-        ensurePluginStateReadyForInstall: (candidatePluginId) =>
-          ensurePluginStateReadyForInstall(candidatePluginId, {
-            pluginMarketplace,
-            pluginRuntime,
-            settingsService,
-            pluginPaths,
-            clearAuthPartitionService,
-            listPluginAuthPartitionsService,
-            forgetPluginAuthPartitionsService,
-            drainPluginInstallLockOperationsService:
-              drainPluginInstallLockOperations,
-            refreshPluginNotifications,
-            emitHostEvent,
-            log,
-          }),
+        ensurePluginStateReadyForInstall: ensureInstallStateReady,
         broadcastInstallProgress: (payload) =>
           broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
         emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
@@ -463,6 +473,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       pluginId: normalizedPluginId,
       pluginRuntime,
       pluginMarketplace,
+      ensurePluginStateReadyForInstall: ensureInstallStateReady,
     });
   });
 
@@ -583,6 +594,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     pluginRuntime.cancelPendingRestart(pluginId);
     return await withPluginInstallLock(pluginId, async () => {
       try {
+        await ensureInstallStateReady(pluginId);
         const result = await pluginMarketplace.installLocal(filePaths[0], {
           activatePreparedArtifact: (prepared) => pluginRuntime.activatePreparedArtifact<string>(prepared),
         });

@@ -21,6 +21,8 @@ export interface PluginUninstallLifecycleDeps {
   pluginMarketplace: Pick<
     PluginMarketplaceService,
     "uninstall" | "getInstalledVersion"
+  > & Partial<
+    Pick<PluginMarketplaceService, "clearInstallFailureDiagnostic">
   >;
   pluginRuntime: Pick<
     PluginRuntime,
@@ -28,17 +30,19 @@ export interface PluginUninstallLifecycleDeps {
     | "removePluginWithCommit"
     | "getPluginManifest"
     | "resolvePluginId"
-    | "resolvePluginInstallId"
     | "resolvePluginInstallIdIfKnown"
     | "clearConfigOverride"
     | "cancelPendingRestart"
   >;
-  settingsService?: Partial<Pick<SettingsService, "deletePluginConfig" | "deletePluginSecrets">>;
-  pluginPaths?: Pick<PluginPaths, "cacheRoot">;
-  clearAuthPartitionService?: (partition: string) => Promise<void>;
-  listPluginAuthPartitionsService?: (pluginId: string) => string[];
-  forgetPluginAuthPartitionsService?: (pluginId: string) => void | Promise<void>;
-  drainPluginInstallLockOperationsService?: (pluginId: string) => Promise<void>;
+  settingsService: Pick<
+    SettingsService,
+    "deletePluginConfig" | "deletePluginSecrets"
+  >;
+  pluginPaths: Pick<PluginPaths, "cacheRoot">;
+  clearAuthPartitionService: (partition: string) => Promise<void>;
+  listPluginAuthPartitionsService: (pluginId: string) => string[];
+  forgetPluginAuthPartitionsService: (pluginId: string) => void | Promise<void>;
+  drainPluginInstallLockOperationsService: (pluginId: string) => Promise<void>;
   refreshPluginNotifications?: () => void;
   emitHostEvent?: (type: "plugin.uninstalled", payload: { pluginId: string }) => void;
   log?: WarnLogger;
@@ -211,11 +215,23 @@ async function finishCommittedPluginCleanup(
   record: PluginUninstallCleanupRecord,
   deps: RequiredPluginStateCleanupDeps,
   journal: PluginUninstallCleanupJournal,
-  options: { drainRuntimeOperations: boolean; cleanupCache?: boolean },
+  options: {
+    drainRuntimeOperations: boolean;
+    assumeRuntimeQuiescent: boolean;
+    cleanupCache?: boolean;
+  },
 ): Promise<void> {
   journal.markRegistryRemovalCommitted(record.pluginId, {
     cleanupCache: options.cleanupCache,
   });
+  if (options.assumeRuntimeQuiescent) {
+    journal.markRuntimeRetirementComplete(record.pluginId);
+  }
+  if (!journal.find(record.pluginId)?.runtimeRetirementComplete) {
+    throw new Error(
+      `plugin runtime retirement cleanup is pending: ${record.pluginId}`,
+    );
+  }
   if (options.drainRuntimeOperations) {
     await deps.drainPluginInstallLockOperationsService(record.pluginId);
   }
@@ -233,7 +249,10 @@ async function reconcilePendingPluginCleanup(
     pluginMarketplace: Pick<PluginMarketplaceService, "getInstalledVersion">;
   },
   journal: PluginUninstallCleanupJournal,
-  options: { drainRuntimeOperations: boolean },
+  options: {
+    drainRuntimeOperations: boolean;
+    assumeRuntimeQuiescent: boolean;
+  },
 ): Promise<"cancelled" | "completed"> {
   const installedVersion =
     await deps.pluginMarketplace.getInstalledVersion(record.installPluginId);
@@ -266,9 +285,15 @@ export async function recoverPendingPluginUninstallCleanups(
           pluginMarketplace: deps.pluginMarketplace,
         },
         journal,
-        { drainRuntimeOperations: false },
+        {
+          drainRuntimeOperations: false,
+          assumeRuntimeQuiescent: true,
+        },
       );
       if (outcome === "cancelled") continue;
+      deps.pluginMarketplace.clearInstallFailureDiagnostic?.(
+        record.installPluginId,
+      );
       deps.emitHostEvent?.("plugin.uninstalled", {
         pluginId: record.pluginId,
       });
@@ -303,9 +328,15 @@ export async function ensurePluginStateReadyForInstall(
       pluginMarketplace: deps.pluginMarketplace,
     },
     journal,
-    { drainRuntimeOperations: true },
+    {
+      drainRuntimeOperations: true,
+      assumeRuntimeQuiescent: false,
+    },
   );
   if (outcome === "completed") {
+    deps.pluginMarketplace.clearInstallFailureDiagnostic?.(
+      record.installPluginId,
+    );
     deps.emitHostEvent?.("plugin.uninstalled", { pluginId: record.pluginId });
     deps.refreshPluginNotifications?.();
   }
@@ -356,7 +387,10 @@ export async function uninstallPluginWithLifecycle(
           pluginMarketplace: deps.pluginMarketplace,
         },
         journal,
-        { drainRuntimeOperations: true },
+        {
+          drainRuntimeOperations: true,
+          assumeRuntimeQuiescent: false,
+        },
       );
       if (outcome === "completed") {
         deps.emitHostEvent?.("plugin.uninstalled", {
@@ -417,12 +451,20 @@ export async function uninstallPluginWithLifecycle(
           return result;
         },
       );
+      journal.markRuntimeRetirementComplete(canonicalPluginId);
     } catch (error) {
       if (!durableCommitCompleted) {
         journal.cancel(canonicalPluginId);
         throw error;
       }
       removalError = error;
+    }
+
+    if (removalError !== undefined) {
+      throw new AggregateError(
+        [removalError],
+        `plugin uninstall committed with pending runtime retirement: ${canonicalPluginId}`,
+      );
     }
 
     const postCommitErrors: unknown[] = [];
@@ -434,6 +476,7 @@ export async function uninstallPluginWithLifecycle(
         journal,
         {
           drainRuntimeOperations: true,
+          assumeRuntimeQuiescent: false,
           cleanupCache: marketplaceRemoved,
         },
       );
@@ -446,15 +489,9 @@ export async function uninstallPluginWithLifecycle(
       deps.refreshPluginNotifications?.();
     }
 
-    if (removalError !== undefined && postCommitErrors.length === 0) {
-      throw removalError;
-    }
-    if (removalError !== undefined || postCommitErrors.length > 0) {
+    if (postCommitErrors.length > 0) {
       throw new AggregateError(
-        [
-          ...(removalError !== undefined ? [removalError] : []),
-          ...postCommitErrors,
-        ],
+        postCommitErrors,
         `plugin uninstall committed with incomplete post-commit cleanup: ${canonicalPluginId}`,
       );
     }
@@ -482,10 +519,15 @@ export async function cleanupFailedPluginInstallWithLifecycle(
       const canonicalPluginId = deps.pluginRuntime.resolvePluginId(pluginId);
       const installPluginId =
         deps.pluginRuntime.resolvePluginInstallIdIfKnown(pluginId);
+      const pendingCleanup =
+        journal.find(pluginId) ?? journal.find(canonicalPluginId);
       return [
         pluginId,
         canonicalPluginId,
         ...(typeof installPluginId === "string" ? [installPluginId] : []),
+        ...(pendingCleanup
+          ? [pendingCleanup.pluginId, pendingCleanup.installPluginId]
+          : []),
       ];
     },
     async () => {
@@ -502,7 +544,6 @@ export async function cleanupFailedPluginInstallWithLifecycle(
     const pendingRecord =
       journal.find(pluginId) ?? journal.find(canonicalPluginId);
     if (pendingRecord) {
-      deps.pluginMarketplace.clearInstallFailureDiagnostic(pluginId);
       const outcome = await reconcilePendingPluginCleanup(
         pendingRecord,
         {
@@ -510,13 +551,17 @@ export async function cleanupFailedPluginInstallWithLifecycle(
           pluginMarketplace: deps.pluginMarketplace,
         },
         journal,
-        { drainRuntimeOperations: true },
+        {
+          drainRuntimeOperations: true,
+          assumeRuntimeQuiescent: false,
+        },
       );
       if (outcome === "cancelled") {
         throw new Error(
           `Failed-install cleanup lost marketplace absence: ${installPluginId}`,
         );
       }
+      deps.pluginMarketplace.clearInstallFailureDiagnostic(pluginId);
       deps.emitHostEvent?.("plugin.uninstalled", {
         pluginId: pendingRecord.pluginId,
       });
@@ -540,8 +585,15 @@ export async function cleanupFailedPluginInstallWithLifecycle(
     let removalError: unknown;
     try {
       await deps.pluginRuntime.removePlugin(canonicalPluginId);
+      journal.markRuntimeRetirementComplete(canonicalPluginId);
     } catch (error) {
       removalError = error;
+    }
+    if (removalError !== undefined) {
+      throw new AggregateError(
+        [removalError],
+        `failed-install removal committed with pending runtime retirement: ${canonicalPluginId}`,
+      );
     }
     let cleanupError: unknown;
     try {
@@ -549,20 +601,18 @@ export async function cleanupFailedPluginInstallWithLifecycle(
         record,
         cleanupDeps,
         journal,
-        { drainRuntimeOperations: true, cleanupCache: true },
+        {
+          drainRuntimeOperations: true,
+          assumeRuntimeQuiescent: false,
+          cleanupCache: true,
+        },
       );
     } catch (error) {
       cleanupError = error;
     }
-    if (removalError !== undefined && cleanupError === undefined) {
-      throw removalError;
-    }
-    if (removalError !== undefined || cleanupError !== undefined) {
+    if (cleanupError !== undefined) {
       throw new AggregateError(
-        [
-          ...(removalError !== undefined ? [removalError] : []),
-          ...(cleanupError !== undefined ? [cleanupError] : []),
-        ],
+        [cleanupError],
         `failed-install removal committed with incomplete cleanup: ${canonicalPluginId}`,
       );
     }

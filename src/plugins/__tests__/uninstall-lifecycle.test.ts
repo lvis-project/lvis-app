@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   cleanupFailedPluginInstallWithLifecycle,
   ensurePluginStateReadyForInstall,
+  recoverPendingPluginUninstallCleanups,
   uninstallPluginWithLifecycle,
 } from "../uninstall-lifecycle.js";
 import {
@@ -229,6 +230,62 @@ describe("uninstallPluginWithLifecycle", () => {
     }
   });
 
+  it("keeps failed-install retry serialized under the journaled install alias", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-failed-cleanup-alias-lock-"));
+    try {
+      const deps = makeDeps("canonical-plugin", join(root, ".cache"));
+      deps.pluginRuntime.resolvePluginId.mockReturnValue("canonical-plugin");
+      deps.pluginMarketplace.getInstalledVersion
+        .mockResolvedValueOnce("1.0.0")
+        .mockResolvedValue(null);
+      deps.clearAuthPartitionService.mockRejectedValueOnce(
+        new Error("partition still busy"),
+      );
+      await expect(
+        uninstallPluginWithLifecycle("marketplace-alias", deps),
+      ).rejects.toThrow(/incomplete post-commit cleanup/);
+      deps.clearAuthPartitionService.mockResolvedValue(undefined);
+
+      let releaseAliasLock!: () => void;
+      let aliasLockEntered!: () => void;
+      const aliasLockGate = new Promise<void>((resolve) => {
+        releaseAliasLock = resolve;
+      });
+      const aliasLockStarted = new Promise<void>((resolve) => {
+        aliasLockEntered = resolve;
+      });
+      const aliasHolder = withPluginInstallLock(
+        "marketplace-alias",
+        async () => {
+          aliasLockEntered();
+          await aliasLockGate;
+        },
+      );
+      await aliasLockStarted;
+
+      let cleanupSettled = false;
+      const cleanup = cleanupFailedPluginInstallWithLifecycle(
+        "canonical-plugin",
+        deps,
+      ).finally(() => {
+        cleanupSettled = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(cleanupSettled).toBe(false);
+
+      releaseAliasLock();
+      await aliasHolder;
+      await expect(cleanup).resolves.toEqual({
+        pluginId: "canonical-plugin",
+        uninstalled: true,
+      });
+      expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("preserves the active generation after EACCES and completes cleanup on retry", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-restore-"));
     try {
@@ -271,11 +328,14 @@ describe("uninstallPluginWithLifecycle", () => {
     }
   });
 
-  it("finishes residual cleanup after durable commit before rethrowing retirement failure", async () => {
+  it("defers residual cleanup after a committed retirement failure until boot recovery", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-retirement-"));
     try {
       const deps = makeDeps("agent-hub", join(root, ".cache"));
       const retirementFailure = new Error("generation retirement failed");
+      deps.pluginMarketplace.getInstalledVersion
+        .mockResolvedValueOnce("1.0.0")
+        .mockResolvedValue(null);
       deps.pluginRuntime.removePluginWithCommit.mockImplementationOnce(async (
         _pluginId,
         commit,
@@ -286,8 +346,28 @@ describe("uninstallPluginWithLifecycle", () => {
 
       await expect(
         uninstallPluginWithLifecycle("agent-hub", deps),
-      ).rejects.toBe(retirementFailure);
+      ).rejects.toThrow(/pending runtime retirement/);
 
+      expect(deps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
+      expect(deps.settingsService.deletePluginSecrets).not.toHaveBeenCalled();
+      expect(deps.clearAuthPartitionService).not.toHaveBeenCalled();
+      expect(deps.forgetPluginAuthPartitionsService).not.toHaveBeenCalled();
+      expect(deps.emitHostEvent).not.toHaveBeenCalled();
+      const pending = JSON.parse(
+        await readFile(
+          join(root, ".cache", "plugin-uninstall-cleanup.json"),
+          "utf8",
+        ),
+      );
+      expect(pending.cleanups).toMatchObject([{
+        pluginId: "agent-hub",
+        registryRemovalCommitted: true,
+        runtimeRetirementComplete: false,
+      }]);
+
+      await expect(
+        recoverPendingPluginUninstallCleanups(deps),
+      ).resolves.toEqual([]);
       expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledWith(
         "agent-hub",
       );
@@ -296,17 +376,14 @@ describe("uninstallPluginWithLifecycle", () => {
       expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledWith(
         "agent-hub",
       );
-      expect(deps.emitHostEvent).toHaveBeenCalledWith(
-        "plugin.uninstalled",
-        { pluginId: "agent-hub" },
-      );
-      const journal = JSON.parse(
+      expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledOnce();
+      const completed = JSON.parse(
         await readFile(
           join(root, ".cache", "plugin-uninstall-cleanup.json"),
           "utf8",
         ),
       );
-      expect(journal.cleanups).toEqual([]);
+      expect(completed.cleanups).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -456,7 +533,7 @@ describe("uninstallPluginWithLifecycle", () => {
     }
   });
 
-  it("keeps failed-install cleanup journaled across retirement and residual failures", async () => {
+  it("keeps failed-install cleanup blocked until boot proves runtime quiescence", async () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-failed-install-cleanup-"));
     try {
       const deps = makeDeps("agent-hub", join(root, ".cache"));
@@ -469,7 +546,7 @@ describe("uninstallPluginWithLifecycle", () => {
 
       await expect(
         cleanupFailedPluginInstallWithLifecycle("agent-hub", deps),
-      ).rejects.toThrow(/incomplete cleanup/);
+      ).rejects.toThrow(/pending runtime retirement/);
       const pending = JSON.parse(
         await readFile(
           join(root, ".cache", "plugin-uninstall-cleanup.json"),
@@ -480,12 +557,29 @@ describe("uninstallPluginWithLifecycle", () => {
       expect(pending.cleanups[0]).toMatchObject({
         pluginId: "agent-hub",
         registryRemovalCommitted: true,
+        runtimeRetirementComplete: false,
       });
+      expect(deps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
+      expect(
+        deps.pluginMarketplace.clearInstallFailureDiagnostic,
+      ).not.toHaveBeenCalled();
 
       await expect(
         cleanupFailedPluginInstallWithLifecycle("agent-hub", deps),
-      ).resolves.toEqual({ pluginId: "agent-hub", uninstalled: true });
+      ).rejects.toThrow(/runtime retirement cleanup is pending/);
       expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledOnce();
+      expect(deps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
+
+      await expect(
+        recoverPendingPluginUninstallCleanups(deps),
+      ).resolves.toEqual(["agent-hub"]);
+      expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledOnce();
+      await expect(
+        recoverPendingPluginUninstallCleanups(deps),
+      ).resolves.toEqual([]);
+      expect(
+        deps.pluginMarketplace.clearInstallFailureDiagnostic,
+      ).toHaveBeenCalledWith("agent-hub");
       const completed = JSON.parse(
         await readFile(
           join(root, ".cache", "plugin-uninstall-cleanup.json"),
