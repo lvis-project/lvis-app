@@ -6,7 +6,7 @@ import type { BrowserWindow } from "electron";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SkillCatalogEntry } from "../main/skill-store.js";
-import type { KeywordEngine } from "../core/keyword-engine.js";
+import type { InputClassifier } from "../core/input-classifier.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { RoutineEngine } from "../core/routine-engine.js";
@@ -31,7 +31,8 @@ import {
   resolveAuthorizedWorkspaceProject,
 } from "../main/project-root-authorization.js";
 
-function authorizeWorkspaceProjectRoot(projectRoot: string, projectName?: string) {
+function authorizeWorkspaceProjectRoot(projectRoot: string, projectName?: string,
+) {
   const resolved = resolveAuthorizedWorkspaceProject(projectRoot, projectName);
   return resolved.authorized ? resolved.project : null;
 }
@@ -62,7 +63,8 @@ export function createSystemPromptBuilder(opts: {
    */
   getAppModelContext?: (sessionId: string) => string;
 }): SystemPromptBuilder {
-  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills, getActivatablePluginIds, getAppModelContext } = opts;
+  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills, getActivatablePluginIds, getAppModelContext,
+  } = opts;
   return new SystemPromptBuilder({
     memoryManager,
     toolRegistry,
@@ -155,7 +157,7 @@ export function createHookRunner(): HookRunner {
 export interface ConversationDeps {
   settingsService: SettingsService;
   systemPromptBuilder: SystemPromptBuilder;
-  keywordEngine: KeywordEngine;
+  inputClassifier: InputClassifier;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   /**
@@ -182,11 +184,13 @@ export interface ConversationDeps {
   additionalDirectories?: readonly string[];
   getAdditionalDirectories?: () => readonly string[];
   isDefaultProjectRoot?: (projectRoot: string) => boolean;
-  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean };
+  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean;
+  };
   authorizeProject?: (
     projectRoot: string,
     projectName?: string,
-  ) => { projectRoot: string; projectName?: string; isDefault?: boolean } | null;
+  ) => { projectRoot: string; projectName?: string; isDefault?: boolean;
+  } | null;
   /**
    * Fan-out hook for permission config mutations. Boot wires this from
    * `ipc/domains/permissions.ts:broadcastPermissionConfigChanged` so the
@@ -231,7 +235,7 @@ export type RoutineConversationLoopDeps = Pick<
   ConversationDeps,
   | "settingsService"
   | "systemPromptBuilder"
-  | "keywordEngine"
+  | "inputClassifier"
   | "routeEngine"
   | "toolRegistry"
   | "memoryManager"
@@ -292,13 +296,14 @@ export function createRoutineConversationLoop(
   const forcedActiveToolNames = new Set(
     deps.toolRegistry
       .listAll()
-      .filter((tool) => tool.source === "plugin" && tool.pluginId && forcedActivePluginIds.has(tool.pluginId))
+      .filter((tool) => tool.source === "plugin" && tool.pluginId && forcedActivePluginIds.has(tool.pluginId),
+      )
       .map((tool) => tool.name),
   );
   return new ConversationLoop({
     settingsService: deps.settingsService,
     systemPromptBuilder: routineSystemPromptBuilder,
-    keywordEngine: deps.keywordEngine,
+    inputClassifier: deps.inputClassifier,
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.memoryManager,
@@ -351,7 +356,7 @@ export function createRoutineConversationLoop(
 export type SideChatConversationLoopDeps = Pick<
   ConversationDeps,
   | "settingsService"
-  | "keywordEngine"
+  | "inputClassifier"
   | "routeEngine"
   | "toolRegistry"
   | "permissionManager"
@@ -372,11 +377,13 @@ export type SideChatConversationLoopDeps = Pick<
   /** Shared settings service — reads `additionalDirectories` at each turn. */
   getAdditionalDirectories?: () => readonly string[];
   isDefaultProjectRoot?: (projectRoot: string) => boolean;
-  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean };
+  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean;
+  };
   authorizeProject?: (
     projectRoot: string,
     projectName?: string,
-  ) => { projectRoot: string; projectName?: string; isDefault?: boolean } | null;
+  ) => { projectRoot: string; projectName?: string; isDefault?: boolean;
+  } | null;
 };
 
 export function createSideChatConversationLoop(
@@ -401,7 +408,7 @@ export function createSideChatConversationLoop(
   return new ConversationLoop({
     settingsService: deps.settingsService,
     systemPromptBuilder: sideChatSystemPromptBuilder,
-    keywordEngine: deps.keywordEngine,
+    inputClassifier: deps.inputClassifier,
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.sideChatMemoryManager,
@@ -432,12 +439,13 @@ export function createSideChatConversationLoop(
   });
 }
 
-export function createConversationLoop(deps: ConversationDeps): ConversationLoop {
+export function createConversationLoop(deps: ConversationDeps,
+): ConversationLoop {
   // §4.5: ConversationLoop
   const loop = new ConversationLoop({
     settingsService: deps.settingsService,
     systemPromptBuilder: deps.systemPromptBuilder,
-    keywordEngine: deps.keywordEngine,
+    inputClassifier: deps.inputClassifier,
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     supportsA2AParentDelivery: deps.supportsA2AParentDelivery === true,
@@ -494,7 +502,8 @@ export function createCallLlmForPlugin(
   conversationLoop: ConversationLoop,
   auditLogger: AuditLogger,
   options: CallLlmRateLimitOptions = {},
-): (pluginId: string, prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }) => Promise<string> {
+): (pluginId: string, prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal },
+) => Promise<string> {
   const maxCalls = options.maxCalls ?? 20;
   const windowMs = options.windowMs ?? 10 * 60 * 1000;
   const buckets = new Map<string, number[]>();
@@ -529,7 +538,11 @@ export function createCallLlmForPlugin(
       });
     } catch {}
 
-    return conversationLoop.generateText(prompt, opts?.systemPrompt, opts?.signal);
+    return conversationLoop.generateText(
+      prompt,
+      opts?.systemPrompt,
+      opts?.signal,
+    );
   };
 }
 
@@ -539,8 +552,15 @@ export function createCallLlmForPlugin(
  */
 export function createCallLlm(
   conversationLoop: ConversationLoop,
-): (prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }) => Promise<string> {
+): (
+  prompt: string,
+  opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal },
+) => Promise<string> {
   return (prompt, opts) => {
-    return conversationLoop.generateText(prompt, opts?.systemPrompt, opts?.signal);
+    return conversationLoop.generateText(
+      prompt,
+      opts?.systemPrompt,
+      opts?.signal,
+    );
   };
 }

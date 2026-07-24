@@ -169,7 +169,8 @@ export interface PluginAuthStatus {
 }
 
 export interface EventSubscriptionHint {
-  category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
+  category:
+    | "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
   priority: "high" | "medium" | "low";
   title: string;
 }
@@ -291,18 +292,6 @@ export interface PluginManifest {
    * (own-namespace-only, declared-only, host-computed CSP). @optional
    */
   uiResources?: PluginUiResourceDecl[];
-  /**
-   * Keyword-to-tool preload entries. `skillId` must exactly name a
-   * model-visible entry in `tools[]`. When user input matches `keyword`, the
-   * Host adds that Tool to the model-visible turn scope; matching never invokes
-   * the Tool directly.
-   *
-   * @deprecated Owner: `lvis-app` plugin runtime. Migrate instruction discovery
-   * to bundled `manifest.skills`; this legacy field only preloads Tool schemas.
-   * Remove after every supported plugin has migrated to bundled
-   * `manifest.skills` and no active manifest declares `keywords`.
-   */
-  keywords?: Array<{ keyword: string; skillId: string }>;
 
   /** Plugin-owned instruction bundles, rooted at a directory containing SKILL.md. */
   skills?: PluginContributionDeclaration[];
@@ -520,7 +509,8 @@ export interface PluginConfigSchemaProperty {
    */
   format?: "secret" | "uri" | "email" | "date-time";
   /** Item schema when `type === "array"`. Only string-item arrays are auto-rendered as a tag input. @optional */
-  items?: { type: "string" | "number" | "integer" | "boolean"; enum?: Array<string | number | boolean> };
+  items?: { type: "string" | "number" | "integer" | "boolean"; enum?: Array<string | number | boolean>;
+  };
 }
 
 export interface PluginUiExtension {
@@ -701,7 +691,11 @@ export interface McpOAuthMetadata {
   authorizationServers?: string[];
   /** Initial least-privilege scopes requested for this MCP server. */
   scopes?: string[];
-  clientRegistration?: "client-id-metadata-document" | "dynamic" | "preregistration" | "manual";
+  clientRegistration?:
+    | "client-id-metadata-document"
+    | "dynamic"
+    | "preregistration"
+    | "manual";
 }
 
 export interface McpAuthMetadata extends McpOAuthMetadata {
@@ -810,7 +804,11 @@ export interface PluginStorage {
   /** Read + parse JSON; returns `null` on missing file, throws on bad JSON. */
   readJson<T = unknown>(relPath: string): Promise<T | null>;
   /** Write bytes / text; ensures parent directories exist. */
-  write(relPath: string, data: string | Uint8Array, encoding?: StorageEncoding): Promise<void>;
+  write(
+    relPath: string,
+    data: string | Uint8Array,
+    encoding?: StorageEncoding,
+  ): Promise<void>;
   /** Stringify + write JSON; ensures parent directories exist. */
   writeJson<T>(relPath: string, value: T, indent?: number): Promise<void>;
   /** Remove a file or directory tree; missing paths are ignored. */
@@ -923,7 +921,12 @@ export interface SpawnedPluginWorker {
    * detect a crashed worker (mark it dead / restart) — without it `isRunning`
    * style state can never go false after a crash.
    */
-  onExit(listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): void;
+  onExit(
+    listener: (info: {
+      code: number | null;
+      signal: NodeJS.Signals | null;
+    }) => void,
+  ): void;
 }
 
 /**
@@ -961,20 +964,11 @@ export interface PluginHostApi {
      * disposer. The subscription is scoped to the caller's pluginId — a
      * change in plugin A cannot fire plugin B's listener.
      */
-    onChange<T = unknown>(key: string, callback: (value: T | undefined) => void): () => void;
+    onChange<T = unknown>(
+      key: string,
+      callback: (value: T | undefined) => void,
+    ): () => void;
   };
-  /**
-   * Register keyword-to-tool preload entries. A matching keyword may add the
-   * exact model-visible Tool named by `skillId` to the current turn's model
-   * scope. It never invokes the Tool directly. Unknown, app-only, or otherwise
-   * out-of-scope tool names do not preload anything.
-   *
-   * @deprecated Owner: `lvis-app` plugin runtime. Migrate instruction discovery
-   * to bundled `manifest.skills`; this legacy method only preloads Tool schemas.
-   * Remove after every supported plugin has migrated to bundled
-   * `manifest.skills` and no active manifest declares `keywords`.
-   */
-  registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
   emitEvent(eventType: string, data?: unknown): void;
   /**
    * Subscribes to a host event. Returns an `unsubscribe()` disposer so callers
@@ -1051,7 +1045,14 @@ export interface PluginHostApi {
    * 플러그인이 직접 LLM 키를 관리하지 않고도 인텔리전트 기능 구현 가능.
    * LLM이 준비되지 않은 경우 에러를 던진다.
    */
-  callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }): Promise<string>;
+  callLlm(
+    prompt: string,
+    options?: {
+      maxTokens?: number;
+      systemPrompt?: string;
+      signal?: AbortSignal;
+    },
+  ): Promise<string>;
   /**
    * Host-mediated outbound HTTPS through Electron's `net` (Chromium network
    * stack). Unlike a plugin's own Node `fetch`/undici, this honors the OS proxy
@@ -1072,7 +1073,11 @@ export interface PluginHostApi {
    * Structured log event routed through AuditLogger.
    * Automatically tagged with `plugin:${pluginId}` context (sessionId = "plugin").
    */
-  logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
+  logEvent(
+    level: "info" | "warn" | "error",
+    message: string,
+    data?: unknown,
+  ): void;
 
   /**
    * Register a handler fired before app shutdown (Electron
@@ -1128,8 +1133,12 @@ export interface PluginHostApi {
    * §6.1 "3+ 플러그인 규칙" 예외 #2 (보안·감사 통제 필요)로 정당화 — 외부 포털 쿠키
    * 수집은 민감 자산 취급이므로 단일 플러그인 사용처여도 HostApi에서 제공한다.
    */
-  openAuthWindow(options: OpenAuthWindowWithFinalUrlOptions): Promise<OpenAuthWindowFinalUrlResult>;
-  openAuthWindow(options: OpenAuthWindowCookieOptions): Promise<AuthWindowCookie[]>;
+  openAuthWindow(
+    options: OpenAuthWindowWithFinalUrlOptions,
+  ): Promise<OpenAuthWindowFinalUrlResult>;
+  openAuthWindow(
+    options: OpenAuthWindowCookieOptions,
+  ): Promise<AuthWindowCookie[]>;
 
   /**
    * Open a hardened viewer BrowserWindow that loads `url` inside the
@@ -1249,7 +1258,10 @@ export interface PluginHostApi {
    * (SDK v8 regen follows). A missing host wiring throws loudly instead of being
    * silently optional-chained.
    */
-  probePrivateHost(host: string, opts?: { timeoutMs?: number }): Promise<boolean>;
+  probePrivateHost(
+    host: string,
+    opts?: { timeoutMs?: number },
+  ): Promise<boolean>;
 
   /**
    * §B3 — Read a host-level user preference exposed via the explicit
@@ -1289,7 +1301,9 @@ export interface PluginHostApi {
    *   times (e.g., the same mail re-emitting events) — host will reject the
    *   second call within a short window.
    */
-  triggerConversation(spec: ConversationTriggerSpec): Promise<ConversationTriggerResult>;
+  triggerConversation(
+    spec: ConversationTriggerSpec,
+  ): Promise<ConversationTriggerResult>;
 
   /**
    * Idempotency SOT query for suggestion-derived routines. Resolves `true` iff a
@@ -1369,7 +1383,12 @@ export interface PluginHostApi {
      * If a future flow legitimately needs the snapshot, add it then with a
      * scoped capability — do not pre-expose dead surface.
      */
-    respond(requestId: string, choice: ApprovalChoice, nonce?: string, hmac?: string): Promise<void>;
+    respond(
+      requestId: string,
+      choice: ApprovalChoice,
+      nonce?: string,
+      hmac?: string,
+    ): Promise<void>;
   };
 }
 
@@ -1484,7 +1503,9 @@ export interface PluginRuntimeContext {
   hostApi: PluginHostApi;
 }
 
-export type PluginToolHandler = (payload?: unknown) => Promise<unknown> | unknown;
+export type PluginToolHandler = (
+  payload?: unknown,
+) => Promise<unknown> | unknown;
 
 export interface RuntimePlugin {
   start?: () => Promise<void> | void;
@@ -1516,4 +1537,5 @@ export interface RuntimePlugin {
   readUiResource?: (uri: string) => Promise<string> | string;
 }
 
-export type RuntimePluginFactory = (context: PluginRuntimeContext) => Promise<RuntimePlugin> | RuntimePlugin;
+export type RuntimePluginFactory = (context: PluginRuntimeContext,
+) => Promise<RuntimePlugin> | RuntimePlugin;

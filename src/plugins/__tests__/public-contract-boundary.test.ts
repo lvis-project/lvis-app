@@ -16,7 +16,9 @@ describe("Host-owned public plugin contract boundary", () => {
       "PluginMarketplaceItem",
     ]) {
       expect(source).not.toMatch(
-        new RegExp(`^export (?:interface|type|class|const|enum) ${declaration}\\b`, "m"),
+        new RegExp(`^export (?:interface|type|class|const|enum) ${declaration}\\b`,
+          "m",
+        ),
       );
     }
   });
@@ -27,10 +29,10 @@ describe("Host-owned public plugin contract boundary", () => {
       readFile(TYPES_BARREL_URL, "utf8"),
     ]);
 
-    expect(contract).toContain("Keyword-to-tool preload entries.");
-    expect(contract).toContain("matching never invokes");
-    expect(contract).toContain("@deprecated Owner: `lvis-app` plugin runtime.");
-    expect(contract).toContain("no active manifest declares `keywords`");
+    expect(contract).toContain("`tools` is the only callable surface.");
+    expect(contract).toContain("Pure MCP `Tool` objects");
+    expect(contract).not.toMatch(/\bkeywords\??:/);
+    expect(contract).not.toContain("registerKeywords");
     expect(barrel).toContain('export * from "./public-contract.js";');
   });
 });

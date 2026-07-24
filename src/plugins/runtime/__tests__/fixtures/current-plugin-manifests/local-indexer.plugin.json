@@ -395,44 +395,6 @@
       "type": "host.theme.changed"
     }
   ],
-  "keywords": [
-    {
-      "keyword": "문서",
-      "skillId": "index_search"
-    },
-    {
-      "keyword": "인덱스",
-      "skillId": "index_scan"
-    },
-    {
-      "keyword": "검색",
-      "skillId": "index_search"
-    },
-    {
-      "keyword": "문서검색",
-      "skillId": "index_search"
-    },
-    {
-      "keyword": "PDF",
-      "skillId": "index_search"
-    },
-    {
-      "keyword": "파일검색",
-      "skillId": "index_search"
-    },
-    {
-      "keyword": "문서찾기",
-      "skillId": "index_search"
-    },
-    {
-      "keyword": "인덱싱",
-      "skillId": "index_scan"
-    },
-    {
-      "keyword": "파일인덱스",
-      "skillId": "index_scan"
-    }
-  ],
   "notificationEvents": [
     {
       "event": "index.scan.completed",

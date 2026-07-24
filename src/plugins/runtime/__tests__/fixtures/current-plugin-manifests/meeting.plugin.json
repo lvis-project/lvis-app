@@ -1235,28 +1235,6 @@
     "meeting.prep.registered"
   ],
   "startupTimeoutMs": 5000,
-  "keywords": [
-    {
-      "keyword": "녹음시작",
-      "skillId": "meeting_start"
-    },
-    {
-      "keyword": "전사",
-      "skillId": "meeting_transcript"
-    },
-    {
-      "keyword": "요약",
-      "skillId": "meeting_stop"
-    },
-    {
-      "keyword": "STT",
-      "skillId": "meeting_start"
-    },
-    {
-      "keyword": "음성메모",
-      "skillId": "meeting_start"
-    }
-  ],
   "notificationEvents": [
     {
       "event": "meeting.summary.created",

@@ -98,7 +98,8 @@ vi.mock("electron", () => {
       defaultSession: { setPermissionRequestHandler: () => {} },
     },
     contextBridge: { exposeInMainWorld: () => {} },
-    ipcRenderer: { invoke: async () => {}, on: () => {}, send: () => {}, removeListener: () => {} },
+    ipcRenderer: { invoke: async () => {}, on: () => {}, send: () => {}, removeListener: () => {},
+    },
   };
   return { ...electron, default: electron };
 });
@@ -125,7 +126,7 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "pluginMarketplace",
   "settingsService",
   "memoryManager",
-  "keywordEngine",
+  "inputClassifier",
   "routeEngine",
   "toolRegistry",
   "systemPromptBuilder",
@@ -204,7 +205,8 @@ describe("#1409 contract version + public-surface freeze", () => {
 
   it("every PUBLIC_CHANNELS member is a real registered channel", () => {
     for (const channel of PUBLIC_CHANNELS) {
-      expect(inventory.has(channel), `PUBLIC channel not registered: ${channel}`).toBe(true);
+      expect(inventory.has(channel), `PUBLIC channel not registered: ${channel}`,
+      ).toBe(true);
     }
   });
 
@@ -218,8 +220,14 @@ describe("#1409 contract version + public-surface freeze", () => {
     expect(required.length).toBeGreaterThan(0);
 
     for (const channel of required) {
-      expect(inventory.has(channel), `gesture:required channel not registered: ${channel}`).toBe(true);
-      expect(publicSet.has(channel), `gesture:required channel leaked into PUBLIC_CHANNELS: ${channel}`).toBe(false);
+      expect(
+        inventory.has(channel),
+        `gesture:required channel not registered: ${channel}`,
+      ).toBe(true);
+      expect(
+        publicSet.has(channel),
+        `gesture:required channel leaked into PUBLIC_CHANNELS: ${channel}`,
+      ).toBe(false);
     }
   });
 

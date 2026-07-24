@@ -30,7 +30,8 @@ const log = createLogger("sandbox");
  *
  * Exported for unit testing.
  */
-export function resolvePluginEntryPath(pluginRoot: string, entry: string): string {
+export function resolvePluginEntryPath(pluginRoot: string, entry: string,
+): string {
   if (isAbsolute(entry)) {
     throw new Error(
       `Plugin entry must be a relative path inside the plugin directory, got absolute: ${entry}`,
@@ -120,22 +121,31 @@ export function createNoopHostApi(
       },
       onChange: () => () => {},
     },
-    registerKeywords: () => {},
     emitEvent: () => {},
     onEvent: () => () => {},
     getInstalledPluginIds: () => [],
     onPluginsChanged: () => () => {},
     getSecret: () => null,
-    callLlm: async () => { throw new Error("LLM not available in noop context"); },
+    callLlm: async () => {
+      throw new Error("LLM not available in noop context");
+    },
     logEvent: () => {},
     onShutdown: () => {},
-    openExternalUrl: async () => { throw new Error("openExternalUrl not available in noop context"); },
+    openExternalUrl: async () => {
+      throw new Error("openExternalUrl not available in noop context");
+    },
     // Fail-safe to false (no corp network) — a probe should never throw the
     // caller's flow; matches hasRoutineBySource's graceful noop default.
     probePrivateHost: async () => false,
-    openAuthWindow: async () => { throw new Error("openAuthWindow not available in noop context"); },
-    openAuthPartitionViewer: async () => { throw new Error("openAuthPartitionViewer not available in noop context"); },
-    clearAuthPartition: async () => { throw new Error("clearAuthPartition not available in noop context"); },
+    openAuthWindow: async () => {
+      throw new Error("openAuthWindow not available in noop context");
+    },
+    openAuthPartitionViewer: async () => {
+      throw new Error("openAuthPartitionViewer not available in noop context");
+    },
+    clearAuthPartition: async () => {
+      throw new Error("clearAuthPartition not available in noop context");
+    },
     triggerConversation: async (spec) => ({
       accepted: false,
       reason: "loop_unavailable",

@@ -23,7 +23,7 @@ import type { PermissionReviewEvent } from "../../shared/permission-review-statu
 import type { ToolSource } from "../../tools/types.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { SystemPromptBuilder } from "../../prompts/system-prompt-builder.js";
-import type { KeywordEngine } from "../../core/keyword-engine.js";
+import type { InputClassifier } from "../../core/input-classifier.js";
 import type { RouteEngine } from "../../core/route-engine.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
@@ -48,7 +48,8 @@ export interface WorkspaceRootRevocationOptions {
 export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
-  onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
+  onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta,
+  ) => void;
   onPermissionReview?: (event: PermissionReviewEvent) => void;
   onToolEnd?: (
     name: string,
@@ -66,8 +67,10 @@ export interface TurnCallbacks {
     hasToolCalls: boolean;
   }) => void;
   onTurnComplete?: (fullText: string) => void;
-  onPermissionModeChanged?: (mode: "default" | "strict" | "auto" | "allow") => void;
-  onError?: (error: string, systemNotice?: "context-error" | "stream-error") => void;
+  onPermissionModeChanged?: (mode: "default" | "strict" | "auto" | "allow",
+  ) => void;
+  onError?: (error: string, systemNotice?: "context-error" | "stream-error",
+  ) => void;
   onCompactOccurred?: (result: {
     removedMessages: number;
     freedTokens: number;
@@ -220,7 +223,8 @@ export interface TurnInputRequired {
 
 export interface TurnResult {
   text: string;
-  toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
+  toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string;
+  }>;
   route: string;
   usage?: TokenUsage;
   usageByModel?: TokenUsageByModel[];
@@ -232,7 +236,7 @@ export interface TurnResult {
 export interface ConversationLoopDeps {
   settingsService: SettingsService;
   systemPromptBuilder: SystemPromptBuilder;
-  keywordEngine: KeywordEngine;
+  inputClassifier: InputClassifier;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   /**
@@ -283,7 +287,8 @@ export interface ConversationLoopDeps {
 
   pluginRuntime?: {
     listPluginIds(): string[];
-    getGenerationAccess?(): import("../../plugins/plugin-host-generation.js").PluginRuntimeGenerationAccess | undefined;
+    getGenerationAccess?():
+      | import("../../plugins/plugin-host-generation.js").PluginRuntimeGenerationAccess | undefined;
     /**
      * #1176 — whether a loaded plugin is active (its tools may be exposed).
      * `enabled !== false` in the registry; absent → active (migration-safe).
@@ -347,12 +352,14 @@ export interface ConversationLoopDeps {
   /** Runtime predicate for the app-managed default workspace project root. */
   isDefaultProjectRoot?: (projectRoot: string) => boolean;
   /** Default project for main conversations when the user has not selected one. */
-  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean };
+  getDefaultProject?: () => { projectRoot?: string; projectName?: string; isDefault?: boolean;
+  };
   /** Re-authorize and canonicalize a stored or renderer-supplied project root. */
   authorizeProject?: (
     projectRoot: string,
     projectName?: string,
-  ) => { projectRoot: string; projectName?: string; isDefault?: boolean } | null;
+  ) => { projectRoot: string; projectName?: string; isDefault?: boolean;
+  } | null;
   /**
    * Script hooks. Boot owns discovery/trust and injects the manager;
    * the executor only invokes the already-trusted generic hook contract.
@@ -397,7 +404,8 @@ export interface RequestProjectionContext {
 
 export type ToolSourceCounts = Record<ToolSource, number>;
 
-export type CompactTriggerSource = "estimate" | "context-tokens" | "manual" | "force-recover" | "rate-limit";
+export type CompactTriggerSource =
+  | "estimate" | "context-tokens" | "manual" | "force-recover" | "rate-limit";
 
 export interface PreflightGuardOptions {
   forceReason?: "rate-limit";

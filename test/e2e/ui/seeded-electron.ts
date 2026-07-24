@@ -1,9 +1,12 @@
-import { _electron as electron, type ElectronApplication, type Page } from "playwright";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { _electron as electron, type ElectronApplication, type Page,
+} from "playwright";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LLM_VENDOR_DEFAULTS, type LLMVendor } from "../../../src/shared/llm-vendor-defaults.js";
+import { LLM_VENDOR_DEFAULTS, type LLMVendor,
+} from "../../../src/shared/llm-vendor-defaults.js";
 import { DEFAULT_BUNDLE_ID } from "../../../src/shared/theme-bundles.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +52,8 @@ export function buildIsolatedElectronEnv(overrides: LaunchEnv): LaunchEnv {
   };
 }
 
-export function buildE2eBaseSettings(onboardingCompleted = true, locale: "ko" | "en" = "ko"): JsonObject {
+export function buildE2eBaseSettings(onboardingCompleted = true, locale: "ko" | "en" = "ko",
+): JsonObject {
   return {
     marketplace: {
       backend: "real-cloud",
@@ -117,7 +121,10 @@ export function builtMainExists(): boolean {
   return existsSync(MAIN_ENTRY);
 }
 
-export function buildLlmSettings(vendor: LLMVendor = "openai", model?: string): JsonObject {
+export function buildLlmSettings(
+  vendor: LLMVendor = "openai",
+  model?: string,
+): JsonObject {
   const vendors = Object.fromEntries(
     Object.entries(LLM_VENDOR_DEFAULTS).map(([id, defaults]) => [
       id,
@@ -152,7 +159,6 @@ function toPersistedHistoryRow(row: JsonObject): JsonObject {
   const {
     createdAt,
     displayText,
-    routeSkill,
     importedTrigger,
     toolDisplay,
     turnSummary,
@@ -165,7 +171,6 @@ function toPersistedHistoryRow(row: JsonObject): JsonObject {
   for (const [key, value] of Object.entries({
     createdAt,
     displayText,
-    routeSkill,
     importedTrigger,
     toolDisplay,
     turnSummary,
@@ -174,7 +179,9 @@ function toPersistedHistoryRow(row: JsonObject): JsonObject {
   })) {
     if (value !== undefined) nextMeta[key] = value;
   }
-  return Object.keys(nextMeta).length > 0 ? { ...message, meta: nextMeta } : message;
+  return Object.keys(nextMeta).length > 0
+    ? { ...message, meta: nextMeta }
+    : message;
 }
 
 export async function launchSeededElectron(opts: {
@@ -187,8 +194,12 @@ export async function launchSeededElectron(opts: {
   launchEnv?: LaunchEnv;
 }): Promise<SeededElectronContext> {
   const sessionId = opts.sessionId ?? "e2000000-bb11-4cc2-8dd3-eeeeeeeeeeee";
-  const userDataDir = mkdtempSync(resolve(tmpdir(), opts.userDataPrefix ?? "lvis-seeded-e2e-user-data-"));
-  const tempHome = mkdtempSync(resolve(tmpdir(), opts.homePrefix ?? "lvis-seeded-e2e-home-"));
+  const userDataDir = mkdtempSync(
+    resolve(tmpdir(), opts.userDataPrefix ?? "lvis-seeded-e2e-user-data-"),
+  );
+  const tempHome = mkdtempSync(
+    resolve(tmpdir(), opts.homePrefix ?? "lvis-seeded-e2e-home-"),
+  );
   const lvisHome = resolve(tempHome, ".lvis");
 
   writeFileSync(
@@ -239,8 +250,16 @@ export async function launchSeededElectron(opts: {
     timeout: 30_000,
   });
 
-  app.process().stdout?.on("data", (d: Buffer) => process.stdout.write(`[electron:stdout] ${d}`));
-  app.process().stderr?.on("data", (d: Buffer) => process.stdout.write(`[electron:stderr] ${d}`));
+  app
+    .process()
+    .stdout?.on("data", (d: Buffer) =>
+      process.stdout.write(`[electron:stdout] ${d}`),
+    );
+  app
+    .process()
+    .stderr?.on("data", (d: Buffer) =>
+      process.stdout.write(`[electron:stderr] ${d}`),
+    );
 
   const page = await app.firstWindow();
   await page.locator('[data-testid="main-toolbar"]').first().waitFor({
@@ -251,7 +270,9 @@ export async function launchSeededElectron(opts: {
   return { app, page, userDataDir, tempHome, lvisHome };
 }
 
-export async function teardownSeededElectron(ctx: SeededElectronContext): Promise<void> {
+export async function teardownSeededElectron(
+  ctx: SeededElectronContext,
+): Promise<void> {
   await ctx.app.close().catch(() => {});
   rmSync(ctx.userDataDir, { recursive: true, force: true });
   makeTreeWritableSync(ctx.tempHome);
@@ -259,7 +280,11 @@ export async function teardownSeededElectron(ctx: SeededElectronContext): Promis
 }
 
 function makeTreeWritableSync(root: string): void {
-  try { chmodSync(root, 0o700); } catch { return; }
+  try {
+    chmodSync(root, 0o700);
+  } catch {
+    return;
+  }
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (entry.isDirectory()) makeTreeWritableSync(resolve(root, entry.name));
   }
