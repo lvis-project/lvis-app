@@ -11,17 +11,20 @@ const extensionAlias = {
   ".cjs": [".cts", ".cjs"],
 };
 
+// Transpile-only TS→JS via esbuild (esbuild is already a dep; ts-loader's
+// classic-compiler API broke under TypeScript 7's native package). esbuild-loader
+// only strips types per-file — module resolution stays with webpack's
+// resolve.extensionAlias (the NodeNext `.js`→`.ts` rewrite), matching the prior
+// ts-loader transpileOnly + Bundler-resolution behavior. Type checking is the
+// separate `tsc --noEmit` gate, not the bundler's job.
 const tsRule = {
   test: /\.[cm]?tsx?$/,
   exclude: /node_modules/,
   use: {
-    loader: "ts-loader",
+    loader: "esbuild-loader",
     options: {
-      transpileOnly: true,
-      compilerOptions: {
-        module: "ESNext",
-        moduleResolution: "Bundler",
-      },
+      target: "es2022",
+      jsx: "automatic",
     },
   },
 };
