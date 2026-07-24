@@ -423,8 +423,9 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       .update("\0")
       .update(runtime.activationId)
       .digest("hex");
+    const predecessorBeforePreparation = this.coordinator.getActive(pluginId);
     const activeBeforePreparation =
-      this.coordinator.getActive(pluginId)?.generationId === generationId;
+      predecessorBeforePreparation?.generationId === generationId;
     const payloadRoot = await materializePluginGenerationRoot(
       pluginRoot,
       this.deps.receiptCacheRoot,
@@ -479,6 +480,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
         const preparedRuntime =
           this.deps.pluginRuntime.prepareRuntimeGeneration(
             candidate.state.runtime,
+            predecessorBeforePreparation?.generationId,
           );
         const preparedSkills =
           this.deps.skillStore.preparePluginGeneration(candidate);
@@ -623,7 +625,10 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       active.generationId,
       bundledServerIds,
     );
-    const preparedRuntime = this.deps.pluginRuntime.prepareRuntimeRemoval(pluginId);
+    const preparedRuntime = this.deps.pluginRuntime.prepareRuntimeRemoval(
+      pluginId,
+      active.generationId,
+    );
     const preparedSkills = this.deps.skillStore.preparePluginRemoval(pluginId, active.generationId);
     const preparedHooks = this.deps.hookManager.preparePluginGeneration(
       [],

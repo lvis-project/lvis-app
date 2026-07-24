@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootContext } from "../../context.js";
 import { TOOL_TIMEOUT_POLICY } from "../../../shared/tool-timeout-policy.js";
+import { PluginRuntimeDetachedOperationError } from "../../../plugins/runtime/detached-operation.js";
 
 const mocks = vi.hoisted(() => ({
   dispatchAppOnlyRuntimeInvocation: vi.fn(),
@@ -158,13 +159,46 @@ describe("setupPluginToolExecutor production auth wiring", () => {
     expect(handlerCeiling).toBeLessThanOrEqual(50);
   });
 
-  it("routes predecessor-generation revocation from begin and result observation", async () => {
+  it("routes predecessor-generation revocation from auth start", async () => {
     const ctx = makeContext();
     mocks.beginPluginAuthInvocation.mockReturnValue({
       epoch: 2,
       invalidatedAccountHash: "predecessor-begin-principal",
       invalidatedAccountGenerationId: predecessorGenerationId,
     });
+    await setupPluginToolExecutor(ctx);
+
+    const invoke = ctx.lateBinding.pluginToolInvokerRef.fn!;
+    await expect(
+      invoke("auth_login", {}, invocationContext()),
+    ).resolves.toEqual({ authenticated: true });
+
+    expect(mocks.revokePluginOperationAccount).toHaveBeenCalledTimes(1);
+    expect(mocks.revokePluginOperationAccount).toHaveBeenCalledWith(
+      pluginId,
+      predecessorGenerationId,
+      "predecessor-begin-principal",
+    );
+  });
+
+  it("fails closed when auth invalidation lacks generation provenance", async () => {
+    const ctx = makeContext();
+    mocks.beginPluginAuthInvocation.mockReturnValue({
+      epoch: 2,
+      invalidatedAccountHash: "malformed-principal",
+    });
+    await setupPluginToolExecutor(ctx);
+
+    const invoke = ctx.lateBinding.pluginToolInvokerRef.fn!;
+    await expect(
+      invoke("auth_login", {}, invocationContext()),
+    ).rejects.toThrow("plugin auth invalidation is missing generation provenance");
+    expect(mocks.revokePluginOperationAccount).not.toHaveBeenCalled();
+  });
+
+  it("routes predecessor-generation revocation from auth result observation", async () => {
+    const ctx = makeContext();
+    mocks.beginPluginAuthInvocation.mockReturnValue({ epoch: 3 });
     mocks.observePluginAuthResult.mockReturnValue({
       invalidatedAccountHash: "predecessor-result-principal",
       invalidatedAccountGenerationId: predecessorGenerationId,
@@ -176,17 +210,39 @@ describe("setupPluginToolExecutor production auth wiring", () => {
       invoke("auth_status", {}, invocationContext()),
     ).resolves.toEqual({ authenticated: true });
 
-    expect(mocks.revokePluginOperationAccount.mock.calls).toEqual([
-      [
-        pluginId,
-        predecessorGenerationId,
-        "predecessor-begin-principal",
-      ],
-      [
-        pluginId,
-        predecessorGenerationId,
-        "predecessor-result-principal",
-      ],
-    ]);
+    expect(mocks.revokePluginOperationAccount).toHaveBeenCalledTimes(1);
+    expect(mocks.revokePluginOperationAccount).toHaveBeenCalledWith(
+      pluginId,
+      predecessorGenerationId,
+      "predecessor-result-principal",
+    );
+  });
+
+  it("routes predecessor-generation revocation when an auth handler detaches", async () => {
+    const ctx = makeContext();
+    mocks.beginPluginAuthInvocation.mockReturnValue({ epoch: 4 });
+    mocks.dispatchAppOnlyRuntimeInvocation.mockRejectedValue(
+      new PluginRuntimeDetachedOperationError(
+        new Error("auth handler ceiling"),
+        Promise.resolve(),
+      ),
+    );
+    mocks.invalidateDetachedPluginAuthInvocation.mockReturnValue({
+      invalidatedAccountHash: "predecessor-detached-principal",
+      invalidatedAccountGenerationId: predecessorGenerationId,
+    });
+    await setupPluginToolExecutor(ctx);
+
+    const invoke = ctx.lateBinding.pluginToolInvokerRef.fn!;
+    await expect(
+      invoke("auth_login", {}, invocationContext()),
+    ).rejects.toThrow("auth handler ceiling");
+
+    expect(mocks.revokePluginOperationAccount).toHaveBeenCalledTimes(1);
+    expect(mocks.revokePluginOperationAccount).toHaveBeenCalledWith(
+      pluginId,
+      predecessorGenerationId,
+      "predecessor-detached-principal",
+    );
   });
 });

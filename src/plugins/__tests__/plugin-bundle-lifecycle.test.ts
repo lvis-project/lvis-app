@@ -168,13 +168,25 @@ describe("PluginBundleLifecycle", () => {
     }));
     const publishBundledGeneration = vi.fn((prepared) => { prepared.published = true; });
     const disconnectBundledGeneration = vi.fn(async () => undefined);
+    const prepareRuntimeGeneration = vi.fn(() => ({
+      pluginId: manifest.id,
+      publish: vi.fn(),
+    }));
+    const prepareRuntimeRemoval = vi.fn(() => ({
+      pluginId: manifest.id,
+      publish: vi.fn(),
+    }));
+    let activationId = "test-activation-1";
     const lifecycle = makeLifecycle({
       pluginRuntime: {
         getPluginManifest: () => manifest,
         getPluginRoot: () => pluginRoot,
-        getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
-        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
-        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        getRuntimeGenerationProjection: () => ({
+          ...runtimeProjection(manifest, pluginRoot),
+          activationId,
+        }),
+        prepareRuntimeGeneration,
+        prepareRuntimeRemoval,
         postPublishRuntimeGeneration: vi.fn(),
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
@@ -194,6 +206,12 @@ describe("PluginBundleLifecycle", () => {
     });
 
     await lifecycle.activate("ep-api");
+    const initialGenerationId = lifecycle.getActive("ep-api")?.generationId;
+    expect(prepareRuntimeGeneration).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      undefined,
+    );
     expect(skillStore.listCatalogSync()).toEqual([expect.objectContaining({ name: "plugin:ep-api:attendance" })]);
     expect(hookManager.size()).toBe(0);
     expect(prepareBundledGeneration).toHaveBeenCalledWith(
@@ -203,11 +221,21 @@ describe("PluginBundleLifecycle", () => {
     );
     expect(publishBundledGeneration).toHaveBeenCalledTimes(1);
 
+    activationId = "test-activation-2";
+    await lifecycle.activate("ep-api");
+    expect(prepareRuntimeGeneration).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      initialGenerationId,
+    );
+    expect(prepareBundledGeneration).toHaveBeenCalledTimes(2);
+    expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
+
     await lifecycle.approveHook("ep-api", "policy");
     expect(hookManager.size()).toBe(0); // descriptor intentionally contains no runnable entries
     await lifecycle.approveMcpServer("ep-api", "ep");
-    expect(prepareBundledGeneration).toHaveBeenCalledTimes(2);
-    expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
+    expect(prepareBundledGeneration).toHaveBeenCalledTimes(3);
+    expect(publishBundledGeneration).toHaveBeenCalledTimes(3);
 
     const active = lifecycle.getActive("ep-api");
     expect(active).not.toHaveProperty("state");
@@ -219,8 +247,12 @@ describe("PluginBundleLifecycle", () => {
     expect(generationId).toMatch(/^[a-f0-9]{64}$/);
     await lifecycle.deactivate("ep-api");
     await lifecycle.waitForRetirements();
-    expect(prepareBundledGeneration).toHaveBeenCalledTimes(2);
-    expect(publishBundledGeneration).toHaveBeenCalledTimes(2);
+    expect(prepareRuntimeRemoval).toHaveBeenCalledWith(
+      "ep-api",
+      generationId,
+    );
+    expect(prepareBundledGeneration).toHaveBeenCalledTimes(3);
+    expect(publishBundledGeneration).toHaveBeenCalledTimes(3);
     expect(skillStore.listCatalogSync()).toEqual([]);
     expect(disconnectBundledGeneration).toHaveBeenCalledWith("ep-api", generationId);
   });

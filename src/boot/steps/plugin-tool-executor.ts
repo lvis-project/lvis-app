@@ -130,6 +130,22 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
     },
   });
+  const revokeInvalidatedPluginAccount = (
+    pluginId: string,
+    invalidatedAccountHash: string,
+    invalidatedAccountGenerationId: string | undefined,
+  ): void => {
+    if (!invalidatedAccountGenerationId) {
+      throw new Error(
+        `plugin auth invalidation is missing generation provenance: ${pluginId}`,
+      );
+    }
+    pluginSurfaceExecutor.revokePluginOperationAccount(
+      pluginId,
+      invalidatedAccountGenerationId,
+      invalidatedAccountHash,
+    );
+  };
   const observePluginAuthResult = (
     pluginId: string,
     generationId: string,
@@ -144,11 +160,11 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       result,
       invocationEpoch,
     );
-    if (observed.invalidatedAccountHash) {
-      pluginSurfaceExecutor.revokePluginOperationAccount(
+    if (observed.invalidatedAccountHash !== undefined) {
+      revokeInvalidatedPluginAccount(
         pluginId,
-        observed.invalidatedAccountGenerationId ?? generationId,
         observed.invalidatedAccountHash,
+        observed.invalidatedAccountGenerationId,
       );
     }
   };
@@ -184,12 +200,12 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       if (
         ownerPluginId &&
         ownerGenerationId &&
-        authInvocation?.invalidatedAccountHash
+        authInvocation?.invalidatedAccountHash !== undefined
       ) {
-        pluginSurfaceExecutor.revokePluginOperationAccount(
+        revokeInvalidatedPluginAccount(
           ownerPluginId,
-          authInvocation.invalidatedAccountGenerationId ?? ownerGenerationId,
           authInvocation.invalidatedAccountHash,
+          authInvocation.invalidatedAccountGenerationId,
         );
       }
       const appOnlyRuntimeInvocation = isAppOnlyRuntimeInvocation(
@@ -303,13 +319,12 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
               pluginRuntime.invalidateDetachedPluginAuthInvocation(
                 ownerPluginId,
                 ownerGenerationId,
-              );
-            if (invalidated.invalidatedAccountHash) {
-              pluginSurfaceExecutor.revokePluginOperationAccount(
+            );
+            if (invalidated.invalidatedAccountHash !== undefined) {
+              revokeInvalidatedPluginAccount(
                 ownerPluginId,
-                invalidated.invalidatedAccountGenerationId ??
-                  ownerGenerationId,
                 invalidated.invalidatedAccountHash,
+                invalidated.invalidatedAccountGenerationId,
               );
             }
           }
