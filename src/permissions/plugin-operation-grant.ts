@@ -66,6 +66,17 @@ export interface PluginOperationExecutionLease {
   release(): void;
 }
 
+export interface PluginOperationAccountTransitionLease {
+  release(): void;
+}
+
+export interface PluginOperationAccountTransitionPrincipal {
+  readonly ownerPluginId: string;
+  readonly generationId: string;
+  readonly appSessionId: string;
+  readonly accountScopeHash: string;
+}
+
 export class PluginOperationExecutionLeaseAbortedError extends Error {
   constructor() {
     super("plugin operation execution lease aborted");
@@ -144,7 +155,8 @@ export function pluginOperationExecutionDomain(
   ].join("\0"));
 }
 
-interface PendingExecutionLease {
+interface PendingOperationExecutionLease {
+  readonly kind: "operation";
   readonly domainKey: string;
   readonly principal: PluginOperationPrincipal;
   readonly resolve: (lease: PluginOperationExecutionLease) => void;
@@ -152,6 +164,17 @@ interface PendingExecutionLease {
   readonly signal?: AbortSignal;
   onAbort?: () => void;
 }
+
+interface PendingAccountTransitionLease {
+  readonly kind: "account-transition";
+  readonly principal: PluginOperationAccountTransitionPrincipal;
+  readonly resolve: (lease: PluginOperationAccountTransitionLease) => void;
+  readonly reject: (error: Error) => void;
+}
+
+type PendingExecutionLease =
+  | PendingOperationExecutionLease
+  | PendingAccountTransitionLease;
 
 interface ExecutionDomainState {
   held: boolean;
@@ -524,6 +547,7 @@ export class PluginOperationGrantCoordinator {
 
     return new Promise<PluginOperationExecutionLease>((resolve, reject) => {
       const request: PendingExecutionLease = {
+        kind: "operation",
         domainKey,
         principal: Object.freeze({ ...principal }),
         resolve,
@@ -541,6 +565,46 @@ export class PluginOperationGrantCoordinator {
         signal.addEventListener("abort", request.onAbort, { once: true });
       }
       state.queue.push(request);
+      this.drainExecutionDomain(executionScopeKey, state);
+    });
+  }
+
+  /**
+   * Serialize a credential transition behind every governed operation already
+   * admitted for the same stable provider account. Callers revoke the current
+   * principal before awaiting this lease, which rejects queued/future work;
+   * the transition then waits for the one in-flight holder to finish before
+   * login/logout code may mutate provider credentials.
+   */
+  acquireAccountTransitionLease(
+    principal: PluginOperationAccountTransitionPrincipal,
+  ): Promise<PluginOperationAccountTransitionLease> {
+    if (
+      !principal.ownerPluginId ||
+      !principal.generationId ||
+      !principal.appSessionId ||
+      !principal.accountScopeHash
+    ) {
+      return Promise.reject(
+        new Error("plugin operation account transition scope is invalid"),
+      );
+    }
+    const executionScopeKey = this.executionScopeKey(
+      principal.ownerPluginId,
+      principal.accountScopeHash,
+    );
+    const state = this.executionDomains.get(executionScopeKey) ?? {
+      held: false,
+      queue: [],
+    };
+    this.executionDomains.set(executionScopeKey, state);
+    return new Promise<PluginOperationAccountTransitionLease>((resolve, reject) => {
+      state.queue.push({
+        kind: "account-transition",
+        principal: Object.freeze({ ...principal }),
+        resolve,
+        reject,
+      });
       this.drainExecutionDomain(executionScopeKey, state);
     });
   }
@@ -567,6 +631,22 @@ export class PluginOperationGrantCoordinator {
         this.revokeDomain(domainKey, domain);
       }
     }
+    for (const [executionScopeKey, state] of this.executionDomains) {
+      const retained: PendingExecutionLease[] = [];
+      for (const request of state.queue) {
+        if (
+          request.kind === "operation" ||
+          request.principal.ownerPluginId !== ownerPluginId ||
+          request.principal.generationId !== generationId
+        ) {
+          retained.push(request);
+          continue;
+        }
+        request.reject(new Error("plugin operation generation is revoked"));
+      }
+      state.queue = retained;
+      if (!state.held) this.drainExecutionDomain(executionScopeKey, state);
+    }
   }
 
   revokeSession(appSessionId: string): void {
@@ -587,7 +667,11 @@ export class PluginOperationGrantCoordinator {
           retained.push(request);
           continue;
         }
-        if (request.signal && request.onAbort) {
+        if (
+          request.kind === "operation" &&
+          request.signal &&
+          request.onAbort
+        ) {
           request.signal.removeEventListener("abort", request.onAbort);
         }
         request.reject(new Error("plugin operation session is revoked"));
@@ -822,22 +906,56 @@ export class PluginOperationGrantCoordinator {
     if (state.held) return;
     while (state.queue.length > 0) {
       const request = state.queue[0]!;
-      const domain = this.domainRevisions.get(request.domainKey);
-      const principalRevocationReason =
-        this.principalRevocationReason(request.principal);
+      const domain = request.kind === "operation"
+        ? this.domainRevisions.get(request.domainKey)
+        : undefined;
+      const principalRevocationReason = request.kind === "operation"
+        ? this.principalRevocationReason(request.principal)
+        : undefined;
+      const transitionRevocationReason =
+        request.kind === "account-transition"
+          ? this.revocationCapacityExhausted
+            ? "plugin operation revocation capacity exhausted"
+            : this.revokedGenerations.has(
+                this.generationRevocationKey(
+                  request.principal.ownerPluginId,
+                  request.principal.generationId,
+                ),
+              )
+              ? "plugin operation generation is revoked"
+              : this.revokedSessions.has(request.principal.appSessionId)
+                ? "plugin operation session is revoked"
+                : undefined
+          : undefined;
       const invalidError =
-        principalRevocationReason
-          ? new Error(principalRevocationReason)
-          : !domain || domain.revoked
-            ? new Error("plugin operation domain is revoked")
-            : domain.poisoned
-              ? new Error("plugin operation domain is indeterminate")
-              : request.signal?.aborted
-                ? new PluginOperationExecutionLeaseAbortedError()
-                : undefined;
+        request.kind === "operation"
+          ? principalRevocationReason
+            ? new Error(principalRevocationReason)
+            : !domain || domain.revoked
+              ? new Error("plugin operation domain is revoked")
+              : domain.poisoned
+                ? new Error("plugin operation domain is indeterminate")
+                : request.signal?.aborted
+                  ? new PluginOperationExecutionLeaseAbortedError()
+                  : undefined
+          : transitionRevocationReason
+            ? new Error(transitionRevocationReason)
+            : this.poisonCapacityExhausted ||
+                this.poisonedOperationScopes.has(
+                  this.poisonScopeKey(
+                    request.principal.ownerPluginId,
+                    request.principal.accountScopeHash,
+                  ),
+                )
+              ? new Error("plugin operation account scope is indeterminate")
+              : undefined;
       if (!invalidError) break;
       state.queue.shift();
-      if (request.signal && request.onAbort) {
+      if (
+        request.kind === "operation" &&
+        request.signal &&
+        request.onAbort
+      ) {
         request.signal.removeEventListener("abort", request.onAbort);
       }
       request.reject(invalidError);
@@ -849,8 +967,14 @@ export class PluginOperationGrantCoordinator {
     }
     state.queue.shift();
     state.held = true;
-    state.heldDomainKey = first.domainKey;
-    this.resolveExecutionLease(executionScopeKey, state, first);
+    state.heldDomainKey = first.kind === "operation"
+      ? first.domainKey
+      : undefined;
+    if (first.kind === "operation") {
+      this.resolveExecutionLease(executionScopeKey, state, first);
+    } else {
+      this.resolveAccountTransitionLease(executionScopeKey, state, first);
+    }
   }
 
   private revokeDomain(
@@ -870,7 +994,10 @@ export class PluginOperationGrantCoordinator {
     }
     const retained: PendingExecutionLease[] = [];
     for (const request of state.queue) {
-      if (request.domainKey !== domainKey) {
+      if (
+        request.kind === "account-transition" ||
+        request.domainKey !== domainKey
+      ) {
         retained.push(request);
         continue;
       }
@@ -889,7 +1016,7 @@ export class PluginOperationGrantCoordinator {
   private resolveExecutionLease(
     executionScopeKey: string,
     state: ExecutionDomainState,
-    request: PendingExecutionLease,
+    request: PendingOperationExecutionLease,
   ): void {
     if (request.signal && request.onAbort) {
       request.signal.removeEventListener("abort", request.onAbort);
@@ -916,6 +1043,23 @@ export class PluginOperationGrantCoordinator {
         if (this.domainRevisions.get(request.domainKey)?.revoked) {
           this.domainRevisions.delete(request.domainKey);
         }
+        this.drainExecutionDomain(executionScopeKey, state);
+      },
+    }));
+  }
+
+  private resolveAccountTransitionLease(
+    executionScopeKey: string,
+    state: ExecutionDomainState,
+    request: PendingAccountTransitionLease,
+  ): void {
+    let released = false;
+    request.resolve(Object.freeze({
+      release: () => {
+        if (released) return;
+        released = true;
+        state.held = false;
+        state.heldDomainKey = undefined;
         this.drainExecutionDomain(executionScopeKey, state);
       },
     }));

@@ -384,6 +384,11 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
   });
 
   it("allows an app-only method (not model-visible) through the bypass", async () => {
+    const callDeclaredAppOnlyTool = vi.fn(
+      async (_method: string, payload: unknown) => ({
+        ok: payload,
+      }),
+    );
     const runtime = {
       listPluginManifests: () => [
         {
@@ -394,9 +399,7 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
           ]),
         },
       ],
-      callDeclaredAppOnlyTool: async (_method: string, payload: unknown) => ({
-        ok: payload,
-      }),
+      callDeclaredAppOnlyTool,
     } as any;
 
     await expect(
@@ -404,9 +407,20 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
         runtime,
         "meeting_stage_upload_begin",
         { chunk: 2 },
-        { origin: "ui", ownerPluginId: "meeting", userAction: true },
+        {
+          origin: "ui",
+          ownerPluginId: "meeting",
+          ownerGenerationId: "generation-exact",
+          userAction: true,
+        },
       ),
     ).resolves.toEqual({ ok: { chunk: 2 } });
+    expect(callDeclaredAppOnlyTool).toHaveBeenCalledWith(
+      "meeting_stage_upload_begin",
+      { chunk: 2 },
+      undefined,
+      "generation-exact",
+    );
   });
 });
 
