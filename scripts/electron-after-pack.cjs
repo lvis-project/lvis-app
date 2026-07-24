@@ -276,47 +276,69 @@ function assertNodePtyBinary(context) {
 }
 
 /**
- * better-sqlite3 (#1500 / E3) ships a native `better_sqlite3.node` addon that
- * the main process resolves unbundled from
- * `app.asar.unpacked/node_modules/better-sqlite3` (the package.json `asarUnpack`
- * glob). E3's cross-session FTS5 search index is its first runtime consumer, so
- * a prune/asarUnpack regression would brick search at runtime with an
- * `ERR_DLOPEN_FAILED` (or `bindings` failing to locate the addon inside the
- * asar). Assert presence + non-empty so the BUILD fails loudly instead. The
- * `require('bindings')(...)` resolver needs `bindings` + `file-uri-to-path`
- * unpacked alongside the addon (also in the asarUnpack list); it walks the
- * filesystem and cannot see paths inside `app.asar`. better-sqlite3 is compiled
- * per-Electron-ABI by the postinstall `electron-rebuild`, so presence — not an
- * ABI matrix — is the correct packaged invariant here.
+ * better-sqlite3 (#1500 / E3) ships a native addon that the main process
+ * resolves unbundled from `app.asar.unpacked/node_modules/better-sqlite3` (the
+ * package.json `asarUnpack` glob). E3's cross-session FTS5 search index is its
+ * first runtime consumer, so a prune/asarUnpack regression would brick search
+ * at runtime with an `ERR_DLOPEN_FAILED` (a `.node` cannot be dlopen'd from
+ * inside app.asar). Assert presence + non-empty so the BUILD fails loudly.
+ *
+ * better-sqlite3 13 is N-API (ABI-stable) and ships per-platform PREBUILDS at
+ * `prebuilds/<platform>-<arch>.node` — one file per target it supports — rather
+ * than a per-Electron-ABI `build/Release/better_sqlite3.node` compiled by
+ * postinstall `electron-rebuild`. Its runtime loader (lib/binding.js) picks the
+ * prebuild by platform+arch, so there is no `bindings`/`file-uri-to-path`
+ * resolver walk to keep unpacked anymore. Presence of THIS target's prebuild is
+ * the correct packaged invariant; the other 7 prebuilds are dead weight on this
+ * installer (~14 MB) and are pruned here so only the loaded one ships.
  */
 function assertBetterSqlite3Binary(context) {
+  const platform = context.electronPlatformName;
+  const win = platform === "win32";
+  const platformPrefix = platform === "darwin" ? "darwin" : win ? "win32" : "linux";
+  // electron-builder's `context.arch` is the numeric Arch enum (1=x64, 3=arm64).
+  // better-sqlite3 names its prebuilds by platform+arch (e.g. win32-x64.node).
+  const ARCH_DIR_BY_ENUM = { 1: "x64", 3: "arm64" };
+  const arch = ARCH_DIR_BY_ENUM[context.arch];
+  if (!arch) {
+    throw new Error(
+      `packaged better-sqlite3 prebuild: unsupported arch enum ${context.arch} for ${platform}`,
+    );
+  }
+  const targetFile = `${platformPrefix}-${arch}.node`;
+
   const resourcesDir = electronResourcesDir(context);
-  const addon = join(
+  const prebuildsDir = join(
     resourcesDir,
     "app.asar.unpacked",
     "node_modules",
     "better-sqlite3",
-    "build",
-    "Release",
-    "better_sqlite3.node",
+    "prebuilds",
   );
-  if (!existsSync(addon)) {
+  const prebuild = join(prebuildsDir, targetFile);
+  if (!existsSync(prebuild)) {
     throw new Error(
-      `packaged better-sqlite3 native addon missing: ${addon} (asarUnpack of node_modules/better-sqlite3/** drifted?)`,
+      `packaged better-sqlite3 prebuild missing: ${prebuild} (asarUnpack of node_modules/better-sqlite3/** drifted?)`,
     );
   }
-  if (statSync(addon).size === 0) {
-    throw new Error(`packaged better-sqlite3 native addon is empty: ${addon}`);
+  if (statSync(prebuild).size === 0) {
+    throw new Error(`packaged better-sqlite3 prebuild is empty: ${prebuild}`);
   }
-  // `bindings` (+ its `file-uri-to-path` dep) must be unpacked too — the
-  // resolver at better-sqlite3/lib/database.js walks the FS to find the addon.
-  for (const pkg of ["bindings", "file-uri-to-path"]) {
-    const pkgJson = join(resourcesDir, "app.asar.unpacked", "node_modules", pkg, "package.json");
-    if (!existsSync(pkgJson)) {
-      throw new Error(
-        `packaged better-sqlite3 resolver dep missing: ${pkgJson} (asarUnpack of node_modules/${pkg}/** drifted?)`,
-      );
+
+  // Prune every prebuild this target never loads. better-sqlite3 ships 8
+  // per-platform prebuilds; only `${targetFile}` is dlopen'd by the packed
+  // binary, so the other 7 (~14 MB) are dead weight on this installer.
+  if (existsSync(prebuildsDir)) {
+    for (const entry of readdirSync(prebuildsDir)) {
+      if (entry === targetFile) continue;
+      rmSync(join(prebuildsDir, entry), { recursive: true, force: true });
     }
+  }
+
+  // Re-assert the target survived the prune (a globbing/name drift must fail the
+  // build here, not brick search at runtime).
+  if (!existsSync(prebuild) || statSync(prebuild).size === 0) {
+    throw new Error(`packaged better-sqlite3 prebuild was pruned away: ${prebuild}`);
   }
 }
 

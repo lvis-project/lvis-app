@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Build
+
+- **`better-sqlite3` upgraded to 13 (N-API prebuilds).** v13 is N-API (ABI-stable) and ships per-platform prebuilds (`prebuilds/<platform>-<arch>.node`) instead of a per-Electron-ABI `build/Release/better_sqlite3.node` compiled by `electron-rebuild`. The postinstall native rebuild is now scoped to `node-pty` only, and the packaged-build asserts follow the binary to its prebuild path. The installer drops the `bindings`/`file-uri-to-path` resolver dependencies (no longer used) and prunes the 7 non-target prebuilds at pack time (~14 MB smaller). The Electron-ABI self-heal that used to rebuild `better-sqlite3` on load failure now fails fast with reinstall guidance, since a rebuild cannot fix a shipped prebuild.
+
 ## v0.5.9 — 2026-07-23
 
 Re-ships the v0.5.8 plugin-integrity fixes with a working Windows installer. Public tags remain unsigned.
