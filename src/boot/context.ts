@@ -69,6 +69,8 @@ import type { RationaleHostService } from "../tools/pipeline/rationale-host-serv
 import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
 import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
 import type { PluginBundleLifecycle } from "../plugins/plugin-bundle-lifecycle.js";
+import type { PluginOperationGrantCoordinator } from "../permissions/plugin-operation-grant.js";
+import type { PluginOperationIdentityProvider } from "../tools/invocation-services.js";
 
 type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
@@ -163,6 +165,8 @@ export class BootContext {
   declare hookRunner: HookRunner;
   declare scriptHookManager: ScriptHookManager;
   declare pluginBundleLifecycle: PluginBundleLifecycle | undefined;
+  declare pluginOperationGrants: PluginOperationGrantCoordinator;
+  declare pluginOperationIdentityProvider: PluginOperationIdentityProvider;
   declare requestPluginOperationGrant: (request: {
     pluginId: string;
     toolName: string;
@@ -278,6 +282,8 @@ const BOOT_CONTEXT_FIELDS = [
   "hookRunner",
   "scriptHookManager",
   "pluginBundleLifecycle",
+  "pluginOperationGrants",
+  "pluginOperationIdentityProvider",
   "requestPluginOperationGrant",
   "revokePluginOperationGeneration",
   "revokePluginOperationSession",

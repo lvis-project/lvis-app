@@ -462,8 +462,21 @@ export async function runToolInvocation(
           finalInput,
           operationOrigin,
         );
-        const hostContext = permissionContext?.pluginOperation;
+        const hostContext =
+          permissionContext?.pluginOperation ??
+          services.pluginOperationIdentityProvider(tool, sessionId);
         if (hostContext && tool.pluginId) {
+          if (
+            !tool.pluginGeneration ||
+            hostContext.generationId !== tool.pluginGeneration.generationId
+          ) {
+            throw new Error("host-derived operation generation does not match the resolved tool");
+          }
+          const appGrantRequired =
+            operationOrigin === "ui" || operationOrigin === "mcp-app";
+          if (hostContext.appGrantRequired !== appGrantRequired) {
+            throw new Error("host-derived operation grant policy does not match the effective origin");
+          }
           pluginOperationPrincipal = {
             ownerPluginId: tool.pluginId,
             ownerVersion: hostContext.ownerVersion,

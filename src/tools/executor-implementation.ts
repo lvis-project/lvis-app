@@ -46,6 +46,7 @@ import {
   type PluginOperationPrincipal,
 } from "../permissions/plugin-operation-grant.js";
 import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
+import type { PluginOperationIdentityProvider } from "./invocation-services.js";
 
 const log = createLogger("executor");
 /**
@@ -102,6 +103,7 @@ export class ToolExecutor {
   private readonly auditWriter: AuditWriter;
   private readonly pluginOperationGrants: PluginOperationGrantCoordinator;
   private readonly pluginGenerationAccessProvider: () => PluginRuntimeGenerationAccess | undefined;
+  private readonly pluginOperationIdentityProvider: PluginOperationIdentityProvider;
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -116,6 +118,7 @@ export class ToolExecutor {
     workspaceRootLifecycleProvider?: () => PermissionDirectoryLifecycle | undefined,
     pluginOperationGrants?: PluginOperationGrantCoordinator,
     pluginGenerationAccessProvider?: () => PluginRuntimeGenerationAccess | undefined,
+    pluginOperationIdentityProvider?: PluginOperationIdentityProvider,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -129,6 +132,8 @@ export class ToolExecutor {
     this.workspaceRootLifecycleProvider = workspaceRootLifecycleProvider ?? (() => undefined);
     this.pluginOperationGrants = pluginOperationGrants ?? new PluginOperationGrantCoordinator();
     this.pluginGenerationAccessProvider = pluginGenerationAccessProvider ?? (() => undefined);
+    this.pluginOperationIdentityProvider =
+      pluginOperationIdentityProvider ?? (() => undefined);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
     this.auditWriter = new AuditWriter(
       this.auditLogger,
@@ -558,6 +563,7 @@ export class ToolExecutor {
         tryUserApprovalMemorySkip: this.tryUserApprovalMemorySkip.bind(this),
         pluginOperationGrants: this.pluginOperationGrants,
         pluginGenerationAccessProvider: this.pluginGenerationAccessProvider,
+        pluginOperationIdentityProvider: this.pluginOperationIdentityProvider,
       },
       toolUse,
       groupId,
