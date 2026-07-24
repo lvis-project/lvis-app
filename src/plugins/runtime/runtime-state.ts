@@ -103,6 +103,7 @@ export abstract class PluginRuntimeState {
     manifest: PluginManifest,
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
+    installPluginId: string | null,
   ) => PluginHostApi;
   protected readonly deploymentGuard?: PluginDeploymentGuard;
   protected readonly installReceiptCacheRoot?: string;
@@ -360,6 +361,7 @@ export abstract class PluginRuntimeState {
     manifest: PluginManifest,
     pluginDataDir: string,
     hostEffects?: HostApiGenerationScope,
+    installPluginId: string | null = this.requirePluginInstallClaim(pluginId),
   ): {
     hostApi: PluginHostApi;
     disposers: Array<() => void>;
@@ -431,6 +433,7 @@ export abstract class PluginRuntimeState {
         manifest,
         pluginDataDir,
         incarnation,
+        installPluginId,
       );
       const hostApi = hostEffects ? hostEffects.wrapHostApi(rawHostApi) : rawHostApi;
       // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
@@ -579,6 +582,13 @@ export abstract class PluginRuntimeState {
     this.assertPluginIdentityNamespace([
       { pluginId: normalizedPluginId, alias: normalizedAlias },
     ]);
+    this.publishValidatedPluginInstallAlias(normalizedPluginId, normalizedAlias);
+  }
+
+  private publishValidatedPluginInstallAlias(
+    normalizedPluginId: string,
+    normalizedAlias: string | undefined,
+  ): void {
     this.knownInstallClaims.set(normalizedPluginId, normalizedAlias ?? null);
     if (!normalizedAlias || normalizedAlias === normalizedPluginId) return;
     let aliases = this.knownInstallAliases.get(normalizedPluginId);
@@ -760,6 +770,26 @@ export abstract class PluginRuntimeState {
 
   protected getPluginInstallClaim(pluginId: string): string | null | undefined {
     return this.knownInstallClaims.get(pluginId);
+  }
+
+  protected requirePluginInstallClaim(pluginId: string): string | null {
+    const installClaim = this.getPluginInstallClaim(this.resolveKnownPluginId(pluginId));
+    if (installClaim === undefined) {
+      throw new Error(`Plugin install provenance unknown: ${pluginId}`);
+    }
+    return installClaim;
+  }
+
+  protected validatePreparedInstallIdentity(pluginId: string, installId: string): string {
+    const normalized = installId.trim();
+    if (!normalized) {
+      throw new Error(`prepared artifact install identity missing for '${pluginId}'`);
+    }
+    this.assertPluginIdentityNamespace(
+      [{ pluginId, alias: normalized }],
+      [normalized],
+    );
+    return normalized;
   }
 
   protected assertPluginManifestIdentity(
@@ -1154,6 +1184,7 @@ export abstract class PluginRuntimeState {
     pluginId: string,
     pluginRoot: string,
     activationId: string,
+    receiptPluginId: string = pluginId,
   ): Promise<string> {
     this.requireGenerationLifecycle("materialize runtime root");
     if (!this.installReceiptCacheRoot) {
@@ -1161,7 +1192,7 @@ export abstract class PluginRuntimeState {
     }
     const manifestRaw = await readFile(resolve(pluginRoot, "plugin.json"), "utf8");
     const receiptRaw = await readFile(
-      installReceiptPath(this.installReceiptCacheRoot, pluginId),
+      installReceiptPath(this.installReceiptCacheRoot, receiptPluginId),
       "utf8",
     );
     const artifactGenerationId = createHash("sha256")
@@ -1180,6 +1211,7 @@ export abstract class PluginRuntimeState {
       pluginId,
       generationId,
       receiptRaw,
+      receiptPluginId,
     );
   }
 
@@ -1226,6 +1258,7 @@ export abstract class PluginRuntimeState {
     if (!plugin) return undefined;
     return Object.freeze({
       activationId: plugin.activationId,
+      installId: this.requirePluginInstallClaim(pluginId),
       manifest: plugin.manifest,
       pluginRoot: plugin.pluginRoot,
       instance: plugin.instance,
@@ -1243,6 +1276,13 @@ export abstract class PluginRuntimeState {
 
   prepareRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): PreparedPluginRuntimeGenerationPublication {
     const pluginId = runtime.manifest.id;
+    if (runtime.installId === undefined) {
+      throw new Error(`Plugin runtime generation install provenance missing: ${pluginId}`);
+    }
+    this.assertPluginIdentityNamespace(
+      [{ pluginId, alias: runtime.installId ?? undefined }],
+      runtime.installId === null ? [] : [runtime.installId],
+    );
     const nextMethods = new Map(this.methodMap);
     for (const [toolName, entry] of nextMethods) {
       if (entry.pluginId === pluginId) nextMethods.delete(toolName);
@@ -1282,6 +1322,10 @@ export abstract class PluginRuntimeState {
         if (published) return;
         this.plugins.get(pluginId)?.hostEffects?.supersede();
         publishHostEffects?.();
+        this.publishValidatedPluginInstallAlias(
+          pluginId,
+          runtime.installId ?? undefined,
+        );
         this.methodMap = nextMethods;
         this.plugins = nextPlugins;
         this.disposers = nextDisposers;

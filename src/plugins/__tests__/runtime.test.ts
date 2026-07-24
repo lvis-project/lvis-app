@@ -5,6 +5,7 @@ import { join, relative } from "node:path";
 import { PluginRuntime } from "../runtime.js";
 import { PluginPhase } from "../lifecycle-log.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
+import { uninstallPluginWithLifecycle } from "../uninstall-lifecycle.js";
 import { mkdtempSync } from "node:fs";
 import {
   makeTestPluginEntrySource,
@@ -79,6 +80,35 @@ describe("PluginRuntime.disable", () => {
       deploymentGuard: guard,
     });
   }
+
+  it("deactivates a live generation when durable uninstall is already missing", async () => {
+    const pluginId = "p-idempotent-uninstall";
+    const toolName = "p_idempotent_uninstall_hello";
+    const manifestPath = await writeFakePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await expect(runtime.call(toolName)).resolves.toBe(`hi-${pluginId}`);
+
+    await expect(uninstallPluginWithLifecycle(pluginId, {
+      pluginRuntime: runtime,
+      pluginMarketplace: {
+        uninstall: vi.fn(async () => {
+          throw new Error(`Plugin not installed: ${pluginId}`);
+        }),
+      },
+    })).resolves.toEqual({ pluginId, uninstalled: true });
+
+    expect(runtime.listPluginIds()).not.toContain(pluginId);
+    await expect(runtime.call(toolName)).rejects.toThrow(/not found/);
+  });
 
   async function writePluginWithEntry(
     id: string,

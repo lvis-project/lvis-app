@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PluginRuntime } from "../index.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
 
 const pluginId = "session-bound-auth";
@@ -19,7 +19,11 @@ const manifest: PluginManifest = {
 };
 
 function runtime(): PluginRuntime {
-  const instance = new PluginRuntime({ hostRoot: "/tmp", manifestPaths: [] });
+  const instance = new PluginRuntime({
+    hostRoot: "/tmp",
+    manifestPaths: [],
+    createHostApi: createNoopHostApiForTests,
+  });
   instance.setGenerationAccess({
     getActive: vi.fn(() => ({
       pluginId,

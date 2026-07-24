@@ -188,6 +188,7 @@ export function createHostApiFactory(
   manifest: PluginManifest,
   pluginDataDir: string,
   incarnation: PluginHostApiIncarnation,
+  installPluginId: string | null,
 ) => PluginHostApi {
   const {
     getPluginRuntime,
@@ -216,15 +217,21 @@ export function createHostApiFactory(
     manifest: PluginManifest,
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
+    installPluginId: string | null,
   ): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
-    const installPluginId = pluginRuntime.resolvePluginInstallId(pluginId);
+    const resolvedInstallPluginId =
+      installPluginId === undefined
+        ? pluginRuntime.resolvePluginInstallId(pluginId)
+        : installPluginId;
     const getCurrentRegistryEntry = () =>
-      installPluginId === null ? undefined : getRegistryEntry(installPluginId);
+      resolvedInstallPluginId === null
+        ? undefined
+        : getRegistryEntry(resolvedInstallPluginId);
     const hostIncarnation = incarnation;
     const hostEffects = hostIncarnation.generationScope;
     const registerOwnedDisposer = (dispose: () => void): (() => void) => {
