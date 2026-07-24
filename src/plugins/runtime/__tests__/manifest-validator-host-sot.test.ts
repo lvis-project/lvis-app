@@ -811,7 +811,12 @@ describe("colocated operation policy cross-field contract", () => {
           "lvisai/operationPolicy": {
             discriminant: "operation",
             operations: {
-              status: { kind: "read", minimumRisk: "read", appVisible: true },
+              status: {
+                kind: "read",
+                minimumRisk: "read",
+                appVisible: true,
+                successfulResultStatuses: ["success"],
+              },
             },
           },
         },
@@ -884,5 +889,17 @@ describe("colocated operation policy cross-field contract", () => {
     const modelOnly = structuredClone(governed);
     modelOnly.tools[1]._meta.ui.visibility = ["model"];
     await expect(parse(modelOnly)).rejects.toThrow(/cannot expand/);
+  });
+
+  it("rejects read-result success statuses on a write operation", async () => {
+    const invalid = structuredClone(governed);
+    (
+      invalid.tools[1]._meta["lvisai/operationPolicy"].operations.save as {
+        successfulResultStatuses?: string[];
+      }
+    ).successfulResultStatuses = ["success"];
+    await expect(parse(invalid)).rejects.toThrow(
+      /valid only for a read operation/,
+    );
   });
 });

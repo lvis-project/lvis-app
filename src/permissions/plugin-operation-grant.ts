@@ -192,6 +192,21 @@ export class PluginOperationGrantCoordinator {
     return revision;
   }
 
+  /**
+   * Mark the start of a governed read before plugin code executes.
+   *
+   * A new attempt supersedes every older snapshot or grant that could satisfy
+   * a write's read prerequisite, even if the attempt later fails, is aborted,
+   * or returns a structured non-success result.
+   */
+  beginRead(key: PluginReadSnapshotKey, domainKey: string): void {
+    this.assertPrincipalNotRevoked(key);
+    this.requireDomain(domainKey, key);
+    const keyString = snapshotKey(key);
+    this.snapshots.delete(keyString);
+    this.latestReadSequences.set(keyString, ++this.nextReadSequence);
+  }
+
   latestRequiredRead(
     principal: PluginOperationPrincipal,
     readTool: string,
@@ -210,7 +225,15 @@ export class PluginOperationGrantCoordinator {
       !newest ||
       newest.domainKey !== domainKey ||
       newest.domainRevision !== domain.revision ||
-      this.now() - newest.recordedAt > maxAgeMs
+      this.now() - newest.recordedAt > maxAgeMs ||
+      readOperations.some((readOperation) => {
+        const latestSequence = this.latestReadSequences.get(snapshotKey({
+          ...principal,
+          readTool,
+          readOperation,
+        }));
+        return latestSequence !== undefined && latestSequence > newest.sequence;
+      })
     ) {
       return undefined;
     }
@@ -596,7 +619,16 @@ export class PluginOperationGrantCoordinator {
       newest.snapshot.revision !== expectedRevision ||
       newest.snapshot.domainKey !== domainKey ||
       newest.snapshot.domainRevision !== domainRevision ||
-      this.now() - newest.snapshot.recordedAt > requiredRead.maxAgeMs
+      this.now() - newest.snapshot.recordedAt > requiredRead.maxAgeMs ||
+      requiredRead.readOperations.some((readOperation) => {
+        const latestSequence = this.latestReadSequences.get(snapshotKey({
+          ...principal,
+          readTool: requiredRead.readTool,
+          readOperation,
+        }));
+        return latestSequence !== undefined &&
+          latestSequence > newest.snapshot.sequence;
+      })
     ) {
       return undefined;
     }

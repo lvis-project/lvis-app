@@ -67,27 +67,16 @@ const log = createLogger("executor");
 
 type AuditToolCall = (...args: Parameters<AuditWriter["auditToolCall"]>) => Promise<void>;
 
-/**
- * A plugin may deliberately return a structured domain envelope for a failed,
- * degraded, or uncertain read without throwing. Such a result is still useful
- * to the caller, but it must never mint the Host freshness receipt required by
- * a later governed write.
- */
-function isUnsuccessfulPluginDomainEnvelope(value: unknown): boolean {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const envelope = value as Record<string, unknown>;
-  if (
-    typeof envelope.operation !== "string" ||
-    !Array.isArray(envelope.warnings) ||
-    envelope.providerEvidence === null ||
-    typeof envelope.providerEvidence !== "object" ||
-    Array.isArray(envelope.providerEvidence)
-  ) {
+function satisfiesDeclaredReadResultStatus(
+  value: unknown,
+  successfulStatuses: readonly string[] | undefined,
+): boolean {
+  if (successfulStatuses === undefined) return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  return envelope.status === "error" ||
-    envelope.status === "degraded" ||
-    envelope.status === "uncertain";
+  const status = (value as Record<string, unknown>).status;
+  return typeof status === "string" && successfulStatuses.includes(status);
 }
 
 export interface ExecutionStageContext {
@@ -304,6 +293,17 @@ export async function executeAuthorizedToolInvocation(
   let indeterminateAuditPersisted = false;
   let interruptionReason: "ceiling" | "user-abort" | undefined;
   try {
+    if (
+      resolvedPluginOperation?.rule.kind === "read" &&
+      pluginOperationPrincipal &&
+      operationExecutionDomain
+    ) {
+      services.pluginOperationGrants.beginRead({
+        ...pluginOperationPrincipal,
+        readTool: toolUse.name,
+        readOperation: resolvedPluginOperation.operation,
+      }, operationExecutionDomain);
+    }
     if (rationaleResumeContext) {
       if (!rationaleResumeContext.authorized) {
         return returnRationaleResumeBlock(
@@ -700,7 +700,10 @@ export async function executeAuthorizedToolInvocation(
       operationExecutionDomain!,
     ) &&
     !effectSummary.hasMutatingEffect &&
-    !isUnsuccessfulPluginDomainEnvelope(rawResult)
+    satisfiesDeclaredReadResultStatus(
+      rawResult,
+      resolvedPluginOperation.rule.successfulResultStatuses,
+    )
   ) {
     services.pluginOperationGrants.recordRead({
       ...pluginOperationPrincipal,
