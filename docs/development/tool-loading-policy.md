@@ -6,23 +6,33 @@
 > §9, §14 and the implementation design in
 > `docs/development/tool-level-deferral-design.md`.
 >
-> The keyword path below is deprecated keyword-to-Tool-schema preload, despite
-> the legacy internal name `SkillKeyword.skillId`. It is separate from bundled
-> `manifest.skills` instruction discovery and never invokes a Tool. Owner:
-> `lvis-app` plugin runtime. Remove it after every supported plugin has migrated
-> to bundled `manifest.skills` and no active manifest declares `keywords`.
+> Keyword routing was **retired** in SDK v12 (2026-07-24, lvis-plugin-sdk#229).
+> `manifest.keywords` is hard-rejected at manifest load
+> (`src/plugins/runtime/manifest-validation.ts`); no keyword path promotes a
+> Tool, and the only callable surface is manifest `Tool` objects. Bundled
+> instruction discovery belongs to `manifest.skills` and is governed by its own
+> symmetric budget — see `docs/development/skill-loading-policy.md`.
 
 ## Decision
 
-LVIS uses a count-based hybrid loading policy. Plugin activation makes a
-plugin's tools eligible for model exposure, but the exposure mode depends on the
-eligible tool count:
+LVIS uses a **budget-based hybrid loading policy**. Plugin activation makes a
+plugin's tools eligible for model exposure; the exposure mode depends on the
+estimated token cost of exposing them eagerly:
 
-- Below `EAGER_TOOL_EXPOSURE_CEILING` (`200`): expose active plugin/MCP tool
-  schemas eagerly. This avoids extra `tool_search` discovery rounds, which were
-  measured to dominate TPM cost in #1176.
-- At or above the ceiling: switch to tool-level deferral. The model sees a
+- Below the eager budget: expose active plugin/MCP tool schemas eagerly. This
+  avoids extra `tool_search` discovery rounds, which were measured to dominate
+  TPM cost in #1176 — for a small surface, eager is *cheaper* than paying the
+  per-round discovery tax.
+- At or above the budget: switch to tool-level deferral. The model sees a
   compact catalog and promotes only the selected tools needed for the turn.
+
+The budget is measured in **tokens**, not raw tool count. The MCP "Tools Tax"
+(eager schema injection, ~10k–60k tokens/turn in multi-server deployments) is a
+token cost, so a few very large schemas can exceed the budget while many tiny
+schemas do not. `EAGER_TOOL_EXPOSURE_CEILING` (200) is retained as a cheap count
+pre-filter — a hard upper bound that trips deferral without estimating — but the
+authoritative gate is the estimated eager tool-schema token total against
+`EAGER_TOOL_EXPOSURE_TOKEN_BUDGET` (see §7).
 
 The canonical loading model is:
 
@@ -35,9 +45,9 @@ The canonical loading model is:
 3. **Catalogued/deferred**: when the eligible count reaches the ceiling, active
    plugin/MCP tools not yet loaded are listed as compact `{name, description}`
    candidates in the system prompt.
-4. **Loaded deferred**: in deferral mode, only builtins/meta-tools,
-   keyword-preloaded tools, explicitly promoted tools, and current-scope
-   carried-forward tools are sent as full `tools[]` schemas to the provider.
+4. **Loaded deferred**: in deferral mode, only builtins/meta-tools, explicitly
+   promoted tools (via `tool_search`), and current-scope carried-forward tools
+   are sent as full `tools[]` schemas to the provider.
 
 User-inactive plugins are excluded from provider `tools[]`, `<tool-catalog>`,
 and `request_plugin`, but stay runtime-callable through host/UI execution paths.
@@ -62,6 +72,20 @@ exposure must never remove a tool from the registry or bypass permission checks.
   substitute for a small tool surface. Cache eligibility depends on stable
   prefixes and does not make large `tools[]` payloads safe under TPM pressure.
   - `https://developers.openai.com/api/docs/guides/prompt-caching`
+- Anthropic Agent Skills establish **progressive disclosure** as the discovery
+  pattern: at startup only each skill's name + description load (a few dozen
+  tokens each); the full `SKILL.md` body loads only when a task matches, and
+  bundled resources load on demand. The always-present metadata is a fixed cost,
+  so it must be bounded — the same discipline this policy applies to tools is
+  applied to skills in `docs/development/skill-loading-policy.md`.
+  - `https://www.anthropic.com/news/skills`, `https://agentskills.io`
+- Dynamic-toolset / "Tools Tax" reports converge on the same conclusion the
+  local #1176 evidence reached: eager schema injection is a per-turn *token*
+  overhead (~10k–60k tokens in multi-server MCP deployments), paid on every
+  round, and just-in-time discovery keeps that cost roughly constant as a
+  catalog scales from tens to hundreds of tools. Semantic (embedding) tool
+  search reports ~97% hit-rate at K=3; LVIS uses lexical scoring instead
+  (cross-vendor, no embedding infrastructure) — embeddings remain future work.
 
 ## Local Evidence
 
@@ -118,11 +142,8 @@ Tools may enter `tools[]` only through one of these paths:
 
 - Builtin/meta tools required for the loop, such as `request_plugin` and
   `tool_search`.
-- Eager full-schema exposure for all active plugin/MCP tools when
-  `eligibleCount < EAGER_TOOL_EXPOSURE_CEILING`.
-- Deprecated Tool-schema preloading from the legacy-named
-  `SkillKeyword.skillId` when the owning plugin is in scope and deferral is
-  active.
+- Eager full-schema exposure for all active plugin/MCP tools when the eager
+  token budget (and the count pre-filter) is not exceeded.
 - `tool_search` promotion from the current compact catalog.
 - Carry-forward from the previous turn, clamped to the current active plugin/MCP
   scope.
@@ -141,7 +162,6 @@ selected subset**, not whole plugin.
 Default promotion should be conservative:
 
 - exact tool-name match: load the matching tool
-- strong keyword match: load the Tool schema named by the legacy `skillId`
 - broad/natural-language query: score candidates and load only the top few
 - explicit multi-tool intent: load a small group if the group is justified
 
@@ -178,13 +198,22 @@ record:
 TPM protection must not rely on auto-compact alone. Compacting history does not
 shrink the active tool schema set.
 
-### 7. Count-Based Deferral Gate
+### 7. Budget-Based Deferral Gate
 
-There is no `experimental.toolDeferral` runtime flag. The single gate is:
+There is no `experimental.toolDeferral` runtime flag. Deferral trips when
+**either** bound is exceeded:
 
 ```text
-eligibleActivePluginAndMcpToolCount >= EAGER_TOOL_EXPOSURE_CEILING
+eligibleActivePluginAndMcpToolCount  >= EAGER_TOOL_EXPOSURE_CEILING       // cheap count pre-filter
+OR estimatedEagerToolSchemaTokens    >= EAGER_TOOL_EXPOSURE_TOKEN_BUDGET   // authoritative token gate
 ```
+
+The token estimate sums a per-tool schema-token estimate over the eligible eager
+set (the same schemas §6 projection records). The count pre-filter is a hard
+upper bound so a pathological catalog can never be exposed eagerly even when
+token estimation is unavailable; the token gate is what actually protects TPM,
+because a few large schemas cost more than many small ones. Both are pure
+functions of the eligible set — no runtime flag, no settings branch.
 
 Required invariants:
 
@@ -195,22 +224,23 @@ Required invariants:
 - Catalog matching uses bounded scoring/top-N instead of broad substring
   promotion.
 - Carry-forward tools are clamped when a plugin leaves scope.
-- Audit/trace metrics expose deferred-vs-loaded ratios.
+- Audit/trace metrics expose deferred-vs-loaded ratios and the token estimate
+  that drove the decision, alongside the count.
 
 Keeping a settings-based alternate path would violate the no-fallback-code rule.
 The eager and deferred modes are not legacy fallbacks; they are both branches of
-the single count-based policy.
+the single budget-based policy.
 
 ## Implementation Direction
 
-The current implementation uses deprecated host-side keyword-to-Tool-schema
-preload plus `tool_search` to promote individual tools or small tool subsets.
-Do not expand the keyword surface; bundled instruction discovery belongs to
-`manifest.skills`.
+Tool discovery is `tool_search` promotion of individual tools or small tool
+subsets from the compact catalog. There is no keyword preload path (retired in
+SDK v12); bundled instruction discovery belongs to `manifest.skills`
+(`docs/development/skill-loading-policy.md`).
 
 Do not switch the app to OpenAI-only hosted tool search as the first fix. LVIS
-currently routes tool schemas through the cross-vendor Vercel AI SDK provider
-adapter, so the stable implementation surface is client-side schema deferral in
+routes tool schemas through the cross-vendor Vercel AI SDK provider adapter, so
+the stable implementation surface is client-side schema deferral in
 `ToolRegistry`, `ConversationLoop`, and `SystemPromptBuilder`.
 
 The long-term model should add manifest-level grouping, for example:

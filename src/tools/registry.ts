@@ -525,8 +525,8 @@ export class ToolRegistry {
    *
    * Builtins/meta-tools load when `includeBuiltins` is set. Plugin/MCP tools
    * load individually only when their name is in `scope.activeToolNames`
-   * (keyword-preloaded, `tool_search`-promoted, carried forward in current
-   * scope, or explicitly allowlisted by a sub-agent/routine/headless caller).
+   * (`tool_search`-promoted, carried forward in current scope, or explicitly
+   * allowlisted by a sub-agent/routine/headless caller).
    * Everything else is deferred to {@link getToolCatalogForScope}.
    *
    * Deny rules AND MCP Apps model-visibility apply first (§6.3 Layer 1 + the
