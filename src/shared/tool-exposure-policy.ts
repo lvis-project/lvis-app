@@ -32,9 +32,10 @@ export const EAGER_TOOL_EXPOSURE_CEILING = 200;
  * `EAGER_TOOL_EXPOSURE_CEILING`. This budget catches that case; the count
  * ceiling remains a cheap hard upper bound.
  *
- * Calibrated to sit far above the current common surface (largest single plugin
- * `agent-hub` ≈ 43 tools ≈ ~13k schema tokens; several active plugins ≈ 30–40k)
- * so it never re-triggers the #1176 discovery-tax regression, while still
+ * Calibrated to sit far above the current common surface (the largest single
+ * plugin today ≈ 43 tools ≈ ~13k schema tokens; several active plugins ≈
+ * 30–40k) so it never re-triggers the #1176 discovery-tax regression, while
+ * still
  * tripping for genuinely TPM-threatening payloads (≈200 average schemas, or
  * fewer large ones). Measured with `estimateTokens(JSON.stringify({ tools }))`
  * over the eligible active-plugin + in-scope MCP schemas — the same payload the
