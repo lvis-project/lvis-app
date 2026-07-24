@@ -88,15 +88,45 @@ policy §6) records skill-catalog tokens alongside tool-schema tokens so the
 combined system-prompt cost is visible. The existing entry cap is retained as a
 cheap pre-filter; the token budget is the authoritative bound.
 
-### 3. Over-Budget Selection Is Ranked, Not Truncated
+### 3. Over-Budget Selection Is Deterministic; Query-Relevance Stays Reactive
 
-When the in-scope catalog exceeds the budget, entries are selected by
-**relevance**, not alphabetical order + hard cut. Ranking reuses the lexical
-scoring already used by `tool_search` (exact-name, prefix, token, description
-matches; short tokens ignored) against the turn's query, then falls back to a
-stable order for ties. Overflow beyond the budget is reachable through
-`skill_list` (enumerate-then-load), so nothing becomes unreachable — it is
-deferred, exactly like a deferred Tool.
+**Decision (reference-backed): the resident catalog is NOT re-ranked in place by
+the turn query.** When the in-scope catalog exceeds the budget, entries are kept
+by a deterministic priority — user skills first, then plugin skills, alphabetical
+within each band — and the overflow is reachable through `skill_list`
+(enumerate-then-load). Nothing becomes unreachable; it is deferred exactly like a
+deferred Tool. Query-relevance selection lives where the reference agents put it:
+the **reactive** path — the model narrows by calling `skill_load` (or, for Tools,
+`tool_search`, which already lexically scores against the query it is handed),
+not by the host re-ordering an always-present catalog.
+
+Why not host-side query pre-ranking of the resident catalog (surveyed Codex,
+Copilot, Claude Code, OpenCode, Goose):
+
+- **No precedent for lexical in-place re-ranking.** Claude Code, Codex, and the
+  mainstream OSS agents (OpenCode, Cline, Aider, Continue) present a bounded
+  catalog in a stable order and let the model decide; query scoring happens only
+  in a model-invoked search step. Goose's closest analogue (opt-in vector
+  *subset retrieval*, not in-place ranking) was removed as "painfully slow"
+  (block/goose#6250). Only Copilot pre-selects by query, and it uses embedding
+  semantics + candidate *promotion*, not lexical re-ordering.
+- **Prompt-cache stable prefix.** LVIS is Claude-backed. Re-ordering the resident
+  catalog every turn changes the cached prefix and invalidates KV/prompt caching.
+  Anthropic's tool-search guidance keeps the prefix untouched precisely to
+  preserve caching, and Copilot bypasses its own catalog re-ordering for
+  Anthropic-backed models for the same reason.
+- **Lexical ranking hides.** A lexical pre-rank can drop a skill the model would
+  have picked (synonym/paraphrase miss) — the reason Copilot reached for
+  embeddings. The reactive `skill_load`/`tool_search` seam has no such failure
+  mode: the model chooses.
+
+Because the catalog is already plugin-scoped (§1) and token-budgeted (§2), the
+always-present set stays below the size where catalog degradation is reported to
+bite (~100+ resident tools). If a future need arises, the only cache-safe shape
+is a **semantic** promotion block placed *after* the stable cached prefix (the
+Copilot-on-Anthropic pattern), or a shared semantic extension of the reactive
+`tool_search`/`skill_load` scorer — never an in-place re-order of the resident
+catalog. This is shared future work with the tool side, not a gap in this policy.
 
 ### 4. Bodies Stay Turn-Scoped And Gated
 
