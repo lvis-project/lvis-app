@@ -722,7 +722,7 @@ lvis-app/plugins/installed/{plugin-id}/
    - `stop()` 호출
    - method handler 제거
    - 플러그인이 등록한 disposer 들을 flush
-   - keywordEngine / toolRegistry / conversationLoop 의 `onDisable` 콜백 호출
+   - toolRegistry / conversationLoop 의 `onDisable` 콜백 호출
    - `registry.json` 원자적 갱신
 3. `managed` 플러그인은 `PluginDeploymentGuard` 가 user-initiated disable 을 차단합니다.
 

@@ -385,11 +385,11 @@ describe("PluginOperationGrantCoordinator", () => {
     }, grantDomain);
     coordinator.poisonDomain(grantDomain);
 
-    coordinator.recordRead({
+    expect(() => coordinator.recordRead({
       ...principal,
       readTool: requiredRead.readTool,
       readOperation: "today",
-    }, grantDomain);
+    }, grantDomain)).toThrow("plugin operation domain is indeterminate");
 
     expect(
       coordinator.latestRequiredRead(
@@ -400,6 +400,66 @@ describe("PluginOperationGrantCoordinator", () => {
         grantDomain,
       ),
     ).toBeUndefined();
+  });
+
+  it("rejects issued, future, and queued operations after domain poison", async () => {
+    const coordinator = new PluginOperationGrantCoordinator(() => 1_000);
+    const directBinding = {
+      ...principal,
+      toolName: "ep_parking_write",
+      operation: "reserve",
+      intentHash: "direct-write",
+      readRevision: null,
+      expiresAt: 2_000,
+    };
+    const issuedBeforePoison = coordinator.issue(
+      directBinding,
+      grantDomain,
+    );
+    const holder = await coordinator.acquireExecutionLease(
+      grantDomain,
+      "write",
+      principal,
+    );
+    const queued = coordinator.acquireExecutionLease(
+      grantDomain,
+      "write",
+      principal,
+    );
+
+    coordinator.poisonDomain(grantDomain);
+
+    expect(() => coordinator.issue(
+      { ...directBinding, intentHash: "future-write" },
+      grantDomain,
+    )).toThrow("plugin operation domain is indeterminate");
+    expect(() =>
+      coordinator.assertExecutionAuthorized(principal, grantDomain)
+    ).toThrow("plugin operation domain is indeterminate");
+
+    holder.release();
+    await expect(queued).rejects.toThrow(
+      "plugin operation domain is indeterminate",
+    );
+    expect(coordinator.consume(
+      issuedBeforePoison.token,
+      {
+        ...principal,
+        toolName: directBinding.toolName,
+        operation: directBinding.operation,
+        intentHash: directBinding.intentHash,
+        requiresRead: false,
+      },
+      grantDomain,
+    )).toMatchObject({
+      ok: false,
+      reason: "operation grant domain is indeterminate",
+    });
+    await expect(coordinator.acquireExecutionLease(
+      grantDomain,
+      "write",
+      principal,
+    )).rejects.toThrow("plugin operation domain is indeterminate");
   });
 
   it("burns before comparison so a mismatch cannot be retried", () => {

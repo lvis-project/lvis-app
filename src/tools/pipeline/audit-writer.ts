@@ -35,6 +35,11 @@ import {
 
 const log = createLogger("executor");
 
+export interface LifecycleDispatchObservation {
+  status: "unwired" | "no-match" | "executed" | "uncertain";
+  result?: HookDispatchResult;
+}
+
 export class AuditWriter {
   constructor(
     private readonly auditLogger: AuditLogger,
@@ -56,18 +61,27 @@ export class AuditWriter {
     sessionId: string | undefined,
     context: ToolPermissionContext,
     payload: LifecycleEventPayload,
-  ): Promise<HookDispatchResult | undefined> {
-    if (!this.scriptHookManager) return undefined;
+  ): Promise<LifecycleDispatchObservation> {
+    if (!this.scriptHookManager) return { status: "unwired" };
     try {
-      return await this.scriptHookManager.runLifecycleEvent(
+      const result = await this.scriptHookManager.runLifecycleEvent(
         event,
         sessionId ?? "unknown",
         context.trustOrigin as HookTrustOrigin,
         payload,
       );
+      if (result.results.length > 0) {
+        return { status: "executed", result };
+      }
+      if (result.reason === "no matching lifecycle hooks") {
+        return { status: "no-match", result };
+      }
+      // A wired manager returned no execution evidence and did not positively
+      // identify the no-match case. Treat that boundary as indeterminate.
+      return { status: "uncertain", result };
     } catch {
       // Defensive: observe-only events must never break a tool call.
-      return undefined;
+      return { status: "uncertain" };
     }
   }
 

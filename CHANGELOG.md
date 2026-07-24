@@ -18,7 +18,7 @@ unsigned.
   read attempt invalidates older freshness receipts and grants.
 - **Effect-capable post hooks cannot race read freshness.** Governed-operation
   leases now cover the complete post-hook boundary. Any executed post hook
-  leaves the domain indeterminate until its generation/account/session identity
+  leaves the domain indeterminate until its generation/account identity
   is retired, so detached descendants cannot race a later read-authorized write.
 - **Retired contracts stay retired.** The Host-owned manifest and public API do
   not restore keyword dispatch, UI-action tool aliases, or plugin-specific Host
