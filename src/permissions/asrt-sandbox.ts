@@ -653,6 +653,14 @@ export function getDefaultSensitiveWriteDenyPaths(userDataDir?: string): string[
     "/var/spool/cron/crontabs", // Linux (Debian/Ubuntu) user crontab spool
     "/var/spool/cron", // Linux (RHEL/Fedora) user crontab spool
     "/etc/cron.d", // system cron drop-in dir
+    // ── ASRT vendored srt-win backend dir (re-exec vector) ──
+    // A sandboxed process must never be able to WRITE/overwrite the broker binary
+    // it is itself spawned through. 0.0.67's explicit srt-win path closes the
+    // IMPLICIT-resolution vector; denying WRITE to the vendored srt-win tree also
+    // closes the PLANTED-binary vector (ASRT's own VENDORED_SRT_WIN_EXE doc warns
+    // that in a dev checkout this exe can sit inside a write grant). Grandparent
+    // of the exe → covers every arch subdir + build script. Inert off win32.
+    dirname(dirname(getVendoredSrtWinExePath())),
   ];
   const seen = new Set<string>();
   const out: string[] = [];
