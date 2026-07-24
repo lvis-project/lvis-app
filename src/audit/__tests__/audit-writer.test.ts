@@ -158,6 +158,10 @@ describe("AuditLogger ordered async writer", () => {
     await logger.flush();
 
     const path = join(auditDir, `${new Date().toISOString().slice(0, 10)}.jsonl`);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    const fileStat = statSync(path);
+    expect(fileStat.isFile()).toBe(true);
+    if (process.platform !== "win32") {
+      expect(fileStat.mode & 0o777).toBe(0o600);
+    }
   });
 });

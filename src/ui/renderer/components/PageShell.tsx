@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { cn } from "../../../lib/utils.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { SettingsHelpPopover } from "./SettingsHelpPopover.js";
 
 export interface PageShellProps {
   title?: ReactNode;
@@ -124,7 +125,7 @@ export function PageSection({
     <section
       id={id}
       className={cn(
-        "border-t border-border/(--opacity-medium) py-5 first:border-t-0 first:pt-0 last:pb-0",
+        "min-w-0 border-t border-border/(--opacity-medium) py-5 first:border-t-0 first:pt-0 last:pb-0",
         className,
       )}
     >
@@ -134,10 +135,18 @@ export function PageSection({
             {title ? (
               <h3 className="flex min-w-0 items-center gap-2 text-base font-semibold leading-6 text-foreground">
                 <span className="min-w-0 truncate">{title}</span>
+                {description ? (
+                  <SettingsHelpPopover
+                    ariaLabel={typeof title === "string" ? title : undefined}
+                    testId="settings-section-help"
+                  >
+                    {description}
+                  </SettingsHelpPopover>
+                ) : null}
                 {badge}
               </h3>
             ) : null}
-            {description ? (
+            {!title && description ? (
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
             ) : null}
           </div>
