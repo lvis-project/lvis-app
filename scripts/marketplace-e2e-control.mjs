@@ -4,8 +4,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
+  constants,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -229,28 +233,58 @@ export function createSafeSourceArchive(sourceRoot, archivePath) {
   for (const entry of entries) {
     chunks.push(ustarHeader(entry));
     if (entry.type === "file") {
-      const before = lstatSync(entry.absolute);
-      const bytes = readFileSync(entry.absolute);
-      const after = lstatSync(entry.absolute);
-      for (const [label, actual] of [
-        ["device", after.dev],
-        ["inode", after.ino],
-        ["size", after.size],
-        ["mtime", after.mtimeMs],
-      ]) {
-        const expected =
-          label === "device"
-            ? entry.identity.dev
-            : label === "inode"
-              ? entry.identity.ino
-              : label === "size"
-                ? entry.size
-                : entry.identity.mtimeMs;
-        if (actual !== expected)
-          fail(`${entry.path} changed while it was archived (${label})`);
-      }
-      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
-        fail(`${entry.path} changed type while it was archived`);
+      let descriptor;
+      let bytes;
+      try {
+        descriptor = openSync(
+          entry.absolute,
+          constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+        );
+        const before = fstatSync(descriptor);
+        for (const [label, actual] of [
+          ["device", before.dev],
+          ["inode", before.ino],
+          ["size", before.size],
+          ["mtime", before.mtimeMs],
+        ]) {
+          const expected =
+            label === "device"
+              ? entry.identity.dev
+              : label === "inode"
+                ? entry.identity.ino
+                : label === "size"
+                  ? entry.size
+                  : entry.identity.mtimeMs;
+          if (actual !== expected)
+            fail(`${entry.path} changed before it was archived (${label})`);
+        }
+        if (!before.isFile() || before.nlink !== 1) {
+          fail(`${entry.path} changed type before it was archived`);
+        }
+        bytes = readFileSync(descriptor);
+        const after = fstatSync(descriptor);
+        for (const [label, actual] of [
+          ["device", after.dev],
+          ["inode", after.ino],
+          ["size", after.size],
+          ["mtime", after.mtimeMs],
+        ]) {
+          const expected =
+            label === "device"
+              ? before.dev
+              : label === "inode"
+                ? before.ino
+                : label === "size"
+                  ? before.size
+                  : before.mtimeMs;
+          if (actual !== expected)
+            fail(`${entry.path} changed while it was archived (${label})`);
+        }
+        if (!after.isFile() || after.nlink !== 1) {
+          fail(`${entry.path} changed type while it was archived`);
+        }
+      } finally {
+        if (descriptor !== undefined) closeSync(descriptor);
       }
       chunks.push(bytes);
       const padding =
