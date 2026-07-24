@@ -175,6 +175,31 @@ describe("PluginOperationGrantCoordinator", () => {
     expect(state.domainRevisions.has(grantDomain)).toBe(false);
   });
 
+  it("tombstones account and generation revocation before their first domain admission", async () => {
+    const accountCoordinator = new PluginOperationGrantCoordinator();
+    accountCoordinator.revokeAccount(
+      principal.ownerPluginId,
+      principal.generationId,
+      principal.accountHash,
+    );
+    await expect(accountCoordinator.acquireExecutionLease(
+      grantDomain,
+      "write",
+      principal,
+    )).rejects.toThrow("account is revoked");
+
+    const generationCoordinator = new PluginOperationGrantCoordinator();
+    generationCoordinator.revokeGeneration(
+      principal.ownerPluginId,
+      principal.generationId,
+    );
+    await expect(generationCoordinator.acquireExecutionLease(
+      grantDomain,
+      "write",
+      principal,
+    )).rejects.toThrow("generation is revoked");
+  });
+
   it("rejects only the revoked session's queued operations and cannot recreate its read authority", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const holderPrincipal = { ...principal, appSessionId: "window-holder" };
@@ -409,7 +434,8 @@ describe("PluginOperationGrantCoordinator", () => {
     }, grantDomain);
     coordinator.revokeGeneration(principal.ownerPluginId, principal.generationId);
     expect(coordinator.consume(generation.token, expected, grantDomain)).toMatchObject({ ok: false });
-    const session = coordinator.issue({
+    const sessionCoordinator = new PluginOperationGrantCoordinator(() => now);
+    const session = sessionCoordinator.issue({
       ...principal,
       toolName: expected.toolName,
       operation: expected.operation,
@@ -417,8 +443,8 @@ describe("PluginOperationGrantCoordinator", () => {
       readRevision: null,
       expiresAt: 100,
     }, grantDomain);
-    coordinator.revokeSession(principal.appSessionId);
-    expect(coordinator.consume(session.token, expected, grantDomain)).toMatchObject({ ok: false });
+    sessionCoordinator.revokeSession(principal.appSessionId);
+    expect(sessionCoordinator.consume(session.token, expected, grantDomain)).toMatchObject({ ok: false });
   });
 
   it("revokes unused grants and read snapshots for one authenticated account session", () => {
@@ -554,6 +580,37 @@ describe("PluginOperationGrantCoordinator", () => {
       ok: true,
       grantId: secondGrant.grantId,
     });
+  });
+
+  it("bounds revocation tombstones by degrading globally fail-closed", async () => {
+    const coordinator = new PluginOperationGrantCoordinator(
+      Date.now,
+      1024,
+      2048,
+      4096,
+      2,
+    );
+    coordinator.revokeSession("revoked-1");
+    coordinator.revokeSession("revoked-2");
+    coordinator.revokeSession("revoked-3");
+
+    const state = coordinator as unknown as {
+      revokedSessions: Set<string>;
+      revokedGenerations: Set<string>;
+      revokedAccounts: Set<string>;
+      revocationCapacityExhausted: boolean;
+    };
+    expect(
+      state.revokedSessions.size +
+      state.revokedGenerations.size +
+      state.revokedAccounts.size,
+    ).toBe(0);
+    expect(state.revocationCapacityExhausted).toBe(true);
+    await expect(coordinator.acquireExecutionLease(
+      grantDomain,
+      "write",
+      { ...principal, appSessionId: "otherwise-fresh" },
+    )).rejects.toThrow("revocation capacity exhausted");
   });
 
   it("atomically reserves one read revision for only one concurrent grant", async () => {

@@ -161,6 +161,9 @@ export class PluginOperationGrantCoordinator {
   private readonly executionDomains = new Map<string, ExecutionDomainState>();
   private readonly domainRevisions = new Map<string, ExecutionDomainRevision>();
   private readonly revokedSessions = new Set<string>();
+  private readonly revokedGenerations = new Set<string>();
+  private readonly revokedAccounts = new Set<string>();
+  private revocationCapacityExhausted = false;
   private nextReadSequence = 0;
 
   constructor(
@@ -168,12 +171,11 @@ export class PluginOperationGrantCoordinator {
     private readonly maxGrants = 1024,
     private readonly maxSnapshots = 2048,
     private readonly maxDomains = 4096,
+    private readonly maxRevocations = 16_384,
   ) {}
 
   recordRead(key: PluginReadSnapshotKey, domainKey: string): string {
-    if (this.revokedSessions.has(key.appSessionId)) {
-      throw new Error("plugin operation session is revoked");
-    }
+    this.assertPrincipalNotRevoked(key);
     this.trimSnapshots();
     const domain = this.requireDomain(domainKey, key);
     const revision = randomUUID();
@@ -197,6 +199,7 @@ export class PluginOperationGrantCoordinator {
     maxAgeMs: number,
     domainKey: string,
   ): string | undefined {
+    if (this.principalRevocationReason(principal)) return undefined;
     const domain = this.requireDomain(domainKey, principal);
     let newest: ReadSnapshot | undefined;
     for (const readOperation of readOperations) {
@@ -222,9 +225,7 @@ export class PluginOperationGrantCoordinator {
     token: string;
     grantId: string;
   } {
-    if (this.revokedSessions.has(binding.appSessionId)) {
-      throw new Error("plugin operation session is revoked");
-    }
+    this.assertPrincipalNotRevoked(binding);
     this.collectExpired();
     const domain = this.requireDomain(domainKey, binding);
     let reservedRead: ReservedReadSnapshot | undefined;
@@ -389,10 +390,8 @@ export class PluginOperationGrantCoordinator {
     if (!/^[0-9a-f]{64}$/.test(domainKey)) {
       return Promise.reject(new Error("plugin operation domain key is invalid"));
     }
-    if (this.revokedSessions.has(principal.appSessionId)) {
-      return Promise.reject(new Error("plugin operation session is revoked"));
-    }
     try {
+      this.assertPrincipalNotRevoked(principal);
       this.requireDomain(domainKey, principal);
     } catch (error) {
       return Promise.reject(error);
@@ -431,6 +430,10 @@ export class PluginOperationGrantCoordinator {
   }
 
   revokeGeneration(ownerPluginId: string, generationId: string): void {
+    this.rememberRevocation(
+      this.revokedGenerations,
+      this.generationRevocationKey(ownerPluginId, generationId),
+    );
     for (const [key, value] of this.grants) {
       if (value.binding.ownerPluginId === ownerPluginId && value.binding.generationId === generationId) this.grants.delete(key);
     }
@@ -451,7 +454,7 @@ export class PluginOperationGrantCoordinator {
   }
 
   revokeSession(appSessionId: string): void {
-    this.revokedSessions.add(appSessionId);
+    this.rememberRevocation(this.revokedSessions, appSessionId);
     for (const [key, value] of this.grants) {
       if (value.binding.appSessionId === appSessionId) this.grants.delete(key);
     }
@@ -482,7 +485,7 @@ export class PluginOperationGrantCoordinator {
     principal: PluginOperationPrincipal,
     domainKey: string,
   ): boolean {
-    if (this.revokedSessions.has(principal.appSessionId)) return false;
+    if (this.principalRevocationReason(principal)) return false;
     const domain = this.domainRevisions.get(domainKey);
     return domain !== undefined &&
       !domain.revoked &&
@@ -496,6 +499,10 @@ export class PluginOperationGrantCoordinator {
     generationId: string,
     accountHash: string,
   ): void {
+    this.rememberRevocation(
+      this.revokedAccounts,
+      this.accountRevocationKey(ownerPluginId, generationId, accountHash),
+    );
     for (const [key, value] of this.grants) {
       if (
         value.binding.ownerPluginId === ownerPluginId &&
@@ -534,6 +541,24 @@ export class PluginOperationGrantCoordinator {
       ) {
         this.latestReadSequences.delete(key);
       }
+    }
+  }
+
+  assertExecutionAuthorized(
+    principal: PluginOperationPrincipal,
+    domainKey: string,
+  ): void {
+    this.assertPrincipalNotRevoked(principal);
+    const domain = this.domainRevisions.get(domainKey);
+    if (!domain || domain.revoked) {
+      throw new Error("plugin operation domain is revoked");
+    }
+    if (
+      domain.ownerPluginId !== principal.ownerPluginId ||
+      domain.generationId !== principal.generationId ||
+      domain.accountHash !== principal.accountHash
+    ) {
+      throw new Error("plugin operation domain owner mismatch");
     }
   }
 
@@ -586,6 +611,7 @@ export class PluginOperationGrantCoordinator {
     domainKey: string,
     principal: PluginOperationPrincipal,
   ): ExecutionDomainRevision {
+    this.assertPrincipalNotRevoked(principal);
     if (!/^[0-9a-f]{64}$/.test(domainKey)) {
       throw new Error("plugin operation domain key is invalid");
     }
@@ -646,9 +672,11 @@ export class PluginOperationGrantCoordinator {
     while (state.queue.length > 0) {
       const request = state.queue[0]!;
       const domain = this.domainRevisions.get(domainKey);
+      const principalRevocationReason =
+        this.principalRevocationReason(request.principal);
       const invalidReason =
-        this.revokedSessions.has(request.principal.appSessionId)
-          ? "plugin operation session is revoked"
+        principalRevocationReason
+          ? principalRevocationReason
           : !domain || domain.revoked
             ? "plugin operation domain is revoked"
             : request.signal?.aborted
@@ -721,10 +749,11 @@ export class PluginOperationGrantCoordinator {
     if (request.signal && request.onAbort) {
       request.signal.removeEventListener("abort", request.onAbort);
     }
-    if (this.revokedSessions.has(request.principal.appSessionId)) {
+    const revocationReason = this.principalRevocationReason(request.principal);
+    if (revocationReason) {
       if (request.kind === "write") state.writer = false;
       else state.readers = Math.max(0, state.readers - 1);
-      request.reject(new Error("plugin operation session is revoked"));
+      request.reject(new Error(revocationReason));
       this.drainExecutionDomain(domainKey, state);
       return;
     }
@@ -740,5 +769,83 @@ export class PluginOperationGrantCoordinator {
         this.drainExecutionDomain(domainKey, state);
       },
     }));
+  }
+
+  private generationRevocationKey(
+    ownerPluginId: string,
+    generationId: string,
+  ): string {
+    return `${ownerPluginId}\0${generationId}`;
+  }
+
+  private accountRevocationKey(
+    ownerPluginId: string,
+    generationId: string,
+    accountHash: string,
+  ): string {
+    return `${ownerPluginId}\0${generationId}\0${accountHash}`;
+  }
+
+  private principalRevocationReason(
+    principal: PluginOperationPrincipal,
+  ): string | undefined {
+    if (this.revocationCapacityExhausted) {
+      return "plugin operation revocation capacity exhausted";
+    }
+    if (this.revokedSessions.has(principal.appSessionId)) {
+      return "plugin operation session is revoked";
+    }
+    if (
+      this.revokedGenerations.has(
+        this.generationRevocationKey(
+          principal.ownerPluginId,
+          principal.generationId,
+        ),
+      )
+    ) {
+      return "plugin operation generation is revoked";
+    }
+    if (
+      this.revokedAccounts.has(
+        this.accountRevocationKey(
+          principal.ownerPluginId,
+          principal.generationId,
+          principal.accountHash,
+        ),
+      )
+    ) {
+      return "plugin operation account is revoked";
+    }
+    return undefined;
+  }
+
+  private assertPrincipalNotRevoked(
+    principal: PluginOperationPrincipal,
+  ): void {
+    const reason = this.principalRevocationReason(principal);
+    if (reason) throw new Error(reason);
+  }
+
+  private rememberRevocation(
+    target: Set<string>,
+    key: string,
+  ): void {
+    if (this.revocationCapacityExhausted || target.has(key)) return;
+    const revocationCount =
+      this.revokedSessions.size +
+      this.revokedGenerations.size +
+      this.revokedAccounts.size;
+    if (revocationCount >= this.maxRevocations) {
+      // Bounded fail-closed degradation. Once exact tombstones can no longer
+      // be retained safely, reject every future governed principal until
+      // process restart instead of evicting old revocations and reviving
+      // stale authority.
+      this.revocationCapacityExhausted = true;
+      this.revokedSessions.clear();
+      this.revokedGenerations.clear();
+      this.revokedAccounts.clear();
+      return;
+    }
+    target.add(key);
   }
 }
