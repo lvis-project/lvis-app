@@ -34,9 +34,15 @@ import {
   isAppOnlyRuntimeInvocation,
 } from "../plugin-tool-invocation.js";
 import type { BootContext } from "../context.js";
-import { resolvePluginOperationAccountHash } from "./plugin-operation-account.js";
-import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
+import { resolvePluginOperationAccount } from "./plugin-operation-account.js";
+import {
+  PluginOperationExecutionLeaseAbortedError,
+  PluginOperationGrantCoordinator,
+} from "../../permissions/plugin-operation-grant.js";
 import type { PluginOperationIdentityProvider } from "../../tools/invocation-services.js";
+import { isPluginRuntimeDetachedOperationError } from "../../plugins/runtime/detached-operation.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
+import type { HostPluginAuthLifecycle } from "../../tools/executor-contract.js";
 
 function toPluginToolInput(payload: unknown): Record<string, unknown> {
   if (payload === undefined || payload === null) return {};
@@ -77,19 +83,19 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     }
     const active = ctx.pluginBundleLifecycle?.getActive(pluginId);
     if (!active || active.generationId !== generationId) return undefined;
-    const accountHash = resolvePluginOperationAccountHash(
+    const account = resolvePluginOperationAccount(
       pluginRuntime,
       active.manifest,
       pluginId,
       generationId,
     );
-    if (!accountHash) return undefined;
+    if (!account) return undefined;
     return {
       ownerVersion: active.manifest.version,
       generationId,
       appSessionId:
         sessionId ?? `model-${pluginId}-${generationId}`,
-      accountHash,
+      ...account,
       appGrantRequired: false,
     };
   };
@@ -125,6 +131,22 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
     },
   });
+  const revokeInvalidatedPluginAccount = (
+    pluginId: string,
+    invalidatedAccountHash: string,
+    invalidatedAccountGenerationId: string | undefined,
+  ): void => {
+    if (!invalidatedAccountGenerationId) {
+      throw new Error(
+        `plugin auth invalidation is missing generation provenance: ${pluginId}`,
+      );
+    }
+    pluginSurfaceExecutor.revokePluginOperationAccount(
+      pluginId,
+      invalidatedAccountGenerationId,
+      invalidatedAccountHash,
+    );
+  };
   const observePluginAuthResult = (
     pluginId: string,
     generationId: string,
@@ -139,11 +161,29 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       result,
       invocationEpoch,
     );
-    if (observed.invalidatedAccountHash) {
-      pluginSurfaceExecutor.revokePluginOperationAccount(
+    if (observed.invalidatedAccountHash !== undefined) {
+      revokeInvalidatedPluginAccount(
         pluginId,
-        generationId,
         observed.invalidatedAccountHash,
+        observed.invalidatedAccountGenerationId,
+      );
+    }
+  };
+  const invalidateFailedPluginAuthInvocation = (
+    pluginId: string,
+    generationId: string,
+    invocationEpoch: number,
+  ): void => {
+    const invalidated = pluginRuntime.invalidateFailedPluginAuthInvocation(
+      pluginId,
+      generationId,
+      invocationEpoch,
+    );
+    if (invalidated.invalidatedAccountHash !== undefined) {
+      revokeInvalidatedPluginAccount(
+        pluginId,
+        invalidated.invalidatedAccountHash,
+        invalidated.invalidatedAccountGenerationId,
       );
     }
   };
@@ -165,152 +205,403 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       const ownerPluginId = context.ownerPluginId;
       const ownerGenerationId = context.ownerGenerationId;
+      const invocationSessionId = pluginInvocationSessionId(context);
+      const appSessionId =
+        context.appInvocation?.sessionId ?? invocationSessionId;
+      const activeGenerationForInvocation = ownerPluginId
+        ? ctx.pluginBundleLifecycle?.getActive(ownerPluginId)
+        : undefined;
+      const activeManifestForInvocation =
+        activeGenerationForInvocation &&
+        activeGenerationForInvocation.generationId === ownerGenerationId
+          ? activeGenerationForInvocation.manifest
+          : undefined;
+      const invocationManifestTool = activeManifestForInvocation?.tools.find(
+        (candidate) => candidate.name === toolName,
+      );
+      const manifestAuthToolKind =
+        activeManifestForInvocation?.auth?.statusTool === toolName
+          ? "status" as const
+          : activeManifestForInvocation?.auth?.loginTool === toolName
+            ? "login" as const
+            : activeManifestForInvocation?.auth?.logoutTool === toolName
+              ? "logout" as const
+              : undefined;
+      if (manifestAuthToolKind && !context.authToolKind) {
+        throw new Error(
+          "manifest auth Tool requires host-pinned trusted-panel provenance",
+        );
+      }
+      if (
+        context.authToolKind &&
+        (
+          !ownerPluginId ||
+          !ownerGenerationId ||
+          effectiveOrigin !== "ui" ||
+          context.authToolKind !== manifestAuthToolKind
+        )
+      ) {
+        throw new Error(
+          "host-pinned plugin auth provenance does not match the active manifest",
+        );
+      }
       // Claim auth publication order before either dispatch path awaits plugin
       // code. A later status/login/logout invocation supersedes this
       // completion even when the older handler resolves last.
-      const authInvocation = ownerPluginId && ownerGenerationId
+      const authInvocation = context.authToolKind && ownerPluginId && ownerGenerationId
         ? pluginRuntime.beginPluginAuthInvocation(
             ownerPluginId,
             ownerGenerationId,
             toolName,
+            appSessionId,
           )
         : undefined;
+      if (context.authToolKind && !authInvocation) {
+        throw new Error("plugin auth generation changed before transition admission");
+      }
       if (
         ownerPluginId &&
         ownerGenerationId &&
-        authInvocation?.invalidatedAccountHash
+        authInvocation?.invalidatedAccountHash !== undefined
       ) {
-        pluginSurfaceExecutor.revokePluginOperationAccount(
+        revokeInvalidatedPluginAccount(
           ownerPluginId,
-          ownerGenerationId,
           authInvocation.invalidatedAccountHash,
+          authInvocation.invalidatedAccountGenerationId,
         );
       }
-      const authInvocationEpoch = authInvocation?.epoch;
-      if (isAppOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
-        // App-only dispatch path — TRUSTED PANEL ONLY (`effectiveOrigin === "ui"`;
-        // an "mcp-app" chain never satisfies the predicate). Routes to the runtime
-        // handler directly, skipping the ToolExecutor and its Step-6 ceiling. The
-        // governed `runWithCeiling` cap is NOT re-added here: it is enforced
-        // STRUCTURALLY inside `PluginRuntime.callDeclaredAppOnlyTool` (the sole
-        // entry point of the bypass), so a hung app-only handler cannot block
-        // the renderer caller even if this dispatch is ever reverted to a
-        // direct `pluginRuntime.callDeclaredAppOnlyTool(...)` call. The
-        // user-activation gate + the #1556 nested-origin error live in
-        // `dispatchAppOnlyRuntimeInvocation`.
-        const result = await dispatchAppOnlyRuntimeInvocation(
-          pluginRuntime,
-          toolName,
-          toPluginToolInput(payload),
-          context,
+      const appOnlyRuntimeInvocation = isAppOnlyRuntimeInvocation(
+        pluginRuntime,
+        toolName,
+        context,
+        effectiveOrigin,
+      );
+      const governedAuthInvocation =
+        authInvocation !== undefined &&
+        !appOnlyRuntimeInvocation &&
+        invocationManifestTool?._meta?.["lvisai/operationPolicy"] !== undefined;
+      if (authInvocation && !appOnlyRuntimeInvocation && !governedAuthInvocation) {
+        throw new Error(
+          "plugin auth invocation reached executor without an operation policy",
         );
-        if (context.ownerPluginId && context.ownerGenerationId) {
-          observePluginAuthResult(
-            context.ownerPluginId,
-            context.ownerGenerationId,
-            toolName,
-            result,
-            authInvocationEpoch,
-          );
+      }
+      const authTransitionStartedAt = Date.now();
+      const authAdmissionController = new AbortController();
+      let authAdmissionTimer: ReturnType<typeof setTimeout> | undefined;
+      let authTransitionLease:
+        | Awaited<ReturnType<
+          typeof pluginOperationGrants.acquireAccountTransitionLease
+        >>
+        | undefined;
+      if (
+        appOnlyRuntimeInvocation &&
+        ownerPluginId &&
+        ownerGenerationId &&
+        authInvocation?.accountTransitionScopeHash
+      ) {
+        authAdmissionTimer = setTimeout(
+          () => authAdmissionController.abort(),
+          TOOL_TIMEOUT_POLICY.globalCeilingMs,
+        );
+        authAdmissionTimer.unref?.();
+        try {
+          authTransitionLease =
+            await pluginOperationGrants.acquireAccountTransitionLease(
+              {
+                ownerPluginId,
+                generationId: ownerGenerationId,
+                appSessionId:
+                  context.appInvocation?.sessionId ?? invocationSessionId,
+                accountScopeHash:
+                  authInvocation.accountTransitionScopeHash,
+              },
+              authAdmissionController.signal,
+            );
+        } catch (error) {
+          if (authInvocation && ownerPluginId && ownerGenerationId) {
+            invalidateFailedPluginAuthInvocation(
+              ownerPluginId,
+              ownerGenerationId,
+              authInvocation.epoch,
+            );
+          }
+          if (
+            error instanceof PluginOperationExecutionLeaseAbortedError &&
+            authAdmissionController.signal.aborted
+          ) {
+            throw new Error(
+              `plugin auth transition exceeded global ceiling ` +
+              `(${TOOL_TIMEOUT_POLICY.globalCeilingMs}ms): ${toolName}`,
+            );
+          }
+          throw error;
+        } finally {
+          if (authAdmissionTimer) clearTimeout(authAdmissionTimer);
         }
-        return result;
+      }
+      const authHandlerCeilingMs = authTransitionLease
+        ? Math.max(
+            1,
+            TOOL_TIMEOUT_POLICY.globalCeilingMs -
+              (Date.now() - authTransitionStartedAt),
+          )
+        : undefined;
+      const authInvocationEpoch = authInvocation?.epoch;
+      if (appOnlyRuntimeInvocation) {
+        let releaseAuthTransitionDeferred = false;
+        try {
+          if (authInvocation && ownerPluginId && ownerGenerationId) {
+            const exactGeneration =
+              ctx.pluginBundleLifecycle?.getActive(ownerPluginId);
+            if (exactGeneration?.generationId !== ownerGenerationId) {
+              throw new Error(
+                "plugin auth generation changed before handler entry",
+              );
+            }
+          }
+          // App-only dispatch path — TRUSTED PANEL ONLY (`effectiveOrigin === "ui"`;
+          // an "mcp-app" chain never satisfies the predicate). Routes to the runtime
+          // handler directly, skipping the ToolExecutor and its Step-6 ceiling. The
+          // governed `runWithCeiling` cap is NOT re-added here: it is enforced
+          // STRUCTURALLY inside `PluginRuntime.callDeclaredAppOnlyTool` (the sole
+          // entry point of the bypass), so a hung app-only handler cannot block
+          // the renderer caller even if this dispatch is ever reverted to a
+          // direct `pluginRuntime.callDeclaredAppOnlyTool(...)` call. The
+          // user-activation gate + the #1556 nested-origin error live in
+          // `dispatchAppOnlyRuntimeInvocation`.
+          const result = await dispatchAppOnlyRuntimeInvocation(
+            pluginRuntime,
+            toolName,
+            toPluginToolInput(payload),
+            context,
+            authHandlerCeilingMs,
+            authTransitionLease
+              ? () => authTransitionLease.assertAuthorized()
+              : undefined,
+          );
+          if (context.ownerPluginId && context.ownerGenerationId) {
+            observePluginAuthResult(
+              context.ownerPluginId,
+              context.ownerGenerationId,
+              toolName,
+              result,
+              authInvocationEpoch,
+            );
+          }
+          return result;
+        } catch (error) {
+          if (authInvocation && ownerPluginId && ownerGenerationId) {
+            invalidateFailedPluginAuthInvocation(
+              ownerPluginId,
+              ownerGenerationId,
+              authInvocation.epoch,
+            );
+          }
+          if (
+            authTransitionLease &&
+            isPluginRuntimeDetachedOperationError(error)
+          ) {
+            releaseAuthTransitionDeferred = true;
+            void error.settlement.then(
+              () => authTransitionLease.release(),
+              () => authTransitionLease.release(),
+            );
+          }
+          throw error;
+        } finally {
+          if (!releaseAuthTransitionDeferred) {
+            authTransitionLease?.release();
+          }
+        }
       }
 
       const appInvocation = context.appInvocation;
-      const activeGeneration = ownerPluginId
-        ? ctx.pluginBundleLifecycle?.getActive(ownerPluginId)
-        : undefined;
+      const activeGeneration = activeGenerationForInvocation;
       const invocationGeneration = ownerPluginId && context.ownerGenerationId &&
         activeGeneration?.generationId === context.ownerGenerationId
         ? activeGeneration
         : undefined;
       const manifest = invocationGeneration?.manifest;
-      const accountHash = ownerPluginId && context.ownerGenerationId
-        ? resolvePluginOperationAccountHash(
-            pluginRuntime,
-            manifest,
-            ownerPluginId,
-            context.ownerGenerationId,
-          )
-        : undefined;
-      const invocationSessionId = pluginInvocationSessionId(context);
+      const account = governedAuthInvocation
+        ? authInvocation?.operationAccount
+        : ownerPluginId && context.ownerGenerationId
+          ? resolvePluginOperationAccount(
+              pluginRuntime,
+              manifest,
+              ownerPluginId,
+              context.ownerGenerationId,
+            )
+          : undefined;
       const appOrigin = effectiveOrigin === "ui" || effectiveOrigin === "mcp-app";
       const pluginOperation = ownerPluginId &&
         manifest &&
         invocationGeneration &&
-        accountHash &&
+        account &&
         (!appOrigin || appInvocation)
         ? {
             ownerVersion: manifest.version,
             generationId: invocationGeneration.generationId,
             appSessionId: appInvocation?.sessionId ?? invocationSessionId,
-            accountHash,
+            ...account,
             appGrantRequired: appOrigin,
             ...(appInvocation?.operationGrantToken
               ? { grantToken: appInvocation.operationGrantToken }
               : {}),
           }
         : undefined;
+      let governedAuthLifecycleSettled = false;
+      let completeGovernedAuthFailure: ((reason: unknown) => void) | undefined;
+      let pluginAuthLifecycle: HostPluginAuthLifecycle | undefined;
+      if (governedAuthInvocation) {
+        if (
+          !authInvocation ||
+          !ownerPluginId ||
+          !ownerGenerationId ||
+          !manifest ||
+          !pluginOperation
+        ) {
+          if (authInvocation && ownerPluginId && ownerGenerationId) {
+            invalidateFailedPluginAuthInvocation(
+              ownerPluginId,
+              ownerGenerationId,
+              authInvocation.epoch,
+            );
+          }
+          throw new Error(
+            "governed plugin auth invocation lost its exact operation identity",
+          );
+        }
+        const completeFailure = (_reason: unknown): void => {
+          if (governedAuthLifecycleSettled) return;
+          governedAuthLifecycleSettled = true;
+          invalidateFailedPluginAuthInvocation(
+            ownerPluginId,
+            ownerGenerationId,
+            authInvocation.epoch,
+          );
+        };
+        const completeSuccess = (result: unknown): void => {
+          if (governedAuthLifecycleSettled) return;
+          try {
+            observePluginAuthResult(
+              ownerPluginId,
+              ownerGenerationId,
+              toolName,
+              result,
+              authInvocation.epoch,
+            );
+            governedAuthLifecycleSettled = true;
+          } catch (error) {
+            completeFailure(error);
+            throw error;
+          }
+        };
+        completeGovernedAuthFailure = completeFailure;
+        pluginAuthLifecycle = {
+          binding: {
+            pluginId: ownerPluginId,
+            generationId: ownerGenerationId,
+            toolName,
+            appSessionId,
+            accountScopeHash: authInvocation.operationAccount.accountScopeHash,
+          },
+          beforeHandler: (principal, domainKey) => {
+            if (
+              !domainKey ||
+              principal.ownerPluginId !== ownerPluginId ||
+              principal.generationId !== ownerGenerationId ||
+              principal.appSessionId !== appSessionId ||
+              principal.accountScopeHash !== authInvocation.operationAccount.accountScopeHash ||
+              principal.accountHash !== authInvocation.operationAccount.accountHash
+            ) {
+              throw new Error(
+                "governed plugin auth lifecycle principal does not match its admission",
+              );
+            }
+            if (
+              ctx.pluginBundleLifecycle?.getActive(ownerPluginId)?.generationId !==
+              ownerGenerationId
+            ) {
+              throw new Error(
+                "plugin auth generation changed before handler entry",
+              );
+            }
+          },
+          completeSuccess,
+          completeFailure,
+        };
+      }
 
-      const [result] = await pluginSurfaceExecutor.executeAll(
-        [{
-          id: randomUUID(),
-          name: toolName,
-          input: toPluginToolInput(payload),
-        }],
-        {
-          sessionId: invocationSessionId,
-          permissionContext: pluginSurfacePermissionScope.createPermissionContext(context, {
-            // headless follows the *effective* chain origin (#664 P2):
-            // a UI-rooted chain keeps `headless: false` even after one or
-            // more `ctx.callTool` hops, so the user's outer approval is
-            // honoured and the reviewer lane is not re-engaged. An MCP-App
-            // chain is foreground too — the user is looking at the card and CAN
-            // be asked — so only a plugin/LLM-emitted chain is headless. (This
-            // is exactly the lane an app call had when it dispatched as "ui";
-            // splitting the origin changed WHO may reach the ungoverned bypass,
-            // not whether a card's governed call can prompt the user.)
-            headless: effectiveOrigin === "plugin",
-            trustOrigin: "plugin-emitted",
-            // The user-gesture credit is the trusted PANEL's alone: an "mcp-app"
-            // chain never carries `userAction` (callFromApp does not accept one),
-            // and the explicit origin check keeps that true even if it ever did.
-            pluginPanelUserAction: effectiveOrigin === "ui" && context.userAction === true,
-            ...(pluginOperation ? { pluginOperation } : {}),
-            ...(context.expectedMcpServerId
-              ? { expectedMcpServerId: context.expectedMcpServerId }
-              : {}),
-          }),
-        },
-      );
-      if (!result) {
-        throw new Error(`Plugin tool '${toolName}' produced no executor result`);
-      }
-      if (result.is_error) {
-        throw new Error(result.content);
-      }
-      if (Object.prototype.hasOwnProperty.call(result, "rawResult")) {
-        if (ownerPluginId && context.ownerGenerationId) {
+      try {
+        const [result] = await pluginSurfaceExecutor.executeAll(
+          [{
+            id: randomUUID(),
+            name: toolName,
+            input: toPluginToolInput(payload),
+          }],
+          {
+            sessionId: invocationSessionId,
+            ...(pluginAuthLifecycle ? { pluginAuthLifecycle } : {}),
+            permissionContext: pluginSurfacePermissionScope.createPermissionContext(context, {
+              // headless follows the *effective* chain origin (#664 P2):
+              // a UI-rooted chain keeps `headless: false` even after one or
+              // more `ctx.callTool` hops, so the user's outer approval is
+              // honoured and the reviewer lane is not re-engaged. An MCP-App
+              // chain is foreground too — the user is looking at the card and CAN
+              // be asked — so only a plugin/LLM-emitted chain is headless. (This
+              // is exactly the lane an app call had when it dispatched as "ui";
+              // splitting the origin changed WHO may reach the ungoverned bypass,
+              // not whether a card's governed call can prompt the user.)
+              headless: effectiveOrigin === "plugin",
+              trustOrigin: "plugin-emitted",
+              // The user-gesture credit is the trusted PANEL's alone: an "mcp-app"
+              // chain never carries `userAction` (callFromApp does not accept one),
+              // and the explicit origin check keeps that true even if it ever did.
+              pluginPanelUserAction: effectiveOrigin === "ui" && context.userAction === true,
+              ...(pluginOperation ? { pluginOperation } : {}),
+              ...(context.expectedMcpServerId
+                ? { expectedMcpServerId: context.expectedMcpServerId }
+                : {}),
+            }),
+          },
+        );
+        if (!result) {
+          throw new Error(`Plugin tool '${toolName}' produced no executor result`);
+        }
+        if (result.is_error) {
+          throw new Error(result.content);
+        }
+        if (governedAuthInvocation && !governedAuthLifecycleSettled) {
+          throw new Error(
+            "governed plugin auth executor omitted terminal lifecycle settlement",
+          );
+        }
+        if (Object.prototype.hasOwnProperty.call(result, "rawResult")) {
+          if (!governedAuthInvocation && ownerPluginId && context.ownerGenerationId) {
+            observePluginAuthResult(
+              ownerPluginId,
+              context.ownerGenerationId,
+              toolName,
+              result.rawResult,
+              authInvocationEpoch,
+            );
+          }
+          return result.rawResult;
+        }
+        if (!governedAuthInvocation && ownerPluginId && context.ownerGenerationId) {
           observePluginAuthResult(
             ownerPluginId,
             context.ownerGenerationId,
             toolName,
-            result.rawResult,
+            result.content,
             authInvocationEpoch,
           );
         }
-        return result.rawResult;
+        return result.content;
+      } catch (error) {
+        completeGovernedAuthFailure?.(error);
+        throw error;
       }
-      if (ownerPluginId && context.ownerGenerationId) {
-        observePluginAuthResult(
-          ownerPluginId,
-          context.ownerGenerationId,
-          toolName,
-          result.content,
-          authInvocationEpoch,
-        );
-      }
-      return result.content;
     });
   };
   lateBinding.pluginToolInvokerRef.fn = invokePluginTool;
@@ -335,13 +626,24 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       return await lifecycle.runWithLease(generationLease, async () => {
         const activeGeneration = generationLease.generation;
         const manifest = activeGeneration.state.runtime.manifest;
-        const accountHash = resolvePluginOperationAccountHash(
+        const authOperationAccount = pluginRuntime.getPluginAuthOperationAccount(
+          pluginId,
+          activeGeneration.generationId,
+          toolName,
+          appSessionId,
+        );
+        if (authOperationAccount && origin === "mcp-app") {
+          throw new Error(
+            "[plugin-operation-policy] manifest auth tools are reserved for the trusted panel",
+          );
+        }
+        const account = authOperationAccount ?? resolvePluginOperationAccount(
           pluginRuntime,
           manifest,
           pluginId,
           activeGeneration.generationId,
         );
-        if (!accountHash) {
+        if (!account) {
           throw new Error("[plugin-operation-policy] fresh authenticated account status is required");
         }
         const principal = {
@@ -349,7 +651,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           ownerVersion: manifest.version,
           generationId: activeGeneration.generationId,
           appSessionId,
-          accountHash,
+          ...account,
         };
         const inspected = pluginSurfaceExecutor.inspectPluginOperationGrant({
           toolName,
@@ -400,6 +702,28 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             },
           });
           throw new Error("[plugin-operation-policy] operation grant denied");
+        }
+        const recheckedAccount = authOperationAccount
+          ? pluginRuntime.getPluginAuthOperationAccount(
+              pluginId,
+              activeGeneration.generationId,
+              toolName,
+              appSessionId,
+            )
+          : resolvePluginOperationAccount(
+              pluginRuntime,
+              manifest,
+              pluginId,
+              activeGeneration.generationId,
+            );
+        if (
+          !recheckedAccount ||
+          recheckedAccount.accountScopeHash !== account.accountScopeHash ||
+          recheckedAccount.accountHash !== account.accountHash
+        ) {
+          throw new Error(
+            "[plugin-operation-policy] operation identity changed before grant issuance",
+          );
         }
         const ttlMs = 60_000;
         const issued = pluginSurfaceExecutor.issueInspectedPluginOperationGrant({

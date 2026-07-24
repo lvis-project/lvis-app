@@ -315,6 +315,7 @@ describe("PluginRuntime.callFromUi — the trusted panel keeps its existing beha
         origin: "ui",
         ownerPluginId: "acme-cards",
         ownerGenerationId: expect.any(String),
+        authToolKind: "login",
         userAction: true,
       },
     );
