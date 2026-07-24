@@ -261,6 +261,7 @@ export async function executeAuthorizedToolInvocation(
           // effect. Serialize every governed operation so a dishonest or
           // compromised handler cannot mutate under a shared read lease.
           "write",
+          pluginOperationPrincipal,
           abortSignal,
         )
       : undefined;
@@ -277,6 +278,7 @@ export async function executeAuthorizedToolInvocation(
     | "indeterminate" = "ok";
   let consumedPluginOperationGrantId: string | undefined;
   let deferredOperationSettlement: Promise<unknown> | undefined;
+  let indeterminateAuditPersisted = false;
   let interruptionReason: "ceiling" | "user-abort" | undefined;
   try {
     if (rationaleResumeContext) {
@@ -570,7 +572,7 @@ export async function executeAuthorizedToolInvocation(
       decision: "deny",
       denyReasons: [{
         layer: 6,
-        reason: "authorized plugin write remains unsettled after interruption",
+        reason: "authorized governed operation remains unsettled after interruption",
         source: "plugin-operation-execution",
       }],
       pluginOperation: {
@@ -582,6 +584,7 @@ export async function executeAuthorizedToolInvocation(
           : {}),
       },
     });
+    indeterminateAuditPersisted = true;
   }
   if (outcome.ok) {
     const result = outcome.value;
@@ -655,6 +658,10 @@ export async function executeAuthorizedToolInvocation(
     tool.source === "plugin" &&
     resolvedPluginOperation?.rule.kind === "read" &&
     pluginOperationPrincipal &&
+    services.pluginOperationGrants.canRecordRead(
+      pluginOperationPrincipal,
+      operationExecutionDomain!,
+    ) &&
     !effectSummary.hasMutatingEffect
   ) {
     services.pluginOperationGrants.recordRead({
@@ -686,6 +693,7 @@ export async function executeAuthorizedToolInvocation(
     if (
       operationExecutionLease &&
       deferredOperationSettlement &&
+      indeterminateAuditPersisted &&
       pluginOperationPrincipal &&
       resolvedPluginOperation
     ) {
@@ -727,6 +735,18 @@ export async function executeAuthorizedToolInvocation(
             error instanceof Error ? error.message : String(error),
           );
         });
+    } else if (operationExecutionLease && deferredOperationSettlement) {
+      void deferredOperationSettlement.catch((error) => {
+        log.error(
+          "unaudited late plugin operation settlement tracking failed; domain remains poisoned for %s: %s",
+          toolUse.name,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+      log.error(
+        "plugin operation interruption audit failed; domain remains poisoned for %s",
+        toolUse.name,
+      );
     } else {
       operationExecutionLease?.release();
     }
