@@ -683,7 +683,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
   }, [showBanner, t, uninstallTarget]);
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col gap-3">
+    <div className="flex min-w-0 flex-1 min-h-0 flex-col gap-3">
       <SettingsPageHeader
         title={t("pluginConfigTab.pageTitle")}
         description={t("pluginConfigTab.pageDescription")}
@@ -713,8 +713,8 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
       )}
 
       {isDevMode && (
-        <div className="flex items-center justify-between rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2">
-          <div className="space-y-0.5">
+        <div className="flex min-w-0 flex-col gap-2 rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 space-y-0.5">
             <p className="text-xs font-medium text-warning">{t("pluginConfigTab.devToolsTitle")}</p>
             <p className="text-[11px] text-warning/(--opacity-intense)">
               {t("pluginConfigTab.devToolsDescription")}
@@ -723,7 +723,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
           <Button
             size="sm"
             variant="outline"
-            className="h-7 shrink-0 text-xs border-warning/(--opacity-half) text-warning hover:bg-warning/(--opacity-light)"
+            className="h-7 self-start shrink-0 text-xs border-warning/(--opacity-half) text-warning hover:bg-warning/(--opacity-light) sm:self-auto"
             onClick={() => void handleInstallLocal()}
             disabled={localInstalling}
           >
@@ -746,10 +746,10 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
         // Right detail card stretches to fill the split height; its own
         // `overflow-y-auto` is the single scroll surface for the card so
         // the entire 환경 설정 list is reachable by scrolling.
-        <div className="flex gap-3 h-[calc(100dvh-180px)] min-h-[350px]">
+        <div className="flex min-w-0 flex-col gap-3 sm:h-[calc(100dvh-180px)] sm:min-h-[350px] sm:flex-row">
           {/* Left: plugin list (sub-sidebar — fixed width) */}
-          <div className="w-60 shrink-0 rounded-md border bg-card">
-            <ScrollArea className="h-full">
+          <div className="w-full min-w-0 shrink-0 rounded-md border bg-card sm:w-60">
+            <ScrollArea className="max-h-52 sm:h-full">
               <div className="p-1 space-y-0.5">
                 {plugins.map((p) => (
                   <button
@@ -852,13 +852,13 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
               for everything inside (header + 인증 + 제공 툴 + 환경 설정),
               so the user can scroll past the auth/tools sections to reach
               the full list of config fields. */}
-          <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3 overflow-y-auto min-h-0">
+          <div className="min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3 overflow-visible sm:flex-1 sm:min-h-0 sm:overflow-y-auto">
             {selectedPlugin ? (
               <>
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1">
-                      <h3 className="text-sm font-semibold">{selectedPlugin.name}</h3>
+                      <h3 className="min-w-0 break-words text-sm font-semibold">{selectedPlugin.name}</h3>
                       {selectedPlugin.isManaged && (
                         <span className="inline-flex items-center gap-0.5 rounded-full bg-info/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-info">🔒 {t("pluginConfigTab.badgeManaged")}</span>
                       )}
@@ -922,10 +922,10 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                       )}
                     </div>
                     {selectedPlugin.description && (
-                      <p className="mt-1 text-xs text-muted-foreground">{selectedPlugin.description}</p>
+                      <p className="mt-1 break-words text-xs text-muted-foreground">{selectedPlugin.description}</p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
                     {selectedPluginRuntimeLoaded ? (
                       <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                         <span>{selectedPluginActive ? t("pluginConfigTab.activeLabel") : t("pluginConfigTab.inactiveLabel")}</span>

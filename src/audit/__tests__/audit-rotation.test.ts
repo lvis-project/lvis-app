@@ -54,7 +54,11 @@ describe("rotateAndPrune — size-triggered rotation", () => {
     // A .gz archive should exist
     const archive = files.find((f) => /2026-04-10\.jsonl\.\d{8}\.gz$/.test(f));
     expect(archive).toBeDefined();
-    expect(statSync(join(auditDir, archive!)).mode & 0o777).toBe(0o600);
+    const archiveStat = statSync(join(auditDir, archive!));
+    expect(archiveStat.isFile()).toBe(true);
+    if (process.platform !== "win32") {
+      expect(archiveStat.mode & 0o777).toBe(0o600);
+    }
   });
 
   it("does NOT rotate a file below the size threshold", async () => {

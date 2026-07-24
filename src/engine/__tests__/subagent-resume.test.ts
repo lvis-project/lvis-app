@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConversationLoop } from "../conversation-loop.js";
 import { MemoryManager } from "../../memory/memory-manager.js";
+import { AuditLogger } from "../../audit/audit-logger.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
@@ -49,6 +50,7 @@ import {
 import { A2A_AGENT_MAX_TRACKED_TREES } from "../a2a-agent-message-envelope.js";
 
 // ─── Test scaffolding ─────────────────────────────────
+let loopAuditLoggers: AuditLogger[] = [];
 
 class ScriptedProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -96,6 +98,8 @@ class AbortAwareBlockingProvider implements LLMProvider {
 function buildLoopDeps(toolRegistry: ToolRegistry) {
   const inputClassifier = new InputClassifier();
   const routeEngine = new RouteEngine();
+  const auditLogger = new AuditLogger();
+  loopAuditLoggers.push(auditLogger);
   return {
     settingsService: {
       get: () => fakeLlmSettings(),
@@ -111,6 +115,7 @@ function buildLoopDeps(toolRegistry: ToolRegistry) {
     inputClassifier,
     routeEngine,
     toolRegistry,
+    auditLogger,
     memoryManager: {
       saveSession: () => Promise.resolve(),
       listSessions: () => [],
@@ -153,17 +158,27 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
   let tmpHome: string;
   let prevLvisHome: string | undefined;
+  let memoryStores: MemoryManager[];
 
   beforeEach(() => {
     prevLvisHome = process.env.LVIS_HOME;
     tmpHome = mkdtempSync(join(tmpdir(), "lvis-subagent-resume-"));
     process.env.LVIS_HOME = tmpHome;
+    memoryStores = [];
+    loopAuditLoggers = [];
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.all(loopAuditLoggers.map((logger) => logger.close()));
+    for (const store of memoryStores) store.closeSearchIndex();
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    });
     vi.restoreAllMocks();
   });
 
@@ -171,6 +186,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const store = new MemoryManager({
       lvisDir: openFeatureNamespace("subagent").dir,
     });
+    memoryStores.push(store);
     store.load();
     return store;
   }
@@ -2545,6 +2561,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const mainStore = new MemoryManager({ lvisDir: tmpHome });
+    memoryStores.push(mainStore);
     mainStore.load();
     const subStore = makeSubStore();
     const parentDeps = buildLoopDeps(toolRegistry);

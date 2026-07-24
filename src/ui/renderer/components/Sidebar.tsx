@@ -1091,6 +1091,7 @@ export function Sidebar({
       className={[
         "absolute left-2 bottom-3 z-30 flex min-h-0 flex-col",
         darwinTopClearance ? "top-2" : "top-1.5",
+        collapsed && "pointer-events-none",
       ].join(" ")}
       // The aside overlays the Electron drag band. Mark it no-drag so its controls
       // stay clickable; the OS traffic lights still own their hit region to the
@@ -1127,7 +1128,7 @@ export function Sidebar({
               // (matching the expanded card) so the collapsed icon-rail body below
               // — itself `flex-1` — fills top-to-bottom in chat mode instead of
               // hugging content height.
-              "w-auto items-start flex-1 min-h-0"
+              "w-auto items-start flex-1 min-h-0 pointer-events-none [&>*]:pointer-events-auto"
             : // Expanded: `relative` anchors the inner-edge resize handle;
               // `flex-1 min-h-0` stretches the card to the aside's bottom so the
               // surface reaches near the window bottom instead of collapsing to

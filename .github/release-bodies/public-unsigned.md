@@ -6,7 +6,7 @@ This is an operator-approved unsigned public release. It is not signed with a Wi
 - **macOS:** Gatekeeper may block the first launch because the app is unsigned and not notarized. Do not bypass OS protections unless you independently trust this release.
 - **Linux:** verify the downloaded asset checksum from this official GitHub Release before installation.
 
-The public tag build contains no embedded internal demo activation key.
+The public tag build contains no embedded internal credentials.
 
 ## Required operator record before publish
 
