@@ -110,7 +110,10 @@ describe("PluginRuntime operation account sessions", () => {
       instance,
       "auth_status",
       { authenticated: false },
-    )).toEqual({ invalidatedAccountHash: first });
+    )).toEqual({
+      invalidatedAccountHash: first,
+      invalidatedAccountGenerationId: generationId,
+    });
     expect(accountIdentity(instance)).toBeUndefined();
 
     observe(
@@ -144,6 +147,7 @@ describe("PluginRuntime operation account sessions", () => {
       epoch: expect.any(Number),
       accountTransitionScopeHash: currentScope,
       invalidatedAccountHash: current,
+      invalidatedAccountGenerationId: generationId,
     });
     expect(instance.observePluginAuthResult(
       pluginId,
@@ -184,6 +188,7 @@ describe("PluginRuntime operation account sessions", () => {
         epoch: expect.any(Number),
         accountTransitionScopeHash: currentScope,
         invalidatedAccountHash: current,
+        invalidatedAccountGenerationId: generationId,
       });
       expect(accountIdentity(instance)).toBeUndefined();
       instance.observePluginAuthResult(
@@ -299,6 +304,149 @@ describe("PluginRuntime operation account sessions", () => {
 
     expect(replacement?.accountTransitionScopeHash)
       .toBe(predecessorIdentity?.identityHash);
+    expect(replacement).toMatchObject({
+      invalidatedAccountHash: predecessorIdentity?.principalHash,
+      invalidatedAccountGenerationId: generationId,
+    });
+  });
+
+  it("attributes detached replacement auth invalidation to the predecessor generation", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const predecessorIdentity = accountIdentity(instance);
+    instance.prepareRuntimeGeneration({
+      activationId: "generation-2",
+      installId: null,
+      manifest,
+      pluginRoot: "/tmp/session-bound-auth",
+      instance: {},
+      methods: new Map(),
+    }).publish();
+
+    expect(
+      instance.invalidateDetachedPluginAuthInvocation(
+        pluginId,
+        "generation-2",
+      ),
+    ).toEqual({
+      invalidatedAccountHash: predecessorIdentity?.principalHash,
+      invalidatedAccountGenerationId: generationId,
+    });
+  });
+
+  it("attributes a replacement auth-status invalidation to the predecessor generation", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const predecessorIdentity = accountIdentity(instance);
+    instance.prepareRuntimeGeneration({
+      activationId: "generation-2",
+      installId: null,
+      manifest,
+      pluginRoot: "/tmp/session-bound-auth",
+      instance: {},
+      methods: new Map(),
+    }).publish();
+    instance.setGenerationAccess({
+      getActive: vi.fn(() => ({
+        pluginId,
+        generationId: "generation-2",
+        manifest,
+      })),
+      replaceRuntime: vi.fn(),
+    } as never);
+
+    const replacementStatus = instance.beginPluginAuthInvocation(
+      pluginId,
+      "generation-2",
+      "auth_status",
+    );
+    expect(instance.observePluginAuthResult(
+      pluginId,
+      "generation-2",
+      "auth_status",
+      { authenticated: false },
+      replacementStatus?.epoch,
+    )).toEqual({
+      invalidatedAccountHash: predecessorIdentity?.principalHash,
+      invalidatedAccountGenerationId: generationId,
+    });
+  });
+
+  it("attributes a detached replacement auth handler to the predecessor generation", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const predecessorIdentity = accountIdentity(instance);
+    instance.prepareRuntimeGeneration({
+      activationId: "generation-2",
+      installId: null,
+      manifest,
+      pluginRoot: "/tmp/session-bound-auth",
+      instance: {},
+      methods: new Map(),
+    }).publish();
+
+    expect(
+      instance.invalidateDetachedPluginAuthInvocation(pluginId, "generation-2"),
+    ).toEqual({
+      invalidatedAccountHash: predecessorIdentity?.principalHash,
+      invalidatedAccountGenerationId: generationId,
+    });
+  });
+
+  it("attributes replacement status invalidation to the predecessor generation", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const predecessorIdentity = accountIdentity(instance);
+    instance.prepareRuntimeGeneration({
+      activationId: "generation-2",
+      installId: null,
+      manifest,
+      pluginRoot: "/tmp/session-bound-auth",
+      instance: {},
+      methods: new Map(),
+    }).publish();
+    instance.setGenerationAccess({
+      getActive: vi.fn(() => ({
+        pluginId,
+        generationId: "generation-2",
+        manifest,
+      })),
+      replaceRuntime: vi.fn(),
+    } as never);
+    const status = instance.beginPluginAuthInvocation(
+      pluginId,
+      "generation-2",
+      "auth_status",
+    );
+
+    expect(
+      instance.observePluginAuthResult(
+        pluginId,
+        "generation-2",
+        "auth_status",
+        { authenticated: true, account: "person@example.com" },
+        status?.epoch,
+      ),
+    ).toEqual({
+      invalidatedAccountHash: predecessorIdentity?.principalHash,
+      invalidatedAccountGenerationId: generationId,
+    });
   });
 
   it("invalidates the cached principal when an auth handler detaches", () => {
@@ -315,7 +463,10 @@ describe("PluginRuntime operation account sessions", () => {
         pluginId,
         generationId,
       ),
-    ).toEqual({ invalidatedAccountHash: principalHash });
+    ).toEqual({
+      invalidatedAccountHash: principalHash,
+      invalidatedAccountGenerationId: generationId,
+    });
     expect(accountIdentity(instance)).toBeUndefined();
   });
 

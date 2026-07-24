@@ -1,6 +1,12 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
+import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
+import { RuleBasedRiskClassifier } from "../../permissions/reviewer/risk-classifier.js";
+import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
 import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
 import { runWithInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { currentEffectLedger } from "../../permissions/effect-ledger.js";
@@ -230,6 +236,91 @@ function options(
 }
 
 describe("ToolExecutor plugin operation governance", () => {
+  it("persists only the governed projection for headless directory deferral", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lvis-governed-directory-"));
+    const outsideDirectory = mkdtempSync(
+      join(tmpdir(), "lvis-governed-outside-"),
+    );
+    const outsideFile = join(outsideDirectory, "attendance.json");
+    writeFileSync(outsideFile, "blocked", "utf8");
+
+    try {
+      const { executor, registry, permissions } = setup();
+      const execute = vi.fn(async () => ({ output: "unexpected", isError: false }));
+      registry.register(createDynamicTool({
+        name: "governed_path_read",
+        description: "read governed state from a declared path",
+        source: "plugin",
+        category: "read",
+        pluginId: principal.ownerPluginId,
+        pluginGeneration: {
+          pluginId: principal.ownerPluginId,
+          generationId: principal.generationId,
+        },
+        modelVisible: true,
+        pathFields: ["path"],
+        operationPolicy: {
+          discriminant: "operation",
+          operations: {
+            status: {
+              kind: "read",
+              minimumRisk: "read",
+              appVisible: true,
+            },
+          },
+        },
+        jsonSchema: { type: "object" },
+        execute,
+      }));
+      const deferredQueue = new DeferredQueue(
+        join(directory, "deferred-queue.jsonl"),
+      );
+      permissions.setReviewer({
+        classifier: new RuleBasedRiskClassifier(),
+        cache: new VerdictCache(join(directory, "reviewer-cache.jsonl")),
+        deferredQueue,
+      });
+      const invocationOptions = options(undefined, principal, false);
+
+      const [result] = await runWithInvocationOrigin(
+        "plugin",
+        undefined,
+        () => executor.executeAll(
+          [{
+            id: "governed-headless-path",
+            name: "governed_path_read",
+            input: {
+              operation: "status",
+              path: outsideFile,
+              opaqueSecret: "must-never-reach-deferred-storage",
+            },
+          }],
+          {
+            ...invocationOptions,
+            permissionContext: {
+              ...invocationOptions.permissionContext,
+              headless: true,
+              additionalDirectories: [directory],
+            },
+          },
+        ),
+      );
+
+      expect(result.is_error).toBe(true);
+      expect(result.content).toContain("허용 디렉토리 외부");
+      expect(execute).not.toHaveBeenCalled();
+      const [pending] = deferredQueue.listPending();
+      expect(pending?.inputSummary).toBe('{"operation":"status"}');
+      expect(pending?.inputSummary).not.toContain(
+        "must-never-reach-deferred-storage",
+      );
+      expect(pending?.inputSummary).not.toContain(outsideFile);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
   it.each(["error", "degraded", "uncertain"])(
     "does not mint freshness from a declared non-success read status=%s",
     async (status) => {

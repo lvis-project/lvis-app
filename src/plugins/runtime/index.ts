@@ -1224,6 +1224,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     epoch: number;
     accountTransitionScopeHash: string;
     invalidatedAccountHash?: string;
+    invalidatedAccountGenerationId?: string;
   } | undefined {
     const active = this.requireGenerationAccess("plugin auth invocation").getActive(pluginId);
     if (!active || active.generationId !== generationId) return undefined;
@@ -1258,7 +1259,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     if (currentAccount) {
       this.pluginAuthTransitionPrincipals.set(
         transitionKey,
-        currentAccount,
+        { ...currentAccount, generationId },
       );
     }
     const invalidatedAccount =
@@ -1269,6 +1270,8 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
           epoch,
           accountTransitionScopeHash,
           invalidatedAccountHash: invalidatedAccount.principalHash,
+          invalidatedAccountGenerationId:
+            currentAccount ? generationId : retainedTransitionAccount?.generationId,
         }
       : { epoch, accountTransitionScopeHash };
   }
@@ -1284,7 +1287,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     toolName: string,
     result: unknown,
     invocationEpoch: number | undefined,
-  ): { invalidatedAccountHash?: string } {
+  ): {
+    invalidatedAccountHash?: string;
+    invalidatedAccountGenerationId?: string;
+  } {
     const active = this.requireGenerationAccess("plugin auth result observation").getActive(pluginId);
     if (!active || active.generationId !== generationId) return {};
     const manifest = active.manifest;
@@ -1303,7 +1309,9 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     if (toolName === auth.logoutTool) {
       const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
       this.pluginAccountHashes.delete(key);
-      return invalidatedAccountHash ? { invalidatedAccountHash } : {};
+      return invalidatedAccountHash
+        ? { invalidatedAccountHash, invalidatedAccountGenerationId: generationId }
+        : {};
     }
     if (toolName !== auth.statusTool) return {};
     const outer = result && typeof result === "object" && !Array.isArray(result)
@@ -1312,25 +1320,53 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     const nested = outer?.data && typeof outer.data === "object" && !Array.isArray(outer.data)
       ? outer.data as Record<string, unknown>
       : outer;
+    const retainedTransitionAccount =
+      this.pluginAuthTransitionPrincipals.get(pluginId);
     if (nested?.authenticated !== true || typeof nested.account !== "string" || !nested.account.trim()) {
-      const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+      const currentAccount = this.pluginAccountHashes.get(key);
+      const invalidatedAccount =
+        currentAccount ?? retainedTransitionAccount;
       this.pluginAccountHashes.delete(key);
-      return invalidatedAccountHash ? { invalidatedAccountHash } : {};
+      return invalidatedAccount
+        ? {
+            invalidatedAccountHash: invalidatedAccount.principalHash,
+            invalidatedAccountGenerationId:
+              currentAccount ? generationId : retainedTransitionAccount?.generationId,
+          }
+        : {};
     }
     const identityHash = createHash("sha256")
       .update("plugin-account-identity/v1\0")
       .update(nested.account.trim().toLowerCase())
       .digest("hex");
     const existing = this.pluginAccountHashes.get(key);
-    if (existing?.identityHash === identityHash) return {};
+    if (existing?.identityHash === identityHash) {
+      this.pluginAuthTransitionPrincipals.set(pluginId, {
+        ...existing,
+        generationId,
+      });
+      return {};
+    }
     const principalHash = createHash("sha256")
       .update("plugin-account-session/v1\0")
       .update(identityHash)
       .update("\0")
       .update(randomUUID())
       .digest("hex");
-    this.pluginAccountHashes.set(key, { identityHash, principalHash });
-    return existing ? { invalidatedAccountHash: existing.principalHash } : {};
+    const nextAccount = { identityHash, principalHash };
+    this.pluginAccountHashes.set(key, nextAccount);
+    this.pluginAuthTransitionPrincipals.set(pluginId, {
+      ...nextAccount,
+      generationId,
+    });
+    const invalidatedAccount = existing ?? retainedTransitionAccount;
+    return invalidatedAccount
+      ? {
+          invalidatedAccountHash: invalidatedAccount.principalHash,
+          invalidatedAccountGenerationId:
+            existing ? generationId : retainedTransitionAccount?.generationId,
+        }
+      : {};
   }
 
   /**
@@ -1342,13 +1378,27 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   invalidateDetachedPluginAuthInvocation(
     pluginId: string,
     generationId: string,
-  ): { invalidatedAccountHash?: string } {
+  ): {
+    invalidatedAccountHash?: string;
+    invalidatedAccountGenerationId?: string;
+  } {
     const key = `${pluginId}\0${generationId}`;
     const current = this.pluginAccountHashes.get(key);
-    if (!current) return {};
-    this.pluginAuthTransitionPrincipals.set(pluginId, current);
+    const retained = this.pluginAuthTransitionPrincipals.get(pluginId);
+    const invalidatedAccount = current ?? retained;
+    if (!invalidatedAccount) return {};
+    if (current) {
+      this.pluginAuthTransitionPrincipals.set(pluginId, {
+        ...current,
+        generationId,
+      });
+    }
     this.pluginAccountHashes.delete(key);
-    return { invalidatedAccountHash: current.principalHash };
+    return {
+      invalidatedAccountHash: invalidatedAccount.principalHash,
+      invalidatedAccountGenerationId:
+        current ? generationId : retained?.generationId,
+    };
   }
 
   clearPluginOperationAccount(pluginId: string): void {
