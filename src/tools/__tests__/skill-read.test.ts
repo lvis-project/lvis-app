@@ -232,3 +232,47 @@ describe("skill_read — plugin generation binding", () => {
     }
   });
 });
+
+describe("skill_load — approval covers the bundled manifest", () => {
+  it("re-prompts when a bundle gains a file even though SKILL.md is unchanged", async () => {
+    const { createSkillLoadTool } = await import("../skill-load.js");
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      const skillDir = userSkillDir(dir, "guide");
+      const store = new SkillStore({ userDir: dir });
+      const approved = new Map<string, string>();
+      const approvals = {
+        isApproved: async (key: string, material: string) => approved.get(key) === material,
+        approve: async (key: string, material: string) => { approved.set(key, material); },
+      };
+      let prompts = 0;
+      const tool = createSkillLoadTool({
+        store,
+        overlay: new SkillOverlay(),
+        approvals: approvals as never,
+        getApprovalGate: () => ({
+          requestAndWait: async () => { prompts += 1; return { choice: "allow" }; },
+        }) as never,
+        emit: () => {},
+      });
+
+      const first = await tool.execute({ skillName: "guide" }, ctx());
+      expect(first.isError).toBe(false);
+      expect(prompts).toBe(1);
+
+      // Same body, second load: still approved, no new prompt.
+      const second = await tool.execute({ skillName: "guide" }, ctx());
+      expect(second.isError).toBe(false);
+      expect(prompts).toBe(1);
+
+      // A NEW bundled file changes what renders in the trusted fence, so the
+      // approval must no longer match.
+      writeFileSync(join(skillDir, "references", "extra.md"), "EXTRA");
+      const third = await tool.execute({ skillName: "guide" }, ctx());
+      expect(third.isError).toBe(false);
+      expect(prompts).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

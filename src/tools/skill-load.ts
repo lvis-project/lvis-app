@@ -37,6 +37,26 @@ export interface SkillLoadEvent {
   description: string;
 }
 
+/**
+ * What the approval record is hash-bound to.
+ *
+ * The body alone stopped being sufficient once a skill can ship bundled files:
+ * their NAMES render inside the trusted `<lvis-skill>` fence, so a bundle that
+ * gains files while SKILL.md is unchanged would reach the system prompt without
+ * re-prompting — the exact TOCTOU the body-hash binding exists to prevent.
+ * Skills with no resources hash exactly as before, so existing approvals (all
+ * seeded built-ins included) stay valid.
+ */
+function approvalMaterial(skill: { body: string; resources?: readonly { path: string; bytes: number }[] }): string {
+  const resources = skill.resources ?? [];
+  if (resources.length === 0) return skill.body;
+  const manifest = resources
+    .map((resource) => `${resource.path}:${resource.bytes}`)
+    .sort()
+    .join("\n");
+  return `${skill.body}\n<<skill-resources>>\n${manifest}`;
+}
+
 export interface SkillLoadToolDeps {
   store: SkillStore;
   /** Current-turn overlay registry — read by SystemPromptBuilder each round. */
@@ -142,7 +162,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // "yes."
       const alreadyApproved = await deps.approvals.isApproved(
         skill.approvalKey ?? skill.name,
-        skill.body,
+        approvalMaterial(skill),
       );
       if (!alreadyApproved) {
         const gate = deps.getApprovalGate();
@@ -174,7 +194,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         }
         // R2-CR-3: persist approval BOUND TO the current body's sha256.
         // A subsequent body swap will invalidate this record.
-        await deps.approvals.approve(skill.approvalKey ?? skill.name, skill.body).catch((err) => {
+        await deps.approvals.approve(skill.approvalKey ?? skill.name, approvalMaterial(skill)).catch((err) => {
           log.warn(
             "skill_load: approval persistence failed (non-fatal): %s",
             (err as Error).message,

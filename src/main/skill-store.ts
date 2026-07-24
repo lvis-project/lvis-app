@@ -87,9 +87,9 @@ function escapesRoot(rel: string): boolean {
 
 /**
  * `skill_read` is a TEXT surface: content is decoded as UTF-8 and handed to the
- * model. A binary file would arrive as lossy replacement characters (and could
- * carry a raw NUL into the result), so refuse it explicitly rather than return
- * corrupted bytes that read like content.
+ * model. Refuse NUL-bearing content — the reliable marker of a binary file —
+ * rather than return corrupted bytes that read like content. (Invalid UTF-8
+ * WITHOUT a NUL still decodes lossily; it is inert data on this channel.)
  */
 function assertTextResource(content: string, resourcePath: string): void {
   if (content.includes("\u0000")) {
@@ -384,12 +384,18 @@ export class SkillStore {
     if (skill.pluginOwner) throw new Error("plugin skill resources load through readPluginResource");
     assertSafeResourcePath(resourcePath);
     const skillDir = dirname(skill.filePath);
-    const canonicalDir = await realpath(skillDir);
+    // Every filesystem resolution below runs inside a try: a raw ENOENT would
+    // otherwise carry the absolute host path into the error text, which
+    // `skill_read` returns verbatim to the model.
+    let canonicalDir: string;
+    try {
+      canonicalDir = await realpath(skillDir);
+    } catch {
+      throw new Error(`resource not found: ${resourcePath}`);
+    }
     if (!(await this.isBundleRoot(canonicalDir, basename(skill.filePath)))) {
       throw new Error("flat skills have no bundled resources");
     }
-    // Resolve inside a try so a missing file cannot leak the absolute host path
-    // (the error text is returned to the model by `skill_read`).
     let canonicalFile: string;
     try {
       canonicalFile = await realpath(join(skillDir, resourcePath));
@@ -406,7 +412,12 @@ export class SkillStore {
     // Bind the size check and the read to ONE file handle: re-opening by path
     // after `stat` leaves a swap window (mirrors the fd-bound read in
     // `tools/file-tools.ts`).
-    const handle = await open(canonicalFile, "r");
+    let handle: Awaited<ReturnType<typeof open>>;
+    try {
+      handle = await open(canonicalFile, "r");
+    } catch {
+      throw new Error(`resource not found: ${resourcePath}`);
+    }
     try {
       const info = await handle.stat();
       if (!info.isFile()) throw new Error("skill resource is not a regular file");
