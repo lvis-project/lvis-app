@@ -8,7 +8,11 @@
  */
 import type { ToolSchema } from "../llm/types.js";
 import type { ToolRegistry } from "../../tools/registry.js";
-import { EAGER_TOOL_EXPOSURE_CEILING } from "../../shared/tool-exposure-policy.js";
+import {
+  EAGER_TOOL_EXPOSURE_CEILING,
+  EAGER_TOOL_EXPOSURE_TOKEN_BUDGET,
+} from "../../shared/tool-exposure-policy.js";
+import { estimateTokens } from "../auto-compact.js";
 import { createLogger } from "../../lib/logger.js";
 import type { ConversationLoopDeps, ToolScope } from "./types.js";
 
@@ -145,9 +149,21 @@ export function scopedToolNameSet(deps: ConversationLoopDeps, activePluginIds: S
 
 export function shouldDeferToolSchemas(deps: ConversationLoopDeps, activePluginIds: Set<string>,
 ): boolean {
-    return (
-    scopedToolNameSet(deps, activePluginIds).size >= EAGER_TOOL_EXPOSURE_CEILING
-  );
+    const inScope = scopedToolNameSet(deps, activePluginIds);
+    // Cheap count pre-filter: a pathological catalog can never be exposed
+    // eagerly even if token estimation is unavailable.
+    if (inScope.size >= EAGER_TOOL_EXPOSURE_CEILING) return true;
+    if (inScope.size === 0) return false;
+    // Authoritative token gate: estimate the eager plugin/MCP schema payload —
+    // the same in-scope schemas that would be sent, excluding always-eager
+    // builtins — and defer when it would dominate TPM. A few large schemas can
+    // exceed budget while the count stays under the ceiling. Only reached below
+    // the count ceiling, so the extra serialization is bounded.
+    const schemas = deps.toolRegistry
+      .getToolSchemas()
+      .filter((entry) => inScope.has(entry.name));
+    const estimatedTokens = estimateTokens(JSON.stringify({ tools: schemas }));
+    return estimatedTokens >= EAGER_TOOL_EXPOSURE_TOKEN_BUDGET;
   }
 
 export function filterAllowedPluginIds(deps: ConversationLoopDeps, pluginIds: string[],
