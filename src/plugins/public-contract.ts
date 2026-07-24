@@ -59,6 +59,14 @@ export interface PluginToolOperationRule {
   minimumRisk: GovernedRiskFloor;
   /** Permit this operation from an app only when the parent Tool is app-visible. @optional */
   appVisible?: boolean;
+  /**
+   * For a read that resolves with a structured domain result, the top-level
+   * `status` value(s) that are allowed to mint Host freshness. When declared,
+   * a missing, non-string, or unlisted status fails closed while the result
+   * remains visible to the caller. Valid only when `kind` is `"read"`.
+   * @optional
+   */
+  successfulResultStatuses?: string[];
   requiresRead?: {
     tool: string;
     operations: string[];

@@ -12,10 +12,10 @@ unsigned.
   servers.** Install, activation, update, rollback, disable, and removal publish
   or retire all contributions as one generation, with journaled cleanup and no
   orphaned ownership.
-- **Failed reads cannot authorize writes.** A structured plugin read result
-  whose status is `error`, `degraded`, or `uncertain` remains visible to the
-  caller but does not mint the Host freshness receipt required by a governed
-  write.
+- **Failed reads cannot authorize writes.** A governed read can explicitly
+  declare its successful structured-result statuses. Missing or unsuccessful
+  status values remain visible to the caller but fail closed, and every new
+  read attempt invalidates older freshness receipts and grants.
 - **Retired contracts stay retired.** The Host-owned manifest and public API do
   not restore keyword dispatch, UI-action tool aliases, or plugin-specific Host
   branches; the SDK remains a generated projection of the app contract.
