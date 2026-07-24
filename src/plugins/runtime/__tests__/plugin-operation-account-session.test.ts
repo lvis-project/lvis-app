@@ -18,11 +18,15 @@ const manifest: PluginManifest = {
   },
 };
 
-function runtime(): PluginRuntime {
-  const instance = new PluginRuntime({
+function runtime(options: {
+  onPluginUiRevisionChange?: (instance: PluginRuntime) => void;
+} = {}): PluginRuntime {
+  let instance!: PluginRuntime;
+  instance = new PluginRuntime({
     hostRoot: "/tmp",
     manifestPaths: [],
     createHostApi: createNoopHostApiForTests,
+    onPluginUiRevisionChange: () => options.onPluginUiRevisionChange?.(instance),
   });
   instance.setGenerationAccess({
     getActive: vi.fn(() => ({
@@ -44,18 +48,39 @@ function observe(
   toolName: string,
   result: unknown,
 ) {
+  return observeFor(instance, pluginId, generationId, toolName, result);
+}
+
+function observeFor(
+  instance: PluginRuntime,
+  targetPluginId: string,
+  targetGenerationId: string,
+  toolName: string,
+  result: unknown,
+) {
   const epoch = instance.beginPluginAuthInvocation(
-    pluginId,
-    generationId,
+    targetPluginId,
+    targetGenerationId,
     toolName,
   );
   return instance.observePluginAuthResult(
-    pluginId,
-    generationId,
+    targetPluginId,
+    targetGenerationId,
     toolName,
     result,
     epoch?.epoch,
   );
+}
+
+function replacementRuntime() {
+  return {
+    activationId: "generation-2",
+    installId: null,
+    manifest,
+    pluginRoot: "/tmp/session-bound-auth",
+    instance: {},
+    methods: new Map(),
+  };
 }
 
 function deferred<T>() {
@@ -286,7 +311,7 @@ describe("PluginRuntime operation account sessions", () => {
       pluginRoot: "/tmp/session-bound-auth",
       instance: {},
       methods: new Map(),
-    }).publish();
+    }, generationId).publish();
     instance.setGenerationAccess({
       getActive: vi.fn(() => ({
         pluginId,
@@ -324,7 +349,7 @@ describe("PluginRuntime operation account sessions", () => {
       pluginRoot: "/tmp/session-bound-auth",
       instance: {},
       methods: new Map(),
-    });
+    }, generationId);
 
     observe(
       instance,
@@ -333,6 +358,7 @@ describe("PluginRuntime operation account sessions", () => {
     );
     const latestIdentity = accountIdentity(instance);
     prepared.publish();
+    expect(accountIdentity(instance)).toBeUndefined();
     instance.setGenerationAccess({
       getActive: vi.fn(() => ({
         pluginId,
@@ -355,6 +381,150 @@ describe("PluginRuntime operation account sessions", () => {
     });
   });
 
+  it("preserves a late predecessor transition through prepared removal and reinstall", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "first@example.com" },
+    );
+    const removal = instance.prepareRuntimeRemoval(pluginId, generationId);
+
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "latest@example.com" },
+    );
+    const latestIdentity = accountIdentity(instance);
+    removal.publish();
+    instance.prepareRuntimeGeneration(replacementRuntime(), generationId).publish();
+    instance.setGenerationAccess({
+      getActive: vi.fn(() => ({
+        pluginId,
+        generationId: "generation-2",
+        manifest,
+      })),
+      replaceRuntime: vi.fn(),
+    } as never);
+
+    expect(
+      instance.beginPluginAuthInvocation(
+        pluginId,
+        "generation-2",
+        "auth_login",
+      ),
+    ).toMatchObject({
+      accountTransitionScopeHash: latestIdentity?.identityHash,
+      invalidatedAccountHash: latestIdentity?.principalHash,
+      invalidatedAccountGenerationId: generationId,
+    });
+  });
+
+  it("does not restore a detached predecessor account after prepared publication", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const prepared = instance.prepareRuntimeGeneration(
+      replacementRuntime(),
+      generationId,
+    );
+
+    expect(instance.invalidateDetachedPluginAuthInvocation(pluginId, generationId))
+      .toMatchObject({ invalidatedAccountGenerationId: generationId });
+    prepared.publish();
+
+    expect(accountIdentity(instance)).toBeUndefined();
+  });
+
+  it("preserves another plugin account while publishing this plugin generation", () => {
+    const instance = runtime();
+    const otherPluginId = "other-session-bound-auth";
+    const otherGenerationId = "other-generation-1";
+    const otherManifest = { ...manifest, id: otherPluginId };
+    instance.setGenerationAccess({
+      getActive: vi.fn((id: string) => {
+        if (id === pluginId) return { pluginId, generationId, manifest };
+        if (id === otherPluginId) {
+          return {
+            pluginId: otherPluginId,
+            generationId: otherGenerationId,
+            manifest: otherManifest,
+          };
+        }
+        return undefined;
+      }),
+      replaceRuntime: vi.fn(),
+    } as never);
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "primary@example.com" },
+    );
+    observeFor(
+      instance,
+      otherPluginId,
+      otherGenerationId,
+      "auth_status",
+      { authenticated: true, account: "other@example.com" },
+    );
+    const otherIdentity = instance.getPluginOperationAccountIdentity(
+      otherPluginId,
+      otherGenerationId,
+    );
+
+    instance.prepareRuntimeGeneration(replacementRuntime(), generationId).publish();
+
+    expect(instance.getPluginOperationAccountIdentity(
+      otherPluginId,
+      otherGenerationId,
+    )).toEqual(otherIdentity);
+  });
+
+  it("preserves a successor account recorded during publication", () => {
+    let activeGenerationId = generationId;
+    const instance = runtime({
+      onPluginUiRevisionChange: (callbackInstance) => {
+        if (activeGenerationId !== "generation-2") return;
+        observeFor(
+          callbackInstance,
+          pluginId,
+          activeGenerationId,
+          "auth_status",
+          { authenticated: true, account: "successor@example.com" },
+        );
+      },
+    });
+    instance.setGenerationAccess({
+      getActive: vi.fn(() => ({
+        pluginId,
+        generationId: activeGenerationId,
+        manifest,
+      })),
+      replaceRuntime: vi.fn(),
+    } as never);
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "predecessor@example.com" },
+    );
+    const predecessorIdentity = accountIdentity(instance);
+    const prepared = instance.prepareRuntimeGeneration(replacementRuntime(), generationId);
+
+    activeGenerationId = "generation-2";
+    prepared.publish();
+
+    expect(accountIdentity(instance)).toBeUndefined();
+    expect(instance.getPluginOperationAccountIdentity(pluginId, activeGenerationId)).toMatchObject({
+      identityHash: expect.any(String),
+      principalHash: expect.any(String),
+    });
+    expect(instance.getPluginOperationAccountIdentity(pluginId, activeGenerationId))
+      .not.toEqual(predecessorIdentity);
+  });
+
   it("attributes detached replacement auth invalidation to the predecessor generation", () => {
     const instance = runtime();
     observe(
@@ -370,7 +540,7 @@ describe("PluginRuntime operation account sessions", () => {
       pluginRoot: "/tmp/session-bound-auth",
       instance: {},
       methods: new Map(),
-    }).publish();
+    }, generationId).publish();
 
     expect(
       instance.invalidateDetachedPluginAuthInvocation(
@@ -398,7 +568,7 @@ describe("PluginRuntime operation account sessions", () => {
       pluginRoot: "/tmp/session-bound-auth",
       instance: {},
       methods: new Map(),
-    }).publish();
+    }, generationId).publish();
     instance.setGenerationAccess({
       getActive: vi.fn(() => ({
         pluginId,
@@ -440,7 +610,7 @@ describe("PluginRuntime operation account sessions", () => {
       pluginRoot: "/tmp/session-bound-auth",
       instance: {},
       methods: new Map(),
-    }).publish();
+    }, generationId).publish();
     instance.setGenerationAccess({
       getActive: vi.fn(() => ({
         pluginId,
