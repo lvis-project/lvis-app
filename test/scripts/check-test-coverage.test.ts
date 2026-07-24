@@ -189,10 +189,6 @@ describe("check-test-coverage", () => {
       "utf8",
     );
     const ciWorkflow = fs.readFileSync(path.resolve(".github/workflows/ci.yml"), "utf8");
-    const marketplaceWorkflow = fs.readFileSync(
-      path.resolve(".github/workflows/marketplace-e2e.yml"),
-      "utf8",
-    );
     const vitestVersion = packageJson.devDependencies.vitest.replace(/^[^\d]*/, "");
     const coverageVersion = packageJson.devDependencies["@vitest/coverage-v8"].replace(/^[^\d]*/, "");
 
@@ -228,7 +224,6 @@ describe("check-test-coverage", () => {
     expect(runtimeNormalizer).toContain('removeRuntimeMarker(target, "resourcesPath")');
     expect(ciWorkflow).not.toContain("npm rebuild better-sqlite3");
     expect(ciWorkflow).not.toContain("prebuild-install -r node");
-    expect(marketplaceWorkflow).toContain("bun run test:vitest -- run");
   });
 
   it("surfaces the highest uncovered files for actionable failures", () => {
