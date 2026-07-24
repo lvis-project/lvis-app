@@ -18,7 +18,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Chat", href: "/en/docs/chat/permissions/risk", title: "Permissions — Risk Management", snippet: "RiskLevel low/medium/high × 5 categories grid · agentApproval" },
 
   // Host Features
-  { group: "Host Features", href: "/en/docs/host/skills", title: "Skills — Ability Packs", snippet: "Invoke frequent tasks with one line. Trigger keywords + tool mapping + risk level", keywords: ["skill", "skills", "keyword", "keywords"] },
+  { group: "Host Features", href: "/en/docs/host/skills", title: "Skills — Ability Packs", snippet: "Plugin-bundled instructions · Host-selected scope · tool_search-based Tool discovery", keywords: ["skill", "skills", "instruction", "instructions"] },
   { group: "Host Features", href: "/en/docs/host/agents", title: "Agents — Small Units of Work", snippet: "An autonomous unit that does one task well. Start via shortcut / Hub message / automation", keywords: ["agent", "agents"] },
   { group: "Host Features", href: "/en/docs/host/memory", title: "MEMORY — Remembering What You Told It", snippet: "Role · preferences · frequent contacts · things to avoid. Kept only on your PC", keywords: ["memory"] },
   { group: "Host Features", href: "/en/docs/host/mcp", title: "MCP — Bringing In External Tools", snippet: "Register external Model Context Protocol servers. Tools join the list after user consent", keywords: ["mcp", "external tools"] },

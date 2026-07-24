@@ -1,12 +1,21 @@
 # LVIS ⇄ MCP 2026-07-28 RC Alignment — Design
 
-> Status: **Design / approved direction** (decisions §0 ratified by the maintainer 2026-06-06).
-> Target revision: MCP `2026-07-28` Release Candidate (stateless protocol, per-request `_meta`,
-> `server/discover`, MRTR, + Apps/Tasks/Skills extensions).
-> Directive: LVIS plugins implemented **as MCP apps/servers**; **No Fallback Code** — design for the
-> correct end-state, no degrade/shim layers.
-> Issues: supersedes/absorbs #885 (plugin contract simplification + MCP isolation parity) and frames
-> #811 (hook runtime expansion) in an MCP-aligned direction.
+> **Historical design record — not a current plugin contract.** 이 문서는
+> 보류된 연구 기록이며 비교를 위해 과거 용어를 포함할 수 있다. 구현 근거로
+> 사용하지 않는다. 현재 계약은 `plugin-contract-v6-design.md`, Host public
+> contract, manifest schema이며, pure `Tool[]`, `manifest.skills`, Host-selected
+> scope, `tool_search`만 사용하고 compatibility alias는 두지 않는다.
+
+> **2026-07-09 범위 축소 (maintainer):** #885의 plugin-contract 축은 더 이상
+> 이 문서가 주도하지 않는다. #885는 MCP `Tool` **객체** 모양과 MCP **격리
+> parity**만 다루도록 축소되었으며, 현재 계약은
+> [`plugin-contract-v6-design.md`](./plugin-contract-v6-design.md)가 소유한다.
+> stateless `2026-07-28` wire migration (`server/discover`/MRTR/per-request
+> `_meta`)은 현재 승인된 방향이 아니다. 아래 wire-migration 제안은 별도 결정 전의
+> 보류·열망적 연구 기록으로만 읽는다.
+>
+> Status: **Historical design / partially superseded**. 과거 target revision과
+> directive, #885 관계는 기록 보존용이며 현재 구현 지시가 아니다.
 
 > **Wire shapes are verified.** The exact RC field shapes were pinned **verbatim** against the
 > authoritative upstream schema — `schema/draft/schema.ts` in the `modelcontextprotocol/modelcontextprotocol`
@@ -17,7 +26,7 @@
 
 ---
 
-## 0. Ratified decisions
+## 0. Archived decision record (historical)
 
 | # | Decision | Choice |
 |-------------------- |----------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -30,7 +39,7 @@
 
 ---
 
-## 1. Executive summary
+## 1. Historical executive summary
 
 The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded plugin**, and **each plugin is an MCP _server_** speaking the stateless `2026-07-28` protocol. Marketplace/untrusted plugins run **out-of-process over stdio** (a normal MCP server); first-party plugins run **in-process behind a loopback transport** (today's `entry`/factory model, MCP-framed). The plugin's `plugin.json` projects to `server/discover`'s `DiscoverResult` (serverInfo + capabilities + `extensions`). `toolSchemas[*]` project to MCP `Tool`s; LVIS's `read|write|shell|network` **category stays the authoritative policy SOT** carried under vendor-prefixed `_meta["lvisai/category"]`, projected to (untrusted, interop-only) MCP `ToolAnnotations`. The host caches **nothing** on the connection: every host→plugin request carries `protocolVersion`+`clientInfo`+`clientCapabilities` in `_meta`, and every result is wrapped with a `resultType` discriminator. The remaining HostApi maps onto **standard MCP client-features** (sampling/elicitation), **MCP authorization**, and **MCP Apps** — **no bespoke host server**; LVIS-only platform surfaces (storage, config, triggerConversation, the domain event bus) stay host-internal. **#811 command-hooks stay 100% host-side** — MCP has no host-side tool-call veto, so hooks remain a host policy layer wrapped around the host's `tools/call` invocation, re-anchored to that boundary.
 

@@ -191,16 +191,16 @@ export function DataFlowDiagram({ locale = "ko" }: { locale?: "ko" | "en" }) {
   const stepsByLocale = {
     ko: [
       { x: 20, label: "사용자 입력", sub: "채팅 본문" },
-      { x: 175, label: "키워드 매칭", sub: "후보 Skill 추천" },
-      { x: 340, label: "도구 목록", sub: "어떤 도구가 적합한지" },
+      { x: 175, label: "호스트 입력 분류", sub: "slash command만" },
+      { x: 340, label: "도구 발견", sub: "선택 scope + tool_search" },
       { x: 500, label: "권한 검토", sub: "위험도 × 종류 × 동의" },
       { x: 665, label: "실행", sub: "결과를 채팅으로" },
       { x: 820, label: "감사 기록", sub: "한 줄로 저장" },
     ],
     en: [
       { x: 20, label: "User input", sub: "Chat body" },
-      { x: 175, label: "Keyword match", sub: "Suggests candidate skills" },
-      { x: 340, label: "Tool list", sub: "Which tool fits" },
+      { x: 175, label: "Host input classification", sub: "Slash commands only" },
+      { x: 340, label: "Tool discovery", sub: "Selected scope + tool_search" },
       { x: 500, label: "Permission review", sub: "Risk × type × consent" },
       { x: 665, label: "Execute", sub: "Result back to chat" },
       { x: 820, label: "Audit record", sub: "Saved as one line" },
@@ -318,13 +318,13 @@ export function CapabilityPackDiagram({ locale = "ko" }: { locale?: "ko" | "en" 
       { label: "플러그인", hint: "기능 모듈", color: "#4b5573" },
       { label: "Agent", hint: "자율 작업", color: "#9aa0ab" },
       { label: "MCP", hint: "외부 도구 서버", color: "#14161d" },
-      { label: "Skill", hint: "키워드 + 프롬프트 묶음", color: "#c3ccdf" },
+      { label: "Skill", hint: "지침 묶음", color: "#c3ccdf" },
     ],
     en: [
       { label: "Plugin", hint: "Feature module", color: "#4b5573" },
       { label: "Agent", hint: "Autonomous task", color: "#9aa0ab" },
       { label: "MCP", hint: "External tool server", color: "#14161d" },
-      { label: "Skill", hint: "Keyword + prompt bundle", color: "#c3ccdf" },
+      { label: "Skill", hint: "Instruction bundle", color: "#c3ccdf" },
     ],
   };
   const cells = cellsByLocale[locale];

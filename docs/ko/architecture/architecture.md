@@ -1,8 +1,11 @@
-# LVIS Architecture Document v0.4.1 (Current)
+# LVIS Architecture Document v0.4.1 (Historical snapshot)
 
 > **Version**: 0.4.1 (base) · v5 덧붙이기 (2026-04-19) — Appendix D-v5 참조
 > **Date**: 2026-04-16 (base) · 2026-04-19 (v5 additive)
-> **Status**: Architecture Currentized Draft (대화 루프/도구 표시/자동 컴팩트 구현 기준 반영) · v5 = Marketplace 승인/카나리, Approval 강화, Telemetry, Contract CI, Trace Logger, File Lock, Tool Versioning 반영
+> **Status**: Historical snapshot — not a current contract. It is retained for
+> design provenance only. Current behavior is defined by
+> [`docs/architecture/architecture.md`](../../architecture/architecture.md),
+> the Host public contract, and executable tests.
 > **Authors**: LVIS Architecture Team
 > **Base Reference**: [구현 철학](../vision/philosophy.md) · LVIS 내부 제품 요구사항 및 공개 표준 문서
 

@@ -3,7 +3,10 @@
 LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 프로젝트의 철학적 배경은 [구현 철학](../vision/philosophy.md)을 참고하세요.
 
-이 디렉터리는 LVIS 아키텍처 문서의 canonical 홈입니다. standalone `lvis-project/docs` 저장소는 아카이브용 reference만 유지합니다.
+현재 아키텍처 계약의 canonical 문서는
+[`docs/architecture/architecture.md`](../../architecture/architecture.md)와
+실행 중인 Host contract이다. 이 디렉터리에는 한국어 보조 문서와 역사적
+스냅샷을 함께 보관한다.
 
 ---
 
@@ -11,14 +14,17 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 
 | 문서 | 설명 |
 |------|------|
-| **[architecture.md](./architecture.md)** | **현재 아키텍처 (v0.4.1 Draft / currentized)** — 5-Layer Architecture, 42+ Mermaid 다이어그램, 16개 섹션 |
+| **[architecture.md](./architecture.md)** | **역사적 v0.4.1 스냅샷** — 현재 계약이 아니며 설계 경위 확인용 |
 | **[session-model-v2.md](./session-model-v2.md)** | **세션 모델 v2 구현 기준** — 명시적 세션 로드, main/routine 단일 모델, active main restore, 이전 세션 자동 로드 제거 |
 | [tool-governance.md](./tool-governance.md) | §6.3 / §9.5 / §14.2 보충 — 통합 도구 거버넌스 |
 | [plugin-deployment-model.md](./plugin-deployment-model.md) | managed vs user-installed 플러그인 배포 모델 상세 |
 
 ---
 
-## 아키텍처 요약
+## 역사적 스냅샷 요약
+
+> 아래 개요와 다이어그램은 `architecture.md`의 역사적 스냅샷을 요약한 것이며
+> 현재 구현 또는 플러그인 계약을 정의하지 않는다.
 
 > _"사용자는 판단과 소통에 집중하고, 절차·탐색·정리는 LVIS가 맡는 환경."_
 

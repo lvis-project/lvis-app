@@ -25,7 +25,7 @@ export default function Page() {
         items={[
           { title: "Secure storage", body: <>A plugin can only read and write files within its own area. It cannot access another plugin's area.</>, tone: "teal" },
           { title: "Read / write user settings", body: <>Each plugin can have its own settings keys, and the user can change those values directly from the host settings screen.</> },
-          { title: "Register Skill keywords", body: <>Registering natural-language phrases like "sort out meeting minutes" or "request parking" as keywords means the matching plugin is automatically suggested when the user says something similar.</>, tone: "citron" },
+          { title: "Bundled Skill instructions", body: <>A plugin can declare artifact-local instructions with <code>manifest.skills</code>. A Skill never activates a plugin or selects or invokes a Tool; Host-selected scope and <code>tool_search</code> control Tool discovery.</>, tone: "citron" },
           { title: "Send and receive events", body: <>Plugins can send and receive signals like "meeting ended" or "new mail arrived" to and from each other, relayed by the host.</> },
           { title: "Call another plugin's tools", body: <>One plugin can borrow another plugin's capability — for example, Work Assistant calling a tool on the calendar plugin.</> },
           { title: "Call the host LLM", body: <>A plugin can use the host's LLM without holding its own LLM key. Cost and model selection are managed centrally by the host.</>, tone: "coral" },

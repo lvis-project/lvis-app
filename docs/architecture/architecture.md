@@ -5,8 +5,9 @@ is built around one invariant: the host owns trust, storage, project identity,
 and tool execution; plugins and renderer surfaces request capabilities through
 explicit contracts.
 
-Korean source history is preserved at
-[docs/ko/architecture/architecture.md](../ko/architecture/architecture.md).
+The large Korean v0.4.1 document is preserved only as a historical source
+snapshot at [docs/ko/architecture/architecture.md](../ko/architecture/architecture.md).
+This file is the current architecture contract.
 
 ## System Goals
 
@@ -380,8 +381,9 @@ preserve historical source text; production paths remain covered.
 English is the canonical default for app docs, generated examples, comments,
 logs, and user-facing fallback copy. Korean source documents are retained under
 the mirrored `docs/ko` path and linked from the default pages. Runtime Korean
-support remains in locale catalogs, intent parsing, and keyword matching where
-the app must understand Korean user input.
+support remains in locale catalogs and feature-owned parsing where the app must
+understand Korean user input. Locale handling never selects plugin scope or
+preloads a Tool.
 
 ## Verification Expectations
 

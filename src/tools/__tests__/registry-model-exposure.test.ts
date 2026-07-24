@@ -175,7 +175,7 @@ describe("registry — an app-only tool is NOT exposed to the model (both arms, 
 
   it("cannot be forced into exposure by naming the tool in activeToolNames", () => {
     const registry = loadedRegistry();
-    // `activeToolNames` is the promotion channel (keyword preload, tool_search,
+    // `activeToolNames` is the promotion channel (`tool_search`,
     // carry-forward). Naming an app-only tool there must not load its schema: the
     // exposure filter runs BEFORE the scope filter, so there is no promotion path.
     const names = registry

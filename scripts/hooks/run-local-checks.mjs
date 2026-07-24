@@ -771,6 +771,7 @@ if (stage === "pre-commit") {
     runPushPolicyChecks(repoRoot, prePushUpdates);
   }
   runStagedSafetyChecks(repoRoot);
+  runPackageScripts(repoRoot, ["check:retired-plugin-contract-docs"]);
   const classification =
     stage === "pre-push"
       ? classifyPrePushChanges(repoRoot, prePushUpdates, remote, remoteLocation)

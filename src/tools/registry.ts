@@ -525,8 +525,8 @@ export class ToolRegistry {
    *
    * Builtins/meta-tools load when `includeBuiltins` is set. Plugin/MCP tools
    * load individually only when their name is in `scope.activeToolNames`
-   * (keyword-preloaded, `tool_search`-promoted, carried forward in current
-   * scope, or explicitly allowlisted by a sub-agent/routine/headless caller).
+   * (`tool_search`-promoted, carried forward in current scope, or explicitly
+   * allowlisted by a sub-agent/routine/headless caller).
    * Everything else is deferred to {@link getToolCatalogForScope}.
    *
    * Deny rules AND MCP Apps model-visibility apply first (§6.3 Layer 1 + the
@@ -577,7 +577,7 @@ export class ToolRegistry {
           }
           if (!active.has(tool.pluginId)) return false;
           // Eager: the whole active plugin's suite loads. Deferred: only the
-          // tools individually promoted via keyword/carry-forward/tool_search.
+          // tools individually promoted via carry-forward/tool_search.
           return deferral ? activeNames.has(tool.name) : true;
         }
         // Fallback for any new source kind added later — exclude from scope.

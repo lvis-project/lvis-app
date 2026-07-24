@@ -129,5 +129,6 @@ Before publishing or merging a plugin change:
 
 Default plugin examples, docs, logs, and visible fallback copy should be English.
 Korean plugin docs may live under `docs/ko` or plugin-local localization files.
-Runtime Korean support should be implemented through locale catalogs or explicit
-keyword/intent support, not by making English default docs Korean-only.
+Runtime Korean support should be implemented through locale catalogs or
+feature-owned parsing, never by selecting plugin scope or preloading Tools from
+natural-language text.

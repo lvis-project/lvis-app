@@ -26,7 +26,7 @@ export const searchIndex: SearchEntry[] = [
   { group: "채팅", href: "/docs/chat/permissions/risk", title: "권한 — 위험 관리", snippet: "RiskLevel low/medium/high × Category 5종 격자 · agentApproval" },
 
   // Host Features
-  { group: "호스트 기능", href: "/docs/host/skills", title: "Skills — 능력 꾸러미", snippet: "자주 쓰는 작업을 한 줄로 부르기. 트리거 키워드 + 도구 매핑 + 위험도", keywords: ["skill", "skills", "키워드"] },
+  { group: "호스트 기능", href: "/docs/host/skills", title: "Skills — 능력 꾸러미", snippet: "플러그인 번들 지침 · Host 선택 범위 · tool_search 기반 Tool 발견", keywords: ["skill", "skills", "지침", "instruction"] },
   { group: "호스트 기능", href: "/docs/host/agents", title: "Agents — 작은 작업 단위", snippet: "하나의 작업을 잘 해내는 자율 단위. 단축키 / Hub 메시지 / 자동화로 시작", keywords: ["agent", "agents", "에이전트"] },
   { group: "호스트 기능", href: "/docs/host/memory", title: "MEMORY — 알려준 사실 기억", snippet: "역할 · 선호 · 자주 만나는 사람 · 안 했으면 하는 것. 내 PC 안에만 보관", keywords: ["memory", "메모리", "기억"] },
   { group: "호스트 기능", href: "/docs/host/mcp", title: "MCP — 외부 도구 가져오기", snippet: "Model Context Protocol 외부 서버 등록. 사용자 동의 후 도구 목록 합류", keywords: ["mcp", "외부 도구"] },

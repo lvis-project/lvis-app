@@ -12,26 +12,25 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Skills"
         title="Skills — Call Frequent Tasks with One Line"
-        description="A Skill is a saved bundle for a frequent task — things like 'clean up meeting notes,' 'request parking,' or 'show today's schedule.' When a registered keyword shows up in chat, the host automatically recommends the best-matching Skill."
-        tags={["Keyword-based auto recommendation", "Stored on your PC", "Runs only after user approval"]}
+        description="A Skill is an instruction bundle shipped by a plugin. The host reads it through an explicit lifecycle to give the model task context, but a Skill never activates a plugin or selects or invokes a Tool."
+        tags={["Instruction bundle", "Host-selected Tool scope", "Runs only after user approval"]}
       />
 
       <h2 id="what">What's inside a single Skill?</h2>
       <FeatureGrid
         columns={2}
         items={[
-          { title: "Trigger keywords", body: <>Phrases users say often, like "clean up meeting notes" or "request parking."</>, tone: "teal" },
-          { title: "Prompt", body: <>The set of sentences defining the tone and format the LLM should use for this task.</> },
-          { title: "Tool mapping", body: <>Which plugin's which tool to call when this Skill runs.</>, tone: "citron" },
-          { title: "Risk level", body: <>The default setting for whether user confirmation is required, or the task can finish automatically.</> },
+          { title: "Instructions", body: <>A set of sentences that describes the context, order, and format the LLM should use for a task.</>, tone: "teal" },
+          { title: "Bundled declaration", body: <>A plugin declares its artifact-local Skill path with <code>manifest.skills</code>.</> },
+          { title: "Tool discovery", body: <>Host-selected scope and <code>tool_search</code> make callable Tools visible to the model.</>, tone: "citron" },
+          { title: "Permission boundary", body: <>Tool-level host policy, not the Skill, decides risk and execution permission.</> },
         ]}
       />
 
       <h2 id="where">Where is it stored?</h2>
       <p>
-        Registered Skills are stored as single-line text files inside the secure LVIS area on the user's PC. They are never sent to an
-        external server, and can be freely deleted or backed up per domain. A Skill's approval state (auto-run allowed / confirm every time / blocked)
-        is also managed in the same area.
+        A plugin's Skill is stored below <code>skills/</code> in its signed plugin artifact. On install, the host verifies the declared path and
+        <code>SKILL.md</code> presence, then reads the metadata and body into the lifecycle. A Skill has no independent execution permission or auto-run state.
       </p>
 
       <h2 id="get-skill">How do you get a Skill?</h2>
@@ -39,22 +38,22 @@ export default function Page() {
         steps={[
           {
             title: "Bundled with a plugin install",
-            body: <p>Most plugins come with a default set of Skills. Example: installing the Meeting plugin automatically registers a "Start meeting recording" Skill.</p>,
+            body: <p>A plugin can bundle the Skill instructions it needs. For example, the Meeting plugin can supply the context for meeting work.</p>,
           },
           {
-            title: "Add from the Marketplace",
-            body: <p>You can install a Skill bundle separately from any plugin. Grab a bundle another user made, like "Weekly retro summary," as-is.</p>,
+            title: "Updated with the plugin",
+            body: <p>A verified plugin update can update its bundled Skill instructions. The host validates the changed artifact again.</p>,
           },
           {
-            title: "Write your own",
-            body: <p>Advanced users can write and save their own Skills. The host validates the format and checks that the risk level is appropriate.</p>,
+            title: "Declared by the plugin author",
+            body: <p>A plugin author writes a Skill in the artifact and declares its path in the manifest. The host validates declared contribution paths and callable Tools as separate contracts.</p>,
           },
         ]}
       />
 
       <Callout tone="security" title="Execution always follows user consent">
-        Being registered as a Skill doesn't mean risky actions run automatically. Actions like sending mail or deleting files
-        still go through the host's permission flow for user confirmation, regardless of the Skill's risk setting.
+        Reading a Skill never selects or invokes a Tool automatically. Callable Tools are discovered through Host-selected scope and
+        <code>tool_search</code>; actions such as sending mail or deleting files still go through the Tool's host permission flow.
       </Callout>
 
       <PageNav />

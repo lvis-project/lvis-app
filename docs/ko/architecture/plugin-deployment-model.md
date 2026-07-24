@@ -675,7 +675,7 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 ```
 
 **Phase 1.5 구현 주의사항**:
-- `pluginMarketplace.uninstall()`은 npm uninstall + registry 파일 갱신만 담당. HostApi가 등록한 keyword/tool은 `PluginRuntime.stopAll()`/restart 시점에 재정리.
+- `pluginMarketplace.uninstall()`은 npm uninstall + registry 파일 갱신만 담당. Host-owned runtime contribution state (Skills, Tools, UI, Hooks, events)는 `PluginRuntime.stopAll()`/restart 시점에 재정리.
 - `disable()` 신규 구현 시 hot-disable 경로(런타임 즉시 중지)와 cold-disable 경로(registry 토글 후 다음 boot에 반영) 중 **hot-disable 우선** 권장.
 - Guard 단위 테스트 매트릭스: `(user/it-admin) × (managed/user) × (lockEnabled true/false) × (policy null/present)` 16조합.
 

@@ -1,5 +1,12 @@
 # LVIS ⇄ MCP 2026-07-28 RC Alignment — Design
 
+> **Historical design record — not a current plugin contract.** This deferred
+> research document may use former names while comparing options. Do not
+> implement from it. The current contract is
+> [`plugin-contract-v6-design.md`](./plugin-contract-v6-design.md), the Host
+> public contract, and the manifest schema: pure `Tool[]`, `manifest.skills`,
+> Host-selected scope, and `tool_search` with no compatibility aliases.
+
 > **2026-07-09 scope narrowing (maintainer):** the **plugin-contract axis of #885 is NO LONGER driven by
 > this document.** #885 is narrowed to "borrow the MCP `Tool` **object** shape + MCP **isolation parity**"
 > and is owned by [`plugin-contract-v6-design.md`](./plugin-contract-v6-design.md); the full stateless
@@ -26,7 +33,7 @@
 
 ---
 
-## 0. Ratified decisions
+## 0. Archived decision record (historical)
 
 | # | Decision | Choice |
 |---|---|---|
@@ -39,7 +46,7 @@
 
 ---
 
-## 1. Executive summary
+## 1. Historical executive summary
 
 The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded plugin**, and **each plugin is an MCP _server_** speaking the stateless `2026-07-28` protocol. Marketplace/untrusted plugins run **out-of-process over stdio** (a normal MCP server); first-party plugins run **in-process behind a loopback transport** (today's `entry`/factory model, MCP-framed). The plugin's `plugin.json` projects to `server/discover`'s `DiscoverResult` (serverInfo + capabilities + `extensions`). `toolSchemas[*]` project to MCP `Tool`s; LVIS's `read|write|shell|network` **category stays the authoritative policy SOT** carried under vendor-prefixed `_meta["lvisai/category"]`, projected to (untrusted, interop-only) MCP `ToolAnnotations`. The host caches **nothing** on the connection: every host→plugin request carries `protocolVersion`+`clientInfo`+`clientCapabilities` in `_meta`, and every result is wrapped with a `resultType` discriminator. The remaining HostApi maps onto **standard MCP client-features** (sampling/elicitation), **MCP authorization**, and **MCP Apps** — **no bespoke host server**; LVIS-only platform surfaces (storage, config, triggerConversation, the domain event bus) stay host-internal. **#811 command-hooks stay 100% host-side** — MCP has no host-side tool-call veto, so hooks remain a host policy layer wrapped around the host's `tools/call` invocation, re-anchored to that boundary.
 
