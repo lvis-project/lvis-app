@@ -1595,3 +1595,114 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 });
+
+describe("MCP prompts discovery", () => {
+  function connectWith(opts: {
+    advertisePrompts: boolean;
+    approveCapabilities: string[];
+    instructions?: string;
+    promptPages?: Array<{ prompts: unknown[]; nextCursor?: string }>;
+  }): { client: McpClient; promptsCalls: unknown[] } {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const promptsCalls: unknown[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      const method = readRpcMethod(init);
+      const id = readRpcId(init) ?? 0;
+      switch (method) {
+        case "server/discover":
+          return jsonRpcResponse(id, {
+            ...RC_DISCOVER_RESULT,
+            capabilities: opts.advertisePrompts ? { tools: {}, prompts: {} } : { tools: {} },
+            ...(opts.instructions !== undefined ? { instructions: opts.instructions } : {}),
+          });
+        case "notifications/initialized":
+          return new Response(null, { status: 202 });
+        case "tools/list":
+          return jsonRpcResponse(id, { tools: [] });
+        case "prompts/list": {
+          const params = (JSON.parse(String(init?.body)).params ?? {}) as Record<string, unknown>;
+          promptsCalls.push(params);
+          const page = opts.promptPages?.[promptsCalls.length - 1] ?? { prompts: [] };
+          return jsonRpcResponse(id, page);
+        }
+        default:
+          return new Response("unexpected", { status: 500 });
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const gov = governanceWithPolicy(
+      buildPolicy([
+        httpApproval("psrv", "https://psrv.example.com/mcp", {
+          allowedCapabilities: opts.approveCapabilities as McpGovernancePolicy["servers"][number]["allowedCapabilities"],
+        }),
+      ]),
+    );
+    const client = new McpClient(
+      { id: "psrv", transport: "http", url: "https://psrv.example.com/mcp" },
+      gov,
+      new ToolRegistry(),
+    );
+    return { client, promptsCalls };
+  }
+
+  it("discovers prompts + instructions when advertised AND approved", async () => {
+    const { client, promptsCalls } = connectWith({
+      advertisePrompts: true,
+      approveCapabilities: ["tools", "prompts"],
+      instructions: "Use the review prompt for PRs.",
+      promptPages: [
+        {
+          prompts: [
+            { name: "code_review", description: "Review a diff", arguments: [{ name: "diff", required: true }] },
+          ],
+        },
+      ],
+    });
+    await client.connect();
+    expect(promptsCalls).toHaveLength(1);
+    expect(client.getState().prompts).toEqual([
+      {
+        name: "code_review",
+        title: undefined,
+        description: "Review a diff",
+        arguments: [{ name: "diff", description: undefined, required: true }],
+      },
+    ]);
+    expect(client.getState().instructions).toBe("Use the review prompt for PRs.");
+    await client.disconnect();
+    expect(client.getState().prompts).toBeUndefined();
+  });
+
+  it("does NOT call prompts/list when advertised but not approved", async () => {
+    const { client, promptsCalls } = connectWith({ advertisePrompts: true, approveCapabilities: ["tools"] });
+    await client.connect();
+    expect(promptsCalls).toHaveLength(0);
+    expect(client.getState().prompts).toBeUndefined();
+    await client.disconnect();
+  });
+
+  it("does NOT call prompts/list when approved but not advertised", async () => {
+    const { client, promptsCalls } = connectWith({
+      advertisePrompts: false,
+      approveCapabilities: ["tools", "prompts"],
+    });
+    await client.connect();
+    expect(promptsCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  it("follows nextCursor with bounded pagination", async () => {
+    const { client, promptsCalls } = connectWith({
+      advertisePrompts: true,
+      approveCapabilities: ["tools", "prompts"],
+      promptPages: [
+        { prompts: [{ name: "a" }], nextCursor: "c1" },
+        { prompts: [{ name: "b" }] },
+      ],
+    });
+    await client.connect();
+    expect(promptsCalls).toHaveLength(2);
+    expect(client.getState().prompts?.map((p) => p.name)).toEqual(["a", "b"]);
+    await client.disconnect();
+  });
+});
