@@ -426,7 +426,11 @@ export class McpClient {
           discover.capabilities?.extensions?.[MCP_APPS_UI_EXTENSION] !== undefined;
         this.promptsAdvertised = discover.capabilities?.prompts !== undefined;
         // Server-level usage guidance (read-only surface; never auto-injected here).
-        this.state.instructions = discover.instructions;
+        // `discover` is untrusted wire data cast without runtime validation, so
+        // coerce a non-string `instructions` to undefined here at the boundary —
+        // every downstream consumer then sees only string | undefined.
+        this.state.instructions =
+          typeof discover.instructions === "string" ? discover.instructions : undefined;
         log.info(
           {
             protocol: MCP_PROTOCOL_VERSION,
