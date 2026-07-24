@@ -200,7 +200,7 @@ export interface LifecycleHookStdin {
   inputOrigin?: string;
   /** UserPromptSubmit — the resolved route for this turn (`llm` | `skill`). */
   route?: string;
-  /** UserPromptSubmit — the keyword classification type (`general` | `skill` | `command`). */
+  /** UserPromptSubmit — the Host input classification (`general` | `command`). */
   classification?: string;
 }
 

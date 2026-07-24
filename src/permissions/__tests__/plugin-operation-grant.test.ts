@@ -376,6 +376,32 @@ describe("PluginOperationGrantCoordinator", () => {
     expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000, grantDomain)).toBeUndefined();
   });
 
+  it("does not let later reads clear an indeterminate post-hook domain", () => {
+    const coordinator = new PluginOperationGrantCoordinator(() => 1_000);
+    coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain);
+    coordinator.poisonDomain(grantDomain);
+
+    coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain);
+
+    expect(
+      coordinator.latestRequiredRead(
+        principal,
+        requiredRead.readTool,
+        requiredRead.readOperations,
+        requiredRead.maxAgeMs,
+        grantDomain,
+      ),
+    ).toBeUndefined();
+  });
+
   it("burns before comparison so a mismatch cannot be retried", () => {
     const coordinator = new PluginOperationGrantCoordinator(() => 10);
     const readRevision = coordinator.recordRead({

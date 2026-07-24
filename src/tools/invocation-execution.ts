@@ -292,6 +292,21 @@ export async function executeAuthorizedToolInvocation(
   let deferredOperationSettlement: Promise<unknown> | undefined;
   let indeterminateAuditPersisted = false;
   let interruptionReason: "ceiling" | "user-abort" | undefined;
+  let releaseOperationLeaseAfterPostHooks = false;
+  let pendingReadReceipt:
+    | {
+        principal: PluginOperationPrincipal;
+        readTool: string;
+        readOperation: string;
+        domainKey: string;
+      }
+    | undefined;
+  let postFeedback: string | undefined;
+  let scriptPost: Awaited<ReturnType<typeof runScriptHook>> = {
+    decision: "allow",
+    reason: "post hooks not run",
+    results: [],
+  };
   try {
     if (
       resolvedPluginOperation?.rule.kind === "read" &&
@@ -688,8 +703,9 @@ export async function executeAuthorizedToolInvocation(
       target: tool.name,
     });
   }
-  // A signed read declaration alone cannot mint freshness. Record the receipt
+  // A signed read declaration alone cannot mint freshness. Stage the receipt
   // only after a successful Host-observable plugin execution with no mutation.
+  // Publication waits until every post-hook boundary has completed below.
   if (
     !isError &&
     tool.source === "plugin" &&
@@ -705,11 +721,12 @@ export async function executeAuthorizedToolInvocation(
       resolvedPluginOperation.rule.successfulResultStatuses,
     )
   ) {
-    services.pluginOperationGrants.recordRead({
-      ...pluginOperationPrincipal,
+    pendingReadReceipt = {
+      principal: pluginOperationPrincipal,
       readTool: toolUse.name,
       readOperation: resolvedPluginOperation.operation,
-    }, operationExecutionDomain!);
+      domainKey: operationExecutionDomain!,
+    };
   }
   // Emit the EFFECT shadow record for plugin/MCP invocations (builtins never
   // touch the hostApi closures, so their ledger is empty — no reconciliation
@@ -729,6 +746,15 @@ export async function executeAuthorizedToolInvocation(
       },
       services.auditLogger,
     );
+  }
+  if (
+    operationExecutionLease &&
+    !deferredOperationSettlement &&
+    interruptionReason !== "user-abort"
+  ) {
+    // PostToolUse callbacks and script hooks are effect-capable boundaries.
+    // Keep the exclusive governed-operation lease until they finish.
+    releaseOperationLeaseAfterPostHooks = true;
   }
   } finally {
     if (
@@ -788,7 +814,7 @@ export async function executeAuthorizedToolInvocation(
         "plugin operation interruption audit failed; domain remains poisoned for %s",
         toolUse.name,
       );
-    } else {
+    } else if (!releaseOperationLeaseAfterPostHooks) {
       operationExecutionLease?.release();
     }
   }
@@ -832,27 +858,62 @@ export async function executeAuthorizedToolInvocation(
   }
 
   // ── Step 7: PostHook + Feedback Merge ───────────
-  const postFeedback = await services.hookRunner.runPostHooks({
-    toolName: toolUse.name,
-    toolInput: finalInput,
-    toolOutput: content,
-    isError,
-  });
-  const scriptPost = await runScriptHook(
-    services.scriptHookManager,
-    "post",
-    toolUse.name,
-    source,
-    invocationCategory,
-    finalInput,
-    sessionId,
-    invocationPermissionContext,
-    tool.mcpServerId,
-    tool.pluginId,
-    content,
-    isError,
-    tool.pluginGeneration !== undefined,
-  );
+  let postHookBoundaryCompleted = false;
+  let postHookMayHaveUnobservedEffects = services.hookRunner.postHookCount > 0;
+  try {
+    postFeedback = await services.hookRunner.runPostHooks({
+      toolName: toolUse.name,
+      toolInput: finalInput,
+      toolOutput: content,
+      isError,
+    });
+    scriptPost = await runScriptHook(
+      services.scriptHookManager,
+      "post",
+      toolUse.name,
+      source,
+      invocationCategory,
+      finalInput,
+      sessionId,
+      invocationPermissionContext,
+      tool.mcpServerId,
+      tool.pluginId,
+      content,
+      isError,
+      tool.pluginGeneration !== undefined,
+    );
+    postHookMayHaveUnobservedEffects ||= scriptPost.results.length > 0;
+    postHookBoundaryCompleted = true;
+  } finally {
+    try {
+      if (
+        operationExecutionDomain &&
+        resolvedPluginOperation &&
+        (
+          !postHookBoundaryCompleted ||
+          postHookMayHaveUnobservedEffects
+        )
+      ) {
+        // Post hooks are arbitrary async callbacks or detached commands. The
+        // Host cannot prove that their descendants are settled or non-mutating,
+        // so every governed operation they observe leaves its domain
+        // indeterminate until that domain identity is retired.
+        services.pluginOperationGrants.poisonDomain(
+          operationExecutionDomain,
+        );
+      } else if (pendingReadReceipt) {
+        services.pluginOperationGrants.recordRead({
+          ...pendingReadReceipt.principal,
+          readTool: pendingReadReceipt.readTool,
+          readOperation: pendingReadReceipt.readOperation,
+        }, pendingReadReceipt.domainKey);
+      }
+    } finally {
+      if (releaseOperationLeaseAfterPostHooks) {
+        operationExecutionLease?.release();
+      }
+    }
+  }
 
   // ── #811 m2: PostToolUseFailure (NON-BLOCKING) ──
   // Fires alongside PostToolUse when the tool's execute() returned isError.

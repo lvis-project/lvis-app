@@ -23,6 +23,7 @@ function setup(options: {
   readRawResult?: unknown;
   omitReadRawResult?: boolean;
   useReadResultStatusContract?: boolean;
+  scriptHookManager?: ScriptHookManager;
 } = {}) {
   const configuredRawResult = Object.prototype.hasOwnProperty.call(
     options,
@@ -167,7 +168,9 @@ function setup(options: {
       permissions,
       undefined,
       approvalGate as never,
-      options.wireHooks === false ? undefined : new ScriptHookManager(),
+      options.wireHooks === false
+        ? undefined
+        : options.scriptHookManager ?? new ScriptHookManager(),
       auditLogger as never,
       undefined,
       undefined,
@@ -281,6 +284,144 @@ describe("ToolExecutor plugin operation governance", () => {
       input: { operation: "save", value: 1 },
       principal,
     })).not.toThrow();
+  });
+
+  it("holds the domain lease through post hooks and withholds freshness from an effect-capable hook", async () => {
+    const { executor, read, write } = setup();
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    const staleGrant = executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    });
+
+    let signalPostStarted!: () => void;
+    const postStarted = new Promise<void>((resolve) => {
+      signalPostStarted = resolve;
+    });
+    let releasePost!: () => void;
+    const postBlocked = new Promise<void>((resolve) => {
+      releasePost = resolve;
+    });
+    let postCalls = 0;
+    executor.getHookRunner().registerPostHook("effect-capable-post", async () => {
+      postCalls += 1;
+      if (postCalls !== 1) return;
+      signalPostStarted();
+      await postBlocked;
+    });
+
+    const refresh = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    await postStarted;
+
+    const queuedRead = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r3", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    const staleWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w", name: "domain_write", input: { operation: "save", value: 1 } }],
+        options(staleGrant.token),
+      ),
+    );
+    await Promise.resolve();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(write).not.toHaveBeenCalled();
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 2 },
+      principal,
+    })).toThrow(/required read is missing or stale/);
+
+    releasePost();
+    await refresh;
+    await queuedRead;
+    const [staleWriteResult] = await staleWrite;
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(staleWriteResult.is_error).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 3 },
+      principal,
+    })).toThrow(/required read is missing or stale/);
+  });
+
+  it("keeps a post-hook domain poisoned after a write and later hook-free reads", async () => {
+    const scriptHookManager = new ScriptHookManager();
+    vi.spyOn(scriptHookManager, "runPostToolUse")
+      .mockResolvedValueOnce({
+        decision: "allow",
+        reason: "no matching hooks of this type",
+        results: [],
+      })
+      .mockResolvedValueOnce({
+        decision: "allow",
+        reason: "post hook observed",
+        results: [{
+          hookPath: "/test/post-hook",
+          hookType: "post",
+          decision: "allow",
+          reason: "observed",
+          rawStdout: "{\"action\":\"allow\",\"reason\":\"observed\"}",
+          exitCode: 0,
+          timedOut: false,
+          durationMs: 1,
+          source: "config",
+          commandIdentity: "a".repeat(64),
+        }],
+      })
+      .mockResolvedValue({
+        decision: "allow",
+        reason: "no matching hooks of this type",
+        results: [],
+      });
+    const { executor, write } = setup({ scriptHookManager });
+
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    const grant = executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    });
+    const [writeResult] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w1", name: "domain_write", input: { operation: "save", value: 1 } }],
+        options(grant.token),
+      ),
+    );
+    expect(writeResult.is_error).toBeFalsy();
+    expect(write).toHaveBeenCalledTimes(1);
+
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    })).toThrow(/required read is missing or stale/);
   });
 
   it("invalidates an older successful read when a refresh resolves non-success", async () => {

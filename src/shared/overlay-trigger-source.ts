@@ -1,8 +1,8 @@
 /**
  * Overlay trigger source pattern — single source of truth.
  *
- * Shared by the HostApi trigger gate, permission manager, keyword engine, and
- * imported-trigger envelope parser. The envelope tag name is intentionally
+ * Shared by the HostApi trigger gate, permission manager, and imported-trigger
+ * envelope parser. The envelope tag name is intentionally
  * unchanged because plugins may already author that wrapper, but the canonical
  * source namespace is `overlay:*`.
  */

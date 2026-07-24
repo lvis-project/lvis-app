@@ -146,6 +146,7 @@ interface ExecutionDomainRevision {
   readonly accountHash: string;
   revision: string;
   revoked: boolean;
+  poisoned: boolean;
 }
 
 export class PluginOperationGrantCoordinator {
@@ -216,6 +217,7 @@ export class PluginOperationGrantCoordinator {
   ): string | undefined {
     if (this.principalRevocationReason(principal)) return undefined;
     const domain = this.requireDomain(domainKey, principal);
+    if (domain.poisoned) return undefined;
     let newest: ReadSnapshot | undefined;
     for (const readOperation of readOperations) {
       const candidate = this.snapshots.get(snapshotKey({ ...principal, readTool, readOperation }));
@@ -402,6 +404,23 @@ export class PluginOperationGrantCoordinator {
       throw new Error("plugin operation domain is not registered");
     }
     domain.revision = randomUUID();
+  }
+
+  /**
+   * Permanently fail closed for a domain whose state may still be changing
+   * outside Host-observable effect boundaries.
+   *
+   * A new read cannot clear this state. Only generation/account/session
+   * retirement can replace the domain identity, so detached or delayed work
+   * from an effect-capable post hook can never race a newly minted write grant.
+   */
+  poisonDomain(domainKey: string): void {
+    const domain = this.domainRevisions.get(domainKey);
+    if (!domain) {
+      throw new Error("plugin operation domain is not registered");
+    }
+    domain.revision = randomUUID();
+    domain.poisoned = true;
   }
 
   acquireExecutionLease(
@@ -670,6 +689,7 @@ export class PluginOperationGrantCoordinator {
       accountHash: principal.accountHash,
       revision: randomUUID(),
       revoked: false,
+      poisoned: false,
     };
     this.domainRevisions.set(domainKey, created);
     return created;

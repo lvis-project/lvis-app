@@ -1352,7 +1352,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //
   //     1. PROVENANCE — `formatAppMessageEnvelope` (shared/mcp-app-message-source.ts) is
   //        the only builder of `<app-message source="app:<serverId>">`. Everything
-  //        downstream (turn origin, transcript marker, permission force-ask, keyword
+  //        downstream (turn origin, transcript marker, permission force-ask, command
   //        bypass) reads provenance from that one envelope. It also strips a leading
   //        slash, so app text can never dispatch a host command.
   //     2. SESSION BINDING — HERE, one comparison. The renderer binds the card's ORIGIN

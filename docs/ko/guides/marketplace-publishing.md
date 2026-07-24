@@ -475,11 +475,10 @@ bun run start
 
 | 플래그 | 효과 |
 |--------|------|
-| `LVIS_DEV=1` | dev 게이트 마스터 (linked entry, hot-reload, DevTools). `bun run dev` 가 자동 세팅. `bun run start` 는 **세팅 안 함** |
-| `LVIS_DEV_SKIP_SIG=1` | 매니페스트 서명 검증 skip. unpackaged 빌드 (`start`/`dev` 모두) 자동 |
+| `LVIS_DEV=1` | 개발자 도구와 hot reload 활성화. `bun run dev`가 자동 설정하며 `bun run start`는 설정하지 않음 |
 | `LVIS_DEV_RELOAD=1` | `dist/` watch + reloadPlugin (수동 export) |
 
-⚠️ 모든 `LVIS_DEV*` / `LVIS_ALLOW_*` 플래그는 `app.isPackaged === true` 일 때 hard-gate 로 무시됩니다 (`src/boot/dev-flags.ts:18-54`). packaged 빌드에 env 가 흘러들어와도 보안 약화 없음.
+⚠️ `LVIS_DEV*` 플래그는 packaged 빌드에서 무시되고 감사 대상이 됩니다. Marketplace envelope/receipt 검증과 entry containment는 unpackaged 빌드에서도 우회되지 않습니다.
 
 ---
 
