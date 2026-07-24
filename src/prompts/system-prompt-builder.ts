@@ -569,13 +569,44 @@ export class SystemPromptBuilder {
         refresh: "per-turn",
         build: () => {
           const allSkills = getAvailableSkills();
-          const skills = allSkills
-            .slice()
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .slice(0, MAX_SKILL_CATALOG_ENTRIES);
+          // Scope symmetry with tools (skill-loading-policy.md §1): only user
+          // skills (no plugin owner) and skills whose owning plugin is in the
+          // current turn scope are catalogued. An out-of-scope plugin's skill is
+          // surfaced again once `request_plugin` brings its plugin into scope —
+          // exactly as its Tools are. This removes the case where the model sees
+          // (or loads) a skill that references Tools it currently cannot call.
+          const activePluginIds = this.toolScope?.activePluginIds ?? new Set<string>();
+          const inScope = allSkills.filter(
+            (s) => !s.pluginOwner || activePluginIds.has(s.pluginOwner.pluginId),
+          );
+          if (inScope.length === 0) return "";
+          // Deterministic priority: user skills first, then plugin skills;
+          // alphabetical within each band. (Query-relevance ranking — §3 — is a
+          // follow-up: the system prompt does not yet carry the turn query.)
+          const ordered = inScope.slice().sort((a, b) => {
+            const ap = a.pluginOwner ? 1 : 0;
+            const bp = b.pluginOwner ? 1 : 0;
+            if (ap !== bp) return ap - bp;
+            return a.name.localeCompare(b.name);
+          });
+          // Token budget (skill-loading-policy.md §2): bound the always-present
+          // metadata fixed cost, not just an entry count. The 80-entry cap stays
+          // as a cheap pre-filter; the token budget is the authoritative bound.
+          // At least one entry is always shown, and overflow stays reachable via
+          // skill_list.
+          const skills: SkillCatalogEntry[] = [];
+          let catalogTokens = 0;
+          for (const s of ordered) {
+            if (skills.length >= MAX_SKILL_CATALOG_ENTRIES) break;
+            const recordTokens = estimateTokens(renderSkillCatalogRecord(s));
+            if (skills.length > 0 && catalogTokens + recordTokens > SKILL_CATALOG_TOKEN_BUDGET) {
+              break;
+            }
+            skills.push(s);
+            catalogTokens += recordTokens;
+          }
           if (skills.length === 0) return "";
-          const totalCount = allSkills.length;
-          const hiddenCount = Math.max(0, totalCount - skills.length);
+          const hiddenCount = Math.max(0, inScope.length - skills.length);
           const records = skills.map(renderSkillCatalogRecord);
           return [
             '<lvis-available-skills trust="untrusted-metadata">',
@@ -916,5 +947,13 @@ function renderSkillCatalogRecord(skill: SkillCatalogEntry): string {
 // ─── Constants ──────────────────────────────────────
 
 const MAX_SKILL_CATALOG_ENTRIES = 80;
+// Authoritative bound on the always-present skill-catalog metadata cost
+// (skill-loading-policy.md §2). Anthropic Agent Skills treat each skill's
+// name+description as a few-dozen-token fixed cost paid every session, so the
+// catalog is token-budgeted, not only entry-capped. ~6000 tokens ≈ 60–100
+// scoped skills at name+description size — comfortably above a realistic active
+// scope while capping pathological catalogs; overflow is reachable via
+// skill_list. The 80-entry cap remains a cheap pre-filter.
+const SKILL_CATALOG_TOKEN_BUDGET = 6000;
 const MAX_SKILL_NAME_CHARS = 96;
 const MAX_SKILL_DESCRIPTION_CHARS = 320;

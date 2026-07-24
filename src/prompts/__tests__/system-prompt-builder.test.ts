@@ -123,12 +123,73 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
     });
 
     const prompt = builder.build();
+    // Token budget (skill-loading-policy.md §2) trims the large-description
+    // catalog before the 80-entry count cap: fewer than 81 shown, the first
+    // survives, overflow is disclosed and reachable via skill_list.
     expect(prompt).toContain("skill-00");
-    expect(prompt).toContain("skill-79");
     expect(prompt).not.toContain("skill-80");
-    expect(prompt).toContain("1 more skills hidden");
+    expect(prompt).toMatch(/\d+ more skills hidden/);
+    expect(prompt).toContain("call skill_list");
     expect(prompt).not.toContain("x".repeat(400));
     expect(prompt).toContain("…");
+  });
+
+  it("scopes plugin skills to the active plugin scope (symmetry with tools)", () => {
+    const pluginSkill = (pluginId: string, name: string) => ({
+      name,
+      description: `${name} description`,
+      pluginOwner: {
+        pluginId,
+        pluginVersion: "1.0.0",
+        generationId: "g1",
+        localId: name,
+        fingerprint: "fp",
+      },
+    });
+    const skills = [pluginSkill("in-scope", "alpha-skill"), pluginSkill("out-scope", "beta-skill")];
+    const make = () =>
+      new SystemPromptBuilder({
+        memoryManager: {
+          getAgentsMd: () => "",
+          getMemoryIndex: () => "",
+          getUserPreferences: () => "",
+          getMemoryContext: () => "",
+        } as never,
+        toolRegistry: new ToolRegistry(),
+        getAvailableSkills: () => skills,
+      });
+
+    // Only the active plugin's skill is catalogued.
+    const builder = make();
+    builder.setToolScope({ activePluginIds: new Set(["in-scope"]), includeBuiltins: true, includeMcp: true });
+    const prompt = builder.build();
+    expect(prompt).toContain("alpha-skill");
+    expect(prompt).not.toContain("beta-skill");
+
+    // Bringing the second plugin into scope catalogues its skill too.
+    const builder2 = make();
+    builder2.setToolScope({
+      activePluginIds: new Set(["in-scope", "out-scope"]),
+      includeBuiltins: true,
+      includeMcp: true,
+    });
+    expect(builder2.build()).toContain("beta-skill");
+  });
+
+  it("always catalogues user skills regardless of plugin scope", () => {
+    const builder = new SystemPromptBuilder({
+      memoryManager: {
+        getAgentsMd: () => "",
+        getMemoryIndex: () => "",
+        getUserPreferences: () => "",
+        getMemoryContext: () => "",
+      } as never,
+      toolRegistry: new ToolRegistry(),
+      getAvailableSkills: () => [{ name: "user-note", description: "a user-owned skill" }],
+    });
+    // Empty plugin scope: a user skill (no plugin owner) is still catalogued.
+    builder.setToolScope({ activePluginIds: new Set(), includeBuiltins: true, includeMcp: true });
+    expect(builder.build()).toContain("user-note");
   });
 
   it("emits the continuity guard instead of hidden marker output instructions", () => {
