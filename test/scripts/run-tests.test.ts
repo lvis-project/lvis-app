@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createVitestRuns,
+  DEFAULT_MAX_WORKERS,
   DEFAULT_SHARD_COUNT,
   runTests,
 } from "../../scripts/run-tests.mjs";
@@ -12,6 +13,7 @@ describe("run-tests", () => {
       Array.from({ length: DEFAULT_SHARD_COUNT }, (_, index) => [
         "run",
         `--shard=${index + 1}/${DEFAULT_SHARD_COUNT}`,
+        `--maxWorkers=${DEFAULT_MAX_WORKERS}`,
       ]),
     );
   });
@@ -30,12 +32,12 @@ describe("run-tests", () => {
       .mockResolvedValueOnce({ code: 2, signal: null });
 
     await expect(
-      runTests([], { shardCount: 3, runVitest, log: vi.fn() }),
+      runTests([], { shardCount: 3, maxWorkers: 2, runVitest, log: vi.fn() }),
     ).resolves.toEqual({ code: 1, signal: null });
     expect(runVitest.mock.calls).toEqual([
-      [["run", "--shard=1/3"]],
-      [["run", "--shard=2/3"]],
-      [["run", "--shard=3/3"]],
+      [["run", "--shard=1/3", "--maxWorkers=2"]],
+      [["run", "--shard=2/3", "--maxWorkers=2"]],
+      [["run", "--shard=3/3", "--maxWorkers=2"]],
     ]);
   });
 
@@ -51,10 +53,11 @@ describe("run-tests", () => {
     expect(runVitest).toHaveBeenCalledTimes(2);
   });
 
-  it("rejects invalid arguments and shard counts", () => {
+  it("rejects invalid arguments, shard counts, and worker counts", () => {
     expect(() => createVitestRuns([1] as unknown as string[])).toThrow(
       "[test-args-invalid]",
     );
     expect(() => createVitestRuns([], 0)).toThrow("[test-shard-count-invalid]");
+    expect(() => createVitestRuns([], 1, 0)).toThrow("[test-max-workers-invalid]");
   });
 });
