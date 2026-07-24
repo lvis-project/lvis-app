@@ -170,6 +170,8 @@ interface PendingAccountTransitionLease {
   readonly principal: PluginOperationAccountTransitionPrincipal;
   readonly resolve: (lease: PluginOperationAccountTransitionLease) => void;
   readonly reject: (error: Error) => void;
+  readonly signal?: AbortSignal;
+  onAbort?: () => void;
 }
 
 type PendingExecutionLease =
@@ -578,6 +580,7 @@ export class PluginOperationGrantCoordinator {
    */
   acquireAccountTransitionLease(
     principal: PluginOperationAccountTransitionPrincipal,
+    signal?: AbortSignal,
   ): Promise<PluginOperationAccountTransitionLease> {
     if (
       !principal.ownerPluginId ||
@@ -589,6 +592,9 @@ export class PluginOperationGrantCoordinator {
         new Error("plugin operation account transition scope is invalid"),
       );
     }
+    if (signal?.aborted) {
+      return Promise.reject(new PluginOperationExecutionLeaseAbortedError());
+    }
     const executionScopeKey = this.executionScopeKey(
       principal.ownerPluginId,
       principal.accountScopeHash,
@@ -599,12 +605,24 @@ export class PluginOperationGrantCoordinator {
     };
     this.executionDomains.set(executionScopeKey, state);
     return new Promise<PluginOperationAccountTransitionLease>((resolve, reject) => {
-      state.queue.push({
+      const request: PendingAccountTransitionLease = {
         kind: "account-transition",
         principal: Object.freeze({ ...principal }),
         resolve,
         reject,
-      });
+        signal,
+      };
+      if (signal) {
+        request.onAbort = () => {
+          const index = state.queue.indexOf(request);
+          if (index < 0) return;
+          state.queue.splice(index, 1);
+          reject(new PluginOperationExecutionLeaseAbortedError());
+          this.drainExecutionDomain(executionScopeKey, state);
+        };
+        signal.addEventListener("abort", request.onAbort, { once: true });
+      }
+      state.queue.push(request);
       this.drainExecutionDomain(executionScopeKey, state);
     });
   }
@@ -643,6 +661,9 @@ export class PluginOperationGrantCoordinator {
           continue;
         }
         request.reject(new Error("plugin operation generation is revoked"));
+        if (request.signal && request.onAbort) {
+          request.signal.removeEventListener("abort", request.onAbort);
+        }
       }
       state.queue = retained;
       if (!state.held) this.drainExecutionDomain(executionScopeKey, state);
@@ -667,11 +688,7 @@ export class PluginOperationGrantCoordinator {
           retained.push(request);
           continue;
         }
-        if (
-          request.kind === "operation" &&
-          request.signal &&
-          request.onAbort
-        ) {
+        if (request.signal && request.onAbort) {
           request.signal.removeEventListener("abort", request.onAbort);
         }
         request.reject(new Error("plugin operation session is revoked"));
@@ -940,6 +957,8 @@ export class PluginOperationGrantCoordinator {
                   : undefined
           : transitionRevocationReason
             ? new Error(transitionRevocationReason)
+            : request.signal?.aborted
+              ? new PluginOperationExecutionLeaseAbortedError()
             : this.poisonCapacityExhausted ||
                 this.poisonedOperationScopes.has(
                   this.poisonScopeKey(
@@ -951,11 +970,7 @@ export class PluginOperationGrantCoordinator {
               : undefined;
       if (!invalidError) break;
       state.queue.shift();
-      if (
-        request.kind === "operation" &&
-        request.signal &&
-        request.onAbort
-      ) {
+      if (request.signal && request.onAbort) {
         request.signal.removeEventListener("abort", request.onAbort);
       }
       request.reject(invalidError);
@@ -1053,6 +1068,9 @@ export class PluginOperationGrantCoordinator {
     state: ExecutionDomainState,
     request: PendingAccountTransitionLease,
   ): void {
+    if (request.signal && request.onAbort) {
+      request.signal.removeEventListener("abort", request.onAbort);
+    }
     let released = false;
     request.resolve(Object.freeze({
       release: () => {

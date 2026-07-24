@@ -1240,10 +1240,11 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     }
     const epoch = ++this.nextPluginAuthInvocationEpoch;
     const key = `${pluginId}\0${generationId}`;
+    const transitionKey = pluginId;
     this.pluginAuthInvocationEpochs.set(key, epoch);
     const currentAccount = this.pluginAccountHashes.get(key);
     const retainedTransitionAccount =
-      this.pluginAuthTransitionPrincipals.get(key);
+      this.pluginAuthTransitionPrincipals.get(transitionKey);
     const accountTransitionScopeHash =
       currentAccount?.identityHash ??
       retainedTransitionAccount?.identityHash ??
@@ -1255,7 +1256,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       return { epoch, accountTransitionScopeHash };
     }
     if (currentAccount) {
-      this.pluginAuthTransitionPrincipals.set(key, currentAccount);
+      this.pluginAuthTransitionPrincipals.set(
+        transitionKey,
+        currentAccount,
+      );
     }
     const invalidatedAccount =
       currentAccount ?? retainedTransitionAccount;
@@ -1329,6 +1333,24 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     return existing ? { invalidatedAccountHash: existing.principalHash } : {};
   }
 
+  /**
+   * Fail closed when an auth handler outlives its caller-facing ceiling. Its
+   * late result is intentionally not published, so the previously cached
+   * principal must be removed before the auth transition lease can ever
+   * release and admit queued governed work.
+   */
+  invalidateDetachedPluginAuthInvocation(
+    pluginId: string,
+    generationId: string,
+  ): { invalidatedAccountHash?: string } {
+    const key = `${pluginId}\0${generationId}`;
+    const current = this.pluginAccountHashes.get(key);
+    if (!current) return {};
+    this.pluginAuthTransitionPrincipals.set(pluginId, current);
+    this.pluginAccountHashes.delete(key);
+    return { invalidatedAccountHash: current.principalHash };
+  }
+
   clearPluginOperationAccount(pluginId: string): void {
     for (const key of this.pluginAccountHashes.keys()) {
       if (key.startsWith(`${pluginId}\0`)) this.pluginAccountHashes.delete(key);
@@ -1336,11 +1358,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     for (const key of this.pluginAuthInvocationEpochs.keys()) {
       if (key.startsWith(`${pluginId}\0`)) this.pluginAuthInvocationEpochs.delete(key);
     }
-    for (const key of this.pluginAuthTransitionPrincipals.keys()) {
-      if (key.startsWith(`${pluginId}\0`)) {
-        this.pluginAuthTransitionPrincipals.delete(key);
-      }
-    }
+    this.pluginAuthTransitionPrincipals.delete(pluginId);
   }
 
 }

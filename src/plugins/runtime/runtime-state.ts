@@ -1401,10 +1401,18 @@ export abstract class PluginRuntimeState {
     const nextAuthInvocationEpochs = new Map(
       [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
     );
+    // Stable account scope is plugin-wide and process-lifetime. Publication
+    // happens before predecessor leases drain, so replacement must retain this
+    // bridge or a new generation could enter a different auth FIFO beside
+    // still-running predecessor work.
     const nextAuthTransitionPrincipals = new Map(
-      [...this.pluginAuthTransitionPrincipals]
-        .filter(([key]) => !key.startsWith(`${pluginId}\0`)),
+      this.pluginAuthTransitionPrincipals,
     );
+    for (const [key, account] of this.pluginAccountHashes) {
+      if (key.startsWith(`${pluginId}\0`)) {
+        nextAuthTransitionPrincipals.set(pluginId, account);
+      }
+    }
     const publishHostEffects = runtime.hostEffects?.preparePublish();
     let published = false;
     return Object.freeze({
@@ -1448,10 +1456,16 @@ export abstract class PluginRuntimeState {
     const nextAuthInvocationEpochs = new Map(
       [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
     );
+    // Keep the bridge through removal publication too. A reinstall can publish
+    // before predecessor retirement settles; process exit is the safe reset.
     const nextAuthTransitionPrincipals = new Map(
-      [...this.pluginAuthTransitionPrincipals]
-        .filter(([key]) => !key.startsWith(`${pluginId}\0`)),
+      this.pluginAuthTransitionPrincipals,
     );
+    for (const [key, account] of this.pluginAccountHashes) {
+      if (key.startsWith(`${pluginId}\0`)) {
+        nextAuthTransitionPrincipals.set(pluginId, account);
+      }
+    }
     let published = false;
     return Object.freeze({
       pluginId,

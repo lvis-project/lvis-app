@@ -266,6 +266,59 @@ describe("PluginRuntime operation account sessions", () => {
     expect(second?.invalidatedAccountHash).toBeUndefined();
   });
 
+  it("bridges the authenticated transition scope across runtime generation publication", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const predecessorIdentity = accountIdentity(instance);
+    instance.prepareRuntimeGeneration({
+      activationId: "generation-2",
+      installId: null,
+      manifest,
+      pluginRoot: "/tmp/session-bound-auth",
+      instance: {},
+      methods: new Map(),
+    }).publish();
+    instance.setGenerationAccess({
+      getActive: vi.fn(() => ({
+        pluginId,
+        generationId: "generation-2",
+        manifest,
+      })),
+      replaceRuntime: vi.fn(),
+    } as never);
+
+    const replacement = instance.beginPluginAuthInvocation(
+      pluginId,
+      "generation-2",
+      "auth_login",
+    );
+
+    expect(replacement?.accountTransitionScopeHash)
+      .toBe(predecessorIdentity?.identityHash);
+  });
+
+  it("invalidates the cached principal when an auth handler detaches", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const principalHash = accountIdentity(instance)?.principalHash;
+
+    expect(
+      instance.invalidateDetachedPluginAuthInvocation(
+        pluginId,
+        generationId,
+      ),
+    ).toEqual({ invalidatedAccountHash: principalHash });
+    expect(accountIdentity(instance)).toBeUndefined();
+  });
+
   it("ignores an older authenticated status that completes after a newer principal", async () => {
     const instance = runtime();
     const older = deferred<unknown>();

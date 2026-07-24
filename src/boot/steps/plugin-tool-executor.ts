@@ -35,9 +35,13 @@ import {
 } from "../plugin-tool-invocation.js";
 import type { BootContext } from "../context.js";
 import { resolvePluginOperationAccount } from "./plugin-operation-account.js";
-import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
+import {
+  PluginOperationExecutionLeaseAbortedError,
+  PluginOperationGrantCoordinator,
+} from "../../permissions/plugin-operation-grant.js";
 import type { PluginOperationIdentityProvider } from "../../tools/invocation-services.js";
 import { isPluginRuntimeDetachedOperationError } from "../../plugins/runtime/detached-operation.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 
 function toPluginToolInput(payload: unknown): Record<string, unknown> {
   if (payload === undefined || payload === null) return {};
@@ -194,12 +198,28 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
         context,
         effectiveOrigin,
       );
-      const authTransitionLease =
+      const authTransitionStartedAt = Date.now();
+      const authAdmissionController = new AbortController();
+      let authAdmissionTimer: ReturnType<typeof setTimeout> | undefined;
+      let authTransitionLease:
+        | Awaited<ReturnType<
+          typeof pluginOperationGrants.acquireAccountTransitionLease
+        >>
+        | undefined;
+      if (
         appOnlyRuntimeInvocation &&
         ownerPluginId &&
         ownerGenerationId &&
         authInvocation?.accountTransitionScopeHash
-          ? await pluginOperationGrants.acquireAccountTransitionLease(
+      ) {
+        authAdmissionTimer = setTimeout(
+          () => authAdmissionController.abort(),
+          TOOL_TIMEOUT_POLICY.globalCeilingMs,
+        );
+        authAdmissionTimer.unref?.();
+        try {
+          authTransitionLease =
+            await pluginOperationGrants.acquireAccountTransitionLease(
               {
                 ownerPluginId,
                 generationId: ownerGenerationId,
@@ -208,8 +228,30 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
                 accountScopeHash:
                   authInvocation.accountTransitionScopeHash,
               },
-            )
-          : undefined;
+              authAdmissionController.signal,
+            );
+        } catch (error) {
+          if (
+            error instanceof PluginOperationExecutionLeaseAbortedError &&
+            authAdmissionController.signal.aborted
+          ) {
+            throw new Error(
+              `plugin auth transition exceeded global ceiling ` +
+              `(${TOOL_TIMEOUT_POLICY.globalCeilingMs}ms): ${toolName}`,
+            );
+          }
+          throw error;
+        } finally {
+          if (authAdmissionTimer) clearTimeout(authAdmissionTimer);
+        }
+      }
+      const authHandlerCeilingMs = authTransitionLease
+        ? Math.max(
+            1,
+            TOOL_TIMEOUT_POLICY.globalCeilingMs -
+              (Date.now() - authTransitionStartedAt),
+          )
+        : undefined;
       const authInvocationEpoch = authInvocation?.epoch;
       if (appOnlyRuntimeInvocation) {
         let releaseAuthTransitionDeferred = false;
@@ -238,6 +280,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             toolName,
             toPluginToolInput(payload),
             context,
+            authHandlerCeilingMs,
           );
           if (context.ownerPluginId && context.ownerGenerationId) {
             observePluginAuthResult(
@@ -250,6 +293,25 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           }
           return result;
         } catch (error) {
+          if (
+            isPluginRuntimeDetachedOperationError(error) &&
+            authInvocation &&
+            ownerPluginId &&
+            ownerGenerationId
+          ) {
+            const invalidated =
+              pluginRuntime.invalidateDetachedPluginAuthInvocation(
+                ownerPluginId,
+                ownerGenerationId,
+              );
+            if (invalidated.invalidatedAccountHash) {
+              pluginSurfaceExecutor.revokePluginOperationAccount(
+                ownerPluginId,
+                ownerGenerationId,
+                invalidated.invalidatedAccountHash,
+              );
+            }
+          }
           if (
             authTransitionLease &&
             isPluginRuntimeDetachedOperationError(error)

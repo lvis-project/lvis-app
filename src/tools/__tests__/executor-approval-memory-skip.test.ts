@@ -57,6 +57,7 @@ vi.mock("../../audit/sandbox-audit-sink.js", async () => {
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
+import { tryUserApprovalMemorySkip } from "../pipeline/approval-memory-skip.js";
 
 function userPermissionContext(
   overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
@@ -136,6 +137,43 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
     expect(entry.reviewer.llmVerdict).toBeNull();
     expect(entry.reviewer.userApprovalUsed?.memoryHit).toBe(true);
     expect(entry.reviewer.userApprovalUsed?.verdictAtApproval).toBe("low");
+  });
+
+  it("approval-memory audit persists the Host-owned governed projection", async () => {
+    state.lookupResult = {
+      scope: "session",
+      verdictAtApproval: "high",
+      nlJustification: null,
+      revokedAt: null,
+    };
+
+    const result = await tryUserApprovalMemorySkip(
+      "plugin_attendance_read",
+      "plugin",
+      "read",
+      [],
+      {
+        operation: "status",
+        opaqueSecret: "must-never-reach-audit",
+      },
+      [],
+      [],
+      userPermissionContext({ trustOrigin: "plugin-emitted" }),
+      undefined,
+      {},
+      undefined,
+      undefined,
+      "com.lvis.attendance",
+      undefined,
+      { operation: "status" },
+    );
+
+    expect(result?.decision).toBe("allow");
+    const entry = emitSandboxAuditMock.mock.calls.at(-1)?.[0] as unknown as
+      | { tool: { args: string } }
+      | undefined;
+    expect(entry?.tool.args).toBe('{"operation":"status"}');
+    expect(entry?.tool.args).not.toContain("must-never-reach-audit");
   });
 
   it("(a2) foreground-auto reviewer path checks Store B before reviewer dispatch", async () => {

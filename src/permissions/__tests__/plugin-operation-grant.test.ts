@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  PluginOperationExecutionLeaseAbortedError,
   PluginOperationGrantCoordinator,
   pluginOperationExecutionDomain,
   type PluginOperationPrincipal,
@@ -258,6 +259,28 @@ describe("PluginOperationGrantCoordinator", () => {
     const secondLease = await second;
     expect(order).toEqual(["first-auth", "second-auth"]);
     secondLease.release();
+  });
+
+  it("removes a queued auth transition when its admission signal aborts", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const controller = new AbortController();
+    const transition = coordinator.acquireAccountTransitionLease(
+      principal,
+      controller.signal,
+    );
+
+    controller.abort();
+
+    await expect(transition).rejects.toBeInstanceOf(
+      PluginOperationExecutionLeaseAbortedError,
+    );
+    active.release();
+    const next = await coordinator.acquireAccountTransitionLease(principal);
+    next.release();
   });
 
   it("serializes a replacement generation through the stable plugin-account scope", async () => {
