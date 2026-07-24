@@ -83,6 +83,7 @@ export interface AuthorizationStageContext {
   meta: ToolCallMeta;
   approvalPurpose: ApprovalPurposeSuggestion | undefined;
   reviewerInput: Record<string, unknown>;
+  auditInput: Record<string, unknown>;
   abortSignal: AbortSignal | undefined;
   rationaleResumeContext: RationaleResumeExecutionContext | undefined;
   rationaleBatchContext: RationaleBatchExecutionContext | undefined;
@@ -141,6 +142,7 @@ export async function authorizeToolInvocation(
     meta,
     approvalPurpose,
     reviewerInput,
+    auditInput,
     abortSignal,
     rationaleResumeContext,
     rationaleBatchContext,
@@ -654,6 +656,7 @@ export async function authorizeToolInvocation(
           tool.workerId,
           tool.pluginId,
           hostShellExecutionPlan,
+          auditInput,
         );
         if (memorySkip) {
           permissionResult = memorySkip;
@@ -686,6 +689,7 @@ export async function authorizeToolInvocation(
         approvalPurpose,
         hostShellExecutionPlan,
         abortSignal,
+        auditInput,
       );
       if (abortSignal?.aborted) {
         return withHostShellExecutionPlan(
@@ -939,6 +943,7 @@ export async function authorizeToolInvocation(
           approvalPurpose,
           hostShellExecutionPlan,
           abortSignal,
+          auditInput,
         );
         if (abortSignal?.aborted) {
           return withHostShellExecutionPlan(
@@ -1042,6 +1047,7 @@ export async function authorizeToolInvocation(
         tool.workerId,
         tool.pluginId,
         hostShellExecutionPlan,
+        auditInput,
       );
       if (memorySkip) {
         permissionResult = memorySkip;

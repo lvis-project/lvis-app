@@ -475,11 +475,10 @@ bun run start
 
 | 플래그 | 효과 |
 |--------|------|
-| `LVIS_DEV=1` | dev 게이트 마스터 (linked entry, hot-reload, DevTools). `bun run dev` 가 자동 세팅. `bun run start` 는 **세팅 안 함** |
-| `LVIS_DEV_SKIP_SIG=1` | 매니페스트 서명 검증 skip. unpackaged 빌드 (`start`/`dev` 모두) 자동 |
+| `LVIS_DEV=1` | 개발자 도구와 hot reload 활성화. `bun run dev`가 자동 설정하며 `bun run start`는 설정하지 않음 |
 | `LVIS_DEV_RELOAD=1` | `dist/` watch + reloadPlugin (수동 export) |
 
-⚠️ 모든 `LVIS_DEV*` / `LVIS_ALLOW_*` 플래그는 `app.isPackaged === true` 일 때 hard-gate 로 무시됩니다 (`src/boot/dev-flags.ts:18-54`). packaged 빌드에 env 가 흘러들어와도 보안 약화 없음.
+⚠️ `LVIS_DEV*` 플래그는 packaged 빌드에서 무시되고 감사 대상이 됩니다. Marketplace envelope/receipt 검증과 entry containment는 unpackaged 빌드에서도 우회되지 않습니다.
 
 ---
 
@@ -490,7 +489,7 @@ bun run start
 | `signature verification failed` (앱) | 서버가 zip 을 앱 호스트 trust set 밖의 키로 서명. 서버 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 와 앱 `src/plugins/marketplace-keys.ts` 를 함께 확인. |
 | 카탈로그에 새 버전 안 보임 | (a) `installPolicy: "admin"` + CLI publish → `pending_review` 상태. admin approve 필요. (b) 카나리 롤아웃 비대상 — `rollout_percent` 확인. (c) bootstrap 서버 `bootstrap_status="failed"` |
 | 부트스트랩 배너 빨간색 (`catalog fetch failed`) | (a) 마켓플레이스 URL 오타 / 서버 다운. (b) 사설 네트워크인데 toggle 안 켜짐. 배너 "다시 시도" 로 재호출. (c) `localhost` IPv6 우선순위 → `127.0.0.1` 권장 |
-| `plugin_unsigned_user_rejected` audit | 사용자 플러그인이 서명되지 않음 + 사용자가 unsigned 허용 토글 안 켬 (Phase 1 fail-closed). 정상 마켓플레이스 경로로 재설치하거나 설정 → 플러그인 → "서명되지 않은 사용자 플러그인 허용" 토글 |
+| envelope 또는 receipt 무결성 검증 실패 | 정상 marketplace 경로로 새 버전을 다시 publish/install하고 Host trust set과 publisher key ID를 확인. 검증 우회 토글은 없음 |
 | `plugin_type="plugin"` 으로 등록됐는데 MCP 서버였음 | 매니페스트 `$schema` URI 가 `mcp.schema.json` 이 아니라 `plugin.schema.json` 으로 들어감 → 매니페스트 수정 후 새 버전 재게시 |
 | `tool_name namespace conflict` (publish 시) | 다른 플러그인이 같은 tool 이름 등록. publisher prefix 추가 (예: `myplugin_search`) |
 | `(plugin_id, version) duplicate` (publish 시) | 동일 버전 재업로드 차단. version bump 후 재시도 |

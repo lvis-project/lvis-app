@@ -144,6 +144,15 @@ export interface AuditCommon {
 export interface ToolExecutionAuditMetadata {
   readonly toolUseId?: string;
   readonly executionPlan?: HostShellExecutionPlanAuditProjection;
+  /**
+   * Host-only snapshot of the operation-governance state captured when the
+   * invocation resolved its Tool. `null` means the governed discriminant was
+   * missing or invalid; `undefined` means the Tool was not governed.
+   *
+   * Audit writers use this snapshot instead of consulting the mutable
+   * ToolRegistry after generation admission, replacement, or uninstall.
+   */
+  readonly governedOperation?: string | null;
 }
 
 /**

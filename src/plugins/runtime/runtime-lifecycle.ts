@@ -50,10 +50,10 @@ import {
   withPluginInstallLock,
 } from "../install-lifecycle.js";
 import {
-  PluginRuntimeState,
   type PendingRestartCancellation,
   type RestartPluginResult,
 } from "./runtime-state.js";
+import { PluginRuntimePublicationState } from "./runtime-publication-state.js";
 import type { PreparedArtifactRuntimeActivationInput } from "./index.js";
 import {
   preflightPluginLoadPlan,
@@ -62,7 +62,7 @@ import {
 } from "./runtime-preflight.js";
 import { commitAtomicPluginRemoval } from "./atomic-removal.js";
 const log = createLogger("plugin-runtime");
-export class PluginRuntimeLifecycle extends PluginRuntimeState {
+export class PluginRuntimeLifecycle extends PluginRuntimePublicationState {
   private async importPluginFactoryForLifecycle(
     pluginId: string,
     resolvedEntryPath: string,

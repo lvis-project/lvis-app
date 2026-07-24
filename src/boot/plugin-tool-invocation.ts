@@ -110,6 +110,8 @@ export async function dispatchAppOnlyRuntimeInvocation(
   toolName: string,
   input: Record<string, unknown>,
   context: PluginToolInvocationContext,
+  ceilingMs?: number,
+  beforeHandler?: () => void,
 ): Promise<unknown> {
   // Defense-in-depth (cluster-review security LOW): this function is exported
   // and trusts its caller to have routed here via `isAppOnlyRuntimeInvocation`,
@@ -158,5 +160,11 @@ export async function dispatchAppOnlyRuntimeInvocation(
   // The global tool-execution ceiling is enforced structurally inside
   // `callDeclaredAppOnlyTool` (see its docstring) — not here — so this dispatch
   // stays a thin gate.
-  return pluginRuntime.callDeclaredAppOnlyTool(toolName, input);
+  return pluginRuntime.callDeclaredAppOnlyTool(
+    toolName,
+    input,
+    ceilingMs,
+    context.ownerGenerationId,
+    beforeHandler,
+  );
 }

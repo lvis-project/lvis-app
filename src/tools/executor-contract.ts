@@ -1,6 +1,7 @@
 import type { A2AAgentCausalContext } from "../engine/a2a-agent-message-envelope.js";
 import type { McpUiPayload } from "../mcp/types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
+import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
 import type { PermissionReviewEvent } from "../shared/permission-review-status.js";
 import type { RationaleExecutorControlOutcome } from "./pipeline/rationale-pr1-contract.js";
 import type { RationaleHostRuntime } from "./pipeline/rationale-orchestrator.js";
@@ -86,6 +87,31 @@ export interface ToolPermissionContext {
   onSessionDirectoryGrant?: (approvedDirectory: string) => void;
 }
 
+/**
+ * Host-private auth-transition lifecycle for one governed plugin invocation.
+ *
+ * This deliberately travels through executor options rather than the plugin
+ * permission context: plugins, manifests, SDK consumers, and HostApi handlers
+ * must never be able to observe or supply it. The executor invokes
+ * `beforeHandler` at its final no-await authorization boundary and settles the
+ * result before releasing the governed-operation lease.
+ */
+export interface HostPluginAuthLifecycle {
+  readonly binding: Readonly<{
+    pluginId: string;
+    generationId: string;
+    toolName: string;
+    appSessionId: string;
+    accountScopeHash: string;
+  }>;
+  beforeHandler(
+    principal: PluginOperationPrincipal,
+    domainKey: string,
+  ): void;
+  completeSuccess(rawResult: unknown): void;
+  completeFailure(reason: unknown): void;
+}
+
 /** Bundled options shared by batch and single-invocation execution. */
 export interface ExecuteOptions {
   callbacks?: ToolExecutorCallbacks;
@@ -99,6 +125,8 @@ export interface ExecuteOptions {
   toolResultChunkReader?: ToolResultChunkReader;
   permissionContext?: ToolPermissionContext;
   executionCwd?: string;
+  /** Host-only lifecycle for an exact governed auth Tool; never plugin data. */
+  pluginAuthLifecycle?: HostPluginAuthLifecycle;
 }
 
 export interface ConversationExecuteOptions extends ExecuteOptions {

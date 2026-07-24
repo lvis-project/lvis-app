@@ -230,6 +230,12 @@ export interface ReviewerDispatchInput {
   /** DLP-redacted finalInput — caller is responsible for redaction. */
   finalInput: Record<string, unknown>;
   /**
+   * Host-owned metadata-only projection for persisted reviewer/deferred audit
+   * sinks. Classifier and approval identity continue to use `finalInput` /
+   * `cacheIdentityInput`; this field is never an authority input.
+   */
+  auditInput?: Record<string, unknown>;
+  /**
    * Raw invocation identity for local approval/cache matching. This must not be
    * sent to the reviewer classifier, deferred queue, or sandbox audit.
    */
@@ -1473,7 +1479,9 @@ export class PermissionManager {
       tool: {
         name: toolName,
         // emitSandboxAudit's sink trusts callers to pass DLP-redacted fields.
-        args: maskSensitiveData(JSON.stringify(input.finalInput)).masked,
+        args: maskSensitiveData(
+          JSON.stringify(input.auditInput ?? input.finalInput),
+        ).masked,
         source: input.source,
         trustOrigin: input.trustOrigin,
         ...(input.approvalCacheKey ? { approvalCacheKey: input.approvalCacheKey } : {}),
@@ -1521,7 +1529,7 @@ export class PermissionManager {
         toolName,
         source: input.source,
         category: input.category,
-        inputSummary: summariseInput(input.finalInput),
+        inputSummary: summariseInput(input.auditInput ?? input.finalInput),
         ...(input.evaluationContext ? { evaluationContext: input.evaluationContext } : {}),
         verdict,
       });

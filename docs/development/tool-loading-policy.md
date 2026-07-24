@@ -233,10 +233,10 @@ the single budget-based policy.
 
 ## Implementation Direction
 
-Tool discovery is `tool_search` promotion of individual tools or small tool
-subsets from the compact catalog. There is no keyword preload path (retired in
-SDK v12); bundled instruction discovery belongs to `manifest.skills`
-(`docs/development/skill-loading-policy.md`).
+ Tool discovery is `tool_search` promotion of individual tools or small tool
+ subsets from the compact catalog. There is no keyword preload path (retired in
+ SDK v12); bundled instruction discovery belongs to `manifest.skills`
+ (`docs/development/skill-loading-policy.md`).
 
 Do not switch the app to OpenAI-only hosted tool search as the first fix. LVIS
 routes tool schemas through the cross-vendor Vercel AI SDK provider adapter, so

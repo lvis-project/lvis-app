@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolvePluginEntryPath } from "../runtime.js";
 import {
-  makeTestPluginRuntime,
+  makeTestPluginRuntimeWithAudit,
   makeTestPluginRuntimeFixture,
   writeTestPlugin,
   writeTestPluginRegistry,
@@ -58,14 +58,6 @@ describe("PluginRuntime — entry path allowlist", () => {
     );
   }
 
-  function runtimeWithAudit() {
-    return makeTestPluginRuntime(fixture, {
-      auditLog: (level, message, data) => {
-        auditEntries.push({ level, message, data });
-      },
-    });
-  }
-
   it("rejects a manifest whose entry traverses outside the plugin directory", async () => {
     const errors: string[] = [];
     const origError = console.error;
@@ -74,7 +66,7 @@ describe("PluginRuntime — entry path allowlist", () => {
       await installManifestFixture("p-evil", "../../../etc/passwd.js");
       await registerPlugins(["p-evil"]);
 
-      const runtime = runtimeWithAudit();
+      const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
       await runtime.load();
 
       // Plugin dropped fail-soft.
@@ -97,7 +89,7 @@ describe("PluginRuntime — entry path allowlist", () => {
       await installManifestFixture("p-abs", "/etc/passwd.js");
       await registerPlugins(["p-abs"]);
 
-      const runtime = runtimeWithAudit();
+      const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
       await runtime.load();
 
       expect(runtime.listPluginIds()).not.toContain("p-abs");
@@ -115,7 +107,7 @@ describe("PluginRuntime — entry path allowlist", () => {
     await installManifestFixture("p-ok", "entry.mjs", { writeEntryFile: true });
     await registerPlugins(["p-ok"]);
 
-    const runtime = runtimeWithAudit();
+    const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-ok");

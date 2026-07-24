@@ -247,7 +247,7 @@ export type ChatEntry =
   // turn_summary entries continue through the normal chat renderer.
   // Rendering the prompt as a user-message bubble would be wrong on two axes:
 
-  //      keyword-routing prefix misattributes authorship.
+  //      a synthetic routing prefix misattributes authorship.
   //   2. The trigger session is intentionally distinct from chat —
   //      flattening it to user→assistant pair erases the overlay-trigger
   //      provenance the user needs to triage what just happened.
