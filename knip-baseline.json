@@ -1,16 +1,11 @@
 {
   "schemaVersion": 1,
-  "knipVersion": "6.23.0",
+  "knipVersion": "6.29.0",
   "entries": [
     {
       "type": "devDependencies",
       "file": "package.json",
       "name": "@ai-sdk/devtools"
-    },
-    {
-      "type": "devDependencies",
-      "file": "package.json",
-      "name": "@tailwindcss/typography"
     },
     {
       "type": "devDependencies",
@@ -26,11 +21,6 @@
       "type": "devDependencies",
       "file": "package.json",
       "name": "caniuse-lite"
-    },
-    {
-      "type": "devDependencies",
-      "file": "package.json",
-      "name": "tailwindcss"
     },
     {
       "type": "devDependencies",
@@ -1341,11 +1331,6 @@
       "type": "files",
       "file": "src/shared/host-font-stack.ts",
       "name": "src/shared/host-font-stack.ts"
-    },
-    {
-      "type": "files",
-      "file": "src/styles.css",
-      "name": "src/styles.css"
     },
     {
       "type": "files",
