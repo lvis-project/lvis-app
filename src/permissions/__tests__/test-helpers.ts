@@ -7,6 +7,7 @@ import {
   checkAsrtDependencies,
   isAsrtSandboxSupported,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
+  getVendoredSrtWinExePath,
 } from "../asrt-sandbox.js";
 import { detectSandboxCapability } from "../sandbox-capability.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
@@ -47,8 +48,13 @@ async function windowsSandboxCanSpawn(): Promise<boolean> {
           "@anthropic-ai/sandbox-runtime",
         );
         process.chdir(dirname(runtimeEntry));
-        const { verifyWindowsWfpEgress } = await import("@anthropic-ai/sandbox-runtime");
-        await verifyWindowsWfpEgress({ proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE });
+        const mod = await import("@anthropic-ai/sandbox-runtime");
+        // ASRT 0.0.67: verifyWindowsWfpEgress needs an EXPLICIT srt-win spawn
+        // descriptor — the argless resolve throws (no implicit vendored fallback).
+        await mod.verifyWindowsWfpEgress({
+          proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE,
+          srtWin: mod.resolveSrtWin({ path: getVendoredSrtWinExePath() }),
+        });
         return true;
       } catch {
         // Loud, not silent: the sandbox provisioned but cannot actually spawn
