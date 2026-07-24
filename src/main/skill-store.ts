@@ -13,9 +13,9 @@
  *   ---
  *   <markdown body>              # loaded into the current-turn prompt overlay
  */
-import { readFile, readdir, realpath } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { closeSync, openSync, readdirSync, readSync, realpathSync } from "node:fs";
-import { resolve, join, relative, isAbsolute } from "node:path";
+import { resolve, join, relative, isAbsolute, dirname, basename, sep } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { ActivePluginGeneration } from "../plugins/plugin-generation-coordinator.js";
@@ -35,6 +35,61 @@ export const SKILL_SELECTOR_ALLOWLIST = /^(?:[a-zA-Z0-9_-]+|plugin:[a-z][a-z0-9-
 
 /** C2(e): skills with a body larger than this are refused at load time. */
 export const SKILL_MAX_BODY_BYTES = 8 * 1024;
+
+/**
+ * Bundled-resource (stage-3) bounds. A skill may ship `references/`, `assets/`
+ * … next to its SKILL.md; those files are surfaced as a manifest and read only
+ * on demand through `skill_read`. Every bound below is a hard cap so untrusted
+ * bundled content cannot flood the prompt, the context, or the scan.
+ */
+const SKILL_RESOURCE_MAX_BYTES = 256 * 1024;
+const SKILL_RESOURCE_COUNT_CAP = 64;
+const SKILL_RESOURCE_DEPTH_CAP = 4;
+const SKILL_RESOURCE_SCAN_LIMIT = 256;
+const SKILL_RESOURCE_PATH_MAX_CHARS = 256;
+
+/**
+ * A bundled resource path is host-facing *and* model-facing (it is rendered in
+ * the trusted `<lvis-skill>` overlay), so it must be inert on both sides:
+ * relative, no traversal, no absolute/drive/UNC form, no backslash, no `:`
+ * (NTFS alternate data streams), and no control characters — a newline in a
+ * filename would otherwise inject extra lines into trusted guidance.
+ */
+function isSafeResourcePath(resourcePath: string): boolean {
+  if (typeof resourcePath !== "string") return false;
+  if (resourcePath.length === 0 || resourcePath.length > SKILL_RESOURCE_PATH_MAX_CHARS) return false;
+  for (const char of resourcePath) {
+    const code = char.codePointAt(0) ?? 0;
+    // Control characters (a newline in a filename would inject extra lines
+    // into the trusted overlay), plus fence/path metacharacters.
+    if (code <= 0x1f || code === 0x7f) return false;
+    if (char === "<" || char === ">" || char === "\\" || char === ":") return false;
+  }
+  if (isAbsolute(resourcePath) || resourcePath.startsWith("/")) return false;
+  const segments = resourcePath.split("/");
+  if (segments.length > SKILL_RESOURCE_DEPTH_CAP) return false;
+  return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+}
+
+function assertSafeResourcePath(resourcePath: string): void {
+  if (!isSafeResourcePath(resourcePath)) {
+    throw new Error("rejected unsafe skill resource path");
+  }
+}
+
+/** One bundled file next to a skill's SKILL.md. Metadata only — never content. */
+export interface SkillResourceRef {
+  /** Skill-root-relative POSIX path (never `SKILL.md`). */
+  path: string;
+  bytes: number;
+}
+
+/** Content of one bundled resource, returned by `skill_read`. */
+export interface SkillResourceContent {
+  path: string;
+  content: string;
+  bytes: number;
+}
 
 export interface SkillFrontmatter {
   name: string;
@@ -61,6 +116,20 @@ function materializedSkill(
     fingerprint: contribution.fingerprint,
   });
   const selector = `plugin:${owner.pluginId}:${owner.localId}`;
+  // Stage-3 manifest, derived with ZERO filesystem access: the generation's
+  // files are already materialized + sha256-verified in memory, so the manifest
+  // is metadata over trusted bytes. `SKILL.md` itself is never a resource.
+  const prefix = `${contribution.path}/`;
+  const resources: SkillResourceRef[] = [];
+  for (const file of contribution.files) {
+    if (resources.length >= SKILL_RESOURCE_COUNT_CAP) break;
+    if (file.path === entryPath || !file.path.startsWith(prefix)) continue;
+    const relPath = file.path.slice(prefix.length);
+    if (!isSafeResourcePath(relPath)) continue;
+    const bytes = Buffer.byteLength(file.content, "utf-8");
+    if (bytes > SKILL_RESOURCE_MAX_BYTES) continue;
+    resources.push(Object.freeze({ path: relPath, bytes }));
+  }
   return Object.freeze({
     name: selector,
     description: fm.description ?? "",
@@ -68,6 +137,7 @@ function materializedSkill(
     filePath: `plugin://${owner.pluginId}/${owner.localId}/SKILL.md`,
     approvalKey: [owner.pluginId, owner.pluginVersion, owner.generationId, owner.localId, owner.fingerprint].join("|"),
     pluginOwner: owner,
+    resources: Object.freeze(resources),
   });
 }
 
@@ -79,6 +149,11 @@ export interface LoadedSkill {
   /** Exact cache/approval identity for plugin-owned materialized bytes. */
   approvalKey?: string;
   pluginOwner?: PluginSkillOwner;
+  /**
+   * Bundled files shipped next to SKILL.md (stage-3). Metadata only — contents
+   * load on demand through `skill_read`. Always present; empty for flat skills.
+   */
+  resources: readonly SkillResourceRef[];
 }
 
 export interface SkillCatalogEntry {
@@ -239,6 +314,73 @@ export class SkillStore {
     return contribution ? materializedSkill(generation, contribution) : null;
   }
 
+  /**
+   * Read one bundled resource of a PLUGIN skill — zero filesystem access.
+   *
+   * The generation's files were materialized and sha256-verified at install and
+   * are held frozen in memory, so an exact `path` match against that set is the
+   * whole integrity story: there is no disk re-read and therefore no TOCTOU.
+   * Returns null when the selector, contribution, or resource does not exist.
+   */
+  readPluginResource(
+    generation: ActivePluginGeneration,
+    selector: string,
+    resourcePath: string,
+  ): SkillResourceContent | null {
+    const prefix = `plugin:${generation.pluginId}:`;
+    if (!selector.startsWith(prefix)) return null;
+    const localId = selector.slice(prefix.length);
+    const contribution = generation.contributions.find(
+      (entry) => entry.kind === "skill" && entry.localId === localId,
+    );
+    if (!contribution) return null;
+    assertSafeResourcePath(resourcePath);
+    const entryPath = `${contribution.path}/SKILL.md`;
+    const full = `${contribution.path}/${resourcePath}`;
+    if (full === entryPath) return null; // SKILL.md is the body, not a resource
+    const file = contribution.files.find((candidate) => candidate.path === full);
+    if (!file) return null;
+    const bytes = Buffer.byteLength(file.content, "utf-8");
+    if (bytes > SKILL_RESOURCE_MAX_BYTES) {
+      throw new Error(`skill resource exceeds ${SKILL_RESOURCE_MAX_BYTES} bytes`);
+    }
+    return { path: resourcePath, content: file.content, bytes };
+  }
+
+  /**
+   * Read one bundled resource of a USER skill, contained inside that skill's
+   * own directory.
+   *
+   * A flat `<name>.md` skill is REFUSED before any filesystem access: its
+   * `dirname` is the shared skills root, so treating it as a bundle root would
+   * let one approved skill read every sibling skill's bytes — approval is
+   * per-skill and body-hash-bound, and that must not become transitive.
+   */
+  async readUserResource(skill: LoadedSkill, resourcePath: string): Promise<SkillResourceContent> {
+    if (skill.pluginOwner) throw new Error("plugin skill resources load through readPluginResource");
+    if (basename(skill.filePath) !== "SKILL.md") {
+      throw new Error("flat skills have no bundled resources");
+    }
+    assertSafeResourcePath(resourcePath);
+    const skillDir = dirname(skill.filePath);
+    const canonicalDir = await realpath(skillDir);
+    const canonicalFile = await realpath(join(skillDir, resourcePath));
+    const rel = relative(canonicalDir, canonicalFile);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      throw new Error("skill resource escapes its skill directory");
+    }
+    if (rel.split(sep).join("/") === "SKILL.md") {
+      throw new Error("SKILL.md is the skill body, not a resource");
+    }
+    const info = await stat(canonicalFile);
+    if (!info.isFile()) throw new Error("skill resource is not a regular file");
+    if (info.size > SKILL_RESOURCE_MAX_BYTES) {
+      throw new Error(`skill resource exceeds ${SKILL_RESOURCE_MAX_BYTES} bytes`);
+    }
+    const content = await readFile(canonicalFile, "utf-8");
+    return { path: resourcePath, content, bytes: info.size };
+  }
+
   /** Publish materialized Skill bytes for exactly one active plugin generation. */
   publishPluginGeneration(generation: ActivePluginGeneration): void {
     this.preparePluginGeneration(generation).publish();
@@ -380,12 +522,88 @@ export class SkillStore {
     if (Buffer.byteLength(trimmedBody, "utf-8") > SKILL_MAX_BODY_BYTES) {
       throw new Error(`rejected oversized body (>${SKILL_MAX_BODY_BYTES} bytes)`);
     }
+    // Stage-3: only the directory layout (`<name>/SKILL.md`) owns a bundle
+    // directory. A flat `<name>.md` skill has no directory of its own — its
+    // parent IS the shared skills root — so it never carries resources.
+    const resources = basename(canonicalFile) === "SKILL.md"
+      ? await this.listSkillResources(dirname(canonicalFile))
+      : [];
     return {
       name,
       description: fm.description ?? "",
       body: trimmedBody,
       filePath: canonicalFile,
+      resources,
     };
+  }
+
+  /**
+   * List a directory-form skill's bundled files, root-relative and POSIX-normalized.
+   *
+   * Every entry is realpath-contained inside the skill directory (a symlink
+   * pointing outside is skipped, mirroring `load()`), character-validated (a
+   * filename with a newline or fence metacharacter is skipped so it can never
+   * reach the trusted overlay), size-capped, and bounded by depth / count /
+   * scan limits. Failures degrade to "no resources", never to a throw: a
+   * broken bundle must not make the skill itself unloadable.
+   */
+  private async listSkillResources(skillDir: string): Promise<SkillResourceRef[]> {
+    let canonicalDir: string;
+    try {
+      canonicalDir = await realpath(skillDir);
+    } catch {
+      return [];
+    }
+    const found: SkillResourceRef[] = [];
+    const queue: Array<{ dir: string; depth: number }> = [{ dir: canonicalDir, depth: 0 }];
+    let scanned = 0;
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) break;
+      if (found.length >= SKILL_RESOURCE_COUNT_CAP || scanned >= SKILL_RESOURCE_SCAN_LIMIT) break;
+      let entries: Array<import("node:fs").Dirent>;
+      try {
+        entries = await readdir(current.dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (found.length >= SKILL_RESOURCE_COUNT_CAP || scanned >= SKILL_RESOURCE_SCAN_LIMIT) break;
+        scanned += 1;
+        const childPath = join(current.dir, entry.name);
+        let canonicalChild: string;
+        let info: Awaited<ReturnType<typeof stat>>;
+        try {
+          // realpath + stat resolve symlinks; the containment check below then
+          // rejects anything whose real location escapes the skill directory.
+          canonicalChild = await realpath(childPath);
+          info = await stat(canonicalChild);
+        } catch {
+          continue;
+        }
+        const rel = relative(canonicalDir, canonicalChild);
+        if (rel.startsWith("..") || isAbsolute(rel)) {
+          log.warn(`skill resources: skipped ${childPath} — escapes ${canonicalDir}`);
+          continue;
+        }
+        if (info.isDirectory()) {
+          if (current.depth + 1 < SKILL_RESOURCE_DEPTH_CAP) {
+            queue.push({ dir: canonicalChild, depth: current.depth + 1 });
+          }
+          continue;
+        }
+        if (!info.isFile()) continue;
+        const posixRel = rel.split(sep).join("/");
+        if (posixRel === "SKILL.md") continue;
+        if (!isSafeResourcePath(posixRel)) {
+          log.warn(`skill resources: skipped an unsafe resource filename under ${canonicalDir}`);
+          continue;
+        }
+        if (info.size > SKILL_RESOURCE_MAX_BYTES) continue;
+        found.push(Object.freeze({ path: posixRel, bytes: info.size }));
+      }
+    }
+    return found;
   }
 
   private scanCatalogDirSync(dir: string, limit = SKILL_CATALOG_SCAN_LIMIT): SkillCatalogRecord[] {
