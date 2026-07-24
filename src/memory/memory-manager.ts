@@ -11,6 +11,7 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 import { projectRootEquals, projectRootKey } from "../shared/project-identity.js";
+import { discoverProjectAgentsMd, type ProjectAgentsMd } from "./project-agents-md.js";
 import { maskSensitiveData } from "../shared/dlp.js";
 import {
   A2ATaskState,
@@ -892,6 +893,26 @@ export class MemoryManager {
 
   getAgentsMd(): string {
     return this.agentsMd;
+  }
+
+  /** Single-entry, stat-revalidated cache for the active project's AGENTS.md. */
+  private projectAgentsMdCache: { root: string; sig: number; value: ProjectAgentsMd } | null = null;
+
+  /**
+   * Committed project AGENTS.md discovered at `projectRoot`. Re-discovered when
+   * the file's mtime changes (single-entry cache; a project switch changes the
+   * root and re-discovers), so an edit is visible on the next turn build with no
+   * fs.watch lifecycle to manage across project switches — unlike the global
+   * file's watcher. Returns empty layers when the file is absent.
+   */
+  getProjectAgentsMd(projectRoot: string): ProjectAgentsMd {
+    const root = resolve(projectRoot);
+    const sig = this.getFileMtimeMs(join(root, "AGENTS.md"));
+    const cached = this.projectAgentsMdCache;
+    if (cached && cached.root === root && cached.sig === sig) return cached.value;
+    const value = discoverProjectAgentsMd(root);
+    this.projectAgentsMdCache = { root, sig, value };
+    return value;
   }
 
   getMemoryIndex(options: ProjectScopedMemoryOptions = {}): string {
