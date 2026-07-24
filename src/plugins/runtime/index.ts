@@ -32,6 +32,7 @@ import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { updatePluginRegistry } from "../registry.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
+import { PluginRuntimeDetachedOperationError } from "./detached-operation.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
 import { sessionContext } from "../../engine/session-context.js";
 import {
@@ -386,8 +387,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * Abort-parity note: like the governed executor path, the ceiling only
    * unblocks the *caller* — `PluginRuntime.call` hands the handler only
    * `payload`, never an abort signal, so a hung handler's work stays detached.
-   * We match that exact parity and do NOT invent a handler-abort mechanism the
-   * executor path itself lacks. `ceilingMs` defaults to the SOT
+   * The immutable generation lease remains held until that detached settlement,
+   * so update/removal cannot publish a replacement beside stale handler work.
+   * We do NOT invent a handler-abort mechanism the executor path itself lacks.
+   * `ceilingMs` defaults to the SOT
    * (`TOOL_TIMEOUT_POLICY.globalCeilingMs`) and is a parameter solely so tests
    * can exercise the ceiling with a small value without weakening the SOT.
    */
@@ -395,6 +398,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     method: string,
     payload?: unknown,
     ceilingMs: number = TOOL_TIMEOUT_POLICY.globalCeilingMs,
+    expectedGenerationId?: string,
   ): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
@@ -419,9 +423,17 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
         undefined,
         method,
       );
-      if (!outcome.ok) throw outcome.error;
+      if (!outcome.ok) {
+        if (outcome.settlement) {
+          throw new PluginRuntimeDetachedOperationError(
+            outcome.error,
+            outcome.settlement,
+          );
+        }
+        throw outcome.error;
+      }
       return outcome.value;
-    });
+    }, expectedGenerationId);
   }
 
   /**
@@ -1197,9 +1209,12 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   /**
    * Claim publication order for any auth lifecycle invocation. Starting login
    * or logout immediately removes the current principal, so neither a failed
-   * nor partial transition can retain stale write authority. The caller must
-   * synchronously revoke grants for the returned hash before awaiting plugin
-   * execution and pass the epoch to {@link observePluginAuthResult}.
+   * nor partial transition can retain stale write authority. Every auth tool
+   * also receives one stable transition scope: status, login, and logout
+   * therefore serialize with admitted governed work and with each other. The
+   * caller must synchronously revoke grants for the returned hash before
+   * awaiting plugin execution and pass the epoch to
+   * {@link observePluginAuthResult}.
    */
   beginPluginAuthInvocation(
     pluginId: string,
@@ -1207,6 +1222,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     toolName: string,
   ): {
     epoch: number;
+    accountTransitionScopeHash: string;
     invalidatedAccountHash?: string;
   } | undefined {
     const active = this.requireGenerationAccess("plugin auth invocation").getActive(pluginId);
@@ -1225,14 +1241,32 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     const epoch = ++this.nextPluginAuthInvocationEpoch;
     const key = `${pluginId}\0${generationId}`;
     this.pluginAuthInvocationEpochs.set(key, epoch);
+    const currentAccount = this.pluginAccountHashes.get(key);
+    const retainedTransitionAccount =
+      this.pluginAuthTransitionPrincipals.get(key);
+    const accountTransitionScopeHash =
+      currentAccount?.identityHash ??
+      retainedTransitionAccount?.identityHash ??
+      createHash("sha256")
+        .update("plugin-auth-transition/v1\0")
+        .update(pluginId)
+        .digest("hex");
     if (toolName !== auth.loginTool && toolName !== auth.logoutTool) {
-      return { epoch };
+      return { epoch, accountTransitionScopeHash };
     }
-    const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+    if (currentAccount) {
+      this.pluginAuthTransitionPrincipals.set(key, currentAccount);
+    }
+    const invalidatedAccount =
+      currentAccount ?? retainedTransitionAccount;
     this.pluginAccountHashes.delete(key);
-    return invalidatedAccountHash
-      ? { epoch, invalidatedAccountHash }
-      : { epoch };
+    return invalidatedAccount
+      ? {
+          epoch,
+          accountTransitionScopeHash,
+          invalidatedAccountHash: invalidatedAccount.principalHash,
+        }
+      : { epoch, accountTransitionScopeHash };
   }
 
   /**
@@ -1301,6 +1335,11 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     }
     for (const key of this.pluginAuthInvocationEpochs.keys()) {
       if (key.startsWith(`${pluginId}\0`)) this.pluginAuthInvocationEpochs.delete(key);
+    }
+    for (const key of this.pluginAuthTransitionPrincipals.keys()) {
+      if (key.startsWith(`${pluginId}\0`)) {
+        this.pluginAuthTransitionPrincipals.delete(key);
+      }
     }
   }
 

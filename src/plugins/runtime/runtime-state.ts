@@ -31,6 +31,7 @@ import { getLvisAppVersion } from "../../shared/app-version.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import type { PluginIntegrityCheckResult } from "./runtime-preflight.js";
 import { reportPluginIntegrity, verifyPluginIntegrity } from "./runtime-integrity.js";
+import { isPluginRuntimeDetachedOperationError } from "./detached-operation.js";
 
 import {
   buildManifestValidator,
@@ -169,6 +170,15 @@ export abstract class PluginRuntimeState {
   }>();
   /** Latest auth invocation admitted for each immutable plugin generation. */
   protected pluginAuthInvocationEpochs = new Map<string, number>();
+  /**
+   * Stable account identity retained after login/logout invalidates the active
+   * principal. Concurrent auth transitions reuse it so they cannot bypass the
+   * governed-operation/account-transition FIFO while the identity is absent.
+   */
+  protected pluginAuthTransitionPrincipals = new Map<string, {
+    identityHash: string;
+    principalHash: string;
+  }>();
   protected nextPluginAuthInvocationEpoch = 0;
   protected readonly pendingRestartCancellations = new Map<string, PendingRestartCancellation>();
   /** Monotonic generation used to reject stale async add/restart commits. */
@@ -1391,6 +1401,10 @@ export abstract class PluginRuntimeState {
     const nextAuthInvocationEpochs = new Map(
       [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
     );
+    const nextAuthTransitionPrincipals = new Map(
+      [...this.pluginAuthTransitionPrincipals]
+        .filter(([key]) => !key.startsWith(`${pluginId}\0`)),
+    );
     const publishHostEffects = runtime.hostEffects?.preparePublish();
     let published = false;
     return Object.freeze({
@@ -1413,6 +1427,7 @@ export abstract class PluginRuntimeState {
         this.disabledPluginIds.delete(pluginId);
         this.pluginAccountHashes = nextAccountHashes;
         this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
+        this.pluginAuthTransitionPrincipals = nextAuthTransitionPrincipals;
         published = true;
       },
     });
@@ -1433,6 +1448,10 @@ export abstract class PluginRuntimeState {
     const nextAuthInvocationEpochs = new Map(
       [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
     );
+    const nextAuthTransitionPrincipals = new Map(
+      [...this.pluginAuthTransitionPrincipals]
+        .filter(([key]) => !key.startsWith(`${pluginId}\0`)),
+    );
     let published = false;
     return Object.freeze({
       pluginId,
@@ -1445,6 +1464,7 @@ export abstract class PluginRuntimeState {
         this.invalidatePluginUiRevision(pluginId);
         this.pluginAccountHashes = nextAccountHashes;
         this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
+        this.pluginAuthTransitionPrincipals = nextAuthTransitionPrincipals;
         published = true;
       },
     });
@@ -1567,6 +1587,7 @@ export abstract class PluginRuntimeState {
       : await access.acquire(pluginId);
     const next = new Map(this.pinnedGenerations.getStore() ?? []);
     next.set(pluginId, lease.generation.generationId);
+    let releaseDeferred = false;
     try {
       return await access.runWithLease(
         lease,
@@ -1575,8 +1596,17 @@ export abstract class PluginRuntimeState {
           () => operation(lease.generation.state.runtime, lease.generation.generationId),
         ),
       );
+    } catch (error) {
+      if (isPluginRuntimeDetachedOperationError(error)) {
+        releaseDeferred = true;
+        void error.settlement.then(
+          () => lease.release(),
+          () => lease.release(),
+        );
+      }
+      throw error;
     } finally {
-      lease.release();
+      if (!releaseDeferred) lease.release();
     }
   }
 
