@@ -36,13 +36,13 @@ describe("parsePluginJson — SDK schema validator required", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  it("fails closed when the SDK schema validator is absent", async () => {
+  it("fails closed when the Host schema validator is absent", async () => {
     await expect(parsePluginJson(manifestPath, null as never)).rejects.toThrow(
-      /SDK plugin manifest validator is required/,
+      /Host plugin manifest validator is required/,
     );
   });
 
-  it("parses a valid manifest with the SDK schema validator", async () => {
+  it("parses a valid manifest with the Host schema validator", async () => {
     const validator = await buildManifestValidator();
     const manifest = await parsePluginJson(manifestPath, validator);
     expect(manifest.id).toBe("test-validator");

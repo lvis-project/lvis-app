@@ -427,8 +427,8 @@ export async function runTurn(
       self.history.removeByHostInjectionId(agentMessageInputId);
       agentMessageInputId = null;
     }
-    // lastTurnScope must reflect any Option C request_plugin expansions so
-    // the next turn's keyword-miss fallback keeps those plugins visible.
+    // lastTurnScope must reflect any request_plugin expansions so the next
+    // turn preserves the explicitly activated plugin scope.
     self.lastTurnScope = new Set(scope.activePluginIds);
     // Tool-Level Deferral — carry only intentional plugin/MCP tool surface
     // forward. Unused tool_search promotions should not stick to unrelated
