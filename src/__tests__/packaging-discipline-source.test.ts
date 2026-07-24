@@ -557,7 +557,10 @@ describe("installer smoke and packaging discipline", () => {
         packageResource?: { from: string; to: string };
         licenseResource?: { from: string; to: string };
       }) =>
-        asset.stagedBy === "electron-builder native rebuild"
+        // asar-unpacked native binaries (e.g. the better-sqlite3 N-API prebuild)
+        // are packaged via asarUnpack + afterPack, not electron-builder
+        // extraResources, so they are not expected in build.extraResources.
+        asset.packageResource?.to?.startsWith("app.asar.unpacked/")
           ? []
           : [asset.packageResource, asset.licenseResource].filter(Boolean),
     );
