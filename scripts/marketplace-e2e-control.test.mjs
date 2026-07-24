@@ -88,6 +88,18 @@ test("creates deterministic ustar from regular non-linked files only", () => {
   );
 });
 
+test("archives through a pinned no-follow descriptor instead of reopening a checked path", () => {
+  const source = readFileSync(
+    fileURLToPath(new URL("./marketplace-e2e-control.mjs", import.meta.url)),
+    "utf8",
+  );
+  assert.match(source, /openSync\(\s*entry\.absolute,/u);
+  assert.match(source, /constants\.O_NOFOLLOW/u);
+  assert.match(source, /readFileSync\(descriptor\)/u);
+  assert.match(source, /fstatSync\(descriptor\)/u);
+  assert.doesNotMatch(source, /readFileSync\(entry\.absolute\)/u);
+});
+
 test("extracts only after archive validation into a new private root", () => {
   const root = fixtureRoot();
   const archive = join(root, "source.tar");
