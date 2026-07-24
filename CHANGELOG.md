@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.5.10 — 2026-07-24
+
+Enables the first public Host release that can install bundled plugin Skills.
+Public tags remain unsigned.
+
+### Plugin contract
+
+- **Bundled Skill contributions are supported.** The Host accepts `manifest.skills`
+  under its closed manifest contract. Skills are instruction bundles; they do
+  not activate plugins, select Tools, or invoke Tools.
+- **Retired keyword routing is removed.** The former keyword engine and
+  keyword-to-Tool dispatch surface are absent from the active Host and public
+  plugin contract.
+
+### Security
+
+- **Staged plugin and MCP App input retains canonical provenance.** Only a
+  complete, ingress-validated envelope can mark a turn as staged; raw text and
+  independently supplied staged-origin flags fail closed. Staged bodies cannot
+  alter carry-forward Tool scope.
+
 ### Build
 
 - **`better-sqlite3` upgraded to 13 (N-API prebuilds).** v13 is N-API (ABI-stable) and ships per-platform prebuilds (`prebuilds/<platform>-<arch>.node`) instead of a per-Electron-ABI `build/Release/better_sqlite3.node` compiled by `electron-rebuild`. The postinstall native rebuild is now scoped to `node-pty` only, and the packaged-build asserts follow the binary to its prebuild path. The installer drops the `bindings`/`file-uri-to-path` resolver dependencies (no longer used) and prunes the 7 non-target prebuilds at pack time (~14 MB smaller). The Electron-ABI self-heal that used to rebuild `better-sqlite3` on load failure now fails fast with reinstall guidance, since a rebuild cannot fix a shipped prebuild.
