@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { PluginRuntime } from "../runtime/index.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import type { PluginManifest, RuntimePlugin } from "../runtime/types.js";
 import type { PluginRuntimeGenerationProjection } from "../plugin-host-generation.js";
 
 describe("PluginRuntime generation isolation", () => {
   it("does not fall back to a live handler missing from the leased generation", async () => {
-    const runtime = new PluginRuntime({ hostRoot: "/tmp/lvis-runtime-generation-test" });
+    const runtime = new PluginRuntime({
+      hostRoot: "/tmp/lvis-runtime-generation-test",
+      createHostApi: createNoopHostApiForTests,
+    });
     const pluginId = "strict-generation";
     const method = "strict_generation_read";
     const legacyHandler = vi.fn(async () => "stale");
@@ -21,6 +24,7 @@ describe("PluginRuntime generation isolation", () => {
     const instance = { handlers: {} } as RuntimePlugin;
     const projection: PluginRuntimeGenerationProjection = {
       activationId: "activation-2",
+      installId: null,
       manifest,
       pluginRoot: "/tmp/lvis-runtime-generation-test/plugin",
       instance,
@@ -68,7 +72,10 @@ describe("PluginRuntime generation isolation", () => {
   });
 
   it("fails closed when an operation is attempted before lifecycle binding", async () => {
-    const runtime = new PluginRuntime({ hostRoot: "/tmp/lvis-runtime-unbound-test" });
+    const runtime = new PluginRuntime({
+      hostRoot: "/tmp/lvis-runtime-unbound-test",
+      createHostApi: createNoopHostApiForTests,
+    });
     runtime._testInjectPlugin("unbound", "unbound_read", async () => "must-not-run");
 
     await expect(runtime.call("unbound_read")).rejects.toThrow(
@@ -77,7 +84,10 @@ describe("PluginRuntime generation isolation", () => {
   });
 
   it("lets an admitted exact-generation call finish after the live pointer retires", async () => {
-    const runtime = new PluginRuntime({ hostRoot: "/tmp/lvis-runtime-drain-test" });
+    const runtime = new PluginRuntime({
+      hostRoot: "/tmp/lvis-runtime-drain-test",
+      createHostApi: createNoopHostApiForTests,
+    });
     const pluginId = "draining-generation";
     const method = "draining_generation_read";
     const handler = vi.fn(async () => "leased-result");
@@ -93,6 +103,7 @@ describe("PluginRuntime generation isolation", () => {
     const instance = { handlers: { [method]: handler } } as RuntimePlugin;
     const projection: PluginRuntimeGenerationProjection = {
       activationId: "activation-drain",
+      installId: null,
       manifest,
       pluginRoot: "/tmp/lvis-runtime-drain-test/plugin",
       instance,

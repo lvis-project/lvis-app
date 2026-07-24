@@ -253,11 +253,13 @@ describe("PluginMarketplaceService.installLocal", () => {
       "utf-8",
     );
     const activatePreparedArtifact = vi.fn(async (prepared: {
+      installId: string;
       pluginRoot: string;
       manifest: { version?: string };
       durableCommit(): Promise<string>;
     }) => {
       expect(prepared.pluginRoot).not.toBe(join(pluginsDir, "test-plugin"));
+      expect(prepared.installId).toBe("test-plugin");
       expect(prepared.manifest.version).toBe("2.0.0");
       throw new Error("candidate start failed");
     });

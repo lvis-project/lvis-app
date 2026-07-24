@@ -74,6 +74,7 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
       clearInstallFailureDiagnostic: vi.fn(() => true),
       rollbackPlugin: vi.fn(async (pluginId: string, options) => {
         await options?.activatePreparedArtifact?.({
+          installId: pluginId,
           pluginRoot: `/staged/${pluginId}`,
           manifest: { id: pluginId, version: "0.0.1" },
           receiptRaw: "{}",
@@ -146,6 +147,7 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
     } => typeof arg === "object" && arg !== null && "activatePreparedArtifact" in arg);
     if (!options?.activatePreparedArtifact) throw new Error("test install omitted atomic activation seam");
     await options.activatePreparedArtifact({
+      installId: pluginId,
       pluginRoot: `/staged/${pluginId}`,
       manifest: { id: pluginId, version: "1.0.0" },
       receiptRaw: "{}",
@@ -153,6 +155,7 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
     });
   };
   deps.pluginRuntime.activatePreparedArtifact.mockImplementation(async (prepared: {
+    installId: string;
     manifest: { id: string };
     durableCommit(): Promise<string>;
   }) => {

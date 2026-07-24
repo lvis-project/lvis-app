@@ -12,7 +12,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
-import { buildInstallReceipt, writeInstallReceipt } from "../../plugin-install-receipt.js";
+import {
+  buildInstallReceipt,
+  installReceiptPath,
+  writeInstallReceipt,
+} from "../../plugin-install-receipt.js";
 
 const registryCommitGate = vi.hoisted(() => ({
   started: undefined as (() => void) | undefined,
@@ -187,6 +191,42 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.loadStatus).toBe("loaded");
     expect(card?.runtimeLoaded).toBe(true);
     expect(card?.active).toBe(true);
+  });
+
+  it("re-enables a canonical manifest through its raw registry alias receipt", async () => {
+    const installId = "se-plugin-marketplace";
+    const pluginDir = join(installedDir, "se-plugin");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: installId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    await rm(installReceiptPath(testDir, "se-plugin"), { force: true });
+    const { receipt } = await buildInstallReceipt(pluginDir, {
+      pluginId: installId,
+      version: "1.0.0",
+      installSource: "marketplace",
+      artifactSha256: "b".repeat(64),
+      signerKeyId: "poc-v1",
+      files: ["entry.mjs", "plugin.json"],
+      installedAt: new Date(0).toISOString(),
+    });
+    await writeInstallReceipt(testDir, receipt);
+
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    expect(runtime.resolvePluginInstallId("se-plugin")).toBe(installId);
+
+    await runtime.setPluginEnabled(installId, false);
+    await runtime.setPluginEnabled(installId, true);
+
+    await expect(runtime.call("se_ping")).resolves.toBe("pong");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((plugin: { id: string }) => plugin.id === installId).enabled)
+      .toBe(true);
   });
 
   it("uninstalls an inactive plugin and permits a clean same-id reinstall", async () => {

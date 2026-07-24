@@ -247,6 +247,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         manifest.id,
         pluginRoot,
         activationId,
+        plan.pluginIdHint ?? manifest.id,
       );
       let entryPath: string;
       try {
@@ -679,6 +680,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       pluginId,
       pluginRoot,
       activationId,
+      receiptPluginId ?? pluginId,
     );
     let entryPath: string;
     try {
@@ -833,6 +835,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
     const candidate: PluginRuntimeGenerationProjection = Object.freeze({
       activationId,
+      installId: this.requirePluginInstallClaim(pluginId),
       manifest,
       pluginRoot: runtimeRoot,
       instance,
@@ -1081,6 +1084,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       manifest.id,
       pluginRoot,
       activationId,
+      plan.pluginIdHint ?? manifest.id,
     );
     let entryPath: string;
     try {
@@ -1289,6 +1293,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     }
     const candidate: PluginRuntimeGenerationProjection = Object.freeze({
       activationId,
+      installId: this.requirePluginInstallClaim(manifest.id),
       manifest,
       pluginRoot: runtimeRoot,
       instance,
@@ -1400,6 +1405,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
     if (manifest.id !== input.manifest.id || manifest.version !== input.manifest.version) {
       throw new Error(`prepared artifact manifest identity changed for '${input.manifest.id}'`);
     }
+    const installId = this.validatePreparedInstallIdentity(manifest.id, input.installId);
     const activationId = randomUUID();
     const artifactGenerationId = createHash("sha256")
       .update(manifestRaw)
@@ -1417,6 +1423,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       manifest.id,
       generationId,
       input.receiptRaw,
+      installId,
     );
     let createPlugin: RuntimePluginFactory | undefined;
     try {
@@ -1452,6 +1459,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         manifest,
         pluginDataDir,
         hostEffects,
+        installId,
       );
     } catch (error) {
       hostEffects.discard();
@@ -1511,6 +1519,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       }
       const projection: PluginRuntimeGenerationProjection = Object.freeze({
         activationId,
+        installId,
         manifest,
         pluginRoot: payloadRoot,
         instance,

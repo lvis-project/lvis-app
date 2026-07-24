@@ -409,7 +409,10 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     const pluginId = manifest.id;
     const manifestRaw = await readFile(resolve(pluginRoot, "plugin.json"), "utf8");
     const receiptRaw = receiptRawOverride
-      ?? await readFile(installReceiptPath(this.deps.receiptCacheRoot, pluginId), "utf8");
+      ?? await readFile(
+        installReceiptPath(this.deps.receiptCacheRoot, runtime.installId ?? pluginId),
+        "utf8",
+      );
     const artifactGenerationId = createHash("sha256")
       .update(manifestRaw)
       .update("\0")
@@ -426,6 +429,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       pluginId,
       generationId,
       receiptRaw,
+      runtime.installId ?? pluginId,
     );
     const contributions = await materializePluginContributions(payloadRoot, manifest);
     const identity = {

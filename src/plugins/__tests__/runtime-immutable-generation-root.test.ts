@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PluginRuntime } from "../runtime/index.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { hashReceiptFiles, writeInstallReceipt } from "../plugin-install-receipt.js";
 import type {
   HostPluginGenerationState,
@@ -21,12 +21,13 @@ afterEach(async () => {
 });
 
 describe("PluginRuntime immutable generation root", () => {
-  it("keeps a booted g1 lease on g1 bytes after the canonical install root changes", async () => {
+  it("keeps canonical generations immutable while an alias-backed receipt restarts", async () => {
     const root = await mkdtemp(join(tmpdir(), "lvis-runtime-generation-root-"));
     roots.push(root);
     const pluginsRoot = join(root, "plugins");
     const cacheRoot = join(root, "cache");
     const pluginId = "immutable-root";
+    const installId = "immutable-root-marketplace";
     const pluginRoot = join(pluginsRoot, pluginId);
     const registryPath = join(pluginsRoot, "registry.json");
     await mkdir(pluginRoot, { recursive: true });
@@ -57,12 +58,12 @@ export default async function createPlugin(ctx) {
     );
     await writeFile(registryPath, JSON.stringify({
       version: 1,
-      plugins: [{ id: pluginId, manifestPath: join(pluginRoot, "plugin.json"), enabled: true }],
+      plugins: [{ id: installId, manifestPath: join(pluginRoot, "plugin.json"), enabled: true }],
     }), "utf8");
     const receiptFiles = ["entry.mjs", "plugin.json", "value.txt"];
     await writeInstallReceipt(cacheRoot, {
       schemaVersion: 2,
-      pluginId,
+      pluginId: installId,
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "a".repeat(64),
@@ -105,12 +106,14 @@ export default async function createPlugin(ctx) {
       registryPath,
       pluginsRoot,
       installReceiptCacheRoot: cacheRoot,
+      createHostApi: createNoopHostApiForTests,
     });
     runtime.setGenerationAccess(access as never);
     await runtime.startAll();
 
     const bootProjection = runtime.getRuntimeGenerationProjection(pluginId);
     expect(bootProjection?.pluginRoot).toContain(`${join(cacheRoot, pluginId, "generations")}`);
+    expect(bootProjection?.installId).toBe(installId);
     expect(await runtime.call("immutable_root_read")).toBe("g1");
 
     await writeFile(join(pluginRoot, "value.txt"), "g2", "utf8");
@@ -118,21 +121,34 @@ export default async function createPlugin(ctx) {
     expect(await runtime.call("immutable_root_read")).toBe("g1");
     expect(access.acquire).toHaveBeenCalled();
 
+    await writeInstallReceipt(cacheRoot, {
+      schemaVersion: 2,
+      pluginId: installId,
+      version: "1.0.0",
+      installSource: "marketplace",
+      artifactSha256: "b".repeat(64),
+      signerKeyId: "test-v1",
+      installedAt: new Date(1).toISOString(),
+      files: await hashReceiptFiles(pluginRoot, receiptFiles),
+    });
+    await expect(runtime.restartPlugin(installId)).resolves.toBe("started");
+    expect(await runtime.call("immutable_root_read")).toBe("g2");
+
     const generationsRoot = join(cacheRoot, pluginId, "generations");
     const generationIdsBeforeFailedRestart = await readdir(generationsRoot);
     await writeFile(join(pluginRoot, "entry.mjs"), "export default {", "utf8");
     await writeInstallReceipt(cacheRoot, {
       schemaVersion: 2,
-      pluginId,
+      pluginId: installId,
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "c".repeat(64),
       signerKeyId: "test-v1",
-      installedAt: new Date(1).toISOString(),
+      installedAt: new Date(2).toISOString(),
       files: await hashReceiptFiles(pluginRoot, receiptFiles),
     });
     await expect(runtime.restartPlugin(pluginId)).resolves.toBe("failed");
     expect(await readdir(generationsRoot)).toEqual(generationIdsBeforeFailedRestart);
-    expect(await runtime.call("immutable_root_read")).toBe("g1");
+    expect(await runtime.call("immutable_root_read")).toBe("g2");
   });
 });

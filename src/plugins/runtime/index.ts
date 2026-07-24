@@ -224,6 +224,7 @@ export interface PluginStartPreparationContext {
 }
 
 export interface PreparedArtifactRuntimeActivationInput<T> {
+  installId: string;
   pluginRoot: string;
   manifest: PluginManifest;
   receiptRaw: string;
@@ -255,6 +256,7 @@ export interface PluginRuntimeOptions {
     manifest: PluginManifest,
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
+    installPluginId: string | null,
   ) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
@@ -878,8 +880,9 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
               );
             }
             const pluginRoot = dirname(targetPlan.manifestPath);
+            const receiptPluginId = installClaim ?? canonicalPluginId;
             const integrity = await this.verifyReceiptAndDevGuard(
-              canonicalPluginId,
+              receiptPluginId,
               pluginRoot,
             );
             if (!integrity.ok) {
@@ -888,10 +891,11 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
               );
             }
             const receiptRaw = await readFile(
-              installReceiptPath(this.installReceiptCacheRoot, canonicalPluginId),
+              installReceiptPath(this.installReceiptCacheRoot, receiptPluginId),
               "utf8",
             );
             await this.activatePreparedArtifact({
+              installId: receiptPluginId,
               pluginRoot,
               manifest,
               receiptRaw,
