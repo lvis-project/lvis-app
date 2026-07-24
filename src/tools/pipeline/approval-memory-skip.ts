@@ -69,6 +69,7 @@ export async function tryUserApprovalMemorySkip(
   workerId?: string,
   pluginId?: string,
   hostShellExecutionPlan?: HostShellExecutionPlan,
+  auditInput?: Record<string, unknown>,
 ): Promise<PermissionCheckResult | null> {
   // Identity = exactly what ToolApprovalDialog stored (canonical finalInput).
   const canonicalArgs = canonicalStringify(finalInput);
@@ -149,7 +150,9 @@ export async function tryUserApprovalMemorySkip(
         name: toolName,
         // emitSandboxAudit's sink trusts callers to pass DLP-redacted
         // fields (sandbox-audit-sink.ts DLP note) — mask before writing.
-        args: maskSensitiveData(JSON.stringify(finalInput)).masked,
+        args: maskSensitiveData(
+          JSON.stringify(auditInput ?? finalInput),
+        ).masked,
         source,
         trustOrigin: context.trustOrigin,
         ...(approvalCacheKey ? { approvalCacheKey } : {}),

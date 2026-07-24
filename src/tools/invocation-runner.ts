@@ -67,7 +67,10 @@ import {
   maskToolInputForDisplay,
   summarizeInputForDeferred,
 } from "./pipeline/display-mask.js";
-import { AuditWriter } from "./pipeline/audit-writer.js";
+import {
+  auditSafeToolInput,
+  AuditWriter,
+} from "./pipeline/audit-writer.js";
 // ── C8 pipeline decomposition — the per-invocation mutable-state contract +
 // initial-state factory + the self-contained user-abort helper. The two
 // SECURITY-CRITICAL sandbox filesystem-containment relaxation blocks stay
@@ -650,6 +653,10 @@ export async function runToolInvocation(
     };
     const approvalPurpose = buildApprovalPurposeSuggestion(finalInput, invocationPermissionContext);
     const reviewerInput = maskToolInputForDisplay(finalInput);
+    const auditInput = auditSafeToolInput(
+      finalInput,
+      currentAuditMetadata(finalInput),
+    );
     // The Plan-B binding is created only after every Layer-1 directory grant
     // has finalized the effective validator scope. It remains host-only.
     let hostShellExecutionPermitBinding:
@@ -1194,6 +1201,7 @@ export async function runToolInvocation(
       meta,
       approvalPurpose,
       reviewerInput,
+      auditInput,
       abortSignal,
       rationaleResumeContext,
       rationaleBatchContext,
