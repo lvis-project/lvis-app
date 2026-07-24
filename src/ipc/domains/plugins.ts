@@ -1212,7 +1212,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //     and the registry entry's `mcpServerId` on the external arm). A call for
   //     another server's tool, a host builtin, or an unknown name is denied.
   //  3. App-visibility (`_meta.ui.visibility` ∋ "app") — the SPEC MUST, enforced
-  //     inside each backend's call path: `assertUiActionInvokable` (loopback) /
+  //     inside each backend's call path: `assertAppVisibleToolInvokable` (loopback) /
   //     the `appInvokable` check (external). NOT re-checked here: one site per path.
   //  4. Risk + consent — the SAME ToolExecutor gate every host tool call takes, entered
   //     under a DISTINCT `"mcp-app"` invocation origin. That origin is what makes the

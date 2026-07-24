@@ -170,7 +170,7 @@ export function mcpToolToPluginTool(
     // is subtracted from the model's tool list at the ONE model-exposure boundary,
     // `ToolRegistry.getModelVisibleTools`. `appInvokable` is deliberately NOT set on
     // this arm: the plugin loopback enforces the app-visibility MUST inside
-    // `PluginRuntime.callFromApp` (`assertUiActionInvokable`, reading its own
+    // `PluginRuntime.callFromApp` (`assertAppVisibleToolInvokable`, reading its own
     // manifest), which stays the single enforcement site for first-party plugins.
     modelVisible: readToolSurfaces(tool.name, meta).includes("model"),
     // #885 v6 — the wire carries no `writesToOwnSandbox`/`version`/`deprecatedSince`/

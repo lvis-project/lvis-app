@@ -89,7 +89,7 @@ export interface Tool {
    * spec default `["model","app"]` when the server declares nothing). The
    * `oncalltool` external backend is the SOLE reader and fails closed on
    * `undefined` — builtin/plugin registry tools leave this unset, and the plugin
-   * loopback path enforces the same MUST through `assertUiActionInvokable`
+   * loopback path enforces the same MUST through `assertAppVisibleToolInvokable`
    * instead (its own manifest-declared visibility), never through this field.
    */
   readonly appInvokable?: boolean;

@@ -204,7 +204,7 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
   it("propagates callFromApp's visibility denial (a tool without app visibility) unchanged", async () => {
     const runtime = {
       resolveToolOwner: vi.fn(() => "acme-cards"),
-      // Exactly what `assertUiActionInvokable` throws for a non-app-visible method.
+      // Exactly what `assertAppVisibleToolInvokable` throws for a non-app-visible method.
       callFromApp: vi.fn(async () => {
         throw new Error(
           "Method 'acme_secret' is not declared as a UI action for plugin 'acme-cards'.",
@@ -220,7 +220,7 @@ describe("loopback tool-call source — plugin methods through callFromApp", () 
 
   it("passes an APP-ONLY tool straight to callFromApp — no deny of its own", async () => {
     // The source is a thin two-member seam: it does not know or care about
-    // visibility. `callFromApp` owns the spec MUST (`assertUiActionInvokable`) and
+    // visibility. `callFromApp` owns the spec MUST (`assertAppVisibleToolInvokable`) and
     // the gate, and an app-only tool is a governed registry `Tool` now — so this
     // call is dispatched, not refused. (Pre-fix the runtime threw
     // `mcp-app-tool-not-app-callable` here, because an app-only tool had no registry
