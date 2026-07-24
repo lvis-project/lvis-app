@@ -1396,27 +1396,6 @@ export abstract class PluginRuntimeState {
     });
     const nextDisposers = new Map(this.disposers);
     nextDisposers.set(pluginId, [...(runtime.disposers ?? [])]);
-    const nextAccountHashes = new Map(
-      [...this.pluginAccountHashes].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
-    );
-    const nextAuthInvocationEpochs = new Map(
-      [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
-    );
-    // Stable account scope is plugin-wide and process-lifetime. Publication
-    // happens before predecessor leases drain, so replacement must retain this
-    // bridge or a new generation could enter a different auth FIFO beside
-    // still-running predecessor work.
-    const nextAuthTransitionPrincipals = new Map(
-      this.pluginAuthTransitionPrincipals,
-    );
-    for (const [key, account] of this.pluginAccountHashes) {
-      if (key.startsWith(`${pluginId}\0`)) {
-        nextAuthTransitionPrincipals.set(pluginId, {
-          ...account,
-          generationId: key.slice(pluginId.length + 1),
-        });
-      }
-    }
     const publishHostEffects = runtime.hostEffects?.preparePublish();
     let published = false;
     return Object.freeze({
@@ -1437,9 +1416,29 @@ export abstract class PluginRuntimeState {
         this.failedPluginIds.delete(pluginId);
         this.loadFailureInfo.delete(pluginId);
         this.disabledPluginIds.delete(pluginId);
-        this.pluginAccountHashes = nextAccountHashes;
-        this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
-        this.pluginAuthTransitionPrincipals = nextAuthTransitionPrincipals;
+        // Read auth state at the synchronous publication linearization point,
+        // not during prepare. Generation preparation can await external work,
+        // and predecessor auth completions in that window must remain visible.
+        // Keep the process-lifetime bridge map live instead of replacing it
+        // with a stale clone.
+        for (const [key, account] of this.pluginAccountHashes) {
+          if (key.startsWith(`${pluginId}\0`)) {
+            this.pluginAuthTransitionPrincipals.set(pluginId, {
+              ...account,
+              generationId: key.slice(pluginId.length + 1),
+            });
+          }
+        }
+        this.pluginAccountHashes = new Map(
+          [...this.pluginAccountHashes].filter(
+            ([key]) => !key.startsWith(`${pluginId}\0`),
+          ),
+        );
+        this.pluginAuthInvocationEpochs = new Map(
+          [...this.pluginAuthInvocationEpochs].filter(
+            ([key]) => !key.startsWith(`${pluginId}\0`),
+          ),
+        );
         published = true;
       },
     });
@@ -1454,25 +1453,6 @@ export abstract class PluginRuntimeState {
     nextPlugins.delete(pluginId);
     const nextDisposers = new Map(this.disposers);
     nextDisposers.delete(pluginId);
-    const nextAccountHashes = new Map(
-      [...this.pluginAccountHashes].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
-    );
-    const nextAuthInvocationEpochs = new Map(
-      [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
-    );
-    // Keep the bridge through removal publication too. A reinstall can publish
-    // before predecessor retirement settles; process exit is the safe reset.
-    const nextAuthTransitionPrincipals = new Map(
-      this.pluginAuthTransitionPrincipals,
-    );
-    for (const [key, account] of this.pluginAccountHashes) {
-      if (key.startsWith(`${pluginId}\0`)) {
-        nextAuthTransitionPrincipals.set(pluginId, {
-          ...account,
-          generationId: key.slice(pluginId.length + 1),
-        });
-      }
-    }
     let published = false;
     return Object.freeze({
       pluginId,
@@ -1483,9 +1463,27 @@ export abstract class PluginRuntimeState {
         this.plugins = nextPlugins;
         this.disposers = nextDisposers;
         this.invalidatePluginUiRevision(pluginId);
-        this.pluginAccountHashes = nextAccountHashes;
-        this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
-        this.pluginAuthTransitionPrincipals = nextAuthTransitionPrincipals;
+        // Removal uses the same synchronous bridge capture as replacement.
+        // Reinstall may publish before predecessor retirement settles, so the
+        // bridge remains process-lifetime and is reset only by explicit clear.
+        for (const [key, account] of this.pluginAccountHashes) {
+          if (key.startsWith(`${pluginId}\0`)) {
+            this.pluginAuthTransitionPrincipals.set(pluginId, {
+              ...account,
+              generationId: key.slice(pluginId.length + 1),
+            });
+          }
+        }
+        this.pluginAccountHashes = new Map(
+          [...this.pluginAccountHashes].filter(
+            ([key]) => !key.startsWith(`${pluginId}\0`),
+          ),
+        );
+        this.pluginAuthInvocationEpochs = new Map(
+          [...this.pluginAuthInvocationEpochs].filter(
+            ([key]) => !key.startsWith(`${pluginId}\0`),
+          ),
+        );
         published = true;
       },
     });
