@@ -692,6 +692,29 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
+  it("blocks local install while committed cleanup remains pending", async () => {
+    const { deps } = await setup();
+    deps.pluginMarketplace.getInstalledVersion
+      .mockResolvedValueOnce("1.0.0")
+      .mockResolvedValue(null);
+    deps.clearAuthPartitionService.mockRejectedValue(
+      new Error("auth partition still busy"),
+    );
+
+    await expect(
+      invoke("lvis:plugins:uninstall", "local-plugin"),
+    ).rejects.toThrow(/incomplete post-commit cleanup/);
+    electronMocks.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ["/tmp/local-plugin"],
+    });
+
+    await expect(
+      invoke("lvis:plugins:install-local"),
+    ).rejects.toThrow(/cleanup pending/);
+    expect(deps.pluginMarketplace.installLocal).not.toHaveBeenCalled();
+  });
+
   it("broadcasts local staged activation failure without durable compensation", async () => {
     const { deps, appWindows } = await setup();
     electronMocks.showOpenDialog.mockResolvedValueOnce({

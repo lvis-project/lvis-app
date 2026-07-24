@@ -133,6 +133,7 @@ describe("PluginRuntime.disable", () => {
         `persist:plugin-auth:${encodeURIComponent(pluginId)}`,
       ]),
       forgetPluginAuthPartitionsService: vi.fn(async () => undefined),
+      drainPluginInstallLockOperationsService: vi.fn(async () => undefined),
     })).resolves.toEqual({ pluginId, uninstalled: true });
 
     expect(runtime.listPluginIds()).not.toContain(pluginId);
