@@ -1,8 +1,15 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
-import ts from "typescript";
+import {
+  isArrowFunction,
+  isFunctionDeclaration,
+  isFunctionExpression,
+  isIdentifier,
+  isVariableDeclaration,
+} from "typescript/unstable/ast";
+import { parseSourceFiles } from "./lib/ts7-ast.mjs";
 
 const ROOT = process.cwd();
 
@@ -70,30 +77,25 @@ export function walk(dir, out = [], root = ROOT) {
 export function collectHelpers(files, root = ROOT) {
   const byName = new Map();
   const byBody = new Map();
+  const sources = parseSourceFiles(files);
   for (const file of files) {
-    const source = readFileSync(file, "utf8");
-    const sourceFile = ts.createSourceFile(
-      file,
-      source,
-      ts.ScriptTarget.Latest,
-      true,
-      file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-    );
+    const sourceFile = sources.get(file);
+    if (!sourceFile) continue;
     const rel = relative(root, file);
     const visit = (node) => {
       const helper = getHelperNode(node);
       if (!helper) {
-        ts.forEachChild(node, visit);
+        node.forEachChild(visit);
         return;
       }
       const { name, body } = helper;
       if (!name) {
-        ts.forEachChild(node, visit);
+        node.forEachChild(visit);
         return;
       }
       const normalizedBody = normalizeHelperBody(body.getText(sourceFile));
       if (!isHelperCandidate(name, normalizedBody)) {
-        ts.forEachChild(node, visit);
+        node.forEachChild(visit);
         return;
       }
       if (!byName.has(name)) byName.set(name, new Set());
@@ -102,7 +104,7 @@ export function collectHelpers(files, root = ROOT) {
       if (!byBody.has(normalizedBody)) byBody.set(normalizedBody, []);
       byBody.get(normalizedBody).push({ name, rel, line });
 
-      ts.forEachChild(node, visit);
+      node.forEachChild(visit);
     };
     visit(sourceFile);
   }
@@ -110,14 +112,14 @@ export function collectHelpers(files, root = ROOT) {
 }
 
 function getHelperNode(node) {
-  if (ts.isFunctionDeclaration(node) && node.name && node.body) {
+  if (isFunctionDeclaration(node) && node.name && node.body) {
     return { name: node.name.text, body: node.body };
   }
   if (
-    ts.isVariableDeclaration(node) &&
-    ts.isIdentifier(node.name) &&
+    isVariableDeclaration(node) &&
+    isIdentifier(node.name) &&
     node.initializer &&
-    (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+    (isArrowFunction(node.initializer) || isFunctionExpression(node.initializer))
   ) {
     return { name: node.name.text, body: node.initializer.body };
   }

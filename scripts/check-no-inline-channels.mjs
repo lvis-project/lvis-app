@@ -23,7 +23,20 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import ts from "typescript";
+import {
+  isArrayLiteralExpression,
+  isAsExpression,
+  isBinaryExpression,
+  isIdentifier,
+  isNoSubstitutionTemplateLiteral,
+  isObjectLiteralExpression,
+  isPropertyAssignment,
+  isStringLiteral,
+  isTemplateExpression,
+  isVariableDeclaration,
+  SyntaxKind,
+} from "typescript/unstable/ast";
+import { parseSourceFiles } from "./lib/ts7-ast.mjs";
 
 const rootArgIndex = process.argv.indexOf("--root");
 const ROOT = rootArgIndex >= 0
@@ -60,20 +73,20 @@ const TARGETS = [
 ];
 
 function isCliCommandName(node, rel) {
-  if (rel !== "src/cli/commands.ts" || !ts.isPropertyAssignment(node.parent)) return false;
+  if (rel !== "src/cli/commands.ts" || !isPropertyAssignment(node.parent)) return false;
   const propertyName = node.parent.name;
-  if (!(ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName))
+  if (!(isIdentifier(propertyName) || isStringLiteral(propertyName))
       || propertyName.text !== "name") return false;
 
   const command = node.parent.parent;
-  if (!ts.isObjectLiteralExpression(command) || !ts.isArrayLiteralExpression(command.parent)) {
+  if (!isObjectLiteralExpression(command) || !isArrayLiteralExpression(command.parent)) {
     return false;
   }
   const array = command.parent;
-  const initializer = ts.isAsExpression(array.parent) ? array.parent : array;
+  const initializer = isAsExpression(array.parent) ? array.parent : array;
   const declaration = initializer.parent;
-  return ts.isVariableDeclaration(declaration)
-    && ts.isIdentifier(declaration.name)
+  return isVariableDeclaration(declaration)
+    && isIdentifier(declaration.name)
     && declaration.name.text === "CLI_COMMANDS";
 }
 
@@ -84,11 +97,11 @@ function isInlineChannel(value, node, rel) {
 }
 
 function staticText(node) {
-  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+  if (isStringLiteral(node) || isNoSubstitutionTemplateLiteral(node)) {
     return node.text;
   }
-  if (ts.isTemplateExpression(node)) return node.head.text;
-  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+  if (isTemplateExpression(node)) return node.head.text;
+  if (isBinaryExpression(node) && node.operatorToken.kind === SyntaxKind.PlusToken) {
     const left = staticText(node.left);
     const right = staticText(node.right);
     return left === undefined || right === undefined ? undefined : left + right;
@@ -97,16 +110,23 @@ function staticText(node) {
 }
 
 let violations = 0;
+const targets = [];
 for (const rel of TARGETS) {
   const abs = join(ROOT, rel);
-  let content;
   try {
-    content = readFileSync(abs, "utf8");
+    targets.push({ rel, abs, content: readFileSync(abs, "utf8") });
   } catch (err) {
     console.error(`[no-inline-channels] cannot read ${rel}: ${err.message}`);
     process.exit(1);
   }
-  const source = ts.createSourceFile(rel, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+}
+const sources = parseSourceFiles(targets.map((target) => target.abs));
+for (const { rel, abs, content } of targets) {
+  const source = sources.get(abs);
+  if (!source) {
+    console.error(`[no-inline-channels] cannot parse ${rel}`);
+    process.exit(1);
+  }
   const lines = content.split("\n");
   const visit = (node) => {
     const value = staticText(node);
@@ -118,7 +138,7 @@ for (const rel of TARGETS) {
       console.error(`    ${lines[line]?.trim() ?? ""}`);
       violations += 1;
     }
-    ts.forEachChild(node, visit);
+    node.forEachChild(visit);
   };
   visit(source);
 }
