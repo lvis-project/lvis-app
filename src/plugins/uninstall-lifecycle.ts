@@ -153,21 +153,22 @@ export async function uninstallPluginWithLifecycle(
     const secretKeys = listSecretKeys(
       deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
     );
-    let result: { pluginId: string; uninstalled: true } | null = null;
     let marketplaceRemoved = false;
-    try {
-      result = await deps.pluginRuntime.removePluginWithCommit(
-        canonicalPluginId,
-        () => deps.pluginMarketplace.uninstall(installPluginId),
-      );
-      await drainPluginInstallLockOperations(canonicalPluginId);
-      marketplaceRemoved = true;
-    } catch (err) {
-      const message = (err as Error).message ?? "uninstall failed";
-      if (!isMissingPluginError(message)) {
-        throw err;
-      }
-    }
+    const result = await deps.pluginRuntime.removePluginWithCommit(
+      canonicalPluginId,
+      async () => {
+        try {
+          const removed = await deps.pluginMarketplace.uninstall(installPluginId);
+          marketplaceRemoved = true;
+          return removed;
+        } catch (err) {
+          const message = (err as Error).message ?? "uninstall failed";
+          if (!isMissingPluginError(message)) throw err;
+          return { pluginId: canonicalPluginId, uninstalled: true as const };
+        }
+      },
+    );
+    await drainPluginInstallLockOperations(canonicalPluginId);
 
     deps.pluginRuntime.clearConfigOverride(canonicalPluginId);
     await bestEffortCleanupPluginState(canonicalPluginId, deps, {
@@ -177,7 +178,7 @@ export async function uninstallPluginWithLifecycle(
     deps.emitHostEvent?.("plugin.uninstalled", { pluginId: canonicalPluginId });
     deps.refreshPluginNotifications?.();
 
-    return result ?? { pluginId: canonicalPluginId, uninstalled: true as const };
+    return result;
     },
     (pluginIds) => {
       for (const discoveredPluginId of pluginIds) {

@@ -23,6 +23,8 @@ export interface ActivePluginGenerationSnapshot {
 
 export interface PluginRuntimeGenerationProjection {
   readonly activationId: string;
+  /** Raw registry identity, or null for a statically configured plugin. */
+  readonly installId: string | null;
   readonly manifest: PluginManifest;
   readonly pluginRoot: string;
   readonly instance: RuntimePlugin;

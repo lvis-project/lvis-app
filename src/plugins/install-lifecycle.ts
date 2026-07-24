@@ -139,6 +139,7 @@ interface PluginInstallRuntime {
   ): Promise<void>;
   cancelPendingRestart(pluginId: string): void;
   activatePreparedArtifact<T>(input: {
+    installId: string;
     pluginRoot: string;
     manifest: PluginManifest;
     receiptRaw: string;
@@ -149,6 +150,7 @@ interface PluginInstallRuntime {
 
 interface PreparedActivationOptions {
   activatePreparedArtifact: (prepared: {
+    installId: string;
     pluginRoot: string;
     manifest: PluginManifest;
     receiptRaw: string;

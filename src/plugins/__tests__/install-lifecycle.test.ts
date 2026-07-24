@@ -23,6 +23,7 @@ function makeRuntime(initialPluginIds: string[] = []) {
     resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
     cancelPendingRestart: vi.fn(),
     activatePreparedArtifact: vi.fn(async (input: {
+      installId: string;
       manifest: { id: string };
       durableCommit(): Promise<string>;
     }) => {
@@ -54,6 +55,7 @@ function makeMarketplace() {
     install: vi.fn(async (pluginId: string, _onProgress, options) => {
       const canonicalPluginId = pluginId.replace(/^lvis-plugin-/, "");
       await options?.activatePreparedArtifact?.({
+        installId: canonicalPluginId,
         pluginRoot: "/staged/plugin",
         manifest: { id: canonicalPluginId, version: candidateVersion },
         receiptRaw: "{}",
@@ -335,6 +337,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
       expect(runtime.listPluginIds()).toContain("p");
       onProgress?.({ phase: "verifying" });
       await options?.activatePreparedArtifact?.({
+        installId: "p",
         pluginRoot: "/staged/plugin",
         manifest: { id: "p", version: "2.0.0" },
         receiptRaw: "{}",
@@ -373,6 +376,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
     marketplace.install.mockImplementationOnce(async (pluginId: string, _onProgress, options) => {
       order.push(`install:${pluginId}`);
       await options?.activatePreparedArtifact?.({
+        installId: "meeting",
         pluginRoot: "/staged/plugin",
         manifest: { id: "meeting", version: "2.0.0" },
         receiptRaw: "{}",
@@ -598,6 +602,7 @@ describe("rollbackMarketplacePluginWithLifecycle", () => {
     const marketplace = makeMarketplace();
     marketplace.rollbackPlugin.mockImplementationOnce(async (pluginId, options) => {
       await options?.activatePreparedArtifact?.({
+        installId: pluginId,
         pluginRoot: "/prepared/p",
         manifest: { id: pluginId },
         receiptRaw: "{}",

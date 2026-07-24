@@ -80,6 +80,7 @@ export interface MarketplaceInstallFailureDiagnostic {
 }
 
 export interface PreparedMarketplacePluginArtifact {
+  readonly installId: string;
   readonly pluginRoot: string;
   readonly manifest: PluginManifest;
   readonly receiptRaw: string;
@@ -1815,6 +1816,7 @@ export class PluginMarketplaceService {
                   files: [...files],
                 });
                 return opts.activatePreparedArtifact({
+                  installId: plugin.id,
                   pluginRoot,
                   manifest: preparedManifest,
                   receiptRaw: preparedReceiptRaw,
@@ -2313,6 +2315,7 @@ export class PluginMarketplaceService {
 
         let predecessorRetired = true;
         const activated = await activatePreparedArtifact({
+          installId: pluginId,
           pluginRoot: stagingDir,
           manifest,
           receiptRaw: localReceiptRaw,

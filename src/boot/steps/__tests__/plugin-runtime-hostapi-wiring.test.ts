@@ -196,6 +196,7 @@ beforeEach(() => {
   runtimeTestState.runtime.restartPlugin.mockClear();
   runtimeTestState.runtime.getWildcardConfigOverride.mockReturnValue({});
   runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+  runtimeTestState.runtime.resolvePluginInstallId.mockClear();
   runtimeTestState.runtime.resolvePluginInstallId.mockImplementation(
     (pluginId: string) => pluginId,
   );
@@ -448,11 +449,12 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
       manifest,
       mkdtempSync("/tmp/lvis-hostapi-alias-"),
       activeIncarnation(),
+      installAlias,
     );
 
     expect(api.getSecret(secretKey)).toBe("host-secret-value");
     expect(runtimeTestState.runtime.resolvePluginInstallId)
-      .toHaveBeenCalledWith(pluginId);
+      .not.toHaveBeenCalled();
   });
 
   it("delivers an emitted event to a same-plugin subscriber with the pluginId injected, and unsubscribe stops delivery", async () => {

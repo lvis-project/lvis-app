@@ -101,6 +101,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
         opts?: {
           commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void>;
           activatePreparedArtifact?: (prepared: {
+            installId: string;
             pluginRoot: string;
             manifest: ReturnType<typeof sampleManifest>;
             receiptRaw: string;
@@ -117,6 +118,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       await mkdir(candidateDir, { recursive: true });
       await writeFile(join(candidateDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
       const coordinated = await opts.activatePreparedArtifact({
+        installId: _plugin.id,
         pluginRoot: candidateDir,
         manifest,
         receiptRaw: "{}",

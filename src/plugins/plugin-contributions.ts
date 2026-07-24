@@ -263,6 +263,7 @@ export async function materializePluginGenerationRoot(
   pluginId: string,
   generationId: string,
   receiptRaw: string,
+  receiptPluginId: string = pluginId,
 ): Promise<string> {
   if (!/^[a-f0-9]{64}$/.test(generationId)) throw new Error("plugin generation id must be a SHA-256 digest");
   let parsed: unknown;
@@ -280,10 +281,10 @@ export async function materializePluginGenerationRoot(
   const finalRoot = resolve(generationsRoot, generationId);
   const finalPayload = resolve(finalRoot, "payload");
   try {
-    const existing = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
+    const existing = await verifyInstallReceiptRaw(receiptRaw, receiptPluginId, finalPayload);
     if (existing.ok) {
       await sealRetainedGeneration(finalPayload);
-      const sealed = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
+      const sealed = await verifyInstallReceiptRaw(receiptRaw, receiptPluginId, finalPayload);
       if (!sealed.ok) {
         throw new Error(`plugin '${pluginId}' retained generation changed while sealing: ${sealed.reason}`);
       }
@@ -319,10 +320,10 @@ export async function materializePluginGenerationRoot(
       await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
       await copyFile(source, destination);
     }
-    const verified = await verifyInstallReceiptRaw(receiptRaw, pluginId, temporaryPayload);
+    const verified = await verifyInstallReceiptRaw(receiptRaw, receiptPluginId, temporaryPayload);
     if (!verified.ok) throw new Error(`plugin '${pluginId}' retained generation verification failed: ${verified.reason}`);
     await sealRetainedGeneration(temporaryPayload);
-    const sealed = await verifyInstallReceiptRaw(receiptRaw, pluginId, temporaryPayload);
+    const sealed = await verifyInstallReceiptRaw(receiptRaw, receiptPluginId, temporaryPayload);
     if (!sealed.ok) throw new Error(`plugin '${pluginId}' retained generation changed while sealing: ${sealed.reason}`);
     try {
       await rename(temporaryRoot, finalRoot);
@@ -330,10 +331,10 @@ export async function materializePluginGenerationRoot(
       if (!(["EEXIST", "ENOTEMPTY"] as Array<string | undefined>).includes((error as NodeJS.ErrnoException).code)) {
         throw error;
       }
-      const raced = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
+      const raced = await verifyInstallReceiptRaw(receiptRaw, receiptPluginId, finalPayload);
       if (!raced.ok) throw new Error(`plugin '${pluginId}' concurrent retained generation failed verification: ${raced.reason}`);
       await sealRetainedGeneration(finalPayload);
-      const sealedRace = await verifyInstallReceiptRaw(receiptRaw, pluginId, finalPayload);
+      const sealedRace = await verifyInstallReceiptRaw(receiptRaw, receiptPluginId, finalPayload);
       if (!sealedRace.ok) {
         throw new Error(`plugin '${pluginId}' concurrent retained generation changed while sealing: ${sealedRace.reason}`);
       }
