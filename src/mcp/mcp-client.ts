@@ -7,6 +7,7 @@ import type {
   McpHttpServerConfig,
   McpServerConfig,
   McpServerState,
+  McpPromptSummary,
   McpStdioServerConfig,
   McpToolSchema,
   McpUiPayload,
@@ -149,6 +150,16 @@ export type McpClientCapabilityProvider = () => McpClientCapabilities;
 
 interface McpToolsListResult {
   tools: McpToolSchema[];
+}
+
+interface McpPromptsListResult {
+  prompts: Array<{
+    name: string;
+    title?: string;
+    description?: string;
+    arguments?: Array<{ name: string; description?: string; required?: boolean }>;
+  }>;
+  nextCursor?: string;
 }
 
 interface McpToolCallResult {
@@ -324,6 +335,8 @@ export class McpClient {
    * the second layer). Legacy (dual-era) servers never advertise Apps.
    */
   private appsUiAdvertised = false;
+  /** The server DECLARED the `prompts` capability at discovery (gate for prompts/list). */
+  private promptsAdvertised = false;
 
   readonly state: McpServerState;
 
@@ -411,6 +424,9 @@ export class McpClient {
         // that DECLARED the ui extension at discovery.
         this.appsUiAdvertised =
           discover.capabilities?.extensions?.[MCP_APPS_UI_EXTENSION] !== undefined;
+        this.promptsAdvertised = discover.capabilities?.prompts !== undefined;
+        // Server-level usage guidance (read-only surface; never auto-injected here).
+        this.state.instructions = discover.instructions;
         log.info(
           {
             protocol: MCP_PROTOCOL_VERSION,
@@ -471,6 +487,9 @@ export class McpClient {
       // ToolRegistry에 등록 (네임스페이스 적용)
       this.registerTools(tools);
 
+      // Discover user-controlled prompts (non-fatal; gated advertised + approved).
+      await this.discoverPrompts();
+
       this.state.status = "connected";
       this.state.connectedAt = new Date().toISOString();
 
@@ -489,6 +508,53 @@ export class McpClient {
     }
   }
 
+  /**
+   * Discover the server's user-controlled prompts. Gated on BOTH the server
+   * having ADVERTISED the `prompts` capability at discovery AND the server being
+   * APPROVED for it (the same governance whitelist every request is gated on).
+   * Non-fatal: prompts are an optional surface, so a failure never breaks the
+   * tool connection. Pagination is bounded so a hostile `nextCursor` loop cannot
+   * hang the handshake.
+   */
+  private async discoverPrompts(): Promise<void> {
+    if (!this.promptsAdvertised) return;
+    if (!this.governance.validateRequestCapability(this.config.id, "prompts/list", {}).valid) {
+      return;
+    }
+    const MAX_PROMPT_PAGES = 20;
+    try {
+      const prompts: McpPromptSummary[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_PROMPT_PAGES; page++) {
+        const result = await this.sendRequest<McpPromptsListResult>(
+          "prompts/list",
+          cursor ? { cursor } : {},
+          HANDSHAKE_TIMEOUT_MS,
+        );
+        for (const p of result.prompts ?? []) {
+          prompts.push({
+            name: p.name,
+            title: p.title,
+            description: p.description,
+            arguments: p.arguments?.map((a) => ({
+              name: a.name,
+              description: a.description,
+              required: a.required,
+            })),
+          });
+        }
+        cursor = result.nextCursor;
+        if (!cursor) break;
+      }
+      this.state.prompts = prompts;
+      log.info(`${this.config.id} discovered ${prompts.length} prompt(s)`);
+    } catch (err) {
+      log.warn(
+        `${this.config.id} prompts/list discovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   /** 서버 연결 해제 + 도구 제거 */
   async disconnect(): Promise<void> {
     this.stopHealthCheck();
@@ -498,6 +564,8 @@ export class McpClient {
     // ToolRegistry에서 도구 제거
     this.toolRegistry.unregisterByMcp(this.config.id);
     this.state.registeredTools = [];
+    this.state.prompts = undefined;
+    this.state.instructions = undefined;
 
     // transport 종료
     await this.closeTransport();
