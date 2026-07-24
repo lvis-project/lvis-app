@@ -9,8 +9,25 @@ import {
   isAsrtWindowsReady,
   normalizeAsrtWindowsUserState,
   normalizeAsrtWindowsWfpState,
+  readAsrtWindowsStatus,
   resolveAsrtWindowsReady,
 } from "../asrt-windows-support.js";
+
+// ASRT 0.0.67: readAsrtWindowsStatus reads BOTH the sandbox-user and WFP state
+// from a SINGLE `srt-win status` spawn (checkWindowsSandboxStatusAsync). Override
+// only that one export; everything else (resolveSrtWin, WindowsSandboxError, …)
+// stays real so the DI-based install tests are unaffected.
+const { checkWindowsSandboxStatusAsyncMock } = vi.hoisted(() => ({
+  checkWindowsSandboxStatusAsyncMock: vi.fn(),
+}));
+vi.mock("@anthropic-ai/sandbox-runtime", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@anthropic-ai/sandbox-runtime")>();
+  return {
+    ...actual,
+    checkWindowsSandboxStatusAsync: checkWindowsSandboxStatusAsyncMock,
+  };
+});
 
 function readAsrtSandboxManagerSource(): string {
   const require = createRequire(import.meta.url);
@@ -269,7 +286,7 @@ describe("asrt-windows-support adapter", () => {
 
     const result = await installAsrtWindowsSandbox({
       loadRuntime: async () => ({
-        installWindowsSandbox: () => {
+        installWindowsSandboxAsync: async () => {
           events.push("install");
           return {
             user: {
@@ -308,7 +325,7 @@ describe("asrt-windows-support adapter", () => {
 
     const result = await installAsrtWindowsSandbox({
       loadRuntime: async () => ({
-        installWindowsSandbox: () => ({ cancelled: true }),
+        installWindowsSandboxAsync: async () => ({ cancelled: true }),
         verifyWindowsWfpEgress,
       }),
       grantBackendAcl,
@@ -319,7 +336,77 @@ describe("asrt-windows-support adapter", () => {
     expect(verifyWindowsWfpEgress).not.toHaveBeenCalled();
   });
 
-  it("normalizes the ASRT 0.0.66 ready sandbox-user shape", () => {
+  it("surfaces an install_timeout WindowsSandboxError distinctly (UAC left open)", async () => {
+    // ASRT 0.0.67 installWindowsSandboxAsync throws WindowsSandboxError with code
+    // 'install_timeout' when the self-elevating subprocess is killed by the 120s
+    // spawn timeout with the UAC consent dialog still open. The adapter must
+    // surface that distinctly (not as a generic failure), and must NOT run the
+    // backend ACL grant or the WFP verification.
+    const { WindowsSandboxError } = await import("@anthropic-ai/sandbox-runtime");
+    const grantBackendAcl = vi.fn(async () => undefined);
+    const verifyWindowsWfpEgress = vi.fn(async () => undefined);
+
+    await expect(
+      installAsrtWindowsSandbox({
+        loadRuntime: async () => ({
+          installWindowsSandboxAsync: async () => {
+            throw new WindowsSandboxError(
+              "install_timeout",
+              "srt-win install timed out after 120000ms",
+              "install",
+            );
+          },
+          verifyWindowsWfpEgress,
+        }),
+        grantBackendAcl,
+      }),
+    ).rejects.toThrow(/timed out after 120s/i);
+
+    expect(grantBackendAcl).not.toHaveBeenCalled();
+    expect(verifyWindowsWfpEgress).not.toHaveBeenCalled();
+  });
+
+  it("reads user + WFP from the single checkWindowsSandboxStatusAsync spawn (ASRT 0.0.67)", async () => {
+    const ORIGINAL_PLATFORM = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    checkWindowsSandboxStatusAsyncMock.mockResolvedValue({
+      user: {
+        provisioned: true,
+        sid: "S-1-5-21-9",
+        groupExists: true,
+        inBuiltinUsers: true,
+        inSandboxGroup: true,
+        hiddenFromLogon: true,
+        credPresent: true,
+        realUserSid: "S-1-5-21-10",
+      },
+      wfp: { state: "installed", filters: 3 },
+    });
+    try {
+      const status = await readAsrtWindowsStatus();
+
+      // ONE status spawn — not the old two-spawn (user + wfp) path.
+      expect(checkWindowsSandboxStatusAsyncMock).toHaveBeenCalledTimes(1);
+      // Threaded the EXPLICIT srt-win descriptor (0.0.67 has no implicit fallback).
+      expect(checkWindowsSandboxStatusAsyncMock.mock.calls[0]?.[0]).toMatchObject({
+        srtWin: expect.objectContaining({ exe: expect.stringContaining("srt-win") }),
+      });
+      expect(status).toMatchObject({
+        applicable: true,
+        userState: "ready",
+        wfpState: "installed",
+        ready: true,
+      });
+    } finally {
+      Object.defineProperty(process, "platform", {
+        value: ORIGINAL_PLATFORM,
+        configurable: true,
+      });
+      checkWindowsSandboxStatusAsyncMock.mockReset();
+    }
+  });
+
+  it("normalizes the ASRT 0.0.67 ready sandbox-user shape", () => {
     expect(
       normalizeAsrtWindowsUserState({
         provisioned: true,
