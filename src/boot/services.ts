@@ -3,7 +3,7 @@
  *
  * Instantiates services that have no plugin dependency and must exist
  * before plugin loading (settings, memory, audit, python runtime coordinator,
- * keyword/route/tool registry + native builtin tools).
+ * input classification, route/tool registry, and native builtin tools).
  */
 import { app } from "electron";
 import type { BrowserWindow } from "electron";

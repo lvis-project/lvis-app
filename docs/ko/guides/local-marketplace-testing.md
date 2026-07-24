@@ -261,14 +261,12 @@ bootstrap: <slug>@0.1.1 published (NNN bytes, sha256…)
 
 | env | start (자동) | dev (자동) | 효과 |
 |-----|:--:|:--:|------|
-| `LVIS_DEV_SKIP_SIG=1` | ✅ | ✅ | 매니페스트 서명 검증 skip |
-| `LVIS_ALLOW_LINKED_PLUGIN_ENTRY=1` | ✅ | ✅ | manifest entry 가 `../node_modules/@lvis/...` 같은 링크 가리키는 것 허용 |
 | `LVIS_DEV=1` | ❌ | ✅ | dev 게이트 마스터 — DevTools / hot-reload 활성화 |
 | `LVIS_DEV_RELOAD=1` | ❌ | ❌ (수동) | dist/ watch + reloadPlugin |
 
-**마켓플레이스 zip envelope 검증**: 앱 호스트가 `src/plugins/marketplace-keys.ts` 의 내장 publisher key set 으로 검증합니다. SDK 는 타입/소스 계약만 제공하고 런타임 trust root 를 소유하지 않습니다.
+**마켓플레이스 zip envelope 검증**: 앱 호스트가 내장 publisher key set으로 항상 검증합니다. dev 플래그로 envelope/receipt 검증이나 entry containment를 우회할 수 없습니다. SDK는 타입/소스 계약만 제공하고 런타임 trust root를 소유하지 않습니다.
 
-모든 `LVIS_*` 플래그는 `app.isPackaged === true` 일 때 hard-gate 로 무시됩니다 (`dev-flags.ts:18-54`) — packaged 빌드 누수 우려 없음.
+모든 `LVIS_DEV*` 플래그는 packaged 빌드에서 무시되고 감사 대상이 됩니다.
 
 ### 4-3. 두 install 경로
 
@@ -402,7 +400,7 @@ zip -r myplugin-0.1.0.zip plugin.json dist/ icons/        # zip 루트에 plugin
 | `<slug>@<v>: missing build output` | `dist/` 가 비어있거나 누락. `bun run build` 가 실제로 출력했는지, `.gitignore` 가 `dist/` 를 제외하지 않았는지 확인. |
 | `bootstrap: <slug> git pull failed (...) — using existing dist/` (경고만) | 정상 dev 동작. 로컬 전용 / 네트워크 끊김 / non-ff. working tree 의 dist/ 그대로 패키징. |
 | `signature verification failed` (앱 install 시) | 서버 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 키 ID 와 lvis-app 호스트의 내장 trust set 이 짝 안 맞음. 현재 단일 키 모델에서는 양쪽 모두 `poc-v1` 이어야 정상. |
-| `manifest signature missing` (managed install) | bootstrap.py 는 `.sig` 를 zip 에 번들하지 않음. dev 에서는 `LVIS_DEV_SKIP_SIG=1` (자동) 으로 통과. prod 에서 admin-policy managed 플러그인을 git-based 부트스트랩으로 배포하려면 별도 매니페스트 서명 파이프라인이 필요 — 현재 CLI publish 경로 또는 user-policy 가 prod 권장. |
+| envelope 또는 receipt 무결성 검증 실패 | 같은 버전의 payload를 바꾸지 말고 버전을 올려 다시 publish/bootstrap. Host의 trust set과 서버 signing key ID가 일치하는지 확인. 검증 우회 env는 없음 |
 | `tool_name namespace conflict` (publish 시) | 다른 등록 플러그인이 같은 tool 이름 등록. publisher prefix 추가 (예: `myplugin_search`). |
 | 카탈로그가 비어 보임 | (a) 부트스트랩 배너 빨간색 — URL 오타 / 사설 네트워크 토글 꺼짐 / 서버 다운. (b) `localhost` 사용 시 IPv6 우선순위로 연결 실패 — 양쪽 모두 `127.0.0.1` 권장. (c) 서버 `bootstrap_status="failed"` (health 확인). |
 | 딥링크 클릭해도 앱이 안 뜸 | OS 가 `lvis://` 핸들러를 다른 인스턴스에 라우팅. macOS: packaged 빌드 한 번 띄워 protocol 등록. Windows: registry `HKCR\lvis` 확인. Linux: `gio open` 시도. |
