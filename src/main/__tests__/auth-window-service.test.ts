@@ -384,4 +384,35 @@ describe("wirePluginAuthPartitionPersistence + rememberPluginAuthPartition", () 
     });
     await forgetTrackedPluginAuthPartitions("retry.plugin");
   });
+
+  it("merges partitions observed while a durable tracker deletion is failing", async () => {
+    let rejectDelete!: (error: Error) => void;
+    const deletion = new Promise<void>((_resolve, reject) => {
+      rejectDelete = reject;
+    });
+    wirePluginAuthPartitionPersistence({
+      write: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn(() => deletion),
+      onError: vi.fn(),
+    });
+    rememberPluginAuthPartition("persist:plugin-auth:concurrent.plugin:before");
+
+    const forgetting = forgetTrackedPluginAuthPartitions("concurrent.plugin");
+    rememberPluginAuthPartition("persist:plugin-auth:concurrent.plugin:during");
+    rejectDelete(new Error("disk locked"));
+
+    await expect(forgetting).rejects.toThrow("disk locked");
+    expect(getTrackedPluginAuthPartitions("concurrent.plugin")).toEqual(
+      expect.arrayContaining([
+        "persist:plugin-auth:concurrent.plugin:before",
+        "persist:plugin-auth:concurrent.plugin:during",
+      ]),
+    );
+    wirePluginAuthPartitionPersistence({
+      write: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      onError: vi.fn(),
+    });
+    await forgetTrackedPluginAuthPartitions("concurrent.plugin");
+  });
 });

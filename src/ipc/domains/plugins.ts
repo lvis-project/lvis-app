@@ -61,12 +61,14 @@ import {
 } from "../../boot/steps/plugin-runtime/trigger-gate.js";
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
+  drainPluginInstallLockOperations,
   installMarketplacePluginWithLifecycle,
   rollbackMarketplacePluginWithLifecycle,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
 import {
   cleanupFailedPluginInstallWithLifecycle,
+  ensurePluginStateReadyForInstall,
   uninstallPluginWithLifecycle,
 } from "../../plugins/uninstall-lifecycle.js";
 import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
@@ -409,6 +411,21 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         networkAccessAcknowledgement,
         pluginRuntime,
         pluginMarketplace,
+        ensurePluginStateReadyForInstall: (candidatePluginId) =>
+          ensurePluginStateReadyForInstall(candidatePluginId, {
+            pluginMarketplace,
+            pluginRuntime,
+            settingsService,
+            pluginPaths,
+            clearAuthPartitionService,
+            listPluginAuthPartitionsService,
+            forgetPluginAuthPartitionsService,
+            drainPluginInstallLockOperationsService:
+              drainPluginInstallLockOperations,
+            refreshPluginNotifications,
+            emitHostEvent,
+            log,
+          }),
         broadcastInstallProgress: (payload) =>
           broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
         emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
@@ -478,6 +495,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           clearAuthPartitionService,
           listPluginAuthPartitionsService,
           forgetPluginAuthPartitionsService,
+          drainPluginInstallLockOperationsService:
+            drainPluginInstallLockOperations,
           refreshPluginNotifications,
           emitHostEvent,
           log,
@@ -499,6 +518,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         clearAuthPartitionService,
         listPluginAuthPartitionsService,
         forgetPluginAuthPartitionsService,
+        drainPluginInstallLockOperationsService:
+          drainPluginInstallLockOperations,
         refreshPluginNotifications,
         emitHostEvent,
         log,

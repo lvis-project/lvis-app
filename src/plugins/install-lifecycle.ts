@@ -897,6 +897,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
   networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
   pluginRuntime: PluginInstallRuntime;
   pluginMarketplace: PluginInstallMarketplace;
+  ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
   broadcastInstallProgress?: (payload: MarketplaceInstallProgressPayload) => void;
   emitPluginInstalled?: (payload: { pluginId: string; source: "marketplace" }) => void;
   refreshPluginNotifications?: () => void;
@@ -910,6 +911,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
     networkAccessAcknowledgement,
     pluginRuntime,
     pluginMarketplace,
+    ensurePluginStateReadyForInstall,
     broadcastInstallProgress,
     emitPluginInstalled,
     refreshPluginNotifications,
@@ -950,6 +952,10 @@ export async function installMarketplacePluginWithLifecycle(options: {
       throw new Error(
         `Statically configured plugin cannot be replaced from the marketplace: ${currentRuntimePluginId}`,
       );
+    }
+    await ensurePluginStateReadyForInstall(currentCatalogState.pluginId);
+    if (currentRuntimePluginId !== currentCatalogState.pluginId) {
+      await ensurePluginStateReadyForInstall(currentRuntimePluginId);
     }
     const expectedVersionForGuard = expectedVersion?.trim();
     if (expectedVersionForGuard) {
