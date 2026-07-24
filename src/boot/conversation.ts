@@ -62,8 +62,14 @@ export function createSystemPromptBuilder(opts: {
    * it (MCP-app cards live in the main chat), and the section then drops out entirely.
    */
   getAppModelContext?: (sessionId: string) => string;
+  /**
+   * MCP server-level guidance provider — the active MCP servers' discovery
+   * `instructions`, rendered as an inert untrusted section. Only the main chat
+   * wires it (from mcpManager); routine / side-chat sessions omit it.
+   */
+  mcpServerGuidanceProvider?: () => Array<{ serverId: string; instructions: string }>;
 }): SystemPromptBuilder {
-  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills, getActivatablePluginIds, getAppModelContext,
+  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills, getActivatablePluginIds, getAppModelContext, mcpServerGuidanceProvider,
   } = opts;
   return new SystemPromptBuilder({
     memoryManager,
@@ -74,6 +80,7 @@ export function createSystemPromptBuilder(opts: {
     getAvailableSkills,
     getActiveSkillsSection,
     getAppModelContext,
+    mcpServerGuidanceProvider,
   });
 }
 
