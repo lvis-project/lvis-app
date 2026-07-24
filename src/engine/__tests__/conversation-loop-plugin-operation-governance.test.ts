@@ -89,6 +89,7 @@ describe("ConversationLoop plugin operation governance", () => {
         ownerVersion: "1.0.0",
         generationId,
         appSessionId: sessionId ?? "model-session",
+        accountScopeHash: "account-scope-hash",
         accountHash: "account-hash",
         appGrantRequired: false,
       }),
@@ -119,6 +120,7 @@ describe("ConversationLoop plugin operation governance", () => {
       ownerVersion: "1.0.0",
       generationId,
       appSessionId: "model-session",
+      accountScopeHash: "account-scope-hash",
       accountHash: "account-hash",
     };
     const domain = pluginOperationExecutionDomain(

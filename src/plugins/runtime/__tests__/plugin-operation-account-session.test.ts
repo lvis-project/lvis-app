@@ -35,6 +35,10 @@ function runtime(): PluginRuntime {
   return instance;
 }
 
+function accountIdentity(instance: PluginRuntime) {
+  return instance.getPluginOperationAccountIdentity(pluginId, generationId);
+}
+
 function observe(
   instance: PluginRuntime,
   toolName: string,
@@ -90,31 +94,35 @@ describe("PluginRuntime operation account sessions", () => {
       "auth_status",
       { authenticated: true, account: "Person@Example.com" },
     )).toEqual({});
-    const first = instance.getPluginOperationAccountHash(pluginId, generationId);
+    const firstIdentity = accountIdentity(instance);
+    const first = firstIdentity?.principalHash;
     expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(firstIdentity?.identityHash).toMatch(/^[a-f0-9]{64}$/);
 
     expect(observe(
       instance,
       "auth_status",
       { authenticated: true, account: "person@example.com" },
     )).toEqual({});
-    expect(instance.getPluginOperationAccountHash(pluginId, generationId)).toBe(first);
+    expect(accountIdentity(instance)?.principalHash).toBe(first);
 
     expect(observe(
       instance,
       "auth_status",
       { authenticated: false },
     )).toEqual({ invalidatedAccountHash: first });
-    expect(instance.getPluginOperationAccountHash(pluginId, generationId)).toBeUndefined();
+    expect(accountIdentity(instance)).toBeUndefined();
 
     observe(
       instance,
       "auth_status",
       { authenticated: true, account: "person@example.com" },
     );
-    const second = instance.getPluginOperationAccountHash(pluginId, generationId);
+    const secondIdentity = accountIdentity(instance);
+    const second = secondIdentity?.principalHash;
     expect(second).toMatch(/^[a-f0-9]{64}$/);
     expect(second).not.toBe(first);
+    expect(secondIdentity?.identityHash).toBe(firstIdentity?.identityHash);
   });
 
   it("invalidates the current account binding on explicit logout", () => {
@@ -124,7 +132,7 @@ describe("PluginRuntime operation account sessions", () => {
       "auth_status",
       { data: { authenticated: true, account: "person@example.com" } },
     );
-    const current = instance.getPluginOperationAccountHash(pluginId, generationId);
+    const current = accountIdentity(instance)?.principalHash;
     const invocation = instance.beginPluginAuthInvocation(
       pluginId,
       generationId,
@@ -142,14 +150,14 @@ describe("PluginRuntime operation account sessions", () => {
       { success: true },
       invocation?.epoch,
     )).toEqual({});
-    expect(instance.getPluginOperationAccountHash(pluginId, generationId)).toBeUndefined();
+    expect(accountIdentity(instance)).toBeUndefined();
 
     observe(
       instance,
       "auth_status",
       { data: { authenticated: true, account: "person@example.com" } },
     );
-    expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+    expect(accountIdentity(instance)?.principalHash)
       .not.toBe(current);
   });
 
@@ -162,7 +170,7 @@ describe("PluginRuntime operation account sessions", () => {
         "auth_status",
         { authenticated: true, account: "person@example.com" },
       );
-      const current = instance.getPluginOperationAccountHash(pluginId, generationId);
+      const current = accountIdentity(instance)?.principalHash;
 
       const invocation = instance.beginPluginAuthInvocation(
         pluginId,
@@ -173,8 +181,7 @@ describe("PluginRuntime operation account sessions", () => {
         epoch: expect.any(Number),
         invalidatedAccountHash: current,
       });
-      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
-        .toBeUndefined();
+      expect(accountIdentity(instance)).toBeUndefined();
       instance.observePluginAuthResult(
         pluginId,
         generationId,
@@ -182,8 +189,7 @@ describe("PluginRuntime operation account sessions", () => {
         toolName === "auth_login" ? { success: true } : { success: false },
         invocation?.epoch,
       );
-      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
-        .toBeUndefined();
+      expect(accountIdentity(instance)).toBeUndefined();
 
       const status = instance.beginPluginAuthInvocation(
         pluginId,
@@ -197,9 +203,9 @@ describe("PluginRuntime operation account sessions", () => {
         { authenticated: true, account: "person@example.com" },
         status?.epoch,
       );
-      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+      expect(accountIdentity(instance)?.principalHash)
         .toMatch(/^[a-f0-9]{64}$/);
-      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+      expect(accountIdentity(instance)?.principalHash)
         .not.toBe(current);
     },
   );
@@ -215,11 +221,11 @@ describe("PluginRuntime operation account sessions", () => {
     );
 
     await newer;
-    const newerPrincipal = instance.getPluginOperationAccountHash(pluginId, generationId);
+    const newerPrincipal = accountIdentity(instance)?.principalHash;
     older.resolve({ authenticated: true, account: "older@example.com" });
     await olderCompletion;
 
-    expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+    expect(accountIdentity(instance)?.principalHash)
       .toBe(newerPrincipal);
   });
 
@@ -239,12 +245,12 @@ describe("PluginRuntime operation account sessions", () => {
           account: `${toolName}@example.com`,
         }),
       );
-      const newerPrincipal = instance.getPluginOperationAccountHash(pluginId, generationId);
+      const newerPrincipal = accountIdentity(instance)?.principalHash;
 
       stale.resolve(result);
       await staleCompletion;
 
-      expect(instance.getPluginOperationAccountHash(pluginId, generationId))
+      expect(accountIdentity(instance)?.principalHash)
         .toBe(newerPrincipal);
     }
   });
@@ -256,7 +262,7 @@ describe("PluginRuntime operation account sessions", () => {
       "auth_status",
       { authenticated: true, account: "current@example.com" },
     );
-    const currentPrincipal = instance.getPluginOperationAccountHash(pluginId, generationId);
+    const currentPrincipal = accountIdentity(instance)?.principalHash;
     const staleStatus = deferred<unknown>();
     const staleCompletion = observeDeferred(
       instance,
@@ -272,8 +278,7 @@ describe("PluginRuntime operation account sessions", () => {
     staleStatus.resolve({ authenticated: false });
     await staleCompletion;
 
-    expect(instance.getPluginOperationAccountHash(pluginId, generationId))
-      .toBeUndefined();
+    expect(accountIdentity(instance)).toBeUndefined();
     expect(currentPrincipal).toMatch(/^[a-f0-9]{64}$/);
   });
 });

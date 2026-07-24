@@ -164,23 +164,6 @@ export function forceKillManagedChildProcesses(reason: string): number {
   return killed;
 }
 
-/**
- * Force-kill one tracked child and its descendants at a caller-owned effect
- * boundary. Unlike the shutdown sweep, this does not touch unrelated managed
- * children. Hook execution uses it when the root command settles so a
- * background descendant cannot escape the completed invocation.
- */
-export function forceKillManagedChildProcess(
-  child: ChildProcess,
-  options: TrackManagedChildProcessOptions = {},
-): void {
-  forceKillProcessTree(
-    child,
-    options.killProcessGroup === true,
-    resolveProcessGroupId(child, options),
-  );
-}
-
 export function __resetManagedChildProcessesForTest(): void {
   for (const entry of [...managedChildren]) entry.dispose();
   managedChildren.clear();
