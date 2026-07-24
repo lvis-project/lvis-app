@@ -688,7 +688,7 @@ describe("invocation audit and sealed resume", () => {
       ["current-sandbox-capability-revalidate", "!services.sandboxFsContainedProvider(tool)"],
       ["permission-request-hook", "const permHook = await runScriptHook("],
       ["permission-ask-audit", "await auditCurrentPermissionAsk("],
-      ["script-pre-tool-use", "const scriptPre = await runScriptHook("],
+      ["script-pre-tool-use", "const scriptPre = resolvedPluginOperation"],
       ["rate-limit", "services.rateLimiter.check(toolUse.name, trust)"],
       ["permission-audit-writable-fail-closed", "services.auditLogger.assertPermissionAuditWritable()"],
       ["tool-start-emit-boundary", "    emitToolStart(callbacks, toolUse.name, finalInput, meta);\n\n    // ── Step 6: Execute"],
@@ -726,7 +726,7 @@ describe("invocation audit and sealed resume", () => {
         beforePhase: "permission-ask-audit",
         afterPhase: "script-pre-tool-use",
         lowerSourceMarker: "permissionResult = {\n          decision: \"allow\",\n          reason: `user approved approval request (${decision.choice})`,",
-        upperSourceMarker: "const scriptPre = await runScriptHook(",
+        upperSourceMarker: "const scriptPre = resolvedPluginOperation",
       },
       {
         phase: "host-invocation-start-cas",
