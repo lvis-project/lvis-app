@@ -9,6 +9,7 @@ export interface PluginUninstallCleanupRecord {
   authPartitions: readonly string[];
   cleanupCache: boolean;
   registryRemovalCommitted: boolean;
+  runtimeRetirementComplete: boolean;
   recordedAt: string;
   attempts: number;
   completedPhases: readonly PluginUninstallCleanupPhase[];
@@ -22,13 +23,23 @@ export type PluginUninstallCleanupPhase =
   | "cache";
 
 interface JournalFile {
-  version: 2;
+  version: 3;
   cleanups: PluginUninstallCleanupRecord[];
 }
 
-interface LegacyJournalFile {
+interface LegacyJournalFileV2 {
+  version: 2;
+  cleanups: Array<Omit<PluginUninstallCleanupRecord, "runtimeRetirementComplete">>;
+}
+
+interface LegacyJournalFileV1 {
   version: 1;
-  cleanups: Array<Omit<PluginUninstallCleanupRecord, "registryRemovalCommitted">>;
+  cleanups: Array<
+    Omit<
+      PluginUninstallCleanupRecord,
+      "registryRemovalCommitted" | "runtimeRetirementComplete"
+    >
+  >;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -83,9 +94,12 @@ export class PluginUninstallCleanupJournal {
 
   constructor(private readonly path: string) {
     try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as JournalFile | LegacyJournalFile;
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as
+        | JournalFile
+        | LegacyJournalFileV2
+        | LegacyJournalFileV1;
       if (
-        (parsed.version !== 1 && parsed.version !== 2)
+        (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3)
         || !Array.isArray(parsed.cleanups)
       ) {
         throw new Error("unsupported plugin uninstall cleanup journal");
@@ -94,14 +108,19 @@ export class PluginUninstallCleanupJournal {
         throw new Error("plugin uninstall cleanup journal is too large");
       }
       for (const persistedRecord of parsed.cleanups) {
-        // Version 1 existed only during the first durable-cleanup rollout.
-        // Registry presence/absence disambiguates its prepared state at recovery.
+        // Older journal versions predate explicit registry and runtime
+        // retirement checkpoints. Recovery must prove those states again.
         const record = {
           ...persistedRecord,
           registryRemovalCommitted:
-            parsed.version === 2
+            parsed.version >= 2
               && "registryRemovalCommitted" in persistedRecord
               ? persistedRecord.registryRemovalCommitted
+              : false,
+          runtimeRetirementComplete:
+            parsed.version === 3
+              && "runtimeRetirementComplete" in persistedRecord
+              ? persistedRecord.runtimeRetirementComplete
               : false,
         };
         if (
@@ -119,6 +138,7 @@ export class PluginUninstallCleanupJournal {
           )
           || typeof record.cleanupCache !== "boolean"
           || typeof record.registryRemovalCommitted !== "boolean"
+          || typeof record.runtimeRetirementComplete !== "boolean"
           || typeof record.recordedAt !== "string"
           || !Number.isSafeInteger(record.attempts)
           || record.attempts < 0
@@ -182,6 +202,7 @@ export class PluginUninstallCleanupJournal {
       secretKeys: [...new Set(input.secretKeys)],
       authPartitions: [...new Set(input.authPartitions)],
       registryRemovalCommitted: false,
+      runtimeRetirementComplete: false,
       recordedAt: new Date().toISOString(),
       attempts: 0,
       completedPhases: [],
@@ -217,6 +238,19 @@ export class PluginUninstallCleanupJournal {
       ...previous,
       cleanupCache,
       registryRemovalCommitted: true,
+    });
+    this.replaceRecord(next);
+    return freezeRecord(next);
+  }
+
+  markRuntimeRetirementComplete(
+    pluginId: string,
+  ): PluginUninstallCleanupRecord {
+    const previous = this.require(pluginId);
+    if (previous.runtimeRetirementComplete) return freezeRecord(previous);
+    const next = freezeRecord({
+      ...previous,
+      runtimeRetirementComplete: true,
     });
     this.replaceRecord(next);
     return freezeRecord(next);
@@ -310,7 +344,7 @@ export class PluginUninstallCleanupJournal {
   ): void {
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     const body: JournalFile = {
-      version: 2,
+      version: 3,
       cleanups: [...records.values()],
     };
     writeUtf8FileAtomicSync(

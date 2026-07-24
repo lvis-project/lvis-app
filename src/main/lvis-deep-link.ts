@@ -50,6 +50,40 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function requirePluginCleanupServices(services: AppServices): {
+  pluginPaths: NonNullable<AppServices["pluginPaths"]>;
+  clearAuthPartitionService: NonNullable<
+    AppServices["clearAuthPartitionService"]
+  >;
+  listPluginAuthPartitionsService: NonNullable<
+    AppServices["listPluginAuthPartitionsService"]
+  >;
+  forgetPluginAuthPartitionsService: NonNullable<
+    AppServices["forgetPluginAuthPartitionsService"]
+  >;
+} {
+  const {
+    pluginPaths,
+    clearAuthPartitionService,
+    listPluginAuthPartitionsService,
+    forgetPluginAuthPartitionsService,
+  } = services;
+  if (
+    !pluginPaths
+    || !clearAuthPartitionService
+    || !listPluginAuthPartitionsService
+    || !forgetPluginAuthPartitionsService
+  ) {
+    throw new Error("plugin lifecycle cleanup services are not fully wired");
+  }
+  return {
+    pluginPaths,
+    clearAuthPartitionService,
+    listPluginAuthPartitionsService,
+    forgetPluginAuthPartitionsService,
+  };
+}
+
 /**
  * Diagnostic log gate — diagnostic console output is dev-only. Packaged
  * builds skip these noisy traces so end-user log files stay clean.
@@ -555,14 +589,12 @@ export async function handleLvisUri(url: string) {
     });
     if (response !== 0) return;
     void (async () => {
+      const cleanupServices = requirePluginCleanupServices(activeServices);
       const result = await uninstallPluginWithLifecycle(target.pluginId, {
         pluginMarketplace: activeServices.pluginMarketplace,
         pluginRuntime: activeServices.pluginRuntime,
         settingsService: activeServices.settingsService,
-        pluginPaths: activeServices.pluginPaths,
-        clearAuthPartitionService: activeServices.clearAuthPartitionService,
-        listPluginAuthPartitionsService: activeServices.listPluginAuthPartitionsService,
-        forgetPluginAuthPartitionsService: activeServices.forgetPluginAuthPartitionsService,
+        ...cleanupServices,
         drainPluginInstallLockOperationsService:
           drainPluginInstallLockOperations,
         refreshPluginNotifications: activeServices.refreshPluginNotifications,
@@ -603,6 +635,7 @@ export async function handleLvisUri(url: string) {
   const networkAccessAcknowledgement = buildNetworkAccessAcknowledgement(target.networkAccess);
   let installProgressSlug = params.slug;
   void (async () => {
+    const cleanupServices = requirePluginCleanupServices(activeServices);
     const catalogItems = await activeServices.pluginMarketplace.list();
     const installLockId =
       catalogItems.find((item) => item.id === params.slug || item.slug === params.slug)?.id ?? params.slug;
@@ -622,12 +655,7 @@ export async function handleLvisUri(url: string) {
           pluginMarketplace: activeServices.pluginMarketplace,
           pluginRuntime: activeServices.pluginRuntime,
           settingsService: activeServices.settingsService,
-          pluginPaths: activeServices.pluginPaths,
-          clearAuthPartitionService: activeServices.clearAuthPartitionService,
-          listPluginAuthPartitionsService:
-            activeServices.listPluginAuthPartitionsService,
-          forgetPluginAuthPartitionsService:
-            activeServices.forgetPluginAuthPartitionsService,
+          ...cleanupServices,
           drainPluginInstallLockOperationsService:
             drainPluginInstallLockOperations,
           refreshPluginNotifications: activeServices.refreshPluginNotifications,

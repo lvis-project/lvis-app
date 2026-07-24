@@ -649,6 +649,7 @@ describe("rollbackMarketplacePluginWithLifecycle", () => {
       pluginId: "p",
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
     })).resolves.toEqual({ pluginId: "p", rolledBackTo: "1.0.0" });
 
     expect(runtime.activatePreparedArtifact).toHaveBeenCalledOnce();
@@ -665,6 +666,26 @@ describe("rollbackMarketplacePluginWithLifecycle", () => {
       pluginId: "p",
       pluginRuntime: runtime,
       pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
     })).rejects.toThrow("atomic rollback committed without active runtime");
+  });
+
+  it("blocks rollback before marketplace mutation while cleanup is pending", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    const cleanupFailure = new Error("plugin cleanup pending");
+    const blockRollback = vi.fn(async () => {
+      throw cleanupFailure;
+    });
+
+    await expect(rollbackMarketplacePluginWithLifecycle({
+      pluginId: "p",
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall: blockRollback,
+    })).rejects.toBe(cleanupFailure);
+
+    expect(blockRollback).toHaveBeenCalledWith("p");
+    expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
   });
 });

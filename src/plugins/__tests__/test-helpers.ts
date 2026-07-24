@@ -52,6 +52,10 @@ export const activateAndCommitPreparedPluginForTest: PreparedMarketplacePluginAc
 export const preparedActivationOptionsForTest = Object.freeze({
   activatePreparedArtifact: activateAndCommitPreparedPluginForTest,
 });
+export const preparedManagedActivationOptionsForTest = Object.freeze({
+  ...preparedActivationOptionsForTest,
+  ensurePluginStateReadyForInstall: async (_pluginId: string) => undefined,
+});
 
 /**
  * Storage/unit-test service with an explicit test lifecycle default. Keeping
@@ -71,7 +75,9 @@ export class TestPluginMarketplaceService extends PluginMarketplaceService {
   override ensureManagedInstalled(
     ...args: Parameters<PluginMarketplaceService["ensureManagedInstalled"]>
   ) {
-    return super.ensureManagedInstalled(args[0] ?? preparedActivationOptionsForTest);
+    return super.ensureManagedInstalled(
+      args[0] ?? preparedManagedActivationOptionsForTest,
+    );
   }
 
   override installPlugin(...args: Parameters<PluginMarketplaceService["installPlugin"]>) {
