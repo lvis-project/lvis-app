@@ -112,7 +112,6 @@ describe("PluginRuntime config overrides", () => {
 `,
       manifest: {
         name: "Cleanup Plugin",
-        keywords: [{ keyword: "cleanup", skillId: "cleanup_echo" }],
       },
     });
 
@@ -128,7 +127,7 @@ describe("PluginRuntime config overrides", () => {
     // Replacement publishes the candidate before retiring predecessor-scoped
     // effects. A global onDisable here would erase the freshly published host
     // projection, so it is reserved for actual plugin removal/disable.
-    expect(events).toEqual(["register:cleanup-plugin"]);
+    expect(events).toEqual([]);
     await expect(runtime.call("cleanup_echo")).resolves.toBe("ok");
   });
 
