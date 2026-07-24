@@ -27,9 +27,9 @@ export default function Page() {
       />
 
       <Callout tone="info" title="Plugin registration model — static manifest">
-        Tools, Skills, events, and UI slots are all declared statically in the <code>plugin.json</code> manifest.
+        Tools, Skills, Hooks, MCP servers, events, and UI slots are all declared statically in the <code>plugin.json</code> manifest.
         There is no runtime API like <code>registerTool</code>/<code>registerSkill</code>/<code>registerCommand</code> in the SDK.
-        The only runtime register API is <code>hostApi.registerKeywords</code> — for adding Skill trigger keywords.
+        Skills provide instructions; only pure manifest <code>Tool</code> objects are callable.
       </Callout>
 
       <div className="my-8 grid gap-3 sm:grid-cols-2">
@@ -59,7 +59,7 @@ export default function Page() {
         <li>The web page fires an <code>lvis://install/&lt;slug&gt;</code> deeplink.</li>
         <li>The host (<code>src/main/lvis-protocol.ts</code>) parses the URL, validates the manifest, and verifies the Ed25519 signature.</li>
         <li>A plugin permission dialog appears → user confirms → its own namespace <code>{"~/.lvis/plugins/<pluginId>/"}</code> is created.</li>
-        <li>The plugin's <code>start()</code> is called, and <code>hostApi.registerKeywords</code> is registered if present.</li>
+        <li>The validated declarative bundle is activated as one unit and the plugin's <code>start()</code> callback is called.</li>
       </ol>
 
       <Callout tone="info" title="Past → present consolidation history">

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { KeywordEngine } from "../../../core/keyword-engine.js";
+import { InputClassifier } from "../../../core/input-classifier.js";
 import { RouteEngine } from "../../../core/route-engine.js";
 import { ConversationLoop } from "../../conversation-loop.js";
 import type {
@@ -48,11 +48,12 @@ function makeHarness(
       jsonSchema: { type: "object", properties: {} },
       isReadOnly: () => readOnly,
       execute: async () => ({ output: "unused", isError: false }),
-    }));
+    }),
+    );
   }
 
   const provider = new RecordingProvider(turns);
-  const loop = new ConversationLoop(({
+  const loop = new ConversationLoop({
     settingsService: {
       get: () => fakeLlmSettings(),
       getSecret: () => "test-key",
@@ -61,8 +62,8 @@ function makeHarness(
       build: () => "system",
       setToolScope: vi.fn(),
     },
-    keywordEngine: new KeywordEngine(),
-    routeEngine: new RouteEngine({ toolRegistry }),
+    inputClassifier: new InputClassifier(),
+    routeEngine: new RouteEngine(),
     toolRegistry,
     memoryManager: {
       saveSession: () => Promise.resolve(),
@@ -74,7 +75,7 @@ function makeHarness(
     ...(closeRationaleSession ? { closeRationaleSession } : {}),
     disableSessionPersistence: true,
     headless,
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
 
   const permissionContexts: Array<Record<string, unknown>> = [];
@@ -108,8 +109,7 @@ function makeHarness(
 
 const toolRound = (
   id: string,
-  name: "read_file" | "bash",
-): StreamEvent[] => [
+  name: "read_file" | "bash"): StreamEvent[] => [
   { type: "tool_call", id, name, input: {} },
   { type: "message_complete", stopReason: "tool_use" },
 ];
@@ -183,8 +183,7 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
   it("does not create an anchor for a file-content turn even if a caller supplies a raw seed", async () => {
     const fixture = makeHarness([
       toolRound("file-bash", "bash"),
-      endRound,
-    ]);
+      endRound]);
 
     await fixture.loop.runTurn("untrusted file input", undefined, undefined, {
       inputOrigin: "file-content",
@@ -198,8 +197,12 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
   });
 
   it.each([
-    ["image", { type: "image" as const, image: "data:image/png;base64,abc", mimeType: "image/png" }],
-    ["file", { type: "file" as const, data: "data:text/plain;base64,Zm9v", mimeType: "text/plain" }],
+    ["image", { type: "image" as const, image: "data:image/png;base64,abc", mimeType: "image/png",
+      },
+    ],
+    ["file", { type: "file" as const, data: "data:text/plain;base64,Zm9v", mimeType: "text/plain",
+      },
+    ],
     ["text", { type: "text" as const, text: "attachment-derived text" }],
   ])("taints a keyboard turn with a %s attachment while preserving the provider payload", async (_kind, attachment) => {
     const fixture = makeHarness([
@@ -211,7 +214,8 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
       inputOrigin: "user-keyboard",
       requestAnchorRawIntent: "inspect the attachment",
       attachments: [attachment],
-    });
+    },
+      );
 
     expect(fixture.permissionContexts[0]).toMatchObject({
       trustOrigin: "file-content",
@@ -228,13 +232,14 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
           ? attachment.data
           : attachment.text,
     );
-  });
+  },
+  );
 
   it("does not create an anchor for headless execution even with keyboard-shaped input", async () => {
     const fixture = makeHarness([
       toolRound("headless-bash", "bash"),
-      endRound,
-    ], true);
+      endRound], true,
+    );
 
     await fixture.loop.runTurn("background request", undefined, undefined, {
       inputOrigin: "user-keyboard",

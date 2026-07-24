@@ -13,34 +13,29 @@ import {
   runWithInvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
-import type { PluginManifest, Tool } from "../../plugins/types.js";
+import type { PluginManifest,
+  PluginToolOperationPolicy,
+  Tool,
+} from "../../plugins/types.js";
 
-// #885 v6 — the gate reads the materialized manifest (`Tool[]` + `_meta.ui.visibility`).
-// The pre-v6 string-array reader was removed in Phase R, so these fixtures take a
-// legacy-shaped `{ tools, uiActions }` spec and compile surface membership into each
-// tool's explicit `_meta.ui.visibility` here (model-visible→["model"],
-// app-visible→["app"], both→dual). Every tool already carries explicit visibility,
-// so no load-time materialization is needed. (`tools`/`uiActions` are just this
-// fixture's input keys.)
-function normalize(spec: {
-  tools?: string[];
-  uiActions?: Record<string, { description?: string }>;
-  auth?: { statusTool: string; loginTool: string; logoutTool?: string };
-}): PluginManifest {
-  const names = spec.tools ?? [];
-  const uiNames = Object.keys(spec.uiActions ?? {});
-  const allNames = [...names, ...uiNames.filter((n) => !names.includes(n))];
-  const tools: Tool[] = allNames.map((name) => {
-    const visibility: Array<"model" | "app"> = [
-      ...(names.includes(name) ? (["model"] as const) : []),
-      ...(uiNames.includes(name) ? (["app"] as const) : []),
-    ];
-    return {
+function manifestTool(
+  name: string,
+  visibility: Array<"model" | "app">,
+  operationPolicy?: PluginToolOperationPolicy,
+): Tool {
+  return {
       name,
-      inputSchema: { type: "object" as const, properties: {} },
-      _meta: { ui: { visibility } },
-    };
-  });
+      inputSchema: { type: "object", properties: {} },
+      _meta: { ui: { visibility },
+      ...(operationPolicy ? { "lvisai/operationPolicy": operationPolicy } : {}),
+    },
+  };
+  }
+
+function normalize(
+  tools: Tool[],
+  auth?: { statusTool: string; loginTool: string; logoutTool?: string },
+): PluginManifest {
   return {
     id: "meeting",
     name: "Meeting",
@@ -48,41 +43,32 @@ function normalize(spec: {
     entry: "index.js",
     description: "test fixture",
     tools,
-    ...(spec.auth ? { auth: spec.auth } : {}),
+    ...(auth ? { auth } : {}),
   };
 }
 
-function runtimeWithManifest(spec: {
-  tools?: string[];
-  uiActions?: Record<string, { description?: string }>;
-  auth?: { statusTool: string; loginTool: string; logoutTool?: string };
-}) {
+function runtimeWithManifest(
+  tools: Tool[],
+  auth?: { statusTool: string; loginTool: string; logoutTool?: string },
+) {
   return {
     listPluginManifests: () => [
       {
         pluginId: "meeting",
-        manifest: normalize(spec),
+        manifest: normalize(tools, auth),
       },
     ],
   } as any;
 }
 
 describe("plugin app-only runtime invocation", () => {
-  it("routes UI action runtime methods that are not LLM tools through the UI action handler path", () => {
+  it("routes app-only Tool methods through the app handler path", () => {
     expect(
       isAppOnlyRuntimeInvocation(
-        runtimeWithManifest({ tools: ["meeting_upload_file"], uiActions: { meeting_stage_upload_begin: {} } }),
-        "meeting_stage_upload_begin",
-        { origin: "ui", ownerPluginId: "meeting" },
-        "ui",
-      ),
-    ).toBe(true);
-  });
-
-  it("routes app-only runtime methods that are not LLM tools through the UI action handler path", () => {
-    expect(
-      isAppOnlyRuntimeInvocation(
-        runtimeWithManifest({ tools: ["meeting_upload_file"], uiActions: { meeting_stage_upload_begin: {} } }),
+        runtimeWithManifest([
+          manifestTool("meeting_upload_file", ["model"]),
+          manifestTool("meeting_stage_upload_begin", ["app"]),
+        ]),
         "meeting_stage_upload_begin",
         { origin: "ui", ownerPluginId: "meeting" },
         "ui",
@@ -91,23 +77,26 @@ describe("plugin app-only runtime invocation", () => {
   });
 
   it("keeps governed app-only tools on ToolExecutor instead of the trusted-panel bypass", () => {
-    const manifest = normalize({ uiActions: { meeting_write: {} } });
-    const tool = manifest.tools.find((candidate) => candidate.name === "meeting_write");
-    tool!._meta = {
-      ...tool!._meta,
-      "lvisai/operationPolicy": {
+    const manifest = normalize([
+      manifestTool("meeting_write", ["app"], {
         discriminant: "operation",
-        operations: { save: { kind: "write", minimumRisk: "write", appVisible: true } },
+        operations: { save: { kind: "write", minimumRisk: "write", appVisible: true },
       },
-    };
-    const runtime = { listPluginManifests: () => [{ pluginId: "meeting", manifest }] } as any;
-    expect(isAppOnlyRuntimeInvocation(runtime, "meeting_write", { origin: "ui", ownerPluginId: "meeting" }, "ui")).toBe(false);
+    }),
+    ]);
+    const runtime = { listPluginManifests: () => [{ pluginId: "meeting", manifest }],
+    } as any;
+    expect(isAppOnlyRuntimeInvocation(runtime, "meeting_write", { origin: "ui", ownerPluginId: "meeting" }, "ui",
+      ),
+    ).toBe(false);
   });
 
   it("keeps LLM-facing tools on the ToolExecutor path", () => {
     expect(
       isAppOnlyRuntimeInvocation(
-        runtimeWithManifest({ tools: ["meeting_upload_file"], uiActions: { meeting_upload_file: {} } }),
+        runtimeWithManifest([
+          manifestTool("meeting_upload_file", ["model", "app"]),
+        ]),
         "meeting_upload_file",
         { origin: "ui", ownerPluginId: "meeting" },
         "ui",
@@ -118,7 +107,9 @@ describe("plugin app-only runtime invocation", () => {
   it("does not bypass ToolExecutor for non-UI-origin calls", () => {
     expect(
       isAppOnlyRuntimeInvocation(
-        runtimeWithManifest({ uiActions: { meeting_stage_upload_begin: {} } }),
+        runtimeWithManifest([
+          manifestTool("meeting_stage_upload_begin", ["app"]),
+        ]),
         "meeting_stage_upload_begin",
         { origin: "plugin", ownerPluginId: "meeting" },
         "plugin",
@@ -129,7 +120,9 @@ describe("plugin app-only runtime invocation", () => {
   it("requires the runtime method to be declared app-visible in the owning plugin", () => {
     expect(
       isAppOnlyRuntimeInvocation(
-        runtimeWithManifest({ tools: ["meeting_upload_file"], uiActions: { meeting_upload_file: {} } }),
+        runtimeWithManifest([
+          manifestTool("meeting_upload_file", ["model", "app"]),
+        ]),
         "meeting_stage_upload_begin",
         { origin: "ui", ownerPluginId: "meeting" },
         "ui",
@@ -140,7 +133,9 @@ describe("plugin app-only runtime invocation", () => {
   it("keeps manifest tools on the ToolExecutor path even when registry sync is stale", () => {
     expect(
       isAppOnlyRuntimeInvocation(
-        runtimeWithManifest({ tools: ["meeting_upload_file"], uiActions: { meeting_upload_file: {} } }),
+        runtimeWithManifest([
+          manifestTool("meeting_upload_file", ["model", "app"]),
+        ]),
         "meeting_upload_file",
         { origin: "ui", ownerPluginId: "meeting" },
         "ui",
@@ -151,11 +146,14 @@ describe("plugin app-only runtime invocation", () => {
   it("allows auth status polling without a fresh user activation", () => {
     expect(
       appOnlyRuntimeInvocationRequiresUserAction(
-        runtimeWithManifest({
-          tools: ["meeting_upload_file"],
-          uiActions: { auth_status: {}, auth_login: {} },
-          auth: { statusTool: "auth_status", loginTool: "auth_login" },
-        }),
+        runtimeWithManifest(
+          [
+            manifestTool("meeting_upload_file", ["model"]),
+            manifestTool("auth_status", ["app"]),
+            manifestTool("auth_login", ["app"]),
+          ],
+          { statusTool: "auth_status", loginTool: "auth_login" },
+        ),
         "auth_status",
         { origin: "ui", ownerPluginId: "meeting" },
       ),
@@ -163,18 +161,22 @@ describe("plugin app-only runtime invocation", () => {
   });
 
   it("requires user activation for non-status app-only actions", () => {
-    const runtime = runtimeWithManifest({
-      tools: ["meeting_upload_file"],
-      uiActions: { auth_status: {}, auth_login: {}, meeting_stage_upload_begin: {} },
-      auth: { statusTool: "auth_status", loginTool: "auth_login" },
-    });
+    const runtime = runtimeWithManifest(
+      [
+        manifestTool("meeting_upload_file", ["model"]),
+        manifestTool("auth_status", ["app"]),
+        manifestTool("auth_login", ["app"]),
+        manifestTool("meeting_stage_upload_begin", ["app"]),
+      ],
+      { statusTool: "auth_status", loginTool: "auth_login" },
+    );
 
     expect(
       appOnlyRuntimeInvocationRequiresUserAction(
         runtime,
         "auth_login",
-        { origin: "ui", ownerPluginId: "meeting" },
-      ),
+        { origin: "ui", ownerPluginId: "meeting",
+      }),
     ).toBe(true);
     expect(
       appOnlyRuntimeInvocationRequiresUserAction(
@@ -200,10 +202,11 @@ describe("plugin app-only runtime invocation", () => {
 // executor branch is reproduced in tools/__tests__/executor-effect-ledger.test.ts.)
 // Fake timers advance to the SOT ceiling so the test does not wait the real 120s.
 describe("invokePluginTool app-only branch — reaches the structural ceiling (#1553 wiring guard)", () => {
-  const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..",
+  );
 
-  function realRuntimeWithUiAction(
-    manifest: { tools?: string[]; uiActions?: Record<string, { description?: string }> },
+  function realRuntimeWithTools(
+    tools: Tool[],
     method: string,
     handler: (payload?: unknown) => Promise<unknown>,
   ): PluginRuntime {
@@ -212,7 +215,8 @@ describe("invokePluginTool app-only branch — reaches the structural ceiling (#
       plugins: Map<string, { manifest: unknown }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
-    internals.plugins.set("test.plugin", { manifest: normalize(manifest) } as unknown as never);
+    internals.plugins.set("test.plugin", { manifest: normalize(tools),
+    } as unknown as never);
     internals.methodMap.set(method, { pluginId: "test.plugin", handler });
     return rt;
   }
@@ -227,17 +231,22 @@ describe("invokePluginTool app-only branch — reaches the structural ceiling (#
     return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       if (isAppOnlyRuntimeInvocation(rt, toolName, context, effectiveOrigin)) {
-        return dispatchAppOnlyRuntimeInvocation(rt, toolName, payload, context);
+        return dispatchAppOnlyRuntimeInvocation(rt, toolName, payload, context,
+          );
       }
       throw new Error("reproduction did not take the app-only branch");
-    });
+    },
+    );
   }
 
   it("rejects at the global ceiling when an app-only handler hangs (caller does not block)", async () => {
     vi.useFakeTimers();
     try {
-      const rt = realRuntimeWithUiAction(
-        { tools: ["meeting_upload_file"], uiActions: { meeting_stage_upload_begin: {} } },
+      const rt = realRuntimeWithTools(
+        [
+          manifestTool("meeting_upload_file", ["model"]),
+          manifestTool("meeting_stage_upload_begin", ["app"]),
+        ],
         "meeting_stage_upload_begin",
         // Never resolves — simulates a hung app-only handler.
         () => new Promise<never>(() => {}),
@@ -255,7 +264,9 @@ describe("invokePluginTool app-only branch — reaches the structural ceiling (#
           `exceeded global ceiling \\(${TOOL_TIMEOUT_POLICY.globalCeilingMs}ms\\): meeting_stage_upload_begin`,
         ),
       );
-      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.globalCeilingMs + 1);
+      await vi.advanceTimersByTimeAsync(
+        TOOL_TIMEOUT_POLICY.globalCeilingMs + 1,
+      );
       await rejection;
     } finally {
       vi.useRealTimers();
@@ -275,10 +286,10 @@ describe("dispatchAppOnlyRuntimeInvocation — nested plugin-origin ctx.callTool
       listPluginManifests: () => [
         {
           pluginId: "meeting",
-          manifest: normalize({
-            tools: ["meeting_upload_file"],
-            uiActions: { meeting_stage_upload_begin: {} },
-          }),
+          manifest: normalize([
+            manifestTool("meeting_upload_file", ["model"]),
+            manifestTool("meeting_stage_upload_begin", ["app"]),
+          ]),
         },
       ],
       callDeclaredAppOnlyTool: async () => {
@@ -303,7 +314,9 @@ describe("dispatchAppOnlyRuntimeInvocation — nested plugin-origin ctx.callTool
       /app-only-visibility method .* cannot be invoked from a plugin-origin ctx\.callTool/,
     );
     // Must NOT be the old, misleading generic activation error.
-    expect((err as Error).message).not.toMatch(/requires an active user activation/);
+    expect((err as Error).message).not.toMatch(
+      /requires an active user activation/,
+    );
     // The constraint is detected before dispatch — the handler is never run.
     expect(handlerCalled).toBe(false);
   });
@@ -313,10 +326,10 @@ describe("dispatchAppOnlyRuntimeInvocation — nested plugin-origin ctx.callTool
       listPluginManifests: () => [
         {
           pluginId: "meeting",
-          manifest: normalize({
-            tools: ["meeting_upload_file"],
-            uiActions: { meeting_stage_upload_begin: {} },
-          }),
+          manifest: normalize([
+            manifestTool("meeting_upload_file", ["model"]),
+            manifestTool("meeting_stage_upload_begin", ["app"]),
+          ]),
         },
       ],
       callDeclaredAppOnlyTool: async () => "unreached",
@@ -345,11 +358,9 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
       listPluginManifests: () => [
         {
           pluginId: "meeting",
-          manifest: normalize({
-            // dual-declared: present in BOTH fixture keys (tools[] + uiActions) → visibility ["model","app"]
-            tools: ["meeting_upload_file"],
-            uiActions: { meeting_upload_file: {} },
-          }),
+          manifest: normalize([
+            manifestTool("meeting_upload_file", ["model", "app"]),
+          ]),
         },
       ],
       callDeclaredAppOnlyTool: async () => {
@@ -365,7 +376,9 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
         {},
         { origin: "ui", ownerPluginId: "meeting", userAction: true },
       ),
-    ).rejects.toThrow(/is a model-visible tool; refusing ungoverned app-only dispatch/);
+    ).rejects.toThrow(
+      /is a model-visible tool; refusing ungoverned app-only dispatch/,
+    );
     // The bypass handler is never reached — the boundary gate fails closed.
     expect(handlerCalled).toBe(false);
   });
@@ -375,13 +388,15 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
       listPluginManifests: () => [
         {
           pluginId: "meeting",
-          manifest: normalize({
-            tools: ["meeting_upload_file"],
-            uiActions: { meeting_stage_upload_begin: {} },
-          }),
+          manifest: normalize([
+            manifestTool("meeting_upload_file", ["model"]),
+            manifestTool("meeting_stage_upload_begin", ["app"]),
+          ]),
         },
       ],
-      callDeclaredAppOnlyTool: async (_method: string, payload: unknown) => ({ ok: payload }),
+      callDeclaredAppOnlyTool: async (_method: string, payload: unknown) => ({
+        ok: payload,
+      }),
     } as any;
 
     await expect(
@@ -407,11 +422,14 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
 // what the verified exploit rode.
 describe("isAppOnlyRuntimeInvocation — an MCP App origin never selects the ungoverned bypass", () => {
   const appOnlyRuntime = () =>
-    runtimeWithManifest({
-      tools: ["meeting_upload_file"],
-      uiActions: { meeting_stage_upload_begin: {}, auth_status: {} },
-      auth: { statusTool: "auth_status", loginTool: "meeting_stage_upload_begin" },
-    });
+    runtimeWithManifest(
+      [
+        manifestTool("meeting_upload_file", ["model"]),
+        manifestTool("meeting_stage_upload_begin", ["app"]),
+        manifestTool("auth_status", ["app"]),
+      ],
+      { statusTool: "auth_status", loginTool: "meeting_stage_upload_begin" },
+    );
 
   it("is false for an app-only tool called from an app (the panel's 'ui' answer is true)", () => {
     expect(
@@ -458,10 +476,9 @@ describe("isAppOnlyRuntimeInvocation — an MCP App origin never selects the ung
   it("is false for a dual-visibility tool called from an app (it takes the governed executor)", () => {
     expect(
       isAppOnlyRuntimeInvocation(
-        runtimeWithManifest({
-          tools: ["meeting_upload_file"],
-          uiActions: { meeting_upload_file: {} },
-        }),
+        runtimeWithManifest([
+          manifestTool("meeting_upload_file", ["model", "app"]),
+        ]),
         "meeting_upload_file",
         { origin: "mcp-app", ownerPluginId: "meeting", userAction: false },
         "mcp-app",
@@ -511,22 +528,32 @@ describe("runWithInvocationOrigin — an mcp-app chain cannot be laundered", () 
 // boot/steps/plugin-tool-executor.ts's `invokePluginTool` used above), driven
 // against a REAL PluginRuntime: which BRANCH does an app-origin call take?
 describe("invokePluginTool routing — app-origin calls land on the governed executor, never the bypass", () => {
-  const HOST_ROOT_2 = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const HOST_ROOT_2 = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+  );
 
-  function realRuntime(spec: {
-    tools?: string[];
-    uiActions?: Record<string, { description?: string }>;
-    auth?: { statusTool: string; loginTool: string };
-  }): PluginRuntime {
+  function realRuntime(
+    tools: Tool[],
+    auth?: { statusTool: string; loginTool: string },
+  ): PluginRuntime {
     const rt = new PluginRuntime({ hostRoot: HOST_ROOT_2, manifestPaths: [] });
     const internals = rt as unknown as {
       plugins: Map<string, { manifest: unknown }>;
-      methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
+      methodMap: Map<
+        string,
+        { pluginId: string; handler: (p?: unknown) => Promise<unknown> }
+      >;
     };
-    const m = normalize(spec);
+    const m = normalize(tools, auth);
     internals.plugins.set("meeting", { manifest: m } as unknown as never);
     for (const t of m.tools) {
-      internals.methodMap.set(t.name, { pluginId: "meeting", handler: async () => "raw-handler" });
+      internals.methodMap.set(t.name, {
+        pluginId: "meeting",
+        handler: async () => "raw-handler",
+      });
     }
     return rt;
   }
@@ -537,28 +564,43 @@ describe("invokePluginTool routing — app-origin calls land on the governed exe
     toolName: string,
     context: PluginToolInvocationContext,
   ): Promise<"app-only-dispatch" | "governed-executor"> {
-    return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
-      const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
-      return isAppOnlyRuntimeInvocation(rt, toolName, context, effectiveOrigin)
-        ? "app-only-dispatch"
-        : "governed-executor";
-    });
+    return runWithInvocationOrigin(
+      context.origin,
+      context.parentOrigin,
+      async () => {
+        const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
+        return isAppOnlyRuntimeInvocation(
+          rt,
+          toolName,
+          context,
+          effectiveOrigin,
+        )
+          ? "app-only-dispatch"
+          : "governed-executor";
+      },
+    );
   }
 
-  const spec = {
-    tools: ["meeting_upload_file"],
-    uiActions: { meeting_upload_file: {}, meeting_stage_upload_begin: {}, auth_status: {} },
-    auth: { statusTool: "auth_status", loginTool: "meeting_stage_upload_begin" },
+  const tools = [
+    manifestTool("meeting_upload_file", ["model", "app"]),
+    manifestTool("meeting_stage_upload_begin", ["app"]),
+    manifestTool("auth_status", ["app"]),
+  ];
+  const auth = {
+    statusTool: "auth_status",
+    loginTool: "meeting_stage_upload_begin",
   };
 
   it("app origin + app-only tool → governed executor branch (and the runtime dispatches it THERE)", async () => {
-    const rt = realRuntime(spec);
+    const rt = realRuntime(tools, auth);
     const ctx: PluginToolInvocationContext = {
       origin: "mcp-app",
       ownerPluginId: "meeting",
       userAction: false,
     };
-    await expect(routeOf(rt, "meeting_stage_upload_begin", ctx)).resolves.toBe("governed-executor");
+    await expect(routeOf(rt, "meeting_stage_upload_begin", ctx)).resolves.toBe(
+      "governed-executor",
+    );
     // …and that branch is where the app arm actually sends it: an app-only tool is a
     // §6.4 registry Tool (the loopback projects it), so PluginRuntime.callFromApp
     // hands it to the executor — risk → reviewer/approval → audit — rather than
@@ -567,14 +609,18 @@ describe("invokePluginTool routing — app-origin calls land on the governed exe
   });
 
   it("app origin + auth.statusTool → governed executor branch (the bypass is not selected)", async () => {
-    const rt = realRuntime(spec);
+    const rt = realRuntime(tools, auth);
     await expect(
-      routeOf(rt, "auth_status", { origin: "mcp-app", ownerPluginId: "meeting", userAction: false }),
+      routeOf(rt, "auth_status", {
+        origin: "mcp-app",
+        ownerPluginId: "meeting",
+        userAction: false,
+      }),
     ).resolves.toBe("governed-executor");
   });
 
   it("app origin + DUAL tool → governed executor branch", async () => {
-    const rt = realRuntime(spec);
+    const rt = realRuntime(tools, auth);
     await expect(
       routeOf(rt, "meeting_upload_file", {
         origin: "mcp-app",
@@ -585,7 +631,7 @@ describe("invokePluginTool routing — app-origin calls land on the governed exe
   });
 
   it("panel origin + app-only tool → app-only dispatch branch (unchanged, incl. the statusTool)", async () => {
-    const rt = realRuntime(spec);
+    const rt = realRuntime(tools, auth);
     await expect(
       routeOf(rt, "meeting_stage_upload_begin", {
         origin: "ui",

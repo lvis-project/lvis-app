@@ -1,43 +1,17 @@
-/**
- * uiActions validation — post-redesign behavior.
- *
- * The legacy suffix-based "destructive verb" gate (and its
- * `allowManagedUnsigned` escape hatch for managed plugins) has been
- * REMOVED. uiActions validation is now purely structural: every entry
- * must be a string declared in manifest.tools[]. Any verb suffix
- * (`_get`, `_delete`, `_drop`, …) is accepted regardless of install policy
- * type or signature status.
- *
- * Security model:
- *   - Code review + marketplace approval gate what ships.
- *   - Signature verification still gates *managed* plugin loading.
- *   - Destructive-action confirmation is the plugin developer's
- *     responsibility inside their own UI (see email_reply precedent).
- *
- * The `allowManagedUnsigned` option still exists in the constructor
- * signature but has NO EFFECT on uiActions validation. The
- * `plugin_uiActions_destructive_rejected` audit event is no longer emitted.
- *
- * These tests pin that new contract:
- *   1. managed + `_delete` in uiActions + no verifier → LOADS.
- *   2. user + `_delete` in uiActions → LOADS.
- *   3. allowManagedUnsigned=true is a no-op for uiActions (both
- *      managed and user plugins load).
- *   4. No `plugin_uiActions_destructive_rejected` audit entries are
- *      ever generated.
- */
+/** Tool names never grant or remove authority based on verb suffixes. */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   makeTestPluginRuntime,
   makeTestPluginRuntimeFixture,
+  pureTool,
   writeTestPlugin,
   writeTestPluginRegistry,
   type TestPluginRuntimeFixture,
 } from "./test-helpers.js";
 
-describe("PluginRuntime — uiActions suffix-blocking removed", () => {
+describe("PluginRuntime — Tool name policy", () => {
   let fixture: TestPluginRuntimeFixture;
   let auditEntries: Array<{ level: string; message: string; data?: unknown }>;
 
@@ -51,19 +25,23 @@ describe("PluginRuntime — uiActions suffix-blocking removed", () => {
   });
 
   async function writePlugin(id: string, manifestOverrides: Record<string, unknown> = {}): Promise<void> {
+    const toolPrefix = id.replaceAll("-", "_");
     const { manifestPath } = await writeTestPlugin(fixture, {
       id,
       entrySource: `export default async function createPlugin(ctx) {
   return {
     handlers: {
-      "${id}_get": async () => "ok",
-      "${id}_delete": async () => "ok",
+      "${toolPrefix}_get": async () => "ok",
+      "${toolPrefix}_delete": async () => "ok",
     },
     start: async () => {},
     stop: async () => {},
-  };
+      };
 }`,
-      tools: [`${id}_get`, `${id}_delete`],
+      tools: [
+        pureTool(`${toolPrefix}_get`),
+        pureTool(`${toolPrefix}_delete`),
+      ],
       manifest: manifestOverrides,
     });
     await writeTestPluginRegistry(fixture, [{ id, manifestPath }]);
@@ -81,8 +59,6 @@ describe("PluginRuntime — uiActions suffix-blocking removed", () => {
   it("managed plugin with any suffix loads successfully (no verifier needed)", async () => {
     await writePlugin("p-managed-default", {
       installPolicy: "admin",
-      tools: ["pmd_get", "pmd_delete"],
-      uiActions: { pmd_delete: {} },
     });
 
     const runtime = runtimeWithAudit();
@@ -94,8 +70,6 @@ describe("PluginRuntime — uiActions suffix-blocking removed", () => {
   it("user plugin with any suffix loads successfully", async () => {
     await writePlugin("p-user-delete", {
       installPolicy: "user",
-      tools: ["pud_get", "pud_delete"],
-      uiActions: { pud_delete: {} },
     });
 
     const runtime = runtimeWithAudit();
@@ -104,16 +78,12 @@ describe("PluginRuntime — uiActions suffix-blocking removed", () => {
     expect(runtime.listPluginIds()).toContain("p-user-delete");
   });
 
-  it("allowManagedUnsigned has no effect on uiActions validation (backward compat)", async () => {
+  it("allowManagedUnsigned does not change Tool name policy", async () => {
     await writePlugin("p-managed-allow", {
       installPolicy: "admin",
-      tools: ["pma_get", "pma_delete"],
-      uiActions: { pma_delete: {} },
     });
     await writePlugin("p-user-allow", {
       installPolicy: "user",
-      tools: ["pua_get", "pua_delete"],
-      uiActions: { pua_delete: {} },
     });
 
     // Rewrite the registry to include both plugins (writePlugin overwrites it).
@@ -135,11 +105,9 @@ describe("PluginRuntime — uiActions suffix-blocking removed", () => {
     expect(runtime.listPluginIds()).toContain("p-user-allow");
   });
 
-  it("auditLog is NOT called for destructive suffix (no longer blocked)", async () => {
+  it("does not emit a synthetic destructive-name rejection", async () => {
     await writePlugin("p-audit-check", {
       installPolicy: "user",
-      tools: ["pac_get", "pac_delete"],
-      uiActions: { pac_delete: {} },
     });
 
     const runtime = runtimeWithAudit();
@@ -148,7 +116,7 @@ describe("PluginRuntime — uiActions suffix-blocking removed", () => {
     expect(runtime.listPluginIds()).toContain("p-audit-check");
     expect(
       auditEntries.some(
-        (e) => e.message === "plugin_uiActions_destructive_rejected",
+        (e) => e.message.includes("destructive") && e.message.includes("rejected"),
       ),
     ).toBe(false);
   });

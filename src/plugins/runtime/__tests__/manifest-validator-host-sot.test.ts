@@ -24,7 +24,8 @@ import type { PluginManifest } from "../../types.js";
 import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 
-function manifestWithFirstTask(firstTask: Record<string, unknown>): Record<string, unknown> {
+function manifestWithFirstTask(firstTask: Record<string, unknown>,
+): Record<string, unknown> {
   return {
     id: "sample-onboarding-plugin",
     name: "Sample Onboarding Plugin",
@@ -66,7 +67,8 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       skills: [{ id: "attendance", path: "skills/attendance" }],
       hooks: [{ id: "audit", path: "hooks/audit.json" }],
       mcpServers: [{ id: "ep", path: "mcp/ep.json" }],
-    })).toBe(true);
+    }),
+    ).toBe(true);
   });
 
   it("rejects malformed contribution declarations and unknown fields", async () => {
@@ -78,11 +80,13 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       entry: "dist/index.js",
       tools: [],
       skills: [{ id: "invalid-id", path: "skills/attendance", trust: true }],
-    })).toBe(false);
+    }),
+    ).toBe(false);
     expect(validator.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({ keyword: "additionalProperties" }),
       expect.objectContaining({ keyword: "pattern" }),
-    ]));
+    ]),
+    );
   });
 
   it("rejects retired parallel UI and operation-governance fields", async () => {
@@ -109,7 +113,8 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
           keyword: "additionalProperties",
           params: expect.objectContaining({ additionalProperty: field }),
         }),
-      ]));
+      ]),
+      );
     }
 
     expect(validator({
@@ -130,14 +135,17 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             },
           },
         },
-      }],
-    })).toBe(false);
+      },
+        ],
+    }),
+    ).toBe(false);
     expect(validator.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({
         keyword: "additionalProperties",
         params: expect.objectContaining({ additionalProperty: "appAllowed" }),
       }),
-    ]));
+    ]),
+    );
   });
 
   // ── accept-probes (formerly runtime guards vs a stale SDK; now test-time
@@ -174,30 +182,40 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ["missing English fallback", {
       ...validFirstTask,
       locales: { ko: validFirstTask.locales.en },
-    }],
+    },
+    ],
     ["invalid locale key", {
       ...validFirstTask,
-      locales: { ...validFirstTask.locales, en_US: validFirstTask.locales.en },
-    }],
+      locales: { ...validFirstTask.locales, en_US: validFirstTask.locales.en,
+        },
+    },
+    ],
     ["oversized locale key", {
       ...validFirstTask,
       locales: {
         ...validFirstTask.locales,
         [`en-${"segment-".repeat(5)}us`]: validFirstTask.locales.en,
+        },
       },
-    }],
+    ],
     ["out-of-range priority", { ...validFirstTask, priority: 1001 }],
     ["unknown executable field", { ...validFirstTask, autoSubmit: true }],
-    ["incomplete localized copy", {
-      ...validFirstTask,
-      locales: { en: { headline: "Incomplete" } },
-    }],
-    ["oversized composer prompt", {
-      ...validFirstTask,
-      locales: {
-        en: { ...validFirstTask.locales.en, composerPrompt: "x".repeat(513) },
+    [
+      "incomplete localized copy",
+      {
+        ...validFirstTask,
+        locales: { en: { headline: "Incomplete" } },
       },
-    }],
+    ],
+    [
+      "oversized composer prompt",
+      {
+        ...validFirstTask,
+        locales: {
+          en: { ...validFirstTask.locales.en, composerPrompt: "x".repeat(513) },
+        },
+      },
+    ],
   ])("rejects malformed onboarding: %s", async (_name, firstTask) => {
     const validator = await buildManifestValidator();
     expect(validator(manifestWithFirstTask(firstTask))).toBe(false);
@@ -224,8 +242,14 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         {
           name: "legacy_export",
           description: "Export to a path.",
-          inputSchema: { type: "object", properties: { path: { type: "string" } } },
-          _meta: { ui: { visibility: ["model"] }, "xyz.lvis/pathFields": ["path"] },
+          inputSchema: {
+            type: "object",
+            properties: { path: { type: "string" } },
+          },
+          _meta: {
+            ui: { visibility: ["model"] },
+            "xyz.lvis/pathFields": ["path"],
+          },
         },
       ],
     });
@@ -236,7 +260,9 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       expect.arrayContaining([
         expect.objectContaining({
           keyword: "additionalProperties",
-          params: expect.objectContaining({ additionalProperty: "xyz.lvis/pathFields" }),
+          params: expect.objectContaining({
+            additionalProperty: "xyz.lvis/pathFields",
+          }),
         }),
       ]),
     );
@@ -312,7 +338,10 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         uiResources: [
           {
             uri: "ui://ui-resource-plugin/card.html",
-            csp: { connectDomains: ["https://api.example.com"], resourceDomains: [] },
+            csp: {
+              connectDomains: ["https://api.example.com"],
+              resourceDomains: [],
+            },
           },
         ],
       }),
@@ -359,7 +388,9 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         publisher: "LVIS",
         entry: "dist/index.js",
         tools: [],
-        uiResources: [{ uri: "ui://ui-resource-plugin/card.html", permissions }],
+        uiResources: [
+          { uri: "ui://ui-resource-plugin/card.html", permissions },
+        ],
       });
     expect(withPermission({ clipboardWrite: {} })).toBe(false);
     expect(withPermission({ notARealFeature: {} })).toBe(false);
@@ -412,7 +443,10 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         entry: "dist/index.js",
         tools: [],
         uiResources: [
-          { uri: "ui://ui-resource-bad/card.html", cspHeader: "default-src 'none'" },
+          {
+            uri: "ui://ui-resource-bad/card.html",
+            cspHeader: "default-src 'none'",
+          },
         ],
       }),
     ).toBe(false);
@@ -432,7 +466,12 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         publisher: "LVIS",
         entry: "dist/index.js",
         tools: [],
-        uiResources: [{ uri: "ui://ui-resource-legacy/card.html", html: "dist/cards/card.html" }],
+        uiResources: [
+          {
+            uri: "ui://ui-resource-legacy/card.html",
+            html: "dist/cards/card.html",
+          },
+        ],
       }),
     ).toBe(false);
   });
@@ -510,7 +549,9 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         publisher: "LVIS",
         entry: "dist/index.js",
         tools: [],
-        ui: [{ id: "a", slot: "sidebar", kind: "action", title: "x", tool: "t" }],
+        ui: [
+          { id: "a", slot: "sidebar", kind: "action", title: "x", tool: "t" },
+        ],
       }),
     ).toBe(false);
   });
@@ -537,7 +578,9 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       });
       vi.doMock("ajv-formats", () => ({ default: () => undefined }));
 
-      const { buildManifestValidator: build } = await import("../manifest-validation.js");
+      const { buildManifestValidator: build } = await import(
+        "../manifest-validation.js"
+      );
       await expect(build()).rejects.toThrow(
         /Host plugin manifest validator failed to compile: boom-compile/,
       );
@@ -548,7 +591,9 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("formatUnknownErrorMessage stringifies Error / string / object / null", () => {
     expect(formatUnknownErrorMessage(new Error("boom"))).toBe("boom");
     expect(formatUnknownErrorMessage("failed")).toBe("failed");
-    expect(formatUnknownErrorMessage({ code: "ERR_X" })).toBe('{"code":"ERR_X"}');
+    expect(formatUnknownErrorMessage({ code: "ERR_X" })).toBe(
+      '{"code":"ERR_X"}',
+    );
     expect(formatUnknownErrorMessage(null)).toBe("null");
   });
 });
@@ -562,7 +607,8 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
     id: "full-featured-plugin",
     name: "Full Featured Plugin",
     version: "1.2.3",
-    description: "A representative manifest exercising every host-required field.",
+    description:
+      "A representative manifest exercising every host-required field.",
     publisher: "LVIS",
     packageName: "@lvis/full-featured-plugin",
     author: "LVIS Team",
@@ -609,7 +655,6 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       logoutTool: "ff_logout",
     },
     emittedEvents: ["full-featured-plugin.auth.changed"],
-    keywords: [{ keyword: "search docs", skillId: "ff_search" }],
     networkAccess: {
       allowedDomains: ["api.example.com"],
       reasoning: "Host-mediated egress for document sync.",
@@ -658,7 +703,9 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
 
   it("parses end-to-end through parsePluginJson (schema + host cross-field checks)", async () => {
     const validator = await buildManifestValidator();
-    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-full-featured-"));
+    const dir = await mkdtemp(
+      join(realpathSync(tmpdir()), "manifest-full-featured-"),
+    );
     try {
       const file = join(dir, "plugin.json");
       await writeFile(file, JSON.stringify(fullFeatured), "utf-8");
@@ -696,7 +743,9 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
 
   it("materializes omitted Tool visibility into independent arrays", async () => {
     const validator = await buildManifestValidator();
-    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-default-visibility-"));
+    const dir = await mkdtemp(
+      join(realpathSync(tmpdir()), "manifest-default-visibility-"),
+    );
     try {
       const file = join(dir, "plugin.json");
       await writeFile(
@@ -709,8 +758,14 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
           publisher: "LVIS",
           entry: "dist/index.js",
           tools: [
-            { name: "first_default", inputSchema: { type: "object", properties: {} } },
-            { name: "second_default", inputSchema: { type: "object", properties: {} } },
+            {
+              name: "first_default",
+              inputSchema: { type: "object", properties: {} },
+            },
+            {
+              name: "second_default",
+              inputSchema: { type: "object", properties: {} },
+            },
           ],
         }),
         "utf-8",
@@ -779,7 +834,11 @@ describe("colocated operation policy cross-field contract", () => {
                 kind: "write",
                 minimumRisk: "network",
                 appVisible: true,
-                requiresRead: { tool: "domain_read", operations: ["status"], maxAgeMs: 60000 },
+                requiresRead: {
+                  tool: "domain_read",
+                  operations: ["status"],
+                  maxAgeMs: 60000,
+                },
               },
             },
           },
@@ -789,7 +848,9 @@ describe("colocated operation policy cross-field contract", () => {
   };
 
   async function parse(value: unknown) {
-    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-governance-"));
+    const dir = await mkdtemp(
+      join(realpathSync(tmpdir()), "manifest-governance-"),
+    );
     try {
       const file = join(dir, "plugin.json");
       await writeFile(file, JSON.stringify(value), "utf-8");
@@ -800,7 +861,9 @@ describe("colocated operation policy cross-field contract", () => {
   }
 
   it("accepts a policy whose operation union exactly matches its tool schema", async () => {
-    await expect(parse(governed)).resolves.toMatchObject({ tools: governed.tools });
+    await expect(parse(governed)).resolves.toMatchObject({
+      tools: governed.tools,
+    });
   });
 
   it("rejects operation drift but accepts an app write without an artificial read", async () => {
@@ -809,7 +872,11 @@ describe("colocated operation policy cross-field contract", () => {
     await expect(parse(drifted)).rejects.toThrow(/exactly match/);
 
     const noRead = structuredClone(governed);
-    delete (noRead.tools[1]._meta["lvisai/operationPolicy"].operations.save as { requiresRead?: unknown }).requiresRead;
+    delete (
+      noRead.tools[1]._meta["lvisai/operationPolicy"].operations.save as {
+        requiresRead?: unknown;
+      }
+    ).requiresRead;
     await expect(parse(noRead)).resolves.toMatchObject({ tools: noRead.tools });
   });
 

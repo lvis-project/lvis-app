@@ -14,15 +14,18 @@ import { mkdtempSync } from "node:fs";
 
 const runtimeTestState = vi.hoisted(() => ({
   appPrependOnceListener: vi.fn(),
-  browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void } }>,
+  browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void };
+  }>,
   capturedRuntimeOptions: null as Record<string, unknown> | null,
   readPluginRegistry: vi.fn(async () => ({ version: 1, plugins: [] })),
   runtime: {
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
     listPluginIds: vi.fn(() => [] as string[]),
-    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
-    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
+    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>,
+    ),
+    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`,
+    ),
     getPluginManifest: vi.fn(() => null),
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     isPluginEnabled: vi.fn(() => true),
@@ -32,10 +35,13 @@ const runtimeTestState = vi.hoisted(() => ({
 }));
 
 const dnsTestState = vi.hoisted(() => ({
-  lookup: vi.fn<(
-    host: string,
-    opts: unknown,
-  ) => Promise<Array<{ address: string; family: number }>>>(),
+  lookup:
+    vi.fn<
+      (
+        host: string,
+        opts: unknown,
+      ) => Promise<Array<{ address: string; family: number }>>
+    >(),
 }));
 
 vi.mock("electron", () => ({
@@ -60,7 +66,10 @@ vi.mock("node:dns", () => ({
 }));
 
 vi.mock("../../../plugins/runtime.js", () => ({
-  PluginRuntime: vi.fn().mockImplementation(function (this: unknown, options: Record<string, unknown>) {
+  PluginRuntime: vi.fn().mockImplementation(function (
+    this: unknown,
+    options: Record<string, unknown>,
+  ) {
     runtimeTestState.capturedRuntimeOptions = options;
     return runtimeTestState.runtime;
   }),
@@ -118,24 +127,33 @@ function invokeHostApiFactory<TArgs extends unknown[], TResult>(
     isActive: () => true,
     isLifecycleHookActive: () => false,
   };
-  return (factory as unknown as (
-    pluginId: string,
-    manifest: unknown,
-    pluginDataDir: string,
-    incarnation: TestHostApiIncarnation,
-    installPluginId: string,
-  ) => TResult)(pluginId, manifest, pluginDataDir, incarnation, pluginId);
+  return (
+    factory as unknown as (
+      pluginId: string,
+      manifest: unknown,
+      pluginDataDir: string,
+      incarnation: TestHostApiIncarnation,
+      installPluginId: string,
+    ) => TResult
+  )(pluginId, manifest, pluginDataDir, incarnation, pluginId);
 }
 
 beforeEach(() => {
   runtimeTestState.readPluginRegistry.mockReset();
-  runtimeTestState.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
+  runtimeTestState.readPluginRegistry.mockResolvedValue({
+    version: 1,
+    plugins: [],
+  });
   dnsTestState.lookup.mockReset();
 });
 
 describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", () => {
   it("re-throws the original ApprovalOriginError even when auditLogger.log throws", () => {
-    const brokenLogger = { log: vi.fn(() => { throw new Error("audit broken"); }) };
+    const brokenLogger = {
+      log: vi.fn(() => {
+        throw new Error("audit broken");
+      }),
+    };
     const originError = new ApprovalOriginError(
       "[cross-plugin-hijack] plugin='evil' requestId='req-1' ...",
       "cross-plugin-hijack",
@@ -161,7 +179,10 @@ describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", 
     ).toThrow(originError);
 
     expect(okLogger.log).toHaveBeenCalledOnce();
-    const entry = okLogger.log.mock.calls[0][0] as { type: string; input: string };
+    const entry = okLogger.log.mock.calls[0][0] as {
+      type: string;
+      input: string;
+    };
     expect(entry.type).toBe("error");
     expect(entry.input).toContain("[scope-not-allowed]");
     expect(entry.input).toContain("plugin='plugin-a'");
@@ -169,7 +190,11 @@ describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", 
   });
 
   it("re-throws unknown (non-ApprovalOriginError) errors and still swallows audit crash", () => {
-    const brokenLogger = { log: vi.fn(() => { throw new Error("audit down"); }) };
+    const brokenLogger = {
+      log: vi.fn(() => {
+        throw new Error("audit down");
+      }),
+    };
     const unexpectedErr = new Error("unexpected gate error");
 
     expect(() =>
@@ -182,54 +207,74 @@ describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", 
 
 describe("declaresHostManagedPythonRuntime", () => {
   it("recognizes only the canonical Host manifest Python declaration", () => {
-    const manifest = (overrides: Record<string, unknown>) => ({
-      id: "test-plugin",
-      name: "Test Plugin",
-      version: "1.0.0",
-      entry: "index.js",
-      tools: [],
-      description: "",
-      ...overrides,
-    } as unknown as Parameters<typeof declaresHostManagedPythonRuntime>[0]);
+    const manifest = (overrides: Record<string, unknown>) =>
+      ({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "1.0.0",
+        entry: "index.js",
+        tools: [],
+        description: "",
+        ...overrides,
+      }) as unknown as Parameters<typeof declaresHostManagedPythonRuntime>[0];
 
-    expect(declaresHostManagedPythonRuntime(manifest({
-      python: { managedBy: "lvis-app" },
-    }))).toBe(true);
-    expect(declaresHostManagedPythonRuntime(manifest({
-      python: { requirementsLock: "requirements/python.lock" },
-    }))).toBe(true);
+    expect(
+      declaresHostManagedPythonRuntime(
+        manifest({
+          python: { managedBy: "lvis-app" },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      declaresHostManagedPythonRuntime(
+        manifest({
+          python: { requirementsLock: "requirements/python.lock" },
+        }),
+      ),
+    ).toBe(true);
     expect(declaresHostManagedPythonRuntime(manifest({}))).toBe(false);
   });
 });
 
 describe("sanitizePluginPendingPrompt", () => {
   it("strips a command-leading slash from plugin-authored prompts", () => {
-    expect(sanitizePluginPendingPrompt("/load victim-session")).toBe("load victim-session");
+    expect(sanitizePluginPendingPrompt("/load victim-session")).toBe(
+      "load victim-session",
+    );
     expect(sanitizePluginPendingPrompt("   /compact")).toBe("   compact");
-    expect(sanitizePluginPendingPrompt("/permission hooks accept pre-x.sh")).toBe(
-      "permission hooks accept pre-x.sh",
-    );
-    expect(sanitizePluginPendingPrompt(" //permission hooks disable pre-x.sh")).toBe(
-      " permission hooks disable pre-x.sh",
-    );
-    expect(sanitizePluginPendingPrompt("/ /permission hooks disable pre-x.sh")).toBe(
-      "permission hooks disable pre-x.sh",
-    );
+    expect(
+      sanitizePluginPendingPrompt("/permission hooks accept pre-x.sh"),
+    ).toBe("permission hooks accept pre-x.sh");
+    expect(
+      sanitizePluginPendingPrompt(" //permission hooks disable pre-x.sh"),
+    ).toBe(" permission hooks disable pre-x.sh");
+    expect(
+      sanitizePluginPendingPrompt("/ /permission hooks disable pre-x.sh"),
+    ).toBe("permission hooks disable pre-x.sh");
   });
 
   it("preserves non-command text", () => {
     expect(sanitizePluginPendingPrompt("회의 요약해줘")).toBe("회의 요약해줘");
-    expect(sanitizePluginPendingPrompt("https://example.com/a")).toBe("https://example.com/a");
+    expect(sanitizePluginPendingPrompt("https://example.com/a")).toBe(
+      "https://example.com/a",
+    );
   });
 
   it("wraps plugin pending prompts in the overlay trigger provenance envelope", () => {
-    expect(formatPluginPendingPrompt("/load victim-session", "overlay:meeting-detection")).toBe(
+    expect(
+      formatPluginPendingPrompt(
+        "/load victim-session",
+        "overlay:meeting-detection",
+      ),
+    ).toBe(
       '<imported-from-proactive source="overlay:meeting-detection">\nload victim-session\n</imported-from-proactive>',
     );
   });
 
   it("rejects invalid overlay trigger source tags", () => {
-    expect(() => formatPluginPendingPrompt("hi", "plugin:bad")).toThrow(/invalid overlay trigger source/);
+    expect(() => formatPluginPendingPrompt("hi", "plugin:bad")).toThrow(
+      /invalid overlay trigger source/,
+    );
   });
 
   it("neutralizes a prompt that carries the envelope's OWN closing tag", () => {
@@ -265,7 +310,8 @@ describe("deriveOverlaySummaryForDisplay", () => {
   it("strips untrusted wrapper tags from prompt-derived summaries", () => {
     expect(
       deriveOverlaySummaryForDisplay({
-        prompt: "<untrusted-meeting-title>대화 내용 확인</untrusted-meeting-title>",
+        prompt:
+          "<untrusted-meeting-title>대화 내용 확인</untrusted-meeting-title>",
       }),
     ).toBe("대화 내용 확인");
   });
@@ -300,8 +346,7 @@ describe("initPluginRuntime partition policy", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
         hasPluginKeywords: vi.fn(() => false),
       } as never,
@@ -357,8 +402,7 @@ describe("initPluginRuntime partition policy", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
         hasPluginKeywords: vi.fn(() => false),
       } as never,
@@ -428,12 +472,14 @@ describe("initPluginRuntime HostApi factory", () => {
     pluginDataDir: string,
   ) => HostFetchApi;
 
-  async function buildHostFetchApi(options: {
-    pluginId?: string;
-    manifest?: HostFetchManifest;
-    networkFetch?: typeof fetch;
-    bootAuditLogger?: { log: ReturnType<typeof vi.fn> };
-  } = {}): Promise<{
+  async function buildHostFetchApi(
+    options: {
+      pluginId?: string;
+      manifest?: HostFetchManifest;
+      networkFetch?: typeof fetch;
+      bootAuditLogger?: { log: ReturnType<typeof vi.fn> };
+    } = {},
+  ): Promise<{
     api: HostFetchApi;
     networkFetch: typeof fetch;
     bootAuditLogger: { log: ReturnType<typeof vi.fn> };
@@ -446,8 +492,9 @@ describe("initPluginRuntime HostApi factory", () => {
       capabilities: ["external-auth-consumer"],
       networkAccess: { allowedDomains: ["api.example.com"] },
     };
-    const networkFetch = options.networkFetch
-      ?? vi.fn(async () => new Response("ok", { status: 200 }));
+    const networkFetch =
+      options.networkFetch ??
+      vi.fn(async () => new Response("ok", { status: 200 }));
     const bootAuditLogger = options.bootAuditLogger ?? { log: vi.fn() };
 
     await initPluginRuntime({
@@ -463,8 +510,7 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
@@ -486,9 +532,8 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | HostFetchCreateHostApi
-      | undefined;
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as HostFetchCreateHostApi | undefined;
     expect(createHostApi).toBeDefined();
     const api = invokeHostApiFactory(
       createHostApi!,
@@ -508,10 +553,13 @@ describe("initPluginRuntime HostApi factory", () => {
 
     expect(dnsTestState.lookup).not.toHaveBeenCalled();
     expect(networkFetch).not.toHaveBeenCalled();
-    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
-      type: "error",
-      input: "[plugin:host-fetch-plugin] host_fetch_denied https://evil.example not in networkAccess.allowedDomains",
-    }));
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        input:
+          "[plugin:host-fetch-plugin] host_fetch_denied https://evil.example not in networkAccess.allowedDomains",
+      }),
+    );
   });
 
   it("hostFetch denies plugins missing external-auth-consumer before URL policy evaluation", async () => {
@@ -530,14 +578,19 @@ describe("initPluginRuntime HostApi factory", () => {
 
     expect(dnsTestState.lookup).not.toHaveBeenCalled();
     expect(networkFetch).not.toHaveBeenCalled();
-    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
-      type: "error",
-      input: "[plugin:host-fetch-plugin] host_fetch_denied capability external-auth-consumer not declared",
-    }));
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        input:
+          "[plugin:host-fetch-plugin] host_fetch_denied capability external-auth-consumer not declared",
+      }),
+    );
   });
 
   it("hostFetch pins redirect:error even when plugin init requests redirect:follow", async () => {
-    dnsTestState.lookup.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+    dnsTestState.lookup.mockResolvedValueOnce([
+      { address: "93.184.216.34", family: 4 },
+    ]);
     const { api, networkFetch, bootAuditLogger } = await buildHostFetchApi();
 
     await expect(
@@ -554,10 +607,13 @@ describe("initPluginRuntime HostApi factory", () => {
         redirect: "error",
       }),
     );
-    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
-      type: "tool_call",
-      input: "[plugin:host-fetch-plugin] host_fetch https://api.example.com method=GET effect=read",
-    }));
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool_call",
+        input:
+          "[plugin:host-fetch-plugin] host_fetch https://api.example.com method=GET effect=read",
+      }),
+    );
     const auditInputs = bootAuditLogger.log.mock.calls
       .map(([entry]) => entry?.input)
       .filter((input): input is string => typeof input === "string");
@@ -565,17 +621,23 @@ describe("initPluginRuntime HostApi factory", () => {
   });
 
   it("hostFetch propagates redirect:error rejection for allowed-host 3xx responses", async () => {
-    dnsTestState.lookup.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
-    const redirectingFetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.redirect === "error") {
-        throw new TypeError("redirect mode is error");
-      }
-      return new Response(null, {
-        status: 302,
-        headers: { location: "https://api.example.com/next" },
-      });
+    dnsTestState.lookup.mockResolvedValueOnce([
+      { address: "93.184.216.34", family: 4 },
+    ]);
+    const redirectingFetch = vi.fn(
+      async (_url: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.redirect === "error") {
+          throw new TypeError("redirect mode is error");
+        }
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/next" },
+        });
+      },
+    );
+    const { api } = await buildHostFetchApi({
+      networkFetch: redirectingFetch as typeof fetch,
     });
-    const { api } = await buildHostFetchApi({ networkFetch: redirectingFetch as typeof fetch });
 
     await expect(
       api.hostFetch("https://api.example.com/redirect", { redirect: "follow" }),
@@ -608,17 +670,16 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      listPluginIds: vi.fn(() => []),
-      replacePluginTools: vi.fn(),
-} as never,
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
       pythonPath: undefined,
       bootAuditLogger: bootAuditLogger as never,
       mainWindow: {} as never,
@@ -630,12 +691,17 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: {
-          id: string;
-          config?: Record<string, unknown>;
-          pluginAccess?: { agentApprovalScopes?: string[] };
-        }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: {
+            id: string;
+            config?: Record<string, unknown>;
+            pluginAccess?: { agentApprovalScopes?: string[] };
+          },
+          pluginDataDir: string,
+        ) => {
           agentApproval: {
             request: (input: {
               toolName: string;
@@ -660,15 +726,19 @@ describe("initPluginRuntime HostApi factory", () => {
       pluginDataDir,
     );
 
-    await expect(api.agentApproval.request({
-      toolName: "agent_external_call",
-      args: { target: "example" },
-      reason: "plugin wants host approval",
-      scope: "agent_external_api_call",
-    })).rejects.toMatchObject({ code: "scope-not-allowed" });
+    await expect(
+      api.agentApproval.request({
+        toolName: "agent_external_call",
+        args: { target: "example" },
+        reason: "plugin wants host approval",
+        scope: "agent_external_api_call",
+      }),
+    ).rejects.toMatchObject({ code: "scope-not-allowed" });
 
     expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
-    expect(runtimeTestState.runtime.getApprovedPluginAccess).toHaveBeenCalledWith("plugin-a");
+    expect(
+      runtimeTestState.runtime.getApprovedPluginAccess,
+    ).toHaveBeenCalledWith("plugin-a");
     expect(bootAuditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "error",
@@ -703,17 +773,16 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      listPluginIds: vi.fn(() => []),
-      replacePluginTools: vi.fn(),
-} as never,
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
       pythonPath: undefined,
       bootAuditLogger: bootAuditLogger as never,
       mainWindow: {} as never,
@@ -725,12 +794,17 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: {
-          id: string;
-          config?: Record<string, unknown>;
-          pluginAccess?: { agentApprovalScopes?: string[] };
-        }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: {
+            id: string;
+            config?: Record<string, unknown>;
+            pluginAccess?: { agentApprovalScopes?: string[] };
+          },
+          pluginDataDir: string,
+        ) => {
           agentApproval: {
             request: (input: {
               toolName: string;
@@ -755,14 +829,18 @@ describe("initPluginRuntime HostApi factory", () => {
       pluginDataDir,
     );
 
-    await expect(api.agentApproval.request({
-      toolName: "agent_external_call",
-      args: { target: "example" },
-      reason: "plugin wants host approval",
-      scope: "agent_external_api_call",
-    })).resolves.toBe("allow-once");
+    await expect(
+      api.agentApproval.request({
+        toolName: "agent_external_call",
+        args: { target: "example" },
+        reason: "plugin wants host approval",
+        scope: "agent_external_api_call",
+      }),
+    ).resolves.toBe("allow-once");
 
-    expect(runtimeTestState.runtime.getApprovedPluginAccess).toHaveBeenCalledWith("plugin-a");
+    expect(
+      runtimeTestState.runtime.getApprovedPluginAccess,
+    ).toHaveBeenCalledWith("plugin-a");
     expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         category: "agent-action",
@@ -790,17 +868,16 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      listPluginIds: vi.fn(() => []),
-      replacePluginTools: vi.fn(),
-} as never,
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
       pythonPath: undefined,
       bootAuditLogger: { log: vi.fn() } as never,
       mainWindow: {} as never,
@@ -812,8 +889,13 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: { id: string; config?: Record<string, unknown> }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: { id: string; config?: Record<string, unknown> },
+          pluginDataDir: string,
+        ) => {
           [key: string]: unknown;
         })
       | undefined;
@@ -846,17 +928,16 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      listPluginIds: vi.fn(() => []),
-      replacePluginTools: vi.fn(),
-} as never,
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
       pythonPath: undefined,
       bootAuditLogger: { log: vi.fn() } as never,
       mainWindow: {} as never,
@@ -868,8 +949,13 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: { id: string; config?: Record<string, unknown> }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: { id: string; config?: Record<string, unknown> },
+          pluginDataDir: string,
+        ) => {
           [key: string]: unknown;
         })
       | undefined;
@@ -908,7 +994,9 @@ describe("initPluginRuntime HostApi factory", () => {
     const { canonicalJSON } = await import(
       "../../../plugins/whitelist/canonical-json.js"
     );
-    const { generateKeyPairSync, sign, createHash } = await import("node:crypto");
+    const { generateKeyPairSync, sign, createHash } = await import(
+      "node:crypto"
+    );
     const { mkdtempSync: mkdtempSyncOs } = await import("node:fs");
     whitelistRegistry.resetForTesting();
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -936,7 +1024,9 @@ describe("initPluginRuntime HostApi factory", () => {
               canonicalJSON({
                 id: "plugin-b6",
                 config: {},
-                hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.claude"] },
+                hostSecrets: {
+                  read: ["llm.apiKey.openai", "llm.apiKey.claude"],
+                },
               }),
             )
             .digest("hex"),
@@ -948,14 +1038,24 @@ describe("initPluginRuntime HostApi factory", () => {
     const envelope = {
       version: 1,
       iat: Math.floor(Date.now() / 1000),
-      artifact_sha256: createHash("sha256").update(Buffer.from(grantBody, "utf-8")).digest("hex"),
+      artifact_sha256: createHash("sha256")
+        .update(Buffer.from(grantBody, "utf-8"))
+        .digest("hex"),
       signatures: [
-        { key_id: WHITELIST_PRIMARY_KEY_ID, alg: "ed25519", sig: grantSig.toString("base64") },
+        {
+          key_id: WHITELIST_PRIMARY_KEY_ID,
+          alg: "ed25519",
+          sig: grantSig.toString("base64"),
+        },
       ],
     };
     const cacheRoot = mkdtempSyncOs("/tmp/lvis-b6-whitelist-");
     const cache = new WhitelistCache(cacheRoot);
-    await cache.store({ body: grantBody, signature: JSON.stringify(envelope), meta: {} });
+    await cache.store({
+      body: grantBody,
+      signature: JSON.stringify(envelope),
+      meta: {},
+    });
     await whitelistRegistry.init({ userDataDir: cacheRoot, online: false });
 
     const getSecretMock = vi.fn((key: string) => {
@@ -978,17 +1078,16 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      listPluginIds: vi.fn(() => []),
-      replacePluginTools: vi.fn(),
-} as never,
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
       pythonPath: undefined,
       bootAuditLogger: bootAuditLogger as never,
       mainWindow: {} as never,
@@ -1000,12 +1099,17 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: {
-          id: string;
-          config?: Record<string, unknown>;
-          hostSecrets?: { read?: string[] };
-        }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: {
+            id: string;
+            config?: Record<string, unknown>;
+            hostSecrets?: { read?: string[] };
+          },
+          pluginDataDir: string,
+        ) => {
           getSecret: (key: string) => string | null;
         })
       | undefined;
@@ -1033,7 +1137,10 @@ describe("initPluginRuntime HostApi factory", () => {
     // Audit captured non-active-vendor warn
     const denyAudit = bootAuditLogger.log.mock.calls.find((c) => {
       const input = (c[0] as { input?: string }).input ?? "";
-      return input.includes("non-active-vendor") && input.includes("llm.apiKey.claude");
+      return (
+        input.includes("non-active-vendor") &&
+        input.includes("llm.apiKey.claude")
+      );
     });
     expect(denyAudit).toBeDefined();
   });
@@ -1041,7 +1148,9 @@ describe("initPluginRuntime HostApi factory", () => {
   it("getSecret denies non-active marketplace provider preset keys even when allowlisted", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     const bootAuditLogger = { log: vi.fn() };
-    const { canonicalJSON } = await import("../../../plugins/whitelist/canonical-json.js");
+    const { canonicalJSON } = await import(
+      "../../../plugins/whitelist/canonical-json.js"
+    );
     const { createHash } = await import("node:crypto");
     const activeKey = "llm.marketplaceProvider.future-router.apiKey";
     const idleKey = "llm.marketplaceProvider.idle-router.apiKey";
@@ -1097,8 +1206,7 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
@@ -1119,12 +1227,17 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: {
-          id: string;
-          config?: Record<string, unknown>;
-          hostSecrets?: { read?: string[] };
-        }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: {
+            id: string;
+            config?: Record<string, unknown>;
+            hostSecrets?: { read?: string[] };
+          },
+          pluginDataDir: string,
+        ) => {
           getSecret: (key: string) => string | null;
         })
       | undefined;
@@ -1140,16 +1253,20 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(api.getSecret(activeKey)).toBe("fr-secret");
     expect(api.getSecret(idleKey)).toBeNull();
     expect(getSecretMock).not.toHaveBeenCalledWith(idleKey);
-    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
-      type: "warn",
-      input: expect.stringContaining("non-active-vendor"),
-    }));
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "warn",
+        input: expect.stringContaining("non-active-vendor"),
+      }),
+    );
   });
 
   it("getSecret denies generic OpenAI-compatible host key while a marketplace preset is active", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     const bootAuditLogger = { log: vi.fn() };
-    const { canonicalJSON } = await import("../../../plugins/whitelist/canonical-json.js");
+    const { canonicalJSON } = await import(
+      "../../../plugins/whitelist/canonical-json.js"
+    );
     const { createHash } = await import("node:crypto");
     const genericKey = "llm.apiKey.openai-compatible";
     const manifest = {
@@ -1173,7 +1290,7 @@ describe("initPluginRuntime HostApi factory", () => {
       ],
     });
     const getSecretMock = vi.fn((key: string) =>
-      key === genericKey ? "generic-secret" : null
+      key === genericKey ? "generic-secret" : null,
     );
 
     await initPluginRuntime({
@@ -1187,7 +1304,9 @@ describe("initPluginRuntime HostApi factory", () => {
             };
           }
           if (key === "marketplace") {
-            return { installedProviderPresets: [{ providerId: "future-router" }] };
+            return {
+              installedProviderPresets: [{ providerId: "future-router" }],
+            };
           }
           if (key === "pluginConfigs") return {};
           return undefined;
@@ -1197,8 +1316,7 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
@@ -1219,12 +1337,17 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: {
-          id: string;
-          config?: Record<string, unknown>;
-          hostSecrets?: { read?: string[] };
-        }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: {
+            id: string;
+            config?: Record<string, unknown>;
+            hostSecrets?: { read?: string[] };
+          },
+          pluginDataDir: string,
+        ) => {
           getSecret: (key: string) => string | null;
         })
       | undefined;
@@ -1239,18 +1362,19 @@ describe("initPluginRuntime HostApi factory", () => {
 
     expect(api.getSecret(genericKey)).toBeNull();
     expect(getSecretMock).not.toHaveBeenCalledWith(genericKey);
-    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
-      type: "warn",
-      input: expect.stringContaining("non-active-vendor"),
-    }));
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "warn",
+        input: expect.stringContaining("non-active-vendor"),
+      }),
+    );
   });
 
   it("B7 — getSecret denied for unknown prefix falls into `other` counter bucket", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     const bootAuditLogger = { log: vi.fn() };
-    const { resetHostSecretCountersForTesting, getHostSecretCounter } = await import(
-      "../../../telemetry/host-secret-counters.js"
-    );
+    const { resetHostSecretCountersForTesting, getHostSecretCounter } =
+      await import("../../../telemetry/host-secret-counters.js");
     resetHostSecretCountersForTesting();
 
     await initPluginRuntime({
@@ -1266,17 +1390,16 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      listPluginIds: vi.fn(() => []),
-      replacePluginTools: vi.fn(),
-} as never,
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
       pythonPath: undefined,
       bootAuditLogger: bootAuditLogger as never,
       mainWindow: {} as never,
@@ -1288,12 +1411,17 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: {
-          id: string;
-          config?: Record<string, unknown>;
-          hostSecrets?: { read?: string[] };
-        }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: {
+            id: string;
+            config?: Record<string, unknown>;
+            hostSecrets?: { read?: string[] };
+          },
+          pluginDataDir: string,
+        ) => {
           getSecret: (key: string) => string | null;
         })
       | undefined;
@@ -1312,10 +1440,13 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(api.getSecret("garbage.y")).toBeNull();
     expect(api.getSecret("evilprefix.z")).toBeNull();
 
-    expect(getHostSecretCounter("hostSecret_denied", "plugin-b7", "other")).toBe(3);
-    expect(getHostSecretCounter("hostSecret_denied", "plugin-b7", "attacker")).toBe(0);
+    expect(
+      getHostSecretCounter("hostSecret_denied", "plugin-b7", "other"),
+    ).toBe(3);
+    expect(
+      getHostSecretCounter("hostSecret_denied", "plugin-b7", "attacker"),
+    ).toBe(0);
   });
-
 
   it("quarantines endpoint URLs stored in api-key-like own plugin secrets", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
@@ -1330,8 +1461,10 @@ describe("initPluginRuntime HostApi factory", () => {
           return undefined;
         }),
         getSecret: vi.fn((key: string) => {
-          if (key === "plugin.plugin-q.sttApiKey") return "https://example.openai.azure.com/openai/deployments/stt/audio/transcriptions";
-          if (key === "plugin.plugin-q.webhookUrl") return "https://example.com/hook";
+          if (key === "plugin.plugin-q.sttApiKey")
+            return "https://example.openai.azure.com/openai/deployments/stt/audio/transcriptions";
+          if (key === "plugin.plugin-q.webhookUrl")
+            return "https://example.com/hook";
           if (key === "plugin.plugin-q.apiKey") return "sk-valid";
           return null;
         }),
@@ -1339,8 +1472,7 @@ describe("initPluginRuntime HostApi factory", () => {
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
@@ -1361,8 +1493,13 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: { id: string; config?: Record<string, unknown> }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: { id: string; config?: Record<string, unknown> },
+          pluginDataDir: string,
+        ) => {
           getSecret: (key: string) => string | null;
         })
       | undefined;
@@ -1377,17 +1514,25 @@ describe("initPluginRuntime HostApi factory", () => {
     );
 
     expect(api.getSecret("plugin.plugin-q.sttApiKey")).toBeNull();
-    expect(api.getSecret("plugin.plugin-q.webhookUrl")).toBe("https://example.com/hook");
+    expect(api.getSecret("plugin.plugin-q.webhookUrl")).toBe(
+      "https://example.com/hook",
+    );
     expect(api.getSecret("plugin.plugin-q.apiKey")).toBe("sk-valid");
-    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
-      type: "warn",
-      input: expect.stringContaining("pluginSecret_denied reason=endpoint-url-in-api-key-like-secret"),
-    }));
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "warn",
+        input: expect.stringContaining(
+          "pluginSecret_denied reason=endpoint-url-in-api-key-like-secret",
+        ),
+      }),
+    );
   });
 
   it("clears registry-entry cache on refresh failure so admin secret bypass fails closed (#959)", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
-    const { canonicalJSON } = await import("../../../plugins/whitelist/canonical-json.js");
+    const { canonicalJSON } = await import(
+      "../../../plugins/whitelist/canonical-json.js"
+    );
     const { createHash } = await import("node:crypto");
     const manifest = {
       id: "plugin-cache-fail",
@@ -1419,13 +1564,14 @@ describe("initPluginRuntime HostApi factory", () => {
           if (key === "pluginConfigs") return {};
           return undefined;
         }),
-        getSecret: vi.fn((key: string) => key === "llm.apiKey.openai" ? "sk-openai" : null),
+        getSecret: vi.fn((key: string) =>
+          key === "llm.apiKey.openai" ? "sk-openai" : null,
+        ),
         getPluginConfig: vi.fn(() => ({})),
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: {
-        registerKeywords: vi.fn(),
+      inputClassifier: {
         unregisterByPlugin: vi.fn(),
       } as never,
       toolRegistry: {
@@ -1446,13 +1592,18 @@ describe("initPluginRuntime HostApi factory", () => {
       routinesStore: { list: () => [] } as never,
     });
 
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
-      | ((pluginId: string, manifest: {
-          id: string;
-          installPolicy?: "admin" | "user";
-          config?: Record<string, unknown>;
-          hostSecrets?: { read?: string[] };
-        }, pluginDataDir: string) => {
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as
+      | ((
+          pluginId: string,
+          manifest: {
+            id: string;
+            installPolicy?: "admin" | "user";
+            config?: Record<string, unknown>;
+            hostSecrets?: { read?: string[] };
+          },
+          pluginDataDir: string,
+        ) => {
           getSecret: (key: string) => string | null;
         })
       | undefined;
@@ -1466,7 +1617,9 @@ describe("initPluginRuntime HostApi factory", () => {
     );
     expect(api.getSecret("llm.apiKey.openai")).toBe("sk-openai");
 
-    runtimeTestState.readPluginRegistry.mockRejectedValue(new Error("registry unavailable"));
+    runtimeTestState.readPluginRegistry.mockRejectedValue(
+      new Error("registry unavailable"),
+    );
     emitEvent("plugin.installed", { pluginId: "plugin-cache-fail" });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -1475,10 +1628,16 @@ describe("initPluginRuntime HostApi factory", () => {
 });
 
 describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () => {
-  type HasRoutineHostApi = { hasRoutineBySource: (source: string) => Promise<boolean> };
+  type HasRoutineHostApi = {
+    hasRoutineBySource: (source: string) => Promise<boolean>;
+  };
   type CreateHostApi = (
     pluginId: string,
-    manifest: { id: string; config?: Record<string, unknown>; capabilities?: string[] },
+    manifest: {
+      id: string;
+      config?: Record<string, unknown>;
+      capabilities?: string[];
+    },
     pluginDataDir: string,
   ) => HasRoutineHostApi;
 
@@ -1502,7 +1661,6 @@ describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () =>
         setPluginConfig: vi.fn(),
       } as never,
       memoryManager: {} as never,
-      keywordEngine: { registerKeywords: vi.fn(), unregisterByPlugin: vi.fn() } as never,
       toolRegistry: {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
@@ -1520,7 +1678,8 @@ describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () =>
       approvalGate: { requestAndWait: vi.fn() } as never,
       routinesStore: { list: () => records } as never,
     });
-    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as CreateHostApi | undefined;
+    const createHostApi = runtimeTestState.capturedRuntimeOptions
+      ?.createHostApi as CreateHostApi | undefined;
     expect(createHostApi).toBeDefined();
     return invokeHostApiFactory(
       createHostApi!,
@@ -1533,32 +1692,46 @@ describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () =>
   const records = [
     { source: "suggestion:local-indexer:nightly-rescan" },
     { source: "suggestion:meeting:weekly-digest" },
-    { /* manual routine — no source */ },
+    {
+      /* manual routine — no source */
+    },
   ];
 
   it("returns true ONLY for the caller's own matching source marker", async () => {
     const api = await buildHostApi("local-indexer", records);
-    await expect(api.hasRoutineBySource("suggestion:local-indexer:nightly-rescan")).resolves.toBe(true);
+    await expect(
+      api.hasRoutineBySource("suggestion:local-indexer:nightly-rescan"),
+    ).resolves.toBe(true);
     // Same prefix, no matching record → false.
-    await expect(api.hasRoutineBySource("suggestion:local-indexer:does-not-exist")).resolves.toBe(false);
+    await expect(
+      api.hasRoutineBySource("suggestion:local-indexer:does-not-exist"),
+    ).resolves.toBe(false);
   });
 
   it("refuses to probe another plugin's routines (prefix scoping)", async () => {
     const api = await buildHostApi("local-indexer", records);
     // A real routine exists with this source, but it is NOT the caller's prefix.
-    await expect(api.hasRoutineBySource("suggestion:meeting:weekly-digest")).resolves.toBe(false);
+    await expect(
+      api.hasRoutineBySource("suggestion:meeting:weekly-digest"),
+    ).resolves.toBe(false);
   });
 
   it("scopes per caller — the meeting plugin sees only its own marker", async () => {
     const api = await buildHostApi("meeting", records);
-    await expect(api.hasRoutineBySource("suggestion:meeting:weekly-digest")).resolves.toBe(true);
-    await expect(api.hasRoutineBySource("suggestion:local-indexer:nightly-rescan")).resolves.toBe(false);
+    await expect(
+      api.hasRoutineBySource("suggestion:meeting:weekly-digest"),
+    ).resolves.toBe(true);
+    await expect(
+      api.hasRoutineBySource("suggestion:local-indexer:nightly-rescan"),
+    ).resolves.toBe(false);
   });
 
   it("rejects empty / non-suggestion sources without enumeration", async () => {
     const api = await buildHostApi("local-indexer", records);
     await expect(api.hasRoutineBySource("")).resolves.toBe(false);
     await expect(api.hasRoutineBySource("local-indexer")).resolves.toBe(false);
-    await expect(api.hasRoutineBySource("suggestion:local-indexer")).resolves.toBe(false);
+    await expect(
+      api.hasRoutineBySource("suggestion:local-indexer"),
+    ).resolves.toBe(false);
   });
 });

@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
@@ -35,11 +35,13 @@ class FakeProvider implements LLMProvider {
 function twoToolRounds(): FakeProvider {
   return new FakeProvider([
     [
-      { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+      { type: "tool_call", id: "t1", name: "noop_tool", input: {},
+      } as StreamEvent,
       { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
     ],
     [
-      { type: "tool_call", id: "t2", name: "noop_tool", input: {} } as StreamEvent,
+      { type: "tool_call", id: "t2", name: "noop_tool", input: {},
+      } as StreamEvent,
       { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
     ],
     [
@@ -54,7 +56,8 @@ interface ExecCall {
   trustOrigin: string;
 }
 
-function makeLoop(provider: LLMProvider): { loop: ConversationLoop; execCalls: ExecCall[] } {
+function makeLoop(provider: LLMProvider): { loop: ConversationLoop; execCalls: ExecCall[];
+} {
   const toolRegistry = new ToolRegistry();
   toolRegistry.register(createDynamicTool({
     name: "noop_tool",
@@ -63,15 +66,17 @@ function makeLoop(provider: LLMProvider): { loop: ConversationLoop; execCalls: E
     category: "read",
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "ok", isError: false }),
-  }));
-  const loop = new ConversationLoop(({
-    settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+  }),
+  );
+  const loop = new ConversationLoop({
+    settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key",
+    },
     systemPromptBuilder: { build: () => "system" },
-    keywordEngine: new KeywordEngine(),
-    routeEngine: new RouteEngine({ toolRegistry }),
+    inputClassifier: new InputClassifier(),
+    routeEngine: new RouteEngine(),
     toolRegistry,
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
 
   // Record what the executor was handed per round — the two values that carry the
@@ -81,7 +86,8 @@ function makeLoop(provider: LLMProvider): { loop: ConversationLoop; execCalls: E
     toolExecutor: {
       executeAll: (
         uses: unknown,
-        opts: { overlayTriggerOrigin?: string | null; permissionContext?: { trustOrigin?: string } },
+        opts: { overlayTriggerOrigin?: string | null; permissionContext?: { trustOrigin?: string };
+          },
       ) => Promise<unknown>;
     };
   }).toolExecutor;
@@ -100,14 +106,17 @@ describe("MCP-app guidance downgrades the rest of the turn", () => {
   it("app-enveloped guidance ⇒ staged origin `app:<serverId>` + `app-emitted` trust from that round on", async () => {
     const { loop, execCalls } = makeLoop(twoToolRounds());
 
-    const turn = loop.runTurn("사용자 질문", {}, undefined, { inputOrigin: "user-keyboard" });
+    const turn = loop.runTurn("사용자 질문", {}, undefined, { inputOrigin: "user-keyboard",
+    });
     await Promise.resolve();
-    loop.queueGuidance(formatAppMessageEnvelope("open the invoice", "app:acme-cards"));
+    loop.queueGuidance(formatAppMessageEnvelope("open the invoice", "app:acme-cards"),
+    );
     await turn;
 
     expect(execCalls).toHaveLength(2);
     // Round 0 ran before the app spoke — still the user's turn.
-    expect(execCalls[0]).toEqual({ overlayTriggerOrigin: null, trustOrigin: "llm-tool-arg" });
+    expect(execCalls[0]).toEqual({ overlayTriggerOrigin: null, trustOrigin: "llm-tool-arg",
+    });
     // Round 1 ran after the app's text entered the turn — the whole permission posture
     // moves: staged origin (⇒ write/shell/network forced to ask) + app provenance.
     expect(execCalls[1]).toEqual({
@@ -119,12 +128,14 @@ describe("MCP-app guidance downgrades the rest of the turn", () => {
   it("a user-typed guide does NOT downgrade the turn (control)", async () => {
     const { loop, execCalls } = makeLoop(twoToolRounds());
 
-    const turn = loop.runTurn("사용자 질문", {}, undefined, { inputOrigin: "user-keyboard" });
+    const turn = loop.runTurn("사용자 질문", {}, undefined, { inputOrigin: "user-keyboard",
+    });
     await Promise.resolve();
     loop.queueGuidance("더 짧게 요약");
     await turn;
 
     expect(execCalls).toHaveLength(2);
-    expect(execCalls[1]).toEqual({ overlayTriggerOrigin: null, trustOrigin: "llm-tool-arg" });
+    expect(execCalls[1]).toEqual({ overlayTriggerOrigin: null, trustOrigin: "llm-tool-arg",
+    });
   });
 });

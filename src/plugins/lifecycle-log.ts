@@ -32,7 +32,7 @@ const log = createLogger("plugin-lifecycle");
  * Naming convention: `"lifecycle:<area>[:<sub>]:<verb>"`
  *   - area:  discovery | validation | load | register | start | invoke |
  *            event | webview | restart | stop | capability
- *   - sub:   optional sub-area (e.g. `tool`, `keywords` under `register`;
+ *   - sub:   optional sub-area (e.g. `tool` under `register`;
  *            `stop`, `reload`, `start` under `restart`; `load` under `webview`)
  *   - verb:  start | ok | fail | skip | retry | timeout
  *     (use `start` for entry, `ok` for success, `fail` for caught error,
@@ -58,11 +58,10 @@ export const PluginPhase = {
   LOAD_OK: "lifecycle:load:ok",
   LOAD_FAIL: "lifecycle:load:fail",
 
-  // register — tool/keyword/event registration
+  // register — tool/event registration
   REGISTER_TOOL_OK: "lifecycle:register:tool:ok",
   REGISTER_TOOL_SKIP: "lifecycle:register:tool:skip",
   REGISTER_TOOL_FAIL: "lifecycle:register:tool:fail",
-  REGISTER_KEYWORDS_OK: "lifecycle:register:keywords:ok",
 
   // start — instance.start()
   START_OK: "lifecycle:start:ok",

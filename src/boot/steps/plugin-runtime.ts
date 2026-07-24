@@ -3,8 +3,8 @@
  *
  * Extracted from boot.ts to keep orchestration thin. This module:
  *   • constructs the PluginDeploymentGuard and plugin runtime integrity gate
- *   • builds the per-plugin HostApi factory (registerKeywords / emitEvent /
- *     onEvent / getSecret / callLlm /
+ *   • builds the per-plugin HostApi factory (emitEvent / onEvent / getSecret /
+ *     callLlm /
  *     logEvent / onShutdown)
  *   • creates the PluginRuntime, starts plugins, registers plugin tools,
  *     and wires the dev hot-reload watcher
@@ -36,7 +36,6 @@ import type {
   OpenAuthWindowBaseOptions,
   OpenAuthWindowFinalUrlResult,
 } from "../../plugins/types.js";
-import type { KeywordEngine } from "../../core/keyword-engine.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
@@ -61,13 +60,15 @@ const log = createLogger("lvis");
 
 // ── C5 re-exports — preserve this module path's public export contract. ──────
 export { declaresHostManagedPythonRuntime } from "./plugin-runtime/manifest.js";
-export { approvalIssuerRegistry, auditApprovalViolation } from "./plugin-runtime/approval-gating.js";
+export { approvalIssuerRegistry, auditApprovalViolation,
+} from "./plugin-runtime/approval-gating.js";
 export {
   HOST_PUBLIC_PREFERENCE_KEYS,
   buildAppPreferenceReader,
 } from "./plugin-runtime/app-preference.js";
 export type { HostPublicPreferenceKey } from "./plugin-runtime/app-preference.js";
-export { EXTERNAL_LINK_PARTITION, routeExternalUrl } from "./plugin-runtime/external-url.js";
+export { EXTERNAL_LINK_PARTITION, routeExternalUrl,
+} from "./plugin-runtime/external-url.js";
 export {
   TRIGGER_CONVERSATION_DEDUPE_TTL_MS,
   TriggerConversationDedupe,
@@ -91,7 +92,9 @@ export type {
 export interface LateBindingRefs {
   llmCallerRef: {
     fn:
-      | ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }) => Promise<string>)
+      | ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal;
+          },
+        ) => Promise<string>)
       | null;
   };
   pluginCallLlmRef: {
@@ -99,7 +102,8 @@ export interface LateBindingRefs {
       | ((
           pluginId: string,
           prompt: string,
-          opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal },
+          opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal;
+          },
         ) => Promise<string>)
       | null;
   };
@@ -120,7 +124,6 @@ export interface InitPluginRuntimeInput {
   projectRoot: string;
   settingsService: SettingsService;
   memoryManager: MemoryManager;
-  keywordEngine: KeywordEngine;
   toolRegistry: ToolRegistry;
   pythonPath: string | undefined;
   pythonRuntime?: PythonRuntimeBootstrapper;
@@ -209,7 +212,8 @@ export interface InitPluginRuntimeOutput {
   pluginRuntime: PluginRuntime;
   deploymentGuard: PluginDeploymentGuard;
   lateBinding: LateBindingRefs;
-  pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }>;
+  pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void>;
+  }>;
   runPluginShutdownHandlers: () => Promise<void>;
   /** SoT — shared with MarketplaceService + post-boot update detector. */
   pluginPaths: ReturnType<typeof resolvePluginPaths>;
@@ -236,7 +240,6 @@ export async function initPluginRuntime(
   const {
     projectRoot,
     settingsService,
-    keywordEngine,
     toolRegistry,
     pythonPath,
     pythonRuntime,
@@ -267,7 +270,8 @@ export async function initPluginRuntime(
     settingsService.get("features")?.hostClassifiesRisk ?? false;
 
   // Plugin shutdown handler registry — fires on before-quit (see shared AuditLogger + hooks wiring).
-  const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
+  const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void>;
+  }> = [];
   let pluginShutdownRan = false;
   let pluginShutdownPromise: Promise<void> | null = null;
   const runPluginShutdownHandlers = (): Promise<void> => {
@@ -283,11 +287,18 @@ export async function initPluginRuntime(
             await Promise.race([
               Promise.resolve().then(() => handler()),
               new Promise<never>((_, reject) => {
-                timer = setTimeout(() => reject(new Error(`shutdown handler timeout [plugin:${pluginId}]`)), SHUTDOWN_TIMEOUT_MS);
+                timer = setTimeout(() => reject(new Error(`shutdown handler timeout [plugin:${pluginId}]`,
+                      ),
+                    ),
+                  SHUTDOWN_TIMEOUT_MS,
+                );
               }),
             ]);
           } catch (err) {
-            log.warn(`shutdown handler error [plugin:${pluginId}]: %s`, (err as Error).message);
+            log.warn(
+              `shutdown handler error [plugin:${pluginId}]: %s`,
+              (err as Error).message,
+            );
           } finally {
             if (timer) clearTimeout(timer);
           }
@@ -335,10 +346,11 @@ export async function initPluginRuntime(
   // install-time manifest SHA pin; `plugin.json` is untrusted). Extracted to
   // ./plugin-runtime/registry-cache.ts and wired here so the HostApi closures
   // answer lookups synchronously and the install/uninstall listeners refresh it.
-  const { refreshRegistryEntryCache, getRegistryEntry } = createRegistryEntryCache({
-    registryPath: pluginPaths.registryPath,
-    log,
-  });
+  const { refreshRegistryEntryCache, getRegistryEntry } =
+    createRegistryEntryCache({
+      registryPath: pluginPaths.registryPath,
+      log,
+    });
   await refreshRegistryEntryCache();
 
   // Late-binding refs for ConversationLoop-dependent callers.
@@ -388,7 +400,6 @@ export async function initPluginRuntime(
     lateBinding,
     getRegistryEntry,
     hostClassifiesRiskEnabled,
-    keywordEngine,
     pluginShutdownHandlers,
     readAppPreference,
     settingsService,
@@ -407,7 +418,6 @@ export async function initPluginRuntime(
   const { preparePluginStart, onDisable, onActiveStateChange, onEnable } =
     createLifecycleCallbacks({
       getPluginRuntime: () => pluginRuntime,
-      keywordEngine,
       lateBinding,
       getMainWindow,
       mainWindow,
@@ -430,7 +440,8 @@ export async function initPluginRuntime(
           sessionId: "plugin-runtime",
           type: level === "error" ? "error" : "tool_call",
           input: `[${level.toUpperCase()}] ${message}`,
-          output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
+          output:
+            data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
         });
       } catch (error) {
         log.error({ err: error }, "plugin runtime audit sink failed");
@@ -482,8 +493,8 @@ export async function initPluginRuntime(
     await pluginRuntime.startAll();
     log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 
-  // Pre-register the per-partition `setPreloads(...)` policy for every
-  // loaded plugin (#498). Electron's `<webview partition="persist:plugin:..."
+    // Pre-register the per-partition `setPreloads(...)` policy for every
+    // loaded plugin (#498). Electron's `<webview partition="persist:plugin:..."
   // preload="...">` honors `preload=` only when sandbox=no; with sandbox=yes
   // the preload script must be registered on the partition's Session via
   // `session.setPreloads()`. The previous attach-time hook in main.ts
@@ -538,10 +549,13 @@ export async function initPluginRuntime(
     onReloaded: (pluginId) => {
       const manifest = pluginRuntime.getPluginManifest(pluginId);
       if (!manifest) return;
-      log.info(`plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
+      log.info(`plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`,
+      );
     },
   });
-  app.prependOnceListener("before-quit", () => { pluginDevWatcher.stop(); });
+  app.prependOnceListener("before-quit", () => {
+    pluginDevWatcher.stop();
+  });
 
   return {
     pluginRuntime,
@@ -551,7 +565,9 @@ export async function initPluginRuntime(
     runPluginShutdownHandlers,
     pluginPaths,
     loopbackManager,
-    setBundleLifecycleHandler: (handler) => { bundleLifecycle = handler; },
+    setBundleLifecycleHandler: (handler) => {
+      bundleLifecycle = handler;
+    },
     startPlugins,
   };
 }

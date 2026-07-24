@@ -193,9 +193,16 @@ export async function rollbackMarketplacePluginWithLifecycle(options: {
   pluginId: string;
   pluginRuntime: PluginInstallRuntime;
   pluginMarketplace: Pick<PluginInstallMarketplace, "rollbackPlugin">;
+  ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
 }): Promise<{ pluginId: string; rolledBackTo: string }> {
-  const { pluginId, pluginRuntime, pluginMarketplace } = options;
+  const {
+    pluginId,
+    pluginRuntime,
+    pluginMarketplace,
+    ensurePluginStateReadyForInstall,
+  } = options;
   return withPluginInstallLock(pluginId, async () => {
+    await ensurePluginStateReadyForInstall(pluginId);
     const result = await pluginMarketplace.rollbackPlugin(pluginId, {
       activatePreparedArtifact: (prepared) =>
         pluginRuntime.activatePreparedArtifact(prepared),
@@ -897,6 +904,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
   networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
   pluginRuntime: PluginInstallRuntime;
   pluginMarketplace: PluginInstallMarketplace;
+  ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
   broadcastInstallProgress?: (payload: MarketplaceInstallProgressPayload) => void;
   emitPluginInstalled?: (payload: { pluginId: string; source: "marketplace" }) => void;
   refreshPluginNotifications?: () => void;
@@ -910,6 +918,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
     networkAccessAcknowledgement,
     pluginRuntime,
     pluginMarketplace,
+    ensurePluginStateReadyForInstall,
     broadcastInstallProgress,
     emitPluginInstalled,
     refreshPluginNotifications,
@@ -950,6 +959,10 @@ export async function installMarketplacePluginWithLifecycle(options: {
       throw new Error(
         `Statically configured plugin cannot be replaced from the marketplace: ${currentRuntimePluginId}`,
       );
+    }
+    await ensurePluginStateReadyForInstall(currentCatalogState.pluginId);
+    if (currentRuntimePluginId !== currentCatalogState.pluginId) {
+      await ensurePluginStateReadyForInstall(currentRuntimePluginId);
     }
     const expectedVersionForGuard = expectedVersion?.trim();
     if (expectedVersionForGuard) {

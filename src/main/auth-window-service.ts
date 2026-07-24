@@ -28,6 +28,9 @@ import {
   buildTitlebarButtonScript,
 } from "./window-titlebar-shell.js";
 import { resolveAppIconPath } from "./app-icon.js";
+import {
+  withAuthPartitionViewersClosed,
+} from "./auth-partition-viewer-service.js";
 import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("auth-window");
@@ -232,16 +235,22 @@ export function getTrackedPluginAuthPartitions(pluginId: string): string[] {
   return [...new Set([base, ...(trackedPluginAuthPartitions.get(pluginId) ?? [])])];
 }
 
-export function forgetTrackedPluginAuthPartitions(pluginId: string): void {
+export async function forgetTrackedPluginAuthPartitions(
+  pluginId: string,
+): Promise<void> {
+  const previous = trackedPluginAuthPartitions.get(pluginId);
   trackedPluginAuthPartitions.delete(pluginId);
-  // Persist deletion — synchronous in-memory removal is immediate; the async
-  // disk write happens in background. Errors are routed to the error logger.
-  if (_persistDelete) {
-    _persistDelete(pluginId).catch((err) => {
-      _persistErrorLog?.(
-        `plugin-auth-partition-store: delete failed for plugin ${pluginId}: ${(err as Error).message}`,
+  try {
+    await _persistDelete?.(pluginId);
+  } catch (error) {
+    const concurrentlyObserved = trackedPluginAuthPartitions.get(pluginId);
+    if (previous || concurrentlyObserved) {
+      trackedPluginAuthPartitions.set(
+        pluginId,
+        new Set([...(previous ?? []), ...(concurrentlyObserved ?? [])]),
       );
-    });
+    }
+    throw error;
   }
 }
 
@@ -1041,20 +1050,22 @@ export async function clearAuthPartition(partition: string): Promise<void> {
   if (typeof partition !== "string" || partition.length === 0) {
     throw new Error("clearAuthPartition: partition must be a non-empty string");
   }
-  const ses = session.fromPartition(partition);
-  await ses.clearStorageData({
-    storages: [
-      "cookies",
-      "filesystem",
-      "indexdb",
-      "localstorage",
-      "shadercache",
-      "serviceworkers",
-      "cachestorage",
-    ],
+  await withAuthPartitionViewersClosed(partition, async () => {
+    const ses = session.fromPartition(partition);
+    await ses.clearStorageData({
+      storages: [
+        "cookies",
+        "filesystem",
+        "indexdb",
+        "localstorage",
+        "shadercache",
+        "serviceworkers",
+        "cachestorage",
+      ],
+    });
+    await ses.clearCache();
+    if (typeof ses.clearAuthCache === "function") {
+      await ses.clearAuthCache();
+    }
   });
-  await ses.clearCache();
-  if (typeof ses.clearAuthCache === "function") {
-    await ses.clearAuthCache();
-  }
 }

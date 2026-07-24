@@ -41,7 +41,7 @@ export default function Page() {
       <h2 id="limits">What the LLM cannot change directly</h2>
       <ul>
         <li>A tool's RiskLevel — fixed as metadata. Cannot be downgraded by an LLM result.</li>
-        <li>A tool's Category (<code>read | write | shell | network | meta</code>) — fixed by the manifest's <code>toolSchemas.&lt;tool&gt;.category</code>.</li>
+        <li>A tool's risk classification — derived by the Host from its schema and execution path. Plugin metadata can strengthen policy but cannot lower it.</li>
         <li>User grants — only the user can change these.</li>
       </ul>
 

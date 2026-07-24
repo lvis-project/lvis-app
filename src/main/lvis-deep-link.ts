@@ -16,8 +16,14 @@ import { sendToWindow } from "../ipc/safe-send.js";
 import { emitEvent as emitHostEvent } from "../boot/types.js";
 import type { AppServices } from "../boot.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import { installMarketplacePluginWithLifecycle } from "../plugins/install-lifecycle.js";
-import { uninstallPluginWithLifecycle } from "../plugins/uninstall-lifecycle.js";
+import {
+  drainPluginInstallLockOperations,
+  installMarketplacePluginWithLifecycle,
+} from "../plugins/install-lifecycle.js";
+import {
+  ensurePluginStateReadyForInstall,
+  uninstallPluginWithLifecycle,
+} from "../plugins/uninstall-lifecycle.js";
 import {
   buildNetworkAccessAcknowledgement,
   hasNetworkAccessDisclosure,
@@ -42,6 +48,40 @@ const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function requirePluginCleanupServices(services: AppServices): {
+  pluginPaths: NonNullable<AppServices["pluginPaths"]>;
+  clearAuthPartitionService: NonNullable<
+    AppServices["clearAuthPartitionService"]
+  >;
+  listPluginAuthPartitionsService: NonNullable<
+    AppServices["listPluginAuthPartitionsService"]
+  >;
+  forgetPluginAuthPartitionsService: NonNullable<
+    AppServices["forgetPluginAuthPartitionsService"]
+  >;
+} {
+  const {
+    pluginPaths,
+    clearAuthPartitionService,
+    listPluginAuthPartitionsService,
+    forgetPluginAuthPartitionsService,
+  } = services;
+  if (
+    !pluginPaths
+    || !clearAuthPartitionService
+    || !listPluginAuthPartitionsService
+    || !forgetPluginAuthPartitionsService
+  ) {
+    throw new Error("plugin lifecycle cleanup services are not fully wired");
+  }
+  return {
+    pluginPaths,
+    clearAuthPartitionService,
+    listPluginAuthPartitionsService,
+    forgetPluginAuthPartitionsService,
+  };
 }
 
 /**
@@ -549,14 +589,14 @@ export async function handleLvisUri(url: string) {
     });
     if (response !== 0) return;
     void (async () => {
+      const cleanupServices = requirePluginCleanupServices(activeServices);
       const result = await uninstallPluginWithLifecycle(target.pluginId, {
         pluginMarketplace: activeServices.pluginMarketplace,
         pluginRuntime: activeServices.pluginRuntime,
         settingsService: activeServices.settingsService,
-        pluginPaths: activeServices.pluginPaths,
-        clearAuthPartitionService: activeServices.clearAuthPartitionService,
-        listPluginAuthPartitionsService: activeServices.listPluginAuthPartitionsService,
-        forgetPluginAuthPartitionsService: activeServices.forgetPluginAuthPartitionsService,
+        ...cleanupServices,
+        drainPluginInstallLockOperationsService:
+          drainPluginInstallLockOperations,
         refreshPluginNotifications: activeServices.refreshPluginNotifications,
         emitHostEvent,
         log,
@@ -595,6 +635,7 @@ export async function handleLvisUri(url: string) {
   const networkAccessAcknowledgement = buildNetworkAccessAcknowledgement(target.networkAccess);
   let installProgressSlug = params.slug;
   void (async () => {
+    const cleanupServices = requirePluginCleanupServices(activeServices);
     const catalogItems = await activeServices.pluginMarketplace.list();
     const installLockId =
       catalogItems.find((item) => item.id === params.slug || item.slug === params.slug)?.id ?? params.slug;
@@ -609,6 +650,18 @@ export async function handleLvisUri(url: string) {
       networkAccessAcknowledgement,
       pluginRuntime: activeServices.pluginRuntime,
       pluginMarketplace: activeServices.pluginMarketplace,
+      ensurePluginStateReadyForInstall: (candidatePluginId) =>
+        ensurePluginStateReadyForInstall(candidatePluginId, {
+          pluginMarketplace: activeServices.pluginMarketplace,
+          pluginRuntime: activeServices.pluginRuntime,
+          settingsService: activeServices.settingsService,
+          ...cleanupServices,
+          drainPluginInstallLockOperationsService:
+            drainPluginInstallLockOperations,
+          refreshPluginNotifications: activeServices.refreshPluginNotifications,
+          emitHostEvent,
+          log,
+        }),
       broadcastInstallProgress: (payload) =>
         broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
       emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),

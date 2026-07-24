@@ -8,7 +8,7 @@ import {
   computeMonthlyProjection,
   getUsageRange,
   type AuditTurnEntry,
-  type UsageTrendPoint
+  type UsageTrendPoint,
 } from "../usage-stats.js";
 import { getModelPricing, computeCost } from "../llm/pricing.js";
 
@@ -19,7 +19,7 @@ function turn(partial: Partial<AuditTurnEntry>): AuditTurnEntry {
     type: "turn",
     route: "claude/claude-sonnet-4-6",
     tokenUsage: { inputTokens: 1000, outputTokens: 500 },
-    ...partial
+    ...partial,
   };
 }
 
@@ -27,13 +27,17 @@ describe("usage-stats", () => {
   it("aggregates today/week/month totals from turn entries", () => {
     const now = new Date("2026-04-18T12:00:00Z"); // Saturday
     const entries: AuditTurnEntry[] = [
-      turn({ timestamp: "2026-04-18T10:00:00Z", tokenUsage: { inputTokens: 1_000_000, outputTokens: 500_000 } }),
+      turn({ timestamp: "2026-04-18T10:00:00Z", tokenUsage: { inputTokens: 1_000_000, outputTokens: 500_000 },
+      }),
       // Monday of same week
-      turn({ timestamp: "2026-04-13T10:00:00Z", tokenUsage: { inputTokens: 200_000, outputTokens: 100_000 } }),
+      turn({ timestamp: "2026-04-13T10:00:00Z", tokenUsage: { inputTokens: 200_000, outputTokens: 100_000 },
+      }),
       // Earlier in month
-      turn({ timestamp: "2026-04-02T10:00:00Z", tokenUsage: { inputTokens: 50_000, outputTokens: 25_000 } }),
+      turn({ timestamp: "2026-04-02T10:00:00Z", tokenUsage: { inputTokens: 50_000, outputTokens: 25_000 },
+      }),
       // Previous month — should only count toward trend, not today/week/month
-      turn({ timestamp: "2026-03-15T10:00:00Z", tokenUsage: { inputTokens: 10_000, outputTokens: 5_000 } }),
+      turn({ timestamp: "2026-03-15T10:00:00Z", tokenUsage: { inputTokens: 10_000, outputTokens: 5_000 },
+      }),
     ];
 
     const summary = computeUsageSummary(entries, now);
@@ -46,20 +50,24 @@ describe("usage-stats", () => {
   it("uses KST calendar days for today and trend around UTC midnight", () => {
     const now = new Date("2026-07-03T16:00:00Z"); // 2026-07-04 01:00 KST
     const entries: AuditTurnEntry[] = [
-      turn({ timestamp: "2026-07-03T15:30:00Z", tokenUsage: { inputTokens: 100, outputTokens: 10 } }),
-      turn({ timestamp: "2026-07-03T14:30:00Z", tokenUsage: { inputTokens: 300, outputTokens: 30 } }),
+      turn({ timestamp: "2026-07-03T15:30:00Z", tokenUsage: { inputTokens: 100, outputTokens: 10 },
+      }),
+      turn({ timestamp: "2026-07-03T14:30:00Z", tokenUsage: { inputTokens: 300, outputTokens: 30 },
+      }),
     ];
 
     const summary = computeUsageSummary(entries, now);
     expect(summary.today.inputTokens).toBe(100);
-    expect(summary.trend.map((point) => [point.date, point.inputTokens])).toEqual([
+    expect(summary.trend.map((point) => [point.date, point.inputTokens]),
+    ).toEqual([
       ["2026-07-03", 300],
       ["2026-07-04", 100],
     ]);
   });
 
   it("computes cost using pricing table — Claude Sonnet $3/$15 per 1M", () => {
-    const entries = [turn({ tokenUsage: { inputTokens: 1_000_000, outputTokens: 1_000_000 } })];
+    const entries = [turn({ tokenUsage: { inputTokens: 1_000_000, outputTokens: 1_000_000 } }),
+    ];
     const summary = computeUsageSummary(entries, new Date());
     // $3 input + $15 output = $18
     expect(summary.perVendor[0].cost).toBeCloseTo(18, 5);
@@ -68,9 +76,12 @@ describe("usage-stats", () => {
 
   it("groups by model and session, ranks topConversations by cost", () => {
     const entries: AuditTurnEntry[] = [
-      turn({ sessionId: "expensive", tokenUsage: { inputTokens: 2_000_000, outputTokens: 1_000_000 } }),
-      turn({ sessionId: "cheap", tokenUsage: { inputTokens: 1000, outputTokens: 500 } }),
-      turn({ sessionId: "expensive", tokenUsage: { inputTokens: 500_000, outputTokens: 200_000 } }),
+      turn({ sessionId: "expensive", tokenUsage: { inputTokens: 2_000_000, outputTokens: 1_000_000 },
+      }),
+      turn({ sessionId: "cheap", tokenUsage: { inputTokens: 1000, outputTokens: 500 },
+      }),
+      turn({ sessionId: "expensive", tokenUsage: { inputTokens: 500_000, outputTokens: 200_000 },
+      }),
     ];
     const summary = computeUsageSummary(entries, new Date());
     expect(summary.topConversations[0].sessionId).toBe("expensive");
@@ -80,7 +91,9 @@ describe("usage-stats", () => {
 
   it("respects env pricing override", () => {
     process.env.LVIS_PRICING_OVERRIDE = JSON.stringify({
-      claude: { "claude-sonnet-4-6": { inputPer1M: 100, outputPer1M: 100, contextWindow: 1_000_000 } }
+      claude: { "claude-sonnet-4-6": { inputPer1M: 100, outputPer1M: 100, contextWindow: 1_000_000,
+        },
+      },
     });
     try {
       const p = getModelPricing("claude", "claude-sonnet-4-6");
@@ -176,7 +189,8 @@ describe("usage-stats", () => {
     it.each(["gemini", "vertex-ai"] as const)(
       "%s — cache fields ignored, write deferred to storage-per-hour cron",
       (vendor) => {
-        const flash = { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_000_000 };
+        const flash = { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_000_000,
+        };
         // Free tier: $0 regardless of cache.
         expect(
           computeCost(
@@ -277,7 +291,7 @@ describe("usage-stats", () => {
         timestamp: new Date().toISOString(),
         sessionId: "legacy-bare-route",
         type: "turn",
-        route: "skill",
+        route: "legacy",
         tokenUsage: {
           inputTokens: 10_000,
           outputTokens: 1_000,
@@ -289,7 +303,7 @@ describe("usage-stats", () => {
     expect(summary.perVendor[0].vendor).toBe("unknown");
     expect(summary.perVendor[0].model).toBe("*");
     expect(summary.perModel[0].vendor).toBe("unknown");
-    expect(summary.perModel[0].model).toBe("skill");
+    expect(summary.perModel[0].model).toBe("legacy");
     expect(summary.perVendor[0].unknownCostTurns).toBe(1);
     expect(summary.perVendor[0].totalTokens).toBe(11_000);
   });
@@ -332,13 +346,16 @@ describe("usage-stats", () => {
 
     const summary = computeUsageSummary(entries, new Date());
     expect(summary.topConversations[0].turns).toBe(1);
-    expect(summary.perVendor.map((row) => row.vendor).sort()).toEqual(["claude", "openai"]);
-    expect(summary.perModel.map((row) => `${row.vendor}/${row.model}`).sort()).toEqual([
-      "claude/claude-sonnet-4-6",
-      "openai/gpt-5.4-mini",
+    expect(summary.perVendor.map((row) => row.vendor).sort()).toEqual(["claude", "openai",
     ]);
-    expect(summary.perVendor.find((row) => row.vendor === "claude")?.totalTokens).toBe(1_800_000);
-    expect(summary.perVendor.find((row) => row.vendor === "openai")?.totalTokens).toBe(11_000);
+    expect(summary.perModel.map((row) => `${row.vendor}/${row.model}`).sort(),
+    ).toEqual(["claude/claude-sonnet-4-6", "openai/gpt-5.4-mini"]);
+    expect(
+      summary.perVendor.find((row) => row.vendor === "claude")?.totalTokens,
+    ).toBe(1_800_000);
+    expect(
+      summary.perVendor.find((row) => row.vendor === "openai")?.totalTokens,
+    ).toBe(11_000);
   });
 
   it("prices OpenAI long-context surcharge per provider request segment, not per LVIS turn aggregate", () => {
@@ -435,7 +452,12 @@ describe("usage-stats", () => {
     // matches Anthropic's own billing breakdown.
     const sonnet = { inputPer1M: 3, outputPer1M: 15, contextWindow: 200_000 };
     const cached = computeCost(
-      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 1_000_000, cacheWriteTokens: 0 },
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 1_000_000,
+        cacheWriteTokens: 0,
+      },
       sonnet,
       "claude",
     );
@@ -444,7 +466,7 @@ describe("usage-stats", () => {
       sonnet,
       "claude",
     );
-    expect(cached).toBeCloseTo(0.30, 5);
+    expect(cached).toBeCloseTo(0.3, 5);
     expect(fresh).toBeCloseTo(3.0, 5);
     expect(cached / fresh).toBeCloseTo(0.1, 5);
   });
@@ -456,7 +478,11 @@ describe("usage-stats", () => {
       gpt54mini,
       "openai",
     );
-    const fresh = computeCost({ inputTokens: 1_000_000, outputTokens: 0 }, gpt54mini, "openai");
+    const fresh = computeCost(
+      { inputTokens: 1_000_000, outputTokens: 0 },
+      gpt54mini,
+      "openai",
+    );
     // 100K fresh at $0.75/M + 900K cached at $0.075/M.
     expect(cached).toBeCloseTo(0.1425, 5);
     expect(fresh).toBeCloseTo(0.75, 5);
@@ -469,8 +495,15 @@ describe("usage-stats", () => {
       turn({ timestamp: "2026-04-12T10:00:00Z" }),
       turn({ timestamp: "2026-04-11T10:00:00Z" }),
     ];
-    const summary = computeUsageSummary(entries, new Date("2026-04-12T12:00:00Z"));
-    expect(summary.trend.map((t) => t.date)).toEqual(["2026-04-10", "2026-04-11", "2026-04-12"]);
+    const summary = computeUsageSummary(
+      entries,
+      new Date("2026-04-12T12:00:00Z"),
+    );
+    expect(summary.trend.map((t) => t.date)).toEqual([
+      "2026-04-10",
+      "2026-04-11",
+      "2026-04-12",
+    ]);
   });
 
   it("reads JSONL audit files and ignores non-turn entries", () => {
@@ -492,7 +525,10 @@ describe("usage-stats", () => {
         file,
         [
           JSON.stringify(turn({ timestamp: `${dateStr}T10:00:00Z` })),
-          JSON.stringify({ type: "tool_call", timestamp: `${dateStr}T10:05:00Z` }),
+          JSON.stringify({
+            type: "tool_call",
+            timestamp: `${dateStr}T10:05:00Z`,
+          }),
           "not json",
           "",
           JSON.stringify(turn({ timestamp: `${dateStr}T11:00:00Z` })),
@@ -515,15 +551,39 @@ describe("computeMonthlyProjection", () => {
 
   it("projects avg-per-day × 30", () => {
     const trend: UsageTrendPoint[] = [
-      { date: "2026-04-01", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 1.0 },
-      { date: "2026-04-02", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 3.0 },
+      {
+        date: "2026-04-01",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 0,
+        cost: 1.0,
+      },
+      {
+        date: "2026-04-02",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 0,
+        cost: 3.0,
+      },
     ];
     expect(computeMonthlyProjection(trend)).toBeCloseTo(60, 5);
   });
 
   it("projects correctly for a single day", () => {
     const trend: UsageTrendPoint[] = [
-      { date: "2026-04-01", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0.5 },
+      {
+        date: "2026-04-01",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 0,
+        cost: 0.5,
+      },
     ];
     expect(computeMonthlyProjection(trend)).toBeCloseTo(15, 5);
   });
@@ -534,19 +594,49 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
     const dir = mkdtempSync(join(tmpdir(), "usage-range-"));
     try {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "2026-04-10.jsonl"),
-        JSON.stringify({ timestamp: "2026-04-10T10:00:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 100, outputTokens: 50 } }) + "\n", "utf-8");
-      writeFileSync(join(dir, "2026-04-15.jsonl"),
-        JSON.stringify({ timestamp: "2026-04-15T10:00:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 200, outputTokens: 100 } }) + "\n", "utf-8");
-      writeFileSync(join(dir, "2026-04-20.jsonl"),
-        JSON.stringify({ timestamp: "2026-04-20T10:00:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 400, outputTokens: 200 } }) + "\n", "utf-8");
+      writeFileSync(
+        join(dir, "2026-04-10.jsonl"),
+        JSON.stringify({
+          timestamp: "2026-04-10T10:00:00Z",
+          sessionId: "s1",
+          type: "turn",
+          route: "claude/claude-sonnet-4-6",
+          tokenUsage: { inputTokens: 100, outputTokens: 50 },
+        }) + "\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(dir, "2026-04-15.jsonl"),
+        JSON.stringify({
+          timestamp: "2026-04-15T10:00:00Z",
+          sessionId: "s1",
+          type: "turn",
+          route: "claude/claude-sonnet-4-6",
+          tokenUsage: { inputTokens: 200, outputTokens: 100 },
+        }) + "\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(dir, "2026-04-20.jsonl"),
+        JSON.stringify({
+          timestamp: "2026-04-20T10:00:00Z",
+          sessionId: "s1",
+          type: "turn",
+          route: "claude/claude-sonnet-4-6",
+          tokenUsage: { inputTokens: 400, outputTokens: 200 },
+        }) + "\n",
+        "utf-8",
+      );
 
       const entries = readAuditEntries(dir, 365).filter((e) => {
         const d = e.timestamp.slice(0, 10);
         return d >= "2026-04-10" && d <= "2026-04-15";
       });
       const summary = computeUsageSummary(entries);
-      expect(summary.trend.map((t) => t.date)).toEqual(["2026-04-10", "2026-04-15"]);
+      expect(summary.trend.map((t) => t.date)).toEqual([
+        "2026-04-10",
+        "2026-04-15",
+      ]);
       expect(summary.trend[0].inputTokens).toBe(100);
       expect(summary.trend[1].inputTokens).toBe(200);
     } finally {
@@ -561,12 +651,31 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
       process.env.LVIS_HOME = home;
       const auditDir = join(home, "audit");
       mkdirSync(auditDir, { recursive: true });
-      writeFileSync(join(auditDir, "2026-07-03.jsonl"), [
-        JSON.stringify({ timestamp: "2026-07-03T14:30:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 300, outputTokens: 30 } }),
-        JSON.stringify({ timestamp: "2026-07-03T15:30:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 100, outputTokens: 10 } }),
-      ].join("\n") + "\n", "utf-8");
+      writeFileSync(
+        join(auditDir, "2026-07-03.jsonl"),
+        [
+          JSON.stringify({
+            timestamp: "2026-07-03T14:30:00Z",
+            sessionId: "s1",
+            type: "turn",
+            route: "claude/claude-sonnet-4-6",
+            tokenUsage: { inputTokens: 300, outputTokens: 30 },
+          }),
+          JSON.stringify({
+            timestamp: "2026-07-03T15:30:00Z",
+            sessionId: "s1",
+            type: "turn",
+            route: "claude/claude-sonnet-4-6",
+            tokenUsage: { inputTokens: 100, outputTokens: 10 },
+          }),
+        ].join("\n") + "\n",
+        "utf-8",
+      );
 
-      const summary = getUsageRange({ dateFrom: "2026-07-04", dateTo: "2026-07-04" });
+      const summary = getUsageRange({
+        dateFrom: "2026-07-04",
+        dateTo: "2026-07-04",
+      });
       expect(summary.trend.map((point) => point.date)).toEqual(["2026-07-04"]);
       expect(summary.trend[0].inputTokens).toBe(100);
     } finally {
@@ -581,5 +690,9 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
 });
 
 // Ensure env override cache does not bleed between tests.
-beforeEach(() => { delete process.env.LVIS_PRICING_OVERRIDE; });
-afterEach(() => { delete process.env.LVIS_PRICING_OVERRIDE; });
+beforeEach(() => {
+  delete process.env.LVIS_PRICING_OVERRIDE;
+});
+afterEach(() => {
+  delete process.env.LVIS_PRICING_OVERRIDE;
+});
