@@ -51,7 +51,10 @@ import { FeedbackStore } from "./data/feedback-store.js";
 import {
   openAuthWindow as openAuthWindowService,
   clearAuthPartition as clearAuthPartitionService,
+  forgetTrackedPluginAuthPartitions,
+  getTrackedPluginAuthPartitions,
 } from "./main/auth-window-service.js";
+import { recoverPendingPluginUninstallCleanups } from "./plugins/uninstall-lifecycle.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
@@ -508,6 +511,27 @@ export async function bootstrap(
   await setupWorkBoard(ctx);
   await setupWorkflowStores(ctx);
   await setupMarketplace(ctx);
+  const unresolvedUninstallCleanups =
+    await recoverPendingPluginUninstallCleanups({
+      pluginMarketplace: ctx.pluginMarketplace,
+      pluginRuntime,
+      settingsService,
+      pluginPaths,
+      clearAuthPartitionService,
+      listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
+      forgetPluginAuthPartitionsService:
+        forgetTrackedPluginAuthPartitions,
+      log,
+    });
+  if (unresolvedUninstallCleanups.length > 0) {
+    ctx.bootAuditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "boot",
+      type: "warn",
+      input: "plugin-uninstall-cleanup-unresolved",
+      output: JSON.stringify(unresolvedUninstallCleanups),
+    });
+  }
 
   // §4.5.9: SystemPromptBuilder.
   // Skills use progressive disclosure: lightweight catalog every turn, full

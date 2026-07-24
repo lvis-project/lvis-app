@@ -232,17 +232,14 @@ export function getTrackedPluginAuthPartitions(pluginId: string): string[] {
   return [...new Set([base, ...(trackedPluginAuthPartitions.get(pluginId) ?? [])])];
 }
 
-export function forgetTrackedPluginAuthPartitions(pluginId: string): void {
+export async function forgetTrackedPluginAuthPartitions(
+  pluginId: string,
+): Promise<void> {
+  // Durable state must be removed before in-memory retry ownership is lost.
+  // A persistence failure remains fail-loud so uninstall cleanup can retain
+  // its journal checkpoint and retry safely.
+  await _persistDelete?.(pluginId);
   trackedPluginAuthPartitions.delete(pluginId);
-  // Persist deletion — synchronous in-memory removal is immediate; the async
-  // disk write happens in background. Errors are routed to the error logger.
-  if (_persistDelete) {
-    _persistDelete(pluginId).catch((err) => {
-      _persistErrorLog?.(
-        `plugin-auth-partition-store: delete failed for plugin ${pluginId}: ${(err as Error).message}`,
-      );
-    });
-  }
 }
 
 function authShellPreloadPath(): string {

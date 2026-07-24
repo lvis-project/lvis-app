@@ -118,10 +118,21 @@ describe("PluginRuntime.disable", () => {
     await expect(uninstallPluginWithLifecycle(pluginId, {
       pluginRuntime: runtime,
       pluginMarketplace: {
+        getInstalledVersion: vi.fn(async () => null),
         uninstall: vi.fn(async () => {
           throw new Error(`Plugin not installed: ${pluginId}`);
         }),
       },
+      settingsService: {
+        deletePluginConfig: vi.fn(async () => undefined),
+        deletePluginSecrets: vi.fn(async () => 0),
+      },
+      pluginPaths: { cacheRoot: join(testDir, ".cache") },
+      clearAuthPartitionService: vi.fn(async () => undefined),
+      listPluginAuthPartitionsService: vi.fn(() => [
+        `persist:plugin-auth:${encodeURIComponent(pluginId)}`,
+      ]),
+      forgetPluginAuthPartitionsService: vi.fn(async () => undefined),
     })).resolves.toEqual({ pluginId, uninstalled: true });
 
     expect(runtime.listPluginIds()).not.toContain(pluginId);

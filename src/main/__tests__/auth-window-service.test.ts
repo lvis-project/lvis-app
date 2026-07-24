@@ -275,7 +275,7 @@ describe("buildAuthWindowShellHtml", () => {
 });
 
 describe("seedPluginAuthPartitions", () => {
-  it("seeds in-memory tracker from persisted map", () => {
+  it("seeds in-memory tracker from persisted map", async () => {
     seedPluginAuthPartitions({
       "seed.plugin": [
         "persist:plugin-auth:seed.plugin",
@@ -286,10 +286,10 @@ describe("seedPluginAuthPartitions", () => {
     expect(partitions).toContain("persist:plugin-auth:seed.plugin");
     expect(partitions).toContain("persist:plugin-auth:seed.plugin:sub");
     // Cleanup
-    forgetTrackedPluginAuthPartitions("seed.plugin");
+    await forgetTrackedPluginAuthPartitions("seed.plugin");
   });
 
-  it("merges with existing in-memory entries (additive)", () => {
+  it("merges with existing in-memory entries (additive)", async () => {
     rememberPluginAuthPartition("persist:plugin-auth:merge.plugin:a");
     seedPluginAuthPartitions({
       "merge.plugin": ["persist:plugin-auth:merge.plugin:b"],
@@ -298,7 +298,7 @@ describe("seedPluginAuthPartitions", () => {
     expect(partitions).toContain("persist:plugin-auth:merge.plugin:a");
     expect(partitions).toContain("persist:plugin-auth:merge.plugin:b");
     // Cleanup
-    forgetTrackedPluginAuthPartitions("merge.plugin");
+    await forgetTrackedPluginAuthPartitions("merge.plugin");
   });
 });
 
@@ -329,7 +329,7 @@ describe("wirePluginAuthPartitionPersistence + rememberPluginAuthPartition", () 
     const [map] = write.mock.calls[0] as [Map<string, Set<string>>];
     expect(map.get("wired.plugin")?.has("persist:plugin-auth:wired.plugin:session")).toBe(true);
     // Cleanup
-    forgetTrackedPluginAuthPartitions("wired.plugin");
+    await forgetTrackedPluginAuthPartitions("wired.plugin");
   });
 
   it("calls delete callback when forgetTrackedPluginAuthPartitions is called", async () => {
@@ -341,8 +341,7 @@ describe("wirePluginAuthPartitionPersistence + rememberPluginAuthPartition", () 
     });
 
     rememberPluginAuthPartition("persist:plugin-auth:forget.plugin");
-    forgetTrackedPluginAuthPartitions("forget.plugin");
-    await Promise.resolve();
+    await forgetTrackedPluginAuthPartitions("forget.plugin");
 
     expect(deleteFn).toHaveBeenCalledWith("forget.plugin");
   });
@@ -361,6 +360,28 @@ describe("wirePluginAuthPartitionPersistence + rememberPluginAuthPartition", () 
 
     expect(onError).toHaveBeenCalledWith(expect.stringContaining("disk full"));
     // Cleanup
-    forgetTrackedPluginAuthPartitions("err.plugin");
+    await forgetTrackedPluginAuthPartitions("err.plugin");
+  });
+
+  it("keeps retry ownership and rejects when durable tracker deletion fails", async () => {
+    wirePluginAuthPartitionPersistence({
+      write: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockRejectedValue(new Error("disk locked")),
+      onError: vi.fn(),
+    });
+    rememberPluginAuthPartition("persist:plugin-auth:retry.plugin:tenant");
+
+    await expect(
+      forgetTrackedPluginAuthPartitions("retry.plugin"),
+    ).rejects.toThrow("disk locked");
+    expect(getTrackedPluginAuthPartitions("retry.plugin")).toContain(
+      "persist:plugin-auth:retry.plugin:tenant",
+    );
+    wirePluginAuthPartitionPersistence({
+      write: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      onError: vi.fn(),
+    });
+    await forgetTrackedPluginAuthPartitions("retry.plugin");
   });
 });
