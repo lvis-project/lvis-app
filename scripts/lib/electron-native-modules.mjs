@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -30,19 +29,6 @@ db.exec("CREATE TABLE abi_probe (id INTEGER)");
 db.close();
 `;
 
-const REPAIRABLE_NATIVE_FAILURES = [
-  /NODE_MODULE_VERSION/i,
-  /compiled against a different Node\.js version/i,
-  /Module did not self-register/i,
-  /Could not locate the bindings file/i,
-  /not a valid Win32 application/i,
-  /wrong architecture/i,
-  /incompatible architecture/i,
-  /wrong ELF class/i,
-  /invalid ELF header/i,
-  /Exec format error/i,
-];
-
 function textOutput(value) {
   if (typeof value === "string") return value;
   if (Buffer.isBuffer(value)) return value.toString("utf8");
@@ -62,12 +48,6 @@ function failureSummary(result) {
   const output = failureOutput(result);
   if (output) return output.split("\n").find(Boolean) ?? output;
   return `exit status ${result?.status ?? "unknown"}`;
-}
-
-function isRepairableNativeFailure(result) {
-  if (result?.error || result?.signal) return false;
-  const output = failureOutput(result);
-  return REPAIRABLE_NATIVE_FAILURES.some((pattern) => pattern.test(output));
 }
 
 function sleepSync(milliseconds) {
@@ -448,90 +428,32 @@ export function withElectronNativeRebuildLock(repoRoot, callback) {
 }
 
 /**
- * Verify better-sqlite3 against Electron's ABI and repair recognized native
- * binding drift. Unrelated Electron launch or JavaScript failures stay strict:
- * mutating node_modules cannot repair them and would hide the real cause.
+ * Verify better-sqlite3 loads under Electron's runtime.
+ *
+ * better-sqlite3 13 is N-API (ABI-stable) and ships a per-platform PREBUILD
+ * (`prebuilds/<platform>-<arch>.node`); there is no per-Electron-ABI compile to
+ * repair. electron-rebuild's gyp output is never loaded while the prebuild
+ * exists, so a failing load-probe means the shipped prebuild is missing or
+ * corrupt for this platform+arch — a rebuild cannot fix that. Fail hard with a
+ * reinstall remedy instead of mutating the native tree.
  */
 export function ensureElectronNativeModules(options = {}) {
   const repoRoot = options.repoRoot ?? process.cwd();
   const run = options.spawnSync ?? spawnSync;
-  const pathExists = options.existsSync ?? existsSync;
   const executable = options.electronExecutable ?? electronPath;
-  const rebuildCli = options.rebuildCli ?? resolve(
-    repoRoot,
-    "node_modules",
-    "@electron",
-    "rebuild",
-    "lib",
-    "cli.js",
-  );
-  const nodeExecutable = options.nodeExecutable ?? process.execPath;
-  const log = options.log ?? ((message) => process.stderr.write(`[native] ${message}\n`));
   const baseEnv = { ...process.env, ...(options.env ?? {}) };
-  const withRebuildLock = options.withRebuildLock
-    ?? ((callback) => withElectronNativeRebuildLock(repoRoot, callback));
 
-  const probe = () => run(executable, ["-e", ELECTRON_NATIVE_PROBE], {
+  const result = run(executable, ["-e", ELECTRON_NATIVE_PROBE], {
     cwd: repoRoot,
     env: { ...baseEnv, ELECTRON_RUN_AS_NODE: "1" },
     encoding: "utf8",
   });
+  if (result.status === 0) return { loaded: true };
 
-  const assertRepairable = (result) => {
-    if (isRepairableNativeFailure(result)) return;
-    throw new Error(
-      `Electron ${NATIVE_MODULE} probe failed for a non-repairable reason; `
-      + `refusing to rebuild dependencies automatically: ${failureSummary(result)}`,
-    );
-  };
-
-  const initial = probe();
-  if (initial.status === 0) return { rebuilt: false };
-  assertRepairable(initial);
-
-  return withRebuildLock(() => {
-    // Another launcher may have repaired the shared checkout while this process
-    // waited for the lock. Re-probe before mutating the native build tree.
-    const locked = probe();
-    if (locked.status === 0) {
-      log(`Electron ${NATIVE_MODULE} was repaired by another process.`);
-      return { rebuilt: false, repairedByPeer: true };
-    }
-    assertRepairable(locked);
-
-    log(
-      `Electron ${NATIVE_MODULE} native binding is incompatible `
-      + `(${failureSummary(locked)}); rebuilding for Electron.`,
-    );
-    if (!pathExists(rebuildCli)) {
-      throw new Error(`electron-rebuild CLI not found: ${rebuildCli}`);
-    }
-
-    const rebuildEnv = { ...baseEnv };
-    delete rebuildEnv.ELECTRON_RUN_AS_NODE;
-    const rebuilt = run(nodeExecutable, [
-      rebuildCli,
-      "--force",
-      "--only",
-      NATIVE_MODULE,
-    ], {
-      cwd: repoRoot,
-      env: rebuildEnv,
-      stdio: "inherit",
-    });
-    if (rebuilt.status !== 0) {
-      throw new Error(`Electron native-module rebuild failed: ${failureSummary(rebuilt)}`);
-    }
-
-    const verified = probe();
-    if (verified.status !== 0) {
-      throw new Error(
-        `Electron ${NATIVE_MODULE} still fails after rebuild: ${failureSummary(verified)}`,
-      );
-    }
-    log(`Electron ${NATIVE_MODULE} rebuilt and verified.`);
-    return { rebuilt: true };
-  });
+  throw new Error(
+    `Electron ${NATIVE_MODULE} failed to load (${failureSummary(result)}); `
+    + `reinstall better-sqlite3 (bun install --force).`,
+  );
 }
 
 export const __internalForTests = {
@@ -541,5 +463,4 @@ export const __internalForTests = {
   failureSummary,
   inspectLockOwner,
   inspectReaperState,
-  isRepairableNativeFailure,
 };
