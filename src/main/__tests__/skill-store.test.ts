@@ -295,3 +295,149 @@ describe("SkillStore — C2 traversal & allowlist", () => {
     }
   });
 });
+
+describe("SkillStore — bundled resources (stage-3)", () => {
+  function makeDirSkill(root: string, name: string, body = "guidance"): string {
+    const skillDir = join(root, name);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---\nname: ${name}\ndescription: d\n---\n${body}`);
+    return skillDir;
+  }
+
+  it("lists bundled files as a manifest and reads one on demand", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      const skillDir = makeDirSkill(dir, "guide");
+      mkdirSync(join(skillDir, "references"));
+      writeFileSync(join(skillDir, "references", "api.md"), "# API reference");
+      const store = new SkillStore({ userDir: dir });
+      const skill = await store.load("guide");
+      expect(skill?.resources.map((r) => r.path)).toEqual(["references/api.md"]);
+      const read = await store.readUserResource(skill!, "references/api.md");
+      expect(read.content).toBe("# API reference");
+      expect(read.bytes).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never lists SKILL.md itself as a resource and refuses to read it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      makeDirSkill(dir, "guide");
+      const store = new SkillStore({ userDir: dir });
+      const skill = await store.load("guide");
+      expect(skill?.resources).toEqual([]);
+      await expect(store.readUserResource(skill!, "SKILL.md")).rejects.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects traversal, absolute, backslash and control-character resource paths", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      makeDirSkill(dir, "guide");
+      const store = new SkillStore({ userDir: dir });
+      const skill = await store.load("guide");
+      for (const bad of ["../SKILL.md", "../../etc/passwd", "/etc/passwd", "a\b.md", "a\nb.md", "x.md:stream", "", "./x.md"]) {
+        await expect(store.readUserResource(skill!, bad)).rejects.toThrow();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses resources for a FLAT skill so it cannot read its siblings", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      // A flat skill's parent directory IS the shared skills root; treating it
+      // as a bundle root would expose every sibling skill's bytes.
+      writeFileSync(join(dir, "flat.md"), "---\nname: flat\ndescription: d\n---\nbody");
+      makeDirSkill(dir, "secret", "SECRET BODY");
+      const store = new SkillStore({ userDir: dir });
+      const flat = await store.load("flat");
+      expect(flat?.resources).toEqual([]);
+      await expect(store.readUserResource(flat!, "secret/SKILL.md")).rejects.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips a bundled filename carrying control characters", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      const skillDir = makeDirSkill(dir, "guide");
+      let planted = false;
+      try {
+        // A newline in a filename would inject extra lines into the trusted overlay.
+        writeFileSync(join(skillDir, "ok\nevil.md"), "x");
+        planted = true;
+      } catch {
+        // Windows refuses such filenames outright — the guard is then moot.
+      }
+      const store = new SkillStore({ userDir: dir });
+      const skill = await store.load("guide");
+      if (planted) {
+        expect(skill?.resources.some((r) => r.path.includes("\n"))).toBe(false);
+      }
+      expect(skill).not.toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a bundled symlink whose target escapes the skill directory", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    const outside = mkdtempSync(join(tmpdir(), "lvis-evil-"));
+    try {
+      const skillDir = makeDirSkill(dir, "guide");
+      writeFileSync(join(outside, "secret.txt"), "TOP SECRET");
+      let linked = false;
+      try {
+        symlinkSync(join(outside, "secret.txt"), join(skillDir, "leak.txt"));
+        linked = true;
+      } catch {
+        // Symlink creation needs privilege on Windows.
+      }
+      if (linked) {
+        const store = new SkillStore({ userDir: dir });
+        const skill = await store.load("guide");
+        expect(skill?.resources.some((r) => r.path === "leak.txt")).toBe(false);
+        await expect(store.readUserResource(skill!, "leak.txt")).rejects.toThrow();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("serves plugin resources from verified memory and refuses unknown paths", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      const generation = pluginGeneration("plugin-one", "g1", "body");
+      const contribution = generation.contributions[0] as { files: Array<{ path: string; content: string; sha256: string }> };
+      contribution.files = [
+        ...contribution.files,
+        { path: "skills/attendance/references/policy.md", content: "POLICY", sha256: "c".repeat(64) },
+      ];
+      const store = new SkillStore({ userDir: dir });
+      store.publishPluginGeneration(generation);
+      const skill = store.loadPluginGeneration(generation, "plugin:plugin-one:attendance");
+      expect(skill?.resources.map((r) => r.path)).toEqual(["references/policy.md"]);
+      const read = store.readPluginResource(generation, "plugin:plugin-one:attendance", "references/policy.md");
+      expect(read?.content).toBe("POLICY");
+      expect(
+        store.readPluginResource(generation, "plugin:plugin-one:attendance", "references/missing.md"),
+      ).toBeNull();
+      expect(
+        store.readPluginResource(generation, "plugin:plugin-one:attendance", "SKILL.md"),
+      ).toBeNull();
+      expect(() =>
+        store.readPluginResource(generation, "plugin:plugin-one:attendance", "../../escape.md"),
+      ).toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

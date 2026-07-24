@@ -23,6 +23,12 @@ export interface SkillOverlayEntry {
   name: string;
   body: string;
   pluginOwner?: LoadedSkill["pluginOwner"];
+  /**
+   * Bundled resources declared by the loaded skill (stage-3). Rendered as an
+   * inert manifest so the model knows what it may fetch with `skill_read`;
+   * contents never live here.
+   */
+  resources: LoadedSkill["resources"];
 }
 
 interface StoredSkillOverlayEntry extends SkillOverlayEntry {
@@ -42,6 +48,7 @@ export class SkillOverlay {
       name: skill.name,
       body: skill.body,
       pluginOwner: skill.pluginOwner,
+      resources: skill.resources ?? [],
       ...(generationLease ? { releaseGeneration: () => generationLease.release() } : {}),
     });
     this.bySession.set(sessionId, bySkill);
@@ -95,6 +102,16 @@ export class SkillOverlay {
     for (const e of entries) {
       lines.push(`<lvis-skill name="${escapeAttr(e.name)}">`);
       lines.push(neutralizeSkillFence(e.body));
+      if (e.resources.length > 0) {
+        // Inert manifest: names only, so the model knows what it can fetch with
+        // `skill_read`. Paths are character-validated at discovery (no control
+        // chars / fence metacharacters), and escaped again here.
+        lines.push("");
+        lines.push("bundled resources (fetch with skill_read):");
+        for (const resource of e.resources) {
+          lines.push(`- ${escapeAttr(resource.path)} (${resource.bytes} bytes)`);
+        }
+      }
       lines.push(`</lvis-skill>`);
     }
     lines.push(`</lvis-active-skills>`);
