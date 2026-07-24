@@ -123,7 +123,8 @@ function invokeHostApiFactory<TArgs extends unknown[], TResult>(
     manifest: unknown,
     pluginDataDir: string,
     incarnation: TestHostApiIncarnation,
-  ) => TResult)(pluginId, manifest, pluginDataDir, incarnation);
+    installPluginId: string,
+  ) => TResult)(pluginId, manifest, pluginDataDir, incarnation, pluginId);
 }
 
 beforeEach(() => {

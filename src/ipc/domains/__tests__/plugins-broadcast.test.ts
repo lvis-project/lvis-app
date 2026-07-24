@@ -142,6 +142,7 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
         pluginRoot: string;
         manifest: { id: string; version: string };
         receiptRaw: string;
+        registryEntry: { installSource?: "admin" | "user" | "local-dev"; manifestSha256?: string };
         durableCommit(): Promise<string>;
       }) => Promise<unknown>;
     } => typeof arg === "object" && arg !== null && "activatePreparedArtifact" in arg);
@@ -151,6 +152,7 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
       pluginRoot: `/staged/${pluginId}`,
       manifest: { id: pluginId, version: "1.0.0" },
       receiptRaw: "{}",
+      registryEntry: { installSource: "user" },
       durableCommit: async () => `${pluginId}/plugin.json`,
     });
   };
