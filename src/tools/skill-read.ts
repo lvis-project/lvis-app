@@ -96,6 +96,12 @@ export function createSkillReadTool(deps: SkillReadToolDeps): Tool {
       if (!entry) {
         return errorResult(`skill not loaded: call skill_load({ skillName: "${skillName}" }) first`);
       }
+      // The manifest captured at load time is the AUTHORIZED set: serving only
+      // what was listed keeps "what the model was told exists" and "what it can
+      // fetch" one set, and makes the discovery caps real access bounds.
+      if (!entry.resources.some((resource) => resource.path === resourcePath)) {
+        return errorResult(`resource not listed for ${skillName}: ${resourcePath}`);
+      }
 
       const selectorMatch = /^plugin:([^:]+):([^:]+)$/.exec(skillName);
       try {
@@ -111,10 +117,12 @@ export function createSkillReadTool(deps: SkillReadToolDeps): Tool {
             // Refuse a cross-generation read: the approval that admitted this
             // skill was bound to the generation recorded in the overlay.
             const owner = entry.pluginOwner;
+            // Fail CLOSED: a plugin-shaped selector without a recorded owner has
+            // no approved generation to compare against, so it is not readable.
             if (
-              owner &&
-              (lease.generation.generationId !== owner.generationId ||
-                lease.generation.pluginVersion !== owner.pluginVersion)
+              !owner ||
+              lease.generation.generationId !== owner.generationId ||
+              lease.generation.pluginVersion !== owner.pluginVersion
             ) {
               return errorResult("skill generation changed since load; call skill_load again");
             }
@@ -133,9 +141,15 @@ export function createSkillReadTool(deps: SkillReadToolDeps): Tool {
           }
         }
 
-        const skill = await deps.store.load(skillName);
-        if (!skill) return errorResult(`skill not found: ${skillName}`);
-        const resource = await deps.store.readUserResource(skill, resourcePath);
+        // Read against the identity captured at approval time — NOT a fresh
+        // name lookup: re-resolving `skillName` from disk would let a mid-turn
+        // file swap (or a newly-created ambiguous sibling) redirect a read the
+        // user authorized against a different file, and would re-run the bundle
+        // scan on every call.
+        const resource = await deps.store.readUserResource(
+          { filePath: entry.filePath, pluginOwner: entry.pluginOwner },
+          resourcePath,
+        );
         return {
           output: JSON.stringify({ skillName, ...resource }),
           isError: false,
