@@ -192,7 +192,12 @@ describe("uninstallPluginWithLifecycle", () => {
     const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-alias-"));
     try {
       const order: string[] = [];
-      const deps = makeDeps("canonical-plugin", join(root, ".cache"));
+      const cacheRoot = join(root, ".cache");
+      await mkdir(join(cacheRoot, "canonical-plugin"), { recursive: true });
+      await mkdir(join(cacheRoot, "marketplace-alias"), { recursive: true });
+      writeFileSync(join(cacheRoot, "canonical-plugin", "generation"), "old");
+      writeFileSync(join(cacheRoot, "marketplace-alias", "receipt"), "old");
+      const deps = makeDeps("canonical-plugin", cacheRoot);
       deps.pluginRuntime.resolvePluginId.mockReturnValue("canonical-plugin");
       deps.pluginRuntime.removePluginWithCommit.mockImplementationOnce(async (
         _pluginId,
@@ -225,6 +230,8 @@ describe("uninstallPluginWithLifecycle", () => {
         "override:clear",
         "settings:clear",
       ]);
+      expect(existsSync(join(cacheRoot, "canonical-plugin"))).toBe(false);
+      expect(existsSync(join(cacheRoot, "marketplace-alias"))).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

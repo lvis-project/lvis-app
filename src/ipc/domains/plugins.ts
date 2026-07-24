@@ -301,34 +301,41 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     getMainWindow,
     getAppWindows,
   } = deps;
-  if (
-    !pluginPaths
-    || !clearAuthPartitionService
-    || !listPluginAuthPartitionsService
-    || !forgetPluginAuthPartitionsService
-  ) {
-    throw new Error("plugin lifecycle cleanup services are not fully wired");
-  }
   const broadcastPluginLifecycleEvent = (channel: string, payload: unknown) => {
     for (const win of getAppWindows?.() ?? [getMainWindow()]) {
       sendToWindow(win, channel, payload, log);
     }
   };
-  const ensureInstallStateReady = (pluginId: string) =>
-    ensurePluginStateReadyForInstall(pluginId, {
-      pluginMarketplace,
-      pluginRuntime,
-      settingsService,
+  const requireCleanupServices = () => {
+    if (
+      !pluginPaths
+      || !clearAuthPartitionService
+      || !listPluginAuthPartitionsService
+      || !forgetPluginAuthPartitionsService
+    ) {
+      throw new Error("plugin lifecycle cleanup services are not fully wired");
+    }
+    return {
       pluginPaths,
       clearAuthPartitionService,
       listPluginAuthPartitionsService,
       forgetPluginAuthPartitionsService,
+    };
+  };
+  const ensureInstallStateReady = (pluginId: string) => {
+    const cleanupServices = requireCleanupServices();
+    return ensurePluginStateReadyForInstall(pluginId, {
+      pluginMarketplace,
+      pluginRuntime,
+      settingsService,
+      ...cleanupServices,
       drainPluginInstallLockOperationsService:
         drainPluginInstallLockOperations,
       refreshPluginNotifications,
       emitHostEvent,
       log,
     });
+  };
   let marketplacePingCache:
     | { key: string; result: MarketplacePingResult; timestampMs: number }
     | null = null;
@@ -502,10 +509,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           pluginMarketplace,
           pluginRuntime,
           settingsService,
-          pluginPaths,
-          clearAuthPartitionService,
-          listPluginAuthPartitionsService,
-          forgetPluginAuthPartitionsService,
+          ...requireCleanupServices(),
           drainPluginInstallLockOperationsService:
             drainPluginInstallLockOperations,
           refreshPluginNotifications,
@@ -525,10 +529,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         pluginMarketplace,
         pluginRuntime,
         settingsService,
-        pluginPaths,
-        clearAuthPartitionService,
-        listPluginAuthPartitionsService,
-        forgetPluginAuthPartitionsService,
+        ...requireCleanupServices(),
         drainPluginInstallLockOperationsService:
           drainPluginInstallLockOperations,
         refreshPluginNotifications,
