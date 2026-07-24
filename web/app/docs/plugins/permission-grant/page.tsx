@@ -36,7 +36,7 @@ export default function Page() {
           { title: "Marketplace 에서 deeplink", body: <p>웹 페이지의 “설치” 버튼이 <code>lvis://install/&lt;slug&gt;</code> 또는 <code>lvis://install/&lt;type&gt;/&lt;slug&gt;</code> 발사. 호스트가 URL 받아 처리 (<code>lvis-protocol.ts:72</code>).</p> },
           { title: "패키지 + 서명 검증", body: <p>Marketplace가 발급한 Ed25519 서명 envelope을 호스트가 검증. 알려진 public key 와 매칭되는 서명이 1개 이상이면 통과 (<code>marketplace/server/src/lvis_marketplace/signing.py:219</code>).</p>, badge: "sig" },
           { title: "권한 다이얼로그 — 한 번에 모두", body: <p>manifest 파싱 결과와 호스트가 분류한 도구 위험도를 capabilities / tools / pluginAccess / secrets 별로 묶어 표시. 사용자 확인 후 grant 저장.</p> },
-          { title: "최초 활성화", body: <p><code>{"~/.lvis/plugins/<pluginId>/"}</code> 자기 namespace 생성 (0o700). 플러그인 <code>start()</code> 콜백 호출 — <code>hostApi.registerKeywords</code> 있다면 등록.</p>, badge: "start()" },
+          { title: "최초 활성화", body: <p><code>{"~/.lvis/plugins/<pluginId>/"}</code> 자기 namespace 생성 (0o700). 검증된 Skill, Hook, MCP 서버를 플러그인 런타임과 함께 원자적으로 활성화.</p>, badge: "start()" },
         ]}
       />
 

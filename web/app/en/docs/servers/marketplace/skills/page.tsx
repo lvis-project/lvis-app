@@ -12,7 +12,7 @@ export default function Page() {
       <PageHero
         eyebrow="Marketplace"
         title="Skills (plugin_type=skill)"
-        description="A reusable 'Skill' package bundling keywords + tool mappings + prompts. When the host's keyword engine matches a registered keyword, it recommends the Skill card to the user. Local Skill definitions follow the ~/.lvis/skills/<name>/SKILL.md format."
+        description="A reusable instruction package built around SKILL.md, optional references, and bounded workflows. Skills guide tool use but are not callable methods or natural-language routing aliases."
       />
 
       <ScreenshotGallery columns={1}>
@@ -21,10 +21,10 @@ export default function Page() {
 
       <h2 id="what">Components of a Skill</h2>
       <ul>
-        <li><strong>Keywords</strong> — natural-language trigger patterns for the Skill. For a plugin, registered via <code>hostApi.registerKeywords</code>.</li>
-        <li><strong>Tool mapping</strong> — which plugin tools / agents to chain-call.</li>
-        <li><strong>Prompts</strong> — system/user message templates inside SKILL.md.</li>
-        <li><strong>RiskLevel meta</strong> — the default for the Skill as a whole. Tool RiskLevel still takes priority.</li>
+        <li><strong>SKILL.md</strong> — the entrypoint instructions and routing guidance.</li>
+        <li><strong>References and assets</strong> — optional verified files used by the workflow.</li>
+        <li><strong>Tool guidance</strong> — instructions for selecting manifest Tools without invoking them implicitly.</li>
+        <li><strong>Security boundary</strong> — Tool permissions remain Host-owned and are evaluated at invocation time.</li>
       </ul>
 
       <Callout tone="info" title="Where Skills are stored">

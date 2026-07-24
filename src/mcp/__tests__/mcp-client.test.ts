@@ -44,6 +44,9 @@ vi.mock("node:child_process", () => ({
   spawn: (cmd: string, args?: readonly string[], opts?: unknown) =>
     spawnMock(cmd, args, opts),
 }));
+vi.mock("../../main/uv-runtime.js", () => ({
+  resolveBundledUvBinaryPath: vi.fn(() => "/test-runtime/uv"),
+}));
 
 // Module imports must come AFTER the mocks above.
 import { McpClient } from "../mcp-client.js";
@@ -837,7 +840,7 @@ describe("StdioTransport — regression", () => {
 
     await client.connect();
     expect(spawnMock).toHaveBeenCalledWith(
-      expect.stringMatching(/resources[\\/]uv[\\/][^\\/]+[\\/]uv(?:\.exe)?$/),
+      "/test-runtime/uv",
       ["tool", "run", "--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
       expect.objectContaining({
         env: expect.objectContaining({

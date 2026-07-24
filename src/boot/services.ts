@@ -8,9 +8,10 @@
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { SettingsService } from "../data/settings-store.js";
-import { DEFAULT_LOCALE, normalizeLocale, setLocale, tryLoadLocaleMessages } from "../i18n/index.js";
+import { DEFAULT_LOCALE, normalizeLocale, setLocale, tryLoadLocaleMessages,
+} from "../i18n/index.js";
 import { MemoryManager } from "../memory/memory-manager.js";
-import { KeywordEngine } from "../core/keyword-engine.js";
+import { InputClassifier } from "../core/input-classifier.js";
 import { RouteEngine } from "../core/route-engine.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { BashTool } from "../tools/bash.js";
@@ -18,12 +19,14 @@ import { createFileTools } from "../tools/file-tools.js";
 import { PowerShellTool } from "../tools/powershell.js";
 import { createReadToolResultChunkTool } from "../tools/tool-result-chunk.js";
 import { createMemoryWriteTool } from "../tools/memory-write.js";
-import { createBashOutputTool, createBashKillTool } from "../tools/background-shell-tools.js";
+import { createBashOutputTool, createBashKillTool,
+} from "../tools/background-shell-tools.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import { createLogger, initFileLogSink } from "../lib/logger.js";
-import { LOG_RETENTION_DAYS, LOG_MAX_BYTES, reprunePersistedRetention } from "../lib/log-file-sink.js";
+import { LOG_RETENTION_DAYS, LOG_MAX_BYTES, reprunePersistedRetention,
+} from "../lib/log-file-sink.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { join } from "node:path";
 const log = createLogger("lvis");
@@ -56,7 +59,7 @@ export interface CoreServices {
   auditService: AuditService;
   settingsService: SettingsService;
   memoryManager: MemoryManager;
-  keywordEngine: KeywordEngine;
+  inputClassifier: InputClassifier;
   toolRegistry: ToolRegistry;
   routeEngine: RouteEngine;
 }
@@ -64,12 +67,14 @@ export interface CoreServices {
 export async function applyBootLocale(
   settingsService: Pick<SettingsService, "get">,
 ): Promise<void> {
-  const bootLocale = normalizeLocale(settingsService.get("appearance").language);
+  const bootLocale = normalizeLocale(settingsService.get("appearance").language,
+  );
   const loaded = await tryLoadLocaleMessages(bootLocale);
   setLocale(loaded ? bootLocale : DEFAULT_LOCALE);
 }
 
-export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<CoreServices> {
+export async function bootstrapCoreServices(mainWindow: BrowserWindow,
+): Promise<CoreServices> {
   // #1499 PR-0: production log file sink — attach FIRST, before any other core
   // service. It depends only on `lvisHome()` (no SettingsService / locale), so
   // hoisting it to the very top of bootstrap shrinks the window where early
@@ -86,7 +91,8 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
       maxBytes: LOG_MAX_BYTES,
     });
     if (sink) {
-      log.info({ file: sink.currentFile }, "boot: production log file sink attached");
+      log.info({ file: sink.currentFile }, "boot: production log file sink attached",
+      );
     }
   }
 
@@ -148,10 +154,11 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // corrupt/missing. No-Fallback — this is the only recovery path; search
   // never falls back to a linear scan.
   await memoryManager.verifyOrRebuildSearchIndex().catch((err: unknown) => {
-    log.warn("boot: search index verify/rebuild failed: %s", (err as Error).message);
+    log.warn("boot: search index verify/rebuild failed: %s", (err as Error).message,
+    );
   });
 
-  const keywordEngine = new KeywordEngine();
+  const inputClassifier = new InputClassifier();
   const toolRegistry = new ToolRegistry();
   // Tier A1: BashTool registers directly — it implements the canonical
   // Tool contract via ZodTool and is tagged source="builtin" + category
@@ -173,7 +180,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // caller's session.
   toolRegistry.register(createBashOutputTool());
   toolRegistry.register(createBashKillTool());
-  const routeEngine = new RouteEngine({ toolRegistry });
+  const routeEngine = new RouteEngine();
 
   return {
     pythonPath,
@@ -182,7 +189,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
     auditService,
     settingsService,
     memoryManager,
-    keywordEngine,
+    inputClassifier,
     toolRegistry,
     routeEngine,
   };

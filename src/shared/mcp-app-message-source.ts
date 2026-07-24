@@ -14,7 +14,7 @@
  *     write/shell/network tool to ask the user (the ONE enforcement site).
  *   - `engine/turn/query-loop.ts` — app-authored guidance injected mid-turn downgrades
  *     the REST of that turn to the same staged origin.
- *   - `core/keyword-engine.ts` — an enveloped turn never routes as a skill/command.
+ *   - `core/input-classifier.ts` — an enveloped turn never routes as a command.
  *
  * The body is app-authored and UNTRUSTED. {@link formatAppMessageEnvelope} is the only
  * place that builds one, so it is the only place the body is sanitized: it strips a
@@ -95,11 +95,16 @@ export function parseAppMessageEnvelope(input: string): string | null {
 }
 
 /** Parse the full envelope into provenance + body (transcript / history replay). */
-export function parseAppMessageEnvelopePayload(input: string): AppMessageEnvelope | null {
+export function parseAppMessageEnvelopePayload(
+  input: string,
+): AppMessageEnvelope | null {
   const trimmed = input.trim();
   const full = trimmed.match(APP_MESSAGE_ENVELOPE_FULL_PATTERN);
   if (full) return { source: full[1], body: full[2].trim() };
   const source = parseAppMessageEnvelope(trimmed);
   if (!source) return null;
-  return { source, body: trimmed.replace(APP_MESSAGE_ENVELOPE_PATTERN, "").trim() };
+  return {
+    source,
+    body: trimmed.replace(APP_MESSAGE_ENVELOPE_PATTERN, "").trim(),
+  };
 }

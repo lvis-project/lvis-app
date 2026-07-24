@@ -11,10 +11,8 @@
  * - LVIS_HOME env override flows through `lvisHome()`.
  * - Corrupt / unreadable JSON → throws immediately with a descriptive error.
  *   Caller (boot.ts) logs to audit and re-throws — no silent empty-set fallback.
- * - Coalescing serial write queue: concurrent callers always see the latest
- *   snapshot written; at most one in-flight disk write at a time. The snapshot
- *   is taken (deep-cloned) synchronously before the async chain is entered, so
- *   subsequent map mutations cannot corrupt an in-flight write.
+ * - One serial mutation queue owns both writes and deletes. Every caller's
+ *   promise settles only after its exact snapshot mutation reaches disk.
  */
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
@@ -47,20 +45,21 @@ function isPartitionsFile(value: unknown): value is PartitionsFile {
 }
 
 // ---------------------------------------------------------------------------
-// Coalescing write queue
+// Serial mutation queue
 //
 // Invariant: at most one `doActualWrite` is executing at any time.
-// New callers update `_pendingSnapshot` (latest wins) and chain onto
-// `_writeChain` — if a write is already in-flight, the trailing continuation
-// picks up the latest snapshot.
+// Writes and deletes share this queue so an older observed-partition snapshot
+// cannot race a durable uninstall deletion or overwrite an unrelated plugin.
 // ---------------------------------------------------------------------------
 
-/** Snapshot taken before entering the async chain — immune to later mutations. */
-let _pendingSnapshot: PartitionsFile | null = null;
 /** Serial promise chain; never rejects (errors propagate via the returned promise). */
-let _writeChain: Promise<void> = Promise.resolve();
-/** True while `doActualWrite` is executing inside the chain. */
-let _writing = false;
+let _mutationChain: Promise<void> = Promise.resolve();
+
+function enqueueMutation(operation: () => Promise<void>): Promise<void> {
+  const result = _mutationChain.then(operation);
+  _mutationChain = result.catch(() => undefined);
+  return result;
+}
 
 /** Deep-clone a partition map into a plain PartitionsFile object. */
 function snapshotMap(partitions: ReadonlyMap<string, ReadonlySet<string>>): PartitionsFile {
@@ -89,9 +88,7 @@ async function doActualWrite(snapshot: PartitionsFile): Promise<void> {
  * @internal
  */
 export function __resetWriteQueueForTest(): void {
-  _pendingSnapshot = null;
-  _writeChain = Promise.resolve();
-  _writing = false;
+  _mutationChain = Promise.resolve();
 }
 
 // ---------------------------------------------------------------------------
@@ -143,54 +140,14 @@ export async function readPersistedPluginAuthPartitions(): Promise<
 /**
  * Atomically persist the current in-memory partition map to disk.
  *
- * Uses a coalescing serial write queue: if a write is already in-flight, the
- * latest snapshot is queued and the trailing continuation writes it. The map is
- * deep-cloned synchronously before this function returns, so callers may mutate
- * the map immediately without risk of corrupting an in-flight write.
+ * The map is deep-cloned synchronously before this function returns, then its
+ * exact snapshot is written in serial order with deletes.
  */
 export function writePersistedPluginAuthPartitions(
   partitions: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<void> {
-  // Snapshot now — before any await — so subsequent map mutations are safe.
-  _pendingSnapshot = snapshotMap(partitions);
-
-  if (!_writing) {
-    _writing = true;
-    const result = _writeChain.then(async () => {
-      try {
-        while (_pendingSnapshot !== null) {
-          const next = _pendingSnapshot;
-          _pendingSnapshot = null;
-          await doActualWrite(next);
-        }
-      } finally {
-        _writing = false;
-      }
-    });
-    // Detach the rejection from the persistent chain so future writes can
-    // recover after a transient I/O error (EIO, ENOSPC, EACCES) without
-    // permanently bricking _writeChain.
-    _writeChain = result.catch(() => undefined);
-    return result;
-  }
-
-  // A write is already in-flight; _pendingSnapshot updated above will be
-  // picked up by the trailing while-loop continuation.
-  //
-  // KNOWN COALESCED-CALLER EDGE: if the in-flight write throws BEFORE the
-  // loop reaches the just-set _pendingSnapshot, this caller's promise
-  // resolves "successfully" (it returns the .catch-detached chain), but
-  // the snapshot itself is dropped. In actual usage this is benign:
-  //  (a) the only call site is auth-window-service.ts and it routes the
-  //      write rejection (received by the in-flight caller) through the
-  //      onError audit hook,
-  //  (b) writes are idempotent — the next rememberPluginAuthPartition
-  //      observation re-triggers a write with the latest snapshot,
-  //  (c) callers do not poll the returned promise to verify "is my
-  //      snapshot persisted" — they fire-and-forget.
-  // If a future caller needs durable per-call confirmation, return a
-  // per-caller deferred that resolves only when its snapshot is written.
-  return _writeChain;
+  const snapshot = snapshotMap(partitions);
+  return enqueueMutation(() => doActualWrite(snapshot));
 }
 
 /**
@@ -199,42 +156,36 @@ export function writePersistedPluginAuthPartitions(
  * No-ops silently when the file does not exist.
  */
 export async function deletePersistedPluginAuthPartitions(pluginId: string): Promise<void> {
-  const path = filePath();
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw new Error(
-      `plugin-auth-partition-store: failed to read ${path} for deletion: ${(err as Error).message}`,
-    );
-  }
+  return enqueueMutation(async () => {
+    const path = filePath();
+    let raw: string;
+    try {
+      raw = await readFile(path, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw new Error(
+        `plugin-auth-partition-store: failed to read ${path} for deletion: ${(err as Error).message}`,
+      );
+    }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    throw new Error(
-      `plugin-auth-partition-store: corrupt JSON in ${path} during deletion: ${(err as Error).message}`,
-    );
-  }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(
+        `plugin-auth-partition-store: corrupt JSON in ${path} during deletion: ${(err as Error).message}`,
+      );
+    }
 
-  if (!isPartitionsFile(parsed)) {
-    throw new Error(
-      `plugin-auth-partition-store: unexpected schema in ${path} during deletion`,
-    );
-  }
-
-  if (!(pluginId in parsed.partitions)) return; // already absent — no write needed
-
-  delete parsed.partitions[pluginId];
-
-  const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(parsed, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
+    if (!isPartitionsFile(parsed)) {
+      throw new Error(
+        `plugin-auth-partition-store: unexpected schema in ${path} during deletion`,
+      );
+    }
+    if (!(pluginId in parsed.partitions)) return;
+    delete parsed.partitions[pluginId];
+    await doActualWrite(parsed);
   });
-  await rename(tmp, path);
 }
 
 /**

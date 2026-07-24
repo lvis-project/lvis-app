@@ -38,6 +38,7 @@ export function resolveManagedPluginBootstrap(input: {
 export interface RunManagedBootstrapInput {
   pluginMarketplace: PluginMarketplaceService;
   pluginRuntime: PluginRuntime;
+  ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
   mainWindow: BrowserWindow | null | undefined;
   marketplace: Pick<MarketplaceSettings, "backend" | "cloudBaseUrl">;
 }
@@ -88,7 +89,13 @@ export function runManagedBootstrap(input: RunManagedBootstrapInput): Promise<vo
 }
 
 async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<void> {
-  const { pluginMarketplace, pluginRuntime, mainWindow, marketplace } = input;
+  const {
+    pluginMarketplace,
+    pluginRuntime,
+    ensurePluginStateReadyForInstall,
+    mainWindow,
+    marketplace,
+  } = input;
   const decision = resolveManagedPluginBootstrap({
     marketplace,
     e2eTestMode: process.env.LVIS_E2E === "1" && process.env.NODE_ENV === "test",
@@ -114,6 +121,7 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     const ensureResult = await withAllPluginInstallLocks(async () => {
       return pluginMarketplace.ensureManagedInstalled({
         activatePreparedArtifact,
+        ensurePluginStateReadyForInstall,
       });
     });
     const updated = ensureResult.updated ?? [];

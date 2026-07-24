@@ -3,11 +3,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { maskSensitiveData } from "../../shared/dlp.js";
 import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 import { RouteEngine } from "../../core/route-engine.js";
-import { MemoryManager, type SessionMetadata } from "../../memory/memory-manager.js";
+import { MemoryManager, type SessionMetadata,
+} from "../../memory/memory-manager.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { ToolRegistry } from "../../tools/registry.js";
@@ -58,8 +59,8 @@ function buildLoopDeps(
       setActiveSessionId: () => undefined,
       setSummaryPreamble: () => undefined,
     },
-    keywordEngine: new KeywordEngine(),
-    routeEngine: new RouteEngine({ toolRegistry }),
+    inputClassifier: new InputClassifier(),
+    routeEngine: new RouteEngine(),
     toolRegistry,
     memoryManager: {
       saveSession: () => Promise.resolve(),
@@ -78,7 +79,8 @@ function registerNoop(toolRegistry: ToolRegistry): void {
     isReadOnly: () => true,
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "ok", isError: false }),
-  }));
+  }),
+  );
 }
 
 function makeResumeId(originSessionId: string): string {
@@ -102,10 +104,14 @@ describe("SubAgentRunner A2A wire security contract", () => {
       ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
       "hasProvider",
     ).mockReturnValue(true);
-    loadSessionSpy = vi.spyOn(
-      ConversationLoop.prototype as unknown as { loadSession: (id: string) => boolean },
-      "loadSession",
-    ).mockReturnValue(true);
+    loadSessionSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as {
+          loadSession: (id: string) => boolean;
+        },
+        "loadSession",
+      )
+      .mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -113,7 +119,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  function makeRunner(getDefaultProject?: ReturnType<typeof vi.fn>): SubAgentRunner {
+  function makeRunner(
+    getDefaultProject?: ReturnType<typeof vi.fn>,
+  ): SubAgentRunner {
     return new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry, getDefaultProject),
       toolRegistry,
@@ -201,33 +209,34 @@ describe("SubAgentRunner A2A wire security contract", () => {
     extra: Record<string, unknown>,
   ): void {
     writeFileSync(
-      join(
-        join(tmpHome, "subagent"),
-        "sessions",
-        resumeId + ".meta.json",
+      join(join(tmpHome, "subagent"), "sessions", resumeId + ".meta.json"),
+      JSON.stringify(
+        {
+          sessionKind: "subagent",
+          sourceTools: ["noop"],
+          originSessionId,
+          projectRoot: join(tmpHome, "host-project"),
+          subAgentTitle: "wire profile",
+          budgetResumeCount: 0,
+          questionAnswerCount: 0,
+          resumeCount: 0,
+          cumulativeRounds: 0,
+          subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+          subAgentSuspensionReason: "budget",
+          subAgentSuspensionPrompt: "Continue the task.",
+          ...extra,
+        },
+        null,
+        2,
       ),
-      JSON.stringify({
-        sessionKind: "subagent",
-        sourceTools: ["noop"],
-        originSessionId,
-        projectRoot: join(tmpHome, "host-project"),
-        subAgentTitle: "wire profile",
-        budgetResumeCount: 0,
-        questionAnswerCount: 0,
-        resumeCount: 0,
-        cumulativeRounds: 0,
-        subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
-        subAgentSuspensionReason: "budget",
-        subAgentSuspensionPrompt: "Continue the task.",
-        ...extra,
-      }, null, 2),
       "utf8",
     );
   }
 
   it("fails closed before provider work when the required durable-link barrier is absent", async () => {
     const runner = makeRunner();
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
 
     const result = await runner.spawnFromA2AWire(
@@ -246,25 +255,24 @@ describe("SubAgentRunner A2A wire security contract", () => {
     const binding = makeBinding();
     const originalSave = store.saveSessionMetadata.bind(store);
     let saveCount = 0;
-    vi.spyOn(store, "saveSessionMetadata").mockImplementation(async (...args) => {
-      saveCount += 1;
-      if (saveCount === 1) events.push("metadata");
-      await originalSave(...args);
-    });
-    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(async (
-      _prompt,
-      _callbacks,
-      _abortSignal,
-      options,
-    ) => {
-      expect(options).toMatchObject({
-        inputOrigin: "agent-message",
-        approvalReasonPrefix: "[A2A Wire]",
-        spawnDepth: 1,
-      });
-      events.push("provider");
-      return COMPLETED_TURN;
-    });
+    vi.spyOn(store, "saveSessionMetadata").mockImplementation(
+      async (...args) => {
+        saveCount += 1;
+        if (saveCount === 1) events.push("metadata");
+        await originalSave(...args);
+      },
+    );
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(
+      async (_prompt, _callbacks, _abortSignal, options) => {
+        expect(options).toMatchObject({
+          inputOrigin: "agent-message",
+          approvalReasonPrefix: "[A2A Wire]",
+          spawnDepth: 1,
+        });
+        events.push("provider");
+        return COMPLETED_TURN;
+      },
+    );
     const runner = makeRunner();
 
     const result = await runner.spawnFromA2AWire(
@@ -279,7 +287,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
           });
           events.push("barrier");
         },
-        onLinked: () => { events.push("linked"); },
+        onLinked: () => {
+          events.push("linked");
+        },
       },
     );
 
@@ -287,13 +297,21 @@ describe("SubAgentRunner A2A wire security contract", () => {
     expect(maskSensitiveData(result.childSessionId).detections).toEqual([]);
     const metadata = store.loadSessionMetadata(result.childSessionId);
     expect(metadata?.a2aWireInternalOrigin).toMatch(/^a2a-wire-[0-9a-f]{8}-/);
-    expect(maskSensitiveData(metadata?.a2aWireInternalOrigin ?? "").detections).toEqual([]);
-    expect(events.slice(0, 4)).toEqual(["metadata", "barrier", "linked", "provider"]);
+    expect(
+      maskSensitiveData(metadata?.a2aWireInternalOrigin ?? "").detections,
+    ).toEqual([]);
+    expect(events.slice(0, 4)).toEqual([
+      "metadata",
+      "barrier",
+      "linked",
+      "provider",
+    ]);
   });
 
   it("keeps onLinked and provider work behind a rejecting durable-link barrier", async () => {
     const onLinked = vi.fn();
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const runner = makeRunner();
 
@@ -301,7 +319,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
       { messageText: "Do the work." },
       makeBinding(),
       {
-        onDurablyLinked: async () => { throw new Error("Task binding write failed"); },
+        onDurablyLinked: async () => {
+          throw new Error("Task binding write failed");
+        },
         onLinked,
       },
     );
@@ -314,8 +334,10 @@ describe("SubAgentRunner A2A wire security contract", () => {
     });
     expect(onLinked).not.toHaveBeenCalled();
     expect(runTurn).not.toHaveBeenCalled();
-    expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
-      .toBe(0);
+    expect(
+      (runner as unknown as { activeChildren: Map<string, unknown> })
+        .activeChildren.size,
+    ).toBe(0);
   });
 
   it("fails closed before durable linking when the initial metadata save is tombstoned", async () => {
@@ -330,17 +352,20 @@ describe("SubAgentRunner A2A wire security contract", () => {
       releaseInitialSave = resolve;
     });
     let firstSave = true;
-    vi.spyOn(store, "saveSessionMetadata").mockImplementation(async (...args) => {
-      if (firstSave) {
-        firstSave = false;
-        signalInitialSave();
-        await initialSaveGate;
-      }
-      await originalSave(...args);
-    });
+    vi.spyOn(store, "saveSessionMetadata").mockImplementation(
+      async (...args) => {
+        if (firstSave) {
+          firstSave = false;
+          signalInitialSave();
+          await initialSaveGate;
+        }
+        await originalSave(...args);
+      },
+    );
     const onDurablyLinked = vi.fn(async () => undefined);
     const onLinked = vi.fn();
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const runner = makeRunner();
     const running = runner.spawnFromA2AWire(
@@ -352,7 +377,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
 
     // Bypass the runner-level live cancellation to isolate the authoritative
     // post-save revalidation. The root tombstone transforms the pending write.
-    await expect(store.detachSessionsFromProject(binding.project.root)).resolves.toBe(0);
+    await expect(
+      store.detachSessionsFromProject(binding.project.root),
+    ).resolves.toBe(0);
     releaseInitialSave();
 
     await expect(running).resolves.toMatchObject({
@@ -362,8 +389,10 @@ describe("SubAgentRunner A2A wire security contract", () => {
     expect(onDurablyLinked).not.toHaveBeenCalled();
     expect(onLinked).not.toHaveBeenCalled();
     expect(runTurn).not.toHaveBeenCalled();
-    expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
-      .toBe(0);
+    expect(
+      (runner as unknown as { activeChildren: Map<string, unknown> })
+        .activeChildren.size,
+    ).toBe(0);
   });
 
   it("fails closed before provider work when a resume WORKING save is tombstoned", async () => {
@@ -374,8 +403,10 @@ describe("SubAgentRunner A2A wire security contract", () => {
       a2aWireHandlerId: binding.handlerId,
       a2aWireInternalOrigin: originSessionId,
     });
-    vi.spyOn(ConversationLoop.prototype, "getSessionProjectRoot")
-      .mockReturnValue(binding.project.root);
+    vi.spyOn(
+      ConversationLoop.prototype,
+      "getSessionProjectRoot",
+    ).mockReturnValue(binding.project.root);
     const originalSave = store.saveSessionMetadata.bind(store);
     let signalWorkingSave!: () => void;
     const workingSaveEntered = new Promise<void>((resolve) => {
@@ -386,19 +417,22 @@ describe("SubAgentRunner A2A wire security contract", () => {
       releaseWorkingSave = resolve;
     });
     let heldWorkingSave = false;
-    vi.spyOn(store, "saveSessionMetadata").mockImplementation(async (...args) => {
-      const metadata = args[1];
-      if (
-        !heldWorkingSave
-        && metadata.subAgentTaskState === "TASK_STATE_WORKING"
-      ) {
-        heldWorkingSave = true;
-        signalWorkingSave();
-        await workingSaveGate;
-      }
-      await originalSave(...args);
-    });
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    vi.spyOn(store, "saveSessionMetadata").mockImplementation(
+      async (...args) => {
+        const metadata = args[1];
+        if (
+          !heldWorkingSave &&
+          metadata.subAgentTaskState === "TASK_STATE_WORKING"
+        ) {
+          heldWorkingSave = true;
+          signalWorkingSave();
+          await workingSaveGate;
+        }
+        await originalSave(...args);
+      },
+    );
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const runner = makeRunner();
     const running = runner.resumeFromA2AWire(
@@ -408,7 +442,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
     await workingSaveEntered;
 
     // As above, isolate the post-WORKING-save reload from runner-level abort.
-    await expect(store.detachSessionsFromProject(binding.project.root)).resolves.toBe(1);
+    await expect(
+      store.detachSessionsFromProject(binding.project.root),
+    ).resolves.toBe(1);
     releaseWorkingSave();
 
     await expect(running).resolves.toMatchObject({
@@ -416,8 +452,10 @@ describe("SubAgentRunner A2A wire security contract", () => {
       stopReason: "interrupted",
     });
     expect(runTurn).not.toHaveBeenCalled();
-    expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
-      .toBe(0);
+    expect(
+      (runner as unknown as { activeChildren: Map<string, unknown> })
+        .activeChildren.size,
+    ).toBe(0);
     expect(store.loadSessionMetadata(resumeId)).toMatchObject({
       projectRoot: undefined,
       subAgentTaskState: "TASK_STATE_CANCELED",
@@ -430,11 +468,14 @@ describe("SubAgentRunner A2A wire security contract", () => {
       releaseBarrier = resolve;
     });
     let linkedChildSessionId = "";
-    const barrier = vi.fn(async ({ childSessionId }: { childSessionId: string }) => {
-      linkedChildSessionId = childSessionId;
-      await barrierGate;
-    });
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const barrier = vi.fn(
+      async ({ childSessionId }: { childSessionId: string }) => {
+        linkedChildSessionId = childSessionId;
+        await barrierGate;
+      },
+    );
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const runner = makeRunner();
     const binding = makeBinding();
@@ -446,11 +487,14 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
     await vi.waitFor(() => expect(barrier).toHaveBeenCalledTimes(1));
 
-    await expect(runner.detachSessionsFromProject(binding.project.root)).resolves.toBe(1);
-    expect(runner.getA2AWireRunSnapshot(
-      linkedChildSessionId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    await expect(
+      runner.detachSessionsFromProject(binding.project.root),
+    ).resolves.toBe(1);
+    expect(
+      runner.getA2AWireRunSnapshot(linkedChildSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
     releaseBarrier();
 
     await expect(running).resolves.toMatchObject({
@@ -458,17 +502,20 @@ describe("SubAgentRunner A2A wire security contract", () => {
       stopReason: "interrupted",
     });
     expect(runTurn).not.toHaveBeenCalled();
-    expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
-      .toBe(0);
+    expect(
+      (runner as unknown as { activeChildren: Map<string, unknown> })
+        .activeChildren.size,
+    ).toBe(0);
     expect(store.loadSessionMetadata(linkedChildSessionId)).toMatchObject({
       projectRoot: undefined,
       a2aWireHandlerId: binding.handlerId,
       subAgentTaskState: "TASK_STATE_CANCELED",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      linkedChildSessionId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    expect(
+      runner.getA2AWireRunSnapshot(linkedChildSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
   });
 
   it("cancels a wire resume when its project is removed during mailbox I/O", async () => {
@@ -494,9 +541,12 @@ describe("SubAgentRunner A2A wire security contract", () => {
       await mailboxGate;
       return [];
     });
-    vi.spyOn(ConversationLoop.prototype, "getSessionProjectRoot")
-      .mockReturnValue(binding.project.root);
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    vi.spyOn(
+      ConversationLoop.prototype,
+      "getSessionProjectRoot",
+    ).mockReturnValue(binding.project.root);
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
@@ -510,11 +560,12 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
     await mailboxEntered;
 
-    await expect(runner.detachSessionsFromProject(binding.project.root)).resolves.toBe(1);
-    expect(runner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    await expect(
+      runner.detachSessionsFromProject(binding.project.root),
+    ).resolves.toBe(1);
+    expect(
+      runner.getA2AWireRunSnapshot(resumeId, { handlerId: binding.handlerId }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
     releaseMailbox();
 
     await expect(running).resolves.toMatchObject({
@@ -522,17 +573,18 @@ describe("SubAgentRunner A2A wire security contract", () => {
       stopReason: "interrupted",
     });
     expect(runTurn).not.toHaveBeenCalled();
-    expect((runner as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size)
-      .toBe(0);
+    expect(
+      (runner as unknown as { activeChildren: Map<string, unknown> })
+        .activeChildren.size,
+    ).toBe(0);
     expect(store.loadSessionMetadata(resumeId)).toMatchObject({
       projectRoot: undefined,
       a2aWireHandlerId: binding.handlerId,
       subAgentTaskState: "TASK_STATE_CANCELED",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    expect(
+      runner.getA2AWireRunSnapshot(resumeId, { handlerId: binding.handlerId }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
   });
 
   it("uses only the host-frozen project even when the wire request carries project-shaped fields", async () => {
@@ -541,14 +593,17 @@ describe("SubAgentRunner A2A wire security contract", () => {
       projectName: "Default Project",
     }));
     const originalNewConversation = ConversationLoop.prototype.newConversation;
-    const newConversation = vi.spyOn(ConversationLoop.prototype, "newConversation")
+    const newConversation = vi
+      .spyOn(ConversationLoop.prototype, "newConversation")
       .mockImplementation(function (
         this: ConversationLoop,
         ...args: Parameters<typeof originalNewConversation>
       ) {
         return originalNewConversation.apply(this, args);
       });
-    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(COMPLETED_TURN);
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(
+      COMPLETED_TURN,
+    );
     const runner = makeRunner(getDefaultProject);
     const binding = makeBinding();
 
@@ -577,7 +632,8 @@ describe("SubAgentRunner A2A wire security contract", () => {
       a2aWireHandlerId: "wire-handler-a",
       a2aWireInternalOrigin: originSessionId,
     });
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const runner = makeRunner();
 
@@ -590,7 +646,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/wire-bound task requires the A2A wire entry point/i);
+    expect(result.error).toMatch(
+      /wire-bound task requires the A2A wire entry point/i,
+    );
     expect(runTurn).not.toHaveBeenCalled();
   });
 
@@ -602,7 +660,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
       a2aWireHandlerId: binding.handlerId,
       a2aWireInternalOrigin: originSessionId,
     });
-    await expect(store.detachSessionsFromProject(binding.project.root)).resolves.toBe(1);
+    await expect(
+      store.detachSessionsFromProject(binding.project.root),
+    ).resolves.toBe(1);
     expect(store.loadSessionMetadata(resumeId)).toMatchObject({
       projectRoot: undefined,
       a2aWireHandlerId: binding.handlerId,
@@ -610,13 +670,15 @@ describe("SubAgentRunner A2A wire security contract", () => {
       subAgentTaskState: "TASK_STATE_CANCELED",
     });
 
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const wireRunner = makeRunner();
-    expect(wireRunner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    expect(
+      wireRunner.getA2AWireRunSnapshot(resumeId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
     const wireResult = await wireRunner.resumeFromA2AWire(
       { resumeId, messageText: "continue" },
       { handlerId: binding.handlerId },
@@ -634,10 +696,11 @@ describe("SubAgentRunner A2A wire security contract", () => {
     expect(runTurn).not.toHaveBeenCalled();
 
     store.allowProjectRoot(binding.project.root);
-    expect(wireRunner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    expect(
+      wireRunner.getA2AWireRunSnapshot(resumeId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
   });
 
   it.each([
@@ -657,18 +720,20 @@ describe("SubAgentRunner A2A wire security contract", () => {
       subAgentSuspensionReason: undefined,
       subAgentSuspensionPrompt: undefined,
     });
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const runner = makeRunner();
 
-    expect(runner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState });
-    await expect(runner.resumeFromA2AWire(
-      { resumeId, messageText: "continue" },
-      { handlerId: binding.handlerId },
-    )).resolves.toMatchObject({
+    expect(
+      runner.getA2AWireRunSnapshot(resumeId, { handlerId: binding.handlerId }),
+    ).toMatchObject({ taskState });
+    await expect(
+      runner.resumeFromA2AWire(
+        { resumeId, messageText: "continue" },
+        { handlerId: binding.handlerId },
+      ),
+    ).resolves.toMatchObject({
       ok: false,
     });
     expect(runTurn).not.toHaveBeenCalled();
@@ -677,38 +742,39 @@ describe("SubAgentRunner A2A wire security contract", () => {
   it.each([
     ["handler", "wire-handler-b", "wire-origin-handler-a"],
     ["internal origin", "wire-handler-a", "wire-origin-handler-b"],
-  ])("fails closed before provider work on a mismatched %s", async (
-    _field,
-    callerHandlerId,
-    storedInternalOrigin,
-  ) => {
-    const originSessionId = "wire-origin-handler-a";
-    const resumeId = makeResumeId(originSessionId);
-    const bindingMetadata = {
-      a2aWireHandlerId: "wire-handler-a",
-      a2aWireInternalOrigin: storedInternalOrigin,
-    };
-    if (storedInternalOrigin === originSessionId) {
-      await saveWaitingMetadata(resumeId, originSessionId, bindingMetadata);
-    } else {
-      writeRawWaitingMetadata(resumeId, originSessionId, bindingMetadata);
-    }
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
-      .mockResolvedValue(COMPLETED_TURN);
-    const runner = makeRunner();
+  ])(
+    "fails closed before provider work on a mismatched %s",
+    async (_field, callerHandlerId, storedInternalOrigin) => {
+      const originSessionId = "wire-origin-handler-a";
+      const resumeId = makeResumeId(originSessionId);
+      const bindingMetadata = {
+        a2aWireHandlerId: "wire-handler-a",
+        a2aWireInternalOrigin: storedInternalOrigin,
+      };
+      if (storedInternalOrigin === originSessionId) {
+        await saveWaitingMetadata(resumeId, originSessionId, bindingMetadata);
+      } else {
+        writeRawWaitingMetadata(resumeId, originSessionId, bindingMetadata);
+      }
+      const runTurn = vi
+        .spyOn(ConversationLoop.prototype, "runTurn")
+        .mockResolvedValue(COMPLETED_TURN);
+      const runner = makeRunner();
 
-    const result = await runner.resumeFromA2AWire(
-      { resumeId, messageText: "continue" },
-      { handlerId: callerHandlerId },
-    );
+      const result = await runner.resumeFromA2AWire(
+        { resumeId, messageText: "continue" },
+        { handlerId: callerHandlerId },
+      );
 
-    expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/A2A wire(?: resume)? binding/i);
-    expect(runTurn).not.toHaveBeenCalled();
-  });
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/A2A wire(?: resume)? binding/i);
+      expect(runTurn).not.toHaveBeenCalled();
+    },
+  );
 
   it("preserves an explicit empty tool scope across INPUT_REQUIRED and wire resume", async () => {
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValueOnce(INPUT_REQUIRED_TURN)
       .mockResolvedValueOnce(COMPLETED_TURN);
     const runner = makeRunner();
@@ -731,8 +797,10 @@ describe("SubAgentRunner A2A wire security contract", () => {
       a2aWireHandlerId: binding.handlerId,
     });
 
-    vi.spyOn(ConversationLoop.prototype, "getSessionProjectRoot")
-      .mockReturnValue(binding.project.root);
+    vi.spyOn(
+      ConversationLoop.prototype,
+      "getSessionProjectRoot",
+    ).mockReturnValue(binding.project.root);
     const completed = await runner.resumeFromA2AWire(
       { resumeId: waiting.childSessionId, messageText: "continue" },
       { handlerId: binding.handlerId },
@@ -743,48 +811,65 @@ describe("SubAgentRunner A2A wire security contract", () => {
   });
 
   it.each([
-    ["partial handler", (_origin: string) => ({ a2aWireHandlerId: "wire-handler-a" })],
-    ["partial internal origin", (origin: string) => ({ a2aWireInternalOrigin: origin })],
-    ["malformed handler", () => ({ a2aWireHandlerId: "wire handler with spaces" })],
-    ["malformed internal origin", () => ({ a2aWireInternalOrigin: "wire origin with spaces" })],
-    ["valid handler plus malformed origin", () => ({
-      a2aWireHandlerId: "wire-handler-a",
-      a2aWireInternalOrigin: "wire origin with spaces",
-    })],
-  ])("does not downgrade %s metadata into a regular resumable task", async (
-    _caseName,
-    buildBindingFields,
-  ) => {
-    const originSessionId = "wire-origin-handler-a";
-    const resumeId = makeResumeId(originSessionId);
-    writeRawWaitingMetadata(
-      resumeId,
-      originSessionId,
-      buildBindingFields(originSessionId),
-    );
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
-      .mockResolvedValue(COMPLETED_TURN);
-    const runner = makeRunner();
+    [
+      "partial handler",
+      (_origin: string) => ({ a2aWireHandlerId: "wire-handler-a" }),
+    ],
+    [
+      "partial internal origin",
+      (origin: string) => ({ a2aWireInternalOrigin: origin }),
+    ],
+    [
+      "malformed handler",
+      () => ({ a2aWireHandlerId: "wire handler with spaces" }),
+    ],
+    [
+      "malformed internal origin",
+      () => ({ a2aWireInternalOrigin: "wire origin with spaces" }),
+    ],
+    [
+      "valid handler plus malformed origin",
+      () => ({
+        a2aWireHandlerId: "wire-handler-a",
+        a2aWireInternalOrigin: "wire origin with spaces",
+      }),
+    ],
+  ])(
+    "does not downgrade %s metadata into a regular resumable task",
+    async (_caseName, buildBindingFields) => {
+      const originSessionId = "wire-origin-handler-a";
+      const resumeId = makeResumeId(originSessionId);
+      writeRawWaitingMetadata(
+        resumeId,
+        originSessionId,
+        buildBindingFields(originSessionId),
+      );
+      const runTurn = vi
+        .spyOn(ConversationLoop.prototype, "runTurn")
+        .mockResolvedValue(COMPLETED_TURN);
+      const runner = makeRunner();
 
-    const result = await runner.resume(
-      resumeId,
-      "continue",
-      "wire profile",
-      undefined,
-      originSessionId,
-    );
+      const result = await runner.resume(
+        resumeId,
+        "continue",
+        "wire profile",
+        undefined,
+        originSessionId,
+      );
 
-    expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/metadata|wire-bound|A2A wire binding/i);
-    expect(runTurn).not.toHaveBeenCalled();
-  });
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/metadata|wire-bound|A2A wire binding/i);
+      expect(runTurn).not.toHaveBeenCalled();
+    },
+  );
   it.each(["onLinked", "onActivity", "onError"] as const)(
     "rejects malformed optional %s callbacks with a structured provider-zero result",
     async (field) => {
       const barrier = vi.fn(async () => undefined);
       const callbacks: Record<string, unknown> = { onDurablyLinked: barrier };
       callbacks[field] = "not-a-function";
-      const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+      const runTurn = vi
+        .spyOn(ConversationLoop.prototype, "runTurn")
         .mockResolvedValue(COMPLETED_TURN);
       const runner = makeRunner();
 
@@ -811,27 +896,31 @@ describe("SubAgentRunner A2A wire security contract", () => {
     "isolates an onLinked observer that %s after the durable barrier",
     async (behavior) => {
       const events: string[] = [];
-      const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+      const runTurn = vi
+        .spyOn(ConversationLoop.prototype, "runTurn")
         .mockImplementation(async () => {
           events.push("provider");
           return COMPLETED_TURN;
         });
-      const onLinked = behavior === "throws"
-        ? () => {
-            events.push("linked");
-            throw new Error("observer failed");
-          }
-        : async () => {
-            events.push("linked");
-            throw new Error("observer rejected");
-          };
+      const onLinked =
+        behavior === "throws"
+          ? () => {
+              events.push("linked");
+              throw new Error("observer failed");
+            }
+          : async () => {
+              events.push("linked");
+              throw new Error("observer rejected");
+            };
       const runner = makeRunner();
 
       const result = await runner.spawnFromA2AWire(
         { messageText: "Do the work." },
         makeBinding(),
         {
-          onDurablyLinked: async () => { events.push("barrier"); },
+          onDurablyLinked: async () => {
+            events.push("barrier");
+          },
           onLinked,
         },
       );
@@ -855,7 +944,8 @@ describe("SubAgentRunner A2A wire security contract", () => {
         (binding.project as { name?: unknown }).name = ["invalid"];
       }
       const barrier = vi.fn(async () => undefined);
-      const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+      const runTurn = vi
+        .spyOn(ConversationLoop.prototype, "runTurn")
         .mockResolvedValue(COMPLETED_TURN);
       const runner = makeRunner();
 
@@ -897,7 +987,8 @@ describe("SubAgentRunner A2A wire security contract", () => {
     });
     const barrier = vi.fn(async () => undefined);
     const onLinked = vi.fn();
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
 
     const result = await runner.spawnFromA2AWire(
@@ -912,7 +1003,8 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
     expect(result).toMatchObject({
       ok: false,
-      error: "sub-agent A2A project binding rejected (a2a-project-binding-rejected)",
+      error:
+        "sub-agent A2A project binding rejected (a2a-project-binding-rejected)",
       toolCallCount: 0,
       turnCount: 0,
     });
@@ -948,7 +1040,8 @@ describe("SubAgentRunner A2A wire security contract", () => {
       toolRegistry,
       subAgentMemoryManager: store,
     });
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
 
     const result = await runner.resumeFromA2AWire(
@@ -959,7 +1052,8 @@ describe("SubAgentRunner A2A wire security contract", () => {
     expect(authorizeProject).toHaveBeenCalledWith(hostRoot, undefined);
     expect(result).toMatchObject({
       ok: false,
-      error: "sub-agent resume: A2A project binding rejected (a2a-project-binding-rejected)",
+      error:
+        "sub-agent resume: A2A project binding rejected (a2a-project-binding-rejected)",
       toolCallCount: 0,
       turnCount: 0,
     });
@@ -976,14 +1070,12 @@ describe("SubAgentRunner A2A wire security contract", () => {
     });
     const runner = makeRunner();
 
-    expect(runner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: "wire-handler-b" },
-    )).toBeNull();
-    expect(runner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: "wire-handler-a" },
-    )).toMatchObject({
+    expect(
+      runner.getA2AWireRunSnapshot(resumeId, { handlerId: "wire-handler-b" }),
+    ).toBeNull();
+    expect(
+      runner.getA2AWireRunSnapshot(resumeId, { handlerId: "wire-handler-a" }),
+    ).toMatchObject({
       childSessionId: resumeId,
       taskState: "TASK_STATE_INPUT_REQUIRED",
       suspension: {
@@ -993,24 +1085,21 @@ describe("SubAgentRunner A2A wire security contract", () => {
       },
     });
 
-    await expect(runner.cancelA2AWireRun(
-      resumeId,
-      { handlerId: "wire-handler-b" },
-    )).resolves.toEqual({ ok: false, reason: "task-not-found" });
-    await expect(runner.cancelA2AWireRun(
-      resumeId,
-      { handlerId: "wire-handler-a" },
-    )).resolves.toMatchObject({
+    await expect(
+      runner.cancelA2AWireRun(resumeId, { handlerId: "wire-handler-b" }),
+    ).resolves.toEqual({ ok: false, reason: "task-not-found" });
+    await expect(
+      runner.cancelA2AWireRun(resumeId, { handlerId: "wire-handler-a" }),
+    ).resolves.toMatchObject({
       ok: true,
       run: { taskState: "TASK_STATE_CANCELED" },
     });
     expect(store.loadSessionMetadata(resumeId)).toMatchObject({
       subAgentTaskState: "TASK_STATE_CANCELED",
     });
-    await expect(runner.cancelA2AWireRun(
-      resumeId,
-      { handlerId: "wire-handler-a" },
-    )).resolves.toMatchObject({
+    await expect(
+      runner.cancelA2AWireRun(resumeId, { handlerId: "wire-handler-a" }),
+    ).resolves.toMatchObject({
       ok: false,
       reason: "task-not-cancelable",
     });
@@ -1024,18 +1113,20 @@ describe("SubAgentRunner A2A wire security contract", () => {
       a2aWireInternalOrigin: originSessionId,
       subAgentSuspensionPrompt: undefined,
     });
-    const runTurn = vi.spyOn(ConversationLoop.prototype, "runTurn")
+    const runTurn = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
       .mockResolvedValue(COMPLETED_TURN);
     const runner = makeRunner();
 
-    expect(runner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: "wire-handler-a" },
-    )).toBeNull();
-    await expect(runner.resumeFromA2AWire(
-      { resumeId, messageText: "continue" },
-      { handlerId: "wire-handler-a" },
-    )).resolves.toMatchObject({
+    expect(
+      runner.getA2AWireRunSnapshot(resumeId, { handlerId: "wire-handler-a" }),
+    ).toBeNull();
+    await expect(
+      runner.resumeFromA2AWire(
+        { resumeId, messageText: "continue" },
+        { handlerId: "wire-handler-a" },
+      ),
+    ).resolves.toMatchObject({
       ok: false,
       error: expect.stringMatching(/wire resume binding is invalid/i),
     });
@@ -1051,10 +1142,12 @@ describe("SubAgentRunner A2A wire security contract", () => {
     const turn = new Promise<TurnResult>((resolve) => {
       finishTurn = resolve;
     });
-    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(async () => {
-      enterTurn();
-      return await turn;
-    });
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(
+      async () => {
+        enterTurn();
+        return await turn;
+      },
+    );
     const runner = makeRunner();
     const binding = makeBinding();
     let childSessionId = "";
@@ -1069,14 +1162,14 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
     await entered;
 
-    expect(runner.getA2AWireRunSnapshot(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_WORKING" });
-    await expect(runner.cancelA2AWireRun(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).resolves.toMatchObject({
+    expect(
+      runner.getA2AWireRunSnapshot(childSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_WORKING" });
+    await expect(
+      runner.cancelA2AWireRun(childSessionId, { handlerId: binding.handlerId }),
+    ).resolves.toMatchObject({
       ok: true,
       run: { taskState: "TASK_STATE_CANCELED" },
     });
@@ -1089,15 +1182,20 @@ describe("SubAgentRunner A2A wire security contract", () => {
       ok: false,
       stopReason: "interrupted",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    expect(
+      runner.getA2AWireRunSnapshot(childSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
   });
 
   it("keeps a durably waiting run cancelable and cleans its terminal mailbox", async () => {
-    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(INPUT_REQUIRED_TURN);
-    const cleanupTerminalRecipientMailbox = vi.fn(async () => ({ ok: true as const }));
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(
+      INPUT_REQUIRED_TURN,
+    );
+    const cleanupTerminalRecipientMailbox = vi.fn(async () => ({
+      ok: true as const,
+    }));
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
@@ -1115,10 +1213,11 @@ describe("SubAgentRunner A2A wire security contract", () => {
       suspension: { reason: "budget" },
     });
 
-    await expect(runner.cancelA2AWireRun(
-      waiting.childSessionId,
-      { handlerId: binding.handlerId },
-    )).resolves.toMatchObject({
+    await expect(
+      runner.cancelA2AWireRun(waiting.childSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).resolves.toMatchObject({
       ok: true,
       run: { taskState: "TASK_STATE_CANCELED" },
     });
@@ -1137,20 +1236,27 @@ describe("SubAgentRunner A2A wire security contract", () => {
     const turn = new Promise<TurnResult>((resolve) => {
       finishTurn = resolve;
     });
-    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(async () => {
-      enterTurn();
-      return await turn;
-    });
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(
+      async () => {
+        enterTurn();
+        return await turn;
+      },
+    );
     const originalSave = store.saveSessionMetadata.bind(store);
     let canceledSaveAttempts = 0;
-    vi.spyOn(store, "saveSessionMetadata").mockImplementation(async (...args) => {
-      if (args[1].subAgentTaskState === "TASK_STATE_CANCELED") {
-        canceledSaveAttempts += 1;
-        if (canceledSaveAttempts <= 2) throw new Error("simulated canceled metadata failure");
-      }
-      await originalSave(...args);
-    });
-    const cleanupTerminalRecipientMailbox = vi.fn(async () => ({ ok: true as const }));
+    vi.spyOn(store, "saveSessionMetadata").mockImplementation(
+      async (...args) => {
+        if (args[1].subAgentTaskState === "TASK_STATE_CANCELED") {
+          canceledSaveAttempts += 1;
+          if (canceledSaveAttempts <= 2)
+            throw new Error("simulated canceled metadata failure");
+        }
+        await originalSave(...args);
+      },
+    );
+    const cleanupTerminalRecipientMailbox = vi.fn(async () => ({
+      ok: true as const,
+    }));
     const runner = new SubAgentRunner({
       parentDeps: buildLoopDeps(toolRegistry),
       toolRegistry,
@@ -1170,17 +1276,17 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
     await entered;
 
-    await expect(runner.cancelA2AWireRun(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).resolves.toEqual({ ok: false, reason: "storage-failed" });
+    await expect(
+      runner.cancelA2AWireRun(childSessionId, { handlerId: binding.handlerId }),
+    ).resolves.toEqual({ ok: false, reason: "storage-failed" });
     expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
       subAgentTaskState: "TASK_STATE_SUBMITTED",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_SUBMITTED" });
+    expect(
+      runner.getA2AWireRunSnapshot(childSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_SUBMITTED" });
 
     finishTurn(COMPLETED_TURN);
     await expect(running).resolves.toMatchObject({
@@ -1190,15 +1296,15 @@ describe("SubAgentRunner A2A wire security contract", () => {
     expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
       subAgentTaskState: "TASK_STATE_SUBMITTED",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_SUBMITTED" });
+    expect(
+      runner.getA2AWireRunSnapshot(childSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_SUBMITTED" });
 
-    await expect(runner.cancelA2AWireRun(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).resolves.toMatchObject({
+    await expect(
+      runner.cancelA2AWireRun(childSessionId, { handlerId: binding.handlerId }),
+    ).resolves.toMatchObject({
       ok: true,
       run: { taskState: "TASK_STATE_CANCELED" },
     });
@@ -1206,10 +1312,11 @@ describe("SubAgentRunner A2A wire security contract", () => {
     expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
       subAgentTaskState: "TASK_STATE_CANCELED",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    expect(
+      runner.getA2AWireRunSnapshot(childSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
     expect(cleanupTerminalRecipientMailbox).toHaveBeenCalledOnce();
   });
 
@@ -1221,8 +1328,10 @@ describe("SubAgentRunner A2A wire security contract", () => {
       a2aWireHandlerId: binding.handlerId,
       a2aWireInternalOrigin: originSessionId,
     });
-    vi.spyOn(ConversationLoop.prototype, "getSessionProjectRoot")
-      .mockReturnValue(binding.project.root);
+    vi.spyOn(
+      ConversationLoop.prototype,
+      "getSessionProjectRoot",
+    ).mockReturnValue(binding.project.root);
     let enterTurn!: () => void;
     const entered = new Promise<void>((resolve) => {
       enterTurn = resolve;
@@ -1231,10 +1340,12 @@ describe("SubAgentRunner A2A wire security contract", () => {
     const turn = new Promise<TurnResult>((resolve) => {
       finishTurn = resolve;
     });
-    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(async () => {
-      enterTurn();
-      return await turn;
-    });
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockImplementation(
+      async () => {
+        enterTurn();
+        return await turn;
+      },
+    );
     const runner = makeRunner();
     const running = runner.resumeFromA2AWire(
       { resumeId, messageText: "continue" },
@@ -1242,10 +1353,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
     await entered;
 
-    await expect(runner.cancelA2AWireRun(
-      resumeId,
-      { handlerId: binding.handlerId },
-    )).resolves.toMatchObject({
+    await expect(
+      runner.cancelA2AWireRun(resumeId, { handlerId: binding.handlerId }),
+    ).resolves.toMatchObject({
       ok: true,
       run: { taskState: "TASK_STATE_CANCELED" },
     });
@@ -1257,14 +1367,15 @@ describe("SubAgentRunner A2A wire security contract", () => {
       ok: false,
       stopReason: "interrupted",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
+    expect(
+      runner.getA2AWireRunSnapshot(resumeId, { handlerId: binding.handlerId }),
+    ).toMatchObject({ taskState: "TASK_STATE_CANCELED" });
   });
 
   it("rejects spawn cancellation after terminal persistence ownership is claimed", async () => {
-    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(COMPLETED_TURN);
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(
+      COMPLETED_TURN,
+    );
     const runner = makeRunner();
     const binding = makeBinding();
     const preparation = pauseQuestionStagePreparation(runner);
@@ -1280,10 +1391,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
     await preparation.entered;
 
-    const canceled = await runner.cancelA2AWireRun(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    );
+    const canceled = await runner.cancelA2AWireRun(childSessionId, {
+      handlerId: binding.handlerId,
+    });
     preparation.release();
     const result = await running;
 
@@ -1298,10 +1408,11 @@ describe("SubAgentRunner A2A wire security contract", () => {
     expect(store.loadSessionMetadata(childSessionId)).toMatchObject({
       subAgentTaskState: "TASK_STATE_COMPLETED",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      childSessionId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_COMPLETED" });
+    expect(
+      runner.getA2AWireRunSnapshot(childSessionId, {
+        handlerId: binding.handlerId,
+      }),
+    ).toMatchObject({ taskState: "TASK_STATE_COMPLETED" });
   });
 
   it("rejects resume cancellation after terminal persistence ownership is claimed", async () => {
@@ -1312,9 +1423,13 @@ describe("SubAgentRunner A2A wire security contract", () => {
       a2aWireHandlerId: binding.handlerId,
       a2aWireInternalOrigin: originSessionId,
     });
-    vi.spyOn(ConversationLoop.prototype, "getSessionProjectRoot")
-      .mockReturnValue(binding.project.root);
-    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(COMPLETED_TURN);
+    vi.spyOn(
+      ConversationLoop.prototype,
+      "getSessionProjectRoot",
+    ).mockReturnValue(binding.project.root);
+    vi.spyOn(ConversationLoop.prototype, "runTurn").mockResolvedValue(
+      COMPLETED_TURN,
+    );
     const runner = makeRunner();
     const preparation = pauseQuestionStagePreparation(runner);
     const running = runner.resumeFromA2AWire(
@@ -1323,10 +1438,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
     );
     await preparation.entered;
 
-    const canceled = await runner.cancelA2AWireRun(
-      resumeId,
-      { handlerId: binding.handlerId },
-    );
+    const canceled = await runner.cancelA2AWireRun(resumeId, {
+      handlerId: binding.handlerId,
+    });
     preparation.release();
     const result = await running;
 
@@ -1341,10 +1455,8 @@ describe("SubAgentRunner A2A wire security contract", () => {
     expect(store.loadSessionMetadata(resumeId)).toMatchObject({
       subAgentTaskState: "TASK_STATE_COMPLETED",
     });
-    expect(runner.getA2AWireRunSnapshot(
-      resumeId,
-      { handlerId: binding.handlerId },
-    )).toMatchObject({ taskState: "TASK_STATE_COMPLETED" });
+    expect(
+      runner.getA2AWireRunSnapshot(resumeId, { handlerId: binding.handlerId }),
+    ).toMatchObject({ taskState: "TASK_STATE_COMPLETED" });
   });
-
 });

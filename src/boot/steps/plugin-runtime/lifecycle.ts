@@ -14,8 +14,8 @@ import { t } from "../../../i18n/index.js";
 import { createLogger } from "../../../lib/logger.js";
 import { sendToWindow } from "../../../ipc/safe-send.js";
 import { declaresHostManagedPythonRuntime } from "./manifest.js";
-import type { PluginRuntime, PluginRuntimeOptions } from "../../../plugins/runtime.js";
-import type { KeywordEngine } from "../../../core/keyword-engine.js";
+import type { PluginRuntime, PluginRuntimeOptions,
+} from "../../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../../main/python-runtime.js";
 import type { LateBindingRefs } from "../plugin-runtime.js";
 import type { PluginBundleLifecycleHandler } from "../../../plugins/plugin-bundle-lifecycle.js";
@@ -25,7 +25,6 @@ const log = createLogger("lvis");
 /** Explicit deps for the lifecycle callbacks. Lazy bindings arrive as getters. */
 export interface LifecycleDeps {
   getPluginRuntime: () => PluginRuntime;
-  keywordEngine: KeywordEngine;
   lateBinding: LateBindingRefs;
   getMainWindow?: () => BrowserWindow | null;
   mainWindow: BrowserWindow;
@@ -44,7 +43,6 @@ export function createLifecycleCallbacks(
 ): Pick<PluginRuntimeOptions, "preparePluginStart" | "onDisable" | "onActiveStateChange" | "onEnable"> {
   const {
     getPluginRuntime,
-    keywordEngine,
     lateBinding,
     getMainWindow,
     mainWindow,
@@ -53,7 +51,8 @@ export function createLifecycleCallbacks(
   } = deps;
 
   return {
-    preparePluginStart: ({ pluginId, manifest, manifestPath, reportProgress }) => {
+    preparePluginStart: ({ pluginId, manifest, manifestPath, reportProgress,
+    }) => {
       if (!pythonRuntime || !declaresHostManagedPythonRuntime(manifest)) return undefined;
       const win = getMainWindow?.() ?? mainWindow;
       return (async () => {
@@ -68,9 +67,11 @@ export function createLifecycleCallbacks(
             message: status.msg,
             progressPct: status.pct,
           });
-        });
+        },
+        );
         if (!runtime) {
-          throw new Error(`plugin '${pluginId}' declares host-managed Python but no accessible lockfile was found`);
+          throw new Error(`plugin '${pluginId}' declares host-managed Python but no accessible lockfile was found`,
+          );
         }
         reportProgress?.({
           phase: "ready",
@@ -78,29 +79,23 @@ export function createLifecycleCallbacks(
           progressPct: 100,
         });
         const pluginRuntime = getPluginRuntime();
-        pluginRuntime.mergeConfigOverride(pluginId, { pythonExecutable: runtime.pythonPath });
-        log.info("plugin dependency runtime ready: %s -> %s", pluginId, runtime.pythonPath);
+        pluginRuntime.mergeConfigOverride(pluginId, { pythonExecutable: runtime.pythonPath,
+        });
+        log.info("plugin dependency runtime ready: %s -> %s", pluginId, runtime.pythonPath,
+        );
       })();
     },
     onDisable: (pluginId) => {
-      keywordEngine.unregisterByPlugin(pluginId);
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
     onActiveStateChange: async (pluginId, enabled) => {
       const bundleLifecycle = deps.getBundleLifecycle?.();
       if (!bundleLifecycle) {
-        throw new Error(`plugin generation lifecycle is not bound for active-state change: ${pluginId}`);
+        throw new Error(`plugin generation lifecycle is not bound for active-state change: ${pluginId}`,
+        );
       }
       if (!enabled) {
-        keywordEngine.unregisterByPlugin(pluginId);
         lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
-        return;
-      }
-      const pluginRuntime = getPluginRuntime();
-      const manifest = pluginRuntime.getPluginManifest(pluginId);
-      if (!keywordEngine.hasPluginKeywords(pluginId) && manifest?.keywords && manifest.keywords.length > 0) {
-        keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
-        log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on activation`);
       }
     },
     // Symmetric to `onDisable` — re-registers tools after a successful
@@ -108,7 +103,6 @@ export function createLifecycleCallbacks(
     // `도구를 찾을 수 없습니다` post-restart (see PR #760). Non-fatal:
     // a sync exception is logged but does not become `runtime reload failed`.
     onEnable: (pluginId) => {
-      const pluginRuntime = getPluginRuntime();
       // `restartAll()` is also the managed-marketplace first-sync path:
       // ensureManagedInstalled() writes the registry, then restartAll() loads
       // the new plugin without emitting plugin.installed. Register the
@@ -118,20 +112,6 @@ export function createLifecycleCallbacks(
       // legacy-removal flag-day: ALL plugins register through the loopback manager
       // (server/discover → tools/list → reverse projection from `_meta`) — the
       // legacy `pluginToolsForRegistration` direct path is gone.
-      // Runtime restart/reload can reach loaded+started after a prior teardown.
-      // registerKeywords usually runs through hostApi during start(); keep this
-      // guarded manifest replay as the lifecycle safety net without duplicating
-      // entries or reviving user-inactive plugins.
-      const manifest = pluginRuntime.getPluginManifest(pluginId);
-      if (
-        pluginRuntime.isPluginEnabled(pluginId) &&
-        !keywordEngine.hasPluginKeywords(pluginId) &&
-        manifest?.keywords &&
-        manifest.keywords.length > 0
-      ) {
-        keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
-        log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on enable`);
-      }
       // Best-effort renderer refresh signal. Runtime/tool registry state is
       // already updated; a closed window must not make reload fail —
       // sendToWindow owns the isDestroyed guard + send try/catch.

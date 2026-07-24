@@ -1651,7 +1651,7 @@ describe("Windows NSIS installer smoke contracts", () => {
       build?: { nsis?: { deleteAppDataOnUninstall?: boolean } };
     };
     expect(packageJson.dependencies?.["@anthropic-ai/sandbox-runtime"]).toBe(
-      "0.0.66",
+      "0.0.67",
     );
     expect(packageJson.build?.nsis?.deleteAppDataOnUninstall).toBe(false);
   });

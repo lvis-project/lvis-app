@@ -38,7 +38,8 @@ function handleSpy(): ReturnType<typeof vi.fn> {
 }
 
 function getRegisteredHandler(channel: string): IpcHandler {
-  const call = handleSpy().mock.calls.find(([registeredChannel]) => registeredChannel === channel);
+  const call = handleSpy().mock.calls.find(([registeredChannel]) => registeredChannel === channel,
+  );
   if (!call) throw new Error(`missing IPC handler for ${channel}`);
   return call[1] as IpcHandler;
 }
@@ -60,8 +61,7 @@ function createPluginFixture(): { root: string; entryUrl: string } {
   writeFileSync(entry, "<!doctype html>");
   return {
     root,
-    entryUrl:
-      `${pathToFileURL(entry).toString()}?lvisPluginVersion=1.0.0&lvisRuntimeRevision=1`,
+    entryUrl: `${pathToFileURL(entry).toString()}?lvisPluginVersion=1.0.0&lvisRuntimeRevision=1`,
   };
 }
 
@@ -79,14 +79,19 @@ function createDeps(pluginRoot: string): {
     getActive: vi.fn((pluginId: string) =>
       pluginId === "meeting"
         ? { pluginId, generationId: "generation-1", manifest: { id: pluginId } }
-        : undefined),
+        : undefined,
+    ),
     isExactAdmitted: vi.fn(() => true),
-    acquire: vi.fn(async () => { throw new Error("not used"); }),
+    acquire: vi.fn(async () => {
+      throw new Error("not used");
+    }),
     acquireExact: vi.fn(async (pluginId: string, generationId: string) => ({
       generation: { pluginId, generationId },
       release: vi.fn(),
     })),
-    runWithLease: vi.fn(async (_lease: unknown, operation: () => Promise<unknown>) => operation()),
+    runWithLease: vi.fn(
+      async (_lease: unknown, operation: () => Promise<unknown>) => operation(),
+    ),
   };
   const pluginRuntime = {
     getPluginManifest: vi.fn(() => ({
@@ -107,13 +112,15 @@ function createDeps(pluginRoot: string): {
       get: vi.fn(),
       set: vi.fn(),
       getPluginConfig: vi.fn((pluginId: string) => pluginConfig.get(pluginId)),
-      setPluginConfig: vi.fn(async (pluginId: string, config: Record<string, unknown>) => {
-        pluginConfig.set(pluginId, config);
-        return config;
-      }),
+      setPluginConfig: vi.fn(
+        async (pluginId: string, config: Record<string, unknown>) => {
+          pluginConfig.set(pluginId, config);
+          return config;
+        },
+      ),
     },
     memoryManager: {},
-    keywordEngine: {},
+    inputClassifier: {},
     routeEngine: {},
     toolRegistry: {},
     systemPromptBuilder: {},
@@ -140,7 +147,13 @@ function registerHandlersWithPlugin(webContentsId: number): {
   const { deps, pluginRuntime } = createDeps(root);
   registerPluginsHandlers(deps);
   const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
-  expect(registerWebview(rendererEvent(), { webContentsId, pluginId: "meeting", entryUrl })).toEqual({ ok: true });
+  expect(
+    registerWebview(rendererEvent(), {
+      webContentsId,
+      pluginId: "meeting",
+      entryUrl,
+    }),
+  ).toEqual({ ok: true });
   return { pluginRuntime };
 }
 
@@ -170,7 +183,11 @@ describe("plugin theme replay cache", () => {
   });
 
   it("returns cloned cache snapshots so callers cannot poison the replay cache", () => {
-    recordValidatedTheme({ bundleId: "violet-dark", shell: "dark", tokens: { "--lvis-bg": "#111" } });
+    recordValidatedTheme({
+      bundleId: "violet-dark",
+      shell: "dark",
+      tokens: { "--lvis-bg": "#111" },
+    });
     const cached = getLastThemePayload();
     expect(cached).toEqual({
       bundleId: "violet-dark",
@@ -194,7 +211,11 @@ describe("plugin theme replay cache", () => {
   });
 
   it("invalid payload leaves the existing cache untouched", () => {
-    recordValidatedTheme({ bundleId: "violet-light", shell: "light", tokens: { "--lvis-bg": "#fff" } });
+    recordValidatedTheme({
+      bundleId: "violet-light",
+      shell: "light",
+      tokens: { "--lvis-bg": "#fff" },
+    });
     const before = getLastThemePayload();
 
     const result = recordValidatedTheme({ bundleId: "sepia", shell: "light" });
@@ -204,8 +225,16 @@ describe("plugin theme replay cache", () => {
   });
 
   it("overwrites earlier payload on each new valid call", () => {
-    recordValidatedTheme({ bundleId: "violet-dark", shell: "dark", tokens: { "--lvis-bg": "#111" } });
-    recordValidatedTheme({ bundleId: "forest", shell: "light", tokens: { "--lvis-bg": "#eee" } });
+    recordValidatedTheme({
+      bundleId: "violet-dark",
+      shell: "dark",
+      tokens: { "--lvis-bg": "#111" },
+    });
+    recordValidatedTheme({
+      bundleId: "forest",
+      shell: "light",
+      tokens: { "--lvis-bg": "#eee" },
+    });
 
     expect(getLastThemePayload()).toEqual({
       bundleId: "forest",
@@ -269,7 +298,11 @@ describe("replayThemeToWebview", () => {
 
   it("sends host.theme.changed exactly once to the resolved wc when cache is filled", () => {
     fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => false });
-    recordValidatedTheme({ bundleId: "tokyo-night", shell: "dark", tokens: { "--lvis-bg": "#0d0d12" } });
+    recordValidatedTheme({
+      bundleId: "tokyo-night",
+      shell: "dark",
+      tokens: { "--lvis-bg": "#0d0d12" },
+    });
 
     const result = replayThemeToWebview(42);
 
@@ -279,14 +312,26 @@ describe("replayThemeToWebview", () => {
     expect(sendSpy).toHaveBeenCalledWith(
       "lvis:plugin:event",
       "host.theme.changed",
-      { bundleId: "tokyo-night", shell: "dark", tokens: { "--lvis-bg": "#0d0d12" } },
+      {
+        bundleId: "tokyo-night",
+        shell: "dark",
+        tokens: { "--lvis-bg": "#0d0d12" },
+      },
     );
-    expect(result).toEqual({ bundleId: "tokyo-night", shell: "dark", tokens: { "--lvis-bg": "#0d0d12" } });
+    expect(result).toEqual({
+      bundleId: "tokyo-night",
+      shell: "dark",
+      tokens: { "--lvis-bg": "#0d0d12" },
+    });
   });
 
   it("does not send when wc.fromId returns undefined (already-destroyed wcId)", () => {
     fromIdSpy.mockReturnValue(undefined);
-    recordValidatedTheme({ bundleId: "violet-light", shell: "light", tokens: { "--lvis-bg": "#fff" } });
+    recordValidatedTheme({
+      bundleId: "violet-light",
+      shell: "light",
+      tokens: { "--lvis-bg": "#fff" },
+    });
 
     const result = replayThemeToWebview(99);
 
@@ -296,7 +341,11 @@ describe("replayThemeToWebview", () => {
 
   it("does not send when wc.isDestroyed() is true", () => {
     fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => true });
-    recordValidatedTheme({ bundleId: "violet-dark", shell: "dark", tokens: { "--lvis-bg": "#111" } });
+    recordValidatedTheme({
+      bundleId: "violet-dark",
+      shell: "dark",
+      tokens: { "--lvis-bg": "#111" },
+    });
 
     const result = replayThemeToWebview(11);
 
@@ -306,10 +355,16 @@ describe("replayThemeToWebview", () => {
 
   it("swallows wc.send throw without surfacing", () => {
     fromIdSpy.mockReturnValue({
-      send: () => { throw new Error("wc gone"); },
+      send: () => {
+        throw new Error("wc gone");
+      },
       isDestroyed: () => false,
     });
-    recordValidatedTheme({ bundleId: "violet-dark", shell: "dark", tokens: { "--lvis-bg": "#111" } });
+    recordValidatedTheme({
+      bundleId: "violet-dark",
+      shell: "dark",
+      tokens: { "--lvis-bg": "#111" },
+    });
 
     expect(() => replayThemeToWebview(7)).not.toThrow();
     expect(replayThemeToWebview(7)).toBeNull();
@@ -318,14 +373,19 @@ describe("replayThemeToWebview", () => {
 
 describe("publishHostThemeChanged", () => {
   it("emits an immutable clone on the host event bus", () => {
-    const payload = { bundleId: "tokyo-night", shell: "dark" as const, tokens: { "--lvis-bg": "#0d0d12" } };
+    const payload = {
+      bundleId: "tokyo-night",
+      shell: "dark" as const,
+      tokens: { "--lvis-bg": "#0d0d12" },
+    };
     const seen: unknown[] = [];
     const unsubscribe = onEvent("host.theme.changed", (data) => {
       expect(data).not.toBe(payload);
       expect(Object.isFrozen(data)).toBe(true);
       expect(Object.isFrozen((data as { tokens?: unknown }).tokens)).toBe(true);
       try {
-        ((data as { tokens: Record<string, string> }).tokens)["--lvis-bg"] = "#fff";
+        (data as { tokens: Record<string, string> }).tokens["--lvis-bg"] =
+          "#fff";
       } catch {
         /* frozen in strict runtimes */
       }
@@ -377,7 +437,11 @@ describe("plugin theme IPC handlers", () => {
   });
 
   it("publishes host.theme.changed through the production theme-notify IPC handler", () => {
-    fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => false, getType: () => "webview" });
+    fromIdSpy.mockReturnValue({
+      send: sendSpy,
+      isDestroyed: () => false,
+      getType: () => "webview",
+    });
     registerHandlersWithPlugin(1701);
     const themeNotify = getRegisteredHandler("lvis:host:plugin-theme-notify");
     const payload = {
@@ -401,11 +465,19 @@ describe("plugin theme IPC handlers", () => {
 
     expect(seen).toEqual([payload]);
     expect(getLastThemePayload()).toEqual(payload);
-    expect(sendSpy).toHaveBeenCalledWith("lvis:plugin:event", "host.theme.changed", payload);
+    expect(sendSpy).toHaveBeenCalledWith(
+      "lvis:plugin:event",
+      "host.theme.changed",
+      payload,
+    );
   });
 
   it("republishes cached theme through the production webview-register replay path", () => {
-    fromIdSpy.mockReturnValue({ send: sendSpy, isDestroyed: () => false, getType: () => "webview" });
+    fromIdSpy.mockReturnValue({
+      send: sendSpy,
+      isDestroyed: () => false,
+      getType: () => "webview",
+    });
     const cached = {
       bundleId: "violet-dark",
       shell: "dark" as const,
@@ -415,7 +487,9 @@ describe("plugin theme IPC handlers", () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const seen: unknown[] = [];
     const unsubscribe = onEvent("host.theme.changed", (data) => {
       expect(data).not.toBe(cached);
@@ -425,12 +499,22 @@ describe("plugin theme IPC handlers", () => {
     });
 
     try {
-      expect(registerWebview(rendererEvent(), { webContentsId: 1702, pluginId: "meeting", entryUrl })).toEqual({ ok: true });
+      expect(
+        registerWebview(rendererEvent(), {
+          webContentsId: 1702,
+          pluginId: "meeting",
+          entryUrl,
+        }),
+      ).toEqual({ ok: true });
     } finally {
       unsubscribe();
     }
 
-    expect(sendSpy).toHaveBeenCalledWith("lvis:plugin:event", "host.theme.changed", cached);
+    expect(sendSpy).toHaveBeenCalledWith(
+      "lvis:plugin:event",
+      "host.theme.changed",
+      cached,
+    );
     expect(seen).toEqual([cached]);
   });
 
@@ -438,20 +522,24 @@ describe("plugin theme IPC handlers", () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const getEntryUrl = getRegisteredHandler("lvis:plugin:get-entry-url");
-    const versionedEntryUrl =
-      `${entryUrl.split("?")[0]}?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7`;
+    const versionedEntryUrl = `${entryUrl.split("?")[0]}?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7`;
 
-    expect(registerWebview(rendererEvent(), {
-      webContentsId: 1704,
-      pluginId: "meeting",
-      entryUrl: versionedEntryUrl,
-    })).toEqual({ ok: true });
+    expect(
+      registerWebview(rendererEvent(), {
+        webContentsId: 1704,
+        pluginId: "meeting",
+        entryUrl: versionedEntryUrl,
+      }),
+    ).toEqual({ ok: true });
 
     expect(getEntryUrl(pluginEvent(1704))).toEqual({
       ok: true,
-      entryUrl: "lvis-plugin://asset/index.html?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7",
+      entryUrl:
+        "lvis-plugin://asset/index.html?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7",
     });
   });
 
@@ -459,17 +547,25 @@ describe("plugin theme IPC handlers", () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const revokedSessions: string[] = [];
-    const revokeSession = (appSessionId: string) => revokedSessions.push(appSessionId);
-    const webContentsIds = Array.from({ length: 64 }, (_, index) => 2_000 + index);
+    const revokeSession = (appSessionId: string) =>
+      revokedSessions.push(appSessionId);
+    const webContentsIds = Array.from(
+      { length: 64 },
+      (_, index) => 2_000 + index,
+    );
 
     for (const webContentsId of webContentsIds) {
-      expect(registerWebview(rendererEvent(), {
-        webContentsId,
-        pluginId: "meeting",
-        entryUrl,
-      })).toEqual({ ok: true });
+      expect(
+        registerWebview(rendererEvent(), {
+          webContentsId,
+          pluginId: "meeting",
+          entryUrl,
+        }),
+      ).toEqual({ ok: true });
     }
     for (const webContentsId of webContentsIds) {
       unregisterPluginWebview(webContentsId, revokeSession);
@@ -484,45 +580,57 @@ describe("plugin theme IPC handlers", () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const revokeSession = vi.mocked(deps.revokePluginOperationSession);
     const webContentsId = 2_100;
 
-    expect(registerWebview(rendererEvent(), {
-      webContentsId,
-      pluginId: "meeting",
-      entryUrl,
-    })).toEqual({ ok: true });
-    expect(registerWebview(rendererEvent(), {
-      webContentsId,
-      pluginId: "meeting",
-      entryUrl,
-    })).toEqual({ ok: true });
+    expect(
+      registerWebview(rendererEvent(), {
+        webContentsId,
+        pluginId: "meeting",
+        entryUrl,
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      registerWebview(rendererEvent(), {
+        webContentsId,
+        pluginId: "meeting",
+        entryUrl,
+      }),
+    ).toEqual({ ok: true });
 
     expect(revokeSession).toHaveBeenCalledTimes(1);
     unregisterPluginWebview(webContentsId, revokeSession);
     unregisterPluginWebview(webContentsId, revokeSession);
 
     expect(revokeSession).toHaveBeenCalledTimes(2);
-    expect(new Set(revokeSession.mock.calls.map(([appSessionId]) => appSessionId))).toHaveLength(2);
+    expect(
+      new Set(revokeSession.mock.calls.map(([appSessionId]) => appSessionId)),
+    ).toHaveLength(2);
   });
 
   it("rejects registration that arrives after the target webview was destroyed", () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const revokeSession = vi.mocked(deps.revokePluginOperationSession);
     const webContentsId = 2_101;
 
     unregisterPluginWebview(webContentsId, revokeSession);
     fromIdSpy.mockReturnValue(undefined);
 
-    expect(registerWebview(rendererEvent(), {
-      webContentsId,
-      pluginId: "meeting",
-      entryUrl,
-    })).toEqual({ ok: false, error: "webview-not-live" });
+    expect(
+      registerWebview(rendererEvent(), {
+        webContentsId,
+        pluginId: "meeting",
+        entryUrl,
+      }),
+    ).toEqual({ ok: false, error: "webview-not-live" });
 
     unregisterPluginWebview(webContentsId, revokeSession);
     expect(revokeSession).not.toHaveBeenCalled();
@@ -532,13 +640,17 @@ describe("plugin theme IPC handlers", () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps, pluginRuntime } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const configSet = getRegisteredHandler("lvis:plugin:config:set");
-    expect(registerWebview(rendererEvent(), {
-      webContentsId: 1705,
-      pluginId: "meeting",
-      entryUrl,
-    })).toEqual({ ok: true });
+    expect(
+      registerWebview(rendererEvent(), {
+        webContentsId: 1705,
+        pluginId: "meeting",
+        entryUrl,
+      }),
+    ).toEqual({ ok: true });
 
     pluginRuntime.isPluginUiRevisionCurrent.mockReturnValue(false);
     const result = await configSet(pluginEvent(1705), "theme", "dark");
@@ -552,13 +664,17 @@ describe("plugin theme IPC handlers", () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps, pluginRuntime } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
-    expect(registerWebview(rendererEvent(), {
-      webContentsId: 1707,
-      pluginId: "meeting",
-      entryUrl,
-    })).toEqual({ ok: true });
+    expect(
+      registerWebview(rendererEvent(), {
+        webContentsId: 1707,
+        pluginId: "meeting",
+        entryUrl,
+      }),
+    ).toEqual({ ok: true });
 
     const access = pluginRuntime.getGenerationAccess();
     access.getActive.mockReturnValue({
@@ -566,7 +682,9 @@ describe("plugin theme IPC handlers", () => {
       generationId: "generation-2",
       manifest: { id: "meeting" },
     });
-    expect(emitEvent(pluginEvent(1707), "meeting.changed")).toEqual(UNAUTHORIZED_FRAME);
+    expect(emitEvent(pluginEvent(1707), "meeting.changed")).toEqual(
+      UNAUTHORIZED_FRAME,
+    );
     expect(deps.revokePluginOperationSession).toHaveBeenCalledTimes(1);
   });
 
@@ -574,54 +692,69 @@ describe("plugin theme IPC handlers", () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
-    expect(registerWebview(rendererEvent(), {
-      webContentsId: 1708,
-      pluginId: "meeting",
-      entryUrl,
-    })).toEqual({ ok: true });
+    expect(
+      registerWebview(rendererEvent(), {
+        webContentsId: 1708,
+        pluginId: "meeting",
+        entryUrl,
+      }),
+    ).toEqual({ ok: true });
 
     revokePluginWebviewsForPlugin("meeting", deps.revokePluginOperationSession);
 
     expect(deps.revokePluginOperationSession).toHaveBeenCalledTimes(1);
-    expect(emitEvent(pluginEvent(1708), "meeting.changed")).toEqual(UNAUTHORIZED_FRAME);
+    expect(emitEvent(pluginEvent(1708), "meeting.changed")).toEqual(
+      UNAUTHORIZED_FRAME,
+    );
   });
 
   it("persists config for the currently registered plugin UI revision", async () => {
     const { root, entryUrl } = createPluginFixture();
     const { deps, pluginRuntime } = createDeps(root);
     registerPluginsHandlers(deps);
-    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const registerWebview = getRegisteredHandler(
+      "lvis:plugin:register-webview",
+    );
     const configSet = getRegisteredHandler("lvis:plugin:config:set");
-    expect(registerWebview(rendererEvent(), {
-      webContentsId: 1706,
-      pluginId: "meeting",
-      entryUrl,
-    })).toEqual({ ok: true });
+    expect(
+      registerWebview(rendererEvent(), {
+        webContentsId: 1706,
+        pluginId: "meeting",
+        entryUrl,
+      }),
+    ).toEqual({ ok: true });
 
-    await expect(configSet(pluginEvent(1706), "theme", "dark")).resolves.toEqual({ ok: true });
+    await expect(
+      configSet(pluginEvent(1706), "theme", "dark"),
+    ).resolves.toEqual({ ok: true });
     expect(deps.settingsService.setPluginConfig).toHaveBeenCalledWith(
       "meeting",
       { theme: "dark" },
     );
-    expect(pluginRuntime.setConfigOverride).toHaveBeenCalledWith(
-      "meeting",
-      { theme: "dark" },
-    );
+    expect(pluginRuntime.setConfigOverride).toHaveBeenCalledWith("meeting", {
+      theme: "dark",
+    });
   });
   it("rejects host namespace emits through the production plugin emit IPC handler", () => {
     const { pluginRuntime } = registerHandlersWithPlugin(1703);
     const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
     const seen: unknown[] = [];
-    const unsubscribe = onEvent("host.theme.changed", (data) => seen.push(data));
+    const unsubscribe = onEvent("host.theme.changed", (data) =>
+      seen.push(data),
+    );
 
     try {
-      expect(emitEvent(pluginEvent(1703), "host.theme.changed", {
-        bundleId: "tokyo-night",
-        shell: "dark",
-        tokens: { "--lvis-bg": "#0d0d12" },
-      })).toEqual({ ok: false, error: "host-only-namespace:host" });
+      expect(
+        emitEvent(pluginEvent(1703), "host.theme.changed", {
+          bundleId: "tokyo-night",
+          shell: "dark",
+          tokens: { "--lvis-bg": "#0d0d12" },
+        }),
+      ).toEqual({ ok: false, error: "host-only-namespace:host" });
     } finally {
       unsubscribe();
     }

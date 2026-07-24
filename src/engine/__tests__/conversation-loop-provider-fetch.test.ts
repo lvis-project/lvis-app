@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
@@ -17,7 +17,8 @@ afterEach(() => {
   vi.doUnmock("../llm/provider-factory.js");
 });
 
-async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[]> {
+async function collectStream(iterable: AsyncIterable<unknown>,
+  ): Promise<unknown[]> {
   const events: unknown[] = [];
   for await (const event of iterable) {
     events.push(event);
@@ -45,18 +46,18 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
       "https://aif.example.openai.azure.com/openai/v1/";
     const llmFetch = vi.fn() as unknown as typeof fetch;
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: () => settings,
         getSecret: () => "test-key",
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
       llmFetch,
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     expect(createProvider).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -88,18 +89,18 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     settings.vendors.openai.baseUrl = "https://proxy.example.test/v1";
     const llmFetch = vi.fn() as unknown as typeof fetch;
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: () => settings,
         getSecret: () => "test-key",
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
       llmFetch,
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     expect(createProvider).toHaveBeenCalledWith(
       expect.not.objectContaining({
@@ -134,17 +135,17 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     });
     settings.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: () => settings,
         getSecret: () => null,
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     expect(createProvider).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -174,17 +175,17 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     });
     settings.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: () => settings,
         getSecret: () => null,
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     // Handshake-only: an empty model means "not configured" — never send a
     // fabricated/seed id to the endpoint. The user must pick from the live list.
@@ -209,17 +210,17 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     });
     settings.vendors["openai-compatible"].baseUrl = "http://localhost:8000/v1";
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: () => settings,
         getSecret: () => "stored-key",
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     expect(createProvider).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -251,22 +252,24 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     settings.marketplaceProviderPresetId = "future-router";
     settings.vendors["openai-compatible"].baseUrl = "https://stale.example/v1";
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: (key: string) => {
           if (key === "llm") return settings;
           if (key === "marketplace") {
             return {
-              installedProviderPresets: [{
-                providerId: "future-router",
-                label: "Future Router",
-                baseUrl: "https://future.example/v1",
-                defaultModel: "future/free",
-                modelOptions: ["future/free"],
-                requiresApiKey: true,
-                modelDiscoveryPolicy: "models-api",
-                capabilities: { streaming: true, toolCalls: true },
-              }],
+              installedProviderPresets: [
+                {
+                  providerId: "future-router",
+                  label: "Future Router",
+                  baseUrl: "https://future.example/v1",
+                  defaultModel: "future/free",
+                  modelOptions: ["future/free"],
+                  requiresApiKey: true,
+                  modelDiscoveryPolicy: "models-api",
+                  capabilities: { streaming: true, toolCalls: true },
+                },
+              ],
             };
           }
           throw new Error(`unexpected settings key: ${key}`);
@@ -277,11 +280,11 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
             : null,
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     expect(createProvider).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -322,20 +325,22 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     });
     settings.marketplaceProviderPresetId = "future-router";
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: (key: string) => {
           if (key === "llm") return settings;
           if (key === "marketplace") {
             return {
-              installedProviderPresets: [{
-                providerId: "future-router",
-                label: "Future Router",
-                baseUrl: "https://future.example/v1",
-                defaultModel: "future/free",
-                modelOptions: ["future/free"],
-                requiresApiKey: true,
-              }],
+              installedProviderPresets: [
+                {
+                  providerId: "future-router",
+                  label: "Future Router",
+                  baseUrl: "https://future.example/v1",
+                  defaultModel: "future/free",
+                  modelOptions: ["future/free"],
+                  requiresApiKey: true,
+                },
+              ],
             };
           }
           throw new Error(`unexpected settings key: ${key}`);
@@ -346,11 +351,11 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
             : null,
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     const providerConfig = createProvider.mock.calls[0]?.[0];
     const guardedFetch = providerConfig?.fetch;
@@ -406,20 +411,22 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     });
     settings.marketplaceProviderPresetId = "local-router";
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: (key: string) => {
           if (key === "llm") return settings;
           if (key === "marketplace") {
             return {
-              installedProviderPresets: [{
-                providerId: "local-router",
-                label: "Local Router",
-                baseUrl: "http://localhost:8000/v1",
-                defaultModel: "local/free",
-                modelOptions: ["local/free"],
-                requiresApiKey: false,
-              }],
+              installedProviderPresets: [
+                {
+                  providerId: "local-router",
+                  label: "Local Router",
+                  baseUrl: "http://localhost:8000/v1",
+                  defaultModel: "local/free",
+                  modelOptions: ["local/free"],
+                  requiresApiKey: false,
+                },
+              ],
             };
           }
           throw new Error(`unexpected settings key: ${key}`);
@@ -427,11 +434,11 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
         getSecret: () => null,
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     const providerConfig = createProvider.mock.calls[0]?.[0];
     const guardedFetch = providerConfig?.fetch;
@@ -454,8 +461,12 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     expect(init.maxRedirects).toBe(0);
     expect(init.allowLoopback).toEqual(expect.any(Function));
     const allowLoopback = init.allowLoopback as (url: URL) => boolean;
-    expect(allowLoopback(new URL("http://localhost:8000/v1/models"))).toBe(true);
-    expect(allowLoopback(new URL("http://localhost:9000/v1/models"))).toBe(false);
+    expect(allowLoopback(new URL("http://localhost:8000/v1/models"))).toBe(
+      true,
+    );
+    expect(allowLoopback(new URL("http://localhost:9000/v1/models"))).toBe(
+      false,
+    );
   });
 
   it("does not fall back to generic OpenAI-compatible credentials when the selected preset is uninstalled", async () => {
@@ -477,7 +488,7 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     settings.marketplaceProviderPresetId = "future-router";
     settings.vendors["openai-compatible"].baseUrl = "https://future.example/v1";
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: (key: string) => {
           if (key === "llm") return settings;
@@ -485,16 +496,14 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
           throw new Error(`unexpected settings key: ${key}`);
         },
         getSecret: (key: string) =>
-          key === "llm.apiKey.openai-compatible"
-            ? "generic-secret"
-            : null,
+          key === "llm.apiKey.openai-compatible" ? "generic-secret" : null,
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     expect(createProvider).not.toHaveBeenCalled();
   });
@@ -504,7 +513,11 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     const primaryProvider = {
       vendor: "openai-compatible" as const,
       streamTurn: vi.fn(async function* () {
-        yield { type: "error" as const, error: "503 unavailable", classification: "network" };
+        yield {
+          type: "error" as const,
+          error: "503 unavailable",
+          classification: "network",
+        };
       }),
     };
     const createProvider = vi.fn(() => primaryProvider);
@@ -521,29 +534,33 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
     });
     settings.marketplaceProviderPresetId = "future-router";
     settings.vendors["openai-compatible"].baseUrl = "https://future.example/v1";
-    settings.fallbackChain = [{ provider: "openai-compatible", model: "fallback/free" }];
+    settings.fallbackChain = [
+      { provider: "openai-compatible", model: "fallback/free" },
+    ];
     const getSecret = vi.fn((key: string) =>
       key === marketplaceProviderPresetSecretKey("future-router")
         ? "fr-secret"
         : key === "llm.apiKey.openai-compatible"
           ? "generic-secret"
-          : null
+          : null,
     );
 
-    const loop = new ConversationLoop(({
+    const loop = new ConversationLoop({
       settingsService: {
         get: (key: string) => {
           if (key === "llm") return settings;
           if (key === "marketplace") {
             return {
-              installedProviderPresets: [{
-                providerId: "future-router",
-                label: "Future Router",
-                baseUrl: "https://future.example/v1",
-                defaultModel: "future/free",
-                modelOptions: ["future/free"],
-                requiresApiKey: true,
-              }],
+              installedProviderPresets: [
+                {
+                  providerId: "future-router",
+                  label: "Future Router",
+                  baseUrl: "https://future.example/v1",
+                  defaultModel: "future/free",
+                  modelOptions: ["future/free"],
+                  requiresApiKey: true,
+                },
+              ],
             };
           }
           throw new Error(`unexpected settings key: ${key}`);
@@ -551,18 +568,20 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
         getSecret,
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
-    const pending = collectStream(loop.provider!.streamTurn({
-      model: "future/free",
-      systemPrompt: "sys",
-      messages: [{ role: "user", content: "hi" }],
-      tools: [],
-    }));
+    const pending = collectStream(
+      loop.provider!.streamTurn({
+        model: "future/free",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+        tools: [],
+      }),
+    );
     const rejection = expect(pending).rejects.toThrow("503 unavailable");
     await vi.advanceTimersByTimeAsync(5_000);
 
@@ -591,17 +610,17 @@ async function collectStream(iterable: AsyncIterable<unknown>): Promise<unknown[
       model: "gpt-5.4-mini",
     });
 
-    new ConversationLoop(({
+    new ConversationLoop({
       settingsService: {
         get: () => settings,
         getSecret: () => null,
       },
       systemPromptBuilder: { build: () => "system" },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry,
       memoryManager: { saveSession: () => {}, listSessions: () => [] },
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
     expect(createProvider).not.toHaveBeenCalled();
   });

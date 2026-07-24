@@ -73,7 +73,7 @@ interface PluginToolCallRuntime {
   resolveToolOwner(method: string): string | undefined;
   /**
    * The gated MCP-App→plugin invocation path (`origin: "mcp-app"`). Enforces
-   * `assertUiActionInvokable` (the tool's `_meta.ui.visibility` MUST include
+   * `assertAppVisibleToolInvokable` (the tool's `_meta.ui.visibility` MUST include
    * `"app"` — the SPEC MUST for this backend, enforced there and nowhere else) and
    * delegates to the ToolExecutor — for every app-visible tool, app-only ones
    * included. It takes no `userAction` argument: an app never has one.
@@ -193,7 +193,7 @@ export function createExternalToolCallSource(deps: ExternalToolCallDeps): {
       // materialized once at ingestion (`mcp-tool-adapter`). Fail-closed on
       // `undefined`: a registry entry that never went through the adapter (a host
       // builtin) is not app-callable. The plugin arm's equivalent is
-      // `assertUiActionInvokable` inside `callFromApp` — one enforcement site each,
+      // `assertAppVisibleToolInvokable` inside `callFromApp` — one enforcement site each,
       // no layering.
       if (tool.appInvokable !== true) {
         throw new Error(
