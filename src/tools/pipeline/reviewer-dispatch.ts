@@ -54,7 +54,7 @@ export async function dispatchReviewerForHeadless(
       toolName,
       source,
       category,
-      inputSummary: summarizeInputForDeferred(finalInput),
+      inputSummary: summarizeInputForDeferred(auditInput ?? finalInput),
       evaluationContext,
       verdict,
     });
