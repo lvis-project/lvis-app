@@ -1,10 +1,17 @@
-# LVIS Architecture Document v0.4.1 (Current)
+# LVIS Architecture Document v0.4.1 (Historical Snapshot)
 
 > **Version**: 0.4.1 (base) · v5 덧붙이기 (2026-04-19) — Appendix D-v5 참조
 > **Date**: 2026-04-16 (base) · 2026-04-19 (v5 additive)
-> **Status**: Architecture Currentized Draft (대화 루프/도구 표시/자동 컴팩트 구현 기준 반영) · v5 = Marketplace 승인/카나리, Approval 강화, Telemetry, Contract CI, Trace Logger, File Lock, Tool Versioning 반영
+> **Status**: 보존용 역사 스냅샷. 현재 실행 계약이나 구현 지침이 아닙니다.
 > **Authors**: LVIS Architecture Team
 > **Base Reference**: [구현 철학](../vision/philosophy.md) · LVIS 내부 제품 요구사항 및 공개 표준 문서
+
+> [!WARNING]
+> 현재 계약의 기준은 [영문 아키텍처 문서](../../architecture/architecture.md),
+> Host의 `schemas/plugin-manifest.schema.json`, 그리고
+> `src/plugins/public-contract.ts`입니다. 이 스냅샷의 keyword dispatch,
+> `uiAction`/`uiActions`, 레거시 manifest, 개발 우회 플래그 설명은 폐기된
+> 역사 기록이며 구현하거나 호환 경로로 복원하면 안 됩니다.
 
 ---
 

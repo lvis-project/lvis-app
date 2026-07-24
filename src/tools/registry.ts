@@ -577,7 +577,7 @@ export class ToolRegistry {
           }
           if (!active.has(tool.pluginId)) return false;
           // Eager: the whole active plugin's suite loads. Deferred: only the
-          // tools individually promoted via keyword/carry-forward/tool_search.
+          // tools individually promoted via carry-forward/tool_search.
           return deferral ? activeNames.has(tool.name) : true;
         }
         // Fallback for any new source kind added later — exclude from scope.
