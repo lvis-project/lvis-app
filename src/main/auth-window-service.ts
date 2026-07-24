@@ -28,6 +28,9 @@ import {
   buildTitlebarButtonScript,
 } from "./window-titlebar-shell.js";
 import { resolveAppIconPath } from "./app-icon.js";
+import {
+  withAuthPartitionViewersClosed,
+} from "./auth-partition-viewer-service.js";
 import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("auth-window");
@@ -1047,20 +1050,22 @@ export async function clearAuthPartition(partition: string): Promise<void> {
   if (typeof partition !== "string" || partition.length === 0) {
     throw new Error("clearAuthPartition: partition must be a non-empty string");
   }
-  const ses = session.fromPartition(partition);
-  await ses.clearStorageData({
-    storages: [
-      "cookies",
-      "filesystem",
-      "indexdb",
-      "localstorage",
-      "shadercache",
-      "serviceworkers",
-      "cachestorage",
-    ],
+  await withAuthPartitionViewersClosed(partition, async () => {
+    const ses = session.fromPartition(partition);
+    await ses.clearStorageData({
+      storages: [
+        "cookies",
+        "filesystem",
+        "indexdb",
+        "localstorage",
+        "shadercache",
+        "serviceworkers",
+        "cachestorage",
+      ],
+    });
+    await ses.clearCache();
+    if (typeof ses.clearAuthCache === "function") {
+      await ses.clearAuthCache();
+    }
   });
-  await ses.clearCache();
-  if (typeof ses.clearAuthCache === "function") {
-    await ses.clearAuthCache();
-  }
 }
