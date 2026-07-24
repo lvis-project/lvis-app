@@ -479,11 +479,6 @@
     },
     {
       "type": "exports",
-      "file": "src/main/auth-partition-viewer-service.ts",
-      "name": "__internals"
-    },
-    {
-      "type": "exports",
       "file": "src/main/auto-updater.ts",
       "name": "CHECK_INTERVAL_MS"
     },
