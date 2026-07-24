@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { uninstallPluginWithLifecycle } from "../uninstall-lifecycle.js";
@@ -29,6 +29,10 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
   };
   return {
     pluginMarketplace: {
+      getInstalledVersion: vi.fn(async () =>
+        uninstallError && /not installed|not found/i.test(uninstallError.message)
+          ? null
+          : "1.0.0"),
       uninstall: vi.fn(async () => {
         if (uninstallError) throw uninstallError;
         return { pluginId, uninstalled: true as const };
@@ -251,6 +255,124 @@ describe("uninstallPluginWithLifecycle", () => {
       const error = await uninstallPluginWithLifecycle("agent-hub", deps).catch((caught) => caught);
       expect(error).toBe(uninstallFailure);
       expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("finishes residual cleanup after durable commit before rethrowing retirement failure", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-retirement-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      const retirementFailure = new Error("generation retirement failed");
+      deps.pluginRuntime.removePluginWithCommit.mockImplementationOnce(async (
+        _pluginId,
+        commit,
+      ) => {
+        await commit();
+        throw retirementFailure;
+      });
+
+      await expect(
+        uninstallPluginWithLifecycle("agent-hub", deps),
+      ).rejects.toBe(retirementFailure);
+
+      expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledWith(
+        "agent-hub",
+      );
+      expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalled();
+      expect(deps.clearAuthPartitionService).toHaveBeenCalledTimes(2);
+      expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledWith(
+        "agent-hub",
+      );
+      expect(deps.emitHostEvent).toHaveBeenCalledWith(
+        "plugin.uninstalled",
+        { pluginId: "agent-hub" },
+      );
+      const journal = JSON.parse(
+        await readFile(
+          join(root, ".cache", "plugin-uninstall-cleanup.json"),
+          "utf8",
+        ),
+      );
+      expect(journal.cleanups).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels the prepared cleanup plan when removal fails before durable commit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-precommit-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      const precommitFailure = new Error("runtime barrier failed");
+      deps.pluginRuntime.removePluginWithCommit.mockRejectedValueOnce(
+        precommitFailure,
+      );
+
+      await expect(
+        uninstallPluginWithLifecycle("agent-hub", deps),
+      ).rejects.toBe(precommitFailure);
+
+      expect(deps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
+      expect(deps.clearAuthPartitionService).not.toHaveBeenCalled();
+      expect(deps.emitHostEvent).not.toHaveBeenCalled();
+      const journal = JSON.parse(
+        await readFile(
+          join(root, ".cache", "plugin-uninstall-cleanup.json"),
+          "utf8",
+        ),
+      );
+      expect(journal.cleanups).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("checkpoints each auth partition and resumes cleanup without removing runtime twice", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-resume-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      deps.pluginMarketplace.getInstalledVersion
+        .mockResolvedValueOnce("1.0.0")
+        .mockResolvedValue(null);
+      deps.clearAuthPartitionService.mockImplementation(
+        async (partition: string) => {
+          if (partition === "persist:plugin-auth:agent-hub") {
+            throw new Error("partition locked");
+          }
+        },
+      );
+
+      await expect(
+        uninstallPluginWithLifecycle("agent-hub", deps),
+      ).rejects.toThrow(/incomplete post-commit cleanup/);
+
+      expect(deps.clearAuthPartitionService).toHaveBeenCalledWith(
+        "persist:plugin-auth:agent-hub:tenant",
+      );
+      expect(deps.forgetPluginAuthPartitionsService).not.toHaveBeenCalled();
+      expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledTimes(1);
+      expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledTimes(1);
+      expect(deps.emitHostEvent).not.toHaveBeenCalled();
+
+      deps.clearAuthPartitionService.mockResolvedValue(undefined);
+      await expect(
+        uninstallPluginWithLifecycle("agent-hub", deps),
+      ).resolves.toEqual({
+        pluginId: "agent-hub",
+        uninstalled: true,
+      });
+
+      expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledTimes(1);
+      expect(deps.clearAuthPartitionService).toHaveBeenCalledTimes(3);
+      expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledTimes(1);
+      expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledTimes(1);
+      expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledTimes(1);
+      expect(deps.emitHostEvent).toHaveBeenCalledWith(
+        "plugin.uninstalled",
+        { pluginId: "agent-hub" },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
