@@ -21,6 +21,7 @@ const runtimeTestState = vi.hoisted(() => ({
     listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
     getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
     getPluginManifest: vi.fn(() => null),
+    resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     isPluginEnabled: vi.fn(() => true),
     getApprovedPluginAccess: vi.fn(() => undefined),
     registerDisposer: vi.fn(),

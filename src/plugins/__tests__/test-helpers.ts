@@ -17,7 +17,11 @@ import {
   type PreparedMarketplacePluginActivation,
 } from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
-import { PluginRuntime, type PluginRuntimeOptions } from "../runtime.js";
+import {
+  createNoopHostApiForTests,
+  PluginRuntime,
+  type PluginRuntimeOptions,
+} from "../runtime.js";
 import type { PluginManifest, Tool } from "../types.js";
 import type {
   HostPluginGenerationState,
@@ -335,6 +339,7 @@ export function makeTestPluginRuntime(
     hostRoot: fixture.rootDir,
     registryPath: fixture.registryPath,
     pluginsRoot: fixture.pluginsRoot,
+    createHostApi: createNoopHostApiForTests,
     ...options,
   }));
 }
@@ -556,10 +561,31 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
   return runtime;
 }
 
+export function createTestHostApiFactory(
+  provided?: PluginRuntimeOptions["createHostApi"],
+): PluginRuntimeOptions["createHostApi"] {
+  return (...args) => {
+    const fallback = createNoopHostApiForTests(...args);
+    const hostApi = provided?.(...args);
+    if (!hostApi) return fallback;
+    return {
+      ...fallback,
+      ...hostApi,
+      storage: hostApi.storage ?? fallback.storage,
+    };
+  };
+}
+
 /** PluginRuntime constructor for tests that need the complete generation fixture. */
 export class TestPluginRuntime extends PluginRuntime {
-  constructor(options: PluginRuntimeOptions) {
-    super(options);
+  constructor(
+    options: Omit<PluginRuntimeOptions, "createHostApi">
+      & Partial<Pick<PluginRuntimeOptions, "createHostApi">>,
+  ) {
+    super({
+      ...options,
+      createHostApi: createTestHostApiFactory(options.createHostApi),
+    });
     bindTestPluginRuntimeGeneration(this);
   }
 }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { PluginRuntime } from "../../runtime.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
 import {
   bindTestPluginRuntimeGeneration,
@@ -72,6 +72,7 @@ describe("PluginRuntime boot preflight", () => {
       hostRoot,
       pluginsRoot,
       registryPath,
+      createHostApi: createNoopHostApiForTests,
       installReceiptCacheRoot: join(root, "receipts"),
       auditLog: (_level, message, data) => {
         if (message === "plugin_integrity_rejected") {
@@ -135,6 +136,7 @@ describe("PluginRuntime boot preflight", () => {
       hostRoot,
       pluginsRoot,
       registryPath,
+      createHostApi: createNoopHostApiForTests,
       installReceiptCacheRoot: join(root, "receipts"),
       auditLog: (_level, message, data) => {
         if (message === "plugin_integrity_rejected") {
@@ -179,6 +181,7 @@ describe("PluginRuntime boot preflight", () => {
       hostRoot,
       pluginsRoot,
       registryPath,
+      createHostApi: createNoopHostApiForTests,
       installReceiptCacheRoot: join(root, "receipts"),
       auditLog: (_level, message) => auditMessages.push(message),
     }));
@@ -221,6 +224,7 @@ describe("PluginRuntime boot preflight", () => {
       hostRoot,
       pluginsRoot,
       registryPath,
+      createHostApi: createNoopHostApiForTests,
       installReceiptCacheRoot: join(root, "receipts"),
       auditLog: (_level, message, data) => {
         const record = data as { pluginId?: string; manifestPath?: string };

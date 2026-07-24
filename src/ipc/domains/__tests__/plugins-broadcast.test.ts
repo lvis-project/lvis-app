@@ -72,7 +72,15 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
       uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
       getInstallFailureDiagnostics: vi.fn(() => []),
       clearInstallFailureDiagnostic: vi.fn(() => true),
-      rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "0.0.1" })),
+      rollbackPlugin: vi.fn(async (pluginId: string, options) => {
+        await options?.activatePreparedArtifact?.({
+          pluginRoot: `/staged/${pluginId}`,
+          manifest: { id: pluginId, version: "0.0.1" },
+          receiptRaw: "{}",
+          durableCommit: async () => pluginId,
+        });
+        return { pluginId, rolledBackTo: "0.0.1" };
+      }),
       rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true })),
       clearLocalInstallRollback: vi.fn(async () => undefined),
       resolveLocalInstallPluginId: vi.fn(async () => "local-plugin"),
@@ -80,6 +88,10 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
     },
     pluginRuntime: {
       resolvePluginId: vi.fn((pluginId: string) => pluginId),
+      resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
+      resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
+      cancelPendingRestart: vi.fn(),
+      cancelAllPendingRestarts: vi.fn(),
       clearConfigOverride: vi.fn(),
       addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
       waitForPluginReady: vi.fn(async () => undefined),
@@ -414,7 +426,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up catalog grant mismatch diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
-    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstalledVersion.mockResolvedValue(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",
@@ -458,7 +470,7 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up manifest validation diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
-    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstalledVersion.mockResolvedValue(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",

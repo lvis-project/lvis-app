@@ -265,6 +265,11 @@ export interface EffectEnforcementDeps {
   readonly approvalGate: ApprovalGate;
   /** Live `hostClassifiesRisk` flag read — evaluated PER CALL so a Settings toggle is honoured. */
   readonly flagEnabled: () => boolean;
+  /**
+   * Revalidate the exact HostApi incarnation after an async approval wait and
+   * immediately before the approved effect executes.
+   */
+  readonly assertActive: () => void;
 }
 
 /**
@@ -453,6 +458,7 @@ export function enforceMutatingEffects<T extends object>(
             approvalGate: deps.approvalGate,
             flagEnabled: deps.flagEnabled,
           });
+          deps.assertActive();
           return Reflect.apply(original, target, callArgs);
         })();
       };

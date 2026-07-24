@@ -16,6 +16,12 @@ function makeRuntime(initialPluginIds: string[] = []) {
   let pluginIds = [...initialPluginIds];
   return {
     listPluginIds: vi.fn(() => [...pluginIds]),
+    resolvePluginId: vi.fn((pluginId: string) =>
+      pluginId.replace(/^lvis-plugin-/, "")
+    ),
+    resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
+    resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
+    cancelPendingRestart: vi.fn(),
     activatePreparedArtifact: vi.fn(async (input: {
       manifest: { id: string };
       durableCommit(): Promise<string>;
@@ -62,7 +68,10 @@ function makeMarketplace() {
     getInstalledVersion: vi.fn(async () => "1.0.0"),
     quarantinePlugin: vi.fn(async (pluginId: string, reason: string) => ({ pluginId, reason, quarantined: true as const })),
     uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true as const })),
-    rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "1.0.0" })),
+    rollbackPlugin: vi.fn(async (pluginId: string) => ({
+      pluginId,
+      rolledBackTo: "1.0.0",
+    })),
     rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true as const })),
     clearLocalInstallRollback: vi.fn(async () => {}),
   };
