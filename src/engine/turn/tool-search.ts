@@ -30,7 +30,7 @@ export const MAX_TOOL_SEARCH_PER_TURN = 4;
 
 export const MAX_TOOL_SEARCH_PER_SESSION = 20;
 
-export const MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH = 3;
+export const MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH = 5;
 
 
 
@@ -88,35 +88,75 @@ function tokenizeName(name: string): string[] {
   return name.toLowerCase().split(/[_\-\s.]+/).filter((t) => t.length > 0);
 }
 
+function entrySearchText(entry: ToolSearchCatalogEntry): string {
+  return `${entry.name} ${entry.description}`.toLowerCase();
+}
+
+/**
+ * IDF weight per query token over the current catalog corpus: a rare token
+ * weighs ~1.0, a token that appears in most entries (get/list/file) is damped
+ * toward a 0.2 floor (kept above 0 so a common-token match still counts).
+ * Normalized by log(1+N) so the range is stable regardless of catalog size and
+ * clamped to [0.2, 1]. This is the discriminative core of the ranking upgrade:
+ * a match on a distinctive token now outranks a match on boilerplate.
+ */
+function computeIdfWeights(
+  catalog: ToolSearchCatalogEntry[],
+  queryTokens: string[],
+): Map<string, number> {
+  const weights = new Map<string, number>();
+  const total = catalog.length;
+  if (total === 0) return weights;
+  const texts = catalog.map(entrySearchText);
+  const denom = Math.log(1 + total) || 1;
+  for (const token of queryTokens) {
+    if (weights.has(token)) continue;
+    let documentFrequency = 0;
+    for (const text of texts) {
+      if (text.includes(token)) documentFrequency += 1;
+    }
+    const idf = documentFrequency > 0 ? Math.log(1 + total / documentFrequency) : Math.log(1 + total);
+    weights.set(token, Math.min(1, Math.max(0.2, idf / denom)));
+  }
+  return weights;
+}
+
 function scoreCatalogEntry(
   query: string,
   tokens: string[],
   entry: ToolSearchCatalogEntry,
+  idfWeights?: Map<string, number>,
 ): number {
   const name = entry.name.toLowerCase();
   const description = entry.description.toLowerCase();
   const nameTokens = tokenizeName(entry.name);
-  // Exact whole-query name match still requires the query to clear the minimum
-  // token length so a 1-char query cannot promote a 1-char tool name.
+  // Exact whole-query name match is an un-weighted strong signal (still requires
+  // the query to clear the minimum token length so a 1-char query cannot promote
+  // a 1-char tool name).
   let score = name === query && query.length >= MIN_CATALOG_MATCH_TOKEN_LENGTH ? 1_000 : 0;
 
   for (const token of tokens) {
     // Defense at the scoring boundary: sub-minimum tokens never contribute,
     // even if a future caller bypasses tokenizeQuery's length filter.
     if (token.length < MIN_CATALOG_MATCH_TOKEN_LENGTH) continue;
+    let tokenScore = 0;
     if (name === token) {
-      score += 700;
+      tokenScore = 700;
     } else if (name.startsWith(token)) {
-      score += 350;
+      tokenScore = 350;
     } else if (nameTokens.includes(token)) {
-      score += 300;
+      tokenScore = 300;
     } else if (name.includes(token)) {
-      score += 120;
+      tokenScore = 120;
     }
 
     if (description.includes(token)) {
-      score += 30;
+      tokenScore += 30;
     }
+
+    // IDF weighting: dampen contributions from tokens common across the catalog.
+    // Absent weights (default 1) preserve the pre-IDF behavior.
+    score += tokenScore * (idfWeights?.get(token) ?? 1);
   }
 
   return score;
@@ -131,6 +171,8 @@ function scoreCatalogEntry(
  * @internal Do not import outside of `__tests__/`.
  */
 export { scoreCatalogEntry as _scoreCatalogEntryForTest };
+/** @internal Test-only — IDF weighting is pure; do not import outside `__tests__/`. */
+export { computeIdfWeights as _computeIdfWeightsForTest };
 
 
 
@@ -142,8 +184,9 @@ function matchCatalog(
   const normalizedQuery = query.toLowerCase().trim();
   const tokens = tokenizeQuery(query);
   if (tokens.length === 0) return [];
+  const idfWeights = computeIdfWeights(catalog, tokens);
   return catalog
-    .map((entry) => ({ entry, score: scoreCatalogEntry(normalizedQuery, tokens, entry) }))
+    .map((entry) => ({ entry, score: scoreCatalogEntry(normalizedQuery, tokens, entry, idfWeights) }))
     .filter((candidate) => candidate.score > 0)
     .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
     .slice(0, MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH)

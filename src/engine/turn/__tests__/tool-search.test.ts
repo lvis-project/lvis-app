@@ -18,6 +18,7 @@ import {
   MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH,
   MIN_CATALOG_MATCH_TOKEN_LENGTH,
   _scoreCatalogEntryForTest,
+  _computeIdfWeightsForTest,
   type ToolSearchState,
 } from "../tool-search.js";
 import type { ToolUseBlock } from "../../../tools/executor.js";
@@ -247,5 +248,53 @@ describe("_scoreCatalogEntryForTest — scoring-boundary MIN_CATALOG_MATCH_TOKEN
     const tiny = { name: "m", description: "shorthand tool" };
     const score = _scoreCatalogEntryForTest("m", ["m"], tiny);
     expect(score).toBe(0);
+  });
+});
+
+describe("computeIdfWeights — IDF ranking", () => {
+  const entry = (name: string, description: string) => ({ name, description });
+
+  it("damps a catalog-common token below a rare token", () => {
+    const catalog = [
+      entry("list_users", "list the users"),
+      entry("list_files", "list the files"),
+      entry("list_repos", "list the repos"),
+      entry("reconcile_ledger", "reconcile the ledger"),
+    ];
+    const weights = _computeIdfWeightsForTest(catalog, ["list", "reconcile"]);
+    expect(weights.get("list")!).toBeLessThan(weights.get("reconcile")!);
+    expect(weights.get("list")!).toBeLessThan(0.7); // common (3/4) → damped
+    expect(weights.get("reconcile")!).toBeGreaterThan(0.9); // rare (1/4) → ~1.0
+  });
+
+  it("clamps a near-ubiquitous token to the 0.2 floor in a large catalog", () => {
+    const catalog = Array.from({ length: 30 }, (_, i) => entry(`get_thing_${i}`, "get a thing"));
+    const weights = _computeIdfWeightsForTest(catalog, ["get"]);
+    expect(weights.get("get")!).toBeCloseTo(0.2, 1);
+  });
+
+  it("ranks a rare-token match above a common-token match of the same tier", () => {
+    const catalog = [
+      entry("list_a", "list a"),
+      entry("list_b", "list b"),
+      entry("list_c", "list c"),
+      entry("reconcile_x", "reconcile x"),
+    ];
+    const weights = _computeIdfWeightsForTest(catalog, ["list", "reconcile"]);
+    // Both are whole-name-token matches (tier 700); IDF breaks the tie.
+    const listScore = _scoreCatalogEntryForTest("list", ["list"], entry("list_a", "list a"), weights);
+    const rareScore = _scoreCatalogEntryForTest("reconcile", ["reconcile"], entry("reconcile_x", "reconcile x"), weights);
+    expect(rareScore).toBeGreaterThan(listScore);
+  });
+
+  it("defaults to weight 1 when no IDF map is supplied (pre-IDF behavior preserved)", () => {
+    const e = entry("query_tool", "run a query");
+    expect(_scoreCatalogEntryForTest("query", ["query"], e)).toBe(
+      _scoreCatalogEntryForTest("query", ["query"], e, new Map([["query", 1]])),
+    );
+  });
+
+  it("returns an empty map for an empty catalog", () => {
+    expect(_computeIdfWeightsForTest([], ["x"]).size).toBe(0);
   });
 });
