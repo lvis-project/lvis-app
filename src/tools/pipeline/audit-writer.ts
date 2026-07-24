@@ -212,6 +212,7 @@ export class AuditWriter {
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error" | "indeterminate",
     hookChain?: HookResult[],
     audit?: ToolExecutionAuditMetadata,
+    suppressPermissionDeniedLifecycle = false,
   ): Promise<void> {
     const governedTool = this.toolRegistry.findByName(toolName)?.operationPolicy;
     const governedOperation = governedTool && typeof input.operation === "string"
@@ -235,7 +236,8 @@ export class AuditWriter {
     if (
       permission?.decision === "deny" &&
       permissionContext !== undefined &&
-      terminationReason !== "user-abort"
+      terminationReason !== "user-abort" &&
+      !suppressPermissionDeniedLifecycle
     ) {
       await this.fireLifecycleEvent(
         "PermissionDenied",
