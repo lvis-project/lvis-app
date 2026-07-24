@@ -313,6 +313,7 @@ export async function runToolInvocation(
         layer: 0,
       },
       hookChain?: HookResult[],
+      suppressPermissionDeniedLifecycle = false,
     ): Promise<ToolResult> => {
       const content = "Rationale resume blocked: " + reason;
       const durationMs = Date.now() - startTime;
@@ -334,6 +335,8 @@ export async function runToolInvocation(
         undefined,
         undefined,
         hookChain,
+        undefined,
+        suppressPermissionDeniedLifecycle,
       );
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
     };
