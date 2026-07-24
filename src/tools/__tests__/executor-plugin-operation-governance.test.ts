@@ -21,19 +21,27 @@ function setup(options: {
   wireHooks?: boolean;
   provideModelIdentity?: boolean;
   readRawResult?: unknown;
+  omitReadRawResult?: boolean;
+  useReadResultStatusContract?: boolean;
 } = {}) {
-  const read = vi.fn(async () => ({
-    output: "fresh",
-    isError: false,
-    metadata: {
-      rawResult: options.readRawResult ?? {
+  const configuredRawResult = Object.prototype.hasOwnProperty.call(
+    options,
+    "readRawResult",
+  )
+    ? options.readRawResult
+    : {
         operation: "status",
         status: "success",
         data: { state: "open" },
         providerEvidence: {},
         warnings: [],
-      },
-    },
+      };
+  const read = vi.fn(async () => ({
+    output: "fresh",
+    isError: false,
+    ...(options.omitReadRawResult
+      ? {}
+      : { metadata: { rawResult: configuredRawResult } }),
   }));
   const write = vi.fn(async () => ({ output: "saved", isError: false }));
   const directWrite = vi.fn(async () => ({ output: "reserved", isError: false }));
@@ -53,7 +61,16 @@ function setup(options: {
       modelVisible: true,
       operationPolicy: {
         discriminant: "operation",
-        operations: { status: { kind: "read", minimumRisk: "read", appVisible: true } },
+        operations: {
+          status: {
+            kind: "read",
+            minimumRisk: "read",
+            appVisible: true,
+            ...(options.useReadResultStatusContract === false
+              ? {}
+              : { successfulResultStatuses: ["success"] }),
+          },
+        },
       },
       jsonSchema: { type: "object" },
       execute: read,
@@ -200,15 +217,11 @@ function options(
 
 describe("ToolExecutor plugin operation governance", () => {
   it.each(["error", "degraded", "uncertain"])(
-    "does not mint freshness from a resolved domain read envelope with status=%s",
+    "does not mint freshness from a declared non-success read status=%s",
     async (status) => {
       const { executor, read } = setup({
         readRawResult: {
-          operation: "status",
           status,
-          data: null,
-          providerEvidence: {},
-          warnings: [],
         },
       });
       const [readResult] = await runWithInvocationOrigin("ui", undefined, () =>
@@ -226,6 +239,132 @@ describe("ToolExecutor plugin operation governance", () => {
       })).toThrow(/required read is missing or stale/);
     },
   );
+
+  it.each([
+    { label: "absent", options: { omitReadRawResult: true } },
+    { label: "undefined", options: { readRawResult: undefined } },
+    { label: "null", options: { readRawResult: null } },
+    { label: "non-object", options: { readRawResult: "success" } },
+    { label: "missing status", options: { readRawResult: { data: "fresh" } } },
+  ])(
+    "fails closed when a declared read result status is $label",
+    async ({ options: setupOptions }) => {
+      const { executor } = setup(setupOptions);
+      const [readResult] = await runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "r", name: "domain_read", input: { operation: "status" } }],
+          options(),
+        ),
+      );
+      expect(readResult.is_error).toBeFalsy();
+      expect(() => executor.issuePluginOperationGrant({
+        toolName: "domain_write",
+        input: { operation: "save", value: 1 },
+        principal,
+      })).toThrow(/required read is missing or stale/);
+    },
+  );
+
+  it("keeps invocation-success semantics when no read result status contract is declared", async () => {
+    const { executor } = setup({
+      omitReadRawResult: true,
+      useReadResultStatusContract: false,
+    });
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    })).not.toThrow();
+  });
+
+  it("invalidates an older successful read when a refresh resolves non-success", async () => {
+    const { executor, read } = setup();
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    read.mockImplementationOnce(async () => ({
+      output: "refresh failed",
+      isError: false,
+      metadata: { rawResult: { status: "error" } },
+    }));
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    })).toThrow(/required read is missing or stale/);
+  });
+
+  it("revokes an issued grant as soon as a newer read starts, even if that read fails", async () => {
+    const { executor, read, write } = setup();
+    await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    const oldGrant = executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    });
+    let releaseRefresh!: () => void;
+    let markRefreshStarted!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    read.mockImplementationOnce(async () => {
+      markRefreshStarted();
+      await refreshGate;
+      return {
+        output: "refresh failed",
+        isError: false,
+        metadata: { rawResult: { status: "uncertain" } },
+      };
+    });
+    const refresh = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    await refreshStarted;
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 2 },
+      principal,
+    })).toThrow(/required read is missing or stale/);
+
+    const staleWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "w", name: "domain_write", input: { operation: "save", value: 1 } }],
+        options(oldGrant.token),
+      ),
+    );
+    releaseRefresh();
+    await refresh;
+    const [writeResult] = await staleWrite;
+    expect(writeResult.is_error).toBe(true);
+    expect(writeResult.content).toMatch(/superseded/);
+    expect(write).not.toHaveBeenCalled();
+  });
 
   it("requires a fresh read and consumes one app-write grant exactly once", async () => {
     const { executor, read, write, auditLogger } = setup();
