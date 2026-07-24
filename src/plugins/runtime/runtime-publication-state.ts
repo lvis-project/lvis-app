@@ -92,6 +92,12 @@ export abstract class PluginRuntimePublicationState extends PluginRuntimeState {
         if (predecessorAuthKey !== undefined) {
           this.pluginAccountHashes.delete(predecessorAuthKey);
           this.pluginAuthInvocationEpochs.delete(predecessorAuthKey);
+          this.pluginAuthPublishedEpochs.delete(predecessorAuthKey);
+          for (const key of this.pluginAuthFailurePrincipals.keys()) {
+            if (key.startsWith(`${predecessorAuthKey}\0`)) {
+              this.pluginAuthFailurePrincipals.delete(key);
+            }
+          }
         }
         published = true;
       },
@@ -126,6 +132,12 @@ export abstract class PluginRuntimePublicationState extends PluginRuntimeState {
         if (predecessorAuthKey !== undefined) {
           this.pluginAccountHashes.delete(predecessorAuthKey);
           this.pluginAuthInvocationEpochs.delete(predecessorAuthKey);
+          this.pluginAuthPublishedEpochs.delete(predecessorAuthKey);
+          for (const key of this.pluginAuthFailurePrincipals.keys()) {
+            if (key.startsWith(`${predecessorAuthKey}\0`)) {
+              this.pluginAuthFailurePrincipals.delete(key);
+            }
+          }
         }
         published = true;
       },

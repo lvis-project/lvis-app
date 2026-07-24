@@ -54,6 +54,7 @@ import {
 import {
   RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT,
   type ExecuteOptions,
+  type HostPluginAuthLifecycle,
   type ToolCallMeta,
   type ToolExecutorCallbacks,
   type ToolPermissionContext,
@@ -129,6 +130,7 @@ export interface ExecutionStageContext {
   preResult: Awaited<ReturnType<HookRunner["runPreHooks"]>>;
   resolvedPluginOperation: ResolvedPluginOperation | undefined;
   pluginOperationPrincipal: PluginOperationPrincipal | undefined;
+  pluginAuthLifecycle: HostPluginAuthLifecycle | undefined;
 }
 
 export async function executeAuthorizedToolInvocation(
@@ -171,6 +173,7 @@ export async function executeAuthorizedToolInvocation(
     preResult,
     resolvedPluginOperation,
     pluginOperationPrincipal,
+    pluginAuthLifecycle,
   } = context;
 
 
@@ -380,6 +383,17 @@ export async function executeAuthorizedToolInvocation(
   let indeterminateAuditPersisted = false;
   let interruptionReason: "ceiling" | "user-abort" | undefined;
   let holdOperationLeaseForFinalBoundary = false;
+  let pluginAuthLifecycleSettled = false;
+  const completePluginAuthSuccess = (result: unknown): void => {
+    if (!pluginAuthLifecycle || pluginAuthLifecycleSettled) return;
+    pluginAuthLifecycleSettled = true;
+    pluginAuthLifecycle.completeSuccess(result);
+  };
+  const completePluginAuthFailure = (reason: unknown): void => {
+    if (!pluginAuthLifecycle || pluginAuthLifecycleSettled) return;
+    pluginAuthLifecycleSettled = true;
+    pluginAuthLifecycle.completeFailure(reason);
+  };
   const releaseOperationLeaseAfterFinalBoundary = (): void => {
     if (!holdOperationLeaseForFinalBoundary) return;
     holdOperationLeaseForFinalBoundary = false;
@@ -674,6 +688,19 @@ export async function executeAuthorizedToolInvocation(
                   operationExecutionDomain,
                 );
               }
+              if (pluginAuthLifecycle) {
+                if (!pluginOperationPrincipal || !operationExecutionDomain) {
+                  throw new Error(
+                    "host plugin auth lifecycle is missing governed operation admission",
+                  );
+                }
+                // This callback performs the host-owned auth-generation check
+                // at the same final no-await boundary as the revocation check.
+                pluginAuthLifecycle.beforeHandler(
+                  pluginOperationPrincipal,
+                  operationExecutionDomain,
+                );
+              }
               return tool.execute(finalInput, ctx);
             },
           ),
@@ -850,6 +877,13 @@ export async function executeAuthorizedToolInvocation(
     holdOperationLeaseForFinalBoundary = true;
   }
   } finally {
+    if (!holdOperationLeaseForFinalBoundary) {
+      completePluginAuthFailure(
+        new Error(
+          "governed plugin auth invocation ended before a successful terminal audit",
+        ),
+      );
+    }
     if (
       operationExecutionLease &&
       deferredOperationSettlement &&
@@ -944,12 +978,17 @@ export async function executeAuthorizedToolInvocation(
         rationaleResumeContext.terminalized = terminalCommitted;
         if (!terminalCommitted) {
           callbacks?.onToolEnd?.(toolUse.name, RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, true, meta, undefined, durationMs);
+          completePluginAuthFailure(
+            new Error(RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT),
+          );
           return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs });
         }
         callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
       }
+      completePluginAuthFailure(new Error(content));
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
     } catch (error) {
+      completePluginAuthFailure(error);
       if (operationExecutionDomain && resolvedPluginOperation) {
         services.pluginOperationGrants.poisonDomain(operationExecutionDomain);
       }
@@ -1079,6 +1118,9 @@ export async function executeAuthorizedToolInvocation(
     if (!terminalCommitted) {
       log.error("Rationale resume invocation terminal audit CAS failed");
       callbacks?.onToolEnd?.(toolUse.name, RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, true, meta, undefined, durationMs);
+      completePluginAuthFailure(
+        new Error(RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT),
+      );
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT, is_error: true, durationMs });
     }
   }
@@ -1098,6 +1140,12 @@ export async function executeAuthorizedToolInvocation(
     durationMs,
   );
 
+  if (!isError && terminationReason === "ok") {
+    completePluginAuthSuccess(rawResult);
+  } else {
+    completePluginAuthFailure(new Error(content));
+  }
+
   return withHostShellExecutionPlan({
     tool_use_id: toolUse.id,
     content,
@@ -1108,6 +1156,7 @@ export async function executeAuthorizedToolInvocation(
     durationMs,
   });
   } catch (error) {
+    completePluginAuthFailure(error);
     if (operationExecutionDomain && resolvedPluginOperation) {
       try {
         services.pluginOperationGrants.poisonDomain(operationExecutionDomain);

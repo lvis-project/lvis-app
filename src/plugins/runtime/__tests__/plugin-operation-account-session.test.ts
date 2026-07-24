@@ -168,7 +168,7 @@ describe("PluginRuntime operation account sessions", () => {
       "auth_logout",
     );
 
-    expect(invocation).toEqual({
+    expect(invocation).toMatchObject({
       epoch: expect.any(Number),
       accountTransitionScopeHash: currentScope,
       invalidatedAccountHash: current,
@@ -209,7 +209,7 @@ describe("PluginRuntime operation account sessions", () => {
         generationId,
         toolName,
       );
-      expect(invocation).toEqual({
+      expect(invocation).toMatchObject({
         epoch: expect.any(Number),
         accountTransitionScopeHash: currentScope,
         invalidatedAccountHash: current,
@@ -294,6 +294,65 @@ describe("PluginRuntime operation account sessions", () => {
       .toBe(first?.accountTransitionScopeHash);
     expect(first?.invalidatedAccountHash).toBeUndefined();
     expect(second?.invalidatedAccountHash).toBeUndefined();
+  });
+
+  it("uses one session-bound synthetic operation principal for the governed auth trio", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+
+    const status = instance.getPluginAuthOperationAccount(
+      pluginId,
+      generationId,
+      "auth_status",
+      "window-1",
+    );
+    const loginBeforeStart = instance.getPluginAuthOperationAccount(
+      pluginId,
+      generationId,
+      "auth_login",
+      "window-1",
+    );
+    const logout = instance.getPluginAuthOperationAccount(
+      pluginId,
+      generationId,
+      "auth_logout",
+      "window-1",
+    );
+
+    expect(status).toEqual(loginBeforeStart);
+    expect(logout).toEqual(loginBeforeStart);
+    expect(instance.getPluginAuthOperationAccount(
+      pluginId,
+      generationId,
+      "auth_login",
+      "window-2",
+    )).not.toEqual(loginBeforeStart);
+    expect(instance.getPluginAuthOperationAccount(
+      pluginId,
+      generationId,
+      "not_auth",
+      "window-1",
+    )).toBeUndefined();
+
+    const login = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_login",
+      "window-1",
+    );
+
+    expect(login?.operationAccount).toEqual(loginBeforeStart);
+    expect(accountIdentity(instance)).toBeUndefined();
+    expect(instance.getPluginAuthOperationAccount(
+      pluginId,
+      generationId,
+      "auth_login",
+      "window-1",
+    )).toEqual(loginBeforeStart);
   });
 
   it("bridges the authenticated transition scope across runtime generation publication", () => {
@@ -431,8 +490,18 @@ describe("PluginRuntime operation account sessions", () => {
       replacementRuntime(),
       generationId,
     );
+    const status = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_status",
+    );
+    expect(status).toBeDefined();
 
-    expect(instance.invalidateDetachedPluginAuthInvocation(pluginId, generationId))
+    expect(instance.invalidateFailedPluginAuthInvocation(
+      pluginId,
+      generationId,
+      status!.epoch,
+    ))
       .toMatchObject({ invalidatedAccountGenerationId: generationId });
     prepared.publish();
 
@@ -541,11 +610,26 @@ describe("PluginRuntime operation account sessions", () => {
       instance: {},
       methods: new Map(),
     }, generationId).publish();
+    instance.setGenerationAccess({
+      getActive: vi.fn(() => ({
+        pluginId,
+        generationId: "generation-2",
+        manifest,
+      })),
+      replaceRuntime: vi.fn(),
+    } as never);
+    const replacementStatus = instance.beginPluginAuthInvocation(
+      pluginId,
+      "generation-2",
+      "auth_status",
+    );
+    expect(replacementStatus).toBeDefined();
 
     expect(
-      instance.invalidateDetachedPluginAuthInvocation(
+      instance.invalidateFailedPluginAuthInvocation(
         pluginId,
         "generation-2",
+        replacementStatus!.epoch,
       ),
     ).toEqual({
       invalidatedAccountHash: predecessorIdentity?.principalHash,
@@ -647,17 +731,63 @@ describe("PluginRuntime operation account sessions", () => {
       { authenticated: true, account: "person@example.com" },
     );
     const principalHash = accountIdentity(instance)?.principalHash;
+    const status = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_status",
+    );
+    expect(status).toBeDefined();
 
     expect(
-      instance.invalidateDetachedPluginAuthInvocation(
+      instance.invalidateFailedPluginAuthInvocation(
         pluginId,
         generationId,
+        status!.epoch,
       ),
     ).toEqual({
       invalidatedAccountHash: principalHash,
       invalidatedAccountGenerationId: generationId,
     });
     expect(accountIdentity(instance)).toBeUndefined();
+  });
+
+  it("revokes a failed status principal even when a newer status has only started", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const principalHash = accountIdentity(instance)?.principalHash;
+    const failed = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_status",
+    );
+    const queuedReplacement = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_status",
+    );
+
+    expect(instance.invalidateFailedPluginAuthInvocation(
+      pluginId,
+      generationId,
+      failed!.epoch,
+    )).toEqual({
+      invalidatedAccountHash: principalHash,
+      invalidatedAccountGenerationId: generationId,
+    });
+    expect(accountIdentity(instance)).toBeUndefined();
+
+    instance.observePluginAuthResult(
+      pluginId,
+      generationId,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+      queuedReplacement?.epoch,
+    );
+    expect(accountIdentity(instance)?.principalHash).not.toBe(principalHash);
   });
 
   it("ignores an older authenticated status that completes after a newer principal", async () => {

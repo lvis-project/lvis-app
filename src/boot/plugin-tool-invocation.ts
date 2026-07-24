@@ -111,6 +111,7 @@ export async function dispatchAppOnlyRuntimeInvocation(
   input: Record<string, unknown>,
   context: PluginToolInvocationContext,
   ceilingMs?: number,
+  beforeHandler?: () => void,
 ): Promise<unknown> {
   // Defense-in-depth (cluster-review security LOW): this function is exported
   // and trusts its caller to have routed here via `isAppOnlyRuntimeInvocation`,
@@ -164,5 +165,6 @@ export async function dispatchAppOnlyRuntimeInvocation(
     input,
     ceilingMs,
     context.ownerGenerationId,
+    beforeHandler,
   );
 }
