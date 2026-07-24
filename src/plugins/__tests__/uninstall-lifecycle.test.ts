@@ -3,8 +3,15 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { uninstallPluginWithLifecycle } from "../uninstall-lifecycle.js";
-import { withPluginInstallLock } from "../install-lifecycle.js";
+import {
+  cleanupFailedPluginInstallWithLifecycle,
+  ensurePluginStateReadyForInstall,
+  uninstallPluginWithLifecycle,
+} from "../uninstall-lifecycle.js";
+import {
+  drainPluginInstallLockOperations,
+  withPluginInstallLock,
+} from "../install-lifecycle.js";
 
 function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
   const pluginRuntime = {
@@ -37,6 +44,7 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
         if (uninstallError) throw uninstallError;
         return { pluginId, uninstalled: true as const };
       }),
+      clearInstallFailureDiagnostic: vi.fn(),
     },
     pluginRuntime,
     settingsService: {
@@ -50,6 +58,9 @@ function makeDeps(pluginId: string, cacheRoot: string, uninstallError?: Error) {
       `persist:plugin-auth:${encodeURIComponent(pluginId)}:tenant`,
     ]),
     forgetPluginAuthPartitionsService: vi.fn(),
+    drainPluginInstallLockOperationsService: vi.fn(
+      drainPluginInstallLockOperations,
+    ),
     emitHostEvent: vi.fn(),
     refreshPluginNotifications: vi.fn(),
     log: { warn: vi.fn() },
@@ -373,6 +384,146 @@ describe("uninstallPluginWithLifecycle", () => {
         "plugin.uninstalled",
         { pluginId: "agent-hub" },
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("durably merges auth partitions observed after the initial cleanup plan", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-late-auth-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      const base = "persist:plugin-auth:agent-hub";
+      const late = `${base}:late-tenant`;
+      const partitions = [base];
+      deps.listPluginAuthPartitionsService.mockImplementation(
+        () => [...partitions],
+      );
+      deps.pluginRuntime.removePluginWithCommit.mockImplementationOnce(async (
+        _pluginId,
+        commit,
+      ) => {
+        partitions.push(late);
+        return commit();
+      });
+
+      await uninstallPluginWithLifecycle("agent-hub", deps);
+
+      expect(deps.clearAuthPartitionService).toHaveBeenCalledWith(base);
+      expect(deps.clearAuthPartitionService).toHaveBeenCalledWith(late);
+      expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledOnce();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retains cleanup ownership when lock drain times out and resumes after settlement", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-uninstall-drain-timeout-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      deps.pluginMarketplace.getInstalledVersion
+        .mockResolvedValueOnce("1.0.0")
+        .mockResolvedValue(null);
+      deps.drainPluginInstallLockOperationsService
+        .mockRejectedValueOnce(
+          Object.assign(new Error("detached mutation did not settle"), {
+            code: "plugin-lifecycle-drain-timeout",
+          }),
+        )
+        .mockResolvedValue(undefined);
+
+      const firstError = await uninstallPluginWithLifecycle(
+        "agent-hub",
+        deps,
+      ).catch((error) => error);
+      expect(firstError).toBeInstanceOf(AggregateError);
+      expect(deps.settingsService.deletePluginConfig).not.toHaveBeenCalled();
+      const pending = JSON.parse(
+        await readFile(
+          join(root, ".cache", "plugin-uninstall-cleanup.json"),
+          "utf8",
+        ),
+      );
+      expect(pending.cleanups).toHaveLength(1);
+
+      await expect(
+        uninstallPluginWithLifecycle("agent-hub", deps),
+      ).resolves.toEqual({ pluginId: "agent-hub", uninstalled: true });
+      expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledOnce();
+      expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledOnce();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps failed-install cleanup journaled across retirement and residual failures", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-failed-install-cleanup-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      const retirementFailure = new Error("retirement failed after purge");
+      deps.pluginMarketplace.getInstalledVersion.mockResolvedValue(null);
+      deps.pluginRuntime.removePlugin.mockRejectedValueOnce(retirementFailure);
+      deps.settingsService.deletePluginConfig.mockRejectedValueOnce(
+        new Error("config file locked"),
+      );
+
+      await expect(
+        cleanupFailedPluginInstallWithLifecycle("agent-hub", deps),
+      ).rejects.toThrow(/incomplete cleanup/);
+      const pending = JSON.parse(
+        await readFile(
+          join(root, ".cache", "plugin-uninstall-cleanup.json"),
+          "utf8",
+        ),
+      );
+      expect(pending.cleanups).toHaveLength(1);
+      expect(pending.cleanups[0]).toMatchObject({
+        pluginId: "agent-hub",
+        registryRemovalCommitted: true,
+      });
+
+      await expect(
+        cleanupFailedPluginInstallWithLifecycle("agent-hub", deps),
+      ).resolves.toEqual({ pluginId: "agent-hub", uninstalled: true });
+      expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledOnce();
+      const completed = JSON.parse(
+        await readFile(
+          join(root, ".cache", "plugin-uninstall-cleanup.json"),
+          "utf8",
+        ),
+      );
+      expect(completed.cleanups).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks reinstall until a committed residual cleanup can finish", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-install-cleanup-gate-"));
+    try {
+      const deps = makeDeps("agent-hub", join(root, ".cache"));
+      deps.pluginMarketplace.getInstalledVersion
+        .mockResolvedValueOnce("1.0.0")
+        .mockResolvedValue(null);
+      deps.clearAuthPartitionService.mockRejectedValueOnce(
+        new Error("partition still busy"),
+      );
+      await expect(
+        uninstallPluginWithLifecycle("agent-hub", deps),
+      ).rejects.toThrow(/incomplete post-commit cleanup/);
+
+      deps.clearAuthPartitionService.mockRejectedValueOnce(
+        new Error("partition still busy"),
+      );
+      await expect(
+        ensurePluginStateReadyForInstall("agent-hub", deps),
+      ).rejects.toThrow(/cleanup pending/);
+
+      deps.clearAuthPartitionService.mockResolvedValue(undefined);
+      await expect(
+        ensurePluginStateReadyForInstall("agent-hub", deps),
+      ).resolves.toBeUndefined();
+      expect(deps.pluginRuntime.removePluginWithCommit).toHaveBeenCalledOnce();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

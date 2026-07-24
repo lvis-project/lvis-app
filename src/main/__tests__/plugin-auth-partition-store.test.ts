@@ -3,7 +3,7 @@
  *
  * Exercises: write → read round-trip, ENOENT returns null, corrupt JSON throws,
  * unexpected schema throws, delete removes single entry, delete no-ops on ENOENT,
- * concurrent write coalescing (write queue serialization).
+ * concurrent write/delete ordering on one mutation queue.
  *
  * LVIS_HOME is overridden via vi.stubEnv so each test suite block points at
  * a fresh temp dir and the module reads the env at call-time (not import-time).
@@ -209,6 +209,30 @@ describe("write queue — concurrency safety", () => {
 
     const result = await readPersistedPluginAuthPartitions();
     expect(result!["pluginB"]).toEqual(["persist:plugin-auth:pluginB"]);
+  });
+
+  it("serializes a plugin delete with queued writes without losing peers or reviving the target", async () => {
+    const withA = new Map([
+      ["pluginA", new Set(["persist:plugin-auth:pluginA"])],
+    ]);
+    await writePersistedPluginAuthPartitions(withA);
+
+    const withAAndB = new Map([
+      ["pluginA", new Set(["persist:plugin-auth:pluginA"])],
+      ["pluginB", new Set(["persist:plugin-auth:pluginB"])],
+    ]);
+    const withBOnly = new Map([
+      ["pluginB", new Set(["persist:plugin-auth:pluginB"])],
+    ]);
+    const olderWrite = writePersistedPluginAuthPartitions(withAAndB);
+    const deletion = deletePersistedPluginAuthPartitions("pluginA");
+    const laterWrite = writePersistedPluginAuthPartitions(withBOnly);
+
+    await Promise.all([olderWrite, deletion, laterWrite]);
+    const result = await readPersistedPluginAuthPartitions();
+    expect(result).toEqual({
+      pluginB: ["persist:plugin-auth:pluginB"],
+    });
   });
 });
 

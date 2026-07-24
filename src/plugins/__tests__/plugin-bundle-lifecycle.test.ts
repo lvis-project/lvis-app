@@ -382,6 +382,75 @@ describe("PluginBundleLifecycle", () => {
     expect(await readdir(generationRoot)).toEqual(generationsBefore);
   });
 
+  it("removes an inactive retained generation when durable commit rejects", async () => {
+    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
+    const lifecycle = makeLifecycle({
+      pluginRuntime: {
+        getPluginManifest: () => manifest,
+        getPluginRoot: () => pluginRoot,
+        getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
+        prepareRuntimeGeneration: vi.fn(() => ({
+          pluginId: manifest.id,
+          publish: vi.fn(),
+        })),
+        prepareRuntimeRemoval: vi.fn(() => ({
+          pluginId: manifest.id,
+          publish: vi.fn(),
+        })),
+        postPublishRuntimeGeneration: vi.fn(),
+        publishRuntimeGeneration: vi.fn(),
+        unpublishRuntimeGeneration: vi.fn(),
+        prepareRuntimeRetirement: vi.fn(() => []),
+      },
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration: vi.fn(async () => ({
+          predecessorServerIds: [],
+          predecessorToolNames: [],
+          records: [],
+          registryReplacement: {
+            publish: vi.fn(),
+            cancel: vi.fn(),
+            replacementTools: [],
+          },
+          published: false,
+        })),
+        publishBundledGeneration: vi.fn((prepared) => { prepared.published = true; }),
+        discardBundledGeneration: vi.fn(async () => undefined),
+        retirePublishedMcpReplacement: vi.fn(async () => undefined),
+        disconnectBundledGeneration: vi.fn(),
+      } as never,
+    });
+    const receiptRaw = await readFile(
+      join(cacheRoot, "ep-api", "install-receipt.json"),
+      "utf8",
+    );
+    const commitFailure = new Error("registry commit rejected");
+
+    await expect(
+      lifecycle.replaceRuntimeWithCommit(
+        runtimeProjection(manifest, pluginRoot),
+        receiptRaw,
+        async () => {
+          throw commitFailure;
+        },
+      ),
+    ).rejects.toBe(commitFailure);
+
+    const generationRoot = join(cacheRoot, "ep-api", "generations");
+    const retained = await readdir(generationRoot).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+      },
+    );
+    expect(retained).toEqual([]);
+    expect(lifecycle.getActive("ep-api")).toBeUndefined();
+  });
+
   it("journals retirement progress and retries only the failed cleanup phase", async () => {
     const { root, pluginRoot, cacheRoot, manifest } = await fixture();
     const stopRuntime = vi.fn();
