@@ -657,7 +657,7 @@ export function PermissionsTab() {
                 key={opt.value}
                 htmlFor={`exec-mode-${opt.value}-radio`}
                 data-testid={`exec-mode-${opt.value}`}
-                className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${mode === opt.value ? "border-primary bg-primary/(--opacity-subtle) hover:bg-primary/(--opacity-subtle)" : "border-muted hover:border-muted-foreground/(--opacity-medium)"}`}
+                className={`flex h-auto min-w-0 w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${mode === opt.value ? "border-primary bg-primary/(--opacity-subtle) hover:bg-primary/(--opacity-subtle)" : "border-muted hover:border-muted-foreground/(--opacity-medium)"}`}
               >
                 <RadioGroupItem
                   id={`exec-mode-${opt.value}-radio`}
@@ -667,11 +667,11 @@ export function PermissionsTab() {
                 />
                 <span className="min-w-0 flex-1">
                   <span className="font-medium">{opt.label}</span>
-                  <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
+                  <span className="mt-0.5 block text-[11px] text-muted-foreground">{opt.description}</span>
                   {opt.value === "auto" && mode === "auto" && (
                     <>
                       <span
-                        className="mt-2 flex items-center gap-3 rounded-md border bg-background/(--opacity-stronger) px-3 py-2"
+                        className="mt-2 flex min-w-0 flex-col gap-2 rounded-md border bg-background/(--opacity-stronger) px-3 py-2"
                         data-testid="interactive-auto-approve-control"
                         onClick={(event) => event.stopPropagation()}
                       >
@@ -697,7 +697,7 @@ export function PermissionsTab() {
                           }
                         >
                           <SelectTrigger
-                            className="h-8 w-44 text-[11px]"
+                            className="h-8 w-full text-[11px]"
                             data-testid="interactive-auto-approve-select"
                           >
                             <SelectValue />
@@ -884,26 +884,38 @@ export function PermissionsTab() {
           {rules.length === 0 ? (
             <p className="text-[11px] text-muted-foreground italic">{t("permissionsTab.rulesEmpty")}</p>
           ) : (
-            <div className="rounded-md border">
-              <table className="w-full table-fixed text-xs">
+            <div className="min-w-0 overflow-x-auto rounded-md border">
+              <table data-testid="permissions-rules-table" className="min-w-[560px] w-full table-fixed text-xs">
+                <colgroup>
+                  <col className="w-[44%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[26%]" />
+                  <col className="w-[10%]" />
+                </colgroup>
                 <thead>
                   <tr className="border-b bg-muted/(--opacity-medium)">
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColPattern")}</th>
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColAction")}</th>
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColSource")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.rulesColPattern")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.rulesColAction")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.rulesColSource")}</th>
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {rules.map((r, i) => (
                     <tr key={`${r.pattern}:${r.action}:${i}`} className="border-b last:border-0 hover:bg-muted/(--opacity-light)">
-                      <td className="px-3 py-1.5 font-mono">{r.pattern}</td>
+                      <td className="px-3 py-1.5 font-mono">
+                        <span className="block truncate" title={r.pattern}>{r.pattern}</span>
+                      </td>
                       <td className="px-3 py-1.5">
-                        <Badge variant={r.action === "allow" ? "default" : "secondary"} className={`text-[10px] ${r.action === "deny" ? "text-destructive" : ""}`}>
+                        <Badge variant={r.action === "allow" ? "default" : "secondary"} className={`shrink-0 whitespace-nowrap text-[10px] ${r.action === "deny" ? "text-destructive" : ""}`}>
                           {r.action === "allow" ? t("permissionsTab.actionAllow") : t("permissionsTab.actionDeny")}
                         </Badge>
                       </td>
-                      <td className="px-3 py-1.5 text-muted-foreground">{r.source ?? t("permissionsTab.sourceAll")}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground">
+                        <span className="block truncate" title={r.source ?? t("permissionsTab.sourceAll")}>
+                          {r.source ?? t("permissionsTab.sourceAll")}
+                        </span>
+                      </td>
                       <td className="px-3 py-1.5 text-right">
                         <Button
                           type="button"
@@ -926,6 +938,7 @@ export function PermissionsTab() {
             <Input
               className="h-8 flex-1 text-xs"
               placeholder={t("permissionsTab.patternInputPlaceholder")}
+              data-testid="permissions-rule-pattern-input"
               value={newPattern}
               onChange={(e) => setNewPattern(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && newPattern.trim()) void handleAddRule(); }}
@@ -942,7 +955,7 @@ export function PermissionsTab() {
                 <SelectItem value="deny">{t("permissionsTab.actionDeny")}</SelectItem>
               </SelectContent>
             </Select>
-            <Button size="sm" className="h-8" onClick={() => void handleAddRule()} disabled={rulesBusy || !newPattern.trim()}>
+            <Button size="sm" className="h-8" data-testid="permissions-rule-add" onClick={() => void handleAddRule()} disabled={rulesBusy || !newPattern.trim()}>
               {t("permissionsTab.addButton")}
             </Button>
           </div>
@@ -1067,16 +1080,16 @@ export function PermissionsTab() {
           {userApprovals.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">{t("permissionsTab.approvalsEmpty")}</p>
           ) : (
-            <div className="overflow-auto rounded-md border">
-              <table className="w-full text-xs">
+            <div className="min-w-0 overflow-x-auto rounded-md border">
+              <table data-testid="permissions-approvals-table" className="min-w-[720px] w-full text-xs">
                 <thead className="border-b bg-muted/(--opacity-medium)">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColTool")}</th>
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColScope")}</th>
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColRisk")}</th>
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColApprovedAt")}</th>
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColReason")}</th>
-                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColAction")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColTool")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColScope")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColRisk")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColApprovedAt")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColReason")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColAction")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1086,12 +1099,12 @@ export function PermissionsTab() {
                         {a.toolName ?? a.key.slice(0, 12)}
                       </td>
                       <td className="px-3 py-2">
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${a.scope === "persistent" ? "bg-warning/(--opacity-soft) text-warning" : "bg-muted text-muted-foreground"}`}>
+                        <span className={`inline-flex h-5 items-center whitespace-nowrap rounded px-1.5 text-[10px] font-medium ${a.scope === "persistent" ? "bg-warning/(--opacity-soft) text-warning" : "bg-muted text-muted-foreground"}`}>
                           {a.scope === "persistent" ? t("permissionsTab.scopePersistent") : t("permissionsTab.scopeSession")}
                         </span>
                       </td>
-                      <td className="px-3 py-2">{a.verdictAtApproval.toUpperCase()}{a.verdictAtApproval === "high" ? t("permissionsTab.verdictHighFixed") : ""}</td>
-                      <td className="px-3 py-2 text-muted-foreground">
+                      <td className="whitespace-nowrap px-3 py-2">{a.verdictAtApproval.toUpperCase()}{a.verdictAtApproval === "high" ? t("permissionsTab.verdictHighFixed") : ""}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                         {new Date(a.approvedAt).toLocaleString()}
                       </td>
                       <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground"

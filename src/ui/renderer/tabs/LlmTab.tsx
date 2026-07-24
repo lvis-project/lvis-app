@@ -23,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog.js";
-import { Loader2, RefreshCw, Store } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, RefreshCw, Store } from "lucide-react";
 import {
   REASONING_EFFORT_STEPS,
   VENDORS,
@@ -56,6 +56,7 @@ import {
 import { isIpcErrorResult, type LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsHelpPopover } from "../components/SettingsHelpPopover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { formatIpcError } from "../format-ipc-error.js";
 
@@ -64,27 +65,10 @@ export interface FallbackEntry {
   model: string;
 }
 
-/** Extract the user honorific ("호칭: …") from MEMORY.md for the account card. */
-function extractHonorific(userPrefsMd: string): string | null {
-  const m = userPrefsMd.match(/(?:사용자\s*)?호칭\s*[:：]\s*(.+)/);
-  return m ? m[1].trim().split(/\s+/)[0] : null;
-}
-
-/** First non-metadata line of MEMORY.md as a short preview. */
-function extractIntroPreview(userPrefsMd: string): string | null {
-  const lines = userPrefsMd
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("-"));
-  if (lines.length === 0) return null;
-  const first = lines[0];
-  return first.length > 120 ? first.slice(0, 117) + "…" : first;
-}
 
 
 
 
-const DEMO_VENDOR_VALUE = "__demo__";
 const VENDOR_SCROLL_THRESHOLD = 10;
 const VENDOR_SELECT_MAX_HEIGHT = "max-h-[386px]";
 const MODEL_LIST_SYNC_DEBOUNCE_MS = 350;
@@ -335,7 +319,7 @@ function SectionSaveBar({
 function ImmediateBadge() {
   const { t } = useTranslation();
   return (
-    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+    <span data-testid="llm-tab:immediate-badge" className="inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full border border-transparent bg-secondary px-2.5 text-xs font-semibold text-secondary-foreground">
       {t("llmTab.immediateApply")}
     </span>
   );
@@ -373,7 +357,7 @@ function shouldSyncModelList(
   baseUrl?: string,
   modelDiscoveryPolicy?: MarketplaceProviderModelDiscoveryPolicy,
 ): boolean {
-  if (!vendorId || vendorId === DEMO_VENDOR_VALUE) return false;
+  if (!vendorId) return false;
   if (modelDiscoveryPolicyUsesSeededOptions(modelDiscoveryPolicy)) return false;
   if (baseUrl?.trim()) return true;
   if (vendorId === "openai" || vendorId === "copilot") return true;
@@ -929,63 +913,35 @@ export function LlmTab(props: LlmTabProps) {
   const hostMapChanged = hostResolverMap !== loadedHostResolverMap;
   const hostMapEntryCount = parseHostResolverMap(hostResolverMap).length;
 
-  // ── Account identity (relocated from the former General tab). Honorific and
-  //    introduction come from MEMORY.md; provider/key state reuse the props
-  //    already hydrated here so no second settings fetch is needed.
-  const [userPrefs, setUserPrefs] = useState<string>("");
-  useEffect(() => {
-    let alive = true;
-    void api.memoryGetUserPrefs().then(
-      (prefs) => { if (alive) setUserPrefs(prefs); },
-      () => { /* MEMORY.md read is non-fatal for the account card */ },
-    );
-    return () => { alive = false; };
-  }, [api]);
-  const honorific = useMemo(() => extractHonorific(userPrefs), [userPrefs]);
-  const intro = useMemo(() => extractIntroPreview(userPrefs), [userPrefs]);
-  const avatarInitial = (honorific?.slice(0, 1) ?? vendor.slice(0, 1) ?? "?").toUpperCase();
-
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <SettingsPageHeader
         title={t("llmTab.pageTitle")}
         description={t("llmTab.pageDescription")}
       />
 
-      {/* Account identity (relocated from the former General tab). */}
       <SettingsSection
-        title={t("generalTab.accountTitle")}
-        description={t("generalTab.accountDescription")}
+        title={t("llmTab.currentConfiguration")}
+        id="llm-current-configuration"
       >
-        <div className="flex items-start gap-4">
-          <div
-            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/(--opacity-soft) text-lg font-semibold text-primary"
-            aria-hidden="true"
-          >
-            {avatarInitial}
+        <dl className="grid gap-3 sm:grid-cols-3" data-testid="llm-tab:configuration-summary">
+          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
+            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.vendor")}</dt>
+            <dd className="mt-1 truncate text-sm font-medium text-foreground">{vendorInfo.label}</dd>
           </div>
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-base font-semibold">{honorific ?? t("generalTab.nameNotSet")}</p>
-              {vendor && (
-                <Badge variant="secondary" className="text-[10px] uppercase">
-                  {vendor}
-                </Badge>
-              )}
-              <Badge variant="outline" className="text-[10px]">
-                {t("generalTab.apiKeyModeBadge")}
+          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
+            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.model")}</dt>
+            <dd className="mt-1 truncate text-sm font-medium text-foreground">{model || "—"}</dd>
+          </div>
+          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
+            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.apiKey")}</dt>
+            <dd className="mt-1">
+              <Badge variant={hasKey ? "default" : "outline"} className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
+                {hasKey ? t("llmTab.apiKeySet") : t("llmTab.apiKeyNotSet")}
               </Badge>
-              {hasKey && (
-                <Badge variant="secondary" className="text-[10px]">
-                  {t("generalTab.keyRegisteredBadge")}
-                </Badge>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground" data-testid="general-tab-intro">
-              {intro ?? t("generalTab.introNotSet")}
-            </p>
+            </dd>
           </div>
-        </div>
+        </dl>
       </SettingsSection>
 
       {/* Relaunch confirmation dialog — shown before applying host map changes */}
@@ -1034,10 +990,8 @@ export function LlmTab(props: LlmTabProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Section A — 공급자 구성.
-          Manual-only surface: the user configures their own API key / provider.
-          The login/demo auth toggle was removed (product decision "①안") — the
-          setup flow lives outside settings. */}
+      {/* Provider configuration — API keys and endpoint settings are edited
+          directly here. */}
       <SettingsSection
         title={t("llmTab.providerConfig")}
         id="llm-providers"
@@ -1062,7 +1016,7 @@ export function LlmTab(props: LlmTabProps) {
           {/* Provider selector — the single provider switcher for the manual
               API-key configuration. */}
           <div className="space-y-2">
-            <Label htmlFor="vendor-select" className="flex items-center gap-2">
+            <Label htmlFor="vendor-select" className="flex min-w-0 flex-wrap items-center gap-2">
               {t("llmTab.vendor")}
               <ImmediateBadge />
               {isMarketplaceProviderSelected && (
@@ -1153,19 +1107,19 @@ export function LlmTab(props: LlmTabProps) {
             )}
             {vendor !== "vertex-ai" && (
               <div
-                className="space-y-2"
+                className="min-w-0 space-y-2"
                 data-testid="llm-tab:api-key-section"
                 data-api-key-required={activeProviderRequiresApiKey ? "true" : "false"}
               >
-                <Label className="text-sm font-medium" data-testid="llm-tab:api-key-label">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <Label className="min-w-0 text-sm font-medium" data-testid="llm-tab:api-key-label">
                   {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
                   {!activeProviderRequiresApiKey ? ` (${t("llmTab.optional")})` : ""}
                 </Label>
-                <div className="flex items-center gap-2">
                   {hasKey ? (
-                    <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge>
+                    <Badge variant="default" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">{t("llmTab.apiKeySet")}</Badge>
                   ) : (
-                    <Badge variant="secondary" className="text-xs">
+                    <Badge variant="secondary" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
                       {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
                     </Badge>
                   )}
@@ -1338,6 +1292,7 @@ export function LlmTab(props: LlmTabProps) {
       {/* Section B — Extended Thinking / Reasoning */}
       <SettingsSection
         title={t("llmTab.thinkingTitle")}
+        description={t("llmTab.thinkingDesc")}
         badge={<ImmediateBadge />}
         actions={
           <Switch
@@ -1352,14 +1307,18 @@ export function LlmTab(props: LlmTabProps) {
         id="llm-thinking"
       >
         <div
-          className="space-y-2"
+          className="min-w-0"
           data-testid="llm-tab:section-thinking"
         >
-          <p className="text-[11px] text-muted-foreground">{t("llmTab.thinkingDesc")}</p>
           {enableThinking && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-muted-foreground">{t("llmTab.reasoningEffortLabel")}</Label>
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Label className="text-xs text-muted-foreground">{t("llmTab.reasoningEffortLabel")}</Label>
+                  <SettingsHelpPopover ariaLabel={t("llmTab.reasoningEffortLabel")}>
+                    {t("llmTab.reasoningEffortDesc")}
+                  </SettingsHelpPopover>
+                </span>
                 <span className="text-xs font-medium tabular-nums">
                   {REASONING_EFFORT_STEPS[budgetToEffortIndex(thinkingBudget)]!.label}
                   <span className="ml-2 text-muted-foreground">
@@ -1383,9 +1342,6 @@ export function LlmTab(props: LlmTabProps) {
                   <span key={s.label}>{s.label}</span>
                 ))}
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                {t("llmTab.reasoningEffortDesc")}
-              </p>
             </div>
           )}
         </div>
@@ -1394,24 +1350,30 @@ export function LlmTab(props: LlmTabProps) {
       {/* Section C — Fallback Chain */}
       <SettingsSection
         title={t("llmTab.fallbackTitle")}
+        description={t("llmTab.fallbackDesc")}
         id="llm-fallback"
-      >
-        <div
-          className="space-y-2"
-          data-testid="fallback-chain-section"
-        >
+        actions={
           <Button
             type="button"
             variant="ghost"
-            className="h-auto w-full justify-between rounded-none px-0 py-1 text-sm font-medium"
-            onClick={() => setFallbackOpen((o) => !o)}
+            size="icon"
+            className="size-8"
+            aria-label={t("llmTab.fallbackTitle")}
+            aria-controls="fallback-chain-content"
+            aria-expanded={fallbackOpen}
+            onClick={() => setFallbackOpen((open) => !open)}
+            data-testid="fallback-chain-toggle"
           >
-            <span className="text-muted-foreground text-xs">{t("llmTab.fallbackSummary")}</span>
-            <span className="text-muted-foreground">{fallbackOpen ? "▲" : "▼"}</span>
+            {fallbackOpen ? <ChevronUp className="size-4" aria-hidden="true" /> : <ChevronDown className="size-4" aria-hidden="true" />}
           </Button>
+        }
+      >
+        <div
+          className="min-w-0"
+          data-testid="fallback-chain-section"
+        >
           {fallbackOpen && (
-            <div className="space-y-3">
-              <p className="text-[11px] text-muted-foreground">{t("llmTab.fallbackDesc")}</p>
+            <div id="fallback-chain-content" className="min-w-0 space-y-3">
               {fallbackChain.map((entry, idx) => {
                 const fallbackVendorInfo = getVendorInfo(entry.provider);
                 const trimmedFallbackModel = entry.model.trim();
@@ -1425,7 +1387,7 @@ export function LlmTab(props: LlmTabProps) {
                   optionsFromModelListState(fallbackModelList),
                 );
                 return (
-                  <div key={idx} className="flex gap-2">
+                  <div key={idx} className="flex min-w-0 flex-col gap-2 sm:flex-row">
                     <ProviderSelect
                       value={entry.provider}
                       onValueChange={(value) => {
@@ -1438,7 +1400,7 @@ export function LlmTab(props: LlmTabProps) {
                         };
                         setFallbackChain(next);
                       }}
-                      triggerClassName="w-36 text-xs"
+                      triggerClassName="w-full text-xs sm:w-36"
                       vendorOptions={visibleVendorsFor([
                         entry.provider,
                         ...marketplaceProviderIds,
@@ -1467,7 +1429,7 @@ export function LlmTab(props: LlmTabProps) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 text-xs text-destructive"
+                      className="h-8 self-end text-xs text-destructive sm:self-auto"
                       onClick={() => setFallbackChain((c) => c.filter((_, i) => i !== idx))}
                     >
                       {t("llmTab.delete")}

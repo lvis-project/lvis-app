@@ -14,11 +14,11 @@ import { closeSettingsWindow, openSettingsWindow } from './settings-window';
  *     does NOT need to click an explicit Save button.
  *   - The settings surface does NOT auto-close on save — the multi-tab
  *     pattern keeps it open so users can verify and edit a sibling tab.
- *     Leaving is an explicit "Back" navigation.
+ *     Leaving uses the title-bar close button.
  *
  * This spec exercises that flow: flip the toggle → wait for the
  * debounced auto-save → assert the settings file reflects the change
- * → navigate back out of settings → reopen → assert the toggle reads the
+ * → close settings → reopen → assert the toggle reads the
  * persisted state on rehydrate (the inline panel unmounts on Back, so
  * reopening remounts SettingsContent and re-reads the persisted value).
  */
@@ -57,10 +57,10 @@ test('immediate-apply toggle persists privacy redaction without explicit Save', 
     )
     .toBe(true);
 
-  // PR #780 design: save does NOT close the surface. Navigate back out of
-  // settings before reopen so the rehydrate assertion sees a fresh mount.
+  // PR #780 design: save does NOT close the surface. Close it explicitly before
+  // reopening so the rehydrate assertion sees a fresh mount.
   // (settingsWindow === mainWindow now, so a raw `.close()` would tear down
-  // the whole app — use the inline Back navigation instead.)
+  // the whole app — use the title-bar close button instead.)
   await closeSettingsWindow(app, settingsWindow);
 
   const reopenedSettingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
@@ -69,5 +69,36 @@ test('immediate-apply toggle persists privacy redaction without explicit Save', 
       name: t('privacyTab.piiRedactToggleLabel'),
     }),
   ).toHaveAttribute('aria-checked', 'true');
+  await closeSettingsWindow(app, reopenedSettingsWindow);
+});
+
+
+test('inline close flushes a pending immediate-apply setting', async ({
+  app,
+  mainWindow,
+  t,
+}) => {
+  const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
+  const redactToggle = settingsWindow.getByRole('checkbox', {
+    name: t('privacyTab.piiRedactToggleLabel'),
+  });
+
+  await expect(redactToggle).toBeVisible({ timeout: 10_000 });
+  const nextState = (await redactToggle.getAttribute('aria-checked')) === 'true'
+    ? 'false'
+    : 'true';
+  await redactToggle.click();
+  await expect(redactToggle).toHaveAttribute('aria-checked', nextState);
+
+  // Do not wait for the 200ms debounce: the inline close path must flush it
+  // before unmount cleanup can cancel the pending timer.
+  await closeSettingsWindow(app, settingsWindow);
+
+  const reopenedSettingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
+  await expect(
+    reopenedSettingsWindow.getByRole('checkbox', {
+      name: t('privacyTab.piiRedactToggleLabel'),
+    }),
+  ).toHaveAttribute('aria-checked', nextState);
   await closeSettingsWindow(app, reopenedSettingsWindow);
 });

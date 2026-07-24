@@ -229,7 +229,7 @@ describe("plugin-owned MCP projections", () => {
     const [projection] = preparePluginMcpGeneration(stdio, testDir);
     expect(projection.config).toMatchObject({
       command: "node",
-      args: [expect.stringMatching(/\/mcp\/server\.mjs$/)],
+      args: [expect.stringMatching(/[\\/]mcp[\\/]server\.mjs$/)],
     });
     expect(projection.owner.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(projection.owner.fingerprint).not.toBe(contribution.fingerprint);

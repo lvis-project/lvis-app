@@ -79,7 +79,7 @@ export async function openSettingsWindow(
 }
 
 /**
- * "Close" the inline settings panel via its PageShell back button, which routes
+ * "Close" the inline settings panel via its title-bar close button, which routes
  * to `onCloseSettings` (returns to the previously-active view). This unmounts
  * SettingsContent, so a subsequent `openSettingsWindow` remounts it and re-reads
  * persisted state — preserving the open→change→close→reopen persistence pattern
@@ -89,7 +89,7 @@ export async function closeSettingsWindow(
   _app: ElectronApplication,
   settingsWindow: Page,
 ): Promise<void> {
-  await settingsWindow.getByTestId('settings-inline-back').click();
+  await settingsWindow.getByTestId('settings-close').click();
   await expect(settingsWindow.getByTestId('settings-sidebar-heading')).toHaveCount(0, {
     timeout: 10_000,
   });

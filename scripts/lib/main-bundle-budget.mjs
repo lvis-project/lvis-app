@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, normalize, relative, resolve } from "node:path";
+import { isAbsolute, normalize, posix, relative } from "node:path";
 
 const LEGACY_SINGLE_MAIN_BUNDLE_BYTES = 10_828_547;
 
@@ -13,10 +13,12 @@ function normalizedPath(path) {
 }
 
 function resolveOutputImport(outputPath, importPath, outputKeys) {
-  const candidates = [
-    importPath,
-    resolve(dirname(outputPath), importPath),
-  ].map(normalizedPath);
+  const normalizedImportPath = normalizedPath(importPath);
+  const normalizedOutputPath = normalizedPath(outputPath);
+  const candidates = [normalizedImportPath];
+  if (!isAbsolute(normalizedImportPath)) {
+    candidates.push(posix.join(posix.dirname(normalizedOutputPath), normalizedImportPath));
+  }
   for (const candidate of candidates) {
     if (outputKeys.has(candidate)) return candidate;
   }
