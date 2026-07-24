@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 178
+ * Fragments: 179
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
@@ -62,6 +62,7 @@ import { en as en_be_shellPathPolicy } from "./be_shellPathPolicy.js";
 import { en as en_be_shutdownRoutines } from "./be_shutdownRoutines.js";
 import { en as en_be_skillList } from "./be_skillList.js";
 import { en as en_be_skillLoad } from "./be_skillLoad.js";
+import { en as en_be_skillRead } from "./be_skillRead.js";
 import { en as en_be_streamCollector } from "./be_streamCollector.js";
 import { en as en_be_structuredCompact } from "./be_structuredCompact.js";
 import { en as en_be_subagentRunner } from "./be_subagentRunner.js";
@@ -242,6 +243,7 @@ export const generatedEn: Record<string, string> = {
   ...en_be_shutdownRoutines,
   ...en_be_skillList,
   ...en_be_skillLoad,
+  ...en_be_skillRead,
   ...en_be_streamCollector,
   ...en_be_structuredCompact,
   ...en_be_subagentRunner,

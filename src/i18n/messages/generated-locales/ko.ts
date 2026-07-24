@@ -53,6 +53,7 @@ import { ko as ko_be_shellPathPolicy } from "../generated/be_shellPathPolicy.js"
 import { ko as ko_be_shutdownRoutines } from "../generated/be_shutdownRoutines.js";
 import { ko as ko_be_skillList } from "../generated/be_skillList.js";
 import { ko as ko_be_skillLoad } from "../generated/be_skillLoad.js";
+import { ko as ko_be_skillRead } from "../generated/be_skillRead.js";
 import { ko as ko_be_streamCollector } from "../generated/be_streamCollector.js";
 import { ko as ko_be_structuredCompact } from "../generated/be_structuredCompact.js";
 import { ko as ko_be_subagentRunner } from "../generated/be_subagentRunner.js";
@@ -233,6 +234,7 @@ export const koMessages: Record<string, string> = {
   ...ko_be_shutdownRoutines,
   ...ko_be_skillList,
   ...ko_be_skillLoad,
+  ...ko_be_skillRead,
   ...ko_be_streamCollector,
   ...ko_be_structuredCompact,
   ...ko_be_subagentRunner,
