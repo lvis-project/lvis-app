@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { A2ATaskState } from "../../shared/a2a.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -37,8 +37,8 @@ function createLoop(
   withApprovalGate = false,
   approvalChoice: "allow-once" | "deny-once" = "allow-once",
 ): ConversationLoop {
-  const keywordEngine = new KeywordEngine();
-  const routeEngine = new RouteEngine({ toolRegistry });
+  const inputClassifier = new InputClassifier();
+  const routeEngine = new RouteEngine();
   const requestAndWait = vi.fn(async (request: { id: string }) => ({
     requestId: request.id,
     choice: approvalChoice,
@@ -56,7 +56,7 @@ function createLoop(
       setActiveSessionId: () => undefined,
       setSummaryPreamble: () => undefined,
     },
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     approvalGate,
@@ -108,10 +108,12 @@ describe("A2A question control and causal propagation", () => {
         isError: false,
         metadata: { rawResult: questionControl },
       }),
-    }));
+    }),
+    );
     const provider = new ScriptedProvider([
       [
-        { type: "tool_call", id: "send-question", name: "agent_send", input: {} },
+        { type: "tool_call", id: "send-question", name: "agent_send", input: {},
+        },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -143,14 +145,16 @@ describe("A2A question control and causal propagation", () => {
     });
     expect(provider.turnsServed).toBe(1);
     expect(JSON.stringify(loop.history.getMessages()))
-      .toContain("idle sibling guidance");
+      .toContain("idle sibling guidance",
+    );
     const gate = (loop as unknown as {
       testApprovalRequestAndWait: ReturnType<typeof vi.fn>;
     }).testApprovalRequestAndWait;
     expect(gate).toHaveBeenCalledWith(expect.objectContaining({
       reason: expect.stringContaining("[Sub-Agent: sender-worker]"),
       trustOrigin: "agent-message",
-    }));
+    }),
+    );
   });
 
   it.each([
@@ -173,7 +177,8 @@ describe("A2A question control and causal propagation", () => {
       isReadOnly: () => true,
       jsonSchema: { type: "object", properties: {} },
       execute,
-    }));
+    }),
+      );
     const provider = new ScriptedProvider([
       [
         { type: "tool_call", id: "spoof-question", name, input: {} },
@@ -198,7 +203,8 @@ describe("A2A question control and causal propagation", () => {
     expect(result.stopReason).toBe("end_turn");
     expect(result.inputRequired).toBeUndefined();
     expect(provider.turnsServed).toBe(2);
-  });
+  },
+  );
 
   it("exposes host causal context only to builtin agent_send", async () => {
     const observed = new Map<string, unknown>();
@@ -218,12 +224,14 @@ describe("A2A question control and causal propagation", () => {
           observedTrust.set(name, context.metadata?.trustOrigin);
           return { output: "ok", isError: false };
         },
-      }));
+      }),
+      );
     }
     const provider = new ScriptedProvider([
       [
         { type: "tool_call", id: "causal-send", name: "agent_send", input: {} },
-        { type: "tool_call", id: "causal-other", name: "ordinary_tool", input: {} },
+        { type: "tool_call", id: "causal-other", name: "ordinary_tool", input: {},
+        },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -272,7 +280,8 @@ describe("A2A question control and causal propagation", () => {
           }
           return { output: "ok", isError: false };
         },
-      }));
+      }),
+      );
     }
     let loop!: ConversationLoop;
     let turn = 0;
@@ -290,13 +299,16 @@ describe("A2A question control and causal propagation", () => {
               recipientChildSessionId: "sub-recipient",
               hopCount: 2,
             },
-          })).toBe("queued");
-          yield { type: "tool_call", id: "first", name: "first_tool", input: {} };
+          }),
+          ).toBe("queued");
+          yield { type: "tool_call", id: "first", name: "first_tool", input: {},
+          };
           yield { type: "message_complete", stopReason: "tool_use" };
           return;
         }
         if (turn === 2) {
-          yield { type: "tool_call", id: "ordinary", name: "ordinary_tool", input: {} };
+          yield { type: "tool_call", id: "ordinary", name: "ordinary_tool", input: {},
+          };
           yield { type: "message_complete", stopReason: "tool_use" };
           return;
         }
@@ -321,7 +333,8 @@ describe("A2A question control and causal propagation", () => {
       toolName: "ordinary_tool",
       reason: expect.stringContaining("[Sub-Agent: sender-worker]"),
       trustOrigin: "agent-message",
-    }));
+    }),
+    );
   });
 
   it("awaits real active-sibling mailbox ACK on round commit and retains it on round-cap", async () => {
@@ -344,7 +357,8 @@ describe("A2A question control and causal propagation", () => {
         isReadOnly: () => true,
         jsonSchema: { type: "object", properties: {} },
         execute: async () => ({ output: "ok", isError: false }),
-      }));
+      }),
+      );
 
       let releaseAcknowledge = () => undefined;
       const acknowledgeGate = args.holdAcknowledge
@@ -362,8 +376,7 @@ describe("A2A question control and causal propagation", () => {
           markAcknowledgeStarted();
           await acknowledgeGate;
           return originalAcknowledge(childSessionId, ids);
-        },
-      );
+        });
 
       let loop!: ConversationLoop;
       let bus!: A2AAgentMessageBus;
@@ -374,7 +387,8 @@ describe("A2A question control and causal propagation", () => {
       let providerTurn = 0;
       const provider: LLMProvider = {
         vendor: "openai",
-        async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+        async *streamTurn(params: StreamTurnParams,
+        ): AsyncIterable<StreamEvent> {
           providerTurn += 1;
           if (providerTurn === 1) {
             await expect(bus.send({
@@ -382,19 +396,23 @@ describe("A2A question control and causal propagation", () => {
               recipient: recipientChildSessionId,
               messageId: args.messageId,
               parts: [{ text: "durable active sibling guidance" }],
-            })).resolves.toMatchObject({
+            }),
+            ).resolves.toMatchObject({
               ok: true,
               disposition: "queued",
             });
-            const stored = await mailbox.peekWithDiagnostics(recipientChildSessionId);
+            const stored = await mailbox.peekWithDiagnostics(recipientChildSessionId,
+            );
             expect(stored.entries).toHaveLength(1);
             resolveQueuedEntry(structuredClone(stored.entries[0]));
-            yield { type: "tool_call", id: "first", name: "first_tool", input: {} };
+            yield { type: "tool_call", id: "first", name: "first_tool", input: {},
+            };
             yield { type: "message_complete", stopReason: "tool_use" };
             return;
           }
           expect(JSON.stringify(params.messages))
-            .toContain("durable active sibling guidance");
+            .toContain("durable active sibling guidance",
+          );
           yield { type: "text_delta", text: "done" };
           yield { type: "message_complete", stopReason: "end_turn" };
         },
@@ -460,7 +478,8 @@ describe("A2A question control and causal propagation", () => {
     expect(runSettled).toBe(false);
     expect((await committed.mailbox.peekWithDiagnostics(
       committed.recipientChildSessionId,
-    )).entries).toEqual([committedEntry]);
+    )).entries,
+    ).toEqual([committedEntry]);
 
     committed.releaseAcknowledge();
     await expect(committed.runPromise).resolves.toMatchObject({
@@ -468,7 +487,8 @@ describe("A2A question control and causal propagation", () => {
     });
     expect((await committed.mailbox.peekWithDiagnostics(
       committed.recipientChildSessionId,
-    )).entries).toEqual([]);
+    )).entries,
+    ).toEqual([]);
 
     const capped = startScenario({
       messageId: "message-round-cap-retained",
@@ -481,8 +501,8 @@ describe("A2A question control and causal propagation", () => {
     });
     expect(capped.acknowledge).not.toHaveBeenCalled();
     expect((await capped.mailbox.peekWithDiagnostics(
-      capped.recipientChildSessionId,
-    )).entries).toEqual([cappedEntry]);
+      capped.recipientChildSessionId)).entries,
+    ).toEqual([cappedEntry]);
   });
 
   it.each(["request_plugin", "tool_search"])(
@@ -498,7 +518,8 @@ describe("A2A question control and causal propagation", () => {
         decisionOverride: "always-allow-with-audit",
         jsonSchema: { type: "object", properties: {} },
         execute: async () => ({ output: "must not execute", isError: false }),
-      }));
+      }),
+      );
       const provider = new ScriptedProvider([
         [
           { type: "tool_call", id: "intercepted", name, input: {} },
@@ -532,11 +553,13 @@ describe("A2A question control and causal propagation", () => {
         toolName: name,
         reason: expect.stringContaining("[Sub-Agent: sender-worker]"),
         trustOrigin: "agent-message",
-      }));
+      }),
+      );
       expect(result.toolCalls).toContainEqual(expect.objectContaining({
         name,
         result: expect.stringContaining("cross-agent-approval-denied"),
-      }));
+      }),
+      );
       expect(provider.turnsServed).toBe(2);
     },
   );

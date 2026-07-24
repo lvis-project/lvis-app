@@ -44,7 +44,8 @@ import { TestPluginRuntime as PluginRuntime } from "../../__tests__/test-helpers
 import type { PluginToolInvocationContext } from "../index.js";
 import type { PluginManifest, Tool } from "../../types.js";
 
-const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..",
+);
 
 type Visibility = Array<"model" | "app">;
 
@@ -87,19 +88,23 @@ const MANIFEST: PluginManifest = {
     tool("acme_logout", ["app"]),
     tool("acme_secret", ["model"]),
   ],
-  auth: { statusTool: "acme_status", loginTool: "acme_login", logoutTool: "acme_logout" },
+  auth: { statusTool: "acme_status", loginTool: "acme_login", logoutTool: "acme_logout",
+  },
 };
 
 /** Derived from the manifest, never hardcoded again below. */
-const AUTH_TOOL_NAMES = [MANIFEST.auth!.statusTool, MANIFEST.auth!.loginTool, MANIFEST.auth!.logoutTool!];
+const AUTH_TOOL_NAMES = [MANIFEST.auth!.statusTool, MANIFEST.auth!.loginTool, MANIFEST.auth!.logoutTool!,
+];
 
-function runtimeWithPlugin(handlers: Record<string, (p?: unknown) => Promise<unknown>>) {
+function runtimeWithPlugin(handlers: Record<string, (p?: unknown) => Promise<unknown>>,
+) {
   const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
   const internals = rt as unknown as {
     plugins: Map<string, { manifest: PluginManifest }>;
     methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
   };
-  internals.plugins.set("acme-cards", { manifest: MANIFEST } as unknown as never);
+  internals.plugins.set("acme-cards", { manifest: MANIFEST,
+  } as unknown as never);
   for (const [name, handler] of Object.entries(handlers)) {
     internals.methodMap.set(name, { pluginId: "acme-cards", handler });
   }
@@ -119,7 +124,8 @@ function harness() {
   // Stands in for the GOVERNED path: boot installs the plugin-surface ToolExecutor
   // (risk → reviewer/approval → audit) as this delegate. Reaching it IS reaching
   // the gate; not reaching it is the bypass.
-  const executor = vi.fn(async (_m: string, _p: unknown, _c: PluginToolInvocationContext) => "governed");
+  const executor = vi.fn(async (_m: string, _p: unknown, _c: PluginToolInvocationContext) => "governed",
+  );
   rt.setToolInvocationDelegate(executor);
   // The ungoverned path. It must never be entered from an app origin.
   const appOnlyDispatch = vi.spyOn(rt, "callDeclaredAppOnlyTool");
@@ -130,14 +136,16 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
   it("routes a NON-AUTH app-only tool through the governed executor — not the ungoverned dispatch, not the raw handler", async () => {
     const { rt, executor, handler, appOnlyDispatch } = harness();
 
-    await expect(rt.callFromApp("acme_ui_rows", { chunk: 1 })).resolves.toBe("governed");
+    await expect(rt.callFromApp("acme_ui_rows", { chunk: 1 })).resolves.toBe("governed",
+    );
     // The gate ran…
     expect(executor).toHaveBeenCalledWith("acme_ui_rows", { chunk: 1 }, {
       origin: "mcp-app",
       ownerPluginId: "acme-cards",
       ownerGenerationId: expect.any(String),
       userAction: false,
-    });
+    },
+    );
     // …and the reviewer-skipping path did not. This is the whole point: `["app"]`
     // now WORKS for a plugin (its card can drive its own tools) *because* the tool
     // is a registry `Tool` the executor can run — not because the gate was relaxed.
@@ -149,13 +157,15 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
   it("routes a DUAL-visibility tool through the governed executor with origin 'mcp-app' and no user gesture", async () => {
     const { rt, executor, appOnlyDispatch } = harness();
 
-    await expect(rt.callFromApp("acme_open", { id: 7 })).resolves.toBe("governed");
+    await expect(rt.callFromApp("acme_open", { id: 7 })).resolves.toBe("governed",
+    );
     expect(executor).toHaveBeenCalledWith("acme_open", { id: 7 }, {
       origin: "mcp-app",
       ownerPluginId: "acme-cards",
       ownerGenerationId: expect.any(String),
       userAction: false,
-    });
+    },
+    );
     expect(appOnlyDispatch).not.toHaveBeenCalled();
   });
 
@@ -172,7 +182,8 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
 
   it("keeps the app-visibility allow-list (the spec MUST): a MODEL-ONLY tool is not app-callable", async () => {
     const { rt, executor } = harness();
-    await expect(rt.callFromApp("acme_secret")).rejects.toThrow(/not declared as a UI action/);
+    await expect(rt.callFromApp("acme_secret")).rejects.toThrow(/not an app-visible Tool/,
+    );
     expect(executor).not.toHaveBeenCalled();
   });
 
@@ -180,24 +191,27 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
     const { handler } = harness();
     const rt = runtimeWithPlugin({ acme_open: handler, acme_ui_rows: handler });
     // Both surfaces: with no gate wired there is nowhere safe to run either one.
-    await expect(rt.callFromApp("acme_open")).rejects.toThrow(/executor is not wired/);
-    await expect(rt.callFromApp("acme_ui_rows")).rejects.toThrow(/executor is not wired/);
+    await expect(rt.callFromApp("acme_open")).rejects.toThrow(/executor is not wired/,
+    );
+    await expect(rt.callFromApp("acme_ui_rows")).rejects.toThrow(/executor is not wired/,
+    );
     expect(handler).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown method", async () => {
     const { rt } = harness();
-    await expect(rt.callFromApp("nope_open")).rejects.toThrow(/Plugin method not found/);
+    await expect(rt.callFromApp("nope_open")).rejects.toThrow(/Plugin method not found/,
+    );
   });
 
-  describe("THE AUTH-TRIO CARVE-OUT — deliberate narrowing below the spec's [\"app\"] semantics", () => {
+  describe('THE AUTH-TRIO CARVE-OUT — deliberate narrowing below the spec\'s ["app"] semantics', () => {
     it("DENIES every manifest.auth.{statusTool,loginTool,logoutTool} name, fail-closed, without running the handler, the executor, or the ungoverned dispatch", async () => {
       for (const name of AUTH_TOOL_NAMES) {
         const { rt, executor, handler, appOnlyDispatch } = harness();
 
-        await expect(rt.callFromApp(name, { token: "attacker-chosen" })).rejects.toThrow(
-          new RegExp(MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE),
-        );
+        await expect(rt.callFromApp(name, { token: "attacker-chosen" }),
+        ).rejects.toThrow(
+          new RegExp(MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE));
         // Nothing ran, nowhere: not the governed executor, not the ungoverned
         // dispatch, not the plugin handler. This is STRICTER than an ordinary
         // app-only tool (which DOES reach the executor) — that gap is the point.
@@ -214,9 +228,9 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
       // bypass. After the governed-registration fix alone, it would have succeeded
       // GOVERNED — which is still wrong for THIS specific tool: an approval prompt
       // does not make "an untrusted card can pop a real login window" acceptable.
-      await expect(rt.callFromApp(MANIFEST.auth!.loginTool, {})).rejects.toThrow(
-        new RegExp(MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE),
-      );
+      await expect(rt.callFromApp(MANIFEST.auth!.loginTool, {}),
+      ).rejects.toThrow(
+        new RegExp(MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE));
       expect(executor).not.toHaveBeenCalled();
       expect(appOnlyDispatch).not.toHaveBeenCalled();
       expect(handler).not.toHaveBeenCalled();
@@ -225,15 +239,23 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
     it("gives the card an ACTIONABLE, English, kebab-case error naming the real constraint", async () => {
       const { rt } = harness();
       await expect(rt.callFromApp(MANIFEST.auth!.statusTool)).rejects.toThrow(
-        new RegExp(`\\[${MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE}\\].*acme_status.*trusted panel`, "s"),
+        new RegExp(`\\[${MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE}\\].*acme_status.*trusted panel`,
+          "s",
+        ),
       );
     });
 
     it("denies the auth trio even when the executor delegate is never wired (the deny fires before that check)", async () => {
       const { handler } = harness();
-      const rt = runtimeWithPlugin({ acme_status: handler, acme_login: handler, acme_logout: handler });
+      const rt = runtimeWithPlugin({
+        acme_status: handler,
+        acme_login: handler,
+        acme_logout: handler,
+      });
       for (const name of AUTH_TOOL_NAMES) {
-        await expect(rt.callFromApp(name)).rejects.toThrow(new RegExp(MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE));
+        await expect(rt.callFromApp(name)).rejects.toThrow(
+          new RegExp(MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE),
+        );
       }
       expect(handler).not.toHaveBeenCalled();
     });
@@ -242,8 +264,14 @@ describe("PluginRuntime.callFromApp — a card's calls are GOVERNED, and only go
       const { rt, executor } = harness();
       // Same visibility shape (["app"]) as the auth trio, but not named in
       // manifest.auth — so it stays governed-and-callable, unlike the trio.
-      await expect(rt.callFromApp("acme_ui_rows", { page: 1 })).resolves.toBe("governed");
-      expect(executor).toHaveBeenCalledWith("acme_ui_rows", { page: 1 }, expect.any(Object));
+      await expect(rt.callFromApp("acme_ui_rows", { page: 1 })).resolves.toBe(
+        "governed",
+      );
+      expect(executor).toHaveBeenCalledWith(
+        "acme_ui_rows",
+        { page: 1 },
+        expect.any(Object),
+      );
     });
   });
 });
@@ -252,13 +280,19 @@ describe("PluginRuntime.callFromUi — the trusted panel keeps its existing beha
   it("still dispatches origin 'ui' and still forwards a real user gesture", async () => {
     const { rt, executor } = harness();
 
-    await expect(rt.callFromUi("acme_open", { id: 7 }, { userAction: true })).resolves.toBe("governed");
-    expect(executor).toHaveBeenCalledWith("acme_open", { id: 7 }, {
-      origin: "ui",
-      ownerPluginId: "acme-cards",
-      ownerGenerationId: expect.any(String),
-      userAction: true,
-    });
+    await expect(
+      rt.callFromUi("acme_open", { id: 7 }, { userAction: true }),
+    ).resolves.toBe("governed");
+    expect(executor).toHaveBeenCalledWith(
+      "acme_open",
+      { id: 7 },
+      {
+        origin: "ui",
+        ownerPluginId: "acme-cards",
+        ownerGenerationId: expect.any(String),
+        userAction: true,
+      },
+    );
   });
 
   it("still reaches the auth trio (incl. auth.loginTool) on the panel's own origin — the carve-out is callFromApp-only, NOT regressed here", async () => {
@@ -270,13 +304,19 @@ describe("PluginRuntime.callFromUi — the trusted panel keeps its existing beha
     // the card arm's auth-trio deny — it keeps dispatching `origin: "ui"`, the ONE
     // origin that can carry a real gesture and the ONE origin the bypass answers to.
     for (const name of AUTH_TOOL_NAMES) {
-      await expect(rt.callFromUi(name, {}, { userAction: true })).resolves.toBe("governed");
+      await expect(rt.callFromUi(name, {}, { userAction: true })).resolves.toBe(
+        "governed",
+      );
     }
-    expect(executor).toHaveBeenCalledWith(MANIFEST.auth!.loginTool, {}, {
-      origin: "ui",
-      ownerPluginId: "acme-cards",
-      ownerGenerationId: expect.any(String),
-      userAction: true,
-    });
+    expect(executor).toHaveBeenCalledWith(
+      MANIFEST.auth!.loginTool,
+      {},
+      {
+        origin: "ui",
+        ownerPluginId: "acme-cards",
+        ownerGenerationId: expect.any(String),
+        userAction: true,
+      },
+    );
   });
 });

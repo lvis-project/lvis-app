@@ -22,7 +22,8 @@ function isBuiltinToolInventoryQuestion(input: string): boolean {
   return mentionsTool && mentionsBuiltin && !mentionsNonBuiltin;
 }
 
-export function rebuildToolSchemas(toolRegistry: ToolRegistry, scope: ToolScope): ToolSchema[] {
+export function rebuildToolSchemas(toolRegistry: ToolRegistry, scope: ToolScope,
+): ToolSchema[] {
     const raw = toolRegistry.getToolSchemasForScope(scope);
     const result: ToolSchema[] = [];
     for (const s of raw) {
@@ -33,8 +34,10 @@ export function rebuildToolSchemas(toolRegistry: ToolRegistry, scope: ToolScope)
           inputSchema: s.input_schema as ToolSchema["inputSchema"],
         });
       } catch (err) {
-      log.warn(`rebuildToolSchemas: tool '${s.name}' schema conversion failed, skipping: %s`, err);
-      }
+      log.warn(`rebuildToolSchemas: tool '${s.name}' schema conversion failed, skipping: %s`,
+        err,
+      );
+    }
     }
     return result;
   }
@@ -48,11 +51,10 @@ export function resolveToolScope(
     sessionActivatedPluginIds: Set<string>;
   },
 ): ToolScope {
-    const matched = deps.keywordEngine.matchAllPluginIds(input);
     const resetCarryForward = isBuiltinToolInventoryQuestion(input);
-    const activePluginIds = new Set(matched.size > 0
-      ? matched
-      : (resetCarryForward ? new Set<string>() : (state.lastTurnScope ?? new Set<string>())));
+    const activePluginIds = new Set(
+    resetCarryForward ? new Set<string>() : (state.lastTurnScope ?? new Set<string>()),
+  );
     for (const pluginId of deps.forcedActivePluginIds ?? []) {
       activePluginIds.add(pluginId);
     }
@@ -94,28 +96,19 @@ export function resolveToolScope(
     // falls back to deferral so a very large surface does not flood context.
     const deferral = shouldDeferToolSchemas(deps, activePluginIds);
 
-    // (B) keyword→tool preload ∪ carried-forward loaded tools ∪ explicit
-    // fixed-surface allowlist. Keyword/carry-forward entries are restricted to
-    // tools whose owning plugin is in scope, so a keyword can never load a tool
-    // the plugin-scope path would have hidden.
-    const activeToolNames = new Set<string>();
+  // (B) carried-forward loaded tools ∪ explicit fixed-surface allowlist.
+  // Entries are restricted to tools whose owning plugin is in scope.
+  const activeToolNames = new Set<string>();
     const preloadedToolNames = new Set<string>();
     const forcedToolNames = new Set<string>();
     const inScopeToolNames = scopedToolNameSet(deps, activePluginIds);
-    const preloaded = deps.keywordEngine.matchToolNames(
-      input,
-      (name) => inScopeToolNames.has(name),
-    );
-    for (const name of preloaded) {
-      activeToolNames.add(name);
-      preloadedToolNames.add(name);
-    }
-    for (const name of resetCarryForward ? [] : (state.lastTurnToolNames ?? [])) {
+  for (const name of resetCarryForward ? [] : (state.lastTurnToolNames ?? [])) {
       if (inScopeToolNames.has(name)) activeToolNames.add(name);
     }
     // Same model-facing listing: a forced name the model may not be shown cannot be
     // forced INTO the model's turn scope (its schema would be filtered out anyway).
-    const registeredToolNames = new Set(deps.toolRegistry.getModelVisibleTools().map((tool) => tool.name));
+    const registeredToolNames = new Set(deps.toolRegistry.getModelVisibleTools().map((tool) => tool.name),
+  );
     for (const name of deps.forcedActiveToolNames ?? []) {
       if (registeredToolNames.has(name)) {
         activeToolNames.add(name);
@@ -134,11 +127,12 @@ export function resolveToolScope(
     };
   }
 
-export function scopedToolNameSet(deps: ConversationLoopDeps, activePluginIds: Set<string>): Set<string> {
+export function scopedToolNameSet(deps: ConversationLoopDeps, activePluginIds: Set<string>,
+): Set<string> {
     const includeMcp = deps.headless !== true;
     const names = new Set<string>();
-    // MODEL-facing set (keyword preload, carry-forward, the eager-exposure ceiling),
-    // so it reads the registry's model-visible listing: an MCP Apps app-only tool is
+  // MODEL-facing set (carry-forward and the eager-exposure ceiling),
+  // so it reads the registry's model-visible listing: an MCP Apps app-only tool is
     // registered (its card's call must run under the gate) but the model never sees
     // it, so it must not count toward the ceiling or be preloadable into the turn.
     for (const tool of deps.toolRegistry.getModelVisibleTools()) {
@@ -151,11 +145,15 @@ export function scopedToolNameSet(deps: ConversationLoopDeps, activePluginIds: S
     return names;
   }
 
-export function shouldDeferToolSchemas(deps: ConversationLoopDeps, activePluginIds: Set<string>): boolean {
-    return scopedToolNameSet(deps, activePluginIds).size >= EAGER_TOOL_EXPOSURE_CEILING;
+export function shouldDeferToolSchemas(deps: ConversationLoopDeps, activePluginIds: Set<string>,
+): boolean {
+    return (
+    scopedToolNameSet(deps, activePluginIds).size >= EAGER_TOOL_EXPOSURE_CEILING
+  );
   }
 
-export function filterAllowedPluginIds(deps: ConversationLoopDeps, pluginIds: string[]): string[] {
+export function filterAllowedPluginIds(deps: ConversationLoopDeps, pluginIds: string[],
+): string[] {
     const allowed = deps.allowedPluginIds;
     if (!allowed) return pluginIds;
     const effectiveAllowed = new Set(allowed);

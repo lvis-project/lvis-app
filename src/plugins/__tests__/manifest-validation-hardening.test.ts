@@ -1,9 +1,9 @@
 /**
  * Runtime manifest validation hardening.
  *
- * Covers 5 cross-field rules:
- *   1) keywords[].skillId ⊂ tools[]             (hard fail-load)
- *   2) toolSchemas keys    ⊂ tools[]             (hard fail-load)
+ * Covers strict manifest rules:
+ *   1) removed keyword routing is rejected
+ *   2) removed schema maps are rejected
  *   3) notificationEvents.event ⊂ eventSubscriptions (soft warn)
  *   4) ui[] kind-specific required fields (hard fail-load)
  *   5) AJV unknown-property rejection (additionalProperties:false at root,
@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
 import {
-  compileLegacyToolSurface,
+  pureTool,
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
 
@@ -53,7 +53,14 @@ describe("runtime manifest validation hardening", () => {
     stop: async () => {},
   };
 }`;
-    await writeFile(join(pluginDir, "entry.mjs"), entrySource ?? defaultEntry, "utf-8");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      entrySource ?? defaultEntry,
+      "utf-8",
+    );
+    const overrideTools = Array.isArray(manifestOverrides.tools)
+      ? manifestOverrides.tools
+      : [`${id}_hello`, `${id}_bad`, `${id}_good`];
     const manifest: Record<string, unknown> = {
       id,
       name: id,
@@ -61,22 +68,16 @@ describe("runtime manifest validation hardening", () => {
       description: "Test fixture.",
       publisher: "Test fixture",
       entry: "entry.mjs",
-      tools: [`${id}_hello`, `${id}_bad`, `${id}_good`],
       ...manifestOverrides,
+      tools: overrideTools.map((tool) =>
+        typeof tool === "string" ? pureTool(tool) : tool,
+      ),
     };
-    // Pure v6: compile any legacy tools[]/uiActions/toolSchemas surface into Tool[]
-    // (an orphan toolSchemas key not in tools[]/uiActions is naturally dropped).
-    const toolNames = Array.isArray(manifest.tools)
-      ? (manifest.tools as unknown[]).filter((t): t is string => typeof t === "string")
-      : [];
-    manifest.tools = compileLegacyToolSurface({
-      tools: toolNames,
-      uiActions: manifest.uiActions as Record<string, { description?: string }> | undefined,
-      toolSchemas: manifest.toolSchemas as Record<string, Record<string, unknown>> | undefined,
-    });
-    delete manifest.uiActions;
-    delete manifest.toolSchemas;
-    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
+    await writeFile(
+      join(pluginDir, "plugin.json"),
+      JSON.stringify(manifest),
+      "utf-8",
+    );
     await mkdir(join(testDir, "plugins"), { recursive: true });
     await writeFile(
       registryPath,
@@ -88,13 +89,18 @@ describe("runtime manifest validation hardening", () => {
     );
   }
 
-  function captureErrors(): { errors: string[]; warns: string[]; restore: () => void } {
+  function captureErrors(): {
+    errors: string[];
+    warns: string[];
+    restore: () => void;
+  } {
     const errors: string[] = [];
     const warns: string[] = [];
     const origErr = console.error;
     const origWarn = console.warn;
     console.error = (msg: unknown) => errors.push(String(msg));
-    console.warn = (msg: unknown, ..._rest: unknown[]) => warns.push(String(msg));
+    console.warn = (msg: unknown, ..._rest: unknown[]) =>
+      warns.push(String(msg));
     return {
       errors,
       warns,
@@ -105,34 +111,16 @@ describe("runtime manifest validation hardening", () => {
     };
   }
 
-  it("1) keywords[].skillId that names no model-visible tool fails load", async () => {
+  it("rejects the removed keyword-to-tool preload field", async () => {
     await writePlugin("p-kw", {
       tools: ["pkw_hello", "pkw_bad", "pkw_good"],
       keywords: [{ keyword: "회의", skillId: "p_kw_missing" }],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    const cap = captureErrors();
-    try {
-      await runtime.load();
-    } finally {
-      cap.restore();
-    }
-    expect(runtime.listPluginIds()).toHaveLength(0);
-    // #885 v6 — the message is now "must name a model-visible tool".
-    expect(
-      cap.errors.some((e) =>
-        /keywords\[0\]\.skillId.*p_kw_missing.*must name a model-visible tool/.test(e),
-      ),
-    ).toBe(true);
-  });
-
-  it("1b) keywords[].skillId cannot preload an app-only tool", async () => {
-    await writePlugin("p-kw-app-only", {
-      tools: [],
-      uiActions: { p_kw_status: {} },
-      keywords: [{ keyword: "status", skillId: "p_kw_status" }],
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -140,18 +128,10 @@ describe("runtime manifest validation hardening", () => {
       cap.restore();
     }
     expect(runtime.listPluginIds()).toHaveLength(0);
-    expect(
-      cap.errors.some((e) =>
-        /keywords\[0\]\.skillId.*p_kw_status.*must name a model-visible tool for keyword preload/.test(e),
-      ),
-    ).toBe(true);
+    expect(cap.errors.some((e) => /keywords|additional/i.test(e))).toBe(true);
   });
 
-  it("2) #885 v6 — a legacy orphan toolSchemas key (not in tools[]) is DROPPED by normalize, not a hard fail", async () => {
-    // The old "toolSchemas key ⊆ tools[] ∪ uiActions" hard-fail is DELETED
-    // (structurally impossible in the pure shape). A legacy orphan schema — an
-    // entry backing neither a tool[] nor a uiAction — is simply dropped during
-    // host-side materialization, so the plugin still LOADS (no cross-field rejection).
+  it("rejects the removed top-level schema map", async () => {
     await writePlugin("p-ts", {
       tools: ["pts_hello", "pts_bad", "pts_good"],
       toolSchemas: {
@@ -162,16 +142,21 @@ describe("runtime manifest validation hardening", () => {
         },
       },
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
     const cap = captureErrors();
     try {
       await runtime.load();
     } finally {
       cap.restore();
     }
-    expect(runtime.listPluginIds()).toContain("p-ts");
-    // No orphan-key cross-field rejection.
-    expect(cap.errors.some((e) => /p_ts_ghost.*not in tools\[\]/.test(e))).toBe(false);
+    expect(runtime.listPluginIds()).not.toContain("p-ts");
+    expect(cap.errors.some((e) => /toolSchemas|additional/i.test(e))).toBe(
+      true,
+    );
   });
 
   it("3) notificationEvents.event not in eventSubscriptions → soft warn, plugin still loads", async () => {
@@ -180,7 +165,11 @@ describe("runtime manifest validation hardening", () => {
       eventSubscriptions: ["meeting.started"],
       notificationEvents: [{ event: "meeting.ghost" }],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -190,7 +179,9 @@ describe("runtime manifest validation hardening", () => {
     expect(runtime.listPluginIds()).toContain("p-notif");
     expect(
       cap.warns.some((w) =>
-        /Plugin manifest 'p-notif': notificationEvents\[0\]\.event 'meeting\.ghost' not declared in eventSubscriptions/.test(w),
+        /Plugin manifest 'p-notif': notificationEvents\[0\]\.event 'meeting\.ghost' not declared in eventSubscriptions/.test(
+          w,
+        ),
       ),
     ).toBe(true);
   });
@@ -200,12 +191,28 @@ describe("runtime manifest validation hardening", () => {
       tools: ["pui_hello", "pui_bad", "pui_good"],
       ui: [
         // bad embedded-module (missing exportName) — should fail the manifest
-        { id: "a", slot: "sidebar", kind: "embedded-module", title: "A", entry: "dist/a.js" },
+        {
+          id: "a",
+          slot: "sidebar",
+          kind: "embedded-module",
+          title: "A",
+          entry: "dist/a.js",
+        },
         { id: "b", slot: "sidebar", kind: "info-card", title: "B" },
-        { id: "c", slot: "sidebar", kind: "embedded-page", title: "C", page: "dist/c.html" },
+        {
+          id: "c",
+          slot: "sidebar",
+          kind: "embedded-page",
+          title: "C",
+          page: "dist/c.html",
+        },
       ],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -215,7 +222,9 @@ describe("runtime manifest validation hardening", () => {
     expect(runtime.listPluginIds()).not.toContain("p-ui");
     expect(
       cap.errors.some((e) =>
-        /ui\[0\].*kind="embedded-module" missing required field\(s\): exportName/.test(e),
+        /ui\[0\].*kind="embedded-module" missing required field\(s\): exportName/.test(
+          e,
+        ),
       ),
     ).toBe(true);
   });
@@ -235,7 +244,11 @@ describe("runtime manifest validation hardening", () => {
         { id: "z", slot: "sidebar", kind: "info-card", title: "Z" },
       ],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -243,7 +256,9 @@ describe("runtime manifest validation hardening", () => {
       cap.restore();
     }
     expect(runtime.listPluginIds()).not.toContain("p-ui-bad");
-    expect(cap.errors.some((e) => /ui\[0\].*must be an object/.test(e))).toBe(true);
+    expect(cap.errors.some((e) => /ui\[0\].*must be an object/.test(e))).toBe(
+      true,
+    );
   });
 
   // SDK 5.7.0 의 schema 가 root 에 `additionalProperties: false` 를 강제하므로
@@ -255,7 +270,11 @@ describe("runtime manifest validation hardening", () => {
       tools: ["puf_hello", "puf_bad", "puf_good"],
       startupTools: ["p_unknown_field_hello"],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -299,5 +318,4 @@ describe("runtime manifest validation hardening", () => {
     expect(data.manifestPath).toContain("p-audit-target");
     expect(data.error).toMatch(/additional|startupTools|schema/i);
   });
-
 });

@@ -89,11 +89,14 @@ vi.mock("../services.js", () => ({
         get: vi.fn((key: string) => {
           switch (key) {
             case "marketplace":
-              return { cloudBaseUrl: undefined, cloudAllowPrivateNetwork: false };
+              return { cloudBaseUrl: undefined, cloudAllowPrivateNetwork: false,
+              };
             case "llm":
-              return { provider: "openai", vendors: { openai: { model: "gpt", baseUrl: undefined } } };
+              return { provider: "openai", vendors: { openai: { model: "gpt", baseUrl: undefined } },
+              };
             case "features":
-              return { osToolSandbox: false, hostClassifiesRisk: false, idlePreferenceRefresh: true };
+              return { osToolSandbox: false, hostClassifiesRisk: false, idlePreferenceRefresh: true,
+              };
             default:
               return {};
           }
@@ -102,7 +105,7 @@ vi.mock("../services.js", () => ({
         getAll: vi.fn(() => ({})),
       },
       memoryManager: {},
-      keywordEngine: {},
+      inputClassifier: {},
       toolRegistry: { setDenyRules: vi.fn(), size: 0 },
       routeEngine: {},
     };
@@ -270,7 +273,8 @@ vi.mock("../steps/work-board-migration.js", () => ({
 }));
 
 vi.mock("../plugin-surface-permissions.js", () => ({
-  createPluginSurfacePermissionScope: vi.fn(() => ({ createPermissionContext: vi.fn() })),
+  createPluginSurfacePermissionScope: vi.fn(() => ({ createPermissionContext: vi.fn(),
+  })),
 }));
 
 // ── data / mcp ───────────────────────────────────────────────────────────────
@@ -312,8 +316,10 @@ vi.mock("../../main/plugin-auth-partition-store.js", () => ({
   deletePersistedPluginAuthPartitions: vi.fn(async () => {}),
   cleanupStaleTmpFiles: vi.fn(async () => {}),
 }));
-vi.mock("../../main/link-window-service.js", () => ({ openLinkWindow: vi.fn() }));
-vi.mock("../../main/auth-partition-viewer-service.js", () => ({ openAuthPartitionViewer: vi.fn() }));
+vi.mock("../../main/link-window-service.js", () => ({ openLinkWindow: vi.fn(),
+}));
+vi.mock("../../main/auth-partition-viewer-service.js", () => ({ openAuthPartitionViewer: vi.fn(),
+}));
 vi.mock("../../main/routines-store.js", () => ({
   RoutinesStore: class {
     constructor() {
@@ -338,7 +344,8 @@ vi.mock("../../main/work-board-store.js", () => ({
     reconcileInterruptedRuns = vi.fn(async () => {});
   },
 }));
-vi.mock("../../main/session-todo-store.js", () => ({ SessionTodoStore: class {} }));
+vi.mock("../../main/session-todo-store.js", () => ({ SessionTodoStore: class {},
+}));
 vi.mock("../../main/ask-user-question-gate.js", () => ({
   AskUserQuestionGate: class {
     disposeAll = vi.fn();
@@ -349,7 +356,8 @@ vi.mock("../../main/notification-service.js", () => ({
     fire = vi.fn();
   },
 }));
-vi.mock("../../main/safe-llm-fetch.js", () => ({ createSafeLlmFetch: vi.fn(() => vi.fn()) }));
+vi.mock("../../main/safe-llm-fetch.js", () => ({ createSafeLlmFetch: vi.fn(() => vi.fn()),
+}));
 vi.mock("../../main/skill-store.js", () => ({
   SkillStore: class {
     listCatalogSync = vi.fn(() => []);
@@ -370,9 +378,11 @@ vi.mock("../../main/agent-profile-store.js", () => ({
     load = vi.fn(async () => null);
   },
 }));
-vi.mock("../../main/persona-prompt-store.js", () => ({ PersonaPromptStore: class {} }));
+vi.mock("../../main/persona-prompt-store.js", () => ({ PersonaPromptStore: class {},
+}));
 vi.mock("../../main/storage/feature-namespace.js", () => ({
-  openFeatureNamespace: vi.fn(() => ({ dir: "/tmp/lvis-boot-test/work-board" })),
+  openFeatureNamespace: vi.fn(() => ({ dir: "/tmp/lvis-boot-test/work-board",
+  })),
 }));
 vi.mock("../../main/seed-lvis-home-docs.js", () => ({
   seedLvisHomeDocs: vi.fn(() => ({ seeded: [], upgraded: [] })),
@@ -405,12 +415,24 @@ vi.mock("../../tools/write-diff-cache.js", () => ({
   clearSessionDiffCache: vi.fn(async () => {}),
 }));
 
-vi.mock("../../core/work-board-engine.js", () => ({ createWorkBoardEngine: vi.fn(() => ({})) }));
-vi.mock("../../work-board/sample-data.js", () => ({ seedSampleWorkBoard: vi.fn(async () => {}) }));
-vi.mock("../../work-board/due-soon.js", () => ({ scanAndEmitDueSoon: vi.fn(async () => []) }));
-vi.mock("../../work-board/storage.js", () => ({ createDirStorage: vi.fn(() => ({})) }));
-vi.mock("../../work-board/work-report.js", () => ({ createWorkBoardReporter: vi.fn(() => ({})) }));
-vi.mock("../../work-board/work-memory.js", () => ({ appendMemory: vi.fn(async () => {}) }));
+vi.mock("../../core/work-board-engine.js", () => ({
+  createWorkBoardEngine: vi.fn(() => ({})),
+}));
+vi.mock("../../work-board/sample-data.js", () => ({
+  seedSampleWorkBoard: vi.fn(async () => {}),
+}));
+vi.mock("../../work-board/due-soon.js", () => ({
+  scanAndEmitDueSoon: vi.fn(async () => []),
+}));
+vi.mock("../../work-board/storage.js", () => ({
+  createDirStorage: vi.fn(() => ({})),
+}));
+vi.mock("../../work-board/work-report.js", () => ({
+  createWorkBoardReporter: vi.fn(() => ({})),
+}));
+vi.mock("../../work-board/work-memory.js", () => ({
+  appendMemory: vi.fn(async () => {}),
+}));
 
 // ── plugins/* ────────────────────────────────────────────────────────────────
 vi.mock("../../plugins/marketplace.js", () => ({
@@ -422,8 +444,12 @@ vi.mock("../../plugins/cloud-marketplace-fetcher.js", () => ({
     updateAllowPrivateNetwork = vi.fn();
   },
 }));
-vi.mock("../../plugins/plugin-artifact-store.js", () => ({ PluginArtifactStore: class {} }));
-vi.mock("../../plugins/publisher-keys.js", () => ({ getBundledPublicKeys: vi.fn(() => ({})) }));
+vi.mock("../../plugins/plugin-artifact-store.js", () => ({
+  PluginArtifactStore: class {},
+}));
+vi.mock("../../plugins/publisher-keys.js", () => ({
+  getBundledPublicKeys: vi.fn(() => ({})),
+}));
 vi.mock("../../plugins/orphan-uninstall-sweeper.js", () => ({
   sweepOrphanUninstallDirs: vi.fn(async () => ({ swept: [], failed: [] })),
 }));
@@ -454,7 +480,9 @@ vi.mock("../../permissions/asrt-sandbox.js", () => ({
   computeDynamicEndpointHosts: vi.fn(() => []),
 }));
 vi.mock("../../permissions/permission-settings-store.js", () => ({
-  readPermissionSettings: vi.fn(() => ({ permissions: { additionalDirectories: [] } })),
+  readPermissionSettings: vi.fn(() => ({
+    permissions: { additionalDirectories: [] },
+  })),
 }));
 vi.mock("../../permissions/user-approval-store.js", () => ({
   migrateCanonicalization: vi.fn(async () => {}),
@@ -475,7 +503,10 @@ vi.mock("../../audit/audit-logger.js", () => ({
     rotateAndPrune = vi.fn(async () => {});
     getAuditDir = vi.fn(() => "C:\\tmp\\lvis-boot-test\\audit");
     getPermissionAuditSecret = vi.fn(() => "s".repeat(64));
-    getPermissionAuditSealStore = vi.fn(() => ({ read: vi.fn(() => null), write: vi.fn() }));
+    getPermissionAuditSealStore = vi.fn(() => ({
+      read: vi.fn(() => null),
+      write: vi.fn(),
+    }));
   },
 }));
 vi.mock("../../audit/hmac-chain.js", () => ({
@@ -506,7 +537,10 @@ function assertBefore(a: string, b: string) {
   const ib = h.order.indexOf(b);
   expect(ia, `${a} was not recorded`).toBeGreaterThanOrEqual(0);
   expect(ib, `${b} was not recorded`).toBeGreaterThanOrEqual(0);
-  expect(ia, `expected ${a} before ${b} (order: ${h.order.join(" -> ")})`).toBeLessThan(ib);
+  expect(
+    ia,
+    `expected ${a} before ${b} (order: ${h.order.join(" -> ")})`,
+  ).toBeLessThan(ib);
 }
 
 describe("bootstrap() integration lock", () => {
@@ -522,7 +556,8 @@ describe("bootstrap() integration lock", () => {
   });
 
   afterAll(() => {
-    if (savedSandboxEnv === undefined) delete process.env["LVIS_SANDBOX_ENABLED"];
+    if (savedSandboxEnv === undefined)
+      delete process.env["LVIS_SANDBOX_ENABLED"];
     else process.env["LVIS_SANDBOX_ENABLED"] = savedSandboxEnv;
   });
 
@@ -545,7 +580,7 @@ describe("bootstrap() integration lock", () => {
         "getPluginToolInvoker",
         "getSubAgentRunner",
         "idleScheduler",
-        "keywordEngine",
+        "inputClassifier",
         "knowledgeAvailable",
         "listPluginAuthPartitionsService",
         "mcpAppModelContext",
@@ -664,7 +699,10 @@ describe("bootstrap() integration lock", () => {
       createConversationLoop: (input: { scope: unknown }) => unknown;
     };
     routineEngineOptions.createConversationLoop({ scope: {} });
-    const routineDeps = h.captured["routineLoopDeps"] as Record<string, unknown>;
+    const routineDeps = h.captured["routineLoopDeps"] as Record<
+      string,
+      unknown
+    >;
     expect(routineDeps["rationaleCoordinatorFactory"]).toBeUndefined();
     expect(routineDeps["closeRationaleSession"]).toBeUndefined();
 

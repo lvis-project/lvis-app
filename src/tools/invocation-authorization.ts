@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import type { Tool } from "./base.js";
 import type { ToolCategory, ToolSource, TrustLevel } from "./types.js";
-import { requiredTier, type PermissionCheckResult } from "../permissions/permission-manager.js";
+import { requiredTier, type PermissionCheckResult,
+} from "../permissions/permission-manager.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import type { PermissionEvaluationContext } from "../permissions/evaluation-context.js";
 import type {
@@ -16,11 +17,9 @@ import type { ApprovalPurposeSuggestion } from "../shared/permission-review-stat
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import {
-  hookChainFromDispatch,
-} from "./pipeline/audit-entries.js";
+  hookChainFromDispatch } from "./pipeline/audit-entries.js";
 import {
-  emitToolStart,
-} from "./pipeline/display-mask.js";
+  emitToolStart } from "./pipeline/display-mask.js";
 import { maybeMaterializeRationaleControl } from "./pipeline/rationale-orchestrator.js";
 import {
   authorizeRationaleResume,
@@ -30,7 +29,8 @@ import {
   dispatchReviewerForHeadless as dispatchReviewerForHeadlessImpl,
   dispatchReviewerForInteractiveAuto as dispatchReviewerForInteractiveAutoImpl,
 } from "./pipeline/reviewer-dispatch.js";
-import { returnUserAbort, type UserAbortDeps } from "./pipeline/invocation-context.js";
+import { returnUserAbort, type UserAbortDeps,
+} from "./pipeline/invocation-context.js";
 import {
   currentApprovalMode,
   runScriptHook,
@@ -70,7 +70,8 @@ export interface AuthorizationStageContext {
   overlayTriggerOrigin: string | null | undefined;
   hostShellRequiresExplicitApproval: boolean;
   hostShellExecutionPlan: HostShellExecutionPlan | undefined;
-  hostShellExecutionPlanAudit: HostShellExecutionPlanAuditProjection | undefined;
+  hostShellExecutionPlanAudit:
+    | HostShellExecutionPlanAuditProjection | undefined;
   hostShellExecutionPermitBinding: HostShellExecutionPermitBinding | undefined;
   hostShellApprovalDecision: ApprovalDecision | undefined;
   finalInput: Record<string, unknown>;
@@ -233,14 +234,14 @@ export async function authorizeToolInvocation(
         ? {
             decision: "deny",
             reason: `${fallbackReason}: headless invocation blocked because interactive approval is unavailable`,
-            layer: permissionResult.layer,
-          }
-        : {
-            decision: "ask",
-            reason: `${fallbackReason}: this shell will run without OS isolation and requires an exact allow-once approval`,
-            layer: permissionResult.layer,
-            forceModal: true,
-          };
+              layer: permissionResult.layer,
+            }
+          : {
+              decision: "ask",
+              reason: `${fallbackReason}: this shell will run without OS isolation and requires an exact allow-once approval`,
+              layer: permissionResult.layer,
+              forceModal: true,
+            };
     }
 
     // A pre-issued app mutation grant replaces only the ordinary foreground
@@ -270,17 +271,19 @@ export async function authorizeToolInvocation(
         undefined,
         tool.pluginGeneration !== undefined,
       );
-      permissionResult = operationPermHook.decision === "deny"
-        ? {
-            decision: "deny",
-            reason: operationPermHook.reason,
-            layer: permissionResult.layer,
-          }
-        : {
-            decision: "allow",
-            reason: "pre-issued app operation grant pending atomic consumption",
-            layer: permissionResult.layer,
-          };
+      permissionResult =
+        operationPermHook.decision === "deny"
+          ? {
+              decision: "deny",
+              reason: operationPermHook.reason,
+              layer: permissionResult.layer,
+            }
+          : {
+              decision: "allow",
+              reason:
+                "pre-issued app operation grant pending atomic consumption",
+              layer: permissionResult.layer,
+            };
     }
 
     // ── Plugin-read auto-allow ↔ sandbox-fs-containment coupling ──────────
@@ -445,9 +448,8 @@ export async function authorizeToolInvocation(
     //          at the effect-boundary (moved OUT of the exclusions) — caught;
     //        • hostFetch self-gates INLINE in its closure (same effect-gate) —
     //          caught; the other gated async writes are caught generically;
-    //        • the THREE remaining exclusions run UNGATED under the flag, each
-    //          BOUNDED: registerKeywords = SYNC + start-only, not reachable during
-    //          tool.execute (no effect during a gated invocation); config.set =
+    //        • the TWO remaining exclusions run UNGATED under the flag, each
+    //          BOUNDED: config.set =
     //          the plugin's OWN config namespace (not user/external data);
     //          agentApproval.respond = resolves HOST-OWNED approval machinery,
     //          gating it with itself is circular (would deadlock).
@@ -488,12 +490,47 @@ export async function authorizeToolInvocation(
       if (relaxedPermHook.decision === "deny") {
         // Operator perm-hook DENY wins over the relaxation — fail closed exactly
         // as the ask lane does on a perm-hook deny.
-        const msg = t("be_executor.hookPermissionBlock", { reason: relaxedPermHook.reason });
+        const msg = t("be_executor.hookPermissionBlock", {
+          reason: relaxedPermHook.reason,
+        });
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
-        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: relaxedPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", relaxedPermHook));
-        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+        callbacks?.onToolEnd?.(
+          toolUse.name,
+          msg,
+          true,
+          meta,
+          undefined,
+          durationMs,
+        );
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          source,
+          trust,
+          finalInput,
+          msg,
+          true,
+          startTime,
+          {
+            ...permissionResult,
+            decision: "deny",
+            reason: relaxedPermHook.reason,
+          },
+          Infinity,
+          invocationPermissionContext,
+          invocationCategory,
+          executionCwd,
+          undefined,
+          undefined,
+          hookChainFromDispatch("perm", relaxedPermHook),
+        );
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: msg,
+          is_error: true,
+          durationMs,
+        });
       }
       permissionResult = {
         decision: "allow",
@@ -527,16 +564,52 @@ export async function authorizeToolInvocation(
         tool.pluginGeneration !== undefined,
       );
       if (panelPermHook.decision === "deny") {
-        const msg = t("be_executor.hookPermissionBlock", { reason: panelPermHook.reason });
+        const msg = t("be_executor.hookPermissionBlock", {
+          reason: panelPermHook.reason,
+        });
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
-        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: panelPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", panelPermHook));
-        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+        callbacks?.onToolEnd?.(
+          toolUse.name,
+          msg,
+          true,
+          meta,
+          undefined,
+          durationMs,
+        );
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          source,
+          trust,
+          finalInput,
+          msg,
+          true,
+          startTime,
+          {
+            ...permissionResult,
+            decision: "deny",
+            reason: panelPermHook.reason,
+          },
+          Infinity,
+          invocationPermissionContext,
+          invocationCategory,
+          executionCwd,
+          undefined,
+          undefined,
+          hookChainFromDispatch("perm", panelPermHook),
+        );
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: msg,
+          is_error: true,
+          durationMs,
+        });
       }
       permissionResult = {
         decision: "allow",
-        reason: "plugin panel user action - standard agent approval modal suppressed",
+        reason:
+          "plugin panel user action - standard agent approval modal suppressed",
         layer: permissionResult.layer,
       };
     }
@@ -545,11 +618,20 @@ export async function authorizeToolInvocation(
     // HOST-computed `ownerPluginSandboxRoot` + host-verified path containment.
     const sandboxAttestation = {
       ...(tool.pluginId
-        ? { ownerPluginSandboxRoot: pathResolve(lvisHome(), "plugins", tool.pluginId) }
+        ? {
+            ownerPluginSandboxRoot: pathResolve(
+              lvisHome(),
+              "plugins",
+              tool.pluginId,
+            ),
+          }
         : {}),
     };
     let foregroundMemorySkipChecked = false;
-    if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
+    if (
+      permissionResult.decision === "ask" &&
+      permissionResult.reviewer?.route === "foreground-auto"
+    ) {
       if (
         rationaleResumeContext === undefined &&
         permissionResult.layer >= 3 &&
@@ -578,7 +660,10 @@ export async function authorizeToolInvocation(
         }
       }
     }
-    if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
+    if (
+      permissionResult.decision === "ask" &&
+      permissionResult.reviewer?.route === "foreground-auto"
+    ) {
       const reviewerResult = await dispatchReviewerForInteractiveAutoImpl(
         services.permissionManager,
         toolUse.name,
@@ -603,23 +688,26 @@ export async function authorizeToolInvocation(
         abortSignal,
       );
       if (abortSignal?.aborted) {
-        return withHostShellExecutionPlan(await returnUserAbort(abortDeps(finalInput)));
+        return withHostShellExecutionPlan(
+          await returnUserAbort(abortDeps(finalInput)),
+        );
       }
       if (reviewerResult) {
         permissionResult = reviewerResult;
       }
     }
     const needsRationaleSecurityContext =
-      rationaleBatchContext !== undefined || rationaleResumeContext !== undefined;
+      rationaleBatchContext !== undefined ||
+      rationaleResumeContext !== undefined;
     const sandboxCapability = needsRationaleSecurityContext
-      ? hostShellExecutionPlan?.capability ??
+      ? (hostShellExecutionPlan?.capability ??
         resolveReviewerSandboxCapability(
           source,
           toolUse.name,
           tool.mcpServerId,
           tool.workerId,
           tool.pluginId,
-        )
+        ))
       : undefined;
     const sandboxExecutionPlan: Record<string, unknown> | undefined =
       sandboxCapability === undefined
@@ -628,9 +716,10 @@ export async function authorizeToolInvocation(
             // v2 adds the exact sealed host-shell plan to the canonical action
             // identity. A stale v1 rationale ticket therefore fails closed on
             // resume instead of authorizing a changed execution substrate.
-            version: hostShellExecutionPlanAudit === undefined
-              ? "rationale-sandbox-execution-plan/v1"
-              : "rationale-sandbox-execution-plan/v2",
+            version:
+              hostShellExecutionPlanAudit === undefined
+                ? "rationale-sandbox-execution-plan/v1"
+                : "rationale-sandbox-execution-plan/v2",
             executionCwd,
             allowedDirectories: [...invocationAllowedScope.directories],
             capability: {
@@ -667,11 +756,15 @@ export async function authorizeToolInvocation(
           source,
           category: invocationCategory,
           ...(tool.pluginId === undefined ? {} : { pluginId: tool.pluginId }),
-          ...(tool.mcpServerId === undefined ? {} : { mcpServerId: tool.mcpServerId }),
+          ...(tool.mcpServerId === undefined
+            ? {}
+            : { mcpServerId: tool.mcpServerId }),
           ...(tool.workerId === undefined ? {} : { workerId: tool.workerId }),
           invocationTrustOrigin: invocationPermissionContext.trustOrigin,
           targetFilePaths,
-          canonicalTargets: canonicalTargets.map((target) => target.canonicalPath),
+          canonicalTargets: canonicalTargets.map(
+            (target) => target.canonicalPath,
+          ),
           allowedDirectories: invocationAllowedScope.directories,
           ...(approvalCacheKey === undefined ? {} : { approvalCacheKey }),
           sandboxCapability,
@@ -706,10 +799,14 @@ export async function authorizeToolInvocation(
           source,
           category: invocationCategory,
           ...(tool.pluginId === undefined ? {} : { pluginId: tool.pluginId }),
-          ...(tool.mcpServerId === undefined ? {} : { mcpServerId: tool.mcpServerId }),
+          ...(tool.mcpServerId === undefined
+            ? {}
+            : { mcpServerId: tool.mcpServerId }),
           ...(tool.workerId === undefined ? {} : { workerId: tool.workerId }),
           invocationTrustOrigin: invocationPermissionContext.trustOrigin,
-          canonicalTargets: canonicalTargets.map((target) => target.canonicalPath),
+          canonicalTargets: canonicalTargets.map(
+            (target) => target.canonicalPath,
+          ),
           allowedDirectories: invocationAllowedScope.directories,
           ...(approvalCacheKey === undefined ? {} : { approvalCacheKey }),
           sandboxCapability,
@@ -734,14 +831,45 @@ export async function authorizeToolInvocation(
       rationaleResumeContext.prepared = prepared.value;
     }
     if (permissionResult.decision === "deny") {
-      const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason: permissionResult.reason });
+      const msg = t("be_executor.permBlockDeny", {
+        name: toolUse.name,
+        source,
+        trust,
+        reason: permissionResult.reason,
+      });
       const durationMs = Date.now() - startTime;
       // Use finalInput (post-PreToolUse hook) so audit/UI never show stale
       // pre-hook args for a hook-modified invocation.
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
-      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+      callbacks?.onToolEnd?.(
+        toolUse.name,
+        msg,
+        true,
+        meta,
+        undefined,
+        durationMs,
+      );
+      await auditCurrentToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        finalInput,
+        msg,
+        true,
+        startTime,
+        permissionResult,
+        Infinity,
+        invocationPermissionContext,
+        invocationCategory,
+        executionCwd,
+      );
+      return withHostShellExecutionPlan({
+        tool_use_id: toolUse.id,
+        content: msg,
+        is_error: true,
+        durationMs,
+      });
     }
     if (permissionResult.decision === "ask") {
       if (invocationPermissionContext.headless === true) {
@@ -754,12 +882,42 @@ export async function authorizeToolInvocation(
             reason: `headless explicit approval unavailable: ${permissionResult.reason}`,
             layer: permissionResult.layer,
           };
-          const msg = t("be_executor.permBlockHeadlessDeny", { name: toolUse.name, source, reason: headlessDeny.reason });
+          const msg = t("be_executor.permBlockHeadlessDeny", {
+            name: toolUse.name,
+            source,
+            reason: headlessDeny.reason,
+          });
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, headlessDeny, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+          callbacks?.onToolEnd?.(
+            toolUse.name,
+            msg,
+            true,
+            meta,
+            undefined,
+            durationMs,
+          );
+          await auditCurrentToolCall(
+            sessionId,
+            toolUse.name,
+            source,
+            trust,
+            finalInput,
+            msg,
+            true,
+            startTime,
+            headlessDeny,
+            Infinity,
+            invocationPermissionContext,
+            invocationCategory,
+            executionCwd,
+          );
+          return withHostShellExecutionPlan({
+            tool_use_id: toolUse.id,
+            content: msg,
+            is_error: true,
+            durationMs,
+          });
         }
         const reviewerResult = await dispatchReviewerForHeadlessImpl(
           services.permissionManager,
@@ -783,7 +941,9 @@ export async function authorizeToolInvocation(
           abortSignal,
         );
         if (abortSignal?.aborted) {
-          return withHostShellExecutionPlan(await returnUserAbort(abortDeps(finalInput)));
+          return withHostShellExecutionPlan(
+            await returnUserAbort(abortDeps(finalInput)),
+          );
         }
         if (reviewerResult.allowed) {
           permissionResult = reviewerResult.permissionResult;
@@ -791,9 +951,35 @@ export async function authorizeToolInvocation(
           const msg = reviewerResult.message;
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, reviewerResult.permissionResult, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+          callbacks?.onToolEnd?.(
+            toolUse.name,
+            msg,
+            true,
+            meta,
+            undefined,
+            durationMs,
+          );
+          await auditCurrentToolCall(
+            sessionId,
+            toolUse.name,
+            source,
+            trust,
+            finalInput,
+            msg,
+            true,
+            startTime,
+            reviewerResult.permissionResult,
+            Infinity,
+            invocationPermissionContext,
+            invocationCategory,
+            executionCwd,
+          );
+          return withHostShellExecutionPlan({
+            tool_use_id: toolUse.id,
+            content: msg,
+            is_error: true,
+            durationMs,
+          });
         }
       }
     }
@@ -880,7 +1066,8 @@ export async function authorizeToolInvocation(
         );
         if (permHook.decision === "deny") {
           return returnRationaleResumeBlock(
-            "permission-request hook denied the sealed action: " + permHook.reason,
+            "permission-request hook denied the sealed action: " +
+              permHook.reason,
             finalInput,
             { ...permissionResult, decision: "deny", reason: permHook.reason },
             hookChainFromDispatch("perm", permHook),
@@ -960,7 +1147,9 @@ export async function authorizeToolInvocation(
           source: source as "builtin" | "plugin" | "mcp",
           createdAt: Date.now(),
           ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
-          isReadOnly: approvalReasonPrefix ? false : invocationCategory === "read",
+          isReadOnly: approvalReasonPrefix
+            ? false
+            : invocationCategory === "read",
           mode: currentApprovalMode(services.permissionManager),
           sensitivePathPattern,
           trustOrigin: invocationPermissionContext.trustOrigin,
@@ -999,12 +1188,43 @@ export async function authorizeToolInvocation(
           tool.pluginGeneration !== undefined,
         );
         if (permHook.decision === "deny") {
-          const msg = t("be_executor.hookPermissionBlock", { reason: permHook.reason });
+          const msg = t("be_executor.hookPermissionBlock", {
+            reason: permHook.reason,
+          });
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", permHook));
-          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+          callbacks?.onToolEnd?.(
+            toolUse.name,
+            msg,
+            true,
+            meta,
+            undefined,
+            durationMs,
+          );
+          await auditCurrentToolCall(
+            sessionId,
+            toolUse.name,
+            source,
+            trust,
+            finalInput,
+            msg,
+            true,
+            startTime,
+            { ...permissionResult, decision: "deny", reason: permHook.reason },
+            Infinity,
+            invocationPermissionContext,
+            invocationCategory,
+            executionCwd,
+            undefined,
+            undefined,
+            hookChainFromDispatch("perm", permHook),
+          );
+          return withHostShellExecutionPlan({
+            tool_use_id: toolUse.id,
+            content: msg,
+            is_error: true,
+            durationMs,
+          });
         }
 
         // §F3: requestAndWait 실패 시 감사 로그 보장 후 deny-once 처리
@@ -1021,50 +1241,115 @@ export async function authorizeToolInvocation(
             targetFilePath,
           );
           if (abortSignal?.aborted) {
-            return withHostShellExecutionPlan(await returnUserAbort(abortDeps(finalInput)));
+            return withHostShellExecutionPlan(
+              await returnUserAbort(abortDeps(finalInput)),
+            );
           }
-          decision = await services.approvalGate.requestAndWait(approvalRequest);
+          decision =
+            await services.approvalGate.requestAndWait(approvalRequest);
           if (hostShellExecutionPermitBinding !== undefined) {
             hostShellApprovalDecision = decision;
           }
         } catch (approvalErr) {
-          const msg = t("be_executor.approvalGateError", { name: toolUse.name, error: approvalErr instanceof Error ? approvalErr.message : String(approvalErr) });
+          const msg = t("be_executor.approvalGateError", {
+            name: toolUse.name,
+            error:
+              approvalErr instanceof Error
+                ? approvalErr.message
+                : String(approvalErr),
+          });
           const durationMs = Date.now() - startTime;
           // finalInput keeps audit/UI consistent with the args shown to the
           // approval gate (which already uses finalInput in approvalRequest).
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
-            ...permissionResult,
-            decision: "deny",
-            reason: `approval gate error: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`,
-          }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+          callbacks?.onToolEnd?.(
+            toolUse.name,
+            msg,
+            true,
+            meta,
+            undefined,
+            durationMs,
+          );
+          await auditCurrentToolCall(
+            sessionId,
+            toolUse.name,
+            source,
+            trust,
+            finalInput,
+            msg,
+            true,
+            startTime,
+            {
+              ...permissionResult,
+              decision: "deny",
+              reason: `approval gate error: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`,
+            },
+            Infinity,
+            invocationPermissionContext,
+            invocationCategory,
+            executionCwd,
+          );
+          return withHostShellExecutionPlan({
+            tool_use_id: toolUse.id,
+            content: msg,
+            is_error: true,
+            durationMs,
+          });
         }
 
         if (decision.choice.startsWith("deny")) {
           // deny-always: 영구 거부 규칙 추가
           if (decision.choice === "deny-always" && services.permissionManager) {
-            const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
+            const pattern =
+              approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
             await services.permissionManager.addAlwaysDeniedPersist(pattern);
           }
-          const msg = t("be_executor.approvalDeniedByUser", { name: toolUse.name });
+          const msg = t("be_executor.approvalDeniedByUser", {
+            name: toolUse.name,
+          });
           const durationMs = Date.now() - startTime;
           // finalInput matches the args the user actually saw + denied via
           // approvalRequest — never log stale pre-hook input here.
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
-            ...permissionResult,
-            decision: "deny",
-            reason: "user denied approval request",
-          }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-          return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+          callbacks?.onToolEnd?.(
+            toolUse.name,
+            msg,
+            true,
+            meta,
+            undefined,
+            durationMs,
+          );
+          await auditCurrentToolCall(
+            sessionId,
+            toolUse.name,
+            source,
+            trust,
+            finalInput,
+            msg,
+            true,
+            startTime,
+            {
+              ...permissionResult,
+              decision: "deny",
+              reason: "user denied approval request",
+            },
+            Infinity,
+            invocationPermissionContext,
+            invocationCategory,
+            executionCwd,
+          );
+          return withHostShellExecutionPlan({
+            tool_use_id: toolUse.id,
+            content: msg,
+            is_error: true,
+            durationMs,
+          });
         }
 
         // allow-always: 영구 허용 규칙 추가
         if (decision.choice === "allow-always" && services.permissionManager) {
-          const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
+          const pattern =
+            approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
           // P2 — stamp the grant tier from the final resolved category so an
           // "Allow always" on a read tool grants read-tier (still asks on a
           // later write of the same pattern) while a write/shell/network/meta
@@ -1083,19 +1368,49 @@ export async function authorizeToolInvocation(
         // allow-once / allow-always: 실행 계속
       } else {
         // §F4: approvalGate 미연결 시 fail-closed — 모든 ask 결정을 차단
-        const msg = t("be_executor.approvalGateMissing", { name: toolUse.name, source, reason: permissionResult.reason });
+        const msg = t("be_executor.approvalGateMissing", {
+          name: toolUse.name,
+          source,
+          reason: permissionResult.reason,
+        });
         const durationMs = Date.now() - startTime;
         log.error(msg);
         // finalInput so audit reflects post-hook args even when the gate is
         // unavailable.
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
-        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, {
-          ...permissionResult,
-          decision: "deny",
-          reason: `approval gate missing: ${permissionResult.reason}`,
-        }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+        callbacks?.onToolEnd?.(
+          toolUse.name,
+          msg,
+          true,
+          meta,
+          undefined,
+          durationMs,
+        );
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          source,
+          trust,
+          finalInput,
+          msg,
+          true,
+          startTime,
+          {
+            ...permissionResult,
+            decision: "deny",
+            reason: `approval gate missing: ${permissionResult.reason}`,
+          },
+          Infinity,
+          invocationPermissionContext,
+          invocationCategory,
+          executionCwd,
+        );
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: msg,
+          is_error: true,
+          durationMs,
+        });
       }
     }
   }
@@ -1107,7 +1422,6 @@ export async function authorizeToolInvocation(
       permissionResult,
     );
   }
-
 
   return {
     outcome: "authorized",

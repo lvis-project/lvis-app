@@ -23,7 +23,7 @@ import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { AuditService } from "../main/audit-service.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
-import type { KeywordEngine } from "../core/keyword-engine.js";
+import type { InputClassifier } from "../core/input-classifier.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
@@ -47,7 +47,8 @@ import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
 import type { SubAgentRunner } from "../engine/subagent-runner.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
-import type { MarketplaceFetcher, PluginMarketplaceService } from "../plugins/marketplace.js";
+import type { MarketplaceFetcher, PluginMarketplaceService,
+} from "../plugins/marketplace.js";
 import type { PluginArtifactStore } from "../plugins/plugin-artifact-store.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { McpAppModelContextStore } from "../mcp/mcp-app-model-context.js";
@@ -104,7 +105,7 @@ export class BootContext {
   declare a2aRemoteRuntime: A2ARemoteRuntime | undefined;
   declare remoteA2AActionController: RemoteA2AActionController | undefined;
   declare memoryManager: MemoryManager;
-  declare keywordEngine: KeywordEngine;
+  declare inputClassifier: InputClassifier;
   declare toolRegistry: ToolRegistry;
   declare routeEngine: RouteEngine;
 
@@ -179,7 +180,8 @@ export class BootContext {
     grantId: string;
     expiresAt: number;
   }>;
-  declare revokePluginOperationGeneration: (pluginId: string, generationId: string) => void;
+  declare revokePluginOperationGeneration: (pluginId: string, generationId: string,
+  ) => void;
   declare revokePluginOperationSession: (appSessionId: string) => void;
 
   // ── Conversation / agent loop ──────────────────────────────────────────────
@@ -240,7 +242,7 @@ const BOOT_CONTEXT_FIELDS = [
   "a2aRemoteRuntime",
   "remoteA2AActionController",
   "memoryManager",
-  "keywordEngine",
+  "inputClassifier",
   "toolRegistry",
   "routeEngine",
   "bootAuditLogger",
@@ -311,20 +313,24 @@ const BOOT_CONTEXT_FIELDS = [
   "autoUpdaterStop",
 ] as const satisfies readonly (keyof BootContext)[];
 
-type MissingBootContextField = Exclude<keyof BootContext, typeof BOOT_CONTEXT_FIELDS[number]>;
+type MissingBootContextField = Exclude<keyof BootContext,
+  (typeof BOOT_CONTEXT_FIELDS)[number]>;
 const bootContextFieldListIsExhaustive: MissingBootContextField extends never ? true : never = true;
 void bootContextFieldListIsExhaustive;
 
 declare const READY_BOOT_CONTEXT: unique symbol;
-export type ReadyBootContext = BootContext & { readonly [READY_BOOT_CONTEXT]: true };
+export type ReadyBootContext = BootContext & { readonly [READY_BOOT_CONTEXT]: true;
+};
 
 /**
  * Convert the mutable boot accumulator into the only context assembly accepts.
  * Own-property checks distinguish a step that explicitly produced `undefined`
  * (valid for optional services) from a step that never produced its field.
  */
-export function assertBootContextReady(ctx: BootContext): asserts ctx is ReadyBootContext {
-  const missing = BOOT_CONTEXT_FIELDS.filter((field) => !Object.hasOwn(ctx, field));
+export function assertBootContextReady(ctx: BootContext,
+): asserts ctx is ReadyBootContext {
+  const missing = BOOT_CONTEXT_FIELDS.filter((field) => !Object.hasOwn(ctx, field),
+  );
   if (missing.length > 0) {
     throw new Error(`boot-context-incomplete: missing ${missing.join(", ")}`);
   }

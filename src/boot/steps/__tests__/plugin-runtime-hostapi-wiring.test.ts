@@ -19,7 +19,8 @@ import { mkdtempSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 const runtimeTestState = vi.hoisted(() => ({
-  browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void } }>,
+  browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void };
+  }>,
   capturedRuntimeOptions: null as Record<string, unknown> | null,
   readPluginRegistry: vi.fn(async () => ({ version: 1, plugins: [] })),
   spawnWorker: vi.fn(),
@@ -27,8 +28,10 @@ const runtimeTestState = vi.hoisted(() => ({
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
     listPluginIds: vi.fn(() => [] as string[]),
-    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
-    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
+    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>,
+    ),
+    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`,
+    ),
     getPluginManifest: vi.fn(() => null),
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     isPluginEnabled: vi.fn(() => true),
@@ -59,7 +62,10 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("../../../plugins/runtime.js", () => ({
-  PluginRuntime: vi.fn().mockImplementation(function (this: unknown, options: Record<string, unknown>) {
+  PluginRuntime: vi.fn().mockImplementation(function (
+    this: unknown,
+    options: Record<string, unknown>,
+  ) {
     runtimeTestState.capturedRuntimeOptions = options;
     return runtimeTestState.runtime;
   }),
@@ -101,7 +107,10 @@ type ConfigHostApi = {
   emitEvent: (type: string, data?: unknown) => void;
   onEvent: (type: string, handler: (data: unknown) => void) => () => void;
   getSecret: (key: string) => string | undefined | null;
-  resolveApiKey: (opts: { purpose: "llm"; vendor?: "openai" }) => Promise<
+  resolveApiKey: (opts: {
+    purpose: "llm";
+    vendor?: "openai";
+  }) => Promise<
     | { ok: false; reason: string }
     | { ok: true; vendor: string; bearer: () => string; release: () => void }
   >;
@@ -111,7 +120,12 @@ type ConfigHostApi = {
     stop: () => void;
     onStdout: (listener: (chunk: string) => void) => void;
     onStderr: (listener: (chunk: string) => void) => void;
-    onExit: (listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void) => void;
+    onExit: (
+      listener: (info: {
+        code: number | null;
+        signal: NodeJS.Signals | null;
+      }) => void,
+    ) => void;
   }>;
 };
 
@@ -120,7 +134,12 @@ type CreateHostApi = (
   manifest: {
     id: string;
     config?: Record<string, unknown>;
-    configSchema?: { properties?: Record<string, { type?: string; format?: string; default?: unknown }> };
+    configSchema?: {
+      properties?: Record<
+        string,
+        { type?: string; format?: string; default?: unknown }
+      >;
+    };
     capabilities?: string[];
     emittedEvents?: string[];
     hostSecrets?: { read?: string[] };
@@ -139,13 +158,14 @@ type CreateHostApi = (
   },
 ) => ConfigHostApi;
 
-async function initAndGetFactory(settingsService: unknown): Promise<CreateHostApi> {
+async function initAndGetFactory(
+  settingsService: unknown,
+): Promise<CreateHostApi> {
   runtimeTestState.capturedRuntimeOptions = null;
   await initPluginRuntime({
     projectRoot: "/tmp/lvis-test/project",
     settingsService: settingsService as never,
     memoryManager: {} as never,
-    keywordEngine: { registerKeywords: vi.fn(), unregisterByPlugin: vi.fn() } as never,
     toolRegistry: {
       unregisterByPlugin: vi.fn(),
       register: vi.fn(),
@@ -165,7 +185,11 @@ async function initAndGetFactory(settingsService: unknown): Promise<CreateHostAp
     approvalGate: { requestAndWait: vi.fn() } as never,
     routinesStore: { list: () => [] } as never,
   });
-  const createHostApi = (runtimeTestState.capturedRuntimeOptions as { createHostApi?: CreateHostApi } | null)?.createHostApi;
+  const createHostApi = (
+    runtimeTestState.capturedRuntimeOptions as {
+      createHostApi?: CreateHostApi;
+    } | null
+  )?.createHostApi;
   expect(createHostApi).toBeDefined();
   return createHostApi!;
 }
@@ -179,9 +203,11 @@ function makeSettingsService(store: Map<string, Record<string, unknown>>) {
     }),
     getSecret: vi.fn(() => undefined),
     getPluginConfig: vi.fn((pluginId: string) => store.get(pluginId) ?? {}),
-    setPluginConfig: vi.fn(async (pluginId: string, record: Record<string, unknown>) => {
-      store.set(pluginId, record);
-    }),
+    setPluginConfig: vi.fn(
+      async (pluginId: string, record: Record<string, unknown>) => {
+        store.set(pluginId, record);
+      },
+    ),
   };
 }
 
@@ -196,7 +222,10 @@ function activeIncarnation() {
 
 beforeEach(() => {
   runtimeTestState.readPluginRegistry.mockReset();
-  runtimeTestState.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
+  runtimeTestState.readPluginRegistry.mockResolvedValue({
+    version: 1,
+    plugins: [],
+  });
   runtimeTestState.runtime.setConfigOverride.mockClear();
   runtimeTestState.runtime.restartPlugin.mockClear();
   runtimeTestState.runtime.getWildcardConfigOverride.mockReturnValue({});
@@ -231,7 +260,10 @@ describe("HostApi.config.get merged-read precedence", () => {
     const store = new Map<string, Record<string, unknown>>([
       ["plugin-a", { p: "cfg", shared: "cfg" }],
     ]);
-    runtimeTestState.runtime.getWildcardConfigOverride.mockReturnValue({ w: "wild", shared: "wild" });
+    runtimeTestState.runtime.getWildcardConfigOverride.mockReturnValue({
+      w: "wild",
+      shared: "wild",
+    });
     const createHostApi = await initAndGetFactory(makeSettingsService(store));
     const api = createHostApi(
       "plugin-a",
@@ -283,14 +315,16 @@ describe("HostApi.config.get merged-read precedence", () => {
 
 describe("HostApi.config.set round-trip", () => {
   beforeEach(() => {
-    runtimeTestState.runtime.getPluginManifest.mockImplementation((pluginId: string) => (
-      pluginId === "plugin-a" ? activeManifest : null
-    ));
+    runtimeTestState.runtime.getPluginManifest.mockImplementation(
+      (pluginId: string) => (pluginId === "plugin-a" ? activeManifest : null),
+    );
   });
 
   let activeManifest: Parameters<CreateHostApi>[1];
 
-  async function createActiveApi(settings: ReturnType<typeof makeSettingsService>) {
+  async function createActiveApi(
+    settings: ReturnType<typeof makeSettingsService>,
+  ) {
     const createHostApi = await initAndGetFactory(settings);
     activeManifest = { id: "plugin-a", config: {} };
     return createHostApi(
@@ -301,7 +335,8 @@ describe("HostApi.config.set round-trip", () => {
         registerDisposer: vi.fn(),
         trackOperation: <T>(operation: Promise<T>) => operation,
         isActive: () =>
-          runtimeTestState.runtime.getPluginManifest("plugin-a") === activeManifest,
+          runtimeTestState.runtime.getPluginManifest("plugin-a") ===
+          activeManifest,
         isLifecycleHookActive: () => false,
       },
       "plugin-a",
@@ -315,8 +350,13 @@ describe("HostApi.config.set round-trip", () => {
 
     await api.config.set("k", "v");
 
-    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { k: "v" });
-    expect(runtimeTestState.runtime.setConfigOverride).toHaveBeenCalledWith("plugin-a", { k: "v" });
+    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", {
+      k: "v",
+    });
+    expect(runtimeTestState.runtime.setConfigOverride).toHaveBeenCalledWith(
+      "plugin-a",
+      { k: "v" },
+    );
     expect(runtimeTestState.runtime.restartPlugin).toHaveBeenCalledWith(
       "plugin-a",
       { skipPreparation: true },
@@ -331,7 +371,9 @@ describe("HostApi.config.set round-trip", () => {
     activeManifest = {
       id: "plugin-a",
       config: {},
-      configSchema: { properties: { secretKey: { type: "string", format: "secret" } } },
+      configSchema: {
+        properties: { secretKey: { type: "string", format: "secret" } },
+      },
     };
     const api = createHostApi(
       "plugin-a",
@@ -341,7 +383,9 @@ describe("HostApi.config.set round-trip", () => {
       "plugin-a",
     );
 
-    await expect(api.config.set("secretKey", "leak")).rejects.toThrow(/secret fields must be saved via hostApi\.setSecret/);
+    await expect(api.config.set("secretKey", "leak")).rejects.toThrow(
+      /secret fields must be saved via hostApi\.setSecret/,
+    );
     expect(settings.setPluginConfig).not.toHaveBeenCalled();
   });
 
@@ -351,8 +395,12 @@ describe("HostApi.config.set round-trip", () => {
     const api = await createActiveApi(settings);
     let release!: () => void;
     let entered!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const lockEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lockEntered = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     const uninstall = withPluginInstallLock("plugin-a", async () => {
       entered();
       await gate;
@@ -364,7 +412,9 @@ describe("HostApi.config.set round-trip", () => {
     expect(settings.setPluginConfig).not.toHaveBeenCalled();
 
     runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
-    expect(() => api.config.get("k")).toThrow(/plugin instance is no longer active/);
+    expect(() => api.config.get("k")).toThrow(
+      /plugin instance is no longer active/,
+    );
     release();
     await uninstall;
     await expect(write).rejects.toThrow(/plugin instance is no longer active/);
@@ -392,7 +442,9 @@ describe("HostApi.config.set round-trip", () => {
     );
 
     await expect(api.config.set("duringStart", true)).resolves.toBeUndefined();
-    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { duringStart: true });
+    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", {
+      duringStart: true,
+    });
     expect(trackOperation).toHaveBeenCalledTimes(1);
     expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
   });
@@ -401,14 +453,15 @@ describe("HostApi.config.set round-trip", () => {
     const settings = makeSettingsService(new Map());
     const api = await createActiveApi(settings);
 
-    await expect(withPluginInstallLock("plugin-a", async () => {
-      await api.config.set("duringStop", true);
-    })).resolves.toBeUndefined();
+    await expect(
+      withPluginInstallLock("plugin-a", async () => {
+        await api.config.set("duringStop", true);
+      }),
+    ).resolves.toBeUndefined();
 
-    expect(settings.setPluginConfig).toHaveBeenCalledWith(
-      "plugin-a",
-      { duringStop: true },
-    );
+    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", {
+      duringStop: true,
+    });
     expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
   });
 
@@ -435,8 +488,12 @@ describe("HostApi.config.set round-trip", () => {
     const api = await createActiveApi(settings);
     runtimeTestState.runtime.restartPlugin.mockResolvedValueOnce("failed");
 
-    await expect(api.config.set("k", "v")).rejects.toThrow(/runtime reload returned failed/);
-    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", { k: "v" });
+    await expect(api.config.set("k", "v")).rejects.toThrow(
+      /runtime reload returned failed/,
+    );
+    expect(settings.setPluginConfig).toHaveBeenCalledWith("plugin-a", {
+      k: "v",
+    });
   });
 });
 
@@ -515,7 +572,9 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
   });
 
   it("delivers an emitted event to a same-plugin subscriber with the pluginId injected, and unsubscribe stops delivery", async () => {
-    const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
+    const createHostApi = await initAndGetFactory(
+      makeSettingsService(new Map()),
+    );
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {}, capabilities: [] },
@@ -538,9 +597,11 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
 
   it("releases returned API-key and worker capabilities when the incarnation is disposed", async () => {
     const settings = makeSettingsService(new Map());
-    settings.getSecret.mockImplementation((key: string) => (
-      key === "plugin.plugin-a.llm.apiKey.openai" ? "sk-incarnation" : undefined
-    ));
+    settings.getSecret.mockImplementation((key: string) =>
+      key === "plugin.plugin-a.llm.apiKey.openai"
+        ? "sk-incarnation"
+        : undefined,
+    );
     const workerStop = vi.fn();
     const workerOnStdout = vi.fn();
     const workerOnStderr = vi.fn();
@@ -573,7 +634,10 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     expect(key.ok).toBe(true);
     if (!key.ok) throw new Error("expected API key capability");
     expect(key.bearer()).toBe("sk-incarnation");
-    const worker = await api.spawnWorker({ workerId: "worker-a", command: "node" });
+    const worker = await api.spawnWorker({
+      workerId: "worker-a",
+      command: "node",
+    });
     const stdoutListener = vi.fn();
     const stderrListener = vi.fn();
     const exitListener = vi.fn();
@@ -595,7 +659,9 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     for (const dispose of disposers) dispose();
 
     expect(() => key.bearer()).toThrow(/plugin instance is no longer active/);
-    expect(() => worker.onStdout(vi.fn())).toThrow(/plugin instance is no longer active/);
+    expect(() => worker.onStdout(vi.fn())).toThrow(
+      /plugin instance is no longer active/,
+    );
     workerOnStdout.mock.calls[0]?.[0]("after");
     workerOnStderr.mock.calls[0]?.[0]("after-error");
     workerOnExit.mock.calls[0]?.[0]({ code: null, signal: "SIGTERM" });
@@ -608,7 +674,9 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
   });
 
   it("revokes every callable HostApi surface when its incarnation is deactivated", async () => {
-    const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
+    const createHostApi = await initAndGetFactory(
+      makeSettingsService(new Map()),
+    );
     let active = true;
     const api = createHostApi(
       "plugin-a",
@@ -625,9 +693,17 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     expect(api.config.get("before")).toBeUndefined();
 
     active = false;
-    expect(() => api.config.get("after")).toThrow(/plugin instance is no longer active/);
-    expect(() => api.getSecret("token")).toThrow(/plugin instance is no longer active/);
-    expect(() => api.emitEvent("plugin-a.updated", {})).toThrow(/plugin instance is no longer active/);
-    expect(() => api.onEvent("plugin-a.updated", vi.fn())).toThrow(/plugin instance is no longer active/);
+    expect(() => api.config.get("after")).toThrow(
+      /plugin instance is no longer active/,
+    );
+    expect(() => api.getSecret("token")).toThrow(
+      /plugin instance is no longer active/,
+    );
+    expect(() => api.emitEvent("plugin-a.updated", {})).toThrow(
+      /plugin instance is no longer active/,
+    );
+    expect(() => api.onEvent("plugin-a.updated", vi.fn())).toThrow(
+      /plugin instance is no longer active/,
+    );
   });
 });

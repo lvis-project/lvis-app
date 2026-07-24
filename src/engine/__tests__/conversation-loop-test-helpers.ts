@@ -6,7 +6,8 @@ import type { GenericMessage } from "../llm/types.js";
 export function makeConversationLoopSettings(
   autoCompact = true,
   model = "claude-sonnet-4-5",
-  provider: "openai" | "claude" | "gemini" | "copilot" | "azure-foundry" | "vertex-ai" = "claude",
+  provider:
+    | "openai" | "claude" | "gemini" | "copilot" | "azure-foundry" | "vertex-ai" = "claude",
 ): ConversationLoopDeps["settingsService"] {
   return {
     get: (key: string) => {
@@ -35,7 +36,8 @@ export function makeConversationLoopMemoryManager(
       sessions[id] = msgs;
     }),
     saveSessionMetadata: vi.fn(),
-    appendCheckpoint: vi.fn((_meta: unknown, cp: unknown) => ({ checkpoints: [cp] })),
+    appendCheckpoint: vi.fn((_meta: unknown, cp: unknown) => ({ checkpoints: [cp],
+    })),
     saveCheckpointSnapshot: vi.fn(),
     listMemoryEntries: () => [],
     saveMemory: vi.fn(),
@@ -70,11 +72,9 @@ export function makeConversationLoopDeps(
       setActiveSessionId: vi.fn(),
       setActiveRolePrompt: vi.fn(),
     } as unknown as ConversationLoopDeps["systemPromptBuilder"],
-    keywordEngine: {
+    inputClassifier: {
       classify: vi.fn().mockReturnValue({ type: "chat" }),
-      matchAllPluginIds: () => new Set<string>(),
-      matchToolNames: () => new Set<string>(),
-    } as unknown as ConversationLoopDeps["keywordEngine"],
+    } as unknown as ConversationLoopDeps["inputClassifier"],
     routeEngine: {
       route: vi.fn().mockReturnValue({ route: "llm" }),
     } as unknown as ConversationLoopDeps["routeEngine"],

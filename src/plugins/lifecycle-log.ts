@@ -58,11 +58,10 @@ export const PluginPhase = {
   LOAD_OK: "lifecycle:load:ok",
   LOAD_FAIL: "lifecycle:load:fail",
 
-  // register — tool/keyword/event registration
+  // register — tool/event registration
   REGISTER_TOOL_OK: "lifecycle:register:tool:ok",
   REGISTER_TOOL_SKIP: "lifecycle:register:tool:skip",
   REGISTER_TOOL_FAIL: "lifecycle:register:tool:fail",
-  REGISTER_KEYWORDS_OK: "lifecycle:register:keywords:ok",
 
   // start — instance.start()
   START_OK: "lifecycle:start:ok",

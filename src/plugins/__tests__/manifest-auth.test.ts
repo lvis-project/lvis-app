@@ -3,10 +3,10 @@
  *
  * Verifies the contract documented in architecture.md §9.4a "Plugin-Owned
  * OAuth — Host UI Surface": when a manifest declares `auth`, the three
- * referenced tool names must all live in `uiActions[]` so the same gate
- * runs at load time.
+ * referenced Tool objects must be app-only so the same gate runs at load time.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi,
+} from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +16,7 @@ import * as AjvModule from "ajv";
 import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import { parsePluginJson } from "../runtime/manifest-validation.js";
+import { pureTool } from "./test-helpers.js";
 
 // `buildManifestValidator(hereFileUrl)` resolves `schemas/plugin.schema.json`
 // using path arithmetic anchored at `dirname(hereFileUrl)`. That math
@@ -60,7 +61,8 @@ beforeAll(() => {
     );
   }
   const AddAny = AddFormatsModule as unknown as { default?: unknown };
-  const addFormatsFn = (AddAny.default ?? AddFormatsModule) as (a: unknown) => void;
+  const addFormatsFn = (AddAny.default ?? AddFormatsModule) as (a: unknown,
+  ) => void;
   if (typeof addFormatsFn !== "function") {
     throw new Error(
       "[manifest-auth.test] addFormats default cast did not yield a callable",
@@ -91,43 +93,23 @@ describe("manifest validation — auth cross-field", () => {
       description: "auth fixture",
       publisher: "tests",
       entry: "dist/hostPlugin.js",
-      // Pure v6: auth tools are app-only Tool objects (visibility ["app"]),
-      // never model-visible. Tests express the surface as legacy tools[]/uiActions
-      // name lists; this helper compiles them into the pure Tool[] the host reads.
-      // The leak-rejection test puts an auth name in tools[] → model-visible → the
-      // auth-visibility check rejects it.
-      tools: [],
-      uiActions: { test_status: {}, test_login: {}, test_signout: {} },
+      tools: [
+        pureTool("test_status", ["app"]),
+        pureTool("test_login", ["app"]),
+        pureTool("test_signout", ["app"]),
+      ],
       ...extra,
     };
-    const names: string[] = Array.isArray(merged.tools)
-      ? (merged.tools as unknown[]).filter((t): t is string => typeof t === "string")
+    merged.tools = Array.isArray(merged.tools)
+      ? merged.tools.map((tool) => typeof tool === "string" ? pureTool(tool, ["model"])
+      : tool,
+        )
       : [];
-    const uiNames =
-      merged.uiActions && typeof merged.uiActions === "object"
-        ? Object.keys(merged.uiActions as Record<string, unknown>)
-        : [];
-    const all = [...names, ...uiNames.filter((n) => !names.includes(n))];
-    const tools = all.map((name) => ({
-      name,
-      description: `${name} tool`,
-      inputSchema: { type: "object", properties: {} },
-      _meta: {
-        ui: {
-          visibility: [
-            ...(names.includes(name) ? ["model"] : []),
-            ...(uiNames.includes(name) ? ["app"] : []),
-          ],
-        },
-      },
-    }));
-    delete merged.uiActions;
-    merged.tools = tools;
     await mkdir(testDir, { recursive: true });
     await writeFile(manifestPath, JSON.stringify(merged, null, 2), "utf-8");
   }
 
-  it("accepts manifest with auth tools all in uiActions", async () => {
+  it("accepts a manifest whose auth Tools are app-only", async () => {
     await writeManifest({
       auth: {
         label: "Test Account",
@@ -157,7 +139,10 @@ describe("manifest validation — auth cross-field", () => {
 
   it("#885 v6 — rejects auth.statusTool that resolves to no declared tool", async () => {
     await writeManifest({
-      uiActions: { test_login: {}, test_signout: {} }, // statusTool missing
+      tools: [
+        pureTool("test_login", ["app"]),
+        pureTool("test_signout", ["app"]),
+      ],
       auth: {
         statusTool: "test_status",
         loginTool: "test_login",
@@ -165,7 +150,6 @@ describe("manifest validation — auth cross-field", () => {
       },
     });
     const validator = TEST_VALIDATOR;
-    // Not in tools[] nor uiActions → after normalize the ref names no tool.
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /auth\.statusTool.*not declared in tools\[\]/,
     );
@@ -173,7 +157,10 @@ describe("manifest validation — auth cross-field", () => {
 
   it("#885 v6 — rejects auth.loginTool that resolves to no declared tool", async () => {
     await writeManifest({
-      uiActions: { test_status: {}, test_signout: {} }, // loginTool missing
+      tools: [
+        pureTool("test_status", ["app"]),
+        pureTool("test_signout", ["app"]),
+      ],
       auth: {
         statusTool: "test_status",
         loginTool: "test_login",
@@ -188,7 +175,10 @@ describe("manifest validation — auth cross-field", () => {
 
   it("#885 v6 — rejects auth.logoutTool that resolves to no declared tool when declared", async () => {
     await writeManifest({
-      uiActions: { test_status: {}, test_login: {} }, // logoutTool missing
+      tools: [
+        pureTool("test_status", ["app"]),
+        pureTool("test_login", ["app"]),
+      ],
       auth: {
         statusTool: "test_status",
         loginTool: "test_login",
@@ -291,7 +281,8 @@ describe("manifest validation — auth cross-field", () => {
       const validator = TEST_VALIDATOR;
       await parsePluginJson(manifestPath, validator);
       const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
-      expect(warnMessages.some((m) => m.includes("emittedEvents[] is missing"))).toBe(false);
+      expect(warnMessages.some((m) => m.includes("emittedEvents[] is missing")),
+      ).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }
@@ -313,22 +304,14 @@ describe("manifest validation — auth cross-field", () => {
     }
   });
 
-  // Defense-in-depth — security review MED #1.
-  // The cross-field validator only enforces `auth.{statusTool,loginTool,
-  // logoutTool} ⊂ uiActions[]`, which means a manifest could route an
-  // arbitrary uiActions name (including a destructive one) through the
-  // host-rendered "로그인" button. Today the broader `uiActions` allow-
-  // list itself does not block destructive verbs (per §2.2 — naming is
-  // plugin-author responsibility, host has no name-based gate). These
-  // tests pin the *current* posture so any future tightening of the
-  // host's destructive-name rule is also surfaced through the auth slot.
+  // Tool names do not grant authority. The auth slot is constrained by
+  // app-only visibility and the normal Host permission path.
   it("does not currently reject destructive-looking tool names in auth (host posture is plugin-author responsibility per §2.2)", async () => {
     await writeManifest({
-      // Auth tools stay in uiActions[] only (migrated shape); the point of this
-      // test is that a destructive-looking NAME is not name-gated by the host,
-      // not the tools[] placement rule.
-      tools: [],
-      uiActions: { test_status: {}, test_email_delete: {} },
+      tools: [
+        pureTool("test_status", ["app"]),
+        pureTool("test_email_delete", ["app"]),
+      ],
       auth: {
         statusTool: "test_status",
         loginTool: "test_email_delete",
@@ -340,16 +323,14 @@ describe("manifest validation — auth cross-field", () => {
   });
 
   // architecture.md §9.4a: auth is a host-managed lifecycle, not an LLM
-  // capability. Auth tools (statusTool/loginTool/logoutTool) must live in
-  // uiActions[] ONLY — never in tools[], which is the LLM-facing surface
-  // (projected verbatim to the model). Hard fail: both shipped auth plugins are
-  // migrated, so rejecting at load is the sole guard against a regression
-  // silently re-exposing auth as an LLM tool (there is no CI gate for it).
-  it("REJECTS when an auth tool appears in tools[] (auth must be host-managed, not LLM-callable)", async () => {
-    // Override the (migrated) base fixture to re-introduce the leak: an auth
-    // tool listed in tools[].
+  // capability. Auth Tools must be app-only and never model-visible.
+  it("rejects a model-visible auth Tool", async () => {
     await writeManifest({
-      tools: ["test_login"],
+      tools: [
+        pureTool("test_status", ["app"]),
+        pureTool("test_login", ["model", "app"]),
+        pureTool("test_signout", ["app"]),
+      ],
       emittedEvents: ["test-plugin.auth.changed"],
       auth: {
         statusTool: "test_status",
@@ -363,13 +344,16 @@ describe("manifest validation — auth cross-field", () => {
     );
   });
 
-  it("does NOT warn when auth tools are only in uiActions[] (migrated state)", async () => {
+  it("does not warn when auth Tools are app-only", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await writeManifest({
-        // tools[] holds only non-auth tools; auth tools live in uiActions[].
-        tools: ["test_other"],
-        uiActions: { test_status: {}, test_login: {}, test_signout: {} },
+        tools: [
+          pureTool("test_other", ["model"]),
+          pureTool("test_status", ["app"]),
+          pureTool("test_login", ["app"]),
+          pureTool("test_signout", ["app"]),
+        ],
         emittedEvents: ["test-plugin.auth.changed"],
         auth: {
           statusTool: "test_status",
@@ -380,7 +364,8 @@ describe("manifest validation — auth cross-field", () => {
       const validator = TEST_VALIDATOR;
       await parsePluginJson(manifestPath, validator);
       const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
-      expect(warnMessages.some((m) => m.includes("must not be LLM-callable"))).toBe(false);
+      expect(warnMessages.some((m) => m.includes("must not be LLM-callable")),
+      ).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }

@@ -9,10 +9,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams,
+} from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -57,20 +58,27 @@ function makeLoop(
         source,
         category: "read",
         ...(source === "mcp" ? { mcpServerId: "test-server" } : {}),
-        jsonSchema: { type: "object", properties: { q: { type: "string" } }, required: [] },
+        jsonSchema: {
+          type: "object",
+          properties: { q: { type: "string" } },
+          required: [],
+        },
         isReadOnly: () => true,
         execute: async () => ({ output: "ok", isError: false }),
       }),
     );
   }
-  const loop = new ConversationLoop(({
-    settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+  const loop = new ConversationLoop({
+    settingsService: {
+      get: () => fakeLlmSettings(),
+      getSecret: () => "test-key",
+    },
     systemPromptBuilder: { build: () => "system" },
-    keywordEngine: new KeywordEngine(),
-    routeEngine: new RouteEngine({ toolRegistry }),
+    inputClassifier: new InputClassifier(),
+    routeEngine: new RouteEngine(),
     toolRegistry,
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as unknown as { provider: LLMProvider | null }).provider = provider;
   return loop;
 }
@@ -86,14 +94,18 @@ describe("ConversationLoop — provider-as-oracle tool-schema guard (#1182)", ()
     ]);
     const loop = makeLoop(provider);
 
-    const result = await loop.runTurn("go", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("go", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     expect(result.text).toContain("done");
     expect(result.stopReason).toBe("end_turn");
     // Two provider calls: the 400, then the successful retry.
     expect(provider.toolNamesPerCall).toHaveLength(2);
     // First call saw both tools; retry dropped only the rejected one.
-    expect(provider.toolNamesPerCall[0]).toEqual(expect.arrayContaining(["good_tool", "bad_tool"]));
+    expect(provider.toolNamesPerCall[0]).toEqual(
+      expect.arrayContaining(["good_tool", "bad_tool"]),
+    );
     expect(provider.toolNamesPerCall[1]).toContain("good_tool");
     expect(provider.toolNamesPerCall[1]).not.toContain("bad_tool");
   });
@@ -108,7 +120,9 @@ describe("ConversationLoop — provider-as-oracle tool-schema guard (#1182)", ()
     ]);
     const loop = makeLoop(provider);
 
-    const result = await loop.runTurn("go", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("go", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     expect(provider.toolNamesPerCall).toHaveLength(2);
     expect(provider.toolNamesPerCall[1]).not.toContain("bad_tool");
@@ -128,12 +142,16 @@ describe("ConversationLoop — provider-as-oracle tool-schema guard (#1182)", ()
       { name: "mcp_bad_tool", source: "mcp" },
     ]);
 
-    const result = await loop.runTurn("go", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("go", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     expect(result.stopReason).toBe("end_turn");
     expect(provider.toolNamesPerCall).toHaveLength(2);
     // The MCP tool was in scope on the first call and dropped on the retry.
-    expect(provider.toolNamesPerCall[0]).toEqual(expect.arrayContaining(["good_tool", "mcp_bad_tool"]));
+    expect(provider.toolNamesPerCall[0]).toEqual(
+      expect.arrayContaining(["good_tool", "mcp_bad_tool"]),
+    );
     expect(provider.toolNamesPerCall[1]).toContain("good_tool");
     expect(provider.toolNamesPerCall[1]).not.toContain("mcp_bad_tool");
   });
@@ -148,14 +166,17 @@ describe("ConversationLoop — provider-as-oracle tool-schema guard (#1182)", ()
             origin: "provider",
             statusCode: 429,
             providerCode: "rate_limit_exceeded",
-            messagePreview: "Rate limit reached; please retry the bad_tool call later",
+            messagePreview:
+              "Rate limit reached; please retry the bad_tool call later",
           },
         } as StreamEvent,
       ],
     ]);
     const loop = makeLoop(provider);
 
-    const result = await loop.runTurn("go", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("go", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     // Single call, no retry — the rate-limit error is not a schema rejection.
     expect(provider.toolNamesPerCall).toHaveLength(1);

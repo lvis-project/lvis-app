@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { createRoutineConversationLoop } from "../conversation.js";
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../../engine/llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams,
+} from "../../engine/llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -44,33 +45,37 @@ describe("createRoutineConversationLoop — tool-level deferral", () => {
       isReadOnly: () => true,
       jsonSchema: { type: "object", properties: {} },
       execute: async () => ({ output: "ok", isError: false }),
-    }));
+    }),
+    );
 
-    const keywordEngine = new KeywordEngine();
-    const routeEngine = new RouteEngine({ toolRegistry });
+    const inputClassifier = new InputClassifier();
+    const routeEngine = new RouteEngine();
     const provider = new RecordingProvider();
-    const loop = createRoutineConversationLoop(({
+    const loop = createRoutineConversationLoop(
+      {
       settingsService: {
         get: () => fakeLlmSettings(),
         getSecret: () => "test-key",
       },
-      keywordEngine,
+        inputClassifier,
       routeEngine,
       toolRegistry,
       memoryManager: memoryManagerStub(),
       pluginRuntime: {
         listPluginCards: () => [],
       },
-    } as unknown) as Parameters<typeof createRoutineConversationLoop>[0], {
+    } as unknown as Parameters<typeof createRoutineConversationLoop>[0], {
       scope: {
         pluginIds: { mode: "allow", ids: ["routine-plugin"] },
         forcedPluginIds: ["routine-plugin"],
         directories: [],
       },
-    });
+    },
+    );
     (loop as unknown as { provider: LLMProvider | null }).provider = provider;
 
-    await loop.runTurn("routine fire", undefined, undefined, { inputOrigin: "plugin-emitted" });
+    await loop.runTurn("routine fire", undefined, undefined, { inputOrigin: "plugin-emitted",
+    });
 
     expect(provider.observedToolNames[0]).toContain(forcedToolName);
   });

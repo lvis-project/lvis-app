@@ -207,7 +207,7 @@ Plugin 로드 시:
 ```
 Plugin 제거:
   ├─ ToolRegistry.unregisterByPlugin(pluginId)
-  ├─ KeywordEngine에서 해당 키워드 제거
+  ├─ 세션의 plugin/tool scope 제거
   └─ 호스트 앱은 정상 동작 유지 (graceful degradation)
 ```
 
@@ -361,7 +361,7 @@ interface ToolCallAuditEntry {
 관리자 disable(pluginId):
   1. PluginRuntime.stopPlugin(pluginId)
   2. ToolRegistry.unregisterByPlugin(pluginId)
-  3. KeywordEngine.removeByPlugin(pluginId)
+  3. ConversationLoop.onPluginDisabled(pluginId)
   4. AuditLogger.log("plugin_disabled", { pluginId })
 ```
 

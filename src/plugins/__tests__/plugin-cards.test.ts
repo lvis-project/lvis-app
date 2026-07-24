@@ -3,8 +3,8 @@
  *
  * Verifies catalog shape used by SystemPromptBuilder + request_plugin:
  *   - id / name / description / sampleTools (max 3)
- *   - toolSchemas descriptions are stitched when present
- *   - Falls back to `Plugin: {name}` when toolSchemas absent
+ *   - Tool descriptions are surfaced from pure manifest Tool objects
+ *   - Manifest description remains the card summary
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  compileLegacyToolSurface,
+  pureTool,
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
 
@@ -35,12 +35,12 @@ function writePlugin(root: string, id: string, opts: {
     entry?: string;
     exportName?: string;
   }>;
-  toolSchemas?: Record<string, {
+    toolMetadata?: Record<string, {
     description: string;
-    category: "read" | "write" | "shell" | "network";
-    inputSchema: { type: "object"; properties: Record<string, unknown> };
+        inputSchema: { type: "object"; properties: Record<string, unknown> };
   }>;
-}) {
+},
+) {
   const dir = join(root, id);
   mkdirSync(dir, { recursive: true });
   const manifest = {
@@ -53,9 +53,16 @@ function writePlugin(root: string, id: string, opts: {
     icon: opts.icon,
     iconText: opts.iconText,
     networkAccess: opts.networkAccess,
-    // Pure v6: per-tool descriptions carried by the Tool object (compiled from the
-    // legacy toolSchemas map); no separate toolSchemas map in the written manifest.
-    tools: compileLegacyToolSurface({ tools: opts.tools, toolSchemas: opts.toolSchemas }),
+    tools: opts.tools.map((name) =>
+      pureTool(name, ["model", "app"], {
+        ...(opts.toolMetadata?.[name]
+          ? {
+              description: opts.toolMetadata[name].description,
+              inputSchema: opts.toolMetadata[name].inputSchema,
+            }
+          : {}),
+      }),
+    ),
     ui: opts.ui,
   };
   writeFileSync(join(dir, "plugin.json"), JSON.stringify(manifest));
@@ -69,7 +76,10 @@ function writePlugin(root: string, id: string, opts: {
   return join(dir, "plugin.json");
 }
 
-function writeRegistry(root: string, entries: Array<{ id: string; manifestPath: string; enabled?: boolean }>) {
+function writeRegistry(
+  root: string,
+  entries: Array<{ id: string; manifestPath: string; enabled?: boolean }>,
+) {
   const registryDir = join(root, "plugins");
   mkdirSync(registryDir, { recursive: true });
   const registryPath = join(registryDir, "registry.json");
@@ -91,27 +101,50 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
   it("returns id, name, description, sampleTools (max 3)", async () => {
     const manifestA = writePlugin(tmp, "example-meeting", {
       name: "Meeting",
-      tools: ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_extra"],
-      toolSchemas: {
-        meeting_start: { description: "회의 시작 명령 — 녹음 개시", category: "write", inputSchema: { type: "object", properties: {} } },
-        meeting_push_chunk: { description: "오디오 청크 전송 (스트리밍)", category: "write", inputSchema: { type: "object", properties: {} } },
-        meeting_stop: { description: "회의 종료 명령 — 녹음 중단", category: "write", inputSchema: { type: "object", properties: {} } },
+      tools: [
+        "meeting_start",
+        "meeting_push_chunk",
+        "meeting_stop",
+        "meeting_extra",
+      ],
+      toolMetadata: {
+        meeting_start: {
+          description: "회의 시작 명령 — 녹음 개시",
+          inputSchema: { type: "object", properties: {} },
+        },
+        meeting_push_chunk: {
+          description: "오디오 청크 전송 (스트리밍)",
+          inputSchema: { type: "object", properties: {} },
+        },
+        meeting_stop: {
+          description: "회의 종료 명령 — 녹음 중단",
+          inputSchema: { type: "object", properties: {} },
+        },
       },
     });
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      manifestPaths: [manifestA],
+    });
     await runtime.load();
 
     const cards = runtime.listPluginCards();
     expect(cards).toHaveLength(1);
     expect(cards[0].id).toBe("example-meeting");
     expect(cards[0].name).toBe("Meeting");
-    expect(cards[0].sampleTools).toEqual(["meeting_start", "meeting_push_chunk", "meeting_stop"]);
-    // Schema v3 requires manifest.description; it takes priority over toolSchemas derivation.
+    expect(cards[0].sampleTools).toEqual([
+      "meeting_start",
+      "meeting_push_chunk",
+      "meeting_stop",
+    ]);
+    // Manifest description is the card summary.
     expect(cards[0].description).toBe("Test fixture.");
-    // Per-tool descriptions from toolSchemas are still accessible via toolDescriptions.
+    // Per-tool descriptions remain accessible via toolDescriptions.
     expect(cards[0].toolDescriptions?.["meeting_start"]).toContain("회의 시작");
-    expect(cards[0].toolDescriptions?.["meeting_push_chunk"]).toContain("오디오 청크 전송");
+    expect(cards[0].toolDescriptions?.["meeting_push_chunk"]).toContain(
+      "오디오 청크 전송",
+    );
   });
 
   it("surfaces manifest sidebar UI metadata on plugin cards", async () => {
@@ -132,7 +165,10 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       ],
     });
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      manifestPaths: [manifestA],
+    });
     await runtime.load();
 
     const card = runtime.listPluginCards()[0];
@@ -160,7 +196,10 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       },
     });
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      manifestPaths: [manifestA],
+    });
     await runtime.load();
 
     expect(runtime.listPluginCards()[0].networkAccess).toEqual({
@@ -185,9 +224,15 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       ],
     });
     mkdirSync(join(tmp, "example-indexer", "dist", "ui"), { recursive: true });
-    writeFileSync(join(tmp, "example-indexer", "dist", "ui", "indexer-control.js"), "export default function mount() {}\n");
+    writeFileSync(
+      join(tmp, "example-indexer", "dist", "ui", "indexer-control.js"),
+      "export default function mount() {}\n",
+    );
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      manifestPaths: [manifestA],
+    });
     await runtime.load();
 
     const first = runtime.listUiExtensions()[0];
@@ -195,23 +240,30 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     expect(first.entryUrl).toBeTruthy();
     const firstUrl = new URL(first.entryUrl!);
     expect(firstUrl.searchParams.get("lvisPluginVersion")).toBe("1.0.0");
-    expect(firstUrl.searchParams.get("lvisRuntimeRevision")).toBe(String(first.runtimeRevision));
+    expect(firstUrl.searchParams.get("lvisRuntimeRevision")).toBe(
+      String(first.runtimeRevision),
+    );
 
     await runtime.reloadPlugin("example-indexer");
 
     const second = runtime.listUiExtensions()[0];
     expect(second.runtimeRevision).toBeGreaterThan(first.runtimeRevision!);
     expect(second.entryUrl).not.toBe(first.entryUrl);
-    expect(new URL(second.entryUrl!).searchParams.get("lvisRuntimeRevision")).toBe(String(second.runtimeRevision));
+    expect(
+      new URL(second.entryUrl!).searchParams.get("lvisRuntimeRevision"),
+    ).toBe(String(second.runtimeRevision));
   });
 
-  it("uses manifest description when toolSchemas absent", async () => {
+  it("uses manifest description when tools use default descriptions", async () => {
     const manifestA = writePlugin(tmp, "example-plain", {
       name: "Plain",
       tools: ["plain_do"],
     });
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      manifestPaths: [manifestA],
+    });
     await runtime.load();
 
     const cards = runtime.listPluginCards();
@@ -225,14 +277,20 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       tools: ["filtered_a", "filtered_b", "filtered_c"],
     });
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      manifestPaths: [manifestA],
+    });
     await runtime.load();
 
     // Fake toolRegistry that only exposes filtered_a and filtered_c (filtered_b is denied).
     // listPluginCards feeds the MODEL-visible set (getModelVisibleTools) to the card UI —
     // see the runtime's comment at that call site.
     const fakeRegistry = {
-      getModelVisibleTools: () => [{ name: "filtered_a" }, { name: "filtered_c" }],
+      getModelVisibleTools: () => [
+        { name: "filtered_a" },
+        { name: "filtered_c" },
+      ],
     };
 
     const cards = runtime.listPluginCards(fakeRegistry);
@@ -247,30 +305,50 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     });
     const failedDir = join(tmp, "example-failed");
     mkdirSync(failedDir, { recursive: true });
-    writeFileSync(join(failedDir, "plugin.json"), JSON.stringify({
-      id: "example-failed",
-      name: "Failed",
-      version: "1.0.0",
-      description: "Test fixture.",
-      publisher: "Test fixture",
-      entry: "index.mjs",
-      tools: ["failed_read"],
-    }));
+    writeFileSync(
+      join(failedDir, "plugin.json"),
+      JSON.stringify({
+        id: "example-failed",
+        name: "Failed",
+        version: "1.0.0",
+        description: "Test fixture.",
+        publisher: "Test fixture",
+        entry: "index.mjs",
+        tools: ["failed_read"],
+      }),
+    );
     writeFileSync(
       join(failedDir, "index.mjs"),
       `throw new Error("boom"); export default () => ({ handlers: { failed_read: async () => ({ ok: true }) } });`,
     );
     const registryPath = writeRegistry(tmp, [
-      { id: "example-disabled", manifestPath: disabledManifest, enabled: false },
-      { id: "example-failed", manifestPath: join(failedDir, "plugin.json"), enabled: true },
+      {
+        id: "example-disabled",
+        manifestPath: disabledManifest,
+        enabled: false,
+      },
+      {
+        id: "example-failed",
+        manifestPath: join(failedDir, "plugin.json"),
+        enabled: true,
+      },
     ]);
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      registryPath,
+      pluginsRoot: tmp,
+    });
     await runtime.load();
 
-    const cards = runtime.listPluginCards().sort((a, b) => a.id.localeCompare(b.id));
+    const cards = runtime
+      .listPluginCards()
+      .sort((a, b) => a.id.localeCompare(b.id));
     expect(cards).toEqual([
-      expect.objectContaining({ id: "example-disabled", loadStatus: "disabled" }),
+      expect.objectContaining({
+        id: "example-disabled",
+        loadStatus: "disabled",
+      }),
       expect.objectContaining({ id: "example-failed", loadStatus: "failed" }),
     ]);
   });
@@ -284,7 +362,11 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       { id: "marketplace-package-slug", manifestPath, enabled: true },
     ]);
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      registryPath,
+      pluginsRoot: tmp,
+    });
     await runtime.load();
 
     expect(runtime.listPluginCards()).toEqual([
@@ -305,16 +387,24 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       { id: "marketplace-event-slug", manifestPath, enabled: true },
     ]);
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      registryPath,
+      pluginsRoot: tmp,
+    });
     await runtime.load();
 
-    expect(() => runtime.assertPluginEventEmitAccess(
-      "manifest-event-owner",
-      "manifest-event-owner.changed",
-    )).not.toThrow();
-    expect(() => runtime.assertPluginEventEmitAccess(
-      "unrelated-plugin",
-      "manifest-event-owner.changed",
-    )).toThrow(/owned by plugin 'manifest-event-owner'/);
+    expect(() =>
+      runtime.assertPluginEventEmitAccess(
+        "manifest-event-owner",
+        "manifest-event-owner.changed",
+      ),
+    ).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventEmitAccess(
+        "unrelated-plugin",
+        "manifest-event-owner.changed",
+      ),
+    ).toThrow(/owned by plugin 'manifest-event-owner'/);
   });
 });

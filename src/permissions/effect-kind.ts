@@ -66,8 +66,7 @@ export type ChokepointKind =
   // ../__tests__/hostapi-effect-completeness.test.ts}) mechanically asserts the
   // mapping is total against the REAL hostApi object.
   //
-  // WRITES — egress / persist / registry / session mutations:
-  | "registerKeywords" // mutates the shared KeywordEngine routing registry
+  // WRITES — egress / persist / session mutations:
   | "callLlm" // body-bearing external LLM egress
   | "openAuthPartitionViewer" // silent-SSO load refreshes/persists partition cookies
   | "agentApprovalRequest" // registers an issuer entry + creates a pending gate entry
@@ -125,8 +124,7 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   openAuthWindow: "write",
   triggerConversation: "write",
   agentApprovalRespond: "write",
-  // Structural-completeness vocabulary — writes (egress / persist / registry).
-  registerKeywords: "write",
+  // Structural-completeness vocabulary — writes (egress / persist / session).
   callLlm: "write",
   openAuthPartitionViewer: "write",
   agentApprovalRequest: "write",
@@ -207,10 +205,7 @@ export interface HostApiEffectSpec {
    * possible at an ALREADY-async chokepoint, so it derives its gated set
    * MECHANICALLY from the write-classified paths that declare `async: true`
    * (see {@link writeClassifiedPaths} + `GATED_EFFECT_PATHS` in
-   * effect-enforcement.ts). A write-classified path that is NOT async (the lone
-   * one is `registerKeywords`) can never be gated by the await-based wrapper —
-   * it MUST be an explicit enforcement exclusion, and the enforcement
-   * completeness test fails if it is neither. The recorder ignores this field.
+   * effect-enforcement.ts). The recorder ignores this field.
    */
   async?: boolean;
   targetFromArgs?: (args: readonly unknown[]) => string | undefined;
@@ -257,10 +252,13 @@ function objectStringField(field: string) {
 
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter((item): item is string => typeof item === "string"))].sort();
+  return [...new Set(value.filter((item): item is string => typeof item === "string"),
+    ),
+  ].sort();
 }
 
-function spawnWorkerTargetFromArgs(args: readonly unknown[]): string | undefined {
+function spawnWorkerTargetFromArgs(args: readonly unknown[],
+): string | undefined {
   const spec = args[0];
   if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
     return JSON.stringify({
@@ -300,44 +298,48 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   "storage.readJson": { kind: "storageRead", targetFromArgs: firstStringArg },
   "storage.list": { kind: "storageRead", targetFromArgs: firstStringArg },
   "storage.exists": { kind: "storageRead", targetFromArgs: firstStringArg },
-  "storage.write": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg },
-  "storage.writeJson": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg },
-  "storage.rm": { kind: "storageRm", async: true, targetFromArgs: firstStringArg },
-  "storage.mkdir": { kind: "storageMkdir", async: true, targetFromArgs: firstStringArg },
+  "storage.write": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg,
+  },
+  "storage.writeJson": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg,
+  },
+  "storage.rm": { kind: "storageRm", async: true, targetFromArgs: firstStringArg,
+  },
+  "storage.mkdir": { kind: "storageMkdir", async: true, targetFromArgs: firstStringArg,
+  },
   // Encrypted-at-rest variants — same read/write classes as the plaintext
   // methods. writeEncrypted is an async write so it auto-joins GATED_EFFECT_PATHS
   // (effect-boundary approval, identical to storage.write); readEncrypted is a read.
-  "storage.writeEncrypted": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg },
-  "storage.readEncrypted": { kind: "storageRead", targetFromArgs: firstStringArg },
+  "storage.writeEncrypted": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg,
+  },
+  "storage.readEncrypted": { kind: "storageRead", targetFromArgs: firstStringArg,
+  },
   // ─── config.* ─────────────────────────────────────────────────────────────
   "config.get": { kind: "config.get", targetFromArgs: firstStringArg },
-  "config.set": { kind: "config.set", async: true, targetFromArgs: firstStringArg },
-  "config.onChange": { kind: "config.onChange", targetFromArgs: firstStringArg },
+  "config.set": { kind: "config.set", async: true, targetFromArgs: firstStringArg,
+  },
+  "config.onChange": { kind: "config.onChange", targetFromArgs: firstStringArg,
+  },
   // ─── top-level reads / non-persisting signals ─────────────────────────────
   getSecret: { kind: "getSecret", targetFromArgs: cappedKeyArg },
   getInstalledPluginIds: { kind: "getInstalledPluginIds" },
   // Idempotency SOT probe — `source` arg is a non-secret forensic descriptor.
-  hasRoutineBySource: { kind: "hasRoutineBySource", targetFromArgs: firstStringArg },
-  getAppPreference: { kind: "getAppPreference", targetFromArgs: firstStringArg },
+  hasRoutineBySource: { kind: "hasRoutineBySource", targetFromArgs: firstStringArg,
+  },
+  getAppPreference: { kind: "getAppPreference", targetFromArgs: firstStringArg,
+  },
   // Corp-network DNS presence probe — a read (no persistence / no egress body);
   // the bare hostname is a non-secret forensic descriptor.
-  probePrivateHost: { kind: "probePrivateHost", targetFromArgs: firstStringArg },
-  resolveApiKey: { kind: "resolveApiKey", targetFromArgs: objectStringField("purpose") },
+  probePrivateHost: { kind: "probePrivateHost", targetFromArgs: firstStringArg,
+  },
+  resolveApiKey: { kind: "resolveApiKey", targetFromArgs: objectStringField("purpose"),
+  },
   callTool: { kind: "callTool", targetFromArgs: firstStringArg },
   emitEvent: { kind: "emitEvent", targetFromArgs: firstStringArg },
   onEvent: { kind: "onEvent", targetFromArgs: firstStringArg },
   onPluginsChanged: { kind: "onPluginsChanged" },
   onShutdown: { kind: "onShutdown" },
   logEvent: { kind: "logEvent", targetFromArgs: firstStringArg },
-  // ─── top-level writes (egress / persist / registry / session) ─────────────
-  // registerKeywords is the LONE SYNCHRONOUS write chokepoint (returns void) —
-  // deliberately NOT marked async, so the await-based enforcement wrapper can
-  // never gate it (a sync→async conversion is a contract break). It is an
-  // explicit enforcement exclusion instead; it stays WRITE-classified so the
-  // recorder marks any tool that calls it as mutating. Under the pre-exec
-  // relaxation flag it runs UNGATED, but is BOUNDED (start-only, not reachable
-  // during a gated tool.execute — see effect-enforcement.ts ENFORCEMENT_EXCLUSIONS).
-  registerKeywords: { kind: "registerKeywords" },
+  // ─── top-level writes (egress / persist / session) ────────────────────────
   // callLlm carries the prompt BODY to an external provider; target stays
   // undefined (the provider is not in args and the prompt is never a target).
   callLlm: { kind: "callLlm", async: true },
@@ -349,12 +351,18 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // It is async but `selfRecorded`, so enforcement gates it INLINE in that same
   // closure (an enforcement exclusion for the generic wrapper).
   hostFetch: { kind: "hostFetch", selfRecorded: true, async: true },
-  spawnWorker: { kind: "spawnWorker", async: true, targetFromArgs: spawnWorkerTargetFromArgs },
-  openExternalUrl: { kind: "openExternalUrl", async: true, targetFromArgs: urlOriginArg },
-  openAuthWindow: { kind: "openAuthWindow", async: true, targetFromArgs: urlOriginFromOpts },
-  openAuthPartitionViewer: { kind: "openAuthPartitionViewer", async: true, targetFromArgs: urlOriginFromOpts },
-  clearAuthPartition: { kind: "clearAuthPartition", async: true, targetFromArgs: firstStringArg },
-  triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source") },
+  spawnWorker: { kind: "spawnWorker", async: true, targetFromArgs: spawnWorkerTargetFromArgs,
+  },
+  openExternalUrl: { kind: "openExternalUrl", async: true, targetFromArgs: urlOriginArg,
+  },
+  openAuthWindow: { kind: "openAuthWindow", async: true, targetFromArgs: urlOriginFromOpts,
+  },
+  openAuthPartitionViewer: { kind: "openAuthPartitionViewer", async: true, targetFromArgs: urlOriginFromOpts,
+  },
+  clearAuthPartition: { kind: "clearAuthPartition", async: true, targetFromArgs: firstStringArg,
+  },
+  triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source"),
+  },
   // ─── agentApproval.* ──────────────────────────────────────────────────────
   "agentApproval.request": {
     kind: "agentApprovalRequest",
@@ -373,7 +381,8 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
  * {@link CHOKEPOINT_EFFECT} (fail-closed `"write"` if a kind is somehow unmapped,
  * mirroring the recorder), never from a plugin-controlled arg.
  */
-export function pathEffectClass(path: string): Effect | "verb-derived" | undefined {
+export function pathEffectClass(path: string,
+): Effect | "verb-derived" | undefined {
   const spec = HOSTAPI_EFFECT_BY_PATH[path];
   if (!spec) return undefined;
   // hostFetch — verb-derived: it CAN be a write (any non GET/HEAD/OPTIONS), so

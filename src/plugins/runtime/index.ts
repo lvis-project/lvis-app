@@ -273,8 +273,8 @@ export interface PluginRuntimeOptions {
    * `restartAll` stop phase per plugin, `disable`, `removePlugin`,
    * `reloadPlugin` stop phase, and `failClosedLoadedPlugin` when a
    * fresh start fails mid-`restartAll`). The host wires this to
-   * `toolRegistry.unregisterByPlugin` + `keywordEngine.unregisterByPlugin`
-   * + `conversationLoop.onPluginDisabled` so transient runtime state stays
+   * `toolRegistry.unregisterByPlugin` +
+   * `conversationLoop.onPluginDisabled` so transient runtime state stays
    * in sync with the runtime's plugin map.
    *
    * May fire more than once per logical cycle for the same pluginId — e.g.,
