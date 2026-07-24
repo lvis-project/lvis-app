@@ -164,6 +164,7 @@ export async function runToolInvocation(
       toolResultChunkReader,
       permissionContext,
       executionCwd: requestedExecutionCwd,
+      pluginAuthLifecycle,
     } = opts;
     const startTime = Date.now();
     const executionCwd =
@@ -551,6 +552,24 @@ export async function runToolInvocation(
           is_error: true,
           durationMs,
         });
+      }
+    }
+    if (pluginAuthLifecycle) {
+      const { binding } = pluginAuthLifecycle;
+      if (
+        !tool.operationPolicy ||
+        !tool.pluginId ||
+        !tool.pluginGeneration ||
+        toolUse.name !== binding.toolName ||
+        tool.pluginId !== binding.pluginId ||
+        tool.pluginGeneration.generationId !== binding.generationId ||
+        !pluginOperationPrincipal ||
+        pluginOperationPrincipal.appSessionId !== binding.appSessionId ||
+        pluginOperationPrincipal.accountScopeHash !== binding.accountScopeHash
+      ) {
+        throw new Error(
+          "host plugin auth lifecycle does not match the admitted governed Tool",
+        );
       }
     }
     if (rationaleResumeContext) {
@@ -1264,6 +1283,7 @@ export async function runToolInvocation(
       preResult,
       resolvedPluginOperation,
       pluginOperationPrincipal,
+      pluginAuthLifecycle,
     });
     };
     try {

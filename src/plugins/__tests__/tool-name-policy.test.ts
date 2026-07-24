@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
 import {
-  makeTestPluginRuntime,
+  makeTestPluginRuntimeWithAudit,
   makeTestPluginRuntimeFixture,
   pureTool,
   writeTestPlugin,
@@ -46,20 +46,12 @@ describe("PluginRuntime — Tool name policy", () => {
     await writeTestPluginRegistry(fixture, [{ id, manifestPath }]);
   }
 
-  function runtimeWithAudit() {
-    return makeTestPluginRuntime(fixture, {
-      auditLog: (level, message, data) => {
-        auditEntries.push({ level, message, data });
-      },
-    });
-  }
-
   it("managed plugin with any suffix loads successfully (no verifier needed)", async () => {
     await writePlugin("p-managed-default", {
       installPolicy: "admin",
     });
 
-    const runtime = runtimeWithAudit();
+    const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-managed-default");
@@ -70,7 +62,7 @@ describe("PluginRuntime — Tool name policy", () => {
       installPolicy: "user",
     });
 
-    const runtime = runtimeWithAudit();
+    const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-user-delete");
@@ -81,7 +73,7 @@ describe("PluginRuntime — Tool name policy", () => {
       installPolicy: "user",
     });
 
-    const runtime = runtimeWithAudit();
+    const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-audit-check");
