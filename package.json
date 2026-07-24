@@ -35,7 +35,7 @@
   },
   "main": "dist/src/main/main.js",
   "scripts": {
-    "postinstall": "electron-rebuild --force --only better-sqlite3,node-pty && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs && node scripts/hooks/install.mjs",
+    "postinstall": "electron-rebuild --force --only node-pty && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs && node scripts/hooks/install.mjs",
     "build:main": "node scripts/build-main-esbuild.mjs",
     "build:webpack": "webpack --config webpack.config.cjs",
     "build:renderer": "webpack --config webpack.config.cjs --config-name renderer",
@@ -104,7 +104,7 @@
     "ai": "~7.0.2",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.1",
     "electron-updater": "~6.8.3",
     "mermaid": "^11.16.0",
     "node-pty": "^1.1.0",
@@ -223,9 +223,7 @@
     "asarUnpack": [
       "node_modules/@anthropic-ai/sandbox-runtime/vendor/**",
       "node_modules/node-pty/**",
-      "node_modules/better-sqlite3/**",
-      "node_modules/bindings/**",
-      "node_modules/file-uri-to-path/**"
+      "node_modules/better-sqlite3/**"
     ],
     "directories": {
       "output": "release"

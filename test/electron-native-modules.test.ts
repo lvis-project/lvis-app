@@ -31,26 +31,19 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function immediateLock(callback: () => unknown) {
-  return callback();
-}
-
 describe("ensureElectronNativeModules", () => {
-  it("does not rebuild when Electron can exercise better-sqlite3", () => {
+  it("returns loaded when Electron can exercise better-sqlite3", () => {
     const spawnSync = vi.fn().mockReturnValue(ok);
 
     expect(ensureElectronNativeModules({
       repoRoot: "/repo",
       electronExecutable: "/repo/electron",
-      nodeExecutable: "/repo/node",
-      rebuildCli: "/repo/electron-rebuild-cli.js",
       spawnSync,
-      existsSync: () => true,
-      log: vi.fn(),
       env: { ELECTRON_RUN_AS_NODE: "0", LVIS_TEST_MARKER: "present" },
-      withRebuildLock: immediateLock,
-    })).toEqual({ rebuilt: false });
+    })).toEqual({ loaded: true });
 
+    // Only the Electron load-probe runs — v13 ships an N-API prebuild, so there
+    // is no ABI rebuild to attempt.
     expect(spawnSync).toHaveBeenCalledTimes(1);
     expect(spawnSync.mock.calls[0]).toEqual([
       "/repo/electron",
@@ -66,123 +59,18 @@ describe("ensureElectronNativeModules", () => {
     ]);
   });
 
-  it("forces only better-sqlite3 rebuild and verifies the repaired ABI", () => {
-    const spawnSync = vi.fn()
-      .mockReturnValueOnce(failedAbiProbe)
-      .mockReturnValueOnce(failedAbiProbe)
-      .mockReturnValueOnce(ok)
-      .mockReturnValueOnce(ok);
-    const log = vi.fn();
+  it("fails hard with reinstall guidance when the prebuild does not load", () => {
+    const spawnSync = vi.fn().mockReturnValue(failedAbiProbe);
 
-    expect(ensureElectronNativeModules({
+    expect(() => ensureElectronNativeModules({
       repoRoot: "/repo",
       electronExecutable: "/repo/electron",
-      nodeExecutable: "/repo/node",
-      rebuildCli: "/repo/electron-rebuild-cli.js",
       spawnSync,
-      existsSync: () => true,
-      log,
-      env: { ELECTRON_RUN_AS_NODE: "0", LVIS_TEST_MARKER: "present" },
-      withRebuildLock: immediateLock,
-    })).toEqual({ rebuilt: true });
+    })).toThrow("reinstall better-sqlite3 (bun install --force)");
 
-    expect(spawnSync.mock.calls[2]).toEqual([
-      "/repo/node",
-      [
-        "/repo/electron-rebuild-cli.js",
-        "--force",
-        "--only",
-        "better-sqlite3",
-      ],
-      expect.objectContaining({
-        cwd: "/repo",
-        stdio: "inherit",
-        env: expect.not.objectContaining({ ELECTRON_RUN_AS_NODE: expect.anything() }),
-      }),
-    ]);
-    expect(spawnSync.mock.calls[3]?.[2]).toEqual(expect.objectContaining({
-      cwd: "/repo",
-      env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: "1" }),
-    }));
-    expect(log).toHaveBeenCalledWith("Electron better-sqlite3 rebuilt and verified.");
-  });
-
-  it("re-probes after locking and skips a rebuild completed by a peer", () => {
-    const spawnSync = vi.fn()
-      .mockReturnValueOnce(failedAbiProbe)
-      .mockReturnValueOnce(ok);
-    const log = vi.fn();
-
-    expect(ensureElectronNativeModules({
-      repoRoot: "/repo",
-      spawnSync,
-      log,
-      withRebuildLock: immediateLock,
-    })).toEqual({ rebuilt: false, repairedByPeer: true });
-
-    expect(spawnSync).toHaveBeenCalledTimes(2);
-    expect(log).toHaveBeenCalledWith(
-      "Electron better-sqlite3 was repaired by another process.",
-    );
-  });
-
-  it("refuses dependency mutation for non-native Electron failures", () => {
-    const spawnSync = vi.fn().mockReturnValue({
-      status: 1,
-      stdout: "",
-      stderr: "Electron failed to initialize AppKit",
-    });
-    const withRebuildLock = vi.fn(immediateLock);
-
-    expect(() => ensureElectronNativeModules({
-      repoRoot: "/repo",
-      spawnSync,
-      log: vi.fn(),
-      withRebuildLock,
-    })).toThrow("non-repairable reason; refusing to rebuild dependencies automatically");
-    expect(withRebuildLock).not.toHaveBeenCalled();
+    // A prebuild load failure cannot be repaired by a rebuild, so the probe
+    // runs exactly once and no rebuild spawn or lock acquisition follows.
     expect(spawnSync).toHaveBeenCalledTimes(1);
-  });
-
-  it("recognizes Linux cross-architecture loader failures as repairable", () => {
-    expect(__internalForTests.isRepairableNativeFailure({
-      status: 1,
-      stdout: "",
-      stderr: "wrong ELF class: ELFCLASS32",
-    })).toBe(true);
-  });
-
-  it("fails clearly when the forced rebuild is terminated", () => {
-    const spawnSync = vi.fn()
-      .mockReturnValueOnce(failedAbiProbe)
-      .mockReturnValueOnce(failedAbiProbe)
-      .mockReturnValueOnce({ status: null, signal: "SIGTERM", stdout: "", stderr: "" });
-
-    expect(() => ensureElectronNativeModules({
-      repoRoot: "/repo",
-      nodeExecutable: "/repo/node",
-      rebuildCli: "/repo/electron-rebuild-cli.js",
-      spawnSync,
-      existsSync: () => true,
-      log: vi.fn(),
-      withRebuildLock: immediateLock,
-    })).toThrow("Electron native-module rebuild failed: terminated by signal SIGTERM");
-  });
-
-  it("fails clearly when rebuilt better-sqlite3 still does not load", () => {
-    const spawnSync = vi.fn()
-      .mockReturnValueOnce(failedAbiProbe)
-      .mockReturnValueOnce(failedAbiProbe)
-      .mockReturnValueOnce(ok)
-      .mockReturnValueOnce(failedAbiProbe);
-
-    expect(() => ensureElectronNativeModules({
-      repoRoot: "/repo",
-      spawnSync,
-      existsSync: () => true,
-      log: vi.fn(),
-      withRebuildLock: immediateLock,
-    })).toThrow("Electron better-sqlite3 still fails after rebuild");
   });
 
   it("serializes rebuild owners across processes", async () => {

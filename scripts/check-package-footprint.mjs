@@ -334,17 +334,41 @@ if (betterSqliteSourceLeakEntries.length > 0) {
   fail("better-sqlite3 build sources leaked into app.asar", betterSqliteSourceLeakEntries);
 }
 
+// better-sqlite3 13 is N-API and ships per-platform PREBUILDS
+// (prebuilds/<platform>-<arch>.node); electron-after-pack prunes every prebuild
+// this target never loads, leaving exactly the one below. Derive that target
+// from the artifact under check: platform from the package type, arch from the
+// output dir (electron-builder appends `-<arch>` for non-default arches and
+// omits it for x64).
+function resolveBetterSqlitePrebuildTarget() {
+  const platformPrefix = isMacAppPackage()
+    ? "darwin"
+    : isWinUnpackedPackage()
+      ? "win32"
+      : isLinuxUnpackedPackage()
+        ? "linux"
+        : process.platform === "darwin"
+          ? "darwin"
+          : process.platform === "win32"
+            ? "win32"
+            : "linux";
+  const arch = /(?:^|[/\\-])arm64(?:$|[/\\-])/.test(appOutDir) ? "arm64" : "x64";
+  return `${platformPrefix}-${arch}`;
+}
+
 const unpackedDir = resolve(resourcesDir, "app.asar.unpacked");
 const betterSqliteNativeBinding = resolve(
   unpackedDir,
   "node_modules",
   "better-sqlite3",
-  "build",
-  "Release",
-  "better_sqlite3.node",
+  "prebuilds",
+  `${resolveBetterSqlitePrebuildTarget()}.node`,
 );
 if (!existsSync(betterSqliteNativeBinding)) {
   fail(`better-sqlite3 native binding missing: ${betterSqliteNativeBinding}`);
+}
+if (statSync(betterSqliteNativeBinding).size === 0) {
+  fail(`better-sqlite3 native binding is empty: ${betterSqliteNativeBinding}`);
 }
 const betterSqliteBuildSources = resolve(unpackedDir, "node_modules", "better-sqlite3", "deps");
 if (existsSync(betterSqliteBuildSources)) {
