@@ -37,6 +37,7 @@ import type { BootContext } from "../context.js";
 import { resolvePluginOperationAccount } from "./plugin-operation-account.js";
 import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
 import type { PluginOperationIdentityProvider } from "../../tools/invocation-services.js";
+import { isPluginRuntimeDetachedOperationError } from "../../plugins/runtime/detached-operation.js";
 
 function toPluginToolInput(payload: unknown): Record<string, unknown> {
   if (payload === undefined || payload === null) return {};
@@ -165,6 +166,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       const ownerPluginId = context.ownerPluginId;
       const ownerGenerationId = context.ownerGenerationId;
+      const invocationSessionId = pluginInvocationSessionId(context);
       // Claim auth publication order before either dispatch path awaits plugin
       // code. A later status/login/logout invocation supersedes this
       // completion even when the older handler resolves last.
@@ -186,34 +188,84 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           authInvocation.invalidatedAccountHash,
         );
       }
+      const appOnlyRuntimeInvocation = isAppOnlyRuntimeInvocation(
+        pluginRuntime,
+        toolName,
+        context,
+        effectiveOrigin,
+      );
+      const authTransitionLease =
+        appOnlyRuntimeInvocation &&
+        ownerPluginId &&
+        ownerGenerationId &&
+        authInvocation?.accountTransitionScopeHash
+          ? await pluginOperationGrants.acquireAccountTransitionLease(
+              {
+                ownerPluginId,
+                generationId: ownerGenerationId,
+                appSessionId:
+                  context.appInvocation?.sessionId ?? invocationSessionId,
+                accountScopeHash:
+                  authInvocation.accountTransitionScopeHash,
+              },
+            )
+          : undefined;
       const authInvocationEpoch = authInvocation?.epoch;
-      if (isAppOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
-        // App-only dispatch path — TRUSTED PANEL ONLY (`effectiveOrigin === "ui"`;
-        // an "mcp-app" chain never satisfies the predicate). Routes to the runtime
-        // handler directly, skipping the ToolExecutor and its Step-6 ceiling. The
-        // governed `runWithCeiling` cap is NOT re-added here: it is enforced
-        // STRUCTURALLY inside `PluginRuntime.callDeclaredAppOnlyTool` (the sole
-        // entry point of the bypass), so a hung app-only handler cannot block
-        // the renderer caller even if this dispatch is ever reverted to a
-        // direct `pluginRuntime.callDeclaredAppOnlyTool(...)` call. The
-        // user-activation gate + the #1556 nested-origin error live in
-        // `dispatchAppOnlyRuntimeInvocation`.
-        const result = await dispatchAppOnlyRuntimeInvocation(
-          pluginRuntime,
-          toolName,
-          toPluginToolInput(payload),
-          context,
-        );
-        if (context.ownerPluginId && context.ownerGenerationId) {
-          observePluginAuthResult(
-            context.ownerPluginId,
-            context.ownerGenerationId,
+      if (appOnlyRuntimeInvocation) {
+        let releaseAuthTransitionDeferred = false;
+        try {
+          if (authInvocation && ownerPluginId && ownerGenerationId) {
+            const exactGeneration =
+              ctx.pluginBundleLifecycle?.getActive(ownerPluginId);
+            if (exactGeneration?.generationId !== ownerGenerationId) {
+              throw new Error(
+                "plugin auth generation changed before handler entry",
+              );
+            }
+          }
+          // App-only dispatch path — TRUSTED PANEL ONLY (`effectiveOrigin === "ui"`;
+          // an "mcp-app" chain never satisfies the predicate). Routes to the runtime
+          // handler directly, skipping the ToolExecutor and its Step-6 ceiling. The
+          // governed `runWithCeiling` cap is NOT re-added here: it is enforced
+          // STRUCTURALLY inside `PluginRuntime.callDeclaredAppOnlyTool` (the sole
+          // entry point of the bypass), so a hung app-only handler cannot block
+          // the renderer caller even if this dispatch is ever reverted to a
+          // direct `pluginRuntime.callDeclaredAppOnlyTool(...)` call. The
+          // user-activation gate + the #1556 nested-origin error live in
+          // `dispatchAppOnlyRuntimeInvocation`.
+          const result = await dispatchAppOnlyRuntimeInvocation(
+            pluginRuntime,
             toolName,
-            result,
-            authInvocationEpoch,
+            toPluginToolInput(payload),
+            context,
           );
+          if (context.ownerPluginId && context.ownerGenerationId) {
+            observePluginAuthResult(
+              context.ownerPluginId,
+              context.ownerGenerationId,
+              toolName,
+              result,
+              authInvocationEpoch,
+            );
+          }
+          return result;
+        } catch (error) {
+          if (
+            authTransitionLease &&
+            isPluginRuntimeDetachedOperationError(error)
+          ) {
+            releaseAuthTransitionDeferred = true;
+            void error.settlement.then(
+              () => authTransitionLease.release(),
+              () => authTransitionLease.release(),
+            );
+          }
+          throw error;
+        } finally {
+          if (!releaseAuthTransitionDeferred) {
+            authTransitionLease?.release();
+          }
         }
-        return result;
       }
 
       const appInvocation = context.appInvocation;
@@ -233,7 +285,6 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             context.ownerGenerationId,
           )
         : undefined;
-      const invocationSessionId = pluginInvocationSessionId(context);
       const appOrigin = effectiveOrigin === "ui" || effectiveOrigin === "mcp-app";
       const pluginOperation = ownerPluginId &&
         manifest &&

@@ -47,7 +47,10 @@ import {
   runScriptHook,
   type InvocationRunnerServices,
 } from "./invocation-services.js";
-import type { AuditWriter } from "./pipeline/audit-writer.js";
+import {
+  auditSafeToolInput,
+  type AuditWriter,
+} from "./pipeline/audit-writer.js";
 import {
   RATIONALE_TERMINAL_AUDIT_UNKNOWN_RESULT,
   type ExecuteOptions,
@@ -104,7 +107,9 @@ export interface ExecutionStageContext {
   callbacks: ToolExecutorCallbacks | undefined;
   meta: ToolCallMeta;
   auditCurrentToolCall: AuditToolCall;
-  currentAuditMetadata: () => ToolExecutionAuditMetadata;
+  currentAuditMetadata: (
+    input?: Record<string, unknown>,
+  ) => ToolExecutionAuditMetadata;
   withHostShellExecutionPlan: (result: ToolResult) => ToolResult;
   permissionResult: PermissionCheckResult | undefined;
   abortSignal: AbortSignal | undefined;
@@ -241,11 +246,14 @@ export async function executeAuthorizedToolInvocation(
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      const audit = currentAuditMetadata(finalInput);
       services.auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: sessionId ?? "unknown",
         type: "tool_call",
-        input: maskSensitiveData(JSON.stringify(finalInput)).masked.slice(0, 500),
+        input: maskSensitiveData(
+          JSON.stringify(auditSafeToolInput(finalInput, audit)),
+        ).masked.slice(0, 500),
         output: msg.slice(0, 1024),
         toolCalls: [{
           name: toolUse.name,
@@ -253,7 +261,10 @@ export async function executeAuthorizedToolInvocation(
           source,
           trust,
           executionTimeMs: durationMs,
-          ...currentAuditMetadata(),
+          ...(audit.toolUseId !== undefined ? { toolUseId: audit.toolUseId } : {}),
+          ...(audit.executionPlan !== undefined
+            ? { executionPlan: audit.executionPlan }
+            : {}),
           permissionDecision: "deny",
           permissionReason: "permission audit chain unavailable before execution",
           rateLimitRemaining: rateResult.remaining,
@@ -1003,7 +1014,10 @@ export async function executeAuthorizedToolInvocation(
   const dlpResult = maskSensitiveData(content);
   if (dlpResult.detections.length > 0) {
     displayContent = dlpResult.masked;
-    const dlpAuditInput = maskSensitiveData(JSON.stringify(finalInput)).masked;
+    const audit = currentAuditMetadata(finalInput);
+    const dlpAuditInput = maskSensitiveData(
+      JSON.stringify(auditSafeToolInput(finalInput, audit)),
+    ).masked;
     log.warn(
       `Sensitive data detected and masked — tool: '${toolUse.name}', patterns: ${dlpResult.detections.join(", ")}`,
     );
@@ -1019,7 +1033,10 @@ export async function executeAuthorizedToolInvocation(
         source,
         trust,
         executionTimeMs: Date.now() - startTime,
-        ...currentAuditMetadata(),
+        ...(audit.toolUseId !== undefined ? { toolUseId: audit.toolUseId } : {}),
+        ...(audit.executionPlan !== undefined
+          ? { executionPlan: audit.executionPlan }
+          : {}),
         permissionDecision: "dlp_masked",
           permissionReason: `Detected patterns: ${dlpResult.detections.join(", ")}`,
       }],

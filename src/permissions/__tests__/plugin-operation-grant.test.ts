@@ -119,6 +119,147 @@ describe("PluginOperationGrantCoordinator", () => {
     thirdLease.release();
   });
 
+  it("queues an account transition behind an admitted operation and ahead of replacement work", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const order: string[] = [];
+    const transition = coordinator.acquireAccountTransitionLease(
+      principal,
+    ).then((lease) => {
+      order.push("transition");
+      return lease;
+    });
+    const replacementPrincipal = {
+      ...principal,
+      generationId: "generation-replacement",
+      accountHash: "account-principal-replacement",
+    };
+    const replacementDomain = pluginOperationExecutionDomain(
+      replacementPrincipal,
+      "ep_attendance_write",
+      "clock",
+      [{
+        name: "ep_attendance_write",
+        pluginId: principal.ownerPluginId,
+        pluginGeneration: {
+          generationId: replacementPrincipal.generationId,
+        },
+        operationPolicy: {
+          discriminant: "operation",
+          operations: {
+            clock: {
+              kind: "write",
+              minimumRisk: "network",
+              appVisible: true,
+            },
+          },
+        },
+      }],
+    );
+    const replacement = coordinator.acquireExecutionLease(
+      replacementDomain,
+      replacementPrincipal,
+    ).then((lease) => {
+      order.push("replacement");
+      return lease;
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual([]);
+    active.release();
+    const transitionLease = await transition;
+    expect(order).toEqual(["transition"]);
+    await Promise.resolve();
+    expect(order).toEqual(["transition"]);
+    transitionLease.release();
+    const replacementLease = await replacement;
+    expect(order).toEqual(["transition", "replacement"]);
+    replacementLease.release();
+  });
+
+  it("refuses an account transition after an admitted operation becomes indeterminate", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const transition = coordinator.acquireAccountTransitionLease(
+      principal,
+    );
+
+    coordinator.poisonDomain(grantDomain);
+    active.release();
+
+    await expect(transition).rejects.toThrow(
+      "plugin operation account scope is indeterminate",
+    );
+  });
+
+  it.each(["generation", "session"] as const)(
+    "cancels a queued account transition when its %s is revoked",
+    async (revocation) => {
+      const coordinator = new PluginOperationGrantCoordinator();
+      const active = await coordinator.acquireExecutionLease(
+        grantDomain,
+        principal,
+      );
+      const transitionResult = coordinator.acquireAccountTransitionLease(
+        principal,
+      ).then(
+        () => "granted",
+        (error: Error) => error.message,
+      );
+
+      if (revocation === "generation") {
+        coordinator.revokeGeneration(
+          principal.ownerPluginId,
+          principal.generationId,
+        );
+      } else {
+        coordinator.revokeSession(principal.appSessionId);
+      }
+
+      await expect(transitionResult).resolves.toContain(
+        `plugin operation ${revocation} is revoked`,
+      );
+      active.release();
+    },
+  );
+
+  it("serializes consecutive auth transitions behind governed work", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const order: string[] = [];
+    const first = coordinator.acquireAccountTransitionLease(principal)
+      .then((lease) => {
+        order.push("first-auth");
+        return lease;
+      });
+    const second = coordinator.acquireAccountTransitionLease({
+      ...principal,
+      appSessionId: "window-second-auth",
+    }).then((lease) => {
+      order.push("second-auth");
+      return lease;
+    });
+
+    active.release();
+    const firstLease = await first;
+    expect(order).toEqual(["first-auth"]);
+    await Promise.resolve();
+    expect(order).toEqual(["first-auth"]);
+    firstLease.release();
+    const secondLease = await second;
+    expect(order).toEqual(["first-auth", "second-auth"]);
+    secondLease.release();
+  });
+
   it("serializes a replacement generation through the stable plugin-account scope", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const predecessorDomain = "3".repeat(64);

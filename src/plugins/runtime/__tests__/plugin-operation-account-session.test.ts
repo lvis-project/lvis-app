@@ -133,6 +133,7 @@ describe("PluginRuntime operation account sessions", () => {
       { data: { authenticated: true, account: "person@example.com" } },
     );
     const current = accountIdentity(instance)?.principalHash;
+    const currentScope = accountIdentity(instance)?.identityHash;
     const invocation = instance.beginPluginAuthInvocation(
       pluginId,
       generationId,
@@ -141,6 +142,7 @@ describe("PluginRuntime operation account sessions", () => {
 
     expect(invocation).toEqual({
       epoch: expect.any(Number),
+      accountTransitionScopeHash: currentScope,
       invalidatedAccountHash: current,
     });
     expect(instance.observePluginAuthResult(
@@ -171,6 +173,7 @@ describe("PluginRuntime operation account sessions", () => {
         { authenticated: true, account: "person@example.com" },
       );
       const current = accountIdentity(instance)?.principalHash;
+      const currentScope = accountIdentity(instance)?.identityHash;
 
       const invocation = instance.beginPluginAuthInvocation(
         pluginId,
@@ -179,6 +182,7 @@ describe("PluginRuntime operation account sessions", () => {
       );
       expect(invocation).toEqual({
         epoch: expect.any(Number),
+        accountTransitionScopeHash: currentScope,
         invalidatedAccountHash: current,
       });
       expect(accountIdentity(instance)).toBeUndefined();
@@ -209,6 +213,58 @@ describe("PluginRuntime operation account sessions", () => {
         .not.toBe(current);
     },
   );
+
+  it("retains one stable transition scope across concurrent login and logout starts", () => {
+    const instance = runtime();
+    observe(
+      instance,
+      "auth_status",
+      { authenticated: true, account: "person@example.com" },
+    );
+    const identity = accountIdentity(instance);
+
+    const login = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_login",
+    );
+    const logout = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_logout",
+    );
+
+    expect(login).toMatchObject({
+      accountTransitionScopeHash: identity?.identityHash,
+      invalidatedAccountHash: identity?.principalHash,
+    });
+    expect(logout).toMatchObject({
+      accountTransitionScopeHash: identity?.identityHash,
+      invalidatedAccountHash: identity?.principalHash,
+    });
+    expect(logout?.epoch).toBeGreaterThan(login?.epoch ?? 0);
+  });
+
+  it("uses one plugin-stable transition scope before the first authenticated account", () => {
+    const instance = runtime();
+
+    const first = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_login",
+    );
+    const second = instance.beginPluginAuthInvocation(
+      pluginId,
+      generationId,
+      "auth_login",
+    );
+
+    expect(first?.accountTransitionScopeHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(second?.accountTransitionScopeHash)
+      .toBe(first?.accountTransitionScopeHash);
+    expect(first?.invalidatedAccountHash).toBeUndefined();
+    expect(second?.invalidatedAccountHash).toBeUndefined();
+  });
 
   it("ignores an older authenticated status that completes after a newer principal", async () => {
     const instance = runtime();

@@ -14,7 +14,7 @@
  * (= SOT) parameter used only as a test seam so we can prove the ceiling without
  * waiting the real 120s and without weakening the SOT.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TestPluginRuntime as PluginRuntime } from "../../__tests__/test-helpers.js";
@@ -67,6 +67,88 @@ describe("PluginRuntime.callDeclaredAppOnlyTool — structural ceiling (#1553)",
     await expect(
       rt.callDeclaredAppOnlyTool("meeting_stage_upload_begin", { chunk: 1 }, 5_000),
     ).resolves.toEqual({ echoed: { chunk: 1 } });
+  });
+
+  it("rejects an app-only invocation pinned to a stale generation", async () => {
+    const handler = vi.fn(async () => "must-not-run");
+    const rt = runtimeWithAppVisibleTool(
+      "meeting_stage_upload_begin",
+      handler,
+    );
+
+    await expect(
+      rt.callDeclaredAppOnlyTool(
+        "meeting_stage_upload_begin",
+        {},
+        5_000,
+        "stale-generation",
+      ),
+    ).rejects.toThrow();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("retains the exact generation lease until a ceiling-detached handler settles", async () => {
+    let settle!: (value: unknown) => void;
+    const handler = vi.fn(
+      () =>
+        new Promise<unknown>((resolvePromise) => {
+          settle = resolvePromise;
+        }),
+    );
+    const method = "meeting_stage_upload_begin";
+    const rt = runtimeWithAppVisibleTool(method, handler);
+    const release = vi.fn();
+    const manifest = {
+      tools: [{
+        name: method,
+        inputSchema: { type: "object", properties: {} },
+        _meta: { ui: { visibility: ["app"] } },
+      }],
+    };
+    const generation = {
+      pluginId: "test.plugin",
+      generationId: "generation-current",
+      state: {
+        runtime: {
+          manifest,
+          methods: new Map([[method, handler]]),
+        },
+      },
+    };
+    rt.setGenerationAccess({
+      getActive: vi.fn(() => generation),
+      acquire: vi.fn(async () => ({ generation, release })),
+      acquireExact: vi.fn(async (
+        _pluginId: string,
+        expectedGenerationId: string,
+      ) => {
+        if (expectedGenerationId !== generation.generationId) {
+          throw new Error("stale generation");
+        }
+        return { generation, release };
+      }),
+      runWithLease: vi.fn(async (
+        _lease: unknown,
+        operation: () => Promise<unknown>,
+      ) => operation()),
+      replaceRuntime: vi.fn(),
+    } as never);
+
+    await expect(
+      rt.callDeclaredAppOnlyTool(
+        method,
+        {},
+        5,
+        generation.generationId,
+      ),
+    ).rejects.toThrow(/exceeded global ceiling/);
+    expect(release).not.toHaveBeenCalled();
+
+    settle("late completion");
+    await new Promise((resolvePromise) => {
+      setTimeout(resolvePromise, 0);
+    });
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it("enforces the app-visible tool allowlist BEFORE the ceiling wrap (a non-app-visible method is rejected)", async () => {

@@ -20,8 +20,11 @@ unsigned.
   PostToolUse, PostToolUseFailure, and PermissionDenied hooks are not dispatched
   for manifest-governed operations because arbitrary commands cannot be part of
   the provider-state proof. A Host-private stable account scope now serializes
-  execution across reauthentication, update, and rollback while authority stays
-  bound to a revocable per-generation principal.
+  execution and auth status/login/logout transitions across reauthentication,
+  update, and rollback while authority stays bound to a revocable
+  per-generation principal. Governed audit rows use the invocation-time
+  governance snapshot, so generation replacement cannot restore payload logging
+  or lifecycle-hook dispatch.
 - **Retired contracts stay retired.** The Host-owned manifest and public API do
   not restore keyword dispatch, UI-action tool aliases, or plugin-specific Host
   branches; the SDK remains a generated projection of the app contract.

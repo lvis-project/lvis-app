@@ -158,5 +158,10 @@ export async function dispatchAppOnlyRuntimeInvocation(
   // The global tool-execution ceiling is enforced structurally inside
   // `callDeclaredAppOnlyTool` (see its docstring) — not here — so this dispatch
   // stays a thin gate.
-  return pluginRuntime.callDeclaredAppOnlyTool(toolName, input);
+  return pluginRuntime.callDeclaredAppOnlyTool(
+    toolName,
+    input,
+    undefined,
+    context.ownerGenerationId,
+  );
 }

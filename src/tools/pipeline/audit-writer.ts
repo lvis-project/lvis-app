@@ -35,6 +35,16 @@ import {
 
 const log = createLogger("executor");
 
+export function auditSafeToolInput(
+  input: Record<string, unknown>,
+  audit: ToolExecutionAuditMetadata | undefined,
+): Record<string, unknown> {
+  if (audit?.governedOperation === undefined) return input;
+  return {
+    operation: audit.governedOperation ?? "<invalid>",
+  };
+}
+
 export interface LifecycleDispatchObservation {
   status: "unwired" | "no-match" | "executed" | "uncertain";
   result?: HookDispatchResult;
@@ -150,17 +160,11 @@ export class AuditWriter {
     auditDirectory?: string,
     audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
-    const governedTool = this.toolRegistry.findByName(toolName)?.operationPolicy;
-    const governedOperation = governedTool && typeof input.operation === "string"
-      ? input.operation
-      : undefined;
     // Operation-governed tools may carry attendance, identity, or reservation
     // payloads. Their audit contract is metadata-only: operation + outcome.
     // The bearer/account hash are held in ToolPermissionContext and are never
     // serialized here.
-    const auditSafeInput = governedTool
-      ? { operation: governedOperation ?? "<invalid>" }
-      : input;
+    const auditSafeInput = auditSafeToolInput(input, audit);
     const tool = this.toolRegistry.findByName(toolName);
     const entry = permissionAuditAskEntryFromToolCall({
       toolName,
@@ -214,13 +218,8 @@ export class AuditWriter {
     audit?: ToolExecutionAuditMetadata,
     suppressPermissionDeniedLifecycle = false,
   ): Promise<void> {
-    const governedTool = this.toolRegistry.findByName(toolName)?.operationPolicy;
-    const governedOperation = governedTool && typeof input.operation === "string"
-      ? input.operation
-      : undefined;
-    const auditSafeInput = governedTool
-      ? { operation: governedOperation ?? "<invalid>" }
-      : input;
+    const governedTool = audit?.governedOperation !== undefined;
+    const auditSafeInput = auditSafeToolInput(input, audit);
     const auditSafeOutput = governedTool
       ? (isError ? "governed operation failed" : "governed operation completed")
       : output;
@@ -239,7 +238,7 @@ export class AuditWriter {
       permission?.decision === "deny" &&
       permissionContext !== undefined &&
       terminationReason !== "user-abort" &&
-      governedTool === undefined &&
+      !governedTool &&
       !suppressPermissionDeniedLifecycle
     ) {
       await this.fireLifecycleEvent(

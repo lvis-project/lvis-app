@@ -195,6 +195,8 @@ function setup(options: {
           })
         : undefined,
     ),
+    registry,
+    generationAccess,
     setGenerationAccessAvailable: (available: boolean) => { generationAccessAvailable = available; },
     permissions,
     approvalGate,
@@ -346,6 +348,38 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(scriptPre).not.toHaveBeenCalled();
     expect(scriptPost).not.toHaveBeenCalled();
     expect(lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("keeps governed admission-denial audit metadata-only after registry removal", async () => {
+    const scriptHookManager = new ScriptHookManager();
+    const lifecycle = vi.spyOn(scriptHookManager, "runLifecycleEvent");
+    const {
+      executor,
+      registry,
+      generationAccess,
+      auditLogger,
+    } = setup({ scriptHookManager });
+    generationAccess.acquireExact.mockImplementationOnce(async () => {
+      registry.unregisterByPlugin(principal.ownerPluginId);
+      throw new Error("generation was replaced");
+    });
+
+    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll([{
+        id: "stale-admission",
+        name: "domain_read",
+        input: {
+          operation: "status",
+          employeeName: "Must Never Reach Audit",
+        },
+      }], options()),
+    );
+
+    expect(result.is_error).toBe(true);
+    expect(lifecycle).not.toHaveBeenCalled();
+    const serialized = JSON.stringify(auditLogger.log.mock.calls);
+    expect(serialized).toContain("status");
+    expect(serialized).not.toContain("Must Never Reach Audit");
   });
 
   it("holds the lease and withholds freshness until the required final audit persists", async () => {
@@ -1507,6 +1541,54 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(serialized).not.toContain(principal.accountScopeHash);
     expect(serialized).not.toContain(principal.accountHash);
     expect(serialized).not.toContain("fresh");
+  });
+
+  it("keeps governed payload metadata-only in manual audit-chain and DLP rows", async () => {
+    const auditChain = setup({ requireAuditChain: true });
+    auditChain.auditLogger.assertPermissionAuditWritable.mockImplementationOnce(
+      () => {
+        throw new Error("audit storage unavailable");
+      },
+    );
+    await runWithInvocationOrigin("ui", undefined, () =>
+      auditChain.executor.executeAll([{
+        id: "audit-chain-block",
+        name: "domain_read",
+        input: {
+          operation: "status",
+          employeeName: "Audit Chain Secret",
+        },
+      }], options()),
+    );
+    expect(JSON.stringify(auditChain.auditLogger.log.mock.calls))
+      .not.toContain("Audit Chain Secret");
+
+    const dlp = setup();
+    dlp.read.mockImplementationOnce(async () => ({
+      output: "employee@example.com",
+      isError: false,
+      metadata: {
+        rawResult: {
+          operation: "status",
+          status: "success",
+          data: {},
+          providerEvidence: {},
+          warnings: [],
+        },
+      },
+    }));
+    await runWithInvocationOrigin("ui", undefined, () =>
+      dlp.executor.executeAll([{
+        id: "dlp-row",
+        name: "domain_read",
+        input: {
+          operation: "status",
+          employeeName: "DLP Auxiliary Secret",
+        },
+      }], options()),
+    );
+    expect(JSON.stringify(dlp.auditLogger.log.mock.calls))
+      .not.toContain("DLP Auxiliary Secret");
   });
 
   it("refuses to mint a grant when exact generation access becomes unavailable", async () => {

@@ -170,24 +170,33 @@ export async function runToolInvocation(
     let source: ToolSource = "builtin";
     let trust: TrustLevel = "high";
     let hostShellExecutionPlanAudit: HostShellExecutionPlanAuditProjection | undefined;
+    let governedTool = false;
     const withHostShellExecutionPlan = (result: ToolResult): ToolResult =>
       hostShellExecutionPlanAudit === undefined
         ? result
         : { ...result, executionPlan: hostShellExecutionPlanAudit };
-    const currentAuditMetadata = (): ToolExecutionAuditMetadata => ({
+    const currentAuditMetadata = (
+      input: Record<string, unknown> = toolUse.input,
+    ): ToolExecutionAuditMetadata => ({
       toolUseId: toolUse.id,
       ...(hostShellExecutionPlanAudit !== undefined
         ? { executionPlan: hostShellExecutionPlanAudit }
         : {}),
+      ...(governedTool
+        ? {
+            governedOperation:
+              typeof input.operation === "string" ? input.operation : null,
+          }
+        : {}),
     });
     const auditCurrentToolCall = (...args: AuditToolCallArgs): Promise<void> => {
-      args[16] = currentAuditMetadata();
+      args[16] = currentAuditMetadata(args[4]);
       return services.auditWriter.auditToolCall(...args);
     };
     const auditCurrentPermissionAsk = (
       ...args: AuditPermissionAskArgs
     ): Promise<void> => {
-      args[8] = currentAuditMetadata();
+      args[8] = currentAuditMetadata(args[3]);
       return services.auditWriter.auditPermissionAsk(...args);
     };
 
@@ -199,6 +208,7 @@ export async function runToolInvocation(
       callbacks?.onToolEnd?.(toolUse.name, t("be_executor.toolNotFound", { name: toolUse.name }), true, meta, undefined, durationMs);
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: t("be_executor.toolNotFound", { name: toolUse.name }), is_error: true, durationMs });
     }
+    governedTool = tool.operationPolicy !== undefined;
     let generationAccess: ReturnType<
       InvocationRunnerServices["pluginGenerationAccessProvider"]
     >;
@@ -394,7 +404,7 @@ export async function runToolInvocation(
       executionCwd,
       startTime,
       auditWriter: services.auditWriter,
-      audit: currentAuditMetadata(),
+      audit: currentAuditMetadata(input),
     });
 
     if (abortSignal?.aborted) {
