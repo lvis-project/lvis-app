@@ -10,8 +10,13 @@ const hostilePath = new URL(
   "../control/marketplace-e2e/run-hostile.mjs",
   import.meta.url,
 );
+const validatorPath = new URL(
+  "../control/marketplace-e2e/validate-evidence.mjs",
+  import.meta.url,
+);
 const orchestrate = readFileSync(orchestratePath, "utf8");
 const hostile = readFileSync(hostilePath, "utf8");
+const validator = readFileSync(validatorPath, "utf8");
 
 function assertIsolatedNetworkPolicy(source) {
   for (const required of [
@@ -115,6 +120,19 @@ test("proves host-gateway, public, private, link-local, and DNS containment", ()
     />"\$private_logs\/hostile-containment\.log" 2>&1/u,
   );
   assert.doesNotMatch(orchestrate, /docker logs|--network host/u);
+  for (const proof of [
+    "hostile.defaultRouteAbsent !== true",
+    'typeof hostile.connectedRouteInterface !== "string"',
+    "hostile.hostGatewayMarkerBlocked !== true",
+    "hostile.publicDnsBlocked !== true",
+    "hostile.rfc1918EgressBlocked !== true",
+    "hostile.linkLocalEgressBlocked !== true",
+  ]) {
+    assert.ok(
+      validator.includes(proof),
+      `evidence validator does not enforce hostile proof: ${proof}`,
+    );
+  }
 });
 
 test("verifies the created EP artifact container image before copying", () => {

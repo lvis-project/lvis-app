@@ -311,8 +311,14 @@ exactKeys(
     "hostMarkerWriteBlocked",
     "sealedInputMutationBlocked",
     "internalMarketplaceReachable",
+    "defaultRouteAbsent",
+    "connectedRouteInterface",
+    "hostGatewayMarkerBlocked",
     "externalDnsBlocked",
+    "publicDnsBlocked",
     "externalEgressBlocked",
+    "rfc1918EgressBlocked",
+    "linkLocalEgressBlocked",
   ],
   "hostile containment",
 );
@@ -329,8 +335,15 @@ if (
   || hostile.hostMarkerWriteBlocked !== true
   || hostile.sealedInputMutationBlocked !== true
   || hostile.internalMarketplaceReachable !== true
+  || hostile.defaultRouteAbsent !== true
+  || typeof hostile.connectedRouteInterface !== "string"
+  || !/^[A-Za-z0-9_.-]+$/u.test(hostile.connectedRouteInterface)
+  || hostile.hostGatewayMarkerBlocked !== true
   || hostile.externalDnsBlocked !== true
+  || hostile.publicDnsBlocked !== true
   || hostile.externalEgressBlocked !== true
+  || hostile.rfc1918EgressBlocked !== true
+  || hostile.linkLocalEgressBlocked !== true
 ) {
   throw new Error("hostile containment rehearsal did not prove isolation");
 }
