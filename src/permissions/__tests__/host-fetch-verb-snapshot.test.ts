@@ -37,8 +37,10 @@ const harness = vi.hoisted(() => ({
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
     listPluginIds: vi.fn(() => [] as string[]),
-    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
-    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
+    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>,
+    ),
+    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`,
+    ),
     getPluginManifest: vi.fn(() => null),
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     isPluginEnabled: vi.fn(() => true),
@@ -62,7 +64,10 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("../../plugins/runtime.js", () => ({
-  PluginRuntime: vi.fn().mockImplementation(function (this: unknown, options: Record<string, unknown>) {
+  PluginRuntime: vi.fn().mockImplementation(function (
+    this: unknown,
+    options: Record<string, unknown>,
+  ) {
     harness.capturedRuntimeOptions = options;
     return harness.runtime;
   }),
@@ -97,7 +102,9 @@ vi.mock("../../main/host-fetch-guard.js", () => ({
       ok: true,
       url: new URL(input.rawUrl),
       method: input.method,
-      effect: ["GET", "HEAD", "OPTIONS"].includes(input.method) ? "read" : "write",
+      effect: ["GET", "HEAD", "OPTIONS"].includes(input.method)
+        ? "read"
+        : "write",
     }),
   ),
 }));
@@ -116,7 +123,10 @@ type CreateHostApi = (
     id: string;
     config?: Record<string, unknown>;
     capabilities?: string[];
-    networkAccess?: { allowedDomains?: string[]; allowPrivateNetworks?: boolean };
+    networkAccess?: {
+      allowedDomains?: string[];
+      allowPrivateNetworks?: boolean;
+    };
   },
   pluginDataDir: string,
   incarnation: {
@@ -148,7 +158,6 @@ async function buildRealHostApi(): Promise<{
       setPluginConfig: vi.fn(),
     } as never,
     memoryManager: {} as never,
-    keywordEngine: { registerKeywords: vi.fn(), unregisterByPlugin: vi.fn() } as never,
     toolRegistry: {
       unregisterByPlugin: vi.fn(),
       register: vi.fn(),
@@ -169,8 +178,13 @@ async function buildRealHostApi(): Promise<{
     routinesStore: { list: () => [] } as never,
   });
 
-  const createHostApi = harness.capturedRuntimeOptions?.createHostApi as CreateHostApi | undefined;
-  expect(createHostApi, "initPluginRuntime must register a createHostApi factory").toBeDefined();
+  const createHostApi = harness.capturedRuntimeOptions?.createHostApi as
+    | CreateHostApi
+    | undefined;
+  expect(
+    createHostApi,
+    "initPluginRuntime must register a createHostApi factory",
+  ).toBeDefined();
   const pluginDataDir = mkdtempSync(join(tmpdir(), "lvis-hostfetch-verb-"));
   const hostApi = createHostApi!(
     "verb-snapshot-plugin",

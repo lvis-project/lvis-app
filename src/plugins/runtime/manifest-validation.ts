@@ -24,17 +24,17 @@ import type {
   InstallPolicy,
   Tool,
 } from "../types.js";
-import { toolVisibility, isModelVisible } from "./tool-visibility.js";
+import { toolVisibility } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import {
-  marketplaceProviderPresetIdFromSecretKey,
-} from "../../shared/marketplace-package-assets.js";
+  marketplaceProviderPresetIdFromSecretKey } from "../../shared/marketplace-package-assets.js";
 import { resolvePluginContributionDeclarations } from "../plugin-contributions.js";
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
-export { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../types.js";
+export { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE,
+} from "../types.js";
 
 /**
  * Stable SemVer pattern (MAJOR.MINOR.PATCH, no leading zeros, no pre-release,
@@ -106,11 +106,14 @@ export function normalizeInstallPolicy(
   return "user";
 }
 
-export function getDeclaredEmittedEvents(manifest: Pick<PluginManifest, "emittedEvents">): string[] {
+export function getDeclaredEmittedEvents(manifest: Pick<PluginManifest, "emittedEvents">,
+): string[] {
   if (!Array.isArray(manifest.emittedEvents)) return [];
   return [...new Set(
-    manifest.emittedEvents.filter((e): e is string => typeof e === "string" && e.length > 0),
-  )];
+    manifest.emittedEvents.filter((e): e is string => typeof e === "string" && e.length > 0,
+      ),
+  ),
+  ];
 }
 
 /**
@@ -169,7 +172,10 @@ function materializeManifest(manifest: PluginManifest): PluginManifest {
   const tools = manifest.tools.map((t): Tool => {
     const vis = t._meta?.ui?.visibility;
     if (vis === undefined) {
-      return { ...t, _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: [...DUAL] } } };
+      return {
+        ...t,
+        _meta: { ...t._meta, ui: { ...t._meta?.ui, visibility: [...DUAL] } },
+      };
     }
     if (vis.length === 0) {
       throw new Error(
@@ -204,11 +210,14 @@ export async function parsePluginJson(
   } catch (err) {
     throw new Error(
       `Invalid plugin manifest '<unknown>' at '${path}': JSON parse error (${(err as Error).message}). ` +
-      `Example: {"id":"sample-plugin","name":"Sample","version":"1.0.0","entry":"dist/index.js",` +
-      `"description":"Sample plugin.","tools":[{"name":"sample_ping","inputSchema":{"type":"object","properties":{}}}]}`,
+        `Example: {"id":"sample-plugin","name":"Sample","version":"1.0.0","entry":"dist/index.js",` +
+        `"description":"Sample plugin.","tools":[{"name":"sample_ping","inputSchema":{"type":"object","properties":{}}}]}`,
     );
   }
-  const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
+  const pid =
+    typeof parsed?.id === "string" && parsed.id.length > 0
+      ? parsed.id
+      : "<unknown>";
   const fail = (fieldPath: string, reason: string, example: string): never => {
     throw new Error(
       `Invalid plugin manifest '${pid}' at '${fieldPath}' (${path}): ${reason}. Example: ${example}`,
@@ -225,10 +234,13 @@ export async function parsePluginJson(
     typeof networkAccessRaw === "object" &&
     !Array.isArray(networkAccessRaw)
   ) {
-    const allowedDomainsRaw = (networkAccessRaw as { allowedDomains?: unknown }).allowedDomains;
+    const allowedDomainsRaw = (networkAccessRaw as { allowedDomains?: unknown })
+      .allowedDomains;
     if (
       Array.isArray(allowedDomainsRaw) &&
-      allowedDomainsRaw.every((entry): entry is string => typeof entry === "string")
+      allowedDomainsRaw.every(
+        (entry): entry is string => typeof entry === "string",
+      )
     ) {
       try {
         parsed.networkAccess = {
@@ -249,16 +261,23 @@ export async function parsePluginJson(
     for (let i = 0; i < parsed.ui.length; i += 1) {
       const rawExt = parsed.ui[i] as unknown;
       if (!rawExt || typeof rawExt !== "object" || Array.isArray(rawExt)) {
-        fail(`ui[${i}]`, "must be an object", `"ui": [{ "slot": "settings", "kind": "embedded-page", "page": "settings" }]`);
+        fail(
+          `ui[${i}]`,
+          "must be an object",
+          `"ui": [{ "slot": "settings", "kind": "embedded-page", "page": "settings" }]`,
+        );
       }
       const ext = rawExt as Record<string, unknown>;
       const kind = ext.kind;
       const missing: string[] = [];
       if (kind === "embedded-module") {
-        if (typeof ext.entry !== "string" || ext.entry.length === 0) missing.push("entry");
-        if (typeof ext.exportName !== "string" || ext.exportName.length === 0) missing.push("exportName");
+        if (typeof ext.entry !== "string" || ext.entry.length === 0)
+          missing.push("entry");
+        if (typeof ext.exportName !== "string" || ext.exportName.length === 0)
+          missing.push("exportName");
       } else if (kind === "embedded-page") {
-        if (typeof ext.page !== "string" || ext.page.length === 0) missing.push("page");
+        if (typeof ext.page !== "string" || ext.page.length === 0)
+          missing.push("page");
       }
       if (missing.length > 0) {
         fail(
@@ -284,14 +303,17 @@ export async function parsePluginJson(
     const additionalProps: string[] = [];
     for (const e of ajvErrors) {
       if (e.keyword === "additionalProperties") {
-        const extra = (e.params as { additionalProperty?: string } | undefined)?.additionalProperty;
+        const extra = (e.params as { additionalProperty?: string } | undefined)
+          ?.additionalProperty;
         if (typeof extra === "string") additionalProps.push(extra);
       }
     }
     const errs = ajvErrors
       .map((e) => {
         if (e.keyword === "additionalProperties") {
-          const extra = (e.params as { additionalProperty?: string } | undefined)?.additionalProperty;
+          const extra = (
+            e.params as { additionalProperty?: string } | undefined
+          )?.additionalProperty;
           return `${e.instancePath || "/"} unknown property: '${extra ?? "?"}'`;
         }
         // Preserve AJV's `params` for non-additionalProperties errors so
@@ -300,9 +322,12 @@ export async function parsePluginJson(
         // a `pattern` mismatch on `version` would say "must match pattern"
         // without showing the pattern itself.
         const base = `${e.instancePath || "/"} ${e.message ?? ""}`.trim();
-        const params = e.params && typeof e.params === "object" && Object.keys(e.params).length > 0
-          ? ` (${JSON.stringify(e.params)})`
-          : "";
+        const params =
+          e.params &&
+          typeof e.params === "object" &&
+          Object.keys(e.params).length > 0
+            ? ` (${JSON.stringify(e.params)})`
+            : "";
         return `${base}${params}`;
       })
       .join("; ");
@@ -321,10 +346,7 @@ export async function parsePluginJson(
   }
   // Defence in depth for callers using a partial validator: the authoritative
   // schema accepts kebab-case only, so every dotted form is invalid.
-  if (
-    typeof parsed.id === "string" &&
-    parsed.id.includes(".")
-  ) {
+  if (typeof parsed.id === "string" && parsed.id.includes(".")) {
     fail(
       "id",
       `value '${parsed.id}' must use kebab-case; dotted ids are not allowed — manifest_schema`,
@@ -336,11 +358,22 @@ export async function parsePluginJson(
   // pre-release tags (`1.2.3-rc1`), build metadata (`1.2.3+abc`), and
   // leading zeros (`01.2.3`) all fail at this gate instead of slipping
   // through and tripping the publish workflow later.
-  if (typeof parsed.version !== "string" || !STABLE_SEMVER_RE.test(parsed.version)) {
-    fail("version", "must be a stable SemVer string MAJOR.MINOR.PATCH (no pre-release or build metadata, no leading zeros)", `"version": "1.0.0"`);
+  if (
+    typeof parsed.version !== "string" ||
+    !STABLE_SEMVER_RE.test(parsed.version)
+  ) {
+    fail(
+      "version",
+      "must be a stable SemVer string MAJOR.MINOR.PATCH (no pre-release or build metadata, no leading zeros)",
+      `"version": "1.0.0"`,
+    );
   }
   if (typeof parsed.entry !== "string" || parsed.entry.length === 0) {
-    fail("entry", "must be a non-empty relative path to the plugin ESM entry", `"entry": "dist/index.js"`);
+    fail(
+      "entry",
+      "must be a non-empty relative path to the plugin ESM entry",
+      `"entry": "dist/index.js"`,
+    );
   }
   if (!Array.isArray(parsed.tools)) {
     fail(
@@ -369,7 +402,10 @@ export async function parsePluginJson(
       `"tools": [{ "name": "sample_ping", "inputSchema": { "type": "object", "properties": {} } }]`,
     );
   }
-  if (typeof parsed.description !== "string" || parsed.description.length === 0) {
+  if (
+    typeof parsed.description !== "string" ||
+    parsed.description.length === 0
+  ) {
     fail(
       "description",
       "must be a non-empty string (used in inactive-plugin catalog)",
@@ -379,7 +415,7 @@ export async function parsePluginJson(
   if (typeof parsed.publisher !== "string" || parsed.publisher.length === 0) {
     log.warn(
       `plugin '${pid}' at '${path}' is missing publisher field (SHOULD). ` +
-      `Add: "publisher": "Your Org"`,
+        `Add: "publisher": "Your Org"`,
     );
   }
 
@@ -410,12 +446,16 @@ export async function parsePluginJson(
     if (typeof name !== "string" || !TOOL_NAME_PATTERN.test(name)) {
       throw new Error(
         `Invalid tool name '${String(name)}' in plugin '${pid}' at 'tools[${i}].name' (${path}): ` +
-        `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
-        `Example: "tools": [{ "name": "sample_tool", ... }] (not "sample.tool")`,
+          `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
+          `Example: "tools": [{ "name": "sample_tool", ... }] (not "sample.tool")`,
       );
     }
     if (byName.has(name)) {
-      fail(`tools[${i}].name`, `duplicate tool name '${name}'`, `each tools[] entry needs a unique name`);
+      fail(
+        `tools[${i}].name`,
+        `duplicate tool name '${name}'`,
+        `each tools[] entry needs a unique name`,
+      );
     }
     byName.set(name, tool);
   }
@@ -429,49 +469,98 @@ export async function parsePluginJson(
     operationPolicies.set(toolName, policy);
     const policyPath = `tools.${toolName}._meta.lvisai/operationPolicy`;
     if (policy.discriminant !== "operation") {
-      fail(`${policyPath}.discriminant`, "must equal 'operation'", `"discriminant": "operation"`);
+      fail(
+        `${policyPath}.discriminant`,
+        "must equal 'operation'",
+        `"discriminant": "operation"`,
+      );
     }
     const operationNames = Object.keys(policy.operations ?? {});
     if (operationNames.length === 0) {
-      fail(`${policyPath}.operations`, "must declare at least one operation", `"operations": { "list": { "kind": "read", "minimumRisk": "read" } }`);
+      fail(
+        `${policyPath}.operations`,
+        "must declare at least one operation",
+        `"operations": { "list": { "kind": "read", "minimumRisk": "read" } }`,
+      );
     }
-    const inputSchema = tool.inputSchema as { required?: unknown; properties?: Record<string, unknown> };
-    if (!Array.isArray(inputSchema.required) || !inputSchema.required.includes("operation")) {
-      fail(`tools.${toolName}.inputSchema.required`, "must require the top-level operation discriminant", `"required": ["operation"]`);
+    const inputSchema = tool.inputSchema as {
+      required?: unknown;
+      properties?: Record<string, unknown>;
+    };
+    if (
+      !Array.isArray(inputSchema.required) ||
+      !inputSchema.required.includes("operation")
+    ) {
+      fail(
+        `tools.${toolName}.inputSchema.required`,
+        "must require the top-level operation discriminant",
+        `"required": ["operation"]`,
+      );
     }
-    const operationSchema = inputSchema.properties?.operation as { type?: unknown; const?: unknown; enum?: unknown } | undefined;
+    const operationSchema = inputSchema.properties?.operation as
+      | { type?: unknown; const?: unknown; enum?: unknown }
+      | undefined;
     if (!operationSchema || operationSchema.type !== "string") {
-      fail(`tools.${toolName}.inputSchema.properties.operation`, "must be a top-level string schema", `"operation": { "type": "string", "enum": [${operationNames.map((name) => JSON.stringify(name)).join(", ")}] }`);
+      fail(
+        `tools.${toolName}.inputSchema.properties.operation`,
+        "must be a top-level string schema",
+        `"operation": { "type": "string", "enum": [${operationNames.map((name) => JSON.stringify(name)).join(", ")}] }`,
+      );
     }
-    const governedOperationSchema = operationSchema as { type: "string"; const?: unknown; enum?: unknown };
+    const governedOperationSchema = operationSchema as {
+      type: "string";
+      const?: unknown;
+      enum?: unknown;
+    };
     const schemaOperations = Array.isArray(governedOperationSchema.enum)
-      ? governedOperationSchema.enum.filter((value): value is string => typeof value === "string")
+      ? governedOperationSchema.enum.filter(
+          (value): value is string => typeof value === "string",
+        )
       : typeof governedOperationSchema.const === "string"
         ? [governedOperationSchema.const]
         : [];
     if (
       schemaOperations.length !== operationNames.length ||
-      [...schemaOperations].sort().some((name, index) => name !== [...operationNames].sort()[index])
+      [...schemaOperations]
+        .sort()
+        .some((name, index) => name !== [...operationNames].sort()[index])
     ) {
-      fail(`tools.${toolName}.inputSchema.properties.operation`, "enum/const must exactly match lvisai/operationPolicy operations", `use exactly ${JSON.stringify(operationNames.sort())}`);
+      fail(
+        `tools.${toolName}.inputSchema.properties.operation`,
+        "enum/const must exactly match lvisai/operationPolicy operations",
+        `use exactly ${JSON.stringify(operationNames.sort())}`,
+      );
     }
     const visibility = toolVisibility(tool);
     for (const [operation, rule] of Object.entries(policy.operations)) {
       if (rule.appVisible === true && !visibility.includes("app")) {
-        fail(`${policyPath}.operations.${operation}.appVisible`, "cannot expand a Tool that is not app-visible", `set tools[]. _meta.ui.visibility to include "app" or remove appVisible`);
+        fail(
+          `${policyPath}.operations.${operation}.appVisible`,
+          "cannot expand a Tool that is not app-visible",
+          `set tools[]. _meta.ui.visibility to include "app" or remove appVisible`,
+        );
       }
     }
     for (const [operation, rule] of Object.entries(policy.operations)) {
       if (!rule.requiresRead) continue;
       const readTool = byName.get(rule.requiresRead.tool);
-      const readPolicy = operationPolicies.get(rule.requiresRead.tool) ??
+      const readPolicy =
+        operationPolicies.get(rule.requiresRead.tool) ??
         readTool?._meta?.["lvisai/operationPolicy"];
       if (!readTool || !readPolicy) {
-        fail(`${policyPath}.operations.${operation}.requiresRead.tool`, "must reference a declared Tool with lvisai/operationPolicy", `reference a governed tool in tools[]`);
+        fail(
+          `${policyPath}.operations.${operation}.requiresRead.tool`,
+          "must reference a declared Tool with lvisai/operationPolicy",
+          `reference a governed tool in tools[]`,
+        );
       }
       for (const readOperation of rule.requiresRead.operations) {
         if (readPolicy!.operations[readOperation]?.kind !== "read") {
-          fail(`${policyPath}.operations.${operation}.requiresRead.operations`, `'${readOperation}' must reference a read operation`, `choose a kind='read' operation from '${rule.requiresRead.tool}'`);
+          fail(
+            `${policyPath}.operations.${operation}.requiresRead.operations`,
+            `'${readOperation}' must reference a read operation`,
+            `choose a kind='read' operation from '${rule.requiresRead.tool}'`,
+          );
         }
       }
     }
@@ -486,7 +575,7 @@ export async function parsePluginJson(
   ) {
     log.warn(
       `protected plugin '${pid}' has config.testMode=true (${path}). ` +
-      `testMode is a development flag and must not ship in production installs — please remove it from the installed manifest.`,
+        `testMode is a development flag and must not ship in production installs — please remove it from the installed manifest.`,
     );
   }
 
@@ -574,31 +663,13 @@ export async function parsePluginJson(
     // rejected by `exactlyApp` (`model ∉ vis` required). No separate leak guard.
   }
 
-  // #885 v6 — keywords[].skillId must name a MODEL-VISIBLE tool (a keyword
-  // preloads that exact Tool into the model's turn scope). Replaces the old
-  // `parsed.tools.includes(sk)`
-  // string membership with a normalized-Tool[] lookup + visibility read. The
-  // legacy `toolSchemas` key ⊆ all-declared-tools check is DELETED — structurally
-  // impossible now that every tool IS its own object (no separate schema map).
-  const kw = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-  for (let i = 0; i < kw.length; i += 1) {
-    const sk = kw[i]?.skillId;
-    const tool = typeof sk === "string" ? byName.get(sk) : undefined;
-    if (!tool || !isModelVisible(tool)) {
-      fail(
-        `keywords[${i}].skillId`,
-        `"${String(sk)}" must name a model-visible tool for keyword preload`,
-        `add a tools[] entry '${String(sk)}' whose visibility includes "model", or fix the skillId`,
-      );
-    }
-  }
-
   // #893 — hostSecrets.read[] schema enforcement. The SDK JSON-schema mirrors
   // this rule, but we re-check at host load time so a plugin shipped with a
   // stale SDK schema cannot grant itself a wider allowlist by adding a
   // non-`llm.apiKey.*` entry. Reason tag is `manifest_schema` to mirror the
   // host's other supply-chain-visibility audit tags.
-  const hostSecretsRaw: unknown = (parsed as { hostSecrets?: unknown }).hostSecrets;
+  const hostSecretsRaw: unknown = (parsed as { hostSecrets?: unknown })
+    .hostSecrets;
   if (hostSecretsRaw !== undefined) {
     if (
       hostSecretsRaw === null ||
@@ -675,7 +746,9 @@ export async function parsePluginJson(
   // the event is in NEITHER set (a dangling reference the plugin can't service).
   const subs = Array.isArray(parsed.eventSubscriptions) ? parsed.eventSubscriptions : [];
   const knownTypes = new Set([
-    ...subs.map((s) => (typeof s === "string" ? s : (s as { type: string }).type)),
+    ...subs.map((s) =>
+      typeof s === "string" ? s : (s as { type: string }).type,
+    ),
     ...getDeclaredEmittedEvents(parsed as PluginManifest),
   ]);
   const notifEvents = Array.isArray(parsed.notificationEvents) ? parsed.notificationEvents : [];

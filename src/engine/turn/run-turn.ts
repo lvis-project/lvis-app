@@ -13,8 +13,10 @@ import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { MessageMeta } from "../llm/types.js";
 import { queryLoop } from "./query-loop.js";
-import { initialToolTrustOrigin, summarizePermissionUserIntent } from "./trust-origin.js";
-import { estimateRequestInputProjection, projectNextTurnInputTokens } from "../request-input-projection.js";
+import { initialToolTrustOrigin, summarizePermissionUserIntent,
+} from "./trust-origin.js";
+import { estimateRequestInputProjection, projectNextTurnInputTokens,
+} from "../request-input-projection.js";
 import { markStaleToolResults } from "../auto-compact.js";
 import { normalizeAiSdkUsageForCost } from "../llm/pricing.js";
 import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
@@ -29,7 +31,8 @@ import { createRequestAnchor } from "../../tools/pipeline/rationale-control.js";
 
 const log = createLogger("lvis");
 
-function commitsHostInjectedMessages(stopReason: TurnStopReason | undefined): boolean {
+function commitsHostInjectedMessages(stopReason: TurnStopReason | undefined,
+): boolean {
   return stopReason === "end_turn" || stopReason === "input-required";
 }
 
@@ -39,34 +42,34 @@ export async function runTurn(
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
     options?: {
-      /**
-       * Multimodal user content parts — appended after the text input as
-       * additional content blocks (vision images, files). When omitted the
-       * user message is a plain string (current behavior).
-       */
-      attachments?: import("../llm/types.js").UserContentPart[];
+    /**
+     * Multimodal user content parts — appended after the text input as
+     * additional content blocks (vision images, files). When omitted the
+     * user message is a plain string (current behavior).
+     */
+    attachments?: import("../llm/types.js").UserContentPart[];
       originSource?: string | null;
-      /**
-       * C3(a): hard cap on assistant rounds for this turn. When set,
-       * queryLoop terminates cleanly between rounds once the cap is hit
-       * regardless of tool_use chains the LLM still wants to run. Used by
-       * SubAgentRunner to enforce the host-assigned `maxRounds` budget at
-       * the loop boundary instead of using user-cancel semantics.
-       */
-      maxRounds?: number;
-      /**
-       * C3(c): override session id used by the executor's
-       * ToolExecutionContext.metadata.sessionId. SubAgentRunner threads
-       * the child session id here so audit entries from the sub-agent's
-       * tool calls are attributed to the child, not the parent.
-       */
-      sessionIdOverride?: string;
-      /**
-       * C3(b): spawn depth carried through to the executor's metadata.
-       * Sub-agents see depth >= 1 and reject any nested agent_spawn call
-       * before it reaches the LLM-visible registry.
-       */
-      spawnDepth?: number;
+    /**
+     * C3(a): hard cap on assistant rounds for this turn. When set,
+     * queryLoop terminates cleanly between rounds once the cap is hit
+     * regardless of tool_use chains the LLM still wants to run. Used by
+     * SubAgentRunner to enforce the host-assigned `maxRounds` budget at
+     * the loop boundary instead of using user-cancel semantics.
+     */
+    maxRounds?: number;
+    /**
+     * C3(c): override session id used by the executor's
+     * ToolExecutionContext.metadata.sessionId. SubAgentRunner threads
+     * the child session id here so audit entries from the sub-agent's
+     * tool calls are attributed to the child, not the parent.
+     */
+    sessionIdOverride?: string;
+    /**
+     * C3(b): spawn depth carried through to the executor's metadata.
+     * Sub-agents see depth >= 1 and reject any nested agent_spawn call
+     * before it reaches the LLM-visible registry.
+     */
+    spawnDepth?: number;
       /** Internal provenance label prepended to ApprovalGate reasons. */
       approvalReasonPrefix?: string;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
@@ -81,7 +84,8 @@ export async function runTurn(
   ): Promise<TurnResult> {
     const effectiveSessionId = options?.sessionIdOverride ?? self.sessionId;
     if (!options?.inputOrigin) {
-      throw new Error("ConversationLoop.runTurn requires an explicit inputOrigin");
+      throw new Error("ConversationLoop.runTurn requires an explicit inputOrigin",
+    );
     }
     const inputOrigin: ChatInputOrigin = options.inputOrigin;
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
@@ -89,7 +93,8 @@ export async function runTurn(
     const toolTrustOrigin = attachmentParts.length > 0
       ? "file-content"
       : initialToolTrustOrigin(inputOrigin, turnInput);
-    const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
+    const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput,
+  );
     const requestAnchor = options.requestAnchorRawIntent !== undefined && self.deps.headless !== true
       ? createRequestAnchor({
           sessionId: effectiveSessionId,
@@ -106,7 +111,8 @@ export async function runTurn(
     self.deps.skillOverlay?.clear(effectiveSessionId);
 
 
-    self.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin });
+    self.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin,
+  });
     if (!self.provider) {
       const err = t("be_conversationLoop.llmProviderNotConfigured");
       callbacks?.onError?.(err);
@@ -148,19 +154,17 @@ export async function runTurn(
     };
 
     try {
-
-
-
-    // §4.5.2 step 2 — KEYWORD_CLASSIFY
-    const classification = self.deps.keywordEngine.classify(turnInput);
-    self.tracer.step("KEYWORD_CLASSIFY", { type: classification.type });
+    // §4.5.2 step 2 — INPUT_CLASSIFY
+    const classification = self.deps.inputClassifier.classify(turnInput);
+    self.tracer.step("INPUT_CLASSIFY", { type: classification.type });
     // §4.5.2 step 3 — ROUTE_RESOLVE
     const routeResult = self.deps.routeEngine.route(classification);
     self.tracer.step("ROUTE_RESOLVE", { route: routeResult.route });
 
     if (routeResult.route === "command") {
       self.currentAbortController = null;
-      return self.handleCommand(routeResult.command, routeResult.args, inputOrigin, callbacks);
+      return self.handleCommand(routeResult.command, routeResult.args, inputOrigin, callbacks,
+      );
     }
 
     // §4.5.2 step 4 — TURN_ORCHESTRATE
@@ -189,12 +193,15 @@ export async function runTurn(
     const promptGateInput = options?.initialGuidance
       ? `${turnInput}\n\n${options.initialGuidance}`
       : turnInput;
-    const promptGate = await self.fireUserPromptSubmit({
-      inputText: promptGateInput,
-      inputOrigin,
-      route: routeResult.route,
-      classification: classification.type,
-    }, effectiveSessionId);
+    const promptGate = await self.fireUserPromptSubmit(
+      {
+        inputText: promptGateInput,
+        inputOrigin,
+        route: routeResult.route,
+        classification: classification.type,
+      },
+      effectiveSessionId,
+    );
     if (promptGate.decision === "deny") {
       // Refuse the turn. Mirror handleCommand's blocked return: surface the
       // refusal text to the renderer, append nothing to history (the prompt
@@ -253,7 +260,9 @@ export async function runTurn(
             // was never recorded (mid-turn instrumentation) we contribute
             // 0 ms.
             const elapsed =
-              typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs >= 0
+              typeof durationMs === "number" &&
+              Number.isFinite(durationMs) &&
+              durationMs >= 0
                 ? durationMs
                 : startedAt !== undefined
                   ? Math.max(0, Date.now() - startedAt)
@@ -261,20 +270,27 @@ export async function runTurn(
             turnToolCount += 1;
             turnCumulativeToolMs += elapsed;
             const prev = turnToolBreakdown.get(name) ?? { count: 0, ms: 0 };
-            turnToolBreakdown.set(name, { count: prev.count + 1, ms: prev.ms + elapsed });
-            callbacks.onToolEnd?.(name, result, isError, meta, uiPayload, elapsed);
+            turnToolBreakdown.set(name, {
+              count: prev.count + 1,
+              ms: prev.ms + elapsed,
+            });
+            callbacks.onToolEnd?.(
+              name,
+              result,
+              isError,
+              meta,
+              uiPayload,
+              elapsed,
+            );
           },
         }
       : undefined;
     const callbacksForLoop = wrappedCallbacks ?? callbacks;
 
-    const baseText = routeResult.route === "skill"
-      ? t("be_conversationLoop.skillRoutePrefix", { skillId: routeResult.skillId, input: turnInput })
-      : turnInput;
     const userContent: string | import("../llm/types.js").UserContentPart[] =
       attachmentParts.length > 0
-        ? [{ type: "text" as const, text: baseText }, ...attachmentParts]
-        : baseText;
+        ? [{ type: "text" as const, text: turnInput }, ...attachmentParts]
+        : turnInput;
     const personaPromptMeta = options?.rolePrompt?.id
       ? {
           id: options.rolePrompt.id,
@@ -285,20 +301,18 @@ export async function runTurn(
     // user bubble — for a plugin overlay trigger AND for an MCP App's confirmed
     // `ui/message`. Both read provenance from their own envelope; `source` is what the
     // transcript shows (`overlay:…` / `app:…`).
-    const importedTrigger = inputOrigin === "plugin-emitted"
-      ? parseImportedTriggerEnvelopePayload(turnInput)
-      : inputOrigin === "app-emitted"
-        ? parseAppMessageEnvelopePayload(turnInput)
-        : null;
+    const importedTrigger =
+      inputOrigin === "plugin-emitted"
+        ? parseImportedTriggerEnvelopePayload(turnInput)
+        : inputOrigin === "app-emitted"
+          ? parseAppMessageEnvelopePayload(turnInput)
+          : null;
     if (inputOrigin === "agent-message") {
       agentMessageInputId = randomUUID();
     }
     const userMeta: MessageMeta = {
       ...(agentMessageInputId ? { hostInjectionId: agentMessageInputId } : {}),
       ...(personaPromptMeta ? { activePersonaPrompt: personaPromptMeta } : {}),
-      ...(routeResult.route === "skill"
-        ? { displayText: turnInput, routeSkill: { skillId: routeResult.skillId } }
-        : {}),
       ...(importedTrigger
         ? {
             displayText: importedTrigger.body,
@@ -330,7 +344,10 @@ export async function runTurn(
       });
     }
     // §4.5.2 step 5 — HISTORY_APPEND
-    self.tracer.step("HISTORY_APPEND", { role: "user", historySize: self.history.length });
+    self.tracer.step("HISTORY_APPEND", {
+      role: "user",
+      historySize: self.history.length,
+    });
 
     // Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
@@ -364,42 +381,49 @@ export async function runTurn(
       effectiveSessionId,
     );
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
-    self.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
+    self.tracer.step("PROMPT_ASSEMBLE", {
+      promptLen: systemPrompt.length,
+      activePlugins: scope.activePluginIds.size,
+    });
     let result: Awaited<ReturnType<typeof queryLoop>>;
     // Establish per-session ALS context so Gate 4 (plugin-runtime-delegate)
-      // can consult the CALLING session's on-demand activation set. The context
-      // uses effectiveSessionId (respects sessionIdOverride for sub-agents) and
-      // propagates through all await chains inside queryLoop, including the
-      // in-process MCP loopback path (LoopbackTransport → PluginMcpServer →
-      // pluginRuntimeToolDelegate). Clearing session B never wipes session A's
-      // activation because the Map is keyed per sessionId.
-      result = await sessionContext.run({ sessionId: effectiveSessionId }, () =>
-        queryLoop(self,
-          systemPrompt,
-          scope,
-          callbacksForLoop,
-          turnSignal,
-          options?.originSource ?? null,
-          {
-            maxRounds: options?.maxRounds,
-            sessionIdOverride: options?.sessionIdOverride,
-            spawnDepth: options?.spawnDepth,
-            approvalReasonPrefix: options?.approvalReasonPrefix,
-            inputOrigin,
-            a2aCausalContext: options?.a2aCausalContext,
-            toolTrustOrigin,
-            ...(requestAnchor ? { requestAnchor } : {}),
-            permissionUserIntent,
-            rolePrompt: options?.rolePrompt,
-          },
-        ),
-      );
+    // can consult the CALLING session's on-demand activation set. The context
+    // uses effectiveSessionId (respects sessionIdOverride for sub-agents) and
+    // propagates through all await chains inside queryLoop, including the
+    // in-process MCP loopback path (LoopbackTransport → PluginMcpServer →
+    // pluginRuntimeToolDelegate). Clearing session B never wipes session A's
+    // activation because the Map is keyed per sessionId.
+    result = await sessionContext.run({ sessionId: effectiveSessionId }, () =>
+      queryLoop(
+        self,
+        systemPrompt,
+        scope,
+        callbacksForLoop,
+        turnSignal,
+        options?.originSource ?? null,
+        {
+          maxRounds: options?.maxRounds,
+          sessionIdOverride: options?.sessionIdOverride,
+          spawnDepth: options?.spawnDepth,
+          approvalReasonPrefix: options?.approvalReasonPrefix,
+          inputOrigin,
+          a2aCausalContext: options?.a2aCausalContext,
+          toolTrustOrigin,
+          ...(requestAnchor ? { requestAnchor } : {}),
+          permissionUserIntent,
+          rolePrompt: options?.rolePrompt,
+        },
+      ),
+    );
     await finalizeTurnState();
     if (!commitsHostInjectedMessages(result.stopReason) && initialGuidanceId) {
       self.history.removeByHostInjectionId(initialGuidanceId);
       initialGuidanceId = null;
     }
-    if (!commitsHostInjectedMessages(result.stopReason) && agentMessageInputId) {
+    if (
+      !commitsHostInjectedMessages(result.stopReason) &&
+      agentMessageInputId
+    ) {
       self.history.removeByHostInjectionId(agentMessageInputId);
       agentMessageInputId = null;
     }
@@ -409,7 +433,10 @@ export async function runTurn(
     // Tool-Level Deferral — carry only intentional plugin/MCP tool surface
     // forward. Unused tool_search promotions should not stick to unrelated
     // follow-up/meta questions as if they were builtins.
-    self.lastTurnToolNames = self.nextCarryForwardToolNames(scope, result.toolCalls);
+    self.lastTurnToolNames = self.nextCarryForwardToolNames(
+      scope,
+      result.toolCalls,
+    );
     const postTurnToolExposure = self.buildToolExposureMetrics(
       scope,
       result.finalToolSchemas,
@@ -429,7 +456,9 @@ export async function runTurn(
     await self.fireLifecycleEvent(
       "Stop",
       {
-        ...(result.stopReason !== undefined ? { stopReason: result.stopReason } : {}),
+        ...(result.stopReason !== undefined
+          ? { stopReason: result.stopReason }
+          : {}),
         toolCount: result.toolCalls.length,
         durationMs: Math.max(0, Date.now() - turnStartedAt),
       },
@@ -450,7 +479,10 @@ export async function runTurn(
         messages: self.history.getMessages(),
         input,
         output: result.text,
-        toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
+        toolCalls: result.toolCalls.map((tc) => ({
+          name: tc.name,
+          isError: false,
+        })),
         tokenUsage: result.usage,
         usageByModel: result.usageByModel,
         toolExposure: postTurnToolExposure,
@@ -491,36 +523,51 @@ export async function runTurn(
       // Tool-result marking — 항상 실행, 저비용. child loop 에서도 작동.
       // token preflight (next turn) 가 동등 압축 처리.
       // child loop 은 fire-and-forget 이라 turn budget 짧음 → markStaleToolResults 만으로 충분.
-      const { messages: afterMark, result: mr } = markStaleToolResults(self.history.getMessages());
+      const { messages: afterMark, result: mr } = markStaleToolResults(
+        self.history.getMessages(),
+      );
       if (mr.marked) {
         self.history.clear();
         self.history.restore(afterMark);
         if (process.env.NODE_ENV !== "production") {
-          log.info(`mark-stale (fallback): marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize`);
+          log.info(
+            `mark-stale (fallback): marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize`,
+          );
         }
       }
       if (!self.deps.disableSessionPersistence) {
-        await self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages());
+        await self.deps.memoryManager.saveSession(
+          self.sessionId,
+          self.history.getMessages(),
+        );
       }
       // Mirror PostTurnHookChain's audit-route format so usage attribution
       // stays consistent across both code paths. SubAgentRunner constructs
       // child loops with `postTurnHookChain: undefined`, which would
       // otherwise log every sub-agent LLM turn as the bare `"llm"` route
       // and lose vendor/model granularity in `~/.lvis/audit.jsonl`.
-      const auditRoute =
-        result.usage
-          ? `${result.vendorProvider}/${result.vendorModel}`
-          : routeResult.route;
-      const auditTokenUsage = normalizeAiSdkUsageForCost(result.usage, result.vendorProvider);
+      const auditRoute = result.usage
+        ? `${result.vendorProvider}/${result.vendorModel}`
+        : routeResult.route;
+      const auditTokenUsage = normalizeAiSdkUsageForCost(
+        result.usage,
+        result.vendorProvider,
+      );
       const auditUsageByModel = result.usageByModel?.map((segment) => ({
         ...segment,
-        tokenUsage: normalizeAiSdkUsageForCost(segment.tokenUsage, segment.vendorProvider),
+        tokenUsage: normalizeAiSdkUsageForCost(
+          segment.tokenUsage,
+          segment.vendorProvider,
+        ),
       }));
       self.auditLogger.logTurn({
         sessionId: self.sessionId,
         input,
         output: result.text,
-        toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
+        toolCalls: result.toolCalls.map((tc) => ({
+          name: tc.name,
+          isError: false,
+        })),
         tokenUsage: auditTokenUsage,
         usageByModel: auditUsageByModel,
         toolExposure: postTurnToolExposure,
@@ -541,8 +588,8 @@ export async function runTurn(
     // turns and turns without a real assistant response (mirrors the
     // turn-end notification gate so dropped turns don't render footers).
     // Production diagnostic — turn_summary 가 사용자 UI (TokenCostBadge 배지
-     // + TokenProgressRing) 의 단일 source 라 *emit 되지 않으면* 두 표면 모두
-     // 0 표시. 어느 단계에서 끊겼는지 정확히 가시화.
+    // + TokenProgressRing) 의 단일 source 라 *emit 되지 않으면* 두 표면 모두
+    // 0 표시. 어느 단계에서 끊겼는지 정확히 가시화.
     const willEmitSummary =
       result.stopReason !== "interrupted" &&
       result.stopReason !== "context-error" &&
@@ -572,7 +619,8 @@ export async function runTurn(
         messages: self.history.getMessages(),
         toolSchemas: result.finalToolSchemas,
       });
-      const lastRoundProjection = self.lastRoundInputProjection ?? postTurnProjection;
+      const lastRoundProjection =
+        self.lastRoundInputProjection ?? postTurnProjection;
       turnTokensIn = projectNextTurnInputTokens({
         providerInputTokens: self.lastRoundProviderInputTokens,
         lastRoundProjection,
@@ -592,7 +640,9 @@ export async function runTurn(
           ? Object.fromEntries(turnToolBreakdown.entries())
           : undefined;
       const uniqueUsageModelKeys = new Set(
-        result.usageByModel?.map((segment) => `${segment.vendorProvider}\u0000${segment.vendorModel}`) ?? [],
+        result.usageByModel?.map(
+          (segment) => `${segment.vendorProvider}\u0000${segment.vendorModel}`,
+        ) ?? [],
       );
       const singleUsageModel =
         uniqueUsageModelKeys.size === 1 && result.usageByModel?.[0]
@@ -613,7 +663,9 @@ export async function runTurn(
               vendorModel: singleUsageModel.vendorModel,
             }
           : {}),
-        ...(result.usageByModel.length > 0 ? { usageByModel: result.usageByModel } : {}),
+        ...(result.usageByModel.length > 0
+          ? { usageByModel: result.usageByModel }
+          : {}),
         ...(breakdown ? { breakdown } : {}),
       };
       // Persist turn-aggregate stats onto the turn-final assistant message so
@@ -624,7 +676,8 @@ export async function runTurn(
       // (rare tool-only termination) — nothing to attach to.
       let attachedTurnSummary = false;
       try {
-        attachedTurnSummary = self.history.attachTurnSummaryToLastAssistant(turnSummaryPayload);
+        attachedTurnSummary =
+          self.history.attachTurnSummaryToLastAssistant(turnSummaryPayload);
       } catch {
         // Meta attach must never break turn completion either.
       }
@@ -632,7 +685,10 @@ export async function runTurn(
         attachedTurnSummary && self.deps.disableSessionPersistence === true;
       if (attachedTurnSummary && !self.deps.disableSessionPersistence) {
         try {
-          await self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages());
+          await self.deps.memoryManager.saveSession(
+            self.sessionId,
+            self.history.getMessages(),
+          );
           turnSummaryDurable = true;
         } catch (err) {
           log.warn("turn_summary final save failed: %s", err);
@@ -710,21 +766,26 @@ export async function runTurn(
 
     retainHostInjectedMessages = commitsHostInjectedMessages(result.stopReason);
     return { ...result, route: routeResult.route };
-    } finally {
-      let removedHostInjectionRows = 0;
-      if (!retainHostInjectedMessages && initialGuidanceId) {
-        removedHostInjectionRows += self.history.removeByHostInjectionId(initialGuidanceId);
-      }
-      if (!retainHostInjectedMessages && agentMessageInputId) {
-        removedHostInjectionRows += self.history.removeByHostInjectionId(agentMessageInputId);
-      }
-      if (removedHostInjectionRows > 0 && !self.deps.disableSessionPersistence) {
-        try {
-          await self.deps.memoryManager.saveSession(self.sessionId, self.history.getMessages());
-        } catch (err) {
-          log.warn("host-injection rollback save failed: %s", err);
-        }
-      }
-      await finalizeTurnState();
+  } finally {
+    let removedHostInjectionRows = 0;
+    if (!retainHostInjectedMessages && initialGuidanceId) {
+      removedHostInjectionRows +=
+        self.history.removeByHostInjectionId(initialGuidanceId);
     }
+    if (!retainHostInjectedMessages && agentMessageInputId) {
+      removedHostInjectionRows +=
+        self.history.removeByHostInjectionId(agentMessageInputId);
+    }
+    if (removedHostInjectionRows > 0 && !self.deps.disableSessionPersistence) {
+      try {
+        await self.deps.memoryManager.saveSession(
+          self.sessionId,
+          self.history.getMessages(),
+        );
+      } catch (err) {
+        log.warn("host-injection rollback save failed: %s", err);
+      }
+    }
+    await finalizeTurnState();
   }
+}

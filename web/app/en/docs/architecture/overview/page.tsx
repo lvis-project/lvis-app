@@ -60,8 +60,8 @@ const layers = [
 
 const flowSteps = [
   { title: "User input", body: <>User input → <code>ChatView</code>.</> },
-  { title: "Skill matching", body: <>The host evaluates candidate keywords registered via <code>registerKeywords</code>.</> },
-  { title: "Tool call decision", body: <>Looks up the Tool Registry by the matched Skill's toolName.</> },
+  { title: "Scope selection", body: <>The Host selects enabled plugin scope from explicit activation and carried session state.</> },
+  { title: "Tool call decision", body: <>The model uses eager Tool schemas or promotes deferred Tools through <code>tool_search</code>.</> },
   { title: "Reviewer evaluation", body: <>Decides auto / card / dialog from the grid of tool RiskLevel × Category × the user's grant.</> },
   { title: "Execution", body: <>On approval, the plugin handler runs (cross-plugin calls possible via <code>callTool</code>).</> },
   { title: "Response streaming", body: <>Tool results + thinking tokens → LLM context → streamed into the chat body.</> },

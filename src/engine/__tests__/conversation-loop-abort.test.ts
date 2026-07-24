@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
@@ -12,20 +12,20 @@ import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 function makeHarness(): { loop: ConversationLoop; toolRegistry: ToolRegistry } {
   const toolRegistry = new ToolRegistry();
-  const keywordEngine = new KeywordEngine();
-  const routeEngine = new RouteEngine({ toolRegistry });
+  const inputClassifier = new InputClassifier();
+  const routeEngine = new RouteEngine();
 
-  const loop = new ConversationLoop(({
+  const loop = new ConversationLoop({
     settingsService: {
       get: () => fakeLlmSettings(),
       getSecret: () => "test-key",
     },
     systemPromptBuilder: { build: () => "system" },
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
 
   return { loop, toolRegistry };
 }
@@ -50,7 +50,8 @@ describe("ConversationLoop currentAbortController lifecycle", () => {
     };
 
     const errors: string[] = [];
-    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) }, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) }, undefined, { inputOrigin: "user-keyboard" },
+    );
     expect(result.text).toContain("synthetic provider failure");
     expect(errors[0]).toContain("synthetic provider failure");
     expect(loop.currentAbortController).toBeNull();
@@ -62,17 +63,20 @@ describe("ConversationLoop currentAbortController lifecycle", () => {
       vendor: "openai" as const,
       async *streamTurn(): AsyncIterable<StreamEvent> {
         yield { type: "text_delta", text: "도구를 확인합니다." } as StreamEvent;
-        yield { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent;
+        yield { type: "tool_call", id: "t1", name: "noop_tool", input: {},
+        } as StreamEvent;
       },
     };
 
     const errors: string[] = [];
-    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) }, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
     expect(result.stopReason).not.toBe("tool_use");
     expect(result.text).toContain("도구 호출 완료 신호 없이 종료");
     expect(errors[0]).toContain("도구 호출 완료 신호 없이 종료");
-    expect(loop.getHistory().getMessages().some((message) => message.role === "tool")).toBe(false);
+    expect(loop.getHistory().getMessages().some((message) => message.role === "tool"),
+    ).toBe(false);
   });
 });
 
@@ -92,7 +96,8 @@ describe("ConversationLoop abort (B4)", () => {
         // Signal abort via the loop's currentAbortController (set by runTurn).
         // We can't easily get that here; instead pass an external AC and abort it.
         yield { type: "text_delta", text: "world" } as StreamEvent;
-        yield { type: "message_complete", stopReason: "end_turn" } as StreamEvent;
+        yield { type: "message_complete", stopReason: "end_turn",
+        } as StreamEvent;
       },
     };
 
@@ -103,7 +108,8 @@ describe("ConversationLoop abort (B4)", () => {
     const textDeltas: string[] = [];
     const result = await loop.runTurn("hi", {
       onTextDelta: (t) => textDeltas.push(t),
-    }, ac.signal, { inputOrigin: "user-keyboard" });
+    }, ac.signal, { inputOrigin: "user-keyboard" },
+    );
 
     expect(result.stopReason).toBe("interrupted");
     expect(result.text).toContain("[중단됨]");
@@ -121,8 +127,10 @@ describe("ConversationLoop abort (B4)", () => {
       vendor: "openai" as const,
       async *streamTurn() {
         // abortCurrentTurn() was called before runTurn, so signal is pre-aborted
-        yield { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent;
-        yield { type: "message_complete", stopReason: "tool_use" } as StreamEvent;
+        yield { type: "tool_call", id: "t1", name: "noop_tool", input: {},
+        } as StreamEvent;
+        yield { type: "message_complete", stopReason: "tool_use",
+        } as StreamEvent;
         toolExecuted = true;
       },
     };
@@ -132,7 +140,8 @@ describe("ConversationLoop abort (B4)", () => {
     const ac = new AbortController();
     ac.abort();
 
-    const result = await loop.runTurn("go", undefined, ac.signal, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("go", undefined, ac.signal, { inputOrigin: "user-keyboard",
+    });
     expect(result.stopReason).toBe("interrupted");
     expect(toolExecuted).toBe(false);
   });
@@ -154,21 +163,25 @@ describe("ConversationLoop abort (B4)", () => {
         loop.abortCurrentTurn();
         return new Promise<never>(() => {});
       },
-    }));
+    }),
+    );
 
     (loop as { provider: LLMProvider }).provider = {
       vendor: "openai" as const,
       async *streamTurn(): AsyncIterable<StreamEvent> {
         streamCalls += 1;
-        yield { type: "tool_call", id: "t1", name: "stuck_tool", input: {} } as StreamEvent;
-        yield { type: "message_complete", stopReason: "tool_use" } as StreamEvent;
+        yield { type: "tool_call", id: "t1", name: "stuck_tool", input: {},
+        } as StreamEvent;
+        yield { type: "message_complete", stopReason: "tool_use",
+        } as StreamEvent;
       },
     };
 
     const textDeltas: string[] = [];
     const result = await loop.runTurn("go", {
       onTextDelta: (delta) => textDeltas.push(delta),
-    }, undefined, { inputOrigin: "user-keyboard" });
+    }, undefined, { inputOrigin: "user-keyboard" },
+    );
 
     expect(toolEntered).toBe(true);
     expect(streamCalls).toBe(1);
@@ -177,7 +190,8 @@ describe("ConversationLoop abort (B4)", () => {
     expect(textDeltas.join("")).toContain("[중단됨]");
 
     const history = loop.getHistory().getMessages();
-    const toolResult = history.find((message) => message.role === "tool_result");
+    const toolResult = history.find((message) => message.role === "tool_result",
+    );
     expect(toolResult?.content).toContain("취소");
     const lastAssistant = history.filter((message) => message.role === "assistant").at(-1);
     expect(lastAssistant?.content).toBe("[중단됨]");
@@ -190,11 +204,13 @@ describe("ConversationLoop abort (B4)", () => {
       vendor: "openai" as const,
       async *streamTurn() {
         yield { type: "text_delta", text: "Done." } as StreamEvent;
-        yield { type: "message_complete", stopReason: "end_turn" } as StreamEvent;
+        yield { type: "message_complete", stopReason: "end_turn",
+        } as StreamEvent;
       },
     };
 
-    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard",
+    });
     // abort after — no-op
     loop.abortCurrentTurn(); // currentAbortController is null here
 
@@ -215,7 +231,8 @@ describe("ConversationLoop abort (B4)", () => {
       },
     };
 
-    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard",
+    });
     // Should be treated as interrupt, not a hard error
     expect(result.stopReason).toBe("interrupted");
     expect(result.text).toContain("[중단됨]");
@@ -235,7 +252,9 @@ describe("ConversationLoop abort (B4)", () => {
     };
 
     let errorCalled = false;
-    const result = await loop.runTurn("hi", { onError: () => { errorCalled = true; } }, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("hi", { onError: () => { errorCalled = true; },
+      }, undefined, { inputOrigin: "user-keyboard" },
+    );
     expect(result.stopReason).not.toBe("interrupted");
     expect(result.text).toContain("네트워크 연결 문제");
     expect(errorCalled).toBe(true);

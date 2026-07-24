@@ -5,11 +5,12 @@
  * on the same map. Keeps boot.ts and boot/plugins.ts in sync without a
  * circular dependency.
  */
-import type { PluginRuntime, PluginToolInvocationDelegate } from "../plugins/runtime.js";
+import type { PluginRuntime, PluginToolInvocationDelegate,
+} from "../plugins/runtime.js";
 import type { PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
-import type { KeywordEngine } from "../core/keyword-engine.js";
+import type { InputClassifier } from "../core/input-classifier.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
@@ -44,7 +45,8 @@ export function emitEvent(type: string, data?: unknown): void {
   const handlers = eventHandlers.get(type);
   if (handlers) {
     for (const handler of handlers) {
-      try { handler(data); } catch (err) { log.error({ err, eventType: type }, `event handler error (${type})`); }
+      try { handler(data); } catch (err) { log.error({ err, eventType: type }, `event handler error (${type})`);
+      }
     }
   }
 }
@@ -77,7 +79,7 @@ export interface AppServices {
   /** Main-owned renderer action boundary; renderer supplies only target id and user intent. */
   remoteA2AActionController?: RemoteA2AActionController;
   memoryManager: MemoryManager;
-  keywordEngine: KeywordEngine;
+  inputClassifier: InputClassifier;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
@@ -195,7 +197,8 @@ export interface AppServices {
   routinesScheduler?: import("../main/routines-scheduler.js").RoutinesScheduler;
   sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
   /** Late-bound sub-agent runner lookup for read-only transcript/status IPC surfaces. */
-  getSubAgentRunner?: () => import("../engine/subagent-runner.js").SubAgentRunner | undefined;
+  getSubAgentRunner?: () =>
+    | import("../engine/subagent-runner.js").SubAgentRunner | undefined;
   /** Work board persistence (~/.lvis/work-board/board.json) — backs the work-board IPC domain. */
   workBoardStore?: import("../main/work-board-store.js").WorkBoardStore;
   /**

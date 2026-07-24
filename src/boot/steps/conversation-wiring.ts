@@ -36,8 +36,10 @@ import { A2ASubAgentMessageBus } from "../../engine/a2a-subagent-message-bus.js"
 import { A2AAgentMessageBus } from "../../engine/a2a-agent-message-bus.js";
 import { A2AAgentMessageMailbox } from "../../engine/a2a-agent-message-mailbox.js";
 import { SubAgentMessageMailbox } from "../../engine/subagent-message-mailbox.js";
-import { createWorkBoardEngine, type WorkBoardEngine } from "../../core/work-board-engine.js";
-import { createWorkBoardReporter, type WorkBoardReporter } from "../../work-board/work-report.js";
+import { createWorkBoardEngine, type WorkBoardEngine,
+} from "../../core/work-board-engine.js";
+import { createWorkBoardReporter, type WorkBoardReporter,
+} from "../../work-board/work-report.js";
 import { appendMemory } from "../../work-board/work-memory.js";
 import { WORK_BOARD } from "../../shared/ipc-channels.js";
 import { fanOutToAllWindows } from "../../ipc/broadcast-helpers.js";
@@ -109,7 +111,7 @@ export async function wireConversation(
   const {
     settingsService,
     systemPromptBuilder,
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager,
@@ -144,7 +146,7 @@ export async function wireConversation(
   const routineLoopDeps = {
     settingsService,
     systemPromptBuilder,
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager,
@@ -162,8 +164,7 @@ export async function wireConversation(
   const routineEngine = createRoutineEngine({
     createConversationLoop: (input) => createRoutineConversationLoop(
       routineLoopDeps,
-      { scope: input.scope },
-    ),
+      { scope: input.scope }),
     // Permission policy Layer 4 — snapshot the live plugin runtime's active id set so
     // routines with `scope.pluginIds.mode === "inherit"` are normalized
     // to a concrete allow-list at fire time (never at loop-construction).
@@ -174,7 +175,8 @@ export async function wireConversation(
   const retainedWorkspaceRoots = readPermissionSettings().permissions.additionalDirectories;
   for (const root of removedWorkspaceRoots) {
     routineEngine.revokeWorkspaceRoot(root, {
-      preserveRoots: retainedDescendantWorkspaceRoots(root, retainedWorkspaceRoots),
+      preserveRoots: retainedDescendantWorkspaceRoots(root, retainedWorkspaceRoots,
+      ),
     });
   }
 
@@ -182,13 +184,16 @@ export async function wireConversation(
   // through `notificationService` (#841) so they inherit the same focus
   // gate, cooldown, sanitization, and audit policy as the host's lifecycle
   // notifications.
-  ctx.disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow, notificationService, bootAuditLogger);
-  ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
+  ctx.disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow, notificationService, bootAuditLogger,
+  );
+  ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow,
+  );
   ctx.pluginEventBridgeWindow = mainWindow;
   ctx.replacePluginEventBridge = (win: BrowserWindow) => {
     ctx.pluginEventBridgeWindow = win;
     ctx.disposePluginEventBridge();
-    ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, win);
+    ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, win,
+    );
   };
 
   // §4.5 + Agent 6: PostTurnHookChain.
@@ -216,7 +221,7 @@ export async function wireConversation(
   conversationLoop = createConversationLoop({
     settingsService,
     systemPromptBuilder,
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     supportsA2AParentDelivery: true,
@@ -235,7 +240,8 @@ export async function wireConversation(
     // and forwards it to the broadcaster declared in the permissions
     // IPC domain — no engine→ipc coupling, just a callback handed down.
     broadcastPermissionConfigChanged: () => {
-      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows(),
+      } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
     },
     pluginRuntime,
     pluginOperationGrants,
@@ -268,7 +274,7 @@ export async function wireConversation(
   });
   sideChatConversationLoop = createSideChatConversationLoop({
     settingsService,
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     permissionManager,
@@ -290,7 +296,8 @@ export async function wireConversation(
 
   lateBinding.conversationLoopRef.fn = conversationLoop;
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
-  lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
+  lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger,
+  );
   log.info("boot: plugin callLlm ready (rate-limited)");
 
   const preferenceRefreshService = new PreferenceRefreshService({
@@ -320,10 +327,12 @@ export async function wireConversation(
     resolveChildAddress: async (parentSessionId, childSessionId, messageId) => {
       const runner = subAgentRunnerRef.fn;
       return runner
-        ? await runner.resolveSubAgentAddress(parentSessionId, childSessionId, messageId)
+        ? await runner.resolveSubAgentAddress(parentSessionId, childSessionId, messageId,
+          )
         : null;
     },
-    releaseEphemeralChildAddress: (parentSessionId, childSessionId, messageId) =>
+    releaseEphemeralChildAddress: (parentSessionId, childSessionId, messageId,
+    ) =>
       subAgentRunnerRef.fn?.releaseEphemeralParentDelivery(
         parentSessionId,
         childSessionId,
@@ -345,8 +354,7 @@ export async function wireConversation(
     },
     resolvePeer: async (
       senderChildSessionId,
-      recipientChildSessionId,
-    ) => {
+      recipientChildSessionId) => {
       const runner = subAgentRunnerRef.fn;
       return runner
         ? await runner.resolveSubAgentPeer(
@@ -364,7 +372,7 @@ export async function wireConversation(
     parentDeps: {
       settingsService,
       systemPromptBuilder,
-      keywordEngine,
+      inputClassifier,
       routeEngine,
       toolRegistry,
       memoryManager,
@@ -416,7 +424,8 @@ export async function wireConversation(
       // destroyed-check + send-race swallow is reused per window.
       fanOutToAllWindows(BrowserWindowValue.getAllWindows(), WORK_BOARD.runProgress, event, {
         logger: log,
-      });
+      },
+      );
     },
     // Self-improvement (Hermes): after a run completes, append a one-line
     // learning to the item's project work memory. appendMemory enforces the
@@ -424,7 +433,9 @@ export async function wireConversation(
     onRunComplete: ({ itemId, title, projectRoot }) =>
       appendMemory(workBoardStorage, [
         `${new Date().toISOString().slice(0, 10)}: autonomous run completed — #${itemId} ${title}`,
-      ], projectRoot ? { projectRoot } : undefined),
+        ],
+        projectRoot ? { projectRoot } : undefined,
+      ),
     // Persist each run's plan+execute conversation to sessions/<id>/<runId>.jsonl
     // so run context survives restart and accumulates across re-runs.
     transcriptStorage: workBoardStorage,

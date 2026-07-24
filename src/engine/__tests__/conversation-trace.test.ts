@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
@@ -20,7 +20,7 @@ import {
   createTracer,
   type ConversationTracer,
   type TraceStepName,
-  type TraceEntry
+  type TraceEntry,
 } from "../../observability/conversation-trace.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
@@ -53,29 +53,29 @@ function makeLoop(provider: LLMProvider) {
       jsonSchema: {
         type: "object",
         properties: { path: { type: "string" } },
-        required: ["path"]
+        required: ["path"],
       },
       isReadOnly: () => true,
-      execute: async () => ({ output: "src\npackage.json", isError: false })
+      execute: async () => ({ output: "src\npackage.json", isError: false }),
     }),
   );
 
-  const keywordEngine = new KeywordEngine();
-  const routeEngine = new RouteEngine({ toolRegistry });
-  const loop = new ConversationLoop(({
+  const inputClassifier = new InputClassifier();
+  const routeEngine = new RouteEngine();
+  const loop = new ConversationLoop({
     settingsService: {
       get: () => fakeLlmSettings(),
-      getSecret: () => "test-key"
+      getSecret: () => "test-key",
     },
     systemPromptBuilder: { build: () => "system" },
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager: {
       saveSession: () => {},
-      listSessions: () => []
-    }
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+      listSessions: () => [],
+    },
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
   return loop;
 }
@@ -86,7 +86,8 @@ describe("ConversationTracer — §4.5 11-step", () => {
       [
         { type: "reasoning_delta", text: "생각 중" },
         { type: "text_delta", text: "먼저 확인" },
-        { type: "tool_call", id: "t1", name: "list_directory", input: { path: "src" } },
+        { type: "tool_call", id: "t1", name: "list_directory", input: { path: "src" },
+        },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -100,12 +101,13 @@ describe("ConversationTracer — §4.5 11-step", () => {
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
-    await loop.runTurn("디렉토리 보여줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("디렉토리 보여줘", undefined, undefined, { inputOrigin: "user-keyboard",
+    });
 
     const names = new Set(rec.steps.map((s) => s.name));
     const expected: TraceStepName[] = [
       "REQUEST_ENTRY",
-      "KEYWORD_CLASSIFY",
+      "INPUT_CLASSIFY",
       "ROUTE_RESOLVE",
       "TURN_ORCHESTRATE",
       "HISTORY_APPEND",
@@ -157,7 +159,9 @@ describe("ConversationTracer — §4.5 11-step", () => {
     const rec = new RecordingTracer();
     loop.setTracer(rec);
 
-    await loop.runTurn("인덱서 호출", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("인덱서 호출", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     const streamStep = rec.steps.find((step) => step.name === "LLM_STREAM");
     expect(streamStep?.meta).toMatchObject({
@@ -175,7 +179,9 @@ describe("ConversationTracer — §4.5 11-step", () => {
     });
     expect(JSON.stringify(streamStep?.meta)).not.toContain("인덱서 호출");
 
-    const errorStep = rec.steps.find((step) => step.name === "LLM_STREAM_ERROR");
+    const errorStep = rec.steps.find(
+      (step) => step.name === "LLM_STREAM_ERROR",
+    );
     expect(errorStep?.meta).toMatchObject({
       classification: "rate-limit",
       providerError: {

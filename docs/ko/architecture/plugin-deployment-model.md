@@ -142,9 +142,6 @@ export interface PluginManifest {
   methods: string[];
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
-  /** @deprecated Tool-schema preload only; bundled Skill discovery uses manifest.skills. */
-  keywords?: Array<{ keyword: string; skillId: string }>;
-
   // ─── Phase 1.5 신규 (deployment model) ─────────────────
 
   /** 배포 모드 — 기본값 "user" (backward compat) */
@@ -344,7 +341,8 @@ export class ManagedPolicySync {
       if (!(await this.verifyPolicySignature(fresh))) {
         this.auditService.log({
           type: "error",
-          payload: { scope: "managed-policy", reason: "signature verification failed" },
+          payload: { scope: "managed-policy", reason: "signature verification failed",
+          },
         });
         return { status: "signature-failed", policy: await this.loadCache() };
       }
@@ -383,15 +381,16 @@ export class ManagedPluginInstaller {
   /** 정책과 현재 설치 상태를 diff하여 install/update/remove */
   async syncFromPolicy(policy: ManagedPolicy): Promise<SyncResult> {
     const installed = await this.listInstalled();
-    const target = new Map(policy.enforcements.managedPlugins.map(p => [p.id, p]));
-    const installedIds = new Set(installed.map(p => p.id));
+    const target = new Map(policy.enforcements.managedPlugins.map((p) => [p.id, p]),
+    );
+    const installedIds = new Set(installed.map((p) => p.id));
 
     const toInstall: ManagedPluginEntry[] = [];
     const toUpdate: Array<{ from: InstalledPlugin; to: ManagedPluginEntry }> = [];
     const toRemove: InstalledPlugin[] = [];
 
     for (const entry of target.values()) {
-      const existing = installed.find(p => p.id === entry.id);
+      const existing = installed.find((p) => p.id === entry.id);
       if (!existing) toInstall.push(entry);
       else if (existing.version !== entry.version) toUpdate.push({ from: existing, to: entry });
     }
@@ -401,7 +400,7 @@ export class ManagedPluginInstaller {
 
     // denyList 우선 적용
     for (const deny of policy.denyList) {
-      const target = installed.find(p => p.id === deny.id);
+      const target = installed.find((p) => p.id === deny.id);
       if (target && !toRemove.includes(target)) toRemove.push(target);
     }
 
@@ -424,18 +423,21 @@ export class ManagedPluginInstaller {
     // 8. 실패 시: rollback + audit + throw
   }
 
-  async update(from: InstalledPlugin, to: ManagedPluginEntry): Promise<InstallResult> {
+  async update(from: InstalledPlugin, to: ManagedPluginEntry,
+  ): Promise<InstallResult> {
     // 1. install new version in parallel dir
     // 2. 검증 성공 시 symlink swap
     // 3. 이전 버전 유지 (다음 gc 주기까지, rollback 대비)
   }
 
-  async remove(plugin: InstalledPlugin, reason: string): Promise<InstallResult> {
+  async remove(plugin: InstalledPlugin, reason: string,
+  ): Promise<InstallResult> {
     // managed 전용 remove API (IT-triggered only)
     // PluginDeploymentGuard를 bypass할 수 있는 유일한 경로
   }
 
-  async verifySignature(pluginPath: string, expectedSig: string): Promise<boolean> {
+  async verifySignature(pluginPath: string, expectedSig: string,
+  ): Promise<boolean> {
     // manifest 파일 로드 + canonicalize + ECDSA verify
   }
 
@@ -469,7 +471,7 @@ export class PluginDeploymentGuard {
    */
   canUninstall(pluginId: string, actor: "user" | "it-admin"): GuardResult {
     if (actor === "it-admin") return { allowed: true };
-    const entry = this.registry().plugins.find(p => p.id === pluginId);
+    const entry = this.registry().plugins.find((p) => p.id === pluginId);
     if (!entry) return { allowed: false, reason: "plugin-not-found" };
 
     const managedDir = path.join(os.homedir(), ".lvis", "plugins", "managed");
@@ -491,7 +493,7 @@ export class PluginDeploymentGuard {
 
   canDisable(pluginId: string, actor: "user" | "it-admin"): GuardResult {
     if (actor === "it-admin") return { allowed: true };
-    const entry = this.registry().plugins.find(p => p.id === pluginId);
+    const entry = this.registry().plugins.find((p) => p.id === pluginId);
     if (!entry) return { allowed: false, reason: "plugin-not-found" };
 
     // manifestPath 기반 판정 (위 canUninstall과 동일 원칙)
@@ -501,7 +503,9 @@ export class PluginDeploymentGuard {
     if (!isManagedDir) return { allowed: true };
 
     const policy = this.policy();
-    const managedEntry = policy?.enforcements.managedPlugins.find(p => p.id === pluginId);
+    const managedEntry = policy?.enforcements.managedPlugins.find(
+      (p) => p.id === pluginId,
+    );
     if (managedEntry?.lockEnabled) {
       return {
         allowed: false,
@@ -528,20 +532,22 @@ export class PluginDeploymentGuard {
     const enf = policy.enforcements;
 
     // denyList 우선
-    if (policy.denyList.some(d => d.id === pluginId)) {
-      return { allowed: false, reason: "deny-list", userMessage: "차단된 플러그인입니다." };
+    if (policy.denyList.some((d) => d.id === pluginId)) {
+      return { allowed: false, reason: "deny-list", userMessage: "차단된 플러그인입니다.",
+      };
     }
 
     switch (enf.userInstallPolicy) {
       case "allow":
         return { allowed: true };
       case "deny":
-        return { allowed: false, reason: "policy-deny-all", userMessage: "회사 정책: 자율 설치 불가" };
+        return { allowed: false, reason: "policy-deny-all", userMessage: "회사 정책: 자율 설치 불가",
+        };
       case "allowlist":
-        if (enf.userAllowlist?.some(p => this._glob(p, pluginId))) return { allowed: true };
+        if (enf.userAllowlist?.some((p) => this._glob(p, pluginId))) return { allowed: true };
         return { allowed: false, reason: "not-in-allowlist" };
       case "denylist":
-        if (enf.userDenylist?.some(p => this._glob(p, pluginId))) return { allowed: false, reason: "in-denylist" };
+        if (enf.userDenylist?.some((p) => this._glob(p, pluginId))) return { allowed: false, reason: "in-denylist" };
         return { allowed: true };
       case "ask":
         return { allowed: true, requiresPrompt: true };
@@ -600,7 +606,8 @@ export class PluginMarketplaceService {
     if (this.deploymentGuard) {
       const guard = this.deploymentGuard.canUninstall(pluginId, actor);
       if (!guard.allowed) {
-        throw new Error(guard.userMessage ?? `Uninstall blocked: ${guard.reason}`);
+        throw new Error(guard.userMessage ?? `Uninstall blocked: ${guard.reason}`,
+        );
       }
     }
     // 기존 uninstall 로직 (npm uninstall + registry 제거)
@@ -613,7 +620,8 @@ export class PluginMarketplaceService {
     if (this.deploymentGuard) {
       const guard = this.deploymentGuard.canInstall(source.pluginId, actor);
       if (!guard.allowed) {
-        throw new Error(guard.userMessage ?? `Install blocked: ${guard.reason}`);
+        throw new Error(guard.userMessage ?? `Install blocked: ${guard.reason}`,
+        );
       }
       if (guard.requiresPrompt && actor === "user") {
         // UI approval flow (Phase 2)
@@ -640,7 +648,8 @@ export class PluginRuntime {
     if (this.deploymentGuard) {
       const guard = this.deploymentGuard.canDisable(pluginId, actor);
       if (!guard.allowed) {
-        throw new Error(guard.userMessage ?? `Disable blocked: ${guard.reason}`);
+        throw new Error(guard.userMessage ?? `Disable blocked: ${guard.reason}`,
+        );
       }
     }
     const plugin = this.plugins.get(pluginId);
@@ -763,7 +772,7 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 ## 11. Edge Cases 분석
 
 | # | 시나리오 | 대응 |
-|---|---|---|
+|---|------------------------------------------------------------------- |------------------------------------------------------------------------------------------------------------------ |
 | 1 | 정책 서명 검증 실패 | `ManagedPolicySync.syncNow`가 `signature-failed` 반환 → last-valid cache 사용 + CRITICAL audit + IT 알림 (Phase 3) |
 | 2 | IT admin API 다운 | `fetchPolicy` 실패 → cache 사용 + UI 경고 배너 + 재시도 큐 |
 | 3 | 오프라인 부팅 | cache 로드, TTL 확인, user 정책 상태에 따라 `canInstall()` 분기 |

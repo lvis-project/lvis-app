@@ -5,14 +5,14 @@ import {
 } from "../permissions/effect-kind.js";
 import type { PluginRuntimeGenerationAccess } from "./plugin-host-generation.js";
 
-type ScopeState = "preparing" | "published" | "superseded" | "discarded" | "retired";
+type ScopeState =
+  | "preparing" | "published" | "superseded" | "discarded" | "retired";
 
 const PREPARED_SUBSCRIPTIONS = new Set([
   "config.onChange",
   "onEvent",
   "onPluginsChanged",
   "onShutdown",
-  "registerKeywords",
 ]);
 const QUEUED_SIGNALS = new Set(["emitEvent", "logEvent"]);
 const PREPARED_SIGNAL_LIMIT = 64;
@@ -48,9 +48,18 @@ export class HostApiGenerationScope {
 
   constructor(readonly pluginId: string) {}
 
-  bindGeneration(access: PluginRuntimeGenerationAccess, generationId: string): void {
-    if (this.binding) throw new Error(`plugin '${this.pluginId}' generation scope is already bound`);
-    if (this.state !== "preparing") throw new Error(`plugin '${this.pluginId}' generation scope is not preparing`);
+  bindGeneration(
+    access: PluginRuntimeGenerationAccess,
+    generationId: string,
+  ): void {
+    if (this.binding)
+      throw new Error(
+        `plugin '${this.pluginId}' generation scope is already bound`,
+      );
+    if (this.state !== "preparing")
+      throw new Error(
+        `plugin '${this.pluginId}' generation scope is not preparing`,
+      );
     this.binding = Object.freeze({ access, generationId });
   }
 
@@ -60,8 +69,14 @@ export class HostApiGenerationScope {
 
   /** Validate before commit and return an assignment-safe publication closure. */
   preparePublish(): () => void {
-    if (!this.binding) throw new Error(`plugin '${this.pluginId}' generation scope is not bound`);
-    if (this.state !== "preparing") throw new Error(`plugin '${this.pluginId}' generation scope cannot publish from ${this.state}`);
+    if (!this.binding)
+      throw new Error(
+        `plugin '${this.pluginId}' generation scope is not bound`,
+      );
+    if (this.state !== "preparing")
+      throw new Error(
+        `plugin '${this.pluginId}' generation scope cannot publish from ${this.state}`,
+      );
     return () => {
       if (this.state !== "preparing") return;
       for (const action of this.publishActions) action();
@@ -70,10 +85,15 @@ export class HostApiGenerationScope {
   }
 
   resume(): void {
-    if (!this.binding) throw new Error(`plugin '${this.pluginId}' generation scope is not bound`);
+    if (!this.binding)
+      throw new Error(
+        `plugin '${this.pluginId}' generation scope is not bound`,
+      );
     if (this.state === "published") return;
     if (this.state !== "superseded") {
-      throw new Error(`plugin '${this.pluginId}' generation scope cannot resume from ${this.state}`);
+      throw new Error(
+        `plugin '${this.pluginId}' generation scope cannot resume from ${this.state}`,
+      );
     }
     for (const action of this.publishActions) action();
     this.state = "published";
@@ -98,7 +118,9 @@ export class HostApiGenerationScope {
       action();
       return;
     }
-    throw new Error(`plugin '${this.pluginId}' generation scope cannot publish effects from ${this.state}`);
+    throw new Error(
+      `plugin '${this.pluginId}' generation scope cannot publish effects from ${this.state}`,
+    );
   }
 
   onSupersede(action: () => void): void {
@@ -138,17 +160,17 @@ export class HostApiGenerationScope {
       if (this.state !== "published" || !binding) return;
       let lease;
       try {
-        lease = await binding.access.acquireExact(this.pluginId, binding.generationId);
+        lease = await binding.access.acquireExact(
+          this.pluginId,
+          binding.generationId,
+        );
       } catch {
         return;
       }
       try {
-        await binding.access.runWithLease(
-          lease,
-          async () => {
-            await callback(...args);
-          },
-        );
+        await binding.access.runWithLease(lease, async () => {
+          await callback(...args);
+        });
       } finally {
         lease.release();
       }
@@ -166,9 +188,16 @@ export class HostApiGenerationScope {
           if (typeof property !== "string") return value;
           const path = prefix ? `${prefix}.${property}` : property;
           if (typeof value === "function") {
-            return (...args: unknown[]) => this.invoke(path, value as (...innerArgs: unknown[]) => unknown, inner, args);
+            return (...args: unknown[]) =>
+              this.invoke(
+                path,
+                value as (...innerArgs: unknown[]) => unknown,
+                inner,
+                args,
+              );
           }
-          if (value && typeof value === "object") return wrapObject(value, path);
+          if (value && typeof value === "object")
+            return wrapObject(value, path);
           return value;
         },
       });
@@ -180,7 +209,9 @@ export class HostApiGenerationScope {
 
   discard(): void {
     if (this.state === "published" || this.state === "superseded") {
-      throw new Error(`plugin '${this.pluginId}' published generation scope cannot be discarded`);
+      throw new Error(
+        `plugin '${this.pluginId}' published generation scope cannot be discarded`,
+      );
     }
     if (this.state === "discarded" || this.state === "retired") return;
     this.state = "discarded";
@@ -206,7 +237,9 @@ export class HostApiGenerationScope {
     args: unknown[],
   ): unknown {
     if (this.state === "discarded" || this.state === "retired") {
-      throw new Error(`[plugin:${this.pluginId}] hostApi.${path} belongs to a retired generation`);
+      throw new Error(
+        `[plugin:${this.pluginId}] hostApi.${path} belongs to a retired generation`,
+      );
     }
     if (this.state === "superseded") {
       const binding = this.binding;
@@ -214,7 +247,9 @@ export class HostApiGenerationScope {
         !binding ||
         !binding.access.isExactAdmitted(this.pluginId, binding.generationId)
       ) {
-        throw new Error(`[plugin:${this.pluginId}] hostApi.${path} belongs to a retired generation`);
+        throw new Error(
+          `[plugin:${this.pluginId}] hostApi.${path} belongs to a retired generation`,
+        );
       }
       return method.apply(receiver, args);
     }
@@ -223,15 +258,26 @@ export class HostApiGenerationScope {
     if (PREPARED_SUBSCRIPTIONS.has(path)) return method.apply(receiver, args);
     if (QUEUED_SIGNALS.has(path)) {
       if (this.queuedSignals.length >= PREPARED_SIGNAL_LIMIT) {
-        throw new Error(`[plugin:${this.pluginId}] prepared HostApi signal limit exceeded`);
+        throw new Error(
+          `[plugin:${this.pluginId}] prepared HostApi signal limit exceeded`,
+        );
       }
       const clonedArgs = structuredClone(args);
-      this.queuedSignals.push({ invoke: () => { method.apply(receiver, clonedArgs); } });
+      this.queuedSignals.push({
+        invoke: () => {
+          method.apply(receiver, clonedArgs);
+        },
+      });
       return undefined;
     }
 
     const effect = pathEffectClass(path);
-    if (path === "callTool" || effect === "write" || effect === "verb-derived" || !HOSTAPI_EFFECT_BY_PATH[path]) {
+    if (
+      path === "callTool" ||
+      effect === "write" ||
+      effect === "verb-derived" ||
+      !HOSTAPI_EFFECT_BY_PATH[path]
+    ) {
       throw preparationError(this.pluginId, path);
     }
     return method.apply(receiver, args);
