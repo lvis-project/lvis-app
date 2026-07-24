@@ -486,10 +486,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         return result;
       }
 
-      // Lifecycle ordering lives in uninstallPluginWithLifecycle:
-      // runtime remove (stop/dispose) first, marketplace file removal second,
-      // then best-effort host state cleanup. This keeps the Windows EBUSY
-      // defense from PR #734 while centralizing config/secret/auth cleanup.
+      // Lifecycle ordering lives in uninstallPluginWithLifecycle: durable
+      // marketplace removal runs inside the runtime generation barrier, then
+      // journaled config/secret/auth/cache cleanup completes or stays
+      // explicitly retryable. This preserves the Windows EBUSY defense while
+      // preventing a partial cleanup from being reported as success.
       const result = await uninstallPluginWithLifecycle(pluginId, {
         pluginMarketplace,
         pluginRuntime,

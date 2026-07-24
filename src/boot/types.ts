@@ -227,7 +227,7 @@ export interface AppServices {
   /** Returns the tracked persistent auth partitions for a plugin, including the base partition. */
   listPluginAuthPartitionsService?: (pluginId: string) => string[];
   /** Drops tracked persistent auth partitions after uninstall cleanup completes. */
-  forgetPluginAuthPartitionsService?: (pluginId: string) => void;
+  forgetPluginAuthPartitionsService?: (pluginId: string) => void | Promise<void>;
   /**
    * Issue 5: Re-register the generic plugin event bridge for a new window.
    * Call on macOS `activate` when a new BrowserWindow is created.

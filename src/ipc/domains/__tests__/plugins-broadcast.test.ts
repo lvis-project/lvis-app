@@ -1,6 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
+const cleanupRoots: string[] = [];
 const electronMocks = vi.hoisted(() => ({
   showOpenDialog: vi.fn(),
 }));
@@ -59,6 +71,8 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
   const devFlags = await import("../../../boot/dev-flags.js");
   devFlags.setIsPackaged(false);
   const appWindows = options.appWindows ?? [makeWindow(), makeWindow()];
+  const cleanupRoot = mkdtempSync(join(tmpdir(), "lvis-plugin-ipc-"));
+  cleanupRoots.push(cleanupRoot);
   const activePluginIds = new Set<string>();
   const deps = {
     pluginMarketplace: {
@@ -127,10 +141,11 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
       log: vi.fn(),
     },
     refreshPluginNotifications: vi.fn(),
+    pluginPaths: { cacheRoot: join(cleanupRoot, ".cache") },
     clearAuthPartitionService: vi.fn(async () => undefined),
-    listPluginAuthPartitionsService: vi.fn(() => [
-      "persist:plugin-auth:agent-hub",
-      "persist:plugin-auth:agent-hub:tenant",
+    listPluginAuthPartitionsService: vi.fn((pluginId: string) => [
+      `persist:plugin-auth:${encodeURIComponent(pluginId)}`,
+      `persist:plugin-auth:${encodeURIComponent(pluginId)}:tenant`,
     ]),
     forgetPluginAuthPartitionsService: vi.fn(),
     getMainWindow: vi.fn(() => appWindows[0]),
@@ -180,6 +195,13 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
   registerPluginsHandlers(deps as never);
   return { deps, appWindows, runActivation };
 }
+
+afterEach(async () => {
+  await Promise.all(
+    cleanupRoots.splice(0).map((root) =>
+      rm(root, { recursive: true, force: true })),
+  );
+});
 
 beforeEach(() => {
   handlers.clear();
