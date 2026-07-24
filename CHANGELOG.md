@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## v0.5.10 — 2026-07-24
+
+Adds signed atomic plugin contributions, tightens governed domain writes, and
+ships the dependency refresh accumulated after v0.5.9. Public tags remain
+unsigned.
+
+### Plugin bundles and governed operations
+
+- **One signed plugin artifact can own Skills, Hooks, and loopback MCP
+  servers.** Install, activation, update, rollback, disable, and removal publish
+  or retire all contributions as one generation, with journaled cleanup and no
+  orphaned ownership.
+- **Failed reads cannot authorize writes.** A structured plugin read result
+  whose status is `error`, `degraded`, or `uncertain` remains visible to the
+  caller but does not mint the Host freshness receipt required by a governed
+  write.
+- **Retired contracts stay retired.** The Host-owned manifest and public API do
+  not restore keyword dispatch, UI-action tool aliases, or plugin-specific Host
+  branches; the SDK remains a generated projection of the app contract.
 
 ### Build
 

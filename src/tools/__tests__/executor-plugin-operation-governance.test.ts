@@ -17,8 +17,24 @@ const principal = {
   accountHash: "account-hash",
 };
 
-function setup(options: { wireHooks?: boolean; provideModelIdentity?: boolean } = {}) {
-  const read = vi.fn(async () => ({ output: "fresh", isError: false, metadata: { rawResult: { status: "open" } } }));
+function setup(options: {
+  wireHooks?: boolean;
+  provideModelIdentity?: boolean;
+  readRawResult?: unknown;
+} = {}) {
+  const read = vi.fn(async () => ({
+    output: "fresh",
+    isError: false,
+    metadata: {
+      rawResult: options.readRawResult ?? {
+        operation: "status",
+        status: "success",
+        data: { state: "open" },
+        providerEvidence: {},
+        warnings: [],
+      },
+    },
+  }));
   const write = vi.fn(async () => ({ output: "saved", isError: false }));
   const directWrite = vi.fn(async () => ({ output: "reserved", isError: false }));
   const taintedRead = vi.fn(async () => {
@@ -183,6 +199,34 @@ function options(
 }
 
 describe("ToolExecutor plugin operation governance", () => {
+  it.each(["error", "degraded", "uncertain"])(
+    "does not mint freshness from a resolved domain read envelope with status=%s",
+    async (status) => {
+      const { executor, read } = setup({
+        readRawResult: {
+          operation: "status",
+          status,
+          data: null,
+          providerEvidence: {},
+          warnings: [],
+        },
+      });
+      const [readResult] = await runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "r", name: "domain_read", input: { operation: "status" } }],
+          options(),
+        ),
+      );
+      expect(readResult.is_error).toBeFalsy();
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(() => executor.issuePluginOperationGrant({
+        toolName: "domain_write",
+        input: { operation: "save", value: 1 },
+        principal,
+      })).toThrow(/required read is missing or stale/);
+    },
+  );
+
   it("requires a fresh read and consumes one app-write grant exactly once", async () => {
     const { executor, read, write, auditLogger } = setup();
     const readResult = await runWithInvocationOrigin("ui", undefined, () =>
