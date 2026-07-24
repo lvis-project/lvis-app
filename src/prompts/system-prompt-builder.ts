@@ -13,6 +13,7 @@ import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
 import { isAppMessageOrigin } from "../shared/mcp-app-message-source.js";
+import { neutralizeFenceClose } from "../shared/fence-sanitizer.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
 
@@ -131,6 +132,14 @@ export interface SystemPromptBuilderDeps {
    * a write can never start a turn because nothing pushes — the builder PULLS.
    */
   getAppModelContext?: (sessionId: string) => string;
+  /**
+   * MCP server-level guidance provider — returns each connected + approved
+   * server's discovery `instructions`. Rendered as an inert, untrusted-metadata
+   * section (server-authored third-party text, never host/user guidance). DATA
+   * only: the builder never imports the MCP layer, keeping prompts/ off
+   * engine/mcp — the boot wiring pulls it from mcpManager.
+   */
+  mcpServerGuidanceProvider?: () => Array<{ serverId: string; instructions: string }>;
 }
 
 // ─── Builder ────────────────────────────────────────
@@ -709,6 +718,55 @@ export class SystemPromptBuilder {
       });
     }
 
+    // ④-f MCP Server Guidance (per-turn) — each connected + approved server's
+    // discovery `instructions`, surfaced read-only as UNTRUSTED third-party
+    // metadata (server-authored, never host/user guidance), the same "data,
+    // never instructions" framing the skill catalog and MCP App Context carry.
+    // The builder never imports the MCP layer; the boot wiring pulls the data.
+    const { mcpServerGuidanceProvider } = deps;
+    if (mcpServerGuidanceProvider) {
+      this.sources.push({
+        id: 4.8,
+        name: "MCP Server Guidance",
+        refresh: "per-turn",
+        build: () => {
+          // `instructions` originates from untrusted server wire data. Guard the
+          // type here too (defense-in-depth beside the boundary coercion in
+          // mcp-client) so a non-string can never reach `.trim()` and abort the
+          // whole prompt build. Bound the server count like the MCP App Context
+          // slot cap.
+          const servers = mcpServerGuidanceProvider()
+            .filter(
+              (server) =>
+                typeof server.instructions === "string" && server.instructions.trim().length > 0,
+            )
+            .slice(0, MAX_MCP_GUIDANCE_SERVERS);
+          if (servers.length === 0) return "";
+          const lines = [
+            '<lvis-mcp-server-guidance trust="untrusted-metadata">',
+            t("be_systemPromptBuilder.mcpServerGuidanceUntrusted"),
+            t("be_systemPromptBuilder.mcpServerGuidanceNoInstructions"),
+          ];
+          for (const server of servers) {
+            const trimmed = server.instructions.trim();
+            // Per-server char cap so one server cannot bloat every turn (mirrors
+            // the MCP App Context per-slot char cap).
+            const capped =
+              trimmed.length > MAX_MCP_GUIDANCE_CHARS
+                ? `${trimmed.slice(0, MAX_MCP_GUIDANCE_CHARS)}…`
+                : trimmed;
+            lines.push("");
+            lines.push(`server "${escapeAttribute(server.serverId)}":`);
+            // Neutralize the body against its OWN closing tag so server text
+            // cannot break out of the inert fence.
+            lines.push(neutralizeFenceClose(capped, "lvis-mcp-server-guidance"));
+          }
+          lines.push("</lvis-mcp-server-guidance>");
+          return lines.join("\n");
+        },
+      });
+    }
+
     // ⑤ Tool Schemas (매 턴)
     this.sources.push({
       id: 5,
@@ -990,5 +1048,9 @@ const MAX_SKILL_CATALOG_ENTRIES = 80;
 // scope while capping pathological catalogs; overflow is reachable via
 // skill_list. The 80-entry cap remains a cheap pre-filter.
 const SKILL_CATALOG_TOKEN_BUDGET = 6000;
+// MCP Server Guidance caps (mirror the MCP App Context slot bounds): a
+// compromised connected server cannot bloat every main-chat turn.
+const MAX_MCP_GUIDANCE_SERVERS = 16;
+const MAX_MCP_GUIDANCE_CHARS = 8192;
 const MAX_SKILL_NAME_CHARS = 96;
 const MAX_SKILL_DESCRIPTION_CHARS = 320;
