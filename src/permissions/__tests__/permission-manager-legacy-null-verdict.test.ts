@@ -273,4 +273,26 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
     expect(auditEntry?.tool.trustOrigin).toBe("plugin-emitted");
     expect(auditEntry?.tool.approvalCacheKey).toBe("plugin_send:scope-a");
   });
+
+  it("reviewer audit persists the Host-owned governed projection", async () => {
+    await pm.dispatchReviewer("plugin_attendance_read", {
+      source: "plugin",
+      category: "read",
+      pathFields: [],
+      finalInput: {
+        operation: "status",
+        opaqueSecret: "must-never-reach-audit",
+      },
+      auditInput: { operation: "status" },
+      allowedDirectories: [],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "plugin-emitted" as const,
+    });
+
+    const auditEntry = emitSandboxAuditMock.mock.calls.at(-1)?.[0] as
+      | { tool: { args: string } }
+      | undefined;
+    expect(auditEntry?.tool.args).toBe('{"operation":"status"}');
+    expect(auditEntry?.tool.args).not.toContain("must-never-reach-audit");
+  });
 });

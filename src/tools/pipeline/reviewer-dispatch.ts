@@ -42,6 +42,7 @@ export async function dispatchReviewerForHeadless(
   approvalPurpose: ApprovalPurposeSuggestion | undefined,
   hostShellExecutionPlan?: HostShellExecutionPlan,
   abortSignal?: AbortSignal,
+  auditInput?: Record<string, unknown>,
 ): Promise<
   | { allowed: true; permissionResult: PermissionCheckResult }
   | { allowed: false; message: string; permissionResult: PermissionCheckResult }
@@ -98,6 +99,7 @@ export async function dispatchReviewerForHeadless(
       category,
       pathFields,
       finalInput,
+      auditInput,
       cacheIdentityInput,
       allowedDirectories,
       sensitivePathsAdjacent,
@@ -192,6 +194,7 @@ export async function dispatchReviewerForInteractiveAuto(
   approvalPurpose: ApprovalPurposeSuggestion | undefined,
   hostShellExecutionPlan?: HostShellExecutionPlan,
   abortSignal?: AbortSignal,
+  auditInput?: Record<string, unknown>,
 ): Promise<PermissionCheckResult | null> {
   if (context.headless === true) return null;
   // PermissionManager's resolved route marker is the sole eligibility SOT.
@@ -224,6 +227,7 @@ export async function dispatchReviewerForInteractiveAuto(
         category,
         pathFields,
         finalInput,
+        auditInput,
         cacheIdentityInput,
         allowedDirectories,
         sensitivePathsAdjacent,
