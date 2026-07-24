@@ -107,6 +107,25 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(loop.getSessionId()).toBe("test-session-id");
   });
 
+  it("clears prior carried-forward plugin scope when loading or creating a session", () => {
+    const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
+    const loop = new ConversationLoop(resumeDeps({
+      memoryManager: {
+        ...resumeMemory(history),
+        saveSession: vi.fn(async () => {}),
+      },
+    }));
+    const state = loop as unknown as { lastTurnScope: Set<string> | null };
+
+    state.lastTurnScope = new Set(["previous-plugin"]);
+    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(state.lastTurnScope).toBeNull();
+
+    state.lastTurnScope = new Set(["loaded-plugin"]);
+    loop.newConversation();
+    expect(state.lastTurnScope).toBeNull();
+  });
+
   it("does not load or merge parent transcript when resuming a child session", () => {
     const childHistory: GenericMessage[] = [{ role: "user", content: "child only" },
     ];
