@@ -19,6 +19,7 @@ import {
   buildPerCommandSandboxCustomConfig,
   buildSandboxConfig,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
+  getVendoredSrtWinExePath,
   hasPerExecFilesystemAllowGrants,
 } from "../asrt-sandbox.js";
 import {
@@ -66,6 +67,10 @@ describe("windows sandbox — buildSandboxConfig emits the windows section on wi
     expect(config.windows).toBeDefined();
     expect(config.windows?.proxyPortRange).toEqual([60080, 60089]);
     expect((config.windows as Record<string, unknown>).groupName).toBeUndefined();
+    // ASRT 0.0.67: srt-win path is REQUIRED (no implicit vendored resolution).
+    // buildSandboxConfig must emit it from the SoT so SandboxManager.initialize
+    // can spawn the backend instead of throwing at runtime.
+    expect(config.windows?.srtWin?.path).toBe(getVendoredSrtWinExePath());
   });
 
   it("honors a trusted non-default proxyPortRange on win32 (enterprise install)", () => {
