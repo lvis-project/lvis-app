@@ -127,6 +127,7 @@ export function pluginOperationExecutionDomain(
 
 interface PendingExecutionLease {
   readonly kind: "read" | "write";
+  readonly principal: PluginOperationPrincipal;
   readonly resolve: (lease: PluginOperationExecutionLease) => void;
   readonly reject: (error: Error) => void;
   readonly signal?: AbortSignal;
@@ -159,6 +160,7 @@ export class PluginOperationGrantCoordinator {
   private readonly latestReadSequences = new Map<string, number>();
   private readonly executionDomains = new Map<string, ExecutionDomainState>();
   private readonly domainRevisions = new Map<string, ExecutionDomainRevision>();
+  private readonly revokedSessions = new Set<string>();
   private nextReadSequence = 0;
 
   constructor(
@@ -169,6 +171,9 @@ export class PluginOperationGrantCoordinator {
   ) {}
 
   recordRead(key: PluginReadSnapshotKey, domainKey: string): string {
+    if (this.revokedSessions.has(key.appSessionId)) {
+      throw new Error("plugin operation session is revoked");
+    }
     this.trimSnapshots();
     const domain = this.requireDomain(domainKey, key);
     const revision = randomUUID();
@@ -217,6 +222,9 @@ export class PluginOperationGrantCoordinator {
     token: string;
     grantId: string;
   } {
+    if (this.revokedSessions.has(binding.appSessionId)) {
+      throw new Error("plugin operation session is revoked");
+    }
     this.collectExpired();
     const domain = this.requireDomain(domainKey, binding);
     let reservedRead: ReservedReadSnapshot | undefined;
@@ -375,13 +383,19 @@ export class PluginOperationGrantCoordinator {
   acquireExecutionLease(
     domainKey: string,
     kind: "read" | "write",
+    principal: PluginOperationPrincipal,
     signal?: AbortSignal,
   ): Promise<PluginOperationExecutionLease> {
     if (!/^[0-9a-f]{64}$/.test(domainKey)) {
       return Promise.reject(new Error("plugin operation domain key is invalid"));
     }
-    if (this.domainRevisions.get(domainKey)?.revoked) {
-      return Promise.reject(new Error("plugin operation domain is revoked"));
+    if (this.revokedSessions.has(principal.appSessionId)) {
+      return Promise.reject(new Error("plugin operation session is revoked"));
+    }
+    try {
+      this.requireDomain(domainKey, principal);
+    } catch (error) {
+      return Promise.reject(error);
     }
     if (signal?.aborted) {
       return Promise.reject(new Error("plugin operation execution lease aborted"));
@@ -394,7 +408,13 @@ export class PluginOperationGrantCoordinator {
     this.executionDomains.set(domainKey, state);
 
     return new Promise<PluginOperationExecutionLease>((resolve, reject) => {
-      const request: PendingExecutionLease = { kind, resolve, reject, signal };
+      const request: PendingExecutionLease = {
+        kind,
+        principal: Object.freeze({ ...principal }),
+        resolve,
+        reject,
+        signal,
+      };
       if (signal) {
         request.onAbort = () => {
           const index = state.queue.indexOf(request);
@@ -431,6 +451,7 @@ export class PluginOperationGrantCoordinator {
   }
 
   revokeSession(appSessionId: string): void {
+    this.revokedSessions.add(appSessionId);
     for (const [key, value] of this.grants) {
       if (value.binding.appSessionId === appSessionId) this.grants.delete(key);
     }
@@ -440,6 +461,34 @@ export class PluginOperationGrantCoordinator {
     for (const [key] of this.latestReadSequences) {
       if (key.includes(`\0${appSessionId}\0`)) this.latestReadSequences.delete(key);
     }
+    for (const [domainKey, state] of this.executionDomains) {
+      const retained: PendingExecutionLease[] = [];
+      for (const request of state.queue) {
+        if (request.principal.appSessionId !== appSessionId) {
+          retained.push(request);
+          continue;
+        }
+        if (request.signal && request.onAbort) {
+          request.signal.removeEventListener("abort", request.onAbort);
+        }
+        request.reject(new Error("plugin operation session is revoked"));
+      }
+      state.queue = retained;
+      this.drainExecutionDomain(domainKey, state);
+    }
+  }
+
+  canRecordRead(
+    principal: PluginOperationPrincipal,
+    domainKey: string,
+  ): boolean {
+    if (this.revokedSessions.has(principal.appSessionId)) return false;
+    const domain = this.domainRevisions.get(domainKey);
+    return domain !== undefined &&
+      !domain.revoked &&
+      domain.ownerPluginId === principal.ownerPluginId &&
+      domain.generationId === principal.generationId &&
+      domain.accountHash === principal.accountHash;
   }
 
   revokeAccount(
@@ -594,6 +643,24 @@ export class PluginOperationGrantCoordinator {
     state: ExecutionDomainState,
   ): void {
     if (state.writer) return;
+    while (state.queue.length > 0) {
+      const request = state.queue[0]!;
+      const domain = this.domainRevisions.get(domainKey);
+      const invalidReason =
+        this.revokedSessions.has(request.principal.appSessionId)
+          ? "plugin operation session is revoked"
+          : !domain || domain.revoked
+            ? "plugin operation domain is revoked"
+            : request.signal?.aborted
+              ? "plugin operation execution lease aborted"
+              : undefined;
+      if (!invalidReason) break;
+      state.queue.shift();
+      if (request.signal && request.onAbort) {
+        request.signal.removeEventListener("abort", request.onAbort);
+      }
+      request.reject(new Error(invalidReason));
+    }
     if (state.readers > 0) {
       while (state.queue[0]?.kind === "read") {
         const reader = state.queue.shift()!;
@@ -653,6 +720,13 @@ export class PluginOperationGrantCoordinator {
   ): void {
     if (request.signal && request.onAbort) {
       request.signal.removeEventListener("abort", request.onAbort);
+    }
+    if (this.revokedSessions.has(request.principal.appSessionId)) {
+      if (request.kind === "write") state.writer = false;
+      else state.readers = Math.max(0, state.readers - 1);
+      request.reject(new Error("plugin operation session is revoked"));
+      this.drainExecutionDomain(domainKey, state);
+      return;
     }
     let released = false;
     request.resolve(Object.freeze({

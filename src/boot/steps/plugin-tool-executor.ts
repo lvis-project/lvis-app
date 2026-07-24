@@ -11,7 +11,7 @@
  * straight to the runtime and is reachable from the trusted panel ORIGIN ALONE.
  * Installs the delegate on the late-binding ref + the plugin runtime.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { BrowserWindow as BrowserWindowValue } from "electron";
 import { createHookRunner } from "../conversation.js";
 import { wireHookSystem } from "./hook-system-wiring.js";
@@ -35,6 +35,8 @@ import {
 } from "../plugin-tool-invocation.js";
 import type { BootContext } from "../context.js";
 import { resolvePluginOperationAccountHash } from "./plugin-operation-account.js";
+import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
+import type { PluginOperationIdentityProvider } from "../../tools/invocation-services.js";
 
 function toPluginToolInput(payload: unknown): Record<string, unknown> {
   if (payload === undefined || payload === null) return {};
@@ -47,18 +49,6 @@ function toPluginToolInput(payload: unknown): Record<string, unknown> {
 function pluginInvocationSessionId(context: PluginToolInvocationContext): string {
   const subject = context.callerPluginId ?? context.ownerPluginId ?? "host";
   return `plugin-${context.origin}-${subject}`;
-}
-
-function unauthenticatedOperationAccountHash(
-  pluginId: string,
-  generationId: string,
-): string {
-  return createHash("sha256")
-    .update("plugin-operation-unauthenticated/v1\0")
-    .update(pluginId)
-    .update("\0")
-    .update(generationId)
-    .digest("hex");
 }
 
 export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
@@ -75,6 +65,36 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
   // files are strict-denied and moved to `.disabled/`.
   const hookSystem = await wireHookSystem({ auditLogger: bootAuditLogger });
   const scriptHookManager = hookSystem.manager;
+  const pluginOperationGrants = new PluginOperationGrantCoordinator();
+  const pluginOperationIdentityProvider: PluginOperationIdentityProvider = (
+    tool,
+    sessionId,
+  ) => {
+    const pluginId = tool.pluginId;
+    const generationId = tool.pluginGeneration?.generationId;
+    if (!pluginId || !generationId || tool.pluginGeneration?.pluginId !== pluginId) {
+      return undefined;
+    }
+    const active = ctx.pluginBundleLifecycle?.getActive(pluginId);
+    if (!active || active.generationId !== generationId) return undefined;
+    const accountHash = resolvePluginOperationAccountHash(
+      pluginRuntime,
+      active.manifest,
+      pluginId,
+      generationId,
+    );
+    if (!accountHash) return undefined;
+    return {
+      ownerVersion: active.manifest.version,
+      generationId,
+      appSessionId:
+        sessionId ?? `model-${pluginId}-${generationId}`,
+      accountHash,
+      appGrantRequired: false,
+    };
+  };
+  ctx.pluginOperationGrants = pluginOperationGrants;
+  ctx.pluginOperationIdentityProvider = pluginOperationIdentityProvider;
 
   // This executor is created before ConversationLoop and workspace IPC. Resolve
   // the lifecycle through the existing late-binding ref at approval time; an
@@ -96,7 +116,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     // ask stands (see ToolExecutor.sandboxFsContainedProvider).
     isActiveSandboxFilesystemContainedForPluginEffects,
     () => lateBinding.conversationLoopRef.fn?.deps.workspaceRootLifecycle,
-    undefined,
+    pluginOperationGrants,
     () => ctx.pluginBundleLifecycle,
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
@@ -214,17 +234,18 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           )
         : undefined;
       const invocationSessionId = pluginInvocationSessionId(context);
-      const pluginOperation = ownerPluginId && manifest && invocationGeneration
+      const appOrigin = effectiveOrigin === "ui" || effectiveOrigin === "mcp-app";
+      const pluginOperation = ownerPluginId &&
+        manifest &&
+        invocationGeneration &&
+        accountHash &&
+        (!appOrigin || appInvocation)
         ? {
             ownerVersion: manifest.version,
             generationId: invocationGeneration.generationId,
             appSessionId: appInvocation?.sessionId ?? invocationSessionId,
-            accountHash: accountHash ??
-              unauthenticatedOperationAccountHash(
-                ownerPluginId,
-                invocationGeneration.generationId,
-              ),
-            appGrantRequired: appInvocation !== undefined,
+            accountHash,
+            appGrantRequired: appOrigin,
             ...(appInvocation?.operationGrantToken
               ? { grantToken: appInvocation.operationGrantToken }
               : {}),

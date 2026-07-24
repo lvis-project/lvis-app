@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PermissionManager } from "../../permissions/permission-manager.js";
+import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
 import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
 import { runWithInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { currentEffectLedger } from "../../permissions/effect-ledger.js";
@@ -16,7 +17,7 @@ const principal = {
   accountHash: "account-hash",
 };
 
-function setup(options: { wireHooks?: boolean } = {}) {
+function setup(options: { wireHooks?: boolean; provideModelIdentity?: boolean } = {}) {
   const read = vi.fn(async () => ({ output: "fresh", isError: false, metadata: { rawResult: { status: "open" } } }));
   const write = vi.fn(async () => ({ output: "saved", isError: false }));
   const directWrite = vi.fn(async () => ({ output: "reserved", isError: false }));
@@ -125,6 +126,7 @@ function setup(options: { wireHooks?: boolean } = {}) {
     runWithLease: vi.fn(async (_lease: unknown, operation: () => Promise<unknown>) => operation()),
   };
   let generationAccessAvailable = true;
+  const pluginOperationGrants = new PluginOperationGrantCoordinator();
   return {
     executor: new ToolExecutor(
       registry,
@@ -137,8 +139,17 @@ function setup(options: { wireHooks?: boolean } = {}) {
       undefined,
       undefined,
       undefined,
-      undefined,
+      pluginOperationGrants,
       () => generationAccessAvailable ? generationAccess as never : undefined,
+      options.provideModelIdentity
+        ? (_tool, sessionId) => ({
+            ownerVersion: principal.ownerVersion,
+            generationId: principal.generationId,
+            appSessionId: sessionId ?? "model-session",
+            accountHash: principal.accountHash,
+            appGrantRequired: false,
+          })
+        : undefined,
     ),
     setGenerationAccessAvailable: (available: boolean) => { generationAccessAvailable = available; },
     permissions,
@@ -148,6 +159,7 @@ function setup(options: { wireHooks?: boolean } = {}) {
     directWrite,
     taintedRead,
     auditLogger,
+    pluginOperationGrants,
   };
 }
 
@@ -586,6 +598,81 @@ describe("ToolExecutor plugin operation governance", () => {
     }
   });
 
+  it("keeps the domain poisoned when the initial indeterminate audit cannot persist", async () => {
+    vi.useFakeTimers();
+    try {
+      const { executor, read, write, auditLogger } = setup();
+      await runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+          options(),
+        ),
+      );
+      const grant = executor.issuePluginOperationGrant({
+        toolName: "domain_write",
+        input: { operation: "save", value: 17 },
+        principal,
+      });
+      const appendPermissionAuditEntry =
+        auditLogger.appendPermissionAuditEntry.getMockImplementation()!;
+      auditLogger.appendPermissionAuditEntry.mockImplementation(async (entry) => {
+        const pluginOperation = entry.pluginOperation as
+          | { outcome?: string }
+          | undefined;
+        if (pluginOperation?.outcome === "indeterminate") {
+          throw new Error("indeterminate audit unavailable");
+        }
+        return appendPermissionAuditEntry(entry);
+      });
+      let signalWriteStarted!: () => void;
+      const writeStarted = new Promise<void>((resolve) => {
+        signalWriteStarted = resolve;
+      });
+      let releaseWrite!: () => void;
+      write.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            signalWriteStarted();
+            releaseWrite = () => resolve({ output: "late saved", isError: false });
+          }),
+      );
+
+      const timedOutWrite = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "w1", name: "domain_write", input: { operation: "save", value: 17 } }],
+          options(grant.token),
+        ),
+      );
+      const timedOutExpectation =
+        expect(timedOutWrite).rejects.toThrow("indeterminate audit unavailable");
+      await writeStarted;
+      await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.globalCeilingMs + 1);
+      await timedOutExpectation;
+
+      const readAbort = new AbortController();
+      const readback = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
+          { ...options(), abortSignal: readAbort.signal },
+        ),
+      );
+      await Promise.resolve();
+      releaseWrite();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginOperation: expect.objectContaining({ outcome: "settled" }),
+        }),
+      );
+      readAbort.abort();
+      await expect(readback).rejects.toThrow(/aborted/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("default-denies missing, unknown and app-disallowed operations before dispatch", async () => {
     const { executor, read } = setup();
     for (const input of [{}, { operation: "unknown" }]) {
@@ -614,6 +701,75 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(result.is_error).toBe(true);
     expect(result.content).toContain("host-derived operation identity is missing");
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("rejects Host context whose grant policy does not match the effective origin", async () => {
+    const { executor, read } = setup();
+    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "origin-mismatch", name: "domain_read", input: { operation: "status" } }],
+        options(undefined, principal, false),
+      ),
+    );
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain("grant policy does not match");
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("uses the Host identity provider for model-origin reads and first direct writes", async () => {
+    const { executor, read, write, directWrite } = setup({ provideModelIdentity: true });
+    const modelOptions = {
+      sessionId: "model-session",
+      permissionContext: {
+        trustOrigin: "llm-tool-arg" as const,
+        allowedPluginIds: new Set([principal.ownerPluginId]),
+      },
+    };
+
+    const [firstWrite] = await executor.executeAll(
+      [{
+        id: "model-direct-write",
+        name: "direct_write",
+        input: { operation: "reserve", target: "room-2" },
+      }],
+      modelOptions,
+    );
+    expect(firstWrite.is_error).toBeFalsy();
+    expect(directWrite).toHaveBeenCalledTimes(1);
+
+    const [readResult] = await executor.executeAll(
+      [{ id: "model-read", name: "domain_read", input: { operation: "status" } }],
+      modelOptions,
+    );
+    expect(readResult.is_error).toBeFalsy();
+    expect(read).toHaveBeenCalledTimes(1);
+
+    const [readBackedWrite] = await executor.executeAll(
+      [{
+        id: "model-read-backed-write",
+        name: "domain_write",
+        input: { operation: "save", value: 21 },
+      }],
+      modelOptions,
+    );
+    expect(readBackedWrite.is_error).toBeFalsy();
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers the domain before a first governed read is observed as mutating", async () => {
+    const { executor, taintedRead } = setup({ provideModelIdentity: true });
+    const [result] = await executor.executeAll(
+      [{ id: "first-tainted", name: "tainted_read", input: { operation: "status" } }],
+      {
+        sessionId: "model-first-tainted",
+        permissionContext: {
+          trustOrigin: "llm-tool-arg",
+          allowedPluginIds: new Set([principal.ownerPluginId]),
+        },
+      },
+    );
+    expect(result.is_error).toBeFalsy();
+    expect(taintedRead).toHaveBeenCalledTimes(1);
   });
 
   it("uses a pre-issued grant instead of the ordinary ask without bypassing final consume", async () => {
@@ -827,6 +983,63 @@ describe("ToolExecutor plugin operation governance", () => {
     );
     expect(burned.is_error).toBe(true);
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it("never dispatches a revoked session's queued operation while preserving another session", async () => {
+    const { executor, read, directWrite } = setup();
+    const holderPrincipal = { ...principal, appSessionId: "window-holder" };
+    const survivorPrincipal = { ...principal, appSessionId: "window-survivor" };
+    const holderGrant = executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "held" },
+      principal: holderPrincipal,
+    });
+    let signalHolderStarted!: () => void;
+    const holderStarted = new Promise<void>((resolve) => {
+      signalHolderStarted = resolve;
+    });
+    let releaseHolder!: () => void;
+    directWrite.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          signalHolderStarted();
+          releaseHolder = () => resolve({ output: "released", isError: false });
+        }),
+    );
+    const holder = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "holder",
+          name: "direct_write",
+          input: { operation: "reserve", target: "held" },
+        }],
+        options(holderGrant.token, holderPrincipal),
+      ),
+    );
+    await holderStarted;
+
+    const revoked = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "revoked", name: "domain_read", input: { operation: "status" } }],
+        options(undefined, principal),
+      ),
+    );
+    const survivor = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "survivor", name: "domain_read", input: { operation: "status" } }],
+        options(undefined, survivorPrincipal),
+      ),
+    );
+    await Promise.resolve();
+    executor.revokePluginOperationSession(principal.appSessionId);
+    await expect(revoked).rejects.toThrow("session is revoked");
+    expect(read).not.toHaveBeenCalled();
+
+    releaseHolder();
+    await holder;
+    const [survivorResult] = await survivor;
+    expect(survivorResult.is_error).toBeFalsy();
+    expect(read).toHaveBeenCalledTimes(1);
   });
 
   it("keeps governed input, result, bearer, and account identity out of audit rows", async () => {

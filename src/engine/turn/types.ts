@@ -304,6 +304,10 @@ export interface ConversationLoopDeps {
      */
     clearSessionActivated?(sessionId: string): void;
   };
+  /** Process-wide Host authority shared by every plugin-tool execution surface. */
+  pluginOperationGrants?: import("../../permissions/plugin-operation-grant.js").PluginOperationGrantCoordinator;
+  /** Resolves immutable Host identity for model/sub-agent governed plugin calls. */
+  pluginOperationIdentityProvider?: import("../../tools/invocation-services.js").PluginOperationIdentityProvider;
   /**
    * Fixed-scope support for callers that already made a plugin-scope decision.
    * These plugin ids are always eligible for catalog/preload checks even when

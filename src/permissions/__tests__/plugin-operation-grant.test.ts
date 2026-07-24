@@ -89,9 +89,9 @@ describe("PluginOperationGrantCoordinator", () => {
   it("runs domain reads concurrently but queues them behind writes without writer starvation", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const domain = "a".repeat(64);
-    const firstRead = await coordinator.acquireExecutionLease(domain, "read");
+    const firstRead = await coordinator.acquireExecutionLease(domain, "read", principal);
     let concurrentReadStarted = false;
-    const concurrentRead = coordinator.acquireExecutionLease(domain, "read").then((lease) => {
+    const concurrentRead = coordinator.acquireExecutionLease(domain, "read", principal).then((lease) => {
       concurrentReadStarted = true;
       return lease;
     });
@@ -99,7 +99,7 @@ describe("PluginOperationGrantCoordinator", () => {
     expect(concurrentReadStarted).toBe(true);
 
     let writeStarted = false;
-    const write = coordinator.acquireExecutionLease(domain, "write").then((lease) => {
+    const write = coordinator.acquireExecutionLease(domain, "write", principal).then((lease) => {
       writeStarted = true;
       return lease;
     });
@@ -107,7 +107,7 @@ describe("PluginOperationGrantCoordinator", () => {
     expect(writeStarted).toBe(false);
 
     let lateReadStarted = false;
-    const lateRead = coordinator.acquireExecutionLease(domain, "read").then((lease) => {
+    const lateRead = coordinator.acquireExecutionLease(domain, "read", principal).then((lease) => {
       lateReadStarted = true;
       return lease;
     });
@@ -130,17 +130,18 @@ describe("PluginOperationGrantCoordinator", () => {
   it("releases an aborted queued execution lease without blocking the domain", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const domain = "b".repeat(64);
-    const writer = await coordinator.acquireExecutionLease(domain, "write");
+    const writer = await coordinator.acquireExecutionLease(domain, "write", principal);
     const controller = new AbortController();
     const queued = coordinator.acquireExecutionLease(
       domain,
       "read",
+      principal,
       controller.signal,
     );
     controller.abort();
     await expect(queued).rejects.toThrow("aborted");
     writer.release();
-    const next = await coordinator.acquireExecutionLease(domain, "write");
+    const next = await coordinator.acquireExecutionLease(domain, "write", principal);
     next.release();
   });
 
@@ -151,8 +152,8 @@ describe("PluginOperationGrantCoordinator", () => {
       readTool: requiredRead.readTool,
       readOperation: "today",
     }, grantDomain);
-    const writer = await coordinator.acquireExecutionLease(grantDomain, "write");
-    const queued = coordinator.acquireExecutionLease(grantDomain, "read");
+    const writer = await coordinator.acquireExecutionLease(grantDomain, "write", principal);
+    const queued = coordinator.acquireExecutionLease(grantDomain, "read", principal);
 
     coordinator.revokeAccount(
       principal.ownerPluginId,
@@ -161,7 +162,7 @@ describe("PluginOperationGrantCoordinator", () => {
     );
     await expect(queued).rejects.toThrow("revoked");
     await expect(
-      coordinator.acquireExecutionLease(grantDomain, "write"),
+      coordinator.acquireExecutionLease(grantDomain, "write", principal),
     ).rejects.toThrow("revoked");
     expect(() => coordinator.markDomainMutation(grantDomain)).not.toThrow();
 
@@ -174,6 +175,47 @@ describe("PluginOperationGrantCoordinator", () => {
     expect(state.domainRevisions.has(grantDomain)).toBe(false);
   });
 
+  it("rejects only the revoked session's queued operations and cannot recreate its read authority", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const holderPrincipal = { ...principal, appSessionId: "window-holder" };
+    const survivorPrincipal = { ...principal, appSessionId: "window-survivor" };
+    const holder = await coordinator.acquireExecutionLease(
+      grantDomain,
+      "write",
+      holderPrincipal,
+    );
+    const revokedRead = coordinator.acquireExecutionLease(
+      grantDomain,
+      "read",
+      principal,
+    );
+    const revokedWrite = coordinator.acquireExecutionLease(
+      grantDomain,
+      "write",
+      principal,
+    );
+    const survivor = coordinator.acquireExecutionLease(
+      grantDomain,
+      "read",
+      survivorPrincipal,
+    );
+
+    coordinator.revokeSession(principal.appSessionId);
+    await expect(revokedRead).rejects.toThrow("session is revoked");
+    await expect(revokedWrite).rejects.toThrow("session is revoked");
+    expect(coordinator.canRecordRead(principal, grantDomain)).toBe(false);
+    expect(() => coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain)).toThrow("session is revoked");
+
+    holder.release();
+    const survivorLease = await survivor;
+    expect(coordinator.canRecordRead(survivorPrincipal, grantDomain)).toBe(true);
+    survivorLease.release();
+  });
+
   it("serializes writes per domain without blocking a different account domain", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const firstAccountDomain = "c".repeat(64);
@@ -181,11 +223,13 @@ describe("PluginOperationGrantCoordinator", () => {
     const firstWrite = await coordinator.acquireExecutionLease(
       firstAccountDomain,
       "write",
+      principal,
     );
     let sameAccountStarted = false;
     const sameAccountWrite = coordinator.acquireExecutionLease(
       firstAccountDomain,
       "write",
+      principal,
     ).then((lease) => {
       sameAccountStarted = true;
       return lease;
@@ -194,6 +238,7 @@ describe("PluginOperationGrantCoordinator", () => {
     const otherAccountWrite = coordinator.acquireExecutionLease(
       secondAccountDomain,
       "write",
+      { ...principal, accountHash: "other-account" },
     ).then((lease) => {
       otherAccountStarted = true;
       return lease;
@@ -463,13 +508,17 @@ describe("PluginOperationGrantCoordinator", () => {
     expect(coordinatorState.snapshots.size).toBe(0);
     expect(coordinatorState.latestReadSequences.size).toBe(0);
 
-    const firstRead = coordinator.recordRead({
+    const survivingPrincipal = {
       ...principal,
+      appSessionId: "window-surviving",
+    };
+    const firstRead = coordinator.recordRead({
+      ...survivingPrincipal,
       readTool: requiredRead.readTool,
       readOperation: "today",
     }, grantDomain);
     const firstGrant = coordinator.issue({
-      ...principal,
+      ...survivingPrincipal,
       toolName: "ep_attendance_write",
       operation: "clock",
       intentHash: "surviving-session",
@@ -477,12 +526,12 @@ describe("PluginOperationGrantCoordinator", () => {
       expiresAt: 500,
     }, grantDomain, requiredRead);
     const secondRead = coordinator.recordRead({
-      ...principal,
+      ...survivingPrincipal,
       readTool: requiredRead.readTool,
       readOperation: "today",
     }, grantDomain);
     const secondGrant = coordinator.issue({
-      ...principal,
+      ...survivingPrincipal,
       toolName: "ep_attendance_write",
       operation: "clock",
       intentHash: "surviving-session",
@@ -490,7 +539,7 @@ describe("PluginOperationGrantCoordinator", () => {
       expiresAt: 500,
     }, grantDomain, requiredRead);
     const expected = {
-      ...principal,
+      ...survivingPrincipal,
       toolName: "ep_attendance_write",
       operation: "clock",
       intentHash: "surviving-session",

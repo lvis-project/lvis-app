@@ -19,6 +19,12 @@ import {
 } from "../permissions/plugin-operation-grant.js";
 import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
 import type { GovernedRiskFloor } from "./plugin-operation-governance.js";
+import type { PluginOperationInvocationContext } from "./plugin-operation-governance.js";
+
+export type PluginOperationIdentityProvider = (
+  tool: Tool,
+  sessionId: string | undefined,
+) => PluginOperationInvocationContext | undefined;
 
 export interface InvocationRunnerServices {
   readonly toolRegistry: ToolRegistry;
@@ -37,6 +43,7 @@ export interface InvocationRunnerServices {
   readonly tryUserApprovalMemorySkip: typeof tryUserApprovalMemorySkipImpl;
   readonly pluginOperationGrants: PluginOperationGrantCoordinator;
   readonly pluginGenerationAccessProvider: () => PluginRuntimeGenerationAccess | undefined;
+  readonly pluginOperationIdentityProvider: PluginOperationIdentityProvider;
 }
 
 export function currentApprovalMode(
