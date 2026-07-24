@@ -1042,6 +1042,72 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["session", "account", "generation"] as const)(
+    "revalidates %s revocation after lease admission and before handler dispatch",
+    async (revocation) => {
+      const { executor, directWrite, auditLogger } = setup();
+      const grant = executor.issuePluginOperationGrant({
+        toolName: "direct_write",
+        input: { operation: "reserve", target: revocation },
+        principal,
+      });
+      const originalAppend =
+        auditLogger.appendPermissionAuditEntry.getMockImplementation()!;
+      let signalAuditStarted!: () => void;
+      const auditStarted = new Promise<void>((resolve) => {
+        signalAuditStarted = resolve;
+      });
+      let releaseAudit!: () => void;
+      auditLogger.appendPermissionAuditEntry.mockImplementation((entry) => {
+        const pluginOperation = entry.pluginOperation as
+          | { outcome?: string }
+          | undefined;
+        if (pluginOperation?.outcome !== "consumed") {
+          return originalAppend(entry);
+        }
+        signalAuditStarted();
+        return new Promise((resolve) => {
+          releaseAudit = () => resolve({
+            ...entry,
+            prevHash: "test-prev-hash",
+          });
+        });
+      });
+
+      const pending = runWithInvocationOrigin("ui", undefined, () =>
+        executor.executeAll(
+          [{
+            id: `admitted-${revocation}`,
+            name: "direct_write",
+            input: { operation: "reserve", target: revocation },
+          }],
+          options(grant.token),
+        ),
+      );
+      await auditStarted;
+      if (revocation === "session") {
+        executor.revokePluginOperationSession(principal.appSessionId);
+      } else if (revocation === "account") {
+        executor.revokePluginOperationAccount(
+          principal.ownerPluginId,
+          principal.generationId,
+          principal.accountHash,
+        );
+      } else {
+        executor.revokePluginOperationGeneration(
+          principal.ownerPluginId,
+          principal.generationId,
+        );
+      }
+      releaseAudit();
+
+      const [result] = await pending;
+      expect(result.is_error).toBe(true);
+      expect(result.content).toContain(`${revocation} is revoked`);
+      expect(directWrite).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps governed input, result, bearer, and account identity out of audit rows", async () => {
     const { executor, auditLogger } = setup();
     await runWithInvocationOrigin("ui", undefined, () =>

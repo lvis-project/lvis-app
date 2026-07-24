@@ -531,7 +531,21 @@ export async function executeAuthorizedToolInvocation(
               headless: invocationPermissionContext.headless === true,
               toolName: toolUse.name,
             },
-            () => tool.execute(finalInput, ctx),
+            () => {
+              if (
+                pluginOperationPrincipal &&
+                operationExecutionDomain
+              ) {
+                // No await may separate this final revocation check from
+                // handler entry. Session/account/generation teardown that won
+                // the race after lease admission therefore blocks dispatch.
+                services.pluginOperationGrants.assertExecutionAuthorized(
+                  pluginOperationPrincipal,
+                  operationExecutionDomain,
+                );
+              }
+              return tool.execute(finalInput, ctx);
+            },
           ),
         ),
       );
