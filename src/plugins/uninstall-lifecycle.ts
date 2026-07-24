@@ -97,6 +97,18 @@ async function cleanupPluginCache(pluginId: string, cacheRoot: string): Promise<
   await rm(target, { recursive: true, force: true });
 }
 
+async function cleanupRecordedPluginCaches(
+  record: PluginUninstallCleanupRecord,
+  cacheRoot: string,
+): Promise<void> {
+  for (const pluginId of new Set([
+    record.pluginId,
+    record.installPluginId,
+  ])) {
+    await cleanupPluginCache(pluginId, cacheRoot);
+  }
+}
+
 function requirePluginStateCleanupDeps(
   deps: PluginStateCleanupDeps,
 ): RequiredPluginStateCleanupDeps {
@@ -192,7 +204,7 @@ async function cleanupRecordedPluginState(
 
   if (record.cleanupCache) {
     await attemptPhase("cache", () =>
-      cleanupPluginCache(record.pluginId, deps.pluginPaths.cacheRoot));
+      cleanupRecordedPluginCaches(record, deps.pluginPaths.cacheRoot));
   } else {
     journal.completePhase(record.pluginId, "cache");
   }
