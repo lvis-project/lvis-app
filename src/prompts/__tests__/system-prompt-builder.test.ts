@@ -192,6 +192,50 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
     expect(builder.build()).toContain("user-note");
   });
 
+  function makeAgentsBuilder(
+    getProjectAgentsMd: () => { projectRoot: string; layers: Array<{ relativePath: string; content: string; truncated: boolean }>; totalBytes: number },
+  ): SystemPromptBuilder {
+    return new SystemPromptBuilder({
+      memoryManager: {
+        getAgentsMd: () => "GLOBAL personal agents",
+        getMemoryIndex: () => "",
+        getUserPreferences: () => "",
+        getMemoryContext: () => "",
+        getProjectAgentsMd,
+      } as never,
+      toolRegistry: new ToolRegistry(),
+    });
+  }
+
+  it("injects project AGENTS.md as a distinct layer below the global personal file", () => {
+    const builder = makeAgentsBuilder(() => ({
+      projectRoot: "/p",
+      layers: [{ relativePath: "AGENTS.md", content: "PROJECT committed rules", truncated: false }],
+      totalBytes: 20,
+    }));
+    builder.setProjectContext({ projectRoot: "/p", projectName: "MyProj", isDefault: false });
+    const prompt = builder.build();
+    expect(prompt).toContain("<lvis-project-agents-context");
+    expect(prompt).toContain('trust="project-provided"');
+    expect(prompt).toContain("PROJECT committed rules");
+    expect(prompt).toContain("MyProj");
+    // The global personal file (<lvis-agents-context>) is ordered BEFORE the project layer.
+    expect(prompt).toContain("<lvis-agents-context>");
+    expect(prompt.indexOf("<lvis-agents-context>")).toBeLessThan(prompt.indexOf("<lvis-project-agents-context"));
+  });
+
+  it("omits project AGENTS.md when no project root is bound", () => {
+    const builder = makeAgentsBuilder(() => ({ projectRoot: "/p", layers: [], totalBytes: 0 }));
+    // no setProjectContext
+    expect(builder.build()).not.toContain("<lvis-project-agents-context");
+  });
+
+  it("omits project AGENTS.md when discovery returns no layers", () => {
+    const builder = makeAgentsBuilder(() => ({ projectRoot: "/p", layers: [], totalBytes: 0 }));
+    builder.setProjectContext({ projectRoot: "/p", projectName: "P", isDefault: false });
+    expect(builder.build()).not.toContain("<lvis-project-agents-context");
+  });
+
   it("emits the continuity guard instead of hidden marker output instructions", () => {
     const builder = makeSystemPromptBuilder();
     const prompt = builder.build();
