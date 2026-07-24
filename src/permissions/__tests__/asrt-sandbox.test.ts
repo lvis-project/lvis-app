@@ -54,6 +54,7 @@ import {
   computeDynamicEndpointHosts,
   updateAsrtSandboxConfig,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
+  getVendoredSrtWinExePath,
   buildSandboxConfig,
   getDefaultSensitiveReadDenyPaths,
   getDefaultSensitiveWriteDenyPaths,
@@ -677,6 +678,18 @@ describe("asrt-sandbox — proxyPortRange single SOT (install↔config consisten
     // Both references must be the identical value — the install path and the
     // buildSandboxConfig runtime path converge on this one constant.
     expect(DEFAULT_WINDOWS_PROXY_PORT_RANGE).toEqual(asrt.DEFAULT_WINDOWS_PROXY_PORT_RANGE);
+  });
+
+  it("getVendoredSrtWinExePath matches ASRT's real VENDORED_SRT_WIN_EXE (srt-win path SoT pin)", async () => {
+    // ASRT 0.0.67 REMOVED implicit vendored resolution — every Windows entry
+    // point must supply an EXPLICIT srt-win path. getVendoredSrtWinExePath is the
+    // local SoT that boot (checkAsrtDependencies), buildSandboxConfig, and the
+    // per-worker ACL grant all source from. Pin it to ASRT's own vendored-exe
+    // constant so upstream drift in the vendored layout fails CI rather than
+    // silently resolving a wrong/absent path. (Dev env has no `app.asar` segment,
+    // so the app.asar.unpacked rewrite is a no-op here.)
+    const asrt = await import("@anthropic-ai/sandbox-runtime");
+    expect(getVendoredSrtWinExePath()).toBe(asrt.VENDORED_SRT_WIN_EXE);
   });
 
   it("buildSandboxConfig emits the local SOT constant as windows.proxyPortRange (win32 path)", () => {
