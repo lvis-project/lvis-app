@@ -1,6 +1,6 @@
 import { isAppUpdateInstallRequested } from "../main/app-update-install-intent.js";
 import type { NetworkAccessAcknowledgement, NetworkAccessGrant } from "../shared/network-access.js";
-import type { PluginAccessSpec, PluginManifest } from "./types.js";
+import type { PluginAccessSpec, PluginManifest, PluginRegistryEntry } from "./types.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const inflightInstallLocks = new Map<string, Promise<unknown>>();
@@ -143,6 +143,9 @@ interface PluginInstallRuntime {
     pluginRoot: string;
     manifest: PluginManifest;
     receiptRaw: string;
+    registryEntry: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    >;
     approvedPluginAccess?: PluginAccessSpec;
     durableCommit(): Promise<T>;
   }): Promise<{ result: T; retirement: Promise<void> }>;
@@ -154,6 +157,9 @@ interface PreparedActivationOptions {
     pluginRoot: string;
     manifest: PluginManifest;
     receiptRaw: string;
+    registryEntry: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    >;
     approvedPluginAccess?: PluginAccessSpec;
     durableCommit(): Promise<string>;
   }) => Promise<{ result: string; retirement: Promise<void> }>;

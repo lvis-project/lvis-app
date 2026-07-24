@@ -7,6 +7,7 @@ import type {
   PluginAccessSpec,
   PluginHostApi,
   PluginManifest,
+  PluginRegistryEntry,
   PluginToolHandler,
   RuntimePlugin,
 } from "../types.js";
@@ -20,6 +21,7 @@ import type {
   PreparedPluginRuntimeGenerationPublication,
 } from "../plugin-host-generation.js";
 import { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
+import { canonicalJSON } from "../whitelist/canonical-json.js";
 import {
   materializePluginGenerationRoot,
   removeRetainedPluginGeneration,
@@ -104,6 +106,9 @@ export abstract class PluginRuntimeState {
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
     installPluginId: string | null,
+    candidateRegistryEntry?: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    >,
   ) => PluginHostApi;
   protected readonly deploymentGuard?: PluginDeploymentGuard;
   protected readonly installReceiptCacheRoot?: string;
@@ -124,6 +129,7 @@ export abstract class PluginRuntimeState {
   protected readonly knownPluginAccessGrants = new Map<string, PluginAccessSpec | undefined>();
   protected readonly knownInstallAliases = new Map<string, Set<string>>();
   protected readonly knownInstallClaims = new Map<string, string | null>();
+  private readonly pendingInstallIdentityOwners = new Map<string, symbol>();
   protected readonly knownToolOwners = new Map<string, string>();
   protected readonly knownEventOwners = new Map<string, string>();
   protected readonly failedPluginIds = new Set<string>();
@@ -362,6 +368,9 @@ export abstract class PluginRuntimeState {
     pluginDataDir: string,
     hostEffects?: HostApiGenerationScope,
     installPluginId: string | null = this.requirePluginInstallClaim(pluginId),
+    candidateRegistryEntry?: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    >,
   ): {
     hostApi: PluginHostApi;
     disposers: Array<() => void>;
@@ -434,6 +443,7 @@ export abstract class PluginRuntimeState {
         pluginDataDir,
         incarnation,
         installPluginId,
+        candidateRegistryEntry,
       );
       const hostApi = hostEffects ? hostEffects.wrapHostApi(rawHostApi) : rawHostApi;
       // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
@@ -790,6 +800,73 @@ export abstract class PluginRuntimeState {
       [normalized],
     );
     return normalized;
+  }
+
+  protected reservePreparedInstallIdentity(
+    pluginId: string,
+    installId: string,
+  ): { installId: string; release(): void } {
+    const normalized = this.validatePreparedInstallIdentity(pluginId, installId);
+    const identifiers = [...new Set([pluginId, normalized])];
+    for (const identifier of identifiers) {
+      if (this.pendingInstallIdentityOwners.has(identifier)) {
+        throw this.pluginIdentityCollision(
+          identifier,
+          "reserved by another prepared activation",
+        );
+      }
+    }
+    const owner = Symbol(`prepared-plugin-identity:${pluginId}`);
+    for (const identifier of identifiers) {
+      this.pendingInstallIdentityOwners.set(identifier, owner);
+    }
+    let released = false;
+    return {
+      installId: normalized,
+      release: () => {
+        if (released) return;
+        released = true;
+        for (const identifier of identifiers) {
+          if (this.pendingInstallIdentityOwners.get(identifier) === owner) {
+            this.pendingInstallIdentityOwners.delete(identifier);
+          }
+        }
+      },
+    };
+  }
+
+  protected async withPreparedInstallIdentity<T>(
+    pluginId: string,
+    installId: string,
+    operation: (normalizedInstallId: string) => Promise<T>,
+  ): Promise<T> {
+    const reservation = this.reservePreparedInstallIdentity(pluginId, installId);
+    try {
+      return await operation(reservation.installId);
+    } finally {
+      reservation.release();
+    }
+  }
+
+  protected validatePreparedRegistryEntry(
+    manifest: PluginManifest,
+    registryEntry: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    > | undefined,
+  ): Readonly<Pick<PluginRegistryEntry, "installSource" | "manifestSha256">> {
+    if (!registryEntry) {
+      throw new Error(`prepared artifact registry provenance missing for '${manifest.id}'`);
+    }
+    const candidateManifestSha256 = createHash("sha256")
+      .update(canonicalJSON(manifest))
+      .digest("hex");
+    if (
+      registryEntry.manifestSha256 !== undefined
+      && registryEntry.manifestSha256 !== candidateManifestSha256
+    ) {
+      throw new Error(`prepared artifact registry manifest provenance changed for '${manifest.id}'`);
+    }
+    return Object.freeze({ ...registryEntry });
   }
 
   protected assertPluginManifestIdentity(

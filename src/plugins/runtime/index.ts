@@ -18,6 +18,7 @@ import type {
   PluginHostApi,
   PluginManifest,
   PluginOnboardingSpec,
+  PluginRegistryEntry,
   PluginToolHandler,
   PluginUiExtension,
   RuntimePlugin,
@@ -228,6 +229,9 @@ export interface PreparedArtifactRuntimeActivationInput<T> {
   pluginRoot: string;
   manifest: PluginManifest;
   receiptRaw: string;
+  registryEntry: Readonly<
+    Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+  >;
   approvedPluginAccess?: PluginAccessSpec;
   durableCommit(): Promise<T>;
 }
@@ -257,6 +261,9 @@ export interface PluginRuntimeOptions {
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
     installPluginId: string | null,
+    candidateRegistryEntry?: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    >,
   ) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
@@ -899,6 +906,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
               pluginRoot,
               manifest,
               receiptRaw,
+              registryEntry: {
+                installSource: targetPlan.installSource,
+                manifestSha256: targetPlan.manifestSha256,
+              },
               approvedPluginAccess:
                 targetPlan.approvedPluginAccess
                 ?? this.knownPluginAccessGrants.get(canonicalPluginId),
