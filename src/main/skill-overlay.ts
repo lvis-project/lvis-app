@@ -22,18 +22,27 @@ import type { LoadedSkill } from "./skill-store.js";
 export interface SkillOverlayEntry {
   name: string;
   body: string;
+  pluginOwner?: LoadedSkill["pluginOwner"];
+}
+
+interface StoredSkillOverlayEntry extends SkillOverlayEntry {
+  releaseGeneration?: () => void;
 }
 
 export class SkillOverlay {
-  private readonly bySession = new Map<string, Map<string, SkillOverlayEntry>>();
+  private readonly bySession = new Map<string, Map<string, StoredSkillOverlayEntry>>();
 
   /** Register (or refresh) a skill for the given session. */
-  register(sessionId: string, skill: LoadedSkill): void {
+  register(sessionId: string, skill: LoadedSkill, generationLease?: { release(): void }): void {
     if (!sessionId) return;
-    const bySkill = this.bySession.get(sessionId) ?? new Map<string, SkillOverlayEntry>();
-    bySkill.set(skill.name, {
+    const bySkill = this.bySession.get(sessionId) ?? new Map<string, StoredSkillOverlayEntry>();
+    const key = skill.approvalKey ?? skill.name;
+    bySkill.get(key)?.releaseGeneration?.();
+    bySkill.set(key, {
       name: skill.name,
       body: skill.body,
+      pluginOwner: skill.pluginOwner,
+      ...(generationLease ? { releaseGeneration: () => generationLease.release() } : {}),
     });
     this.bySession.set(sessionId, bySkill);
   }
@@ -47,7 +56,22 @@ export class SkillOverlay {
 
   /** Drop all skills for a session — fired on user-turn boundaries and chat:new. */
   clear(sessionId: string): void {
+    for (const entry of this.bySession.get(sessionId)?.values() ?? []) {
+      entry.releaseGeneration?.();
+    }
     this.bySession.delete(sessionId);
+  }
+
+  clearPluginGeneration(pluginId: string, generationId: string): void {
+    for (const [sessionId, entries] of this.bySession) {
+      for (const [key, entry] of entries) {
+        if (entry.pluginOwner?.pluginId === pluginId && entry.pluginOwner.generationId === generationId) {
+          entry.releaseGeneration?.();
+          entries.delete(key);
+        }
+      }
+      if (entries.size === 0) this.bySession.delete(sessionId);
+    }
   }
 
   /**

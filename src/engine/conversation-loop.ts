@@ -227,6 +227,9 @@ export class ConversationLoop {
       // Workspace handlers wire this after loop construction; resolve lazily
       // so persistent directory approvals never capture an empty snapshot.
       () => deps.workspaceRootLifecycle,
+      deps.pluginOperationGrants,
+      () => deps.pluginRuntime?.getGenerationAccess?.(),
+      deps.pluginOperationIdentityProvider,
     );
     this.auditLogger = deps.auditLogger ?? new AuditLogger();
     this.refreshProvider();

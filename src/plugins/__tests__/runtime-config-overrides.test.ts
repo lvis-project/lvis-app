@@ -98,7 +98,7 @@ describe("PluginRuntime config overrides", () => {
     await expect(runtime.call("remove_config_echo")).resolves.toBe("missing");
   });
 
-  it("fires onDisable for loaded plugins before restartAll re-registers them", async () => {
+  it("does not fire global onDisable while restartAll atomically replaces a generation", async () => {
     await installConfigPlugin({
       id: "cleanup-plugin",
       tool: "cleanup_echo",
@@ -132,7 +132,10 @@ describe("PluginRuntime config overrides", () => {
     events.length = 0;
     await runtime.restartAll();
 
-    expect(events).toEqual(["disable:cleanup-plugin", "register:cleanup-plugin"]);
+    // Replacement publishes the candidate before retiring predecessor-scoped
+    // effects. A global onDisable here would erase the freshly published host
+    // projection, so it is reserved for actual plugin removal/disable.
+    expect(events).toEqual(["register:cleanup-plugin"]);
     await expect(runtime.call("cleanup_echo")).resolves.toBe("ok");
   });
 

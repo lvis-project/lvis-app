@@ -319,7 +319,7 @@ export interface AuditEntry {
      *  executor's global timeout fired, `"user-abort"` when caller cancelled
      *  via abortSignal, `"error"` for any other failure. Distinguishes
      *  policy-enforced cap from user cancellation in post-incident analysis. */
-    terminationReason?: "ok" | "ceiling" | "user-abort" | "error";
+    terminationReason?: "ok" | "ceiling" | "user-abort" | "error" | "indeterminate";
   }>;
   tokenUsage?: {
     /**

@@ -27,6 +27,7 @@ import {
   filterRegistryByEventAndSubject,
   filterRegistryByEventAndTool,
   type HookRegistryEntry,
+  type ConfigHookRegistryEntry,
 } from "./hook-registry.js";
 import type { HookConfigEntry } from "./hook-config.js";
 import {
@@ -48,6 +49,8 @@ import {
 import { redactForLLM } from "../audit/dlp-filter.js";
 import { createLogger } from "../lib/logger.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
+import type { PluginHookTrustStore, PreparedPluginHookProjection } from "./plugin-hook-projection.js";
+import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
 
 const log = createLogger("script-hook-manager");
 
@@ -77,6 +80,12 @@ export interface HookDispatchResult {
   reason: string;
   /** Per-hook results — for audit + observability. */
   results: ScriptHookInvocationResult[];
+}
+
+export interface PreparedPluginHookGenerationPublication {
+  readonly pluginId: string;
+  readonly generationId: string;
+  publish(): void;
 }
 
 /**
@@ -138,7 +147,13 @@ export interface UserPromptSubmitPayload {
 
 export class ScriptHookManager {
   private registry: HookRegistryEntry[] = [];
+  private pluginRegistries = new Map<string, readonly HookRegistryEntry[]>();
   private generation = 0;
+  private generationAccess: PluginRuntimeGenerationAccess | undefined;
+
+  setPluginGenerationAccess(access: PluginRuntimeGenerationAccess): void {
+    this.generationAccess = access;
+  }
 
   /**
    * Replace the trusted hook list with legacy `.sh` hooks only. Retained for
@@ -164,14 +179,99 @@ export class ScriptHookManager {
     this.generation += 1;
   }
 
+  publishPluginGeneration(
+    projections: readonly PreparedPluginHookProjection[],
+    trust: PluginHookTrustStore,
+  ): void {
+    this.preparePluginGeneration(projections, trust).publish();
+  }
+
+  preparePluginGeneration(
+    projections: readonly PreparedPluginHookProjection[],
+    trust: PluginHookTrustStore,
+    owner?: { pluginId: string; generationId: string },
+  ): PreparedPluginHookGenerationPublication {
+    for (const projection of projections) {
+      if (!projection.owner.activationId) {
+        throw new Error(`plugin Hook activation identity is missing for '${projection.owner.localId}'`);
+      }
+    }
+    const inferred = projections[0]?.owner;
+    const pluginId = owner?.pluginId ?? inferred?.pluginId;
+    const generationId = owner?.generationId ?? inferred?.generationId;
+    if (!pluginId || !generationId) {
+      throw new Error("plugin Hook generation identity is required");
+    }
+    const next = new Map(this.pluginRegistries);
+    const generations = new Set(
+      projections.map((projection) =>
+        `${projection.owner.pluginId}\0${projection.owner.activationId}`),
+    );
+    generations.add(`${pluginId}\0${generationId}`);
+    for (const identity of generations) {
+      const [targetPluginId, targetGenerationId] = identity.split("\0");
+      for (const [key, entries] of next) {
+        if (entries.some((entry) =>
+          entry.owner?.pluginId === targetPluginId &&
+          entry.owner.activationId === targetGenerationId)) {
+          next.delete(key);
+        }
+      }
+    }
+    for (const projection of projections) {
+      if (!trust.isApproved(projection)) continue;
+      const entries: ConfigHookRegistryEntry[] = projection.entries.map((entry) => ({
+        id: `plugin:${projection.owner.pluginId}:${projection.owner.localId}:${entry.id}`,
+        event: entry.event,
+        ...(entry.matcher !== undefined ? { matcher: entry.matcher } : {}),
+        command: [...entry.command],
+        source: "config",
+        timeoutMs: entry.timeoutMs,
+        owner: projection.owner,
+      }));
+      next.set(pluginProjectionKey(projection), Object.freeze(entries));
+    }
+    let published = false;
+    return Object.freeze({
+      pluginId,
+      generationId,
+      publish: () => {
+        if (published) return;
+        this.pluginRegistries = next;
+        this.generation += 1;
+        published = true;
+      },
+    });
+  }
+
+  removePluginGeneration(pluginId: string, generationId: string): void {
+    for (const [key, entries] of this.pluginRegistries) {
+      if (entries.some((entry) => entry.owner?.pluginId === pluginId &&
+        entry.owner.activationId === generationId)) {
+        this.pluginRegistries.delete(key);
+      }
+    }
+    this.generation += 1;
+  }
+
+  removePlugin(pluginId: string): void {
+    for (const [key, entries] of this.pluginRegistries) {
+      if (entries.some((entry) => entry.owner?.pluginId === pluginId)) this.pluginRegistries.delete(key);
+    }
+  }
+
+  private snapshotRegistry(): HookRegistryEntry[] {
+    return [...this.registry, ...[...this.pluginRegistries.values()].flat()];
+  }
+
   /** Registry entries for the given type. Used by tests + diagnostics. */
   hooksOfType(type: ScriptHookType): HookRegistryEntry[] {
-    return this.registry.filter((e) => e.event === type);
+    return this.snapshotRegistry().filter((e) => e.event === type);
   }
 
   /** Total trusted entry count. */
   size(): number {
-    return this.registry.length;
+    return this.snapshotRegistry().length;
   }
 
   getGeneration(): string {
@@ -248,7 +348,7 @@ export class ScriptHookManager {
       // Subject for lifecycle matchers is the sessionId (design §6). Reuse the
       // same glob filter so a `'*'` / sessionId matcher behaves identically to
       // tool-use matchers. (`'*'` / absent matcher ⇒ match every session.)
-      const entries = filterRegistryByEventAndSubject(this.registry, event, sessionId);
+      const entries = filterRegistryByEventAndSubject(this.snapshotRegistry(), event, sessionId);
       if (entries.length === 0) {
         return { decision: "allow", reason: "no matching lifecycle hooks", results: [] };
       }
@@ -279,7 +379,8 @@ export class ScriptHookManager {
       // decision is OBSERVE-ONLY, so the caller ignores it. (Chain-stop just
       // avoids running later hooks once one already signaled deny — the audit
       // captures every result up to that point, same as PostToolUse.)
-      return await runHookChain(entries.map(toRunnable), stdinPayload, options);
+      return await this.runWithGenerationLeases(entries, (activeEntries) =>
+        runHookChain(activeEntries.map(toRunnable), stdinPayload, options));
     } catch (err) {
       // Fail-soft: a lifecycle dispatch must NEVER break the turn. Log + return
       // an empty observe result so the caller continues unaffected.
@@ -325,7 +426,7 @@ export class ScriptHookManager {
       // Matcher subject = the prompt text (design §5). Reuse the same glob as
       // tool-use / lifecycle matchers (`'*'` / absent matcher ⇒ match every prompt).
       const entries = filterRegistryByEventAndSubject(
-        this.registry,
+        this.snapshotRegistry(),
         USER_PROMPT_SUBMIT_EVENT,
         payload.inputText,
       );
@@ -348,7 +449,8 @@ export class ScriptHookManager {
       // All fail-closed cases (timeout/nonzero-exit/bad-json/spawn-error) are
       // already collapsed to a deny RESULT by runOneHookScript, so the chain's
       // returned decision is authoritative — the caller refuses on deny.
-      return await runHookChain(entries.map(toRunnable), stdinPayload, options);
+      return await this.runWithGenerationLeases(entries, (activeEntries) =>
+        runHookChain(activeEntries.map(toRunnable), stdinPayload, options));
     } catch (err) {
       // FAIL-CLOSED: a blocking event must DENY (refuse the turn) on an
       // unexpected dispatch error — NOT allow. (Contrast runLifecycleEvent,
@@ -374,7 +476,7 @@ export class ScriptHookManager {
   ): Promise<HookDispatchResult> {
     // #811 — filter by event + matcher (the same glob as `.sh` frontmatter).
     // A config/`.sh` entry with no matcher runs for every tool.
-    const entries = filterRegistryByEventAndTool(this.registry, type, payload.toolName);
+    const entries = filterRegistryByEventAndTool(this.snapshotRegistry(), type, payload.toolName);
     if (entries.length === 0) {
       return { decision: "allow", reason: "no matching hooks of this type", results: [] };
     }
@@ -396,7 +498,44 @@ export class ScriptHookManager {
     // Each entry runs with its own timeout: config entries carry a per-entry
     // (already-clamped) `timeoutMs`; `.sh` entries fall back to the default /
     // caller-supplied option.
-    return runHookChain(entries.map(toRunnable), stdinPayload, options);
+    return this.runWithGenerationLeases(entries, (activeEntries) =>
+      runHookChain(activeEntries.map(toRunnable), stdinPayload, options));
+  }
+
+  private async runWithGenerationLeases<T>(
+    entries: readonly HookRegistryEntry[],
+    operation: (activeEntries: HookRegistryEntry[]) => Promise<T>,
+  ): Promise<T> {
+    const access = this.generationAccess;
+    if (!access) {
+      const pluginEntry = entries.find((entry) => entry.owner);
+      if (pluginEntry?.owner) {
+        throw new Error(
+          `plugin hook '${pluginEntry.id}' cannot run without generation leasing for ` +
+          `'${pluginEntry.owner.pluginId}' generation '${pluginEntry.owner.generationId}'`,
+        );
+      }
+      return operation([...entries]);
+    }
+    const leases = new Map<
+      string,
+      Awaited<ReturnType<PluginRuntimeGenerationAccess["acquireExact"]>>
+    >();
+    const acquiredOwnerKeys = new Set<string>();
+    try {
+      for (const entry of entries) {
+        const owner = entry.owner;
+        if (!owner) continue;
+        const activationId = owner.activationId;
+        const key = `${owner.pluginId}\0${activationId}`;
+        if (acquiredOwnerKeys.has(key)) continue;
+        leases.set(key, await access.acquireExact(owner.pluginId, activationId));
+        acquiredOwnerKeys.add(key);
+      }
+      return await operation([...entries]);
+    } finally {
+      for (const lease of leases.values()) lease.release();
+    }
   }
 }
 
@@ -423,7 +562,13 @@ function toRunnable(entry: HookRegistryEntry): RunnableHook {
     // A declarative `hooks.json` command — the runner falls back to hashing the
     // verbatim argv for `commandIdentity` (no on-disk local-script sha exists).
     source: "config",
+    ...(entry.owner ? { pluginOwner: entry.owner } : {}),
   };
+}
+
+function pluginProjectionKey(projection: PreparedPluginHookProjection): string {
+  const owner = projection.owner;
+  return [owner.pluginId, owner.pluginVersion, owner.generationId, owner.localId, owner.fingerprint].join("|");
 }
 
 /**

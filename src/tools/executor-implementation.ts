@@ -37,6 +37,16 @@ import type {
 import type { ToolCategory, ToolSource } from "./types.js";
 import { runToolInvocation } from "./invocation-runner.js";
 import { createLogger } from "../lib/logger.js";
+import {
+  resolvePluginOperation,
+} from "./plugin-operation-governance.js";
+import {
+  PluginOperationGrantCoordinator,
+  pluginOperationExecutionDomain,
+  type PluginOperationPrincipal,
+} from "../permissions/plugin-operation-grant.js";
+import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
+import type { PluginOperationIdentityProvider } from "./invocation-services.js";
 
 const log = createLogger("executor");
 /**
@@ -91,6 +101,9 @@ export class ToolExecutor {
   private readonly sandboxFsContainedProvider: (tool: Tool) => boolean;
   private readonly workspaceRootLifecycleProvider: () => PermissionDirectoryLifecycle | undefined;
   private readonly auditWriter: AuditWriter;
+  private readonly pluginOperationGrants: PluginOperationGrantCoordinator;
+  private readonly pluginGenerationAccessProvider: () => PluginRuntimeGenerationAccess | undefined;
+  private readonly pluginOperationIdentityProvider: PluginOperationIdentityProvider;
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -103,6 +116,9 @@ export class ToolExecutor {
     hostClassifiesRiskProvider?: () => boolean,
     sandboxFsContainedProvider?: (tool: Tool) => boolean,
     workspaceRootLifecycleProvider?: () => PermissionDirectoryLifecycle | undefined,
+    pluginOperationGrants?: PluginOperationGrantCoordinator,
+    pluginGenerationAccessProvider?: () => PluginRuntimeGenerationAccess | undefined,
+    pluginOperationIdentityProvider?: PluginOperationIdentityProvider,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -114,6 +130,10 @@ export class ToolExecutor {
     this.hostClassifiesRiskProvider = hostClassifiesRiskProvider ?? (() => false);
     this.sandboxFsContainedProvider = sandboxFsContainedProvider ?? (() => false);
     this.workspaceRootLifecycleProvider = workspaceRootLifecycleProvider ?? (() => undefined);
+    this.pluginOperationGrants = pluginOperationGrants ?? new PluginOperationGrantCoordinator();
+    this.pluginGenerationAccessProvider = pluginGenerationAccessProvider ?? (() => undefined);
+    this.pluginOperationIdentityProvider =
+      pluginOperationIdentityProvider ?? (() => undefined);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
     this.auditWriter = new AuditWriter(
       this.auditLogger,
@@ -148,6 +168,157 @@ export class ToolExecutor {
 
   getHookRunner(): HookRunner {
     return this.hookRunner;
+  }
+
+  issuePluginOperationGrant(args: {
+    toolName: string;
+    input: Record<string, unknown>;
+    principal: PluginOperationPrincipal;
+    origin?: "ui" | "mcp-app";
+    ttlMs?: number;
+  }): { token: string; grantId: string; readRevision: string | null } {
+    const inspected = this.inspectPluginOperationGrant(args);
+    return this.issueInspectedPluginOperationGrant({
+      toolName: args.toolName,
+      principal: args.principal,
+      inspected,
+      ttlMs: args.ttlMs,
+    });
+  }
+
+  issueInspectedPluginOperationGrant(args: {
+    toolName: string;
+    principal: PluginOperationPrincipal;
+    inspected: {
+      operation: string;
+      intentHash: string;
+      readRevision: string | null;
+      operationDomain: string;
+      requiredRead?: {
+        readTool: string;
+        readOperations: readonly string[];
+        maxAgeMs: number;
+      };
+    };
+    ttlMs?: number;
+  }): { token: string; grantId: string; readRevision: string | null } {
+    const issued = this.pluginOperationGrants.issue(
+      {
+        ...args.principal,
+        toolName: args.toolName,
+        operation: args.inspected.operation,
+        intentHash: args.inspected.intentHash,
+        readRevision: args.inspected.readRevision,
+        expiresAt:
+          Date.now() +
+          Math.min(Math.max(args.ttlMs ?? 60_000, 1), 300_000),
+      },
+      args.inspected.operationDomain,
+      args.inspected.requiredRead,
+    );
+    return { ...issued, readRevision: args.inspected.readRevision };
+  }
+
+  inspectPluginOperationGrant(args: {
+    toolName: string;
+    input: Record<string, unknown>;
+    principal: PluginOperationPrincipal;
+    origin?: "ui" | "mcp-app";
+  }): {
+    operation: string;
+    intentHash: string;
+    readRevision: string | null;
+    operationDomain: string;
+    requiredRead?: {
+      readTool: string;
+      readOperations: readonly string[];
+      maxAgeMs: number;
+    };
+    approvalArgs: Record<string, unknown>;
+  } {
+    const tool = this.toolRegistry.findByName(args.toolName);
+    if (!tool?.pluginId || !tool.operationPolicy) {
+      throw new Error(`[plugin-operation-policy] governed plugin tool '${args.toolName}' not found`);
+    }
+    if (tool.pluginId !== args.principal.ownerPluginId) {
+      throw new Error("[plugin-operation-policy] owner mismatch");
+    }
+    const generationAccess = this.pluginGenerationAccessProvider();
+    if (!generationAccess) {
+      throw new Error("[plugin-operation-policy] plugin generation access is not wired");
+    }
+    if (
+      !tool.pluginGeneration ||
+      tool.pluginGeneration.pluginId !== args.principal.ownerPluginId ||
+      tool.pluginGeneration.generationId !== args.principal.generationId
+    ) {
+      throw new Error("[plugin-operation-policy] tool generation mismatch");
+    }
+    const activeGeneration = generationAccess.getActive(args.principal.ownerPluginId);
+    if (!activeGeneration || activeGeneration.generationId !== args.principal.generationId) {
+      throw new Error("[plugin-operation-policy] principal generation is not active");
+    }
+    const resolved = resolvePluginOperation(tool.operationPolicy, args.input, args.origin ?? "ui");
+    if (resolved.rule.kind !== "write") {
+      throw new Error("[plugin-operation-policy] only writes receive app grants");
+    }
+    const operationDomain = pluginOperationExecutionDomain(
+      args.principal,
+      args.toolName,
+      resolved.operation,
+      this.toolRegistry.listAll(),
+    );
+    let readRevision: string | null = null;
+    let requiredRead:
+      | {
+          readTool: string;
+          readOperations: readonly string[];
+          maxAgeMs: number;
+        }
+      | undefined;
+    if (resolved.rule.requiresRead) {
+      const latest = this.pluginOperationGrants.latestRequiredRead(
+        args.principal,
+        resolved.rule.requiresRead.tool,
+        resolved.rule.requiresRead.operations,
+        resolved.rule.requiresRead.maxAgeMs,
+        operationDomain,
+      );
+      if (!latest) {
+        throw new Error("[plugin-operation-policy] required read is missing or stale");
+      }
+      readRevision = latest;
+      requiredRead = {
+        readTool: resolved.rule.requiresRead.tool,
+        readOperations: resolved.rule.requiresRead.operations,
+        maxAgeMs: resolved.rule.requiresRead.maxAgeMs,
+      };
+    }
+    const approvalArgs = structuredClone(args.input);
+    return {
+      operation: resolved.operation,
+      intentHash: resolved.intentHash,
+      readRevision,
+      operationDomain,
+      ...(requiredRead ? { requiredRead } : {}),
+      approvalArgs,
+    };
+  }
+
+  revokePluginOperationGeneration(pluginId: string, generationId: string): void {
+    this.pluginOperationGrants.revokeGeneration(pluginId, generationId);
+  }
+
+  revokePluginOperationSession(appSessionId: string): void {
+    this.pluginOperationGrants.revokeSession(appSessionId);
+  }
+
+  revokePluginOperationAccount(
+    pluginId: string,
+    generationId: string,
+    accountHash: string,
+  ): void {
+    this.pluginOperationGrants.revokeAccount(pluginId, generationId, accountHash);
   }
 
   private async tryUserApprovalMemorySkip(
@@ -390,6 +561,9 @@ export class ToolExecutor {
         workspaceRootLifecycleProvider: this.workspaceRootLifecycleProvider,
         auditWriter: this.auditWriter,
         tryUserApprovalMemorySkip: this.tryUserApprovalMemorySkip.bind(this),
+        pluginOperationGrants: this.pluginOperationGrants,
+        pluginGenerationAccessProvider: this.pluginGenerationAccessProvider,
+        pluginOperationIdentityProvider: this.pluginOperationIdentityProvider,
       },
       toolUse,
       groupId,

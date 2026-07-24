@@ -1,9 +1,8 @@
 /**
  * Bridges a {@link PluginRuntime} into the {@link PluginToolDelegate} a
  * {@link PluginMcpServer} calls for `tools/call`. This is where the loopback
- * (plugin-as-MCP-server) path preserves EXACT parity with the legacy
- * `buildPluginTool` execute gate (`plugins/plugin-tool-adapter.ts`): the same
- * fail-closed runtime-state gates run BEFORE the plugin is invoked —
+ * (plugin-as-MCP-server) path applies the authoritative fail-closed runtime
+ * gates before the plugin is invoked —
  *
  *  - inactive plugin → isError. A sub-agent's `sourceTools` allowlist is NOT
  *    `isPluginEnabled`-filtered, so this is the authoritative execution gate for
@@ -17,9 +16,7 @@
  * `_meta["lvisai/rawResult"]` (the reverse adapter re-surfaces it as
  * `metadata.rawResult`) so the executor.ts / boot.ts consumers that read the raw
  * value keep working — MCP's content model is text-first, so non-text structured
- * output rides `_meta`. Parity invariant: rawResult is present iff the call
- * succeeded (the legacy adapter sets `metadata.rawResult` only on the success
- * branch).
+ * output rides `_meta`. `rawResult` is present only when the call succeeds.
  *
  * This is also where a plugin TRIGGERS an MCP App card. A plugin's tool handler
  * says "render this card with my result" by attaching the STANDARD MCP Apps
@@ -97,9 +94,7 @@ export function splitPluginToolUiMeta(value: unknown): { value: unknown; ui?: Mc
 }
 
 /**
- * Build the `tools/call` delegate for one first-party plugin. Mirrors
- * `buildPluginTool`'s execute closure exactly (gates, messages, result shape),
- * but at the MCP server boundary instead of the legacy direct Tool.
+ * Build the generation-pinned `tools/call` delegate for one first-party plugin.
  */
 export function pluginRuntimeToolDelegate(
   pluginRuntime: PluginRuntime,
@@ -110,10 +105,11 @@ export function pluginRuntimeToolDelegate(
    * Defaults to empty: a plugin that declares no card cannot trigger one.
    */
   declaredUiUris: ReadonlySet<string> = new Set(),
+  generationId: string,
 ): PluginToolDelegate {
   return async (toolName, args): Promise<PluginToolOutcome> => {
-    // Mirror buildPluginTool: empty args → undefined payload (some plugins
-    // distinguish "no args" from an empty object).
+    // Preserve the plugin handler contract: some plugins distinguish no payload
+    // from an empty object.
     const finalPayload = Object.keys(args).length > 0 ? args : undefined;
 
     // Gate 4 (authoritative execution gate): allow the call if the plugin is
@@ -150,7 +146,12 @@ export function pluginRuntimeToolDelegate(
     }
 
     try {
-      const returned = await pluginRuntime.call(toolName, finalPayload);
+      const returned = await pluginRuntime.callForPlugin(
+        pluginId,
+        toolName,
+        finalPayload,
+        generationId,
+      );
       // The plugin's own result, and (optionally) the card it asked the host to
       // render with it — the standard MCP Apps `_meta.ui` tool-result extension.
       const { value: result, ui } = splitPluginToolUiMeta(returned);

@@ -5,13 +5,17 @@
  * deploymentGuard?) shape. registry.json lives at the root of pluginsRoot,
  * so tests pick a single tmp root and the helper derives the rest.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdtempSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { PluginPaths } from "../plugin-paths.js";
 import { resolvePluginPaths } from "../plugin-paths.js";
-import { PluginMarketplaceService } from "../marketplace.js";
+import {
+  PluginMarketplaceService,
+  type PreparedMarketplacePluginActivation,
+} from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import {
   createNoopHostApiForTests,
@@ -19,6 +23,82 @@ import {
   type PluginRuntimeOptions,
 } from "../runtime.js";
 import type { PluginManifest, Tool } from "../types.js";
+import type {
+  HostPluginGenerationState,
+  PluginRuntimeGenerationProjection,
+} from "../plugin-host-generation.js";
+import type { ActivePluginGeneration } from "../plugin-generation-coordinator.js";
+
+/** Restore owner write access before deleting immutable generation fixtures. */
+export async function makeTestTreeWritable(root: string): Promise<void> {
+  await chmod(root, 0o700).catch(() => undefined);
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  await Promise.all(entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => makeTestTreeWritable(join(root, entry.name))));
+}
+
+/**
+ * Explicit test lifecycle for storage-focused Marketplace tests. Production
+ * code must supply `PluginRuntime.activatePreparedArtifact`; this helper keeps
+ * unit fixtures honest about crossing the same mandatory coordination seam.
+ */
+export const activateAndCommitPreparedPluginForTest: PreparedMarketplacePluginActivation =
+  async (prepared) => ({
+    result: await prepared.durableCommit(),
+    retirement: Promise.resolve(),
+  });
+
+export const preparedActivationOptionsForTest = Object.freeze({
+  activatePreparedArtifact: activateAndCommitPreparedPluginForTest,
+});
+
+/**
+ * Storage/unit-test service with an explicit test lifecycle default. Keeping
+ * this adapter under `__tests__` lets legacy storage fixtures omit repetitive
+ * options without weakening the production method signatures or runtime gate.
+ */
+export class TestPluginMarketplaceService extends PluginMarketplaceService {
+  override install(...args: Parameters<PluginMarketplaceService["install"]>) {
+    const [pluginId, onProgress, options] = args;
+    return super.install(
+      pluginId,
+      onProgress,
+      options ?? preparedActivationOptionsForTest,
+    );
+  }
+
+  override ensureManagedInstalled(
+    ...args: Parameters<PluginMarketplaceService["ensureManagedInstalled"]>
+  ) {
+    return super.ensureManagedInstalled(args[0] ?? preparedActivationOptionsForTest);
+  }
+
+  override installPlugin(...args: Parameters<PluginMarketplaceService["installPlugin"]>) {
+    const [pluginId, version, options] = args;
+    return super.installPlugin(
+      pluginId,
+      version,
+      options ?? preparedActivationOptionsForTest,
+    );
+  }
+
+  override rollbackPlugin(...args: Parameters<PluginMarketplaceService["rollbackPlugin"]>) {
+    const [pluginId, options] = args;
+    return super.rollbackPlugin(
+      pluginId,
+      options ?? preparedActivationOptionsForTest,
+    );
+  }
+
+  override installLocal(...args: Parameters<PluginMarketplaceService["installLocal"]>) {
+    const [sourcePath, options] = args;
+    return super.installLocal(
+      sourcePath,
+      options ?? preparedActivationOptionsForTest,
+    );
+  }
+}
 
 /**
  * #885 v6 — build a pure MCP `Tool` object from a bare tool name. Tests declare
@@ -255,20 +335,271 @@ export function makeTestPluginRuntime(
   fixture: TestPluginRuntimeFixture,
   options: Partial<PluginRuntimeOptions> = {},
 ): PluginRuntime {
-  return new PluginRuntime({
+  return bindTestPluginRuntimeGeneration(new PluginRuntime({
     hostRoot: fixture.rootDir,
     registryPath: fixture.registryPath,
     pluginsRoot: fixture.pluginsRoot,
     createHostApi: createNoopHostApiForTests,
     ...options,
-  });
+  }));
+}
+
+/**
+ * Bind the smallest complete generation lifecycle needed by legacy runtime
+ * unit tests. Product code never receives this adapter: strict lifecycle
+ * binding and immutable receipt-backed roots are covered by dedicated tests.
+ * These older tests intentionally exercise parsing, startup, restart, and
+ * teardown in their mutable tmp fixture, so their candidate-root materializer
+ * is replaced with that fixture root while publication still goes through the
+ * same runtime prepare/publish boundary as production.
+ */
+export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginRuntime {
+  const active = new Map<string, ActivePluginGeneration<HostPluginGenerationState>>();
+  const lifecycleTails = new Map<string, Promise<void>>();
+  const lifecycleQueueContext = new AsyncLocalStorage<ReadonlyMap<string, object>>();
+  const activeLifecycleQueueTokens = new WeakSet<object>();
+  const retirementTasks = new Set<Promise<void>>();
+  let sequence = 0;
+
+  const trackRetirement = (retirement: Promise<void>): Promise<void> => {
+    retirementTasks.add(retirement);
+    void retirement
+      .finally(() => retirementTasks.delete(retirement))
+      .catch(() => undefined);
+    return retirement;
+  };
+
+  const runInLifecycleQueue = <T>(
+    pluginId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const current = lifecycleQueueContext.getStore();
+    const currentToken = current?.get(pluginId);
+    if (currentToken && activeLifecycleQueueTokens.has(currentToken)) return operation();
+    const prior = lifecycleTails.get(pluginId) ?? Promise.resolve();
+    const next = prior.then(async () => {
+      const token = {};
+      const inherited = new Map(lifecycleQueueContext.getStore() ?? current ?? []);
+      inherited.set(pluginId, token);
+      activeLifecycleQueueTokens.add(token);
+      try {
+        return await lifecycleQueueContext.run(inherited, operation);
+      } finally {
+        activeLifecycleQueueTokens.delete(token);
+      }
+    });
+    const tail = next.then(() => undefined, () => undefined);
+    lifecycleTails.set(pluginId, tail);
+    return next.finally(() => {
+      if (lifecycleTails.get(pluginId) === tail) lifecycleTails.delete(pluginId);
+    });
+  };
+
+  const adoptLegacyProjection = (
+    pluginId: string,
+  ): ActivePluginGeneration<HostPluginGenerationState> | undefined => {
+    const existing = active.get(pluginId);
+    if (existing) return existing;
+    if (runtime.resolvePluginInstallIdIfKnown(pluginId) === undefined) {
+      (runtime as unknown as {
+        rememberPluginInstallAlias(id: string, alias: undefined): void;
+      }).rememberPluginInstallAlias(pluginId, undefined);
+    }
+    const projection = runtime.getRuntimeGenerationProjection(pluginId);
+    if (!projection) return undefined;
+    const methods = new Map(
+      [...runtime.getMethodMap()].flatMap(([name, entry]) =>
+        entry.pluginId === pluginId ? [[name, entry.handler] as const] : [],
+      ),
+    );
+    const generationId = projection.activationId || `test-generation-${++sequence}`;
+    const normalizedProjection = Object.freeze({
+      ...projection,
+      activationId: generationId,
+      pluginRoot: projection.pluginRoot || "/tmp/test-plugin-runtime",
+      methods,
+    });
+    const generation: ActivePluginGeneration<HostPluginGenerationState> = {
+      pluginId,
+      pluginVersion: projection.manifest.version,
+      artifactGenerationId: generationId,
+      generationId,
+      manifestSha256: generationId,
+      receiptSha256: generationId,
+      contributions: [],
+      state: {
+        payloadRoot: normalizedProjection.pluginRoot,
+        runtime: normalizedProjection,
+        hooks: [],
+        mcpServers: [],
+      },
+    };
+    active.set(pluginId, generation);
+    return generation;
+  };
+
+  const runRuntimeRetirement = async (
+    projection: PluginRuntimeGenerationProjection,
+  ): Promise<void> => {
+    const errors: Error[] = [];
+    for (const step of runtime.prepareRuntimeRetirement(projection)) {
+      try {
+        await step.run();
+      } catch (error) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(
+        errors,
+        `plugin '${projection.manifest.id}' generation retirement failed`,
+      );
+    }
+  };
+
+  const publish = async (
+    projection: PluginRuntimeGenerationProjection,
+  ): Promise<{ retirement: Promise<void> }> => {
+    const pluginId = projection.manifest.id;
+    const predecessor = active.get(pluginId);
+    const generationId = `test-generation-${++sequence}`;
+    projection.hostEffects?.bindGeneration(lifecycle as never, generationId);
+    runtime.prepareRuntimeGeneration(projection).publish();
+    active.set(pluginId, {
+      pluginId,
+      pluginVersion: projection.manifest.version,
+      artifactGenerationId: generationId,
+      generationId,
+      manifestSha256: generationId,
+      receiptSha256: generationId,
+      contributions: [],
+      state: {
+        payloadRoot: projection.pluginRoot,
+        runtime: projection,
+        hooks: [],
+        mcpServers: [],
+      },
+    });
+    const retirement = predecessor && predecessor.state.runtime !== projection
+      ? trackRetirement(runRuntimeRetirement(predecessor.state.runtime))
+      : Promise.resolve();
+    return { retirement };
+  };
+
+  const deactivate = async (
+    pluginId: string,
+  ): Promise<{ retirement: Promise<void> }> => {
+    const predecessor = active.get(pluginId);
+    runtime.prepareRuntimeRemoval(pluginId).publish();
+    active.delete(pluginId);
+    const retirement = predecessor
+      ? trackRetirement(runRuntimeRetirement(predecessor.state.runtime))
+      : Promise.resolve();
+    return { retirement };
+  };
+
+  const lifecycle = {
+    runInLifecycleQueue,
+    getActive: (pluginId: string) => {
+      const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
+      return generation
+        ? {
+            pluginId: generation.pluginId,
+            generationId: generation.generationId,
+            manifest: generation.state.runtime.manifest,
+          }
+        : undefined;
+    },
+    isExactAdmitted: (pluginId: string, generationId: string) =>
+      active.get(pluginId)?.generationId === generationId,
+    acquire: async (pluginId: string) => {
+      const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
+      if (!generation) throw new Error(`test generation is not active for '${pluginId}'`);
+      return { generation, release: () => undefined };
+    },
+    acquireExact: async (pluginId: string, generationId: string) => {
+      const generation = active.get(pluginId) ?? adoptLegacyProjection(pluginId);
+      if (!generation || generation.generationId !== generationId) {
+        throw new Error(`test generation '${pluginId}:${generationId}' is not active`);
+      }
+      return { generation, release: () => undefined };
+    },
+    runWithLease: async <T>(_lease: unknown, operation: () => Promise<T>) => operation(),
+    replaceRuntime: async (projection: PluginRuntimeGenerationProjection) => {
+      await publish(projection);
+    },
+    replaceRuntimeWithCommit: <T>(
+      projection: PluginRuntimeGenerationProjection,
+      _receiptRaw: string,
+      durableCommit: () => Promise<T>,
+    ) => runInLifecycleQueue(projection.manifest.id, async () => {
+      const result = await durableCommit();
+      const { retirement } = await publish(projection);
+      return { result, retirement };
+    }),
+    deactivate: (pluginId: string) => runInLifecycleQueue(pluginId, async () => {
+      await deactivate(pluginId);
+    }),
+    deactivateWithCommit: <T>(pluginId: string, durableCommit: () => Promise<T>) =>
+      runInLifecycleQueue(pluginId, async () => {
+        const result = await durableCommit();
+        const { retirement } = await deactivate(pluginId);
+        return { result, retirement };
+      }),
+    recoverRetirements: async () => undefined,
+    waitForRetirements: async () => {
+      await Promise.all([...retirementTasks]);
+    },
+  };
+
+  const testInternals = runtime as unknown as {
+    materializeImmutableRuntimeRoot: (
+      pluginId: string,
+      pluginRoot: string,
+      activationId: string,
+    ) => Promise<string>;
+    removeUnpublishedRuntimeRoot: (pluginId: string, pluginRoot: string) => Promise<void>;
+  };
+  testInternals.materializeImmutableRuntimeRoot = async (_pluginId, pluginRoot) => pluginRoot;
+  testInternals.removeUnpublishedRuntimeRoot = async () => undefined;
+  runtime.setGenerationAccess(lifecycle as never);
+  return runtime;
+}
+
+export function createTestHostApiFactory(
+  provided?: PluginRuntimeOptions["createHostApi"],
+): PluginRuntimeOptions["createHostApi"] {
+  return (...args) => {
+    const fallback = createNoopHostApiForTests(...args);
+    const hostApi = provided?.(...args);
+    if (!hostApi) return fallback;
+    return {
+      ...fallback,
+      ...hostApi,
+      storage: hostApi.storage ?? fallback.storage,
+    };
+  };
+}
+
+/** PluginRuntime constructor for tests that need the complete generation fixture. */
+export class TestPluginRuntime extends PluginRuntime {
+  constructor(
+    options: Omit<PluginRuntimeOptions, "createHostApi">
+      & Partial<Pick<PluginRuntimeOptions, "createHostApi">>,
+  ) {
+    super({
+      ...options,
+      createHostApi: createTestHostApiFactory(options.createHostApi),
+    });
+    bindTestPluginRuntimeGeneration(this);
+  }
 }
 
 export function makeTestPluginMarketplaceService(
   rootDir: string,
   fetcher: MarketplaceFetcher,
 ): PluginMarketplaceService {
-  return new PluginMarketplaceService(
+  return new TestPluginMarketplaceService(
     makeTestPluginPaths({ rootDir }),
     fetcher,
   );

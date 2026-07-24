@@ -20,6 +20,7 @@ import {
   formatUnknownErrorMessage,
   parsePluginJson,
 } from "../manifest-validation.js";
+import type { PluginManifest } from "../../types.js";
 import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 
@@ -52,6 +53,91 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("compiles the host schema into a working validator", async () => {
     const validator = await buildManifestValidator();
     expect(typeof validator).toBe("function");
+  });
+
+  it("accepts structured plugin-owned Skill, Hook, and MCP declarations", async () => {
+    const validator = await buildManifestValidator();
+    expect(validator({
+      id: "atomic-bundle-plugin",
+      version: "1.0.0",
+      description: "Atomic contribution bundle fixture.",
+      entry: "dist/index.js",
+      tools: [],
+      skills: [{ id: "attendance", path: "skills/attendance" }],
+      hooks: [{ id: "audit", path: "hooks/audit.json" }],
+      mcpServers: [{ id: "ep", path: "mcp/ep.json" }],
+    })).toBe(true);
+  });
+
+  it("rejects malformed contribution declarations and unknown fields", async () => {
+    const validator = await buildManifestValidator();
+    expect(validator({
+      id: "atomic-bundle-plugin",
+      version: "1.0.0",
+      description: "Atomic contribution bundle fixture.",
+      entry: "dist/index.js",
+      tools: [],
+      skills: [{ id: "invalid-id", path: "skills/attendance", trust: true }],
+    })).toBe(false);
+    expect(validator.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ keyword: "additionalProperties" }),
+      expect.objectContaining({ keyword: "pattern" }),
+    ]));
+  });
+
+  it("rejects retired parallel UI and operation-governance fields", async () => {
+    const validator = await buildManifestValidator();
+    const base = {
+      id: "retired-parallel-fields",
+      version: "1.0.0",
+      description: "Retired parallel manifest field fixture.",
+      entry: "dist/index.js",
+      tools: [],
+    };
+
+    for (const field of [
+      "uiTool",
+      "uiTools",
+      "uiAction",
+      "uiActions",
+      "operationGovernance",
+      "appAllowed",
+    ]) {
+      expect(validator({ ...base, [field]: {} }), field).toBe(false);
+      expect(validator.errors).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          keyword: "additionalProperties",
+          params: expect.objectContaining({ additionalProperty: field }),
+        }),
+      ]));
+    }
+
+    expect(validator({
+      ...base,
+      tools: [{
+        name: "legacy_governed",
+        inputSchema: {
+          type: "object",
+          properties: { operation: { type: "string", const: "status" } },
+          required: ["operation"],
+        },
+        _meta: {
+          "lvisai/operationPolicy": {
+            discriminant: "operation",
+            appAllowed: ["status"],
+            operations: {
+              status: { kind: "read", minimumRisk: "read" },
+            },
+          },
+        },
+      }],
+    })).toBe(false);
+    expect(validator.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        keyword: "additionalProperties",
+        params: expect.objectContaining({ additionalProperty: "appAllowed" }),
+      }),
+    ]));
   });
 
   // ── accept-probes (formerly runtime guards vs a stale SDK; now test-time
@@ -478,7 +564,9 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
     version: "1.2.3",
     description: "A representative manifest exercising every host-required field.",
     publisher: "LVIS",
+    packageName: "@lvis/full-featured-plugin",
     author: "LVIS Team",
+    uiSlots: ["sidebar"],
     entry: "dist/index.js",
     tools: [
       {
@@ -550,8 +638,13 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       },
       required: ["enabled"],
     },
+    python: {
+      managedBy: "lvis-app",
+      requirementsLock: "python-requirements.lock",
+      interpreter: "python3",
+    },
     startupTimeoutMs: 8000,
-  };
+  } satisfies PluginManifest;
 
   it("validates against the compiled host schema", async () => {
     const validator = await buildManifestValidator();
@@ -574,6 +667,14 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       expect(parsed.id).toBe("full-featured-plugin");
       expect(parsed.auth?.statusTool).toBe("ff_status");
       expect(parsed.auth?.logoutTool).toBe("ff_logout");
+      expect(parsed.packageName).toBe("@lvis/full-featured-plugin");
+      expect(parsed.author).toBe("LVIS Team");
+      expect(parsed.uiSlots).toEqual(["sidebar"]);
+      expect(parsed.python).toEqual({
+        managedBy: "lvis-app",
+        requirementsLock: "python-requirements.lock",
+        interpreter: "python3",
+      });
       expect(parsed.requires?.minAppVersion).toBe("1.0.0");
       expect(parsed.networkAccess?.allowedDomains).toEqual(["api.example.com"]);
       expect(parsed.uiResources?.[0]).toEqual({
@@ -631,5 +732,90 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("colocated operation policy cross-field contract", () => {
+  const governed = {
+    id: "governed-plugin",
+    version: "1.0.0",
+    description: "Governed operation union fixture.",
+    entry: "dist/index.js",
+    tools: [
+      {
+        name: "domain_read",
+        description: "Read domain state before a write.",
+        inputSchema: {
+          type: "object",
+          properties: { operation: { type: "string", enum: ["status"] } },
+          required: ["operation"],
+          additionalProperties: false,
+        },
+        _meta: {
+          ui: { visibility: ["model", "app"] },
+          "lvisai/operationPolicy": {
+            discriminant: "operation",
+            operations: {
+              status: { kind: "read", minimumRisk: "read", appVisible: true },
+            },
+          },
+        },
+      },
+      {
+        name: "domain_write",
+        description: "Write domain state after confirmation.",
+        inputSchema: {
+          type: "object",
+          properties: { operation: { type: "string", enum: ["save"] } },
+          required: ["operation"],
+          additionalProperties: false,
+        },
+        _meta: {
+          ui: { visibility: ["model", "app"] },
+          "lvisai/operationPolicy": {
+            discriminant: "operation",
+            operations: {
+              save: {
+                kind: "write",
+                minimumRisk: "network",
+                appVisible: true,
+                requiresRead: { tool: "domain_read", operations: ["status"], maxAgeMs: 60000 },
+              },
+            },
+          },
+        },
+      },
+    ],
+  };
+
+  async function parse(value: unknown) {
+    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-governance-"));
+    try {
+      const file = join(dir, "plugin.json");
+      await writeFile(file, JSON.stringify(value), "utf-8");
+      return await parsePluginJson(file, await buildManifestValidator());
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("accepts a policy whose operation union exactly matches its tool schema", async () => {
+    await expect(parse(governed)).resolves.toMatchObject({ tools: governed.tools });
+  });
+
+  it("rejects operation drift but accepts an app write without an artificial read", async () => {
+    const drifted = structuredClone(governed);
+    drifted.tools[1].inputSchema.properties.operation.enum = ["save", "delete"];
+    await expect(parse(drifted)).rejects.toThrow(/exactly match/);
+
+    const noRead = structuredClone(governed);
+    delete (noRead.tools[1]._meta["lvisai/operationPolicy"].operations.save as { requiresRead?: unknown }).requiresRead;
+    await expect(parse(noRead)).resolves.toMatchObject({ tools: noRead.tools });
+  });
+
+  it("does not let an operation policy expand app visibility", async () => {
+    const modelOnly = structuredClone(governed);
+    modelOnly.tools[1]._meta.ui.visibility = ["model"];
+    await expect(parse(modelOnly)).rejects.toThrow(/cannot expand/);
   });
 });

@@ -1,6 +1,10 @@
 import type { BrowserWindow } from "electron";
 import type { MarketplaceSettings } from "../data/settings-store.js";
-import type { PluginMarketplaceService } from "../plugins/marketplace.js";
+import type {
+  PluginMarketplaceService,
+  PreparedMarketplacePluginArtifact,
+  PreparedMarketplacePluginActivation,
+} from "../plugins/marketplace.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
@@ -42,9 +46,9 @@ export interface RunManagedBootstrapInput {
  * In-flight bootstrap promise. The first-boot caller and the renderer-driven
  * `lvis:bootstrap:retry` IPC both go through `runManagedBootstrap`; if the
  * user mashes the retry button or boot is still in progress when retry fires,
- * concurrent runs would race on `ensureManagedInstalled` (registry write) +
- * `restartAll` (runtime tear-down/reload). Coalescing eliminates both
- * windows — subsequent callers await the in-flight result.
+ * concurrent runs would race on `ensureManagedInstalled` and atomic runtime
+ * publication. Coalescing eliminates both windows — subsequent callers await
+ * the in-flight result.
  *
  * Module-scoped (not instance-scoped) because the singleton matches the
  * single PluginMarketplaceService + PluginRuntime constructed at boot. If
@@ -61,12 +65,12 @@ export function _resetBootstrapInFlightForTest(): void {
  * Run the managed-plugin bootstrap once and emit lifecycle status to the
  * renderer. Shared between the first-boot call in `boot()` and the
  * `lvis:bootstrap:retry` IPC handler so the retry path is bug-for-bug
- * identical to the original — same skip-reason resolution, same
- * `restartAll()` call after a successful install, same status payload shape.
+ * identical to the original — same skip-reason resolution and status payload
+ * shape, with successful artifacts activated through the generation lifecycle.
  *
  * Concurrent calls are coalesced via {@link bootstrapInFlight}: if a run is
  * already underway, the new caller awaits the same promise instead of
- * starting a parallel `ensureManagedInstalled` / `restartAll` cycle.
+ * starting a parallel managed-install/activation cycle.
  *
  * Graceful by contract: marketplace unreachable / per-plugin failure /
  * thrown errors all emit a status event but never propagate. The caller does
@@ -101,14 +105,16 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   }
   notifyBootstrapStatus(mainWindow, { phase: "start" });
   try {
+    const activatePreparedArtifact: PreparedMarketplacePluginActivation =
+      (prepared: PreparedMarketplacePluginArtifact) =>
+        pluginRuntime.activatePreparedArtifact<string>(prepared);
     // A dependency preparation can hold a per-plugin lifecycle lock forever.
     // Cancellation must happen before the outer all-plugin lock queues.
     pluginRuntime.cancelAllPendingRestarts();
     const ensureResult = await withAllPluginInstallLocks(async () => {
-      const result = await pluginMarketplace.ensureManagedInstalled();
-      const changed = result.installed.length > 0 || (result.updated?.length ?? 0) > 0;
-      if (changed) await pluginRuntime.restartAll();
-      return result;
+      return pluginMarketplace.ensureManagedInstalled({
+        activatePreparedArtifact,
+      });
     });
     const updated = ensureResult.updated ?? [];
     if (ensureResult.installed.length > 0) {
@@ -121,8 +127,6 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
         `boot: managed plugin bootstrap auto-updated ${updated.length}: ${updated.join(", ")}`,
       );
     }
-    // Reload the runtime once if anything was installed OR auto-updated so the
-    // new versions are picked up without an app restart.
     if (ensureResult.failed.length > 0) {
       log.warn(
         `boot: managed plugin bootstrap failed ${ensureResult.failed.length}: %s`,

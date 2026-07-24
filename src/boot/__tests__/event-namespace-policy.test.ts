@@ -13,7 +13,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createNoopHostApiForTests, PluginRuntime } from "../../plugins/runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "../../plugins/__tests__/test-helpers.js";
 import {
   canEmitEvent,
   classifySubscription,
@@ -198,8 +198,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
 
   it("rejects subscription to a private namespace with warn", async () => {
     await writePlugin("p-priv", ["memory.private.leaked"]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const warns: string[] = [];
@@ -218,8 +217,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
 
   it("accepts a known public subscription silently", async () => {
     await writePlugin("p-pub", ["email.new"]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const warns: string[] = [];
@@ -237,8 +235,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
 
   it("accepts explicit host public events silently while keeping host namespace closed", async () => {
     await writePlugin("p-host-theme", ["host.theme.changed"]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const warns: string[] = [];
@@ -255,8 +252,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
 
   it("allows unknown neutral subscription with a drift warning", async () => {
     await writePlugin("p-neutral", ["custom.thing"]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const warns: string[] = [];
@@ -361,8 +357,7 @@ describe("capability emit gate", () => {
 
   it("drops email.* emission from a plugin that did not declare the email namespace", async () => {
     await writePlugin("p-no-mail", ["custom.ping"]); // declares an unrelated namespace
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-no-mail");
@@ -374,8 +369,7 @@ describe("capability emit gate", () => {
 
   it("passes email.* emission from a plugin declaring email.* in emittedEvents", async () => {
     await writePlugin("p-mail", ["email.new"]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-mail");
@@ -390,8 +384,7 @@ describe("capability emit gate", () => {
     // Trust comes from HostApi pluginId binding (the runtime overwrites
     // payload.pluginId with the bound runtime id), not from a declared namespace.
     await writePlugin("p-custom", []);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-custom");
@@ -408,8 +401,7 @@ describe("capability emit gate", () => {
     await writePlugin("p-legacy", [], {
       capabilities: ["worker-client", "mail-source", "totally-legacy-cap"],
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const manifest = runtime.getPluginManifest("p-legacy");
@@ -433,8 +425,7 @@ describe("capability emit gate", () => {
     await writePlugin("p-legacy", [], {
       capabilities: ["worker-client", "mail-source", "totally-legacy-cap"],
     });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p-legacy");

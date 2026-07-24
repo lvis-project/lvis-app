@@ -347,7 +347,7 @@ export class PermissionManager {
    */
   private readonly alwaysAllowed = new Map<string, GrantTier>();
 
-  private readonly toolModeOverrides = new Map<string, ExecutionMode>();
+  private toolModeOverrides = new Map<string, ExecutionMode>();
 
   private readonly permissionsFilePath: string;
   /** Permission policy P3 — reviewer agent dispatch components. Wired at boot. */
@@ -693,6 +693,28 @@ export class PermissionManager {
 
   clearToolModeOverride(toolName: string): void {
     if (this.toolModeOverrides.delete(toolName)) this.policyGeneration += 1;
+  }
+
+  /** Prebuild an exact tool-mode snapshot; publication is assignment-only. */
+  prepareToolModeOverrides(
+    predecessorToolNames: Iterable<string>,
+    replacements: readonly { toolName: string; mode: ExecutionMode }[],
+  ): { publish(): void } {
+    const predecessors = Object.freeze([...predecessorToolNames]);
+    const prepared = Object.freeze(replacements.map((entry) => Object.freeze({ ...entry })));
+    let published = false;
+    return Object.freeze({
+      publish: () => {
+        if (published) return;
+        for (const toolName of predecessors) this.toolModeOverrides.delete(toolName);
+        for (const { toolName, mode } of prepared) {
+          if (mode === "default") this.toolModeOverrides.delete(toolName);
+          else this.toolModeOverrides.set(toolName, mode);
+        }
+        this.policyGeneration += 1;
+        published = true;
+      },
+    });
   }
 
   getVisibilityDenyRules(): DenyRule[] {

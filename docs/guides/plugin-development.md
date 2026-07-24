@@ -16,18 +16,34 @@ host APIs or tool execution.
 
 ## Manifest Basics
 
-Every plugin package needs a `plugin.json` manifest. The manifest should include:
+Every plugin package needs a `plugin.json` manifest. The Host owns the canonical
+shape in `schemas/plugin-manifest.schema.json` and the complete TypeScript/JSDoc
+authoring contract in `src/plugins/public-contract.ts`. `@lvis/plugin-sdk`
+publishes generated mirrors of those two Host files.
+
+The manifest should include:
 
 - stable plugin id;
 - display name and version;
-- entry points for UI and runtime code;
-- tools and tool schemas;
+- runtime entry point and optional UI declarations;
+- pure MCP `Tool[]` objects with colocated input schemas;
 - required capabilities;
 - settings schema if configurable;
 - marketplace metadata if published.
 
-Tool categories and input schemas are part of the security contract. Missing or
-misleading categories can cause the host to deny execution.
+`tools[]` is the only callable surface. The retired `uiTool`, `uiTools`,
+`uiAction`, `uiActions`, top-level `operationGovernance`, and top-level
+`appAllowed` shapes are rejected. App/model visibility belongs on each Tool at
+`_meta.ui.visibility`; operation restrictions belong on the same Tool at
+`_meta["lvisai/operationPolicy"]`.
+
+Deprecated `keywords[]` entries bind a case-insensitive keyword to an exact
+model-visible Tool name in `skillId`. A match preloads that Tool schema into the
+model-visible turn scope; it does not invoke the Tool. This is not Skill
+discovery: instruction bundles belong in `manifest.skills`. Missing and app-only
+targets are rejected. Owner: `lvis-app` plugin runtime. Remove after every
+supported plugin has migrated to bundled `manifest.skills` and no active
+manifest declares `keywords`.
 
 ## HostApi Boundaries
 
@@ -66,14 +82,15 @@ provide:
 
 - name;
 - description;
-- category;
 - input schema;
-- path fields where file access is possible;
+- `_meta.ui.visibility` when the SEP-1865 dual-surface default is not intended;
+- `_meta["lvisai/pathFields"]` where file access is possible;
 - execution handler;
 - required capabilities.
 
-Tools are executed only after permission resolution. The plugin runtime does not
-own the approval gate.
+The Host classifies risk for each invocation. A plugin cannot assign its own
+permission category or lower a Host verdict. Tools are executed only after
+permission resolution; the plugin runtime does not own the approval gate.
 
 ## Settings
 

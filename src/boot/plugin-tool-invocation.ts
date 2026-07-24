@@ -49,6 +49,9 @@ export function isAppOnlyRuntimeInvocation(
   // true` conjunction. A model-visible tool (model-only or dual) is isUiOnly=false
   // → governed (the load-bearing #1554 rule; "model wins" for dual).
   const tool = manifest.tools.find((t) => t.name === toolName);
+  // Operation-governed app-only tools must stay on ToolExecutor. The policy is
+  // colocated on the signed Tool; there is no parallel app-action map.
+  if (tool?._meta?.["lvisai/operationPolicy"]) return false;
   return tool != null && isUiOnly(tool);
 }
 

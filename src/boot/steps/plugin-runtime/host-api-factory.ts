@@ -188,6 +188,10 @@ export function createHostApiFactory(
   manifest: PluginManifest,
   pluginDataDir: string,
   incarnation: PluginHostApiIncarnation,
+  installPluginId: string | null,
+  candidateRegistryEntry?: Readonly<
+    Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+  >,
 ) => PluginHostApi {
   const {
     getPluginRuntime,
@@ -216,16 +220,37 @@ export function createHostApiFactory(
     manifest: PluginManifest,
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
+    installPluginId: string | null,
+    candidateRegistryEntry?: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    >,
   ): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
-    const installPluginId = pluginRuntime.resolvePluginInstallId(pluginId);
+    if (installPluginId === undefined) {
+      throw new Error(`HostApi install provenance missing: ${pluginId}`);
+    }
     const getCurrentRegistryEntry = () =>
-      installPluginId === null ? undefined : getRegistryEntry(installPluginId);
+      candidateRegistryEntry
+      ?? (installPluginId === null
+        ? undefined
+        : getRegistryEntry(installPluginId));
     const hostIncarnation = incarnation;
+    const hostEffects = hostIncarnation.generationScope;
+    const registerOwnedDisposer = (dispose: () => void): (() => void) => {
+      let disposed = false;
+      const disposeOnce = () => {
+        if (disposed) return;
+        disposed = true;
+        dispose();
+      };
+      hostIncarnation.registerDisposer(disposeOnce);
+      hostEffects?.registerDisposer(disposeOnce);
+      return disposeOnce;
+    };
     const assertIssuedCapabilityActive = (memberPath: string): void => {
       if (!hostIncarnation.isActive()) {
         throw new Error(
@@ -439,13 +464,16 @@ export function createHostApiFactory(
             pluginId,
             key,
             (_changedKey, value) => {
-              if (!hostIncarnation.isActive()) return;
-              callback(value as T | undefined);
+              const invoke = (nextValue: T | undefined) => {
+                if (!hostIncarnation.isActive()) return;
+                callback(nextValue);
+              };
+              if (hostEffects) void hostEffects.wrapCallback(invoke)(value as T | undefined);
+              else invoke(value as T | undefined);
             },
           );
           // Auto-cleanup on plugin disable to mirror onEvent semantics.
-          hostIncarnation.registerDisposer(unsubscribe);
-          return unsubscribe;
+          return registerOwnedDisposer(unsubscribe);
         },
       },
       registerKeywords: (keywords) => {
@@ -456,15 +484,26 @@ export function createHostApiFactory(
           log.debug(`plugin:${pluginId} skipping keyword registration — plugin inactive`);
           return;
         }
-        keywordEngine.registerKeywords(
-          keywords.map((k) => ({ ...k, pluginId })),
-        );
+        if (hostEffects) {
+          const generationToken = hostEffects.token;
+          const prepared = keywords.map((keyword) => ({ ...keyword }));
+          const publication = keywordEngine.preparePluginGeneration(
+            pluginId,
+            generationToken,
+            prepared,
+          );
+          hostEffects.stagePublish(publication.publish);
+          hostEffects.onSupersede(() => {
+            keywordEngine.removePluginGeneration(pluginId, generationToken);
+          });
+        } else {
+          keywordEngine.registerKeywords(keywords.map((k) => ({ ...k, pluginId })));
+        }
         log.info(`plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
         plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
-        const manifest = pluginRuntime?.getPluginManifest(pluginId);
-        const declaredEmittedEvents = manifest ? getDeclaredEmittedEvents(manifest) : [];
+        const declaredEmittedEvents = getDeclaredEmittedEvents(manifest);
         if (!canEmitEvent(type, declaredEmittedEvents)) {
           const requiredCap = requiredCapabilityForEmit(type);
           try {
@@ -484,12 +523,13 @@ export function createHostApiFactory(
       },
       onEvent: (type, handler) => {
         pluginRuntime.assertPluginEventAccess(pluginId, type);
-        const unsubscribe = onEvent(type, (data) => {
+        const dispatch = (data: unknown) => {
           if (hostIncarnation.isActive()) handler(data);
-        });
-        hostIncarnation.registerDisposer(unsubscribe);
+        };
+        const guardedHandler = hostEffects ? hostEffects.wrapCallback(dispatch) : dispatch;
+        const unsubscribe = onEvent(type, (data) => { void guardedHandler(data); });
         plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
-        return unsubscribe;
+        return registerOwnedDisposer(unsubscribe);
       },
       getInstalledPluginIds: () => {
         return pluginRuntime.listPluginIds().filter((id) => id !== pluginId);
@@ -509,11 +549,12 @@ export function createHostApiFactory(
           if (typeof subjectId !== "string" || subjectId === pluginId) return;
           handler({ type: "uninstalled", pluginId: subjectId });
         };
-        const unsubInstalled = onEvent("plugin.installed", dispatchInstalled);
-        const unsubUninstalled = onEvent("plugin.uninstalled", dispatchUninstalled);
+        const guardedInstalled = hostEffects ? hostEffects.wrapCallback(dispatchInstalled) : dispatchInstalled;
+        const guardedUninstalled = hostEffects ? hostEffects.wrapCallback(dispatchUninstalled) : dispatchUninstalled;
+        const unsubInstalled = onEvent("plugin.installed", (data) => { void guardedInstalled(data); });
+        const unsubUninstalled = onEvent("plugin.uninstalled", (data) => { void guardedUninstalled(data); });
         const unsubscribe = () => { unsubInstalled(); unsubUninstalled(); };
-        hostIncarnation.registerDisposer(unsubscribe);
-        return unsubscribe;
+        return registerOwnedDisposer(unsubscribe);
       },
       // #893 Stage 2 — Host implementation of the SDK's `resolveApiKey`.
       // Returns the SDK `ResolveApiKeyResult` discriminated union (bearer +
@@ -898,12 +939,20 @@ export function createHostApiFactory(
         }
       },
       onShutdown: (handler) => {
-        const registration = { pluginId, handler };
-        pluginShutdownHandlers.push(registration);
-        hostIncarnation.registerDisposer(() => {
-          const index = pluginShutdownHandlers.indexOf(registration);
+        const invoke = async () => {
+          if (!hostIncarnation.isActive()) return;
+          await handler();
+        };
+        const entry = {
+          pluginId,
+          handler: hostEffects ? hostEffects.wrapCallback(invoke) : invoke,
+        };
+        pluginShutdownHandlers.push(entry);
+        const unsubscribe = () => {
+          const index = pluginShutdownHandlers.indexOf(entry);
           if (index >= 0) pluginShutdownHandlers.splice(index, 1);
-        });
+        };
+        registerOwnedDisposer(unsubscribe);
       },
       // ─── Host-mediated worker spawn ───────────────────────────────────
       // HOST PRIMITIVE — Tool.workerId producer is intentionally NOT wired here.

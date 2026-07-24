@@ -1,27 +1,11 @@
 name: A2A P4-5 Packaged Evidence
 
 on:
-  workflow_dispatch:
-    inputs:
-      head_sha:
-        description: Exact 40-character lvis-app commit to build
-        required: true
-        type: string
-      agent_hub_head_sha:
-        description: Exact 40-character Agent Hub commit paired with this evidence build
-        required: true
-        type: string
-      platform:
-        description: Exact profile; all means macOS, Linux x64, and Windows (select Linux ARM64 separately)
-        required: true
-        default: all
-        type: choice
-        options:
-          - all
-          - macos
-          - linux-x64
-          - linux-arm64
-          - windows
+  # repository_dispatch always loads the signing workflow from the default
+  # branch. Mutable candidate branches cannot replace the code receiving
+  # platform signing credentials.
+  repository_dispatch:
+    types: [a2a-packaged-evidence]
 
 jobs:
   plan:
@@ -35,7 +19,7 @@ jobs:
         name: Build closed platform matrix
         shell: bash
         env:
-          PLATFORM_PROFILE: ${{ inputs.platform }}
+          PLATFORM_PROFILE: ${{ github.event.client_payload.platform }}
         run: |
           set -euo pipefail
           case "$PLATFORM_PROFILE" in
@@ -72,22 +56,25 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
+    environment: release-signing
     env:
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
-      REQUESTED_HEAD: ${{ inputs.head_sha }}
-      AGENT_HUB_HEAD: ${{ inputs.agent_hub_head_sha }}
+      REQUESTED_HEAD: ${{ github.event.client_payload.head_sha }}
+      AGENT_HUB_HEAD: ${{ github.event.client_payload.agent_hub_head_sha }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ inputs.head_sha }}
+          ref: ${{ github.event.client_payload.head_sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Checkout exact Agent Hub source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           repository: lvis-project/agent-hub
-          ref: ${{ inputs.agent_hub_head_sha }}
+          ref: ${{ github.event.client_payload.agent_hub_head_sha }}
           path: .evidence/agent-hub
+          fetch-depth: 0
           persist-credentials: false
       - name: Pin exact source heads
         shell: bash
@@ -106,13 +93,19 @@ jobs:
             echo "Checkout HEAD does not equal the requested head" >&2
             exit 1
           fi
-          if [ "$REQUESTED_HEAD" != "$GITHUB_SHA" ]; then
-            echo "Requested head must equal the immutable workflow source head for attestation binding" >&2
-            exit 1
-          fi
           actual_hub_head="$(git -C .evidence/agent-hub rev-parse HEAD)"
           if [ "$actual_hub_head" != "$AGENT_HUB_HEAD" ]; then
             echo "Agent Hub checkout HEAD does not equal the requested exact commit" >&2
+            exit 1
+          fi
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "$REQUESTED_HEAD" origin/main; then
+            echo "Requested lvis-app head must be reachable from origin/main" >&2
+            exit 1
+          fi
+          git -C .evidence/agent-hub fetch origin main --quiet
+          if ! git -C .evidence/agent-hub merge-base --is-ancestor "$AGENT_HUB_HEAD" origin/main; then
+            echo "Requested Agent Hub head must be reachable from origin/main" >&2
             exit 1
           fi
           hub_lock=.evidence/agent-hub/server/bun.lock

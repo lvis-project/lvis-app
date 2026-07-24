@@ -428,6 +428,8 @@ export interface McpUiToolMeta {
 export interface McpUiPayload {
   /** MCP server that owns this UI resource. */
   serverId: string;
+  /** Exact plugin generation for loopback cards; absent for external MCP servers. */
+  generationId?: string;
   /**
    * `ui://` URI pointing to the HTML resource on the MCP server.
    * The main process resolves this via `resources/read` to fetch the HTML.

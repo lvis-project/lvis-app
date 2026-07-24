@@ -5,6 +5,7 @@ import type { PermissionReviewEvent } from "../shared/permission-review-status.j
 import type { RationaleExecutorControlOutcome } from "./pipeline/rationale-pr1-contract.js";
 import type { RationaleHostRuntime } from "./pipeline/rationale-orchestrator.js";
 import type { RationaleResumeHostRuntime } from "./pipeline/rationale-resume-runner.js";
+import type { PluginOperationInvocationContext } from "./plugin-operation-governance.js";
 import type { ToolResultChunkReader } from "./tool-result-chunk.js";
 import type {
   ToolCategory,
@@ -75,6 +76,10 @@ export interface ToolPermissionContext {
   trustOrigin: ToolTrustOrigin;
   /** Direct plugin panel/renderer user activation marker. */
   pluginPanelUserAction?: boolean;
+  /** Host-derived app identity and optional opaque one-shot grant. Never copied into tool metadata. */
+  pluginOperation?: PluginOperationInvocationContext;
+  /** Host-owned stale-card binding checked against the final resolved registry Tool. */
+  expectedMcpServerId?: string;
   /** Recent user-authored intent for reviewer context only. */
   userIntent?: string;
   onTurnDirectoryGrant?: (approvedDirectory: string) => void;
