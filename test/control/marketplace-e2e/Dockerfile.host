@@ -13,24 +13,6 @@ RUN apt-get update \
       python3 \
     && rm -rf /var/lib/apt/lists/*
 
-FROM native-toolchain AS dependencies
-USER root
-COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
-WORKDIR /deps
-COPY --from=candidate package.json bun.lock ./
-COPY --from=control \
-  test/control/marketplace-e2e/verify-bun-dependency-inputs.mjs \
-  /trusted/verify-bun-dependency-inputs.mjs
-RUN --network=none node /trusted/verify-bun-dependency-inputs.mjs \
-      --mode host \
-      --package package.json \
-      --lock bun.lock
-RUN --mount=type=cache,id=lvis-m4-host-candidate-bun,target=/root/.bun/install/cache \
-    bun install \
-      --frozen-lockfile \
-      --ignore-scripts \
-      --registry=https://registry.npmjs.org
-
 FROM native-toolchain AS trusted-runner
 USER root
 COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
@@ -69,6 +51,8 @@ RUN --network=none \
 FROM ${PLAYWRIGHT_IMAGE} AS runtime
 ARG CONTROL_SHA
 ARG HOST_SHA
+ARG DEPENDENCY_IMAGE_ID
+ARG DEPENDENCY_INPUT_SHA256
 USER root
 COPY --from=bun-tool /usr/local/bin/bun /usr/local/bin/bun
 RUN groupadd --gid 10001 lvis-e2e \
@@ -133,6 +117,9 @@ COPY --from=control --chown=10001:10001 \
 COPY --from=control --chown=10001:10001 \
   test/control/marketplace-e2e/loopback-proxy.mjs /trusted/control/loopback-proxy.mjs
 COPY --from=control --chown=10001:10001 \
+  test/control/marketplace-e2e/dependency-connect-proxy.mjs \
+  /trusted/control/dependency-connect-proxy.mjs
+COPY --from=control --chown=10001:10001 \
   test/control/marketplace-e2e/run-host.mjs /trusted/control/run-host.mjs
 COPY --from=control --chown=10001:10001 \
   test/control/marketplace-e2e/run-hostile.mjs /trusted/control/run-hostile.mjs
@@ -160,7 +147,9 @@ RUN chmod -R a-w \
       /trusted/control/harness-manifest.json \
       "${CONTROL_SHA}"
 LABEL org.lvis.control-sha="${CONTROL_SHA}" \
-      org.lvis.host-sha="${HOST_SHA}"
+      org.lvis.host-sha="${HOST_SHA}" \
+      ai.lvis.dependency-image-id="${DEPENDENCY_IMAGE_ID}" \
+      ai.lvis.dependency-input-sha256="${DEPENDENCY_INPUT_SHA256}"
 USER 10001:10001
 WORKDIR /candidate/app
 ENTRYPOINT ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x1024x24", "node", "/trusted/control/run-host.mjs"]

@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.7
+
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.6.14-python3.12-bookworm-slim@sha256:5c8edeb8b5644b618882e06ddaa8ddf509dcd1aa7d08fedac7155106116a9a9e
+
+FROM ${UV_IMAGE}
+USER root
+RUN --network=none groupadd --gid 10005 downloader \
+    && useradd --uid 10005 --gid 10005 --no-create-home \
+      --home-dir /nonexistent downloader \
+    && mkdir -p /deps/server /trusted \
+    && chown -R 10005:10005 /deps
+COPY --from=input --chown=10005:10005 pyproject.toml uv.lock /deps/server/
+COPY --from=control --chown=10005:10005 \
+  test/control/marketplace-e2e/verify-marketplace-python-inputs.py \
+  /trusted/verify-marketplace-python-inputs.py
+RUN --network=none python3 /trusted/verify-marketplace-python-inputs.py \
+      /deps/server/pyproject.toml /deps/server/uv.lock \
+    && chmod -R a-w /trusted /deps/server/pyproject.toml /deps/server/uv.lock
+USER 10005:10005
+WORKDIR /deps/server
+ENV HOME=/deps \
+    UV_CACHE_DIR=/deps/.cache/uv
+ENTRYPOINT ["uv", "sync", "--locked", "--all-groups", "--no-build", "--no-config", "--no-sources", "--no-install-project", "--no-install-workspace", "--no-python-downloads", "--default-index", "https://pypi.org/simple", "--keyring-provider", "disabled", "--link-mode", "copy"]

@@ -28,6 +28,7 @@ const fixed = [
   "test/control/marketplace-e2e/vitest.control.config.ts",
   "test/control/marketplace-e2e/playwright.control.config.ts",
   "test/control/marketplace-e2e/loopback-proxy.mjs",
+  "test/control/marketplace-e2e/dependency-connect-proxy.mjs",
   "test/control/marketplace-e2e/run-host.mjs",
   "test/control/marketplace-e2e/run-hostile.mjs",
   "test/control/marketplace-e2e/verify-harness.mjs",

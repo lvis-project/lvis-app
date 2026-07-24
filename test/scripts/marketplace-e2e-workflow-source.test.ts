@@ -7,6 +7,18 @@ const orchestrate = read("test/control/marketplace-e2e/orchestrate.sh");
 const hostDockerfile = read("test/control/marketplace-e2e/Dockerfile.host");
 const marketplaceDockerfile = read("test/control/marketplace-e2e/Dockerfile.marketplace");
 const epDockerfile = read("test/control/marketplace-e2e/Dockerfile.ep");
+const dependencyProxyDockerfile = read(
+  "test/control/marketplace-e2e/Dockerfile.dependency-proxy",
+);
+const dependencyBunDockerfile = read(
+  "test/control/marketplace-e2e/Dockerfile.dependency-bun",
+);
+const dependencyUvDockerfile = read(
+  "test/control/marketplace-e2e/Dockerfile.dependency-uv",
+);
+const dependencyProxy = read(
+  "test/control/marketplace-e2e/dependency-connect-proxy.mjs",
+);
 const evidenceDockerfile = read("test/control/marketplace-e2e/Dockerfile.evidence");
 const hostControl = read("test/control/marketplace-e2e/run-host.mjs");
 const hostileControl = read("test/control/marketplace-e2e/run-hostile.mjs");
@@ -224,6 +236,7 @@ describe("trusted marketplace E2E workflow", () => {
       ["EP", epDockerfile],
     ] as const) {
       expect(source).toContain("COPY --from=candidate");
+      expect(source).toContain("COPY --from=dependencies");
       const candidateStart = source.indexOf(" AS candidate-build");
       const candidateStage = source.slice(
         candidateStart,
@@ -245,6 +258,15 @@ describe("trusted marketplace E2E workflow", () => {
       '--build-context "candidate=$candidate_context"',
     );
     expect(orchestrate).toContain('--build-context "control=$control_root"');
+    expect(orchestrate).toContain(
+      '--build-context "dependencies=docker-image://$host_dependency_image"',
+    );
+    expect(orchestrate).toContain(
+      '--build-context "dependencies=docker-image://$ep_dependency_image"',
+    );
+    expect(orchestrate).toContain(
+      '--build-context "dependencies=docker-image://$marketplace_dependency_image"',
+    );
     expect(orchestrate).not.toContain("--build-context candidate=$workspace");
     expect(orchestrate).not.toContain("/var/run/docker.sock");
     expect(orchestrate).not.toContain("docker logs");
@@ -252,30 +274,50 @@ describe("trusted marketplace E2E workflow", () => {
     expect(orchestrate).toContain("private log retained only on runner");
   });
 
-  it("isolates candidate dependency caches from each other and the trusted runner", () => {
-    const candidateCacheIds = [
-      "lvis-m4-host-candidate-bun",
-      "lvis-m4-marketplace-candidate-uv",
-      "lvis-m4-ep-candidate-bun",
-    ];
-    const dockerfiles = [hostDockerfile, marketplaceDockerfile, epDockerfile];
-    const cacheMounts = dockerfiles
-      .flatMap((source) =>
-        [...source.matchAll(/--mount=([^\\\s]+)/gu)].map((match) => match[1]),
-      )
-      .filter((mount) => mount.split(",").includes("type=cache"));
-    const cacheIds = cacheMounts.map(
-      (mount) =>
-        mount
-          .split(",")
-          .find((option) => option.startsWith("id="))
-          ?.slice("id=".length),
+  it("moves candidate dependency downloads behind isolated input-only downloaders", () => {
+    for (const source of [marketplaceDockerfile, epDockerfile]) {
+      expect(source).not.toContain("bun install");
+      expect(source).not.toContain("uv sync");
+      expect(source).not.toContain("--mount=type=cache");
+    }
+    expect(count(hostDockerfile, "bun install")).toBe(1);
+    expect(hostDockerfile).not.toContain("lvis-m4-host-candidate-bun");
+    expect(hostDockerfile).not.toContain("COPY --from=candidate package.json bun.lock");
+    expect(dependencyBunDockerfile).toContain("COPY --from=input");
+    expect(dependencyBunDockerfile).toContain("BUN_INSTALL_CACHE_DIR=/deps/.cache/bun");
+    expect(dependencyUvDockerfile).toContain("COPY --from=input");
+    expect(dependencyUvDockerfile).toContain("UV_CACHE_DIR=/deps/.cache/uv");
+    expect(dependencyProxyDockerfile).toContain(
+      'ENTRYPOINT ["bun", "/trusted/dependency-connect-proxy.mjs"]',
     );
-
-    expect(cacheMounts).toHaveLength(candidateCacheIds.length);
-    expect(cacheIds).toEqual(candidateCacheIds);
-    expect(new Set(cacheIds).size).toBe(cacheIds.length);
-
+    for (const proof of [
+      'docker network create --internal',
+      'dependency_fetch_network="lvis-dependency-fetch-${suffix}"',
+      "--dns 127.0.0.1",
+      "--cap-drop ALL",
+      "--security-opt no-new-privileges",
+      '"ALLOWED_CLIENT_IP=$allowed_client_ip"',
+      '"PROXY_BIND_ADDRESS=$ip"',
+      "registry.npmjs.org,github.com,api.github.com,codeload.github.com",
+      "pypi.org,files.pythonhosted.org",
+      "docker commit",
+      "'{{json .Mounts}}'",
+      "dependency image tag changed during candidate build",
+      "ai.lvis.dependency-image-id",
+      "ai.lvis.dependency-input-sha256",
+    ]) {
+      expect(orchestrate).toContain(proof);
+    }
+    for (const proof of [
+      "CONNECT authority is malformed",
+      "CONNECT target is not allowlisted",
+      "DNS returned an absent or non-global address",
+      "allowedClientIp",
+      "host: address",
+      'server.listen(port, bindAddress',
+    ]) {
+      expect(dependencyProxy).toContain(proof);
+    }
     const trustedRunnerStart = hostDockerfile.indexOf(
       "FROM native-toolchain AS trusted-runner",
     );
@@ -290,19 +332,11 @@ describe("trusted marketplace E2E workflow", () => {
   });
 
   it("installs Marketplace dependencies only from pre-built registry wheels", () => {
-    const dependenciesStart = marketplaceDockerfile.indexOf(
-      "FROM ${UV_IMAGE} AS dependencies",
-    );
-    const dependenciesStage = marketplaceDockerfile.slice(
-      dependenciesStart,
-      marketplaceDockerfile.indexOf("\nFROM ", dependenciesStart + 1),
-    );
-    const verifyInputs = dependenciesStage.indexOf(
+    const verifyInputs = dependencyUvDockerfile.indexOf(
       "RUN --network=none python3 /trusted/verify-marketplace-python-inputs.py",
     );
-    const sync = dependenciesStage.indexOf("uv sync");
+    const sync = dependencyUvDockerfile.indexOf('"uv", "sync"');
 
-    expect(dependenciesStart).toBeGreaterThan(-1);
     expect(verifyInputs).toBeGreaterThan(-1);
     expect(sync).toBeGreaterThan(verifyInputs);
     for (const flag of [
@@ -317,9 +351,9 @@ describe("trusted marketplace E2E workflow", () => {
       "--keyring-provider disabled",
       "--link-mode copy",
     ]) {
-      expect(dependenciesStage).toContain(flag);
+      expect(dependencyUvDockerfile.replaceAll('", "', " ")).toContain(flag);
     }
-    expect(dependenciesStage).not.toContain("--frozen");
+    expect(dependencyUvDockerfile).not.toContain("--frozen");
     expect(marketplacePythonInputVerifier).toContain(
       'if source == {"editable": "."}:',
     );
@@ -352,6 +386,9 @@ describe("trusted marketplace E2E workflow", () => {
     expect(harnessManifest).toContain('"ls-tree", "-r", "-z"');
     expect(harnessManifest).toContain("test/e2e/ui/ep-attendance-live.spec.ts");
     expect(harnessManifest).toContain("test/e2e/ui/marketplace-live-lifecycle.spec.ts");
+    expect(harnessManifest).toContain(
+      "test/control/marketplace-e2e/dependency-connect-proxy.mjs",
+    );
     expect(harnessManifest).toContain("src/shared/llm-vendor-defaults.ts");
     expect(harnessManifest).toContain("src/shared/theme-bundles.ts");
     expect(hostDockerfile).toContain(

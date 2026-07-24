@@ -197,7 +197,42 @@ for (const file of harness.files) {
   }
 }
 
-exactKeys(images, ["marketplace", "ep", "host"], "image digests");
+exactKeys(
+  images,
+  [
+    "marketplace",
+    "ep",
+    "host",
+    "marketplaceDependency",
+    "epDependency",
+    "hostDependency",
+    "marketplaceDependencyInput",
+    "epDependencyInput",
+    "hostDependencyInput",
+  ],
+  "image digests",
+);
+for (const name of [
+  "marketplace",
+  "ep",
+  "host",
+  "marketplaceDependency",
+  "epDependency",
+  "hostDependency",
+]) {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(images[name] ?? "")) {
+    throw new Error(`image digest ${name} is invalid`);
+  }
+}
+for (const name of [
+  "marketplaceDependencyInput",
+  "epDependencyInput",
+  "hostDependencyInput",
+]) {
+  if (!/^[0-9a-f]{64}$/u.test(images[name] ?? "")) {
+    throw new Error(`dependency input digest ${name} is invalid`);
+  }
+}
 for (const name of ["marketplace", "ep", "host"]) {
   if (!imageId.test(images[name] ?? "")) throw new Error(`invalid ${name} image digest`);
 }

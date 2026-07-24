@@ -45,7 +45,7 @@ test("creates and inspects a fail-closed isolated IPv4 bridge", () => {
 });
 
 test("rejects missing or weakened create and inspect isolation policies", () => {
-  const missing = orchestrate.replace(
+  const missing = orchestrate.replaceAll(
     "  -o com.docker.network.bridge.gateway_mode_ipv4=isolated \\\n",
     "",
   );
@@ -54,7 +54,7 @@ test("rejects missing or weakened create and inspect isolation policies", () => 
     /gateway_mode_ipv4=isolated/u,
   );
 
-  const wrong = orchestrate.replace(
+  const wrong = orchestrate.replaceAll(
     "com.docker.network.bridge.gateway_mode_ipv4=isolated",
     "com.docker.network.bridge.gateway_mode_ipv4=nat",
   );
@@ -63,7 +63,7 @@ test("rejects missing or weakened create and inspect isolation policies", () => 
     /gateway_mode_ipv4=isolated/u,
   );
 
-  const wrongInspectionOption = orchestrate.replace(
+  const wrongInspectionOption = orchestrate.replaceAll(
     '"com.docker.network.bridge.gateway_mode_ipv4": "isolated"',
     '"com.docker.network.bridge.gateway_mode_ipv4": "nat"',
   );
@@ -72,7 +72,7 @@ test("rejects missing or weakened create and inspect isolation policies", () => 
     /gateway_mode_ipv4/u,
   );
 
-  const ipv6Enabled = orchestrate.replace(
+  const ipv6Enabled = orchestrate.replaceAll(
     ".EnableIPv6 == false",
     ".EnableIPv6 == true",
   );
@@ -136,4 +136,24 @@ test("verifies the created EP artifact container image before copying", () => {
   assert.ok(inspectIndex > createIndex, "EP artifact image inspection must follow creation");
   assert.ok(compareIndex > inspectIndex, "EP artifact image must match the recorded EP IID");
   assert.ok(copyIndex > compareIndex, "EP artifact copy must follow image identity verification");
+});
+
+test("isolates dependency downloaders behind exact dual-homed CONNECT proxies", () => {
+  for (const proof of [
+    'dependency_fetch_network="lvis-dependency-fetch-${suffix}"',
+    'dependency_egress_network="lvis-dependency-egress-${suffix}"',
+    'docker network connect --gw-priority 1 "$dependency_egress_network" "$name"',
+    '--env "ALLOWED_CLIENT_IP=$allowed_client_ip"',
+    '--env "PROXY_BIND_ADDRESS=$ip"',
+    "registry.npmjs.org,github.com,api.github.com,codeload.github.com",
+    "pypi.org,files.pythonhosted.org",
+    'net.connect({ host: "1.1.1.1", port: 443 })',
+    'await lookup("example.com")',
+    "dependency fetch network permitted direct public IP or DNS egress",
+    "'{{json .Mounts}}'",
+    "downloader must run as a non-root user",
+    "dependency egress network must contain exactly the trusted proxies",
+  ]) {
+    assert.ok(orchestrate.includes(proof), `missing dependency topology proof: ${proof}`);
+  }
 });
