@@ -67,6 +67,8 @@ export interface PluginOperationExecutionLease {
 }
 
 export interface PluginOperationAccountTransitionLease {
+  /** Recheck tombstoned session/generation state immediately before handler entry. */
+  assertAuthorized(): void;
   release(): void;
 }
 
@@ -916,6 +918,33 @@ export class PluginOperationGrantCoordinator {
     if (oldest) this.snapshots.delete(oldest);
   }
 
+  private accountTransitionAuthorizationError(
+    principal: PluginOperationAccountTransitionPrincipal,
+    signal?: AbortSignal,
+  ): Error | undefined {
+    if (this.revocationCapacityExhausted) {
+      return new Error("plugin operation revocation capacity exhausted");
+    }
+    if (this.revokedGenerations.has(
+      this.generationRevocationKey(principal.ownerPluginId, principal.generationId),
+    )) {
+      return new Error("plugin operation generation is revoked");
+    }
+    if (this.revokedSessions.has(principal.appSessionId)) {
+      return new Error("plugin operation session is revoked");
+    }
+    if (signal?.aborted) return new PluginOperationExecutionLeaseAbortedError();
+    if (
+      this.poisonCapacityExhausted ||
+      this.poisonedOperationScopes.has(
+        this.poisonScopeKey(principal.ownerPluginId, principal.accountScopeHash),
+      )
+    ) {
+      return new Error("plugin operation account scope is indeterminate");
+    }
+    return undefined;
+  }
+
   private drainExecutionDomain(
     executionScopeKey: string,
     state: ExecutionDomainState,
@@ -929,21 +958,6 @@ export class PluginOperationGrantCoordinator {
       const principalRevocationReason = request.kind === "operation"
         ? this.principalRevocationReason(request.principal)
         : undefined;
-      const transitionRevocationReason =
-        request.kind === "account-transition"
-          ? this.revocationCapacityExhausted
-            ? "plugin operation revocation capacity exhausted"
-            : this.revokedGenerations.has(
-                this.generationRevocationKey(
-                  request.principal.ownerPluginId,
-                  request.principal.generationId,
-                ),
-              )
-              ? "plugin operation generation is revoked"
-              : this.revokedSessions.has(request.principal.appSessionId)
-                ? "plugin operation session is revoked"
-                : undefined
-          : undefined;
       const invalidError =
         request.kind === "operation"
           ? principalRevocationReason
@@ -955,19 +969,10 @@ export class PluginOperationGrantCoordinator {
                 : request.signal?.aborted
                   ? new PluginOperationExecutionLeaseAbortedError()
                   : undefined
-          : transitionRevocationReason
-            ? new Error(transitionRevocationReason)
-            : request.signal?.aborted
-              ? new PluginOperationExecutionLeaseAbortedError()
-            : this.poisonCapacityExhausted ||
-                this.poisonedOperationScopes.has(
-                  this.poisonScopeKey(
-                    request.principal.ownerPluginId,
-                    request.principal.accountScopeHash,
-                  ),
-                )
-              ? new Error("plugin operation account scope is indeterminate")
-              : undefined;
+          : this.accountTransitionAuthorizationError(
+              request.principal,
+              request.signal,
+            );
       if (!invalidError) break;
       state.queue.shift();
       if (request.signal && request.onAbort) {
@@ -1073,6 +1078,13 @@ export class PluginOperationGrantCoordinator {
     }
     let released = false;
     request.resolve(Object.freeze({
+      assertAuthorized: () => {
+        const error = this.accountTransitionAuthorizationError(
+          request.principal,
+          request.signal,
+        );
+        if (error) throw error;
+      },
       release: () => {
         if (released) return;
         released = true;

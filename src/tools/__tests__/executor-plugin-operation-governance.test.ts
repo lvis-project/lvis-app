@@ -540,6 +540,166 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(lifecycle).not.toHaveBeenCalled();
   });
 
+  it("settles a governed auth lifecycle after final audit and before queued work", async () => {
+    const {
+      executor,
+      directWrite,
+      auditLogger,
+    } = setup({ requireAuditChain: true });
+    const events: string[] = [];
+    directWrite.mockImplementation(async () => {
+      events.push("queued-handler");
+      return { output: "reserved", isError: false };
+    });
+    let signalAuditStarted!: () => void;
+    const auditStarted = new Promise<void>((resolve) => {
+      signalAuditStarted = resolve;
+    });
+    let resolveAudit!: (value: unknown) => void;
+    auditLogger.appendPermissionAuditEntry.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        signalAuditStarted();
+        resolveAudit = resolve;
+      }),
+    );
+    const pluginAuthLifecycle = {
+      binding: {
+        pluginId: principal.ownerPluginId,
+        generationId: principal.generationId,
+        toolName: "domain_read",
+        appSessionId: principal.appSessionId,
+        accountScopeHash: principal.accountScopeHash,
+      },
+      beforeHandler: () => {
+        events.push("before-handler");
+      },
+      completeSuccess: () => {
+        events.push("success");
+      },
+      completeFailure: () => {
+        events.push("failure");
+      },
+    };
+
+    const pendingAuth = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "auth-status", name: "domain_read", input: { operation: "status" } }],
+        { ...options(), pluginAuthLifecycle },
+      ),
+    );
+    await auditStarted;
+    expect(events).toEqual(["before-handler"]);
+
+    const grant = executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "after-auth-audit" },
+      principal,
+    });
+    const queuedWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "queued-after-auth-audit",
+          name: "direct_write",
+          input: { operation: "reserve", target: "after-auth-audit" },
+        }],
+        options(grant.token),
+      ),
+    );
+    await Promise.resolve();
+    expect(directWrite).not.toHaveBeenCalled();
+
+    resolveAudit({});
+    await pendingAuth;
+    await queuedWrite;
+    expect(events).toEqual([
+      "before-handler",
+      "success",
+      "queued-handler",
+    ]);
+  });
+
+  it("settles a failed governed auth lifecycle before releasing queued work", async () => {
+    const {
+      executor,
+      read,
+      directWrite,
+      auditLogger,
+    } = setup({ requireAuditChain: true });
+    const events: string[] = [];
+    read.mockImplementationOnce(async () => ({
+      output: "status failed",
+      isError: true,
+    }));
+    directWrite.mockImplementation(async () => {
+      events.push("queued-handler");
+      return { output: "reserved", isError: false };
+    });
+    let signalAuditStarted!: () => void;
+    const auditStarted = new Promise<void>((resolve) => {
+      signalAuditStarted = resolve;
+    });
+    let resolveAudit!: (value: unknown) => void;
+    auditLogger.appendPermissionAuditEntry.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        signalAuditStarted();
+        resolveAudit = resolve;
+      }),
+    );
+    const pluginAuthLifecycle = {
+      binding: {
+        pluginId: principal.ownerPluginId,
+        generationId: principal.generationId,
+        toolName: "domain_read",
+        appSessionId: principal.appSessionId,
+        accountScopeHash: principal.accountScopeHash,
+      },
+      beforeHandler: () => {
+        events.push("before-handler");
+      },
+      completeSuccess: () => {
+        events.push("success");
+      },
+      completeFailure: () => {
+        events.push("failure");
+      },
+    };
+
+    const pendingAuth = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "auth-status-failed", name: "domain_read", input: { operation: "status" } }],
+        { ...options(), pluginAuthLifecycle },
+      ),
+    );
+    await auditStarted;
+    const grant = executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "after-auth-failure" },
+      principal,
+    });
+    const queuedWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "queued-after-auth-failure",
+          name: "direct_write",
+          input: { operation: "reserve", target: "after-auth-failure" },
+        }],
+        options(grant.token),
+      ),
+    );
+    await Promise.resolve();
+    expect(directWrite).not.toHaveBeenCalled();
+
+    resolveAudit({});
+    const [failed] = await pendingAuth;
+    expect(failed.is_error).toBe(true);
+    await queuedWrite;
+    expect(events).toEqual([
+      "before-handler",
+      "failure",
+      "queued-handler",
+    ]);
+  });
+
   it("invalidates an older successful read when a refresh resolves non-success", async () => {
     const { executor, read } = setup();
     await runWithInvocationOrigin("ui", undefined, () =>

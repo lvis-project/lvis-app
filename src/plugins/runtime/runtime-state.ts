@@ -169,6 +169,17 @@ export abstract class PluginRuntimeState {
   }>();
   /** Latest auth invocation admitted for each immutable plugin generation. */
   protected pluginAuthInvocationEpochs = new Map<string, number>();
+  /** Latest auth result that actually published for each immutable generation. */
+  protected pluginAuthPublishedEpochs = new Map<string, number>();
+  /**
+   * Principal observed when an auth invocation began. A failed refresh revokes
+   * this exact authority unless a later result has actually published; a later
+   * *start* alone must not keep stale governed work alive.
+   */
+  protected pluginAuthFailurePrincipals = new Map<string, {
+    principalHash: string;
+    generationId: string;
+  }>();
   /**
    * Stable account identity retained after login/logout invalidates the active
    * principal. Concurrent auth transitions reuse it so they cannot bypass the

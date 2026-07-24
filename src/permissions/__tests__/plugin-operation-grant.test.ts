@@ -230,6 +230,26 @@ describe("PluginOperationGrantCoordinator", () => {
     },
   );
 
+  it("rechecks a resolved account transition before handler entry", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const transition = coordinator.acquireAccountTransitionLease(principal);
+
+    active.release();
+    const lease = await transition;
+    // The request is no longer queued at this point. A session teardown in
+    // this exact async-continuation window must still block the handler.
+    coordinator.revokeSession(principal.appSessionId);
+
+    expect(() => lease.assertAuthorized()).toThrow(
+      "plugin operation session is revoked",
+    );
+    lease.release();
+  });
+
   it("serializes consecutive auth transitions behind governed work", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const active = await coordinator.acquireExecutionLease(

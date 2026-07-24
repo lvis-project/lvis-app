@@ -292,6 +292,17 @@ export function makeTestPluginRuntime(
   }));
 }
 
+export function makeTestPluginRuntimeWithAudit(
+  fixture: TestPluginRuntimeFixture,
+  auditEntries: Array<{ level: string; message: string; data?: unknown }>,
+): PluginRuntime {
+  return makeTestPluginRuntime(fixture, {
+    auditLog: (level, message, data) => {
+      auditEntries.push({ level, message, data });
+    },
+  });
+}
+
 /**
  * Bind the smallest complete generation lifecycle needed by legacy runtime
  * unit tests. Product code never receives this adapter: strict lifecycle

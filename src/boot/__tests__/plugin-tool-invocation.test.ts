@@ -420,6 +420,46 @@ describe("dispatchAppOnlyRuntimeInvocation — boundary routing gate (security d
       { chunk: 2 },
       undefined,
       "generation-exact",
+      undefined,
+    );
+  });
+
+  it("forwards the host-owned final authorization assertion", async () => {
+    const beforeHandler = vi.fn();
+    const callDeclaredAppOnlyTool = vi.fn(async () => "ok");
+    const runtime = {
+      listPluginManifests: () => [
+        {
+          pluginId: "meeting",
+          manifest: normalize([
+            manifestTool("meeting_stage_upload_begin", ["app"]),
+          ]),
+        },
+      ],
+      callDeclaredAppOnlyTool,
+    } as any;
+
+    await expect(
+      dispatchAppOnlyRuntimeInvocation(
+        runtime,
+        "meeting_stage_upload_begin",
+        {},
+        {
+          origin: "ui",
+          ownerPluginId: "meeting",
+          ownerGenerationId: "generation-exact",
+          userAction: true,
+        },
+        undefined,
+        beforeHandler,
+      ),
+    ).resolves.toBe("ok");
+    expect(callDeclaredAppOnlyTool).toHaveBeenCalledWith(
+      "meeting_stage_upload_begin",
+      {},
+      undefined,
+      "generation-exact",
+      beforeHandler,
     );
   });
 });
