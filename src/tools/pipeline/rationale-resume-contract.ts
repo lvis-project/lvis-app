@@ -485,7 +485,7 @@ export function createRationaleApprovalDisplayFromProjection(
   });
 }
 
-export const RATIONALE_SECURITY_SUFFIX_VERSION = 2 as const;
+export const RATIONALE_SECURITY_SUFFIX_VERSION = 3 as const;
 
 export const RATIONALE_SECURITY_SUFFIX = Object.freeze([
   "resume-cas-validate",
@@ -507,9 +507,9 @@ export const RATIONALE_SECURITY_SUFFIX = Object.freeze([
   "post-tool-use-hooks",
   "post-failure-lifecycle",
   "post-exec-dlp-display-audit",
-  "tool-end-emit",
   "final-permission-audit",
   "invocation-audit-terminal",
+  "tool-end-emit",
 ] as const);
 
 export type RationaleSecuritySuffixStep = (typeof RATIONALE_SECURITY_SUFFIX)[number];

@@ -292,6 +292,17 @@ export function makeTestPluginRuntime(
   }));
 }
 
+export function makeTestPluginRuntimeWithAudit(
+  fixture: TestPluginRuntimeFixture,
+  auditEntries: Array<{ level: string; message: string; data?: unknown }>,
+): PluginRuntime {
+  return makeTestPluginRuntime(fixture, {
+    auditLog: (level, message, data) => {
+      auditEntries.push({ level, message, data });
+    },
+  });
+}
+
 /**
  * Bind the smallest complete generation lifecycle needed by legacy runtime
  * unit tests. Product code never receives this adapter: strict lifecycle
@@ -412,7 +423,7 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
     const predecessor = active.get(pluginId);
     const generationId = `test-generation-${++sequence}`;
     projection.hostEffects?.bindGeneration(lifecycle as never, generationId);
-    runtime.prepareRuntimeGeneration(projection).publish();
+    runtime.prepareRuntimeGeneration(projection, predecessor?.generationId).publish();
     active.set(pluginId, {
       pluginId,
       pluginVersion: projection.manifest.version,
@@ -438,7 +449,7 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
     pluginId: string,
   ): Promise<{ retirement: Promise<void> }> => {
     const predecessor = active.get(pluginId);
-    runtime.prepareRuntimeRemoval(pluginId).publish();
+    runtime.prepareRuntimeRemoval(pluginId, predecessor?.generationId).publish();
     active.delete(pluginId);
     const retirement = predecessor
       ? trackRetirement(runRuntimeRetirement(predecessor.state.runtime))

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  PluginOperationExecutionLeaseAbortedError,
   PluginOperationGrantCoordinator,
   pluginOperationExecutionDomain,
   type PluginOperationPrincipal,
@@ -10,6 +11,7 @@ const principal = {
   ownerVersion: "1.2.3",
   generationId: "gen-1",
   appSessionId: "window-7",
+  accountScopeHash: "acct-scope-hash",
   accountHash: "acct-hash",
 };
 const requiredRead = {
@@ -68,7 +70,11 @@ describe("PluginOperationGrantCoordinator", () => {
       tools,
     );
     const anotherAccount = pluginOperationExecutionDomain(
-      { ...principal, accountHash: "another-account" },
+      {
+        ...principal,
+        accountScopeHash: "another-account-scope",
+        accountHash: "another-account",
+      },
       "ep_attendance_write",
       "clock",
       tools,
@@ -86,62 +92,298 @@ describe("PluginOperationGrantCoordinator", () => {
     ).toBe(readDomain);
   });
 
-  it("runs domain reads concurrently but queues them behind writes without writer starvation", async () => {
+  it("serializes every governed operation through one FIFO exclusive lease", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const domain = "a".repeat(64);
-    const firstRead = await coordinator.acquireExecutionLease(domain, "read", principal);
-    let concurrentReadStarted = false;
-    const concurrentRead = coordinator.acquireExecutionLease(domain, "read", principal).then((lease) => {
-      concurrentReadStarted = true;
+    const first = await coordinator.acquireExecutionLease(domain, principal);
+    let secondStarted = false;
+    const second = coordinator.acquireExecutionLease(domain, principal).then((lease) => {
+      secondStarted = true;
       return lease;
     });
-    const concurrentReadLease = await concurrentRead;
-    expect(concurrentReadStarted).toBe(true);
-
-    let writeStarted = false;
-    const write = coordinator.acquireExecutionLease(domain, "write", principal).then((lease) => {
-      writeStarted = true;
+    let thirdStarted = false;
+    const third = coordinator.acquireExecutionLease(domain, principal).then((lease) => {
+      thirdStarted = true;
       return lease;
     });
     await Promise.resolve();
-    expect(writeStarted).toBe(false);
+    expect(secondStarted).toBe(false);
+    expect(thirdStarted).toBe(false);
 
-    let lateReadStarted = false;
-    const lateRead = coordinator.acquireExecutionLease(domain, "read", principal).then((lease) => {
-      lateReadStarted = true;
+    first.release();
+    const secondLease = await second;
+    expect(secondStarted).toBe(true);
+    expect(thirdStarted).toBe(false);
+    secondLease.release();
+    const thirdLease = await third;
+    expect(thirdStarted).toBe(true);
+    thirdLease.release();
+  });
+
+  it("queues an account transition behind an admitted operation and ahead of replacement work", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const order: string[] = [];
+    const transition = coordinator.acquireAccountTransitionLease(
+      principal,
+    ).then((lease) => {
+      order.push("transition");
       return lease;
     });
-    await Promise.resolve();
-    expect(lateReadStarted).toBe(false);
+    const replacementPrincipal = {
+      ...principal,
+      generationId: "generation-replacement",
+      accountHash: "account-principal-replacement",
+    };
+    const replacementDomain = pluginOperationExecutionDomain(
+      replacementPrincipal,
+      "ep_attendance_write",
+      "clock",
+      [{
+        name: "ep_attendance_write",
+        pluginId: principal.ownerPluginId,
+        pluginGeneration: {
+          generationId: replacementPrincipal.generationId,
+        },
+        operationPolicy: {
+          discriminant: "operation",
+          operations: {
+            clock: {
+              kind: "write",
+              minimumRisk: "network",
+              appVisible: true,
+            },
+          },
+        },
+      }],
+    );
+    const replacement = coordinator.acquireExecutionLease(
+      replacementDomain,
+      replacementPrincipal,
+    ).then((lease) => {
+      order.push("replacement");
+      return lease;
+    });
 
-    firstRead.release();
     await Promise.resolve();
-    expect(writeStarted).toBe(false);
-    concurrentReadLease.release();
-    const writeLease = await write;
-    expect(writeStarted).toBe(true);
-    expect(lateReadStarted).toBe(false);
-    writeLease.release();
-    const lateReadLease = await lateRead;
-    expect(lateReadStarted).toBe(true);
-    lateReadLease.release();
+    expect(order).toEqual([]);
+    active.release();
+    const transitionLease = await transition;
+    expect(order).toEqual(["transition"]);
+    await Promise.resolve();
+    expect(order).toEqual(["transition"]);
+    transitionLease.release();
+    const replacementLease = await replacement;
+    expect(order).toEqual(["transition", "replacement"]);
+    replacementLease.release();
+  });
+
+  it("refuses an account transition after an admitted operation becomes indeterminate", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const transition = coordinator.acquireAccountTransitionLease(
+      principal,
+    );
+
+    coordinator.poisonDomain(grantDomain);
+    active.release();
+
+    await expect(transition).rejects.toThrow(
+      "plugin operation account scope is indeterminate",
+    );
+  });
+
+  it.each(["generation", "session"] as const)(
+    "cancels a queued account transition when its %s is revoked",
+    async (revocation) => {
+      const coordinator = new PluginOperationGrantCoordinator();
+      const active = await coordinator.acquireExecutionLease(
+        grantDomain,
+        principal,
+      );
+      const transitionResult = coordinator.acquireAccountTransitionLease(
+        principal,
+      ).then(
+        () => "granted",
+        (error: Error) => error.message,
+      );
+
+      if (revocation === "generation") {
+        coordinator.revokeGeneration(
+          principal.ownerPluginId,
+          principal.generationId,
+        );
+      } else {
+        coordinator.revokeSession(principal.appSessionId);
+      }
+
+      await expect(transitionResult).resolves.toContain(
+        `plugin operation ${revocation} is revoked`,
+      );
+      active.release();
+    },
+  );
+
+  it("rechecks a resolved account transition before handler entry", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const transition = coordinator.acquireAccountTransitionLease(principal);
+
+    active.release();
+    const lease = await transition;
+    // The request is no longer queued at this point. A session teardown in
+    // this exact async-continuation window must still block the handler.
+    coordinator.revokeSession(principal.appSessionId);
+
+    expect(() => lease.assertAuthorized()).toThrow(
+      "plugin operation session is revoked",
+    );
+    lease.release();
+  });
+
+  it("serializes consecutive auth transitions behind governed work", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const order: string[] = [];
+    const first = coordinator.acquireAccountTransitionLease(principal)
+      .then((lease) => {
+        order.push("first-auth");
+        return lease;
+      });
+    const second = coordinator.acquireAccountTransitionLease({
+      ...principal,
+      appSessionId: "window-second-auth",
+    }).then((lease) => {
+      order.push("second-auth");
+      return lease;
+    });
+
+    active.release();
+    const firstLease = await first;
+    expect(order).toEqual(["first-auth"]);
+    await Promise.resolve();
+    expect(order).toEqual(["first-auth"]);
+    firstLease.release();
+    const secondLease = await second;
+    expect(order).toEqual(["first-auth", "second-auth"]);
+    secondLease.release();
+  });
+
+  it("removes a queued auth transition when its admission signal aborts", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const active = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const controller = new AbortController();
+    const transition = coordinator.acquireAccountTransitionLease(
+      principal,
+      controller.signal,
+    );
+
+    controller.abort();
+
+    await expect(transition).rejects.toBeInstanceOf(
+      PluginOperationExecutionLeaseAbortedError,
+    );
+    active.release();
+    const next = await coordinator.acquireAccountTransitionLease(principal);
+    next.release();
+  });
+
+  it("serializes a replacement generation through the stable plugin-account scope", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const predecessorDomain = "3".repeat(64);
+    const replacementDomain = "4".repeat(64);
+    const predecessor = await coordinator.acquireExecutionLease(
+      predecessorDomain,
+      principal,
+    );
+    const replacementPrincipal = {
+      ...principal,
+      ownerVersion: "2.0.0",
+      generationId: "gen-2",
+      accountHash: "rotated-account-principal",
+    };
+    let replacementStarted = false;
+    const replacement = coordinator.acquireExecutionLease(
+      replacementDomain,
+      replacementPrincipal,
+    ).then((lease) => {
+      replacementStarted = true;
+      return lease;
+    });
+
+    await Promise.resolve();
+    expect(replacementStarted).toBe(false);
+    coordinator.revokeGeneration(
+      principal.ownerPluginId,
+      principal.generationId,
+    );
+    expect(replacementStarted).toBe(false);
+
+    predecessor.release();
+    const replacementLease = await replacement;
+    expect(replacementStarted).toBe(true);
+    replacementLease.release();
+  });
+
+  it("rejects a queued replacement when predecessor completion poisons the stable scope", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const predecessorDomain = "5".repeat(64);
+    const replacementDomain = "6".repeat(64);
+    const predecessor = await coordinator.acquireExecutionLease(
+      predecessorDomain,
+      principal,
+    );
+    const replacement = coordinator.acquireExecutionLease(
+      replacementDomain,
+      {
+        ...principal,
+        ownerVersion: "2.0.0",
+        generationId: "gen-2",
+        accountHash: "replacement-account-principal",
+      },
+    );
+
+    coordinator.poisonDomain(predecessorDomain);
+    coordinator.revokeGeneration(
+      principal.ownerPluginId,
+      principal.generationId,
+    );
+    predecessor.release();
+
+    await expect(replacement).rejects.toThrow(
+      "plugin operation domain is indeterminate",
+    );
   });
 
   it("releases an aborted queued execution lease without blocking the domain", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const domain = "b".repeat(64);
-    const writer = await coordinator.acquireExecutionLease(domain, "write", principal);
+    const writer = await coordinator.acquireExecutionLease(domain, principal);
     const controller = new AbortController();
     const queued = coordinator.acquireExecutionLease(
       domain,
-      "read",
       principal,
       controller.signal,
     );
     controller.abort();
     await expect(queued).rejects.toThrow("aborted");
     writer.release();
-    const next = await coordinator.acquireExecutionLease(domain, "write", principal);
+    const next = await coordinator.acquireExecutionLease(domain, principal);
     next.release();
   });
 
@@ -152,8 +394,8 @@ describe("PluginOperationGrantCoordinator", () => {
       readTool: requiredRead.readTool,
       readOperation: "today",
     }, grantDomain);
-    const writer = await coordinator.acquireExecutionLease(grantDomain, "write", principal);
-    const queued = coordinator.acquireExecutionLease(grantDomain, "read", principal);
+    const writer = await coordinator.acquireExecutionLease(grantDomain, principal);
+    const queued = coordinator.acquireExecutionLease(grantDomain, principal);
 
     coordinator.revokeAccount(
       principal.ownerPluginId,
@@ -162,7 +404,7 @@ describe("PluginOperationGrantCoordinator", () => {
     );
     await expect(queued).rejects.toThrow("revoked");
     await expect(
-      coordinator.acquireExecutionLease(grantDomain, "write", principal),
+      coordinator.acquireExecutionLease(grantDomain, principal),
     ).rejects.toThrow("revoked");
     expect(() => coordinator.markDomainMutation(grantDomain)).not.toThrow();
 
@@ -171,7 +413,7 @@ describe("PluginOperationGrantCoordinator", () => {
       executionDomains: Map<string, unknown>;
       domainRevisions: Map<string, unknown>;
     };
-    expect(state.executionDomains.has(grantDomain)).toBe(false);
+    expect(state.executionDomains.size).toBe(0);
     expect(state.domainRevisions.has(grantDomain)).toBe(false);
   });
 
@@ -184,7 +426,6 @@ describe("PluginOperationGrantCoordinator", () => {
     );
     await expect(accountCoordinator.acquireExecutionLease(
       grantDomain,
-      "write",
       principal,
     )).rejects.toThrow("account is revoked");
 
@@ -195,7 +436,6 @@ describe("PluginOperationGrantCoordinator", () => {
     );
     await expect(generationCoordinator.acquireExecutionLease(
       grantDomain,
-      "write",
       principal,
     )).rejects.toThrow("generation is revoked");
   });
@@ -206,22 +446,18 @@ describe("PluginOperationGrantCoordinator", () => {
     const survivorPrincipal = { ...principal, appSessionId: "window-survivor" };
     const holder = await coordinator.acquireExecutionLease(
       grantDomain,
-      "write",
       holderPrincipal,
     );
     const revokedRead = coordinator.acquireExecutionLease(
       grantDomain,
-      "read",
       principal,
     );
     const revokedWrite = coordinator.acquireExecutionLease(
       grantDomain,
-      "write",
       principal,
     );
     const survivor = coordinator.acquireExecutionLease(
       grantDomain,
-      "read",
       survivorPrincipal,
     );
 
@@ -247,13 +483,11 @@ describe("PluginOperationGrantCoordinator", () => {
     const secondAccountDomain = "d".repeat(64);
     const firstWrite = await coordinator.acquireExecutionLease(
       firstAccountDomain,
-      "write",
       principal,
     );
     let sameAccountStarted = false;
     const sameAccountWrite = coordinator.acquireExecutionLease(
       firstAccountDomain,
-      "write",
       principal,
     ).then((lease) => {
       sameAccountStarted = true;
@@ -262,8 +496,11 @@ describe("PluginOperationGrantCoordinator", () => {
     let otherAccountStarted = false;
     const otherAccountWrite = coordinator.acquireExecutionLease(
       secondAccountDomain,
-      "write",
-      { ...principal, accountHash: "other-account" },
+      {
+        ...principal,
+        accountScopeHash: "other-account-scope",
+        accountHash: "other-account",
+      },
     ).then((lease) => {
       otherAccountStarted = true;
       return lease;
@@ -374,6 +611,128 @@ describe("PluginOperationGrantCoordinator", () => {
     expect(coordinator.consume(grant.token, expected, grantDomain)).toMatchObject({ ok: false, reason: expect.stringContaining("already consumed") });
     now += 2_000;
     expect(coordinator.latestRequiredRead(principal, "ep_attendance_read", ["today"], 1_000, grantDomain)).toBeUndefined();
+  });
+
+  it("does not let later reads clear an indeterminate post-hook domain", () => {
+    const coordinator = new PluginOperationGrantCoordinator(() => 1_000);
+    coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain);
+    coordinator.poisonDomain(grantDomain);
+
+    expect(() => coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain)).toThrow("plugin operation domain is indeterminate");
+
+    expect(
+      coordinator.latestRequiredRead(
+        principal,
+        requiredRead.readTool,
+        requiredRead.readOperations,
+        requiredRead.maxAgeMs,
+        grantDomain,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("rejects issued, future, and queued operations after domain poison", async () => {
+    const coordinator = new PluginOperationGrantCoordinator(() => 1_000);
+    const directBinding = {
+      ...principal,
+      toolName: "ep_parking_write",
+      operation: "reserve",
+      intentHash: "direct-write",
+      readRevision: null,
+      expiresAt: 2_000,
+    };
+    const issuedBeforePoison = coordinator.issue(
+      directBinding,
+      grantDomain,
+    );
+    const holder = await coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+    const queued = coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    );
+
+    coordinator.poisonDomain(grantDomain);
+
+    expect(() => coordinator.issue(
+      { ...directBinding, intentHash: "future-write" },
+      grantDomain,
+    )).toThrow("plugin operation domain is indeterminate");
+    expect(() =>
+      coordinator.assertExecutionAuthorized(principal, grantDomain)
+    ).toThrow("plugin operation domain is indeterminate");
+
+    holder.release();
+    await expect(queued).rejects.toThrow(
+      "plugin operation domain is indeterminate",
+    );
+    expect(coordinator.consume(
+      issuedBeforePoison.token,
+      {
+        ...principal,
+        toolName: directBinding.toolName,
+        operation: directBinding.operation,
+        intentHash: directBinding.intentHash,
+        requiresRead: false,
+      },
+      grantDomain,
+    )).toMatchObject({
+      ok: false,
+      reason: "operation grant domain is indeterminate",
+    });
+    await expect(coordinator.acquireExecutionLease(
+      grantDomain,
+      principal,
+    )).rejects.toThrow("plugin operation domain is indeterminate");
+  });
+
+  it("carries poison across replacement generations for the same plugin account", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    coordinator.recordRead({
+      ...principal,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, grantDomain);
+    coordinator.poisonDomain(grantDomain);
+    coordinator.revokeGeneration(principal.ownerPluginId, principal.generationId);
+
+    const replacement = {
+      ...principal,
+      ownerVersion: "2.0.0",
+      generationId: "gen-2",
+      appSessionId: "replacement-window",
+      accountHash: "replacement-principal",
+    };
+    const replacementDomain = "1".repeat(64);
+    await expect(
+      coordinator.acquireExecutionLease(replacementDomain, replacement),
+    ).rejects.toThrow("plugin operation domain is indeterminate");
+    expect(() => coordinator.recordRead({
+      ...replacement,
+      readTool: requiredRead.readTool,
+      readOperation: "today",
+    }, replacementDomain)).toThrow("plugin operation domain is indeterminate");
+
+    const otherAccount = {
+      ...replacement,
+      accountScopeHash: "different-account-scope",
+      accountHash: "different-account",
+    };
+    const otherAccountLease = await coordinator.acquireExecutionLease(
+      "2".repeat(64),
+      otherAccount,
+    );
+    otherAccountLease.release();
   });
 
   it("burns before comparison so a mismatch cannot be retried", () => {
@@ -608,7 +967,6 @@ describe("PluginOperationGrantCoordinator", () => {
     expect(state.revocationCapacityExhausted).toBe(true);
     await expect(coordinator.acquireExecutionLease(
       grantDomain,
-      "write",
       { ...principal, appSessionId: "otherwise-fresh" },
     )).rejects.toThrow("revocation capacity exhausted");
   });

@@ -336,6 +336,7 @@ export class ToolExecutor {
     workerId?: string,
     pluginId?: string,
     hostShellExecutionPlan?: HostShellExecutionPlan,
+    auditInput?: Record<string, unknown>,
   ): Promise<PermissionCheckResult | null> {
     return tryUserApprovalMemorySkipImpl(
       toolName,
@@ -352,6 +353,7 @@ export class ToolExecutor {
       workerId,
       pluginId,
       hostShellExecutionPlan,
+      auditInput,
     );
   }
 

@@ -35,6 +35,21 @@ import {
 
 const log = createLogger("executor");
 
+export function auditSafeToolInput(
+  input: Record<string, unknown>,
+  audit: ToolExecutionAuditMetadata | undefined,
+): Record<string, unknown> {
+  if (audit?.governedOperation === undefined) return input;
+  return {
+    operation: audit.governedOperation ?? "<invalid>",
+  };
+}
+
+export interface LifecycleDispatchObservation {
+  status: "unwired" | "no-match" | "executed" | "uncertain";
+  result?: HookDispatchResult;
+}
+
 export class AuditWriter {
   constructor(
     private readonly auditLogger: AuditLogger,
@@ -56,18 +71,27 @@ export class AuditWriter {
     sessionId: string | undefined,
     context: ToolPermissionContext,
     payload: LifecycleEventPayload,
-  ): Promise<HookDispatchResult | undefined> {
-    if (!this.scriptHookManager) return undefined;
+  ): Promise<LifecycleDispatchObservation> {
+    if (!this.scriptHookManager) return { status: "unwired" };
     try {
-      return await this.scriptHookManager.runLifecycleEvent(
+      const result = await this.scriptHookManager.runLifecycleEvent(
         event,
         sessionId ?? "unknown",
         context.trustOrigin as HookTrustOrigin,
         payload,
       );
+      if (result.results.length > 0) {
+        return { status: "executed", result };
+      }
+      if (result.reason === "no matching lifecycle hooks") {
+        return { status: "no-match", result };
+      }
+      // A wired manager returned no execution evidence and did not positively
+      // identify the no-match case. Treat that boundary as indeterminate.
+      return { status: "uncertain", result };
     } catch {
       // Defensive: observe-only events must never break a tool call.
-      return undefined;
+      return { status: "uncertain" };
     }
   }
 
@@ -136,17 +160,11 @@ export class AuditWriter {
     auditDirectory?: string,
     audit?: ToolExecutionAuditMetadata,
   ): Promise<void> {
-    const governedTool = this.toolRegistry.findByName(toolName)?.operationPolicy;
-    const governedOperation = governedTool && typeof input.operation === "string"
-      ? input.operation
-      : undefined;
     // Operation-governed tools may carry attendance, identity, or reservation
     // payloads. Their audit contract is metadata-only: operation + outcome.
     // The bearer/account hash are held in ToolPermissionContext and are never
     // serialized here.
-    const auditSafeInput = governedTool
-      ? { operation: governedOperation ?? "<invalid>" }
-      : input;
+    const auditSafeInput = auditSafeToolInput(input, audit);
     const tool = this.toolRegistry.findByName(toolName);
     const entry = permissionAuditAskEntryFromToolCall({
       toolName,
@@ -198,22 +216,20 @@ export class AuditWriter {
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error" | "indeterminate",
     hookChain?: HookResult[],
     audit?: ToolExecutionAuditMetadata,
+    suppressPermissionDeniedLifecycle = false,
   ): Promise<void> {
-    const governedTool = this.toolRegistry.findByName(toolName)?.operationPolicy;
-    const governedOperation = governedTool && typeof input.operation === "string"
-      ? input.operation
-      : undefined;
-    const auditSafeInput = governedTool
-      ? { operation: governedOperation ?? "<invalid>" }
-      : input;
+    const governedTool = audit?.governedOperation !== undefined;
+    const auditSafeInput = auditSafeToolInput(input, audit);
     const auditSafeOutput = governedTool
       ? (isError ? "governed operation failed" : "governed operation completed")
       : output;
     // ── #811 m2: PermissionDenied (NON-BLOCKING) ──
-    // `auditToolCall` is the single chokepoint every tool-deny path funnels
-    // through, so firing here observes the deny EXACTLY ONCE where it is
-    // finalized. OBSERVE-ONLY: the lifecycle hook's verdict is recorded but the
-    // deny stands regardless (control flow already returned the deny result).
+    // `auditToolCall` is the single chokepoint every ordinary tool-deny path
+    // funnels through, so firing here observes the deny EXACTLY ONCE where it is
+    // finalized. Governed plugin operations deliberately suppress this
+    // effect-capable extension boundary: several deny paths occur before an
+    // operation lease exists, and arbitrary hooks cannot be part of the
+    // serialized provider-state proof.
     // A user-abort is a CANCEL, not a permission denial — exclude it so a policy
     // hook never sees false "denied" signals. `denyReason.reason` carries the
     // finalized reason so a hook can discriminate the remaining cases (e.g.
@@ -221,7 +237,9 @@ export class AuditWriter {
     if (
       permission?.decision === "deny" &&
       permissionContext !== undefined &&
-      terminationReason !== "user-abort"
+      terminationReason !== "user-abort" &&
+      !governedTool &&
+      !suppressPermissionDeniedLifecycle
     ) {
       await this.fireLifecycleEvent(
         "PermissionDenied",

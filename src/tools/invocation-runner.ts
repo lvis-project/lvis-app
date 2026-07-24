@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import type { Tool } from "./base.js";
+import type { HookRunner } from "../hooks/hook-runner.js";
 import { isModelExposedTool } from "./base.js";
 import { isCanonicalBashTool } from "./bash.js";
 import { isCanonicalPowerShellTool } from "./powershell.js";
@@ -66,7 +67,10 @@ import {
   maskToolInputForDisplay,
   summarizeInputForDeferred,
 } from "./pipeline/display-mask.js";
-import { AuditWriter } from "./pipeline/audit-writer.js";
+import {
+  auditSafeToolInput,
+  AuditWriter,
+} from "./pipeline/audit-writer.js";
 // ── C8 pipeline decomposition — the per-invocation mutable-state contract +
 // initial-state factory + the self-contained user-abort helper. The two
 // SECURITY-CRITICAL sandbox filesystem-containment relaxation blocks stay
@@ -160,6 +164,7 @@ export async function runToolInvocation(
       toolResultChunkReader,
       permissionContext,
       executionCwd: requestedExecutionCwd,
+      pluginAuthLifecycle,
     } = opts;
     const startTime = Date.now();
     const executionCwd =
@@ -169,24 +174,33 @@ export async function runToolInvocation(
     let source: ToolSource = "builtin";
     let trust: TrustLevel = "high";
     let hostShellExecutionPlanAudit: HostShellExecutionPlanAuditProjection | undefined;
+    let governedTool = false;
     const withHostShellExecutionPlan = (result: ToolResult): ToolResult =>
       hostShellExecutionPlanAudit === undefined
         ? result
         : { ...result, executionPlan: hostShellExecutionPlanAudit };
-    const currentAuditMetadata = (): ToolExecutionAuditMetadata => ({
+    const currentAuditMetadata = (
+      input: Record<string, unknown> = toolUse.input,
+    ): ToolExecutionAuditMetadata => ({
       toolUseId: toolUse.id,
       ...(hostShellExecutionPlanAudit !== undefined
         ? { executionPlan: hostShellExecutionPlanAudit }
         : {}),
+      ...(governedTool
+        ? {
+            governedOperation:
+              typeof input.operation === "string" ? input.operation : null,
+          }
+        : {}),
     });
     const auditCurrentToolCall = (...args: AuditToolCallArgs): Promise<void> => {
-      args[16] = currentAuditMetadata();
+      args[16] = currentAuditMetadata(args[4]);
       return services.auditWriter.auditToolCall(...args);
     };
     const auditCurrentPermissionAsk = (
       ...args: AuditPermissionAskArgs
     ): Promise<void> => {
-      args[8] = currentAuditMetadata();
+      args[8] = currentAuditMetadata(args[3]);
       return services.auditWriter.auditPermissionAsk(...args);
     };
 
@@ -198,6 +212,7 @@ export async function runToolInvocation(
       callbacks?.onToolEnd?.(toolUse.name, t("be_executor.toolNotFound", { name: toolUse.name }), true, meta, undefined, durationMs);
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: t("be_executor.toolNotFound", { name: toolUse.name }), is_error: true, durationMs });
     }
+    governedTool = tool.operationPolicy !== undefined;
     let generationAccess: ReturnType<
       InvocationRunnerServices["pluginGenerationAccessProvider"]
     >;
@@ -313,6 +328,7 @@ export async function runToolInvocation(
         layer: 0,
       },
       hookChain?: HookResult[],
+      suppressPermissionDeniedLifecycle = false,
     ): Promise<ToolResult> => {
       const content = "Rationale resume blocked: " + reason;
       const durationMs = Date.now() - startTime;
@@ -334,6 +350,8 @@ export async function runToolInvocation(
         undefined,
         undefined,
         hookChain,
+        undefined,
+        suppressPermissionDeniedLifecycle,
       );
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
     };
@@ -390,7 +408,7 @@ export async function runToolInvocation(
       executionCwd,
       startTime,
       auditWriter: services.auditWriter,
-      audit: currentAuditMetadata(),
+      audit: currentAuditMetadata(input),
     });
 
     if (abortSignal?.aborted) {
@@ -427,10 +445,17 @@ export async function runToolInvocation(
     }
 
     // ── Step 2: PreToolUse Hook ─────────────────────
-    const preResult = await services.hookRunner.runPreHooks({
-      toolName: toolUse.name,
-      toolInput: toolUse.input,
-    });
+    // Governed plugin operations never dispatch effect-capable extension
+    // hooks. Their provider state is protected by a Host-owned serialized
+    // account scope; arbitrary hook code cannot participate in that proof or
+    // be made crash-contained on every supported OS.
+    const preResult: Awaited<ReturnType<HookRunner["runPreHooks"]>> =
+      tool.operationPolicy
+        ? { action: "allow" }
+        : await services.hookRunner.runPreHooks({
+            toolName: toolUse.name,
+            toolInput: toolUse.input,
+          });
 
     if (preResult.action === "deny") {
       if (rationaleResumeContext) {
@@ -482,6 +507,7 @@ export async function runToolInvocation(
             ownerVersion: hostContext.ownerVersion,
             generationId: hostContext.generationId,
             appSessionId: hostContext.appSessionId,
+            accountScopeHash: hostContext.accountScopeHash,
             accountHash: hostContext.accountHash,
           };
         } else {
@@ -526,6 +552,24 @@ export async function runToolInvocation(
           is_error: true,
           durationMs,
         });
+      }
+    }
+    if (pluginAuthLifecycle) {
+      const { binding } = pluginAuthLifecycle;
+      if (
+        !tool.operationPolicy ||
+        !tool.pluginId ||
+        !tool.pluginGeneration ||
+        toolUse.name !== binding.toolName ||
+        tool.pluginId !== binding.pluginId ||
+        tool.pluginGeneration.generationId !== binding.generationId ||
+        !pluginOperationPrincipal ||
+        pluginOperationPrincipal.appSessionId !== binding.appSessionId ||
+        pluginOperationPrincipal.accountScopeHash !== binding.accountScopeHash
+      ) {
+        throw new Error(
+          "host plugin auth lifecycle does not match the admitted governed Tool",
+        );
       }
     }
     if (rationaleResumeContext) {
@@ -628,6 +672,10 @@ export async function runToolInvocation(
     };
     const approvalPurpose = buildApprovalPurposeSuggestion(finalInput, invocationPermissionContext);
     const reviewerInput = maskToolInputForDisplay(finalInput);
+    const auditInput = auditSafeToolInput(
+      finalInput,
+      currentAuditMetadata(finalInput),
+    );
     // The Plan-B binding is created only after every Layer-1 directory grant
     // has finalized the effective validator scope. It remains host-only.
     let hostShellExecutionPermitBinding:
@@ -839,7 +887,7 @@ export async function runToolInvocation(
             toolName: toolUse.name,
             source,
             category: invocationCategory,
-            inputSummary: summarizeInputForDeferred(finalInput),
+            inputSummary: summarizeInputForDeferred(auditInput),
             evaluationContext: makeEvaluationContext({
               pathFields: reviewerPathFields,
               targetFilePaths: [outOfAllowedTarget.filePath],
@@ -1172,6 +1220,7 @@ export async function runToolInvocation(
       meta,
       approvalPurpose,
       reviewerInput,
+      auditInput,
       abortSignal,
       rationaleResumeContext,
       rationaleBatchContext,
@@ -1234,6 +1283,7 @@ export async function runToolInvocation(
       preResult,
       resolvedPluginOperation,
       pluginOperationPrincipal,
+      pluginAuthLifecycle,
     });
     };
     try {

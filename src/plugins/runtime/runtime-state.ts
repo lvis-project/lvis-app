@@ -18,7 +18,6 @@ import type {
   PluginRuntimeGenerationLifecycle,
   PluginRuntimeGenerationProjection,
   PluginRuntimeRetirementStep,
-  PreparedPluginRuntimeGenerationPublication,
 } from "../plugin-host-generation.js";
 import { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
@@ -31,6 +30,7 @@ import { getLvisAppVersion } from "../../shared/app-version.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import type { PluginIntegrityCheckResult } from "./runtime-preflight.js";
 import { reportPluginIntegrity, verifyPluginIntegrity } from "./runtime-integrity.js";
+import { isPluginRuntimeDetachedOperationError } from "./detached-operation.js";
 
 import {
   buildManifestValidator,
@@ -169,6 +169,27 @@ export abstract class PluginRuntimeState {
   }>();
   /** Latest auth invocation admitted for each immutable plugin generation. */
   protected pluginAuthInvocationEpochs = new Map<string, number>();
+  /** Latest auth result that actually published for each immutable generation. */
+  protected pluginAuthPublishedEpochs = new Map<string, number>();
+  /**
+   * Principal observed when an auth invocation began. A failed refresh revokes
+   * this exact authority unless a later result has actually published; a later
+   * *start* alone must not keep stale governed work alive.
+   */
+  protected pluginAuthFailurePrincipals = new Map<string, {
+    principalHash: string;
+    generationId: string;
+  }>();
+  /**
+   * Stable account identity retained after login/logout invalidates the active
+   * principal. Concurrent auth transitions reuse it so they cannot bypass the
+   * governed-operation/account-transition FIFO while the identity is absent.
+   */
+  protected pluginAuthTransitionPrincipals = new Map<string, {
+    identityHash: string;
+    principalHash: string;
+    generationId: string;
+  }>();
   protected nextPluginAuthInvocationEpoch = 0;
   protected readonly pendingRestartCancellations = new Map<string, PendingRestartCancellation>();
   /** Monotonic generation used to reject stale async add/restart commits. */
@@ -595,7 +616,7 @@ export abstract class PluginRuntimeState {
     this.publishValidatedPluginInstallAlias(normalizedPluginId, normalizedAlias);
   }
 
-  private publishValidatedPluginInstallAlias(
+  protected publishValidatedPluginInstallAlias(
     normalizedPluginId: string,
     normalizedAlias: string | undefined,
   ): void {
@@ -1330,158 +1351,6 @@ export abstract class PluginRuntimeState {
     return this.generationAccess;
   }
 
-  getRuntimeGenerationProjection(pluginId: string): PluginRuntimeGenerationProjection | undefined {
-    const plugin = this.plugins.get(pluginId);
-    if (!plugin) return undefined;
-    return Object.freeze({
-      activationId: plugin.activationId,
-      installId: this.requirePluginInstallClaim(pluginId),
-      manifest: plugin.manifest,
-      pluginRoot: plugin.pluginRoot,
-      instance: plugin.instance,
-      methods: new Map(plugin.methods),
-      ...(plugin.approvedPluginAccess ? { approvedPluginAccess: plugin.approvedPluginAccess } : {}),
-      disposers: Object.freeze([...(this.disposers.get(pluginId) ?? [])]),
-      ...(plugin.hostEffects ? { hostEffects: plugin.hostEffects } : {}),
-      ...(plugin.deactivateHostApi ? { deactivateHostApi: plugin.deactivateHostApi } : {}),
-      ...(plugin.drainHostApiOperations
-        ? { drainHostApiOperations: plugin.drainHostApiOperations }
-        : {}),
-      ...(plugin.lifecycleHookScope ? { lifecycleHookScope: plugin.lifecycleHookScope } : {}),
-    });
-  }
-
-  prepareRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): PreparedPluginRuntimeGenerationPublication {
-    const pluginId = runtime.manifest.id;
-    if (runtime.installId === undefined) {
-      throw new Error(`Plugin runtime generation install provenance missing: ${pluginId}`);
-    }
-    this.assertPluginIdentityNamespace(
-      [{ pluginId, alias: runtime.installId ?? undefined }],
-      runtime.installId === null ? [] : [runtime.installId],
-    );
-    const nextMethods = new Map(this.methodMap);
-    for (const [toolName, entry] of nextMethods) {
-      if (entry.pluginId === pluginId) nextMethods.delete(toolName);
-    }
-    for (const toolName of runtime.methods.keys()) {
-      const owner = nextMethods.get(toolName)?.pluginId;
-      if (owner && owner !== pluginId) throw new Error(`Duplicate plugin method registered: ${toolName}`);
-      nextMethods.set(toolName, { pluginId, handler: runtime.methods.get(toolName)! });
-    }
-    const nextPlugins = new Map(this.plugins);
-    nextPlugins.set(pluginId, {
-      activationId: runtime.activationId,
-      manifest: runtime.manifest,
-      pluginRoot: runtime.pluginRoot,
-      instance: runtime.instance,
-      methods: new Map(runtime.methods),
-      approvedPluginAccess: runtime.approvedPluginAccess,
-      hostEffects: runtime.hostEffects,
-      started: true,
-      deactivateHostApi: runtime.deactivateHostApi,
-      drainHostApiOperations: runtime.drainHostApiOperations,
-      lifecycleHookScope: runtime.lifecycleHookScope,
-    });
-    const nextDisposers = new Map(this.disposers);
-    nextDisposers.set(pluginId, [...(runtime.disposers ?? [])]);
-    const nextAccountHashes = new Map(
-      [...this.pluginAccountHashes].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
-    );
-    const nextAuthInvocationEpochs = new Map(
-      [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
-    );
-    const publishHostEffects = runtime.hostEffects?.preparePublish();
-    let published = false;
-    return Object.freeze({
-      pluginId,
-      publish: () => {
-        if (published) return;
-        this.plugins.get(pluginId)?.hostEffects?.supersede();
-        publishHostEffects?.();
-        this.publishValidatedPluginInstallAlias(
-          pluginId,
-          runtime.installId ?? undefined,
-        );
-        this.methodMap = nextMethods;
-        this.plugins = nextPlugins;
-        this.disposers = nextDisposers;
-        this.rememberPluginManifest(pluginId, runtime.manifest, runtime.approvedPluginAccess);
-        this.markPluginUiRevision(pluginId);
-        this.failedPluginIds.delete(pluginId);
-        this.loadFailureInfo.delete(pluginId);
-        this.disabledPluginIds.delete(pluginId);
-        this.pluginAccountHashes = nextAccountHashes;
-        this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
-        published = true;
-      },
-    });
-  }
-
-  prepareRuntimeRemoval(pluginId: string): PreparedPluginRuntimeGenerationPublication {
-    const nextMethods = new Map(this.methodMap);
-    for (const [toolName, entry] of nextMethods) {
-      if (entry.pluginId === pluginId) nextMethods.delete(toolName);
-    }
-    const nextPlugins = new Map(this.plugins);
-    nextPlugins.delete(pluginId);
-    const nextDisposers = new Map(this.disposers);
-    nextDisposers.delete(pluginId);
-    const nextAccountHashes = new Map(
-      [...this.pluginAccountHashes].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
-    );
-    const nextAuthInvocationEpochs = new Map(
-      [...this.pluginAuthInvocationEpochs].filter(([key]) => !key.startsWith(`${pluginId}\0`)),
-    );
-    let published = false;
-    return Object.freeze({
-      pluginId,
-      publish: () => {
-        if (published) return;
-        this.plugins.get(pluginId)?.hostEffects?.supersede();
-        this.methodMap = nextMethods;
-        this.plugins = nextPlugins;
-        this.disposers = nextDisposers;
-        this.invalidatePluginUiRevision(pluginId);
-        this.pluginAccountHashes = nextAccountHashes;
-        this.pluginAuthInvocationEpochs = nextAuthInvocationEpochs;
-        published = true;
-      },
-    });
-  }
-
-  async postPublishRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): Promise<void> {
-    const faults: Error[] = [];
-    for (const error of runtime.hostEffects?.postPublish() ?? []) {
-      log.error(`generation post-publish signal failed for ${runtime.manifest.id}: %s`, error.message);
-      faults.push(error);
-    }
-    try {
-      await runtime.instance.onPublished?.();
-    } catch (error) {
-      log.error(`generation post-publish startup degraded for ${runtime.manifest.id}: %s`, (error as Error).message);
-      this.auditLog?.("warn", "plugin_post_publish_startup_degraded", {
-        pluginId: runtime.manifest.id,
-        version: runtime.manifest.version,
-        error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
-      });
-      faults.push(error instanceof Error ? error : new Error(String(error)));
-    }
-    if (faults.length > 0) {
-      throw new AggregateError(faults, `plugin '${runtime.manifest.id}' runtime post-publish failed`);
-    }
-  }
-
-  /** Synchronous publish half of the host generation linearization point. */
-  publishRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): void {
-    this.prepareRuntimeGeneration(runtime).publish();
-  }
-
-  /** Synchronous inactive-pointer publish. Resource teardown is lease-drained. */
-  unpublishRuntimeGeneration(pluginId: string): void {
-    this.prepareRuntimeRemoval(pluginId).publish();
-  }
-
   prepareRuntimeRetirement(
     runtime: PluginRuntimeGenerationProjection,
   ): readonly PluginRuntimeRetirementStep[] {
@@ -1567,6 +1436,7 @@ export abstract class PluginRuntimeState {
       : await access.acquire(pluginId);
     const next = new Map(this.pinnedGenerations.getStore() ?? []);
     next.set(pluginId, lease.generation.generationId);
+    let releaseDeferred = false;
     try {
       return await access.runWithLease(
         lease,
@@ -1575,8 +1445,17 @@ export abstract class PluginRuntimeState {
           () => operation(lease.generation.state.runtime, lease.generation.generationId),
         ),
       );
+    } catch (error) {
+      if (isPluginRuntimeDetachedOperationError(error)) {
+        releaseDeferred = true;
+        void error.settlement.then(
+          () => lease.release(),
+          () => lease.release(),
+        );
+      }
+      throw error;
     } finally {
-      lease.release();
+      if (!releaseDeferred) lease.release();
     }
   }
 

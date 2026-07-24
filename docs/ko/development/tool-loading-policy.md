@@ -6,11 +6,9 @@
 > §9, §14 and the implementation design in
 > `docs/development/tool-level-deferral-design.md`.
 >
-> The keyword path below is deprecated keyword-to-Tool-schema preload, despite
-> the legacy internal name `SkillKeyword.skillId`. It is separate from bundled
-> `manifest.skills` instruction discovery and never invokes a Tool. Owner:
-> `lvis-app` plugin runtime. Remove it after every supported plugin has migrated
-> to bundled `manifest.skills` and no active manifest declares `keywords`.
+> Manifest `keywords` are retired and schema-rejected. Bundled
+> `manifest.skills` provide plugin-owned instructions; bounded catalog search
+> controls Tool schema exposure and never turns Skill prose into Host dispatch.
 
 ## Decision
 
@@ -35,9 +33,9 @@ The canonical loading model is:
 3. **Catalogued/deferred**: when the eligible count reaches the ceiling, active
    plugin/MCP tools not yet loaded are listed as compact `{name, description}`
    candidates in the system prompt.
-4. **Loaded deferred**: in deferral mode, only builtins/meta-tools,
-   keyword-preloaded tools, explicitly promoted tools, and current-scope
-   carried-forward tools are sent as full `tools[]` schemas to the provider.
+4. **Loaded deferred**: in deferral mode, only builtins/meta-tools, explicitly
+   promoted tools, and current-scope carried-forward tools are sent as full
+   `tools[]` schemas to the provider.
 
 User-inactive plugins are excluded from provider `tools[]`, `<tool-catalog>`,
 and `request_plugin`, but stay runtime-callable through host/UI execution paths.
@@ -120,9 +118,6 @@ Tools may enter `tools[]` only through one of these paths:
   `tool_search`.
 - Eager full-schema exposure for all active plugin/MCP tools when
   `eligibleCount < EAGER_TOOL_EXPOSURE_CEILING`.
-- Deprecated Tool-schema preloading from the legacy-named
-  `SkillKeyword.skillId` when the owning plugin is in scope and deferral is
-  active.
 - `tool_search` promotion from the current compact catalog.
 - Carry-forward from the previous turn, clamped to the current active plugin/MCP
   scope.
@@ -141,7 +136,7 @@ selected subset**, not whole plugin.
 Default promotion should be conservative:
 
 - exact tool-name match: load the matching tool
-- strong keyword match: load the Tool schema named by the legacy `skillId`
+- strong catalog match: load the matching Tool schema
 - broad/natural-language query: score candidates and load only the top few
 - explicit multi-tool intent: load a small group if the group is justified
 
@@ -203,10 +198,9 @@ the single count-based policy.
 
 ## Implementation Direction
 
-The current implementation uses deprecated host-side keyword-to-Tool-schema
-preload plus `tool_search` to promote individual tools or small tool subsets.
-Do not expand the keyword surface; bundled instruction discovery belongs to
-`manifest.skills`.
+The current implementation uses `tool_search` to promote individual tools or
+small tool subsets. Bundled instruction discovery belongs to `manifest.skills`;
+the Host has no keyword-to-Tool dispatch or preload path.
 
 Do not switch the app to OpenAI-only hosted tool search as the first fix. LVIS
 currently routes tool schemas through the cross-vendor Vercel AI SDK provider

@@ -390,8 +390,9 @@ export async function initPluginRuntime(
     });
   };
 
-  // §Step 1 + §Step 2 — thread the user-installed dir as a second
-  // trust root and the unsigned-user-plugin opt-in flag.
+  // §Step 1 + §Step 2 — thread the canonical installed-plugin root through
+  // the runtime. Install source and receipt metadata, not an unsigned-plugin
+  // opt-in, establish the deployment trust classification.
   // C6 — build the extracted factories. Lazy bindings (pluginRuntime,
   // loopbackManager) are passed as getters so the eventual assignments below
   // are visible; both are still unassigned at this point (never value-captured).

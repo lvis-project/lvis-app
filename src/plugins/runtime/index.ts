@@ -32,6 +32,7 @@ import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
 import { updatePluginRegistry } from "../registry.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
+import { PluginRuntimeDetachedOperationError } from "./detached-operation.js";
 import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
 import { sessionContext } from "../../engine/session-context.js";
 import {
@@ -77,6 +78,81 @@ export { resolveManifestLoadPlan, readEnabledManifestSnapshots };
 // Re-export public interface types so callers that do
 // `import { PluginCard, PluginPerfStats } from "./runtime/index.js"` work.
 export type { ManifestLoadPlan, ManifestSnapshot };
+
+/** Host-private revocation tuple. Hash and minting generation are inseparable. */
+type PluginAuthInvalidation = Readonly<{
+  invalidatedAccountHash: string;
+  invalidatedAccountGenerationId: string;
+}>;
+
+type PluginAuthNoInvalidation = Readonly<{
+  invalidatedAccountHash?: undefined;
+  invalidatedAccountGenerationId?: undefined;
+}>;
+
+type PluginAuthObservation = PluginAuthInvalidation | PluginAuthNoInvalidation;
+type PluginAuthOperationAccount = Readonly<{
+  /** Stable scope shared with ordinary account operations for FIFO serialization. */
+  accountScopeHash: string;
+  /**
+   * Host-private synthetic principal used only by a manifest auth Tool's
+   * operation-policy path. It is never a cached authenticated account.
+   */
+  accountHash: string;
+}>;
+type PluginAuthInvocation = PluginAuthObservation & Readonly<{
+  epoch: number;
+  accountTransitionScopeHash: string;
+  operationAccount: PluginAuthOperationAccount;
+}>;
+
+function fallbackPluginAuthTransitionScope(pluginId: string): string {
+  return createHash("sha256")
+    .update("plugin-auth-transition/v1\0")
+    .update(pluginId)
+    .digest("hex");
+}
+
+function pluginAuthOperationAccount(
+  pluginId: string,
+  generationId: string,
+  appSessionId: string | undefined,
+  accountScopeHash: string,
+): PluginAuthOperationAccount {
+  const effectiveSessionId = appSessionId || `plugin-auth-${pluginId}-${generationId}`;
+  return Object.freeze({
+    accountScopeHash,
+    accountHash: createHash("sha256")
+      .update("plugin-auth-operation-principal/v1\0")
+      .update(pluginId)
+      .update("\0")
+      .update(generationId)
+      .update("\0")
+      .update(effectiveSessionId)
+      .update("\0")
+      .update(accountScopeHash)
+      .digest("hex"),
+  });
+}
+
+function authInvalidation(
+  current: { readonly principalHash: string } | undefined,
+  currentGenerationId: string,
+  retained: { readonly principalHash: string; readonly generationId: string } | undefined,
+): PluginAuthInvalidation | undefined {
+  if (current) {
+    return {
+      invalidatedAccountHash: current.principalHash,
+      invalidatedAccountGenerationId: currentGenerationId,
+    };
+  }
+  return retained
+    ? {
+        invalidatedAccountHash: retained.principalHash,
+        invalidatedAccountGenerationId: retained.generationId,
+      }
+    : undefined;
+}
 
 /**
  * Option C — non-active plugin catalog card.
@@ -152,6 +228,12 @@ export interface PluginToolInvocationContext {
   ownerPluginId?: string;
   /** Host-admitted runtime activation; never inferred from mutable live state. */
   ownerGenerationId?: string;
+  /**
+   * Host-private auth classification captured from the exact immutable manifest
+   * that admitted this invocation. It prevents a replacement generation from
+   * downgrading a predecessor auth call into an ordinary app-only call.
+   */
+  authToolKind?: "status" | "login" | "logout";
   /**
    * True only when the renderer call was made during an active browser user
    * activation. Renderer-provided booleans are not trusted directly; preload
@@ -386,8 +468,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * Abort-parity note: like the governed executor path, the ceiling only
    * unblocks the *caller* — `PluginRuntime.call` hands the handler only
    * `payload`, never an abort signal, so a hung handler's work stays detached.
-   * We match that exact parity and do NOT invent a handler-abort mechanism the
-   * executor path itself lacks. `ceilingMs` defaults to the SOT
+   * The immutable generation lease remains held until that detached settlement,
+   * so update/removal cannot publish a replacement beside stale handler work.
+   * We do NOT invent a handler-abort mechanism the executor path itself lacks.
+   * `ceilingMs` defaults to the SOT
    * (`TOOL_TIMEOUT_POLICY.globalCeilingMs`) and is a parameter solely so tests
    * can exercise the ceiling with a small value without weakening the SOT.
    */
@@ -395,13 +479,15 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     method: string,
     payload?: unknown,
     ceilingMs: number = TOOL_TIMEOUT_POLICY.globalCeilingMs,
+    expectedGenerationId?: string,
+    beforeHandler?: () => void,
   ): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
       this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
-    return this.withPinnedGeneration(entry.pluginId, async (projection) => {
+    return this.withPinnedGeneration(entry.pluginId, async (projection, generationId) => {
       assertAppVisibleToolInvokable({
         method,
         pluginId: entry.pluginId,
@@ -409,19 +495,49 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       });
       const handler = projection.methods.get(method);
       if (!handler) throw new Error(`Plugin method not found in active generation: ${method}`);
+      const auth = projection.manifest.auth;
+      const isAuthTool = auth !== undefined && (
+        method === auth.statusTool ||
+        method === auth.loginTool ||
+        method === auth.logoutTool
+      );
       this.auditLog?.("info", "plugin_ui_action_invoked", {
         pluginId: entry.pluginId,
         method,
       });
       const outcome = await runWithCeiling(
-        async () => handler(payload),
+        async () => {
+          // Auth calls are stricter than ordinary pinned calls: an admitted
+          // predecessor may finish non-auth work, but it must not mutate
+          // credentials after the active generation has changed.
+          if (
+            isAuthTool &&
+            this.requireGenerationAccess("plugin auth handler").getActive(entry.pluginId)
+              ?.generationId !== generationId
+          ) {
+            throw new Error("plugin auth generation changed before handler entry");
+          }
+          // The boot-owned transition lease rechecks session/generation
+          // revocation here, after runWithCeiling's task boundary and with no
+          // await before the plugin handler.
+          beforeHandler?.();
+          return handler(payload);
+        },
         ceilingMs,
         undefined,
         method,
       );
-      if (!outcome.ok) throw outcome.error;
+      if (!outcome.ok) {
+        if (outcome.settlement) {
+          throw new PluginRuntimeDetachedOperationError(
+            outcome.error,
+            outcome.settlement,
+          );
+        }
+        throw outcome.error;
+      }
       return outcome.value;
-    });
+    }, expectedGenerationId);
   }
 
   /**
@@ -459,10 +575,18 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       if (!this.toolInvocationDelegate) {
         throw new Error("Plugin tool executor is not wired; UI plugin call denied");
       }
+      const authToolKind = method === manifest.auth?.statusTool
+        ? "status" as const
+        : method === manifest.auth?.loginTool
+          ? "login" as const
+          : method === manifest.auth?.logoutTool
+            ? "logout" as const
+            : undefined;
       return this.toolInvocationDelegate(method, payload, {
         origin: "ui",
         ownerPluginId: entry.pluginId,
         ownerGenerationId: generationId,
+        ...(authToolKind ? { authToolKind } : {}),
         userAction: options?.userAction === true,
         ...(options?.appSessionId
           ? {
@@ -1183,25 +1307,76 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     }, expectedGenerationId);
   }
 
-  getPluginOperationAccountHash(pluginId: string, generationId: string): string | undefined {
-    return this.pluginAccountHashes.get(`${pluginId}\0${generationId}`)?.principalHash;
+  getPluginOperationAccountIdentity(
+    pluginId: string,
+    generationId: string,
+  ): {
+    readonly identityHash: string;
+    readonly principalHash: string;
+  } | undefined {
+    const identity = this.pluginAccountHashes.get(`${pluginId}\0${generationId}`);
+    return identity ? { ...identity } : undefined;
+  }
+
+  /**
+   * Return the Host-only operation identity for one exact manifest auth Tool.
+   * It intentionally never reuses or publishes the cached authenticated
+   * account principal: auth status, login, and logout need one shared identity
+   * so a valid governed status-read → login/write chain can retain its receipt
+   * after login revokes the real account principal. Normal tools continue to
+   * use {@link getPluginOperationAccountIdentity} exclusively.
+   */
+  getPluginAuthOperationAccount(
+    pluginId: string,
+    generationId: string,
+    toolName: string,
+    appSessionId: string,
+  ): PluginAuthOperationAccount | undefined {
+    const active = this.requireGenerationAccess("plugin auth operation account")
+      .getActive(pluginId);
+    if (!active || active.generationId !== generationId) return undefined;
+    const auth = active.manifest.auth;
+    if (
+      !auth ||
+      (
+        toolName !== auth.statusTool &&
+        toolName !== auth.loginTool &&
+        toolName !== auth.logoutTool
+      )
+    ) {
+      return undefined;
+    }
+    const key = `${pluginId}\0${generationId}`;
+    const currentAccount = this.pluginAccountHashes.get(key);
+    const retainedTransitionAccount = this.pluginAuthTransitionPrincipals.get(pluginId);
+    const accountTransitionScopeHash =
+      currentAccount?.identityHash ??
+      retainedTransitionAccount?.identityHash ??
+      fallbackPluginAuthTransitionScope(pluginId);
+    return pluginAuthOperationAccount(
+      pluginId,
+      generationId,
+      appSessionId,
+      accountTransitionScopeHash,
+    );
   }
 
   /**
    * Claim publication order for any auth lifecycle invocation. Starting login
    * or logout immediately removes the current principal, so neither a failed
-   * nor partial transition can retain stale write authority. The caller must
-   * synchronously revoke grants for the returned hash before awaiting plugin
-   * execution and pass the epoch to {@link observePluginAuthResult}.
+   * nor partial transition can retain stale write authority. Every auth tool
+   * also receives one stable transition scope: status, login, and logout
+   * therefore serialize with admitted governed work and with each other. The
+   * caller must synchronously revoke grants for the returned hash before
+   * awaiting plugin execution and pass the epoch to
+   * {@link observePluginAuthResult}.
    */
   beginPluginAuthInvocation(
     pluginId: string,
     generationId: string,
     toolName: string,
-  ): {
-    epoch: number;
-    invalidatedAccountHash?: string;
-  } | undefined {
+    appSessionId?: string,
+  ): PluginAuthInvocation | undefined {
     const active = this.requireGenerationAccess("plugin auth invocation").getActive(pluginId);
     if (!active || active.generationId !== generationId) return undefined;
     const auth = active.manifest.auth;
@@ -1217,15 +1392,58 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     }
     const epoch = ++this.nextPluginAuthInvocationEpoch;
     const key = `${pluginId}\0${generationId}`;
+    const transitionKey = pluginId;
     this.pluginAuthInvocationEpochs.set(key, epoch);
-    if (toolName !== auth.loginTool && toolName !== auth.logoutTool) {
-      return { epoch };
+    const currentAccount = this.pluginAccountHashes.get(key);
+    const retainedTransitionAccount =
+      this.pluginAuthTransitionPrincipals.get(transitionKey);
+    const failurePrincipal = currentAccount
+      ? { principalHash: currentAccount.principalHash, generationId }
+      : retainedTransitionAccount
+        ? {
+            principalHash: retainedTransitionAccount.principalHash,
+            generationId: retainedTransitionAccount.generationId,
+          }
+        : undefined;
+    if (failurePrincipal) {
+      this.pluginAuthFailurePrincipals.set(
+        `${key}\0${epoch}`,
+        failurePrincipal,
+      );
     }
-    const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+    const accountTransitionScopeHash =
+      currentAccount?.identityHash ??
+      retainedTransitionAccount?.identityHash ??
+      fallbackPluginAuthTransitionScope(pluginId);
+    const operationAccount = pluginAuthOperationAccount(
+      pluginId,
+      generationId,
+      appSessionId,
+      accountTransitionScopeHash,
+    );
+    if (toolName !== auth.loginTool && toolName !== auth.logoutTool) {
+      return { epoch, accountTransitionScopeHash, operationAccount };
+    }
+    if (currentAccount) {
+      this.pluginAuthTransitionPrincipals.set(
+        transitionKey,
+        { ...currentAccount, generationId },
+      );
+    }
+    const invalidatedAccount = authInvalidation(
+      currentAccount,
+      generationId,
+      retainedTransitionAccount,
+    );
     this.pluginAccountHashes.delete(key);
-    return invalidatedAccountHash
-      ? { epoch, invalidatedAccountHash }
-      : { epoch };
+    return invalidatedAccount
+      ? {
+          epoch,
+          accountTransitionScopeHash,
+          operationAccount,
+          ...invalidatedAccount,
+        }
+      : { epoch, accountTransitionScopeHash, operationAccount };
   }
 
   /**
@@ -1239,13 +1457,16 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     toolName: string,
     result: unknown,
     invocationEpoch: number | undefined,
-  ): { invalidatedAccountHash?: string } {
+  ): PluginAuthObservation {
     const active = this.requireGenerationAccess("plugin auth result observation").getActive(pluginId);
     if (!active || active.generationId !== generationId) return {};
     const manifest = active.manifest;
     const auth = manifest?.auth;
     if (!auth) return {};
     const key = `${pluginId}\0${generationId}`;
+    if (invocationEpoch !== undefined) {
+      this.pluginAuthFailurePrincipals.delete(`${key}\0${invocationEpoch}`);
+    }
     if (
       (toolName === auth.statusTool || toolName === auth.logoutTool) &&
       (
@@ -1255,10 +1476,20 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     ) {
       return {};
     }
+    if (
+      invocationEpoch !== undefined &&
+      this.pluginAuthInvocationEpochs.get(key) === invocationEpoch
+    ) {
+      this.pluginAuthPublishedEpochs.set(key, invocationEpoch);
+    }
     if (toolName === auth.logoutTool) {
-      const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+      const invalidatedAccount = authInvalidation(
+        this.pluginAccountHashes.get(key),
+        generationId,
+        undefined,
+      );
       this.pluginAccountHashes.delete(key);
-      return invalidatedAccountHash ? { invalidatedAccountHash } : {};
+      return invalidatedAccount ?? {};
     }
     if (toolName !== auth.statusTool) return {};
     const outer = result && typeof result === "object" && !Array.isArray(result)
@@ -1267,25 +1498,86 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     const nested = outer?.data && typeof outer.data === "object" && !Array.isArray(outer.data)
       ? outer.data as Record<string, unknown>
       : outer;
+    const retainedTransitionAccount =
+      this.pluginAuthTransitionPrincipals.get(pluginId);
     if (nested?.authenticated !== true || typeof nested.account !== "string" || !nested.account.trim()) {
-      const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+      const currentAccount = this.pluginAccountHashes.get(key);
+      const invalidatedAccount = authInvalidation(
+        currentAccount,
+        generationId,
+        retainedTransitionAccount,
+      );
       this.pluginAccountHashes.delete(key);
-      return invalidatedAccountHash ? { invalidatedAccountHash } : {};
+      return invalidatedAccount ?? {};
     }
     const identityHash = createHash("sha256")
       .update("plugin-account-identity/v1\0")
       .update(nested.account.trim().toLowerCase())
       .digest("hex");
     const existing = this.pluginAccountHashes.get(key);
-    if (existing?.identityHash === identityHash) return {};
+    if (existing?.identityHash === identityHash) {
+      this.pluginAuthTransitionPrincipals.set(pluginId, {
+        ...existing,
+        generationId,
+      });
+      return {};
+    }
     const principalHash = createHash("sha256")
       .update("plugin-account-session/v1\0")
       .update(identityHash)
       .update("\0")
       .update(randomUUID())
       .digest("hex");
-    this.pluginAccountHashes.set(key, { identityHash, principalHash });
-    return existing ? { invalidatedAccountHash: existing.principalHash } : {};
+    const nextAccount = { identityHash, principalHash };
+    this.pluginAccountHashes.set(key, nextAccount);
+    this.pluginAuthTransitionPrincipals.set(pluginId, {
+      ...nextAccount,
+      generationId,
+    });
+    return authInvalidation(existing, generationId, retainedTransitionAccount) ?? {};
+  }
+
+  /**
+   * Fail closed on any unsuccessful auth transition. Its result is not
+   * authoritative, so the previously cached principal must be removed before
+   * the transition lease can release and admit queued governed work.
+   */
+  invalidateFailedPluginAuthInvocation(
+    pluginId: string,
+    generationId: string,
+    invocationEpoch: number,
+  ): PluginAuthObservation {
+    const key = `${pluginId}\0${generationId}`;
+    const failurePrincipal = this.pluginAuthFailurePrincipals.get(
+      `${key}\0${invocationEpoch}`,
+    );
+    this.pluginAuthFailurePrincipals.delete(`${key}\0${invocationEpoch}`);
+    if (!failurePrincipal) return {};
+    // A later completed auth result is authoritative. A later *started* status
+    // is not: it may still be queued behind governed work that must be denied.
+    if ((this.pluginAuthPublishedEpochs.get(key) ?? -1) > invocationEpoch) {
+      return {};
+    }
+    const current = this.pluginAccountHashes.get(key);
+    const retained = this.pluginAuthTransitionPrincipals.get(pluginId);
+    const currentMatches =
+      current?.principalHash === failurePrincipal.principalHash &&
+      failurePrincipal.generationId === generationId;
+    const retainedMatches =
+      retained?.principalHash === failurePrincipal.principalHash &&
+      retained.generationId === failurePrincipal.generationId;
+    if (!currentMatches && !retainedMatches) return {};
+    if (currentMatches && current) {
+      this.pluginAuthTransitionPrincipals.set(pluginId, {
+        ...current,
+        generationId,
+      });
+      this.pluginAccountHashes.delete(key);
+    }
+    return {
+      invalidatedAccountHash: failurePrincipal.principalHash,
+      invalidatedAccountGenerationId: failurePrincipal.generationId,
+    };
   }
 
   clearPluginOperationAccount(pluginId: string): void {
@@ -1295,6 +1587,13 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     for (const key of this.pluginAuthInvocationEpochs.keys()) {
       if (key.startsWith(`${pluginId}\0`)) this.pluginAuthInvocationEpochs.delete(key);
     }
+    for (const key of this.pluginAuthPublishedEpochs.keys()) {
+      if (key.startsWith(`${pluginId}\0`)) this.pluginAuthPublishedEpochs.delete(key);
+    }
+    for (const key of this.pluginAuthFailurePrincipals.keys()) {
+      if (key.startsWith(`${pluginId}\0`)) this.pluginAuthFailurePrincipals.delete(key);
+    }
+    this.pluginAuthTransitionPrincipals.delete(pluginId);
   }
 
 }

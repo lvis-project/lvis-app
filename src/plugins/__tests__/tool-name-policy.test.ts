@@ -1,9 +1,8 @@
 /** Tool names never grant or remove authority based on verb suffixes. */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
 import {
-  makeTestPluginRuntime,
+  makeTestPluginRuntimeWithAudit,
   makeTestPluginRuntimeFixture,
   pureTool,
   writeTestPlugin,
@@ -47,21 +46,12 @@ describe("PluginRuntime — Tool name policy", () => {
     await writeTestPluginRegistry(fixture, [{ id, manifestPath }]);
   }
 
-  function runtimeWithAudit(opts: { allowManagedUnsigned?: boolean } = {}) {
-    return makeTestPluginRuntime(fixture, {
-      allowManagedUnsigned: opts.allowManagedUnsigned,
-      auditLog: (level, message, data) => {
-        auditEntries.push({ level, message, data });
-      },
-    });
-  }
-
   it("managed plugin with any suffix loads successfully (no verifier needed)", async () => {
     await writePlugin("p-managed-default", {
       installPolicy: "admin",
     });
 
-    const runtime = runtimeWithAudit();
+    const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-managed-default");
@@ -72,37 +62,10 @@ describe("PluginRuntime — Tool name policy", () => {
       installPolicy: "user",
     });
 
-    const runtime = runtimeWithAudit();
+    const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-user-delete");
-  });
-
-  it("allowManagedUnsigned does not change Tool name policy", async () => {
-    await writePlugin("p-managed-allow", {
-      installPolicy: "admin",
-    });
-    await writePlugin("p-user-allow", {
-      installPolicy: "user",
-    });
-
-    // Rewrite the registry to include both plugins (writePlugin overwrites it).
-    await writeTestPluginRegistry(fixture, [
-      {
-        id: "p-managed-allow",
-        manifestPath: join(fixture.pluginsRoot, "p-managed-allow", "plugin.json"),
-      },
-      {
-        id: "p-user-allow",
-        manifestPath: join(fixture.pluginsRoot, "p-user-allow", "plugin.json"),
-      },
-    ]);
-
-    const runtime = runtimeWithAudit({ allowManagedUnsigned: true });
-    await runtime.load();
-
-    expect(runtime.listPluginIds()).toContain("p-managed-allow");
-    expect(runtime.listPluginIds()).toContain("p-user-allow");
   });
 
   it("does not emit a synthetic destructive-name rejection", async () => {
@@ -110,7 +73,7 @@ describe("PluginRuntime — Tool name policy", () => {
       installPolicy: "user",
     });
 
-    const runtime = runtimeWithAudit();
+    const runtime = makeTestPluginRuntimeWithAudit(fixture, auditEntries);
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-audit-check");

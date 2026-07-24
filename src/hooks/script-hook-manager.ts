@@ -141,7 +141,7 @@ export interface UserPromptSubmitPayload {
   inputOrigin?: string;
   /** Resolved route for this turn (`llm` | `skill`). */
   route?: string;
-  /** Keyword classification type (`general` | `skill` | `command`). */
+  /** Host input classification (`general` | `command`). */
   classification?: string;
 }
 

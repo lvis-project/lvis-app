@@ -1,6 +1,12 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
+import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
+import { RuleBasedRiskClassifier } from "../../permissions/reviewer/risk-classifier.js";
+import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
 import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
 import { runWithInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { currentEffectLedger } from "../../permissions/effect-ledger.js";
@@ -14,6 +20,7 @@ const principal = {
   ownerVersion: "2.0.0",
   generationId: "gen-2",
   appSessionId: "window-4",
+  accountScopeHash: "account-scope-hash",
   accountHash: "account-hash",
 };
 
@@ -23,6 +30,8 @@ function setup(options: {
   readRawResult?: unknown;
   omitReadRawResult?: boolean;
   useReadResultStatusContract?: boolean;
+  scriptHookManager?: ScriptHookManager;
+  requireAuditChain?: boolean;
 } = {}) {
   const configuredRawResult = Object.prototype.hasOwnProperty.call(
     options,
@@ -131,6 +140,10 @@ function setup(options: {
   const permissions = new PermissionManager("/tmp/nonexistent-operation-governance.json");
   permissions.checkDetailed = () => ({ decision: "allow", reason: "test", layer: 3 });
   const approvalGate = { requestAndWait: vi.fn(async () => ({ choice: "allow-once" })) };
+  const scriptHookManager =
+    options.wireHooks === false
+      ? undefined
+      : options.scriptHookManager ?? new ScriptHookManager();
   const auditLogger = {
     log: vi.fn(),
     logShadow: vi.fn(),
@@ -138,7 +151,10 @@ function setup(options: {
       ...entry,
       prevHash: "test-prev-hash",
     })),
-    isPermissionAuditChainReady: vi.fn(() => false),
+    isPermissionAuditChainReady: vi.fn(
+      () => options.requireAuditChain === true,
+    ),
+    assertPermissionAuditWritable: vi.fn(),
     isShadowChannelWritable: vi.fn(() => true),
     getPermissionShadowLogFile: vi.fn(() => "/tmp/shadow"),
   };
@@ -167,7 +183,7 @@ function setup(options: {
       permissions,
       undefined,
       approvalGate as never,
-      options.wireHooks === false ? undefined : new ScriptHookManager(),
+      scriptHookManager,
       auditLogger as never,
       undefined,
       undefined,
@@ -179,11 +195,14 @@ function setup(options: {
             ownerVersion: principal.ownerVersion,
             generationId: principal.generationId,
             appSessionId: sessionId ?? "model-session",
+            accountScopeHash: principal.accountScopeHash,
             accountHash: principal.accountHash,
             appGrantRequired: false,
           })
         : undefined,
     ),
+    registry,
+    generationAccess,
     setGenerationAccessAvailable: (available: boolean) => { generationAccessAvailable = available; },
     permissions,
     approvalGate,
@@ -192,6 +211,7 @@ function setup(options: {
     directWrite,
     taintedRead,
     auditLogger,
+    scriptHookManager,
     pluginOperationGrants,
   };
 }
@@ -216,6 +236,91 @@ function options(
 }
 
 describe("ToolExecutor plugin operation governance", () => {
+  it("persists only the governed projection for headless directory deferral", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lvis-governed-directory-"));
+    const outsideDirectory = mkdtempSync(
+      join(tmpdir(), "lvis-governed-outside-"),
+    );
+    const outsideFile = join(outsideDirectory, "attendance.json");
+    writeFileSync(outsideFile, "blocked", "utf8");
+
+    try {
+      const { executor, registry, permissions } = setup();
+      const execute = vi.fn(async () => ({ output: "unexpected", isError: false }));
+      registry.register(createDynamicTool({
+        name: "governed_path_read",
+        description: "read governed state from a declared path",
+        source: "plugin",
+        category: "read",
+        pluginId: principal.ownerPluginId,
+        pluginGeneration: {
+          pluginId: principal.ownerPluginId,
+          generationId: principal.generationId,
+        },
+        modelVisible: true,
+        pathFields: ["path"],
+        operationPolicy: {
+          discriminant: "operation",
+          operations: {
+            status: {
+              kind: "read",
+              minimumRisk: "read",
+              appVisible: true,
+            },
+          },
+        },
+        jsonSchema: { type: "object" },
+        execute,
+      }));
+      const deferredQueue = new DeferredQueue(
+        join(directory, "deferred-queue.jsonl"),
+      );
+      permissions.setReviewer({
+        classifier: new RuleBasedRiskClassifier(),
+        cache: new VerdictCache(join(directory, "reviewer-cache.jsonl")),
+        deferredQueue,
+      });
+      const invocationOptions = options(undefined, principal, false);
+
+      const [result] = await runWithInvocationOrigin(
+        "plugin",
+        undefined,
+        () => executor.executeAll(
+          [{
+            id: "governed-headless-path",
+            name: "governed_path_read",
+            input: {
+              operation: "status",
+              path: outsideFile,
+              opaqueSecret: "must-never-reach-deferred-storage",
+            },
+          }],
+          {
+            ...invocationOptions,
+            permissionContext: {
+              ...invocationOptions.permissionContext,
+              headless: true,
+              additionalDirectories: [directory],
+            },
+          },
+        ),
+      );
+
+      expect(result.is_error).toBe(true);
+      expect(result.content).toContain("허용 디렉토리 외부");
+      expect(execute).not.toHaveBeenCalled();
+      const [pending] = deferredQueue.listPending();
+      expect(pending?.inputSummary).toBe('{"operation":"status"}');
+      expect(pending?.inputSummary).not.toContain(
+        "must-never-reach-deferred-storage",
+      );
+      expect(pending?.inputSummary).not.toContain(outsideFile);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
   it.each(["error", "degraded", "uncertain"])(
     "does not mint freshness from a declared non-success read status=%s",
     async (status) => {
@@ -281,6 +386,318 @@ describe("ToolExecutor plugin operation governance", () => {
       input: { operation: "save", value: 1 },
       principal,
     })).not.toThrow();
+  });
+
+  it("never dispatches effect-capable extension hooks for governed operations", async () => {
+    const scriptHookManager = new ScriptHookManager();
+    const scriptPre = vi.spyOn(scriptHookManager, "runPreToolUse");
+    const scriptPost = vi.spyOn(scriptHookManager, "runPostToolUse");
+    const lifecycle = vi.spyOn(scriptHookManager, "runLifecycleEvent");
+    const { executor, read, directWrite } = setup({ scriptHookManager });
+    const inProcessPre = vi.fn(() => ({
+      action: "deny" as const,
+      reason: "must not run",
+    }));
+    const inProcessPost = vi.fn();
+    executor.getHookRunner().registerPreHook("must-not-run", inProcessPre);
+    executor.getHookRunner().registerPostHook("must-not-run", inProcessPost);
+
+    const [successfulRead] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "successful-read", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    expect(successfulRead.is_error).toBeFalsy();
+
+    read.mockImplementationOnce(async () => ({
+      output: "provider read failed",
+      isError: true,
+    }));
+    const [failedRead] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "failed-read", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    expect(failedRead.is_error).toBe(true);
+
+    const [deniedWrite] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "denied-write",
+          name: "direct_write",
+          input: { operation: "reserve", target: "missing-grant" },
+        }],
+        options(),
+      ),
+    );
+    expect(deniedWrite.is_error).toBe(true);
+    expect(directWrite).not.toHaveBeenCalled();
+    expect(inProcessPre).not.toHaveBeenCalled();
+    expect(inProcessPost).not.toHaveBeenCalled();
+    expect(scriptPre).not.toHaveBeenCalled();
+    expect(scriptPost).not.toHaveBeenCalled();
+    expect(lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("keeps governed admission-denial audit metadata-only after registry removal", async () => {
+    const scriptHookManager = new ScriptHookManager();
+    const lifecycle = vi.spyOn(scriptHookManager, "runLifecycleEvent");
+    const {
+      executor,
+      registry,
+      generationAccess,
+      auditLogger,
+    } = setup({ scriptHookManager });
+    generationAccess.acquireExact.mockImplementationOnce(async () => {
+      registry.unregisterByPlugin(principal.ownerPluginId);
+      throw new Error("generation was replaced");
+    });
+
+    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll([{
+        id: "stale-admission",
+        name: "domain_read",
+        input: {
+          operation: "status",
+          employeeName: "Must Never Reach Audit",
+        },
+      }], options()),
+    );
+
+    expect(result.is_error).toBe(true);
+    expect(lifecycle).not.toHaveBeenCalled();
+    const serialized = JSON.stringify(auditLogger.log.mock.calls);
+    expect(serialized).toContain("status");
+    expect(serialized).not.toContain("Must Never Reach Audit");
+  });
+
+  it("holds the lease and withholds freshness until the required final audit persists", async () => {
+    const scriptHookManager = new ScriptHookManager();
+    const lifecycle = vi.spyOn(scriptHookManager, "runLifecycleEvent");
+    const {
+      executor,
+      read,
+      directWrite,
+      auditLogger,
+    } = setup({
+      scriptHookManager,
+      provideModelIdentity: true,
+      requireAuditChain: true,
+    });
+    let signalAuditStarted!: () => void;
+    const auditStarted = new Promise<void>((resolve) => {
+      signalAuditStarted = resolve;
+    });
+    let rejectAudit!: (error: Error) => void;
+    auditLogger.appendPermissionAuditEntry.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          signalAuditStarted();
+          rejectAudit = reject;
+        }),
+    );
+
+    const pendingRead = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "audited-read", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    await auditStarted;
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "domain_write",
+      input: { operation: "save", value: 1 },
+      principal,
+    })).toThrow(/required read is missing or stale/);
+
+    const directGrant = executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "queued" },
+      principal,
+    });
+    const queuedWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "queued-after-final-audit",
+          name: "direct_write",
+          input: { operation: "reserve", target: "queued" },
+        }],
+        options(directGrant.token),
+      ),
+    );
+    await Promise.resolve();
+    expect(directWrite).not.toHaveBeenCalled();
+
+    rejectAudit(new Error("final audit unavailable"));
+    await expect(pendingRead).rejects.toThrow("final audit unavailable");
+    const [queuedResult] = await queuedWrite;
+    expect(queuedResult.is_error).toBe(true);
+    expect(queuedResult.content).toContain("domain is indeterminate");
+    expect(directWrite).not.toHaveBeenCalled();
+    expect(lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("settles a governed auth lifecycle after final audit and before queued work", async () => {
+    const {
+      executor,
+      directWrite,
+      auditLogger,
+    } = setup({ requireAuditChain: true });
+    const events: string[] = [];
+    directWrite.mockImplementation(async () => {
+      events.push("queued-handler");
+      return { output: "reserved", isError: false };
+    });
+    let signalAuditStarted!: () => void;
+    const auditStarted = new Promise<void>((resolve) => {
+      signalAuditStarted = resolve;
+    });
+    let resolveAudit!: (value: unknown) => void;
+    auditLogger.appendPermissionAuditEntry.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        signalAuditStarted();
+        resolveAudit = resolve;
+      }),
+    );
+    const pluginAuthLifecycle = {
+      binding: {
+        pluginId: principal.ownerPluginId,
+        generationId: principal.generationId,
+        toolName: "domain_read",
+        appSessionId: principal.appSessionId,
+        accountScopeHash: principal.accountScopeHash,
+      },
+      beforeHandler: () => {
+        events.push("before-handler");
+      },
+      completeSuccess: () => {
+        events.push("success");
+      },
+      completeFailure: () => {
+        events.push("failure");
+      },
+    };
+
+    const pendingAuth = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "auth-status", name: "domain_read", input: { operation: "status" } }],
+        { ...options(), pluginAuthLifecycle },
+      ),
+    );
+    await auditStarted;
+    expect(events).toEqual(["before-handler"]);
+
+    const grant = executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "after-auth-audit" },
+      principal,
+    });
+    const queuedWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "queued-after-auth-audit",
+          name: "direct_write",
+          input: { operation: "reserve", target: "after-auth-audit" },
+        }],
+        options(grant.token),
+      ),
+    );
+    await Promise.resolve();
+    expect(directWrite).not.toHaveBeenCalled();
+
+    resolveAudit({});
+    await pendingAuth;
+    await queuedWrite;
+    expect(events).toEqual([
+      "before-handler",
+      "success",
+      "queued-handler",
+    ]);
+  });
+
+  it("settles a failed governed auth lifecycle before releasing queued work", async () => {
+    const {
+      executor,
+      read,
+      directWrite,
+      auditLogger,
+    } = setup({ requireAuditChain: true });
+    const events: string[] = [];
+    read.mockImplementationOnce(async () => ({
+      output: "status failed",
+      isError: true,
+    }));
+    directWrite.mockImplementation(async () => {
+      events.push("queued-handler");
+      return { output: "reserved", isError: false };
+    });
+    let signalAuditStarted!: () => void;
+    const auditStarted = new Promise<void>((resolve) => {
+      signalAuditStarted = resolve;
+    });
+    let resolveAudit!: (value: unknown) => void;
+    auditLogger.appendPermissionAuditEntry.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        signalAuditStarted();
+        resolveAudit = resolve;
+      }),
+    );
+    const pluginAuthLifecycle = {
+      binding: {
+        pluginId: principal.ownerPluginId,
+        generationId: principal.generationId,
+        toolName: "domain_read",
+        appSessionId: principal.appSessionId,
+        accountScopeHash: principal.accountScopeHash,
+      },
+      beforeHandler: () => {
+        events.push("before-handler");
+      },
+      completeSuccess: () => {
+        events.push("success");
+      },
+      completeFailure: () => {
+        events.push("failure");
+      },
+    };
+
+    const pendingAuth = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "auth-status-failed", name: "domain_read", input: { operation: "status" } }],
+        { ...options(), pluginAuthLifecycle },
+      ),
+    );
+    await auditStarted;
+    const grant = executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "after-auth-failure" },
+      principal,
+    });
+    const queuedWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "queued-after-auth-failure",
+          name: "direct_write",
+          input: { operation: "reserve", target: "after-auth-failure" },
+        }],
+        options(grant.token),
+      ),
+    );
+    await Promise.resolve();
+    expect(directWrite).not.toHaveBeenCalled();
+
+    resolveAudit({});
+    const [failed] = await pendingAuth;
+    expect(failed.is_error).toBe(true);
+    await queuedWrite;
+    expect(events).toEqual([
+      "before-handler",
+      "failure",
+      "queued-handler",
+    ]);
   });
 
   it("invalidates an older successful read when a refresh resolves non-success", async () => {
@@ -775,7 +1192,9 @@ describe("ToolExecutor plugin operation governance", () => {
       await Promise.resolve();
       expect(read).toHaveBeenCalledTimes(1);
       readAbort.abort();
-      await expect(readback).rejects.toThrow(/aborted/);
+      const [readbackResult] = await readback;
+      expect(readbackResult.is_error).toBe(true);
+      expect(readbackResult.content).toContain("취소");
     } finally {
       vi.useRealTimers();
     }
@@ -850,7 +1269,9 @@ describe("ToolExecutor plugin operation governance", () => {
         }),
       );
       readAbort.abort();
-      await expect(readback).rejects.toThrow(/aborted/);
+      const [readbackResult] = await readback;
+      expect(readbackResult.is_error).toBe(true);
+      expect(readbackResult.content).toContain("취소");
     } finally {
       vi.useRealTimers();
     }
@@ -1168,8 +1589,69 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(write).not.toHaveBeenCalled();
   });
 
+  it("reports queued admission abort as cancellation without PermissionDenied hooks", async () => {
+    const scriptHookManager = new ScriptHookManager();
+    const lifecycle = vi.spyOn(scriptHookManager, "runLifecycleEvent");
+    const { executor, read, directWrite, auditLogger } = setup({
+      scriptHookManager,
+    });
+    const holderGrant = executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "held-for-abort" },
+      principal,
+    });
+    let signalHolderStarted!: () => void;
+    const holderStarted = new Promise<void>((resolve) => {
+      signalHolderStarted = resolve;
+    });
+    let releaseHolder!: () => void;
+    directWrite.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          signalHolderStarted();
+          releaseHolder = () => resolve({ output: "released", isError: false });
+        }),
+    );
+    const holder = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "abort-holder",
+          name: "direct_write",
+          input: { operation: "reserve", target: "held-for-abort" },
+        }],
+        options(holderGrant.token),
+      ),
+    );
+    await holderStarted;
+
+    const controller = new AbortController();
+    const queued = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "queued-abort", name: "domain_read", input: { operation: "status" } }],
+        { ...options(), abortSignal: controller.signal },
+      ),
+    );
+    await Promise.resolve();
+    controller.abort();
+    const [aborted] = await queued;
+    expect(aborted.is_error).toBe(true);
+    expect(aborted.content).toContain("취소");
+    expect(read).not.toHaveBeenCalled();
+    expect(lifecycle).not.toHaveBeenCalled();
+    expect(auditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      toolCalls: [expect.objectContaining({
+        terminationReason: "user-abort",
+      })],
+    }));
+
+    releaseHolder();
+    await holder;
+  });
+
   it("never dispatches a revoked session's queued operation while preserving another session", async () => {
-    const { executor, read, directWrite } = setup();
+    const scriptHookManager = new ScriptHookManager();
+    const lifecycle = vi.spyOn(scriptHookManager, "runLifecycleEvent");
+    const { executor, read, directWrite } = setup({ scriptHookManager });
     const holderPrincipal = { ...principal, appSessionId: "window-holder" };
     const survivorPrincipal = { ...principal, appSessionId: "window-survivor" };
     const holderGrant = executor.issuePluginOperationGrant({
@@ -1215,7 +1697,9 @@ describe("ToolExecutor plugin operation governance", () => {
     );
     await Promise.resolve();
     executor.revokePluginOperationSession(principal.appSessionId);
-    await expect(revoked).rejects.toThrow("session is revoked");
+    const [revokedResult] = await revoked;
+    expect(revokedResult.is_error).toBe(true);
+    expect(revokedResult.content).toContain("session is revoked");
     expect(read).not.toHaveBeenCalled();
 
     releaseHolder();
@@ -1223,6 +1707,7 @@ describe("ToolExecutor plugin operation governance", () => {
     const [survivorResult] = await survivor;
     expect(survivorResult.is_error).toBeFalsy();
     expect(read).toHaveBeenCalledTimes(1);
+    expect(lifecycle).not.toHaveBeenCalled();
   });
 
   it.each(["session", "account", "generation"] as const)(
@@ -1304,8 +1789,57 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(serialized).toContain("status");
     expect(serialized).not.toContain("Sensitive Person");
     expect(serialized).not.toContain("bearer-must-not-log");
+    expect(serialized).not.toContain(principal.accountScopeHash);
     expect(serialized).not.toContain(principal.accountHash);
     expect(serialized).not.toContain("fresh");
+  });
+
+  it("keeps governed payload metadata-only in manual audit-chain and DLP rows", async () => {
+    const auditChain = setup({ requireAuditChain: true });
+    auditChain.auditLogger.assertPermissionAuditWritable.mockImplementationOnce(
+      () => {
+        throw new Error("audit storage unavailable");
+      },
+    );
+    await runWithInvocationOrigin("ui", undefined, () =>
+      auditChain.executor.executeAll([{
+        id: "audit-chain-block",
+        name: "domain_read",
+        input: {
+          operation: "status",
+          employeeName: "Audit Chain Secret",
+        },
+      }], options()),
+    );
+    expect(JSON.stringify(auditChain.auditLogger.log.mock.calls))
+      .not.toContain("Audit Chain Secret");
+
+    const dlp = setup();
+    dlp.read.mockImplementationOnce(async () => ({
+      output: "employee@example.com",
+      isError: false,
+      metadata: {
+        rawResult: {
+          operation: "status",
+          status: "success",
+          data: {},
+          providerEvidence: {},
+          warnings: [],
+        },
+      },
+    }));
+    await runWithInvocationOrigin("ui", undefined, () =>
+      dlp.executor.executeAll([{
+        id: "dlp-row",
+        name: "domain_read",
+        input: {
+          operation: "status",
+          employeeName: "DLP Auxiliary Secret",
+        },
+      }], options()),
+    );
+    expect(JSON.stringify(dlp.auditLogger.log.mock.calls))
+      .not.toContain("DLP Auxiliary Secret");
   });
 
   it("refuses to mint a grant when exact generation access becomes unavailable", async () => {
@@ -1322,12 +1856,13 @@ describe("ToolExecutor plugin operation governance", () => {
     })).toThrow(/generation access is not wired/);
   });
 
-  it("fails closed for a generation-owned tool when the script Hook manager is not wired", async () => {
+  it("does not require a script Hook manager for a hook-isolated governed operation", async () => {
     const { executor, read } = setup({ wireHooks: false });
-    await expect(runWithInvocationOrigin("ui", undefined, () =>
+    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll([{ id: "r", name: "domain_read", input: { operation: "status" } }], options()),
-    )).rejects.toThrow(/script Hook manager is not wired/);
+    );
 
-    expect(read).not.toHaveBeenCalled();
+    expect(result.is_error).toBeFalsy();
+    expect(read).toHaveBeenCalledTimes(1);
   });
 });

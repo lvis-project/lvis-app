@@ -89,4 +89,4 @@ compatibility aliases.
 - Path fields cover every input path.
 - Network and shell behavior is explicit in the description and implementation.
 - Tests cover schema rejection, cross-field validation, model/app visibility,
-  permission behavior, and keyword preload where declared.
+  permission behavior, bundled Skill path validation, and bounded Tool discovery.
