@@ -147,7 +147,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     if (observed.invalidatedAccountHash) {
       pluginSurfaceExecutor.revokePluginOperationAccount(
         pluginId,
-        generationId,
+        observed.invalidatedAccountGenerationId ?? generationId,
         observed.invalidatedAccountHash,
       );
     }
@@ -188,7 +188,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
       ) {
         pluginSurfaceExecutor.revokePluginOperationAccount(
           ownerPluginId,
-          ownerGenerationId,
+          authInvocation.invalidatedAccountGenerationId ?? ownerGenerationId,
           authInvocation.invalidatedAccountHash,
         );
       }
@@ -307,7 +307,8 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             if (invalidated.invalidatedAccountHash) {
               pluginSurfaceExecutor.revokePluginOperationAccount(
                 ownerPluginId,
-                ownerGenerationId,
+                invalidated.invalidatedAccountGenerationId ??
+                  ownerGenerationId,
                 invalidated.invalidatedAccountHash,
               );
             }

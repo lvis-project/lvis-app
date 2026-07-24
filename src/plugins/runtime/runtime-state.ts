@@ -178,6 +178,7 @@ export abstract class PluginRuntimeState {
   protected pluginAuthTransitionPrincipals = new Map<string, {
     identityHash: string;
     principalHash: string;
+    generationId: string;
   }>();
   protected nextPluginAuthInvocationEpoch = 0;
   protected readonly pendingRestartCancellations = new Map<string, PendingRestartCancellation>();
@@ -1410,7 +1411,10 @@ export abstract class PluginRuntimeState {
     );
     for (const [key, account] of this.pluginAccountHashes) {
       if (key.startsWith(`${pluginId}\0`)) {
-        nextAuthTransitionPrincipals.set(pluginId, account);
+        nextAuthTransitionPrincipals.set(pluginId, {
+          ...account,
+          generationId: key.slice(pluginId.length + 1),
+        });
       }
     }
     const publishHostEffects = runtime.hostEffects?.preparePublish();
@@ -1463,7 +1467,10 @@ export abstract class PluginRuntimeState {
     );
     for (const [key, account] of this.pluginAccountHashes) {
       if (key.startsWith(`${pluginId}\0`)) {
-        nextAuthTransitionPrincipals.set(pluginId, account);
+        nextAuthTransitionPrincipals.set(pluginId, {
+          ...account,
+          generationId: key.slice(pluginId.length + 1),
+        });
       }
     }
     let published = false;

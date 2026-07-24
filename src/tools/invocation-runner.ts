@@ -868,7 +868,7 @@ export async function runToolInvocation(
             toolName: toolUse.name,
             source,
             category: invocationCategory,
-            inputSummary: summarizeInputForDeferred(finalInput),
+            inputSummary: summarizeInputForDeferred(auditInput),
             evaluationContext: makeEvaluationContext({
               pathFields: reviewerPathFields,
               targetFilePaths: [outOfAllowedTarget.filePath],
