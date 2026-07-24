@@ -16,6 +16,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 const runtimeTestState = vi.hoisted(() => ({
   browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void } }>,
@@ -29,6 +30,7 @@ const runtimeTestState = vi.hoisted(() => ({
     listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
     getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
     getPluginManifest: vi.fn(() => null),
+    resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     isPluginEnabled: vi.fn(() => true),
     getApprovedPluginAccess: vi.fn(() => undefined),
     registerDisposer: vi.fn(),
@@ -89,6 +91,7 @@ vi.mock("../../../plugins/registry.js", () => ({
 
 import { initPluginRuntime } from "../plugin-runtime.js";
 import { withPluginInstallLock } from "../../../plugins/install-lifecycle.js";
+import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 
 type ConfigHostApi = {
   config: {
@@ -120,6 +123,7 @@ type CreateHostApi = (
     configSchema?: { properties?: Record<string, { type?: string; format?: string; default?: unknown }> };
     capabilities?: string[];
     emittedEvents?: string[];
+    hostSecrets?: { read?: string[] };
   },
   pluginDataDir: string,
   incarnation: {
@@ -192,6 +196,9 @@ beforeEach(() => {
   runtimeTestState.runtime.restartPlugin.mockClear();
   runtimeTestState.runtime.getWildcardConfigOverride.mockReturnValue({});
   runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+  runtimeTestState.runtime.resolvePluginInstallId.mockImplementation(
+    (pluginId: string) => pluginId,
+  );
   runtimeTestState.spawnWorker.mockReset();
 });
 
@@ -376,6 +383,24 @@ describe("HostApi.config.set round-trip", () => {
     expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
   });
 
+  it("reports a detached lifecycle config write failure to the owning mutation", async () => {
+    const settings = makeSettingsService(new Map());
+    settings.setPluginConfig.mockRejectedValueOnce(
+      new Error("config persistence failed"),
+    );
+    const api = await createActiveApi(settings);
+
+    const error = await withPluginInstallLock("plugin-a", async () => {
+      void api.config.set("duringStop", true);
+    }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: "config persistence failed" }),
+    ]);
+    expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
+  });
+
   it("surfaces a non-started runtime reload result after config persistence", async () => {
     const settings = makeSettingsService(new Map());
     const api = await createActiveApi(settings);
@@ -387,6 +412,49 @@ describe("HostApi.config.set round-trip", () => {
 });
 
 describe("HostApi emitEvent/onEvent round-trip", () => {
+  it("uses the raw registry install identity for canonical alias HostApi provenance", async () => {
+    const installAlias = "marketplace-install-alias";
+    const pluginId = "plugin-canonical";
+    const secretKey = "host.shared.secret";
+    const manifest = {
+      id: pluginId,
+      config: {},
+      hostSecrets: { read: [secretKey] },
+    };
+    const manifestSha256 = createHash("sha256")
+      .update(canonicalJSON(manifest))
+      .digest("hex");
+    runtimeTestState.readPluginRegistry.mockResolvedValueOnce({
+      version: 1,
+      plugins: [{
+        id: installAlias,
+        manifestPath: `${installAlias}/plugin.json`,
+        installSource: "admin",
+        manifestSha256,
+      }],
+    });
+    runtimeTestState.runtime.resolvePluginInstallId.mockImplementation(
+      (requestedPluginId: string) =>
+        requestedPluginId === pluginId ? installAlias : requestedPluginId,
+    );
+    const settings = makeSettingsService(new Map());
+    settings.getSecret.mockImplementation((key: string) =>
+      key === secretKey ? "host-secret-value" : undefined
+    );
+
+    const createHostApi = await initAndGetFactory(settings);
+    const api = createHostApi(
+      pluginId,
+      manifest,
+      mkdtempSync("/tmp/lvis-hostapi-alias-"),
+      activeIncarnation(),
+    );
+
+    expect(api.getSecret(secretKey)).toBe("host-secret-value");
+    expect(runtimeTestState.runtime.resolvePluginInstallId)
+      .toHaveBeenCalledWith(pluginId);
+  });
+
   it("delivers an emitted event to a same-plugin subscriber with the pluginId injected, and unsubscribe stops delivery", async () => {
     const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
     const api = createHostApi(

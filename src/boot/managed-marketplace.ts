@@ -108,6 +108,9 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     const activatePreparedArtifact: PreparedMarketplacePluginActivation =
       (prepared: PreparedMarketplacePluginArtifact) =>
         pluginRuntime.activatePreparedArtifact<string>(prepared);
+    // A dependency preparation can hold a per-plugin lifecycle lock forever.
+    // Cancellation must happen before the outer all-plugin lock queues.
+    pluginRuntime.cancelAllPendingRestarts();
     const ensureResult = await withAllPluginInstallLocks(async () => {
       return pluginMarketplace.ensureManagedInstalled({
         activatePreparedArtifact,

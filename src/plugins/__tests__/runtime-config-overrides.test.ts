@@ -7,6 +7,7 @@ import {
   writeTestPluginRegistry,
   type TestPluginRuntimeFixture,
 } from "./test-helpers.js";
+import { createNoopHostApiForTests } from "../runtime.js";
 
 describe("PluginRuntime config overrides", () => {
   let fixture: TestPluginRuntimeFixture;
@@ -119,7 +120,8 @@ describe("PluginRuntime config overrides", () => {
     const events: string[] = [];
     const runtime = makeTestPluginRuntime(fixture, {
       onDisable: (pluginId) => events.push(`disable:${pluginId}`),
-      createHostApi: (pluginId) => ({
+      createHostApi: (pluginId, manifest, pluginDataDir) => ({
+        ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
         registerKeywords: () => {
           events.push(`register:${pluginId}`);
         },

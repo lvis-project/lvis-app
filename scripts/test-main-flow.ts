@@ -1,7 +1,10 @@
 import { rm, mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime } from "../src/plugins/runtime.js";
+import {
+  createNoopHostApiForTests,
+  PluginRuntime,
+} from "../src/plugins/runtime.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,6 +22,7 @@ async function main() {
   const runtime = new PluginRuntime({
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
+    createHostApi: createNoopHostApiForTests,
     configOverrides: {
       "local-indexer": {
         scanFolders: ["fixtures"],

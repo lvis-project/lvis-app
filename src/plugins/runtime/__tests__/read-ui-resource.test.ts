@@ -36,11 +36,13 @@ function runtimeWithCardPlugin(instance: Partial<RuntimePlugin>): PluginRuntime 
   const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
   const internals = rt as unknown as {
     plugins: Map<string, { manifest: unknown; instance: Partial<RuntimePlugin> }>;
+    knownInstallClaims: Map<string, string | null>;
   };
   internals.plugins.set(PLUGIN_ID, {
     manifest: { id: PLUGIN_ID, tools: [], uiResources: [{ uri: URI }] },
     instance: { handlers: {}, ...instance },
   });
+  internals.knownInstallClaims.set(PLUGIN_ID, null);
   return rt;
 }
 
