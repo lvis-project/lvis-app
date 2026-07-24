@@ -263,12 +263,36 @@ export interface McpToolSchema {
   };
 }
 
+/** One declared argument of an MCP prompt (prompts/list `arguments[]`). */
+interface McpPromptArgumentSummary {
+  name: string;
+  description?: string;
+  required?: boolean;
+}
+
+/**
+ * A server-declared prompt discovered via `prompts/list`. Prompts are a
+ * user-controlled MCP primitive (parallel to registeredTools but never
+ * model-callable): the user picks one, supplies arguments, and the host fetches
+ * it via `prompts/get`.
+ */
+export interface McpPromptSummary {
+  name: string;
+  title?: string;
+  description?: string;
+  arguments?: McpPromptArgumentSummary[];
+}
+
 export interface McpServerState {
   id: string;
   status: "disconnected" | "connecting" | "connected" | "error";
   connectedAt?: string;
   lastError?: string;
   registeredTools: string[];
+  /** Prompts declared by the server (only when it advertised + was approved for the `prompts` capability). */
+  prompts?: McpPromptSummary[];
+  /** Server-level usage guidance from discovery (`instructions`), surfaced read-only. */
+  instructions?: string;
 }
 
 // ─── Validation Results ────────────────────────────
