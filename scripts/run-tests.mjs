@@ -32,6 +32,7 @@ export function createVitestRuns(
     "run",
     `--shard=${index + 1}/${shardCount}`,
     `--maxWorkers=${maxWorkers}`,
+    "--no-file-parallelism",
   ]);
 }
 

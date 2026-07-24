@@ -14,6 +14,7 @@ describe("run-tests", () => {
         "run",
         `--shard=${index + 1}/${DEFAULT_SHARD_COUNT}`,
         `--maxWorkers=${DEFAULT_MAX_WORKERS}`,
+        "--no-file-parallelism",
       ]),
     );
   });
@@ -35,9 +36,9 @@ describe("run-tests", () => {
       runTests([], { shardCount: 3, maxWorkers: 2, runVitest, log: vi.fn() }),
     ).resolves.toEqual({ code: 1, signal: null });
     expect(runVitest.mock.calls).toEqual([
-      [["run", "--shard=1/3", "--maxWorkers=2"]],
-      [["run", "--shard=2/3", "--maxWorkers=2"]],
-      [["run", "--shard=3/3", "--maxWorkers=2"]],
+      [["run", "--shard=1/3", "--maxWorkers=2", "--no-file-parallelism"]],
+      [["run", "--shard=2/3", "--maxWorkers=2", "--no-file-parallelism"]],
+      [["run", "--shard=3/3", "--maxWorkers=2", "--no-file-parallelism"]],
     ]);
   });
 
