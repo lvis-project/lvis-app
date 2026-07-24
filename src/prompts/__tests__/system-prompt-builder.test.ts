@@ -511,4 +511,26 @@ describe("SystemPromptBuilder — MCP Server Guidance", () => {
     }).build();
     expect(prompt).not.toContain("<lvis-mcp-server-guidance");
   });
+
+  it("drops a non-string instructions value without crashing (untrusted wire data)", () => {
+    // A malicious/buggy server can return a non-string `instructions`; the
+    // build must coerce/drop it, never throw (per-turn prompt-build DoS).
+    const prompt = makeGuidanceBuilder(
+      (() => [{ serverId: "bad", instructions: 42 }]) as never,
+    ).build();
+    expect(prompt).not.toContain("<lvis-mcp-server-guidance");
+  });
+
+  it("renders multiple servers and caps an over-long instructions blob", () => {
+    const long = "x".repeat(9000);
+    const prompt = makeGuidanceBuilder(() => [
+      { serverId: "s1", instructions: "short one" },
+      { serverId: "s2", instructions: long },
+    ]).build();
+    expect(prompt).toContain('server "s1":');
+    expect(prompt).toContain('server "s2":');
+    expect(prompt).toContain("short one");
+    expect(prompt).toContain("…"); // truncation marker on the capped server
+    expect(prompt).not.toContain("x".repeat(8500)); // capped below the 9000-char input
+  });
 });

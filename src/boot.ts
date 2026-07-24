@@ -563,7 +563,9 @@ export async function bootstrap(
       ctx.mcpManager
         .listServers()
         .flatMap((server) =>
-          server.status === "connected" && server.instructions
+          server.status === "connected" &&
+          typeof server.instructions === "string" &&
+          server.instructions.trim().length > 0
             ? [{ serverId: server.id, instructions: server.instructions }]
             : [],
         ),
