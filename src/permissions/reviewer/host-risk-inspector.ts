@@ -1,7 +1,6 @@
 /**
  * Host Risk Inspector — derives a tool call's EFFECTIVE permission category
- * from HOST-OWNED signals only, never from the plugin-declared
- * `toolSchemas.category`.
+ * from HOST-OWNED signals only, never from plugin self-declared risk hints.
  *
  * Rationale (docs/architecture/architecture.md §6.3/§8;
  * project_permission_review_redesign): a tool that grades its own danger is

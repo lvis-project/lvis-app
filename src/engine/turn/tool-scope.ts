@@ -99,7 +99,6 @@ export function resolveToolScope(
   // (B) carried-forward loaded tools ∪ explicit fixed-surface allowlist.
   // Entries are restricted to tools whose owning plugin is in scope.
   const activeToolNames = new Set<string>();
-    const preloadedToolNames = new Set<string>();
     const forcedToolNames = new Set<string>();
     const inScopeToolNames = scopedToolNameSet(deps, activePluginIds);
   for (const name of resetCarryForward ? [] : (state.lastTurnToolNames ?? [])) {
@@ -119,7 +118,6 @@ export function resolveToolScope(
     return {
       activePluginIds,
       activeToolNames,
-      preloadedToolNames,
       forcedToolNames,
       includeBuiltins: true,
       includeMcp: deps.headless !== true,
@@ -171,9 +169,6 @@ export function nextCarryForwardToolNames(
     const inScopeToolNames = scopedToolNameSet(deps, scope.activePluginIds);
     const next = new Set<string>();
 
-    for (const name of scope.preloadedToolNames) {
-      if (inScopeToolNames.has(name)) next.add(name);
-    }
     for (const name of scope.forcedToolNames) {
       if (inScopeToolNames.has(name)) next.add(name);
     }

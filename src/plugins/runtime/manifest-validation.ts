@@ -191,7 +191,7 @@ function materializeManifest(manifest: PluginManifest): PluginManifest {
 /**
  * Parse and fully validate a plugin.json manifest file.
  *
- * Runs SDK AJV schema validation, then materializes each tool's surface
+ * Runs the Host-owned AJV schema validation, then materializes each tool's surface
  * visibility and the `name` default via `materializeManifest` (SoT §3.1), then
  * runs host cross-field MUST checks against the pure `Tool[]`. Returns the
  * fully-materialized {@link PluginManifest} every host consumer reads. Throws
@@ -225,7 +225,7 @@ export async function parsePluginJson(
   };
 
   if (!validator) {
-    throw new Error("SDK plugin manifest validator is required");
+    throw new Error("Host plugin manifest validator is required");
   }
 
   const networkAccessRaw: unknown = parsed.networkAccess;
@@ -333,7 +333,7 @@ export async function parsePluginJson(
       .join("; ");
     const hint =
       additionalProps.length > 0
-        ? ` — the manifest contains ${additionalProps.length === 1 ? "a field" : "fields"} that the current SDK schema no longer allows. The plugin may need an update — try reinstalling from the marketplace.`
+        ? ` — the manifest contains ${additionalProps.length === 1 ? "a field" : "fields"} that the current Host schema no longer allows. The plugin may need an update — try reinstalling from the marketplace.`
         : "";
     throw new Error(
       `[manifest:${pid}] schema validation failed (${path}): ${errs}${hint}`,
@@ -432,12 +432,12 @@ export async function parsePluginJson(
   resolvePluginContributionDeclarations(manifest);
 
   // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor
-  // requirement — kept as defence-in-depth vs a stale SDK schema, same rationale
-  // as the hostSecrets/version re-checks). One pass also builds the by-name index
-  // reused by the auth/keyword cross-field checks and REJECTS duplicate names:
+  // requirement — kept as defence-in-depth against an accidentally stale compiled
+  // Host validator, same rationale as the hostSecrets/version re-checks). One pass
+  // also builds the by-name index reused by auth cross-field checks and REJECTS duplicates:
   // the old three-map shape got name-uniqueness for free (object keys), but two
   // `tools[]` objects may now share a `name`, which would throw at runtime in the
-  // loader methodMap and make the auth/keyword lookups ambiguous (u2 §1.4.1).
+  // loader methodMap and make auth lookups ambiguous (u2 §1.4.1).
   const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
   const byName = new Map<string, Tool>();
   for (let i = 0; i < manifest.tools.length; i += 1) {
