@@ -423,6 +423,8 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       .update("\0")
       .update(runtime.activationId)
       .digest("hex");
+    const activeBeforePreparation =
+      this.coordinator.getActive(pluginId)?.generationId === generationId;
     const payloadRoot = await materializePluginGenerationRoot(
       pluginRoot,
       this.deps.receiptCacheRoot,
@@ -431,42 +433,102 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       receiptRaw,
       runtime.installId ?? pluginId,
     );
-    const contributions = await materializePluginContributions(payloadRoot, manifest);
-    const identity = {
-      pluginId,
-      pluginVersion: manifest.version,
-      artifactGenerationId,
-      generationId,
-      manifestSha256: createHash("sha256").update(manifestRaw).digest("hex"),
-      receiptSha256: createHash("sha256").update(receiptRaw).digest("hex"),
-      contributions,
-    };
-    const preparationView: ActivePluginGeneration = { ...identity, state: undefined };
-    const candidate: ActivePluginGeneration<HostPluginGenerationState> = {
-      ...identity,
-      state: Object.freeze({
-        payloadRoot,
-        runtime,
-        hooks: await preparePluginHookGeneration(preparationView, payloadRoot),
-        mcpServers: await preparePluginMcpGeneration(preparationView, payloadRoot),
-      }),
-    };
-    candidate.state.runtime.hostEffects?.bindGeneration(this, candidate.generationId);
-    const predecessorMcpServerIds = this.deps.mcpManager.bundledServerIdsForPlugin(pluginId);
-    const preparedRuntime = this.deps.pluginRuntime.prepareRuntimeGeneration(candidate.state.runtime);
-    const preparedSkills = this.deps.skillStore.preparePluginGeneration(candidate);
-    const preparedHooks = this.deps.hookManager.preparePluginGeneration(
-      candidate.state.hooks,
-      this.hookTrust,
-      { pluginId, generationId: candidate.generationId },
-    );
-    // ToolRegistry reservation is prepared last so any earlier preparation
-    // failure cannot strand the global publication reservation.
-    const preparedLoopback = await this.deps.loopbackManager.prepareGeneration(
-      candidate.state.runtime.manifest,
-      candidate.generationId,
-      predecessorMcpServerIds,
-    );
+    const prepared = await (async () => {
+      let candidate:
+        | ActivePluginGeneration<HostPluginGenerationState>
+        | undefined;
+      try {
+        const contributions =
+          await materializePluginContributions(payloadRoot, manifest);
+        const identity = {
+          pluginId,
+          pluginVersion: manifest.version,
+          artifactGenerationId,
+          generationId,
+          manifestSha256:
+            createHash("sha256").update(manifestRaw).digest("hex"),
+          receiptSha256:
+            createHash("sha256").update(receiptRaw).digest("hex"),
+          contributions,
+        };
+        const preparationView: ActivePluginGeneration = {
+          ...identity,
+          state: undefined,
+        };
+        candidate = {
+          ...identity,
+          state: Object.freeze({
+            payloadRoot,
+            runtime,
+            hooks: await preparePluginHookGeneration(
+              preparationView,
+              payloadRoot,
+            ),
+            mcpServers: await preparePluginMcpGeneration(
+              preparationView,
+              payloadRoot,
+            ),
+          }),
+        };
+        candidate.state.runtime.hostEffects?.bindGeneration(
+          this,
+          candidate.generationId,
+        );
+        const predecessorMcpServerIds =
+          this.deps.mcpManager.bundledServerIdsForPlugin(pluginId);
+        const preparedRuntime =
+          this.deps.pluginRuntime.prepareRuntimeGeneration(
+            candidate.state.runtime,
+          );
+        const preparedSkills =
+          this.deps.skillStore.preparePluginGeneration(candidate);
+        const preparedHooks =
+          this.deps.hookManager.preparePluginGeneration(
+            candidate.state.hooks,
+            this.hookTrust,
+            { pluginId, generationId: candidate.generationId },
+          );
+        // ToolRegistry reservation is prepared last so any earlier preparation
+        // failure cannot strand the global publication reservation.
+        const preparedLoopback =
+          await this.deps.loopbackManager.prepareGeneration(
+            candidate.state.runtime.manifest,
+            candidate.generationId,
+            predecessorMcpServerIds,
+          );
+        return {
+          candidate,
+          preparedRuntime,
+          preparedSkills,
+          preparedHooks,
+          preparedLoopback,
+        };
+      } catch (error) {
+        candidate?.state.runtime.hostEffects?.discard();
+        if (!activeBeforePreparation) {
+          try {
+            await removeRetainedPluginGeneration(
+              this.deps.receiptCacheRoot,
+              pluginId,
+              generationId,
+            );
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [error, cleanupError],
+              `plugin generation preparation and retained-root cleanup both failed: ${pluginId}:${generationId}`,
+            );
+          }
+        }
+        throw error;
+      }
+    })();
+    const {
+      candidate,
+      preparedRuntime,
+      preparedSkills,
+      preparedHooks,
+      preparedLoopback,
+    } = prepared;
     const predecessor = this.coordinator.getActive(pluginId);
 
     let published;
@@ -488,7 +550,34 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       );
     } catch (error) {
       candidate.state.runtime.hostEffects?.discard();
-      await this.deps.loopbackManager.discardGeneration(preparedLoopback);
+      const cleanupErrors: unknown[] = [];
+      try {
+        await this.deps.loopbackManager.discardGeneration(preparedLoopback);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      const activeGenerationId =
+        this.coordinator.getActive(pluginId)?.generationId;
+      if (
+        !activeBeforePreparation
+        && activeGenerationId !== candidate.generationId
+      ) {
+        try {
+          await removeRetainedPluginGeneration(
+            this.deps.receiptCacheRoot,
+            pluginId,
+            candidate.generationId,
+          );
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError);
+        }
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          `plugin generation commit and candidate cleanup failed: ${pluginId}:${candidate.generationId}`,
+        );
+      }
       throw error;
     }
     try {

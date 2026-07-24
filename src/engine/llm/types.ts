@@ -11,8 +11,7 @@
 // re-export here so existing engine-side callers keep their import
 // path while the type definition cannot drift between modules.
 import {
-  type LLMVendor,
-} from "../../shared/llm-vendor-defaults.js";
+  type LLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
 import type { ToolResultImage } from "../../tools/types.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
@@ -32,8 +31,6 @@ export interface MessageMeta {
   displayText?: string;
   /** Host-minted nonce for rollbackable injected rows across history cloning. */
   hostInjectionId?: string;
-  /** Skill routing provenance for a user turn. */
-  routeSkill?: { skillId: string };
   /** Structured provenance for plugin/proactive imported trigger turns. */
   importedTrigger?: {
     sessionId: string;
@@ -168,7 +165,8 @@ export interface MessageMeta {
     contextTokensAfter?: number;
     compactNum?: number;
     trigger?: "auto-compact" | "manual";
-    compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
+    compactStatus?:
+      | "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
     summary?: string;
     truncatedDir?: string;
   };
@@ -193,13 +191,16 @@ export interface ThinkingBlock {
  */
 export type UserContentPart =
   | { type: "text"; text: string }
-  | { type: "image"; image: string; mimeType?: string; width?: number; height?: number; bytes?: number }
+  | { type: "image"; image: string; mimeType?: string; width?: number; height?: number; bytes?: number;
+    }
   | { type: "file"; data: string; mimeType: string };
 
 export type GenericMessage =
   | { role: "user"; content: string | UserContentPart[]; meta?: MessageMeta }
-  | { role: "assistant"; content: string; thought?: string; thinkingBlocks?: ThinkingBlock[]; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
-  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; image?: ToolResultImage; meta?: MessageMeta };
+  | { role: "assistant"; content: string; thought?: string; thinkingBlocks?: ThinkingBlock[]; toolCalls?: ToolCallBlock[]; meta?: MessageMeta;
+    }
+  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; image?: ToolResultImage; meta?: MessageMeta;
+    };
 
 /**
  * Flatten a user-message `content` (string or multimodal parts) into a plain
@@ -208,8 +209,7 @@ export type GenericMessage =
  * represented by a placeholder so downstream regex/length logic stays sane.
  */
 export function userContentText(
-  content: string | UserContentPart[],
-): string {
+  content: string | UserContentPart[]): string {
   if (typeof content === "string") return content;
   return content
     .map((p) =>
@@ -233,9 +233,13 @@ export function serializeMessageForEstimation(message: GenericMessage): string {
       const contentForEstimation =
         typeof message.content === "string"
           ? message.content
-          : message.content.map((p) =>
-              p.type === "text" ? p.text : `[${p.type}:${p.type === "image" ? p.mimeType ?? "image" : p.mimeType}]`,
-            ).join("\n");
+          : message.content
+              .map((p) =>
+                p.type === "text"
+                  ? p.text
+                  : `[${p.type}:${p.type === "image" ? (p.mimeType ?? "image") : p.mimeType}]`,
+              )
+              .join("\n");
       return JSON.stringify({
         role: message.role,
         content: contentForEstimation,
@@ -259,7 +263,6 @@ export function serializeMessageForEstimation(message: GenericMessage): string {
       });
   }
 }
-
 
 export interface ToolCallBlock {
   id: string;
@@ -285,8 +288,18 @@ export interface ToolSchema {
 export type StreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
-  | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "message_complete"; stopReason: "end_turn" | "tool_use" | "max_tokens"; usage?: TokenUsage; thinkingBlocks?: ThinkingBlock[] }
+  | {
+      type: "tool_call";
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+    }
+  | {
+      type: "message_complete";
+      stopReason: "end_turn" | "tool_use" | "max_tokens";
+      usage?: TokenUsage;
+      thinkingBlocks?: ThinkingBlock[];
+    }
   | {
       type: "error";
       error: string;

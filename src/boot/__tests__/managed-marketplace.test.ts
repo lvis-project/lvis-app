@@ -58,6 +58,7 @@ describe("runManagedBootstrap concurrency", () => {
     const input = {
       pluginMarketplace,
       pluginRuntime,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
       mainWindow: null,
       marketplace: {
         backend: "real-cloud" as const,
@@ -81,6 +82,7 @@ describe("runManagedBootstrap concurrency", () => {
     expect(ensureManagedInstalled).toHaveBeenCalledTimes(1);
     expect(ensureManagedInstalled).toHaveBeenCalledWith({
       activatePreparedArtifact: expect.any(Function),
+      ensurePluginStateReadyForInstall: expect.any(Function),
     });
   });
 
@@ -97,6 +99,7 @@ describe("runManagedBootstrap concurrency", () => {
     await runManagedBootstrap({
       pluginMarketplace,
       pluginRuntime,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
       mainWindow: null,
       marketplace: {
         backend: "real-cloud" as const,
@@ -106,6 +109,7 @@ describe("runManagedBootstrap concurrency", () => {
 
     expect(ensureManagedInstalled).toHaveBeenCalledWith({
       activatePreparedArtifact: expect.any(Function),
+      ensurePluginStateReadyForInstall: expect.any(Function),
     });
     expect(activatePreparedArtifact).not.toHaveBeenCalled();
   });
@@ -122,6 +126,7 @@ describe("runManagedBootstrap concurrency", () => {
     const input = {
       pluginMarketplace,
       pluginRuntime,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
       mainWindow: null,
       marketplace: {
         backend: "real-cloud" as const,

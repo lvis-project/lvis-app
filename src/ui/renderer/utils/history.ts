@@ -39,7 +39,8 @@ export function historyToEntries(
     if (m.role === "tool_result") {
       const toolUseId = m.toolUseId ?? `hist-tool-${m.index}`;
       const existingGroupId = toolGroupByUseId.get(toolUseId);
-      const groupId: string = existingGroupId ?? fallbackGroupId ?? `hist-tools-${m.index}`;
+      const groupId: string =
+        existingGroupId ?? fallbackGroupId ?? `hist-tools-${m.index}`;
       if (!existingGroupId) {
         fallbackGroupId = groupId;
         const displayOrder = nextToolOrder(toolOrderByGroupId, groupId);
@@ -56,7 +57,9 @@ export function historyToEntries(
         toolUseId,
         result: textContent(m.content),
         isError: m.isError,
-        ...(m.toolDisplay?.durationMs !== undefined ? { durationMs: m.toolDisplay.durationMs } : {}),
+        ...(m.toolDisplay?.durationMs !== undefined
+          ? { durationMs: m.toolDisplay.durationMs }
+          : {}),
       });
       continue;
     }
@@ -77,7 +80,9 @@ export function historyToEntries(
           ...(m.checkpointMeta.compactNum !== undefined
             ? { compactNum: m.checkpointMeta.compactNum }
             : {}),
-          ...(m.checkpointMeta.trigger ? { trigger: m.checkpointMeta.trigger } : {}),
+          ...(m.checkpointMeta.trigger
+            ? { trigger: m.checkpointMeta.trigger }
+            : {}),
           ...(m.checkpointMeta.compactStatus
             ? { compactStatus: m.checkpointMeta.compactStatus }
             : {}),
@@ -114,11 +119,12 @@ export function historyToEntries(
     } else if (m.role === "assistant") {
       const text = textContent(m.content);
       const cleanedText = detectFromStream(text).cleanedText;
-      const visibleText = cleanedText.trim().length > 0
-        ? cleanedText
-        : text.trim().length > 0
-          ? EMPTY_ASSISTANT_RESPONSE_TEXT
-          : "";
+      const visibleText =
+        cleanedText.trim().length > 0
+          ? cleanedText
+          : text.trim().length > 0
+            ? EMPTY_ASSISTANT_RESPONSE_TEXT
+            : "";
       out = finalizeStreamingReasoning(out, m.thought ?? "");
       // Pass the persisted createdAt through finalize so the assistant entry
       // it constructs/updates carries the original turn time (rather than
@@ -126,16 +132,12 @@ export function historyToEntries(
       // persisted message has no createdAt (legacy session), finalize falls
       // back to Date.now() — UI then renders the load time, but that's
       // acceptable for legacy data since the timestamp wasn't recorded.
-      out = finalizeStreamingAssistant(
-        out,
-        visibleText,
-        {
-          ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
-          ...(isReplayableSystemNotice(m.systemNotice)
-            ? { systemNotice: m.systemNotice }
-            : {}),
-        },
-      );
+      out = finalizeStreamingAssistant(out, visibleText, {
+        ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
+        ...(isReplayableSystemNotice(m.systemNotice)
+          ? { systemNotice: m.systemNotice }
+          : {}),
+      });
 
       if (m.toolCalls?.length) {
         const groupId = `hist-tools-${m.index}`;
@@ -161,7 +163,10 @@ export function historyToEntries(
       // shows real token / duration totals on reload. Only the turn-final
       // assistant carries `turnSummary` (attached by ConversationLoop right
       // after onTurnSummary fires).
-      if (m.turnSummary && !isPreservedPreCompactTurn(m, latestCheckpointCreatedAt)) {
+      if (
+        m.turnSummary &&
+        !isPreservedPreCompactTurn(m, latestCheckpointCreatedAt)
+      ) {
         out.push({
           kind: "turn_summary",
           turnDurationMs: m.turnSummary.turnDurationMs,
@@ -185,7 +190,9 @@ export function historyToEntries(
           ...(m.turnSummary.usageByModel !== undefined
             ? { usageByModel: m.turnSummary.usageByModel }
             : {}),
-          ...(m.turnSummary.breakdown ? { breakdown: m.turnSummary.breakdown } : {}),
+          ...(m.turnSummary.breakdown
+            ? { breakdown: m.turnSummary.breakdown }
+            : {}),
         });
       }
     }
@@ -198,13 +205,19 @@ function isPreservedPreCompactTurn(
   latestCheckpointCreatedAt: number | null,
 ): boolean {
   if (latestCheckpointCreatedAt === null) return false;
-  if (typeof message.createdAt !== "number" || !Number.isFinite(message.createdAt)) {
+  if (
+    typeof message.createdAt !== "number" ||
+    !Number.isFinite(message.createdAt)
+  ) {
     return true;
   }
   return message.createdAt <= latestCheckpointCreatedAt;
 }
 
-function nextToolOrder(orderByGroupId: Map<string, number>, groupId: string): number {
+function nextToolOrder(
+  orderByGroupId: Map<string, number>,
+  groupId: string,
+): number {
   const next = orderByGroupId.get(groupId) ?? 0;
   orderByGroupId.set(groupId, next + 1);
   return next;
@@ -216,15 +229,7 @@ function textContent(content: PersistedHistoryMessage["content"]): string {
 
 function visibleUserText(message: PersistedHistoryMessage): string {
   if (message.displayText !== undefined) return message.displayText;
-  const content = textContent(message.content);
-  return legacySkillVisibleText(content);
-}
-
-const LEGACY_SKILL_PREFIX_PATTERN = /^\[스킬:\s*([^\]]+)\]\s*/;
-
-function legacySkillVisibleText(content: string): string {
-  const match = content.match(LEGACY_SKILL_PREFIX_PATTERN);
-  return match ? content.slice(match[0].length) : content;
+  return textContent(message.content);
 }
 
 function importedTriggerFromMessage(
@@ -253,14 +258,18 @@ function importedTriggerFromMessage(
     prompt: textContent(message.content),
     summary: parsed.body,
     toolCallCount: 0,
-    importedAt: message.createdAt !== undefined
-      ? new Date(message.createdAt).toISOString()
-      : new Date(0).toISOString(),
+    importedAt:
+      message.createdAt !== undefined
+        ? new Date(message.createdAt).toISOString()
+        : new Date(0).toISOString(),
   };
 }
 
 function isReplayableSystemNotice(
   value: PersistedHistoryMessage["systemNotice"],
-): value is Exclude<NonNullable<PersistedHistoryMessage["systemNotice"]>, "interrupted"> {
+): value is Exclude<
+  NonNullable<PersistedHistoryMessage["systemNotice"]>,
+  "interrupted"
+> {
   return value === "context-error" || value === "stream-error";
 }

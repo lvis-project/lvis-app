@@ -160,32 +160,8 @@
         }
       }
     },
-    "keywords": {
-      "type": "array",
-      "description": "DEPRECATED keyword-to-Tool-schema preload entries; this is not Skill discovery. Each skillId must exactly name a model-visible Tool in tools[]. A match adds that Tool schema to the model-visible turn scope and never invokes it directly. Owner: lvis-app plugin runtime. Remove after every supported plugin migrates to bundled manifest.skills and no active manifest declares keywords.",
-      "items": {
-        "type": "object",
-        "required": [
-          "keyword",
-          "skillId"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "keyword": {
-            "type": "string",
-            "description": "Case-insensitive substring matched against user input.",
-            "minLength": 1
-          },
-          "skillId": {
-            "type": "string",
-            "description": "Exact name of the model-visible Tool schema to preload; despite the legacy field name, this is not a bundled Skill id.",
-            "minLength": 1
-          }
-        }
-      }
-    },
     "skills": {
-      "type": "array",
+        "type": "array",
       "description": "Plugin-owned Skill directories. Each path is relative to the verified plugin root and must contain SKILL.md.",
       "maxItems": 64,
       "items": { "$ref": "#/definitions/pluginContributionDeclaration" }

@@ -13,7 +13,7 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="The Plugin Panel Inside Chat"
-        description="Active plugins are surfaced in the sidebar. Each plugin exposes its entry points through its manifest's ui[] slots and keywords (Skill triggers). The host core never imports plugin-specific code directly."
+        description="Active plugins are surfaced in the sidebar. Each plugin exposes UI slots, instruction Skills, and callable Tools through one validated manifest. The host core never imports plugin-specific code directly."
       />
 
       <ScreenshotGallery columns={1}>
@@ -23,7 +23,7 @@ export default function Page() {
       <FeatureGrid
         columns={3}
         items={[
-          { title: "Skill keywords", body: <>A Skill card is auto-suggested when a registered keyword appears in the chat input. The only runtime registration API is <code>hostApi.registerKeywords</code>.</>, tone: "teal" },
+          { title: "Bundled Skills", body: <>A manifest <code>skills[]</code> entry installs a verified <code>SKILL.md</code> instruction bundle. Natural-language text never invokes or preloads a Tool implicitly.</>, tone: "teal" },
           { title: "ui[] slots", body: <>plugin.json's <code>ui[]</code> declares <code>slot</code> (sidebar/chat/popover/embedded) · <code>kind</code> (embedded-module/url) · <code>entry</code> · <code>exportName</code> · <code>window</code>.</> },
           { title: "Tools list", body: <>Tools are statically declared in the manifest's <code>tools[]</code>. Handlers live in the <code>RuntimePlugin.handlers</code> map. Tool name regex: <code>^[a-zA-Z_][a-zA-Z0-9_]*$</code>.</>, tone: "citron" },
         ]}

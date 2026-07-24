@@ -57,21 +57,44 @@ vi.mock("electron", () => ({
   },
 }));
 
+// ASRT 0.0.67 surface: explicit srt-win descriptor (resolveSrtWin), the single
+// `srt-win status` spawn (checkWindowsSandboxStatusAsync), and the ASYNC install
+// (installWindowsSandboxAsync). WindowsSandboxError is a real class so the
+// adapter's `instanceof` install_timeout branch stays callable.
+class MockWindowsSandboxError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 vi.mock("@anthropic-ai/sandbox-runtime", () => ({
-  getWindowsSandboxUserStatus: vi.fn(() => asrtState.userStatus),
-  getWindowsWfpStatus: vi.fn(() => ({ state: asrtState.wfpState, filters: 2 })),
+  WindowsSandboxError: MockWindowsSandboxError,
+  resolveSrtWin: vi.fn((cfg?: { path: string }) => ({
+    exe: cfg?.path ?? "srt-win.exe",
+    prependArgs: ["--srt-win"],
+  })),
+  checkWindowsSandboxStatusAsync: vi.fn(async () => ({
+    user: asrtState.userStatus,
+    wfp: { state: asrtState.wfpState, filters: 2 },
+  })),
   windowsInstallInstructions: vi.fn((_sublayer?: string) => asrtState.instructions),
-  verifyWindowsWfpEgress: vi.fn((opts?: { proxyPortRange?: readonly [number, number] }) => {
-    asrtState.verifyCalls.push(opts ?? {});
-    if (asrtState.verifyRejects) {
-      throw new Error("WFP egress verification failed");
-    }
-    return Promise.resolve({ target: "127.0.0.1:49152", stderr: "BLOCKED" });
-  }),
-  installWindowsSandbox: vi.fn((opts?: { proxyPortRange?: readonly [number, number] }) => {
-    asrtState.installCalls.push(opts ?? {});
-    return asrtState.installResult;
-  }),
+  verifyWindowsWfpEgress: vi.fn(
+    (opts?: { proxyPortRange?: readonly [number, number] }) => {
+      asrtState.verifyCalls.push(opts ?? {});
+      if (asrtState.verifyRejects) {
+        throw new Error("WFP egress verification failed");
+      }
+      return Promise.resolve({ target: "127.0.0.1:49152", stderr: "BLOCKED" });
+    },
+  ),
+  installWindowsSandboxAsync: vi.fn(
+    async (opts?: { proxyPortRange?: readonly [number, number] }) => {
+      asrtState.installCalls.push(opts ?? {});
+      return asrtState.installResult;
+    },
+  ),
   DEFAULT_WINDOWS_PROXY_PORT_RANGE: [60080, 60089] as readonly [number, number],
 }));
 
