@@ -20,7 +20,7 @@ import { closeSync, fstatSync, openSync, readFileSync, realpathSync } from "node
 import { join, resolve, sep } from "node:path";
 
 interface ProjectAgentsMdLayer {
-  /** Path relative to the project root (always `AGENTS.md` in phase 1). */
+  /** Path relative to the project root (always `AGENTS.md` for now). */
   relativePath: string;
   /** LF-normalized content, head-truncated to the remaining byte budget. */
   content: string;
@@ -31,7 +31,7 @@ interface ProjectAgentsMdLayer {
 export interface ProjectAgentsMd {
   /** Canonicalized project root the discovery was scoped to. */
   projectRoot: string;
-  /** Ordered root-first (closest-last); phase 1 yields at most one. */
+  /** Ordered root-first (closest-last); yields at most one for now. */
   layers: ProjectAgentsMdLayer[];
   /** Total UTF-8 bytes of injected content, always <= maxTotalBytes. */
   totalBytes: number;
@@ -49,9 +49,9 @@ export const PROJECT_AGENTS_MD_MAX_TOTAL_BYTES = 32 * 1024;
  */
 function isRealpathWithinRoot(root: string, candidate: string): boolean {
   try {
-    const realRoot = realpathSync(root);
-    const realCandidate = realpathSync(candidate);
-    return realCandidate === realRoot || realCandidate.startsWith(`${realRoot}${sep}`);
+    const canonicalRoot = realpathSync(root);
+    const canonicalCandidate = realpathSync(candidate);
+    return canonicalCandidate === canonicalRoot || canonicalCandidate.startsWith(`${canonicalRoot}${sep}`);
   } catch {
     return false;
   }
