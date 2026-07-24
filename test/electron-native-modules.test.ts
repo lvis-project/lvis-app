@@ -315,7 +315,7 @@ describe("ensureElectronNativeModules", () => {
     });
     expect(__internalForTests.inspectReaperState({
       lockDir,
-      now: () => Date.now() + 10_001,
+      now: () => Date.now() + 20_000,
     })).toMatchObject({
       state: "ambiguous",
       ownerState: "absent",
@@ -326,7 +326,7 @@ describe("ensureElectronNativeModules", () => {
     writeFileSync(join(`${lockDir}.reaper`, "owner.json"), "{", "utf8");
     expect(__internalForTests.inspectReaperState({
       lockDir,
-      now: () => Date.now() + 10_001,
+      now: () => Date.now() + 20_000,
     })).toMatchObject({
       state: "ambiguous",
       ownerState: "malformed",
@@ -348,7 +348,7 @@ describe("ensureElectronNativeModules", () => {
     expect(__internalForTests.inspectReaperState({
       lockDir,
       inspectProcess: () => "unknown",
-      now: () => Date.now() + 10_001,
+      now: () => Date.now() + 20_000,
     })).toMatchObject({
       state: "ambiguous",
       ownerPid: process.pid,
