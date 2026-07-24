@@ -87,7 +87,7 @@ export default async function createPlugin(ctx) {
       runWithLease: vi.fn(async (_lease, operation) => operation()),
       replaceRuntime: vi.fn(async (projection: PluginRuntimeGenerationProjection) => {
         projection.hostEffects?.bindGeneration(access as never, generationId);
-        runtime.prepareRuntimeGeneration(projection).publish();
+        runtime.prepareRuntimeGeneration(projection, active?.generationId).publish();
         active = {
           pluginId,
           generationId,
