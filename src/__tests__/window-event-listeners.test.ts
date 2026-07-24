@@ -33,6 +33,7 @@ vi.mock("../audit/dlp-filter.js", () => ({
 vi.mock("../audit/audit-logger.js", () => ({ createAuditLogger: vi.fn() }));
 vi.mock("../shared/overlay-trigger-source.js", () => ({
   parseImportedTriggerEnvelope: vi.fn(),
+  parseImportedTriggerEnvelopePayload: vi.fn(() => null),
 }));
 
 // ─── BrowserWindow stub ───────────────────────────────────────────────────────

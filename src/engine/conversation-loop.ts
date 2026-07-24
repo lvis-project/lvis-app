@@ -24,6 +24,7 @@ import type { SessionKind } from "../memory/memory-manager.js";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
+import type { CanonicalStagedChatInput } from "../shared/staged-chat-input.js";
 import type { AiProviderPingResult } from "../shared/ai-provider-ping.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
@@ -801,6 +802,8 @@ export class ConversationLoop {
       /** Host-owned causal hop inherited from durable A2A guidance. */
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
+      /** Parsed at app/plugin ingress; staged raw text is never reparsed here. */
+      canonicalStagedInput?: CanonicalStagedChatInput;
       /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
       requestAnchorRawIntent?: string;
       rolePrompt?: ActiveRolePrompt;

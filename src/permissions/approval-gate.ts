@@ -125,7 +125,8 @@ export interface ApprovalRequest {
   };
   /**
    * Permission policy P2.5 §9 — trust origin classification
-   * (user-keyboard / plugin-emitted / app-emitted / llm-tool-arg / file-content).
+   * (user-keyboard / plugin-emitted / app-emitted / routine / llm-tool-arg /
+   * file-content).
    * Audited; renderer may surface badge.
    */
   trustOrigin?: string;

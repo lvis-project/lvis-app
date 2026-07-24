@@ -14,6 +14,10 @@
  */
 import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
 import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
+import {
+  isStagedChatInputOrigin,
+  parseCanonicalStagedChatInput,
+} from "../../shared/staged-chat-input.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import { PERSONA_PROMPT_ID_ALLOWLIST } from "../../main/persona-prompt-store.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
@@ -21,8 +25,6 @@ import type { GenericMessage } from "../../engine/llm/types.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
-import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
-import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -305,14 +307,14 @@ export function parseChatSendPayload(
   if (candidate.inputOrigin === "user-keyboard" && candidate.userActivation !== true) {
     return { ok: false, error: "user-keyboard-required" };
   }
-  if (candidate.inputOrigin === "plugin-emitted" && !parseImportedTriggerEnvelope(candidate.input)) {
+  if (candidate.inputOrigin === "plugin-emitted" && !parseCanonicalStagedChatInput(candidate.inputOrigin, candidate.input)) {
     return { ok: false, error: "missing-plugin-envelope" };
   }
   // An `app-emitted` send is an MCP App's `ui/message` that the USER confirmed from the
   // staging card. The envelope is the provenance mechanism, so a send that claims the
   // origin without carrying it is rejected here — the one place a claimed origin is
   // checked against the text (mirrors the plugin envelope rule directly above).
-  if (candidate.inputOrigin === "app-emitted" && !parseAppMessageEnvelope(candidate.input)) {
+  if (candidate.inputOrigin === "app-emitted" && !parseCanonicalStagedChatInput(candidate.inputOrigin, candidate.input)) {
     return { ok: false, error: "missing-app-envelope" };
   }
   const personaPrompt = normalizePersonaPromptId(candidate.inputOrigin, candidate.personaPromptId);
@@ -445,6 +447,16 @@ export async function handleChatSend(
   // sees garbage.
   const validated = validateUserContentParts(attachments);
   const effective = sanitizeOutgoingInput(settingsService, ctx.sink, input);
+  // Parse the post-redaction envelope once at ingress and carry its structured
+  // provenance through stream/run. If redaction ever corrupts the wrapper, fail
+  // closed instead of trusting the origin claim that arrived with the raw text.
+  const canonicalStagedInput = parseCanonicalStagedChatInput(inputOrigin, effective);
+  if (isStagedChatInputOrigin(inputOrigin) && !canonicalStagedInput) {
+    return {
+      ok: false,
+      error: inputOrigin === "plugin-emitted" ? "missing-plugin-envelope" : "missing-app-envelope",
+    };
+  }
   const streamId = ctx.allocateStreamId();
   return ctx.trackStreamTurn(async () => {
     // The mailbox snapshot belongs to the same lease as the receiving turn.
@@ -466,6 +478,7 @@ export async function handleChatSend(
           ? { requestAnchorRawIntent: input }
           : {}),
         ...(personaPrompt.rolePrompt ? { rolePrompt: personaPrompt.rolePrompt } : {}),
+        ...(canonicalStagedInput ? { canonicalStagedInput } : {}),
         ...(mailboxTurn
           ? {
               initialGuidance: mailboxTurn.initialGuidance,

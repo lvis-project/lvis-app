@@ -10,6 +10,11 @@ import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
 import type { TurnCallbacks, TurnResult, TurnStopReason } from "./types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
+import {
+  isStagedChatInputOrigin,
+  type CanonicalStagedChatInput,
+} from "../../shared/staged-chat-input.js";
+import { isStagedTurnOrigin } from "../../shared/mcp-app-message-source.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { MessageMeta } from "../llm/types.js";
 import { queryLoop } from "./query-loop.js";
@@ -21,8 +26,6 @@ import { markStaleToolResults } from "../auto-compact.js";
 import { normalizeAiSdkUsageForCost } from "../llm/pricing.js";
 import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
-import { parseImportedTriggerEnvelopePayload } from "../../shared/overlay-trigger-source.js";
-import { parseAppMessageEnvelopePayload } from "../../shared/mcp-app-message-source.js";
 import { sessionContext } from "../session-context.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
@@ -77,6 +80,8 @@ export async function runTurn(
       /** Host-owned causal hop inherited from durable A2A guidance. */
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
+      /** Parsed at app/plugin ingress; staged raw text is never reparsed here. */
+      canonicalStagedInput?: CanonicalStagedChatInput;
       /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
       requestAnchorRawIntent?: string;
       rolePrompt?: ActiveRolePrompt;
@@ -88,7 +93,44 @@ export async function runTurn(
     );
     }
     const inputOrigin: ChatInputOrigin = options.inputOrigin;
+    const canonicalStagedInput = options.canonicalStagedInput;
+    if (
+      isStagedChatInputOrigin(inputOrigin)
+      && (!canonicalStagedInput || canonicalStagedInput.inputOrigin !== inputOrigin)
+    ) {
+      throw new Error("staged conversation input requires canonical envelope provenance");
+    }
+    if (
+      canonicalStagedInput
+      && (!isStagedChatInputOrigin(inputOrigin)
+        || canonicalStagedInput.inputOrigin !== inputOrigin)
+    ) {
+      throw new Error("canonical staged provenance does not match input origin");
+    }
+    if (
+      canonicalStagedInput
+      && options.originSource !== undefined
+      && options.originSource !== canonicalStagedInput.source
+    ) {
+      throw new Error("staged conversation origin source does not match canonical provenance");
+    }
+    // `originSource` changes prompt and permission behavior. A valid staged
+    // source is therefore host-owned provenance, never an independently
+    // supplied flag on a keyboard/non-staged turn.
+    if (
+      options.originSource != null
+      && isStagedTurnOrigin(options.originSource)
+      && (!canonicalStagedInput || options.originSource !== canonicalStagedInput.source)
+    ) {
+      throw new Error("staged conversation origin source requires canonical provenance");
+    }
+    const originSource = canonicalStagedInput?.source ?? options.originSource ?? null;
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
+    // Staged body text and scheduled pre-prompts remain in history/prompt exactly
+    // as received, but cannot alter carry-forward tool scope. Independently forced
+    // routine scope remains active below. User-authored envelope-looking text stays
+    // eligible as user input.
+    const scopeInput = canonicalStagedInput || inputOrigin === "routine" ? "" : turnInput;
     const attachmentParts = options.attachments ?? [];
     const toolTrustOrigin = attachmentParts.length > 0
       ? "file-content"
@@ -297,16 +339,9 @@ export async function runTurn(
           name: options.rolePrompt.name,
         }
       : undefined;
-    // Staged (non-user-authored) input renders as an `imported_trigger` marker, not a
-    // user bubble — for a plugin overlay trigger AND for an MCP App's confirmed
-    // `ui/message`. Both read provenance from their own envelope; `source` is what the
-    // transcript shows (`overlay:…` / `app:…`).
-    const importedTrigger =
-      inputOrigin === "plugin-emitted"
-        ? parseImportedTriggerEnvelopePayload(turnInput)
-        : inputOrigin === "app-emitted"
-          ? parseAppMessageEnvelopePayload(turnInput)
-          : null;
+    // Staged (non-user-authored) input renders as an `imported_trigger` marker,
+    // using the ingress parser result rather than reparsing the raw envelope.
+    const importedTrigger = canonicalStagedInput;
     if (inputOrigin === "agent-message") {
       agentMessageInputId = randomUUID();
     }
@@ -352,7 +387,7 @@ export async function runTurn(
     // Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
     // build() 호출 전에 setToolScope 수행.
-    const scope = self.resolveToolScope(input);
+    const scope = self.resolveToolScope(scopeInput);
     const initialToolSchemas = self.rebuildToolSchemas(scope);
 
     // ─── Token Preflight (same-session checkpoint compaction) ───
@@ -364,7 +399,7 @@ export async function runTurn(
       await self.runPreflightGuard(
         self.createRequestProjectionContext(
           scope,
-          options?.originSource ?? null,
+          originSource,
           options?.rolePrompt,
           initialToolSchemas,
           effectiveSessionId,
@@ -376,7 +411,7 @@ export async function runTurn(
 
     const systemPrompt = self.buildSystemPromptForScope(
       scope,
-      options?.originSource ?? null,
+      originSource,
       options?.rolePrompt,
       effectiveSessionId,
     );
@@ -400,7 +435,7 @@ export async function runTurn(
         scope,
         callbacksForLoop,
         turnSignal,
-        options?.originSource ?? null,
+        originSource,
         {
           maxRounds: options?.maxRounds,
           sessionIdOverride: options?.sessionIdOverride,

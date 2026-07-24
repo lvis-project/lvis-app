@@ -52,7 +52,7 @@ describe("createRoutineEngine", () => {
       "오늘 업무 맥락 정리",
       undefined,
       undefined,
-      { inputOrigin: "plugin-emitted" },
+      { inputOrigin: "routine" },
     );
     expect(result.routineId).toBe("schedule-daily");
     expect(result.trigger).toBe("schedule");

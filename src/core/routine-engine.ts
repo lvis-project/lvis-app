@@ -239,7 +239,10 @@ export class RoutineEngine {
       let summary = "";
       try {
         const result = await loop.runTurn(input.prePrompt, undefined, input.signal, {
-          inputOrigin: "plugin-emitted",
+          // Scheduled pre-prompts are host-owned routine input, not plugin text.
+          // `routine` remains non-public and non-user, preserving slash and
+          // permission restrictions while keeping audit/trust provenance exact.
+          inputOrigin: "routine",
         });
         summary = extractSummaryTag(result.text ?? "");
       } catch (err) {

@@ -64,6 +64,7 @@ export type ToolDecisionOverride = "always-allow-with-audit" | "ask";
  * input is `llm-tool-arg`, while later tool calls influenced by read_file
  * output are `file-content`. A turn seeded (or, mid-turn, joined) by an MCP App's
  * `ui/message` is `app-emitted` — never `user-keyboard`, whatever the app claims.
+ * A scheduled host pre-prompt is `routine`, preserving its non-user audit boundary.
  */
 export type ToolTrustOrigin = ChatInputOrigin;
 

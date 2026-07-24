@@ -16,11 +16,13 @@
  */
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
+import {
+  isStagedChatInputOrigin,
+  type CanonicalStagedChatInput,
+} from "../../shared/staged-chat-input.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import type { UserContentPart } from "../../engine/llm/types.js";
-import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
-import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
 import {
   createStreamingFilter,
   stripSuggestedReplies,
@@ -68,6 +70,8 @@ export async function runStreamedTurn(
   options: {
     attachments?: UserContentPart[];
     inputOrigin: ChatInputOrigin;
+    /** Parsed once at app/plugin ingress; never reconstructed from raw text. */
+    canonicalStagedInput?: CanonicalStagedChatInput;
     /** DLP-before-send keyboard text used only to mint a host RequestAnchor. */
     requestAnchorRawIntent?: string;
     rolePrompt?: ActiveRolePrompt;
@@ -78,16 +82,24 @@ export async function runStreamedTurn(
 ): Promise<TurnResult> {
   const send = (payload: unknown) =>
     sink(channels.stream, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
-  // The turn's ORIGIN SOURCE — read from the input's provenance envelope, never from a
-  // separate flag. `overlay:*` for a plugin trigger, `app:*` for an MCP App's confirmed
-  // `ui/message`. It becomes the permission manager's staged-origin (write/shell/network
-  // forced to ask) and the transcript's provenance marker.
-  const originSource =
-    options.inputOrigin === "plugin-emitted"
-      ? parseImportedTriggerEnvelope(input)
-      : options.inputOrigin === "app-emitted"
-        ? parseAppMessageEnvelope(input)
-        : null;
+  // App/plugin text reaches this layer only with the canonical ingress result.
+  // Never reparse raw staged text here: a prefix/unclosed wrapper must have
+  // been rejected before a turn can be created.
+  const canonicalStagedInput = options.canonicalStagedInput;
+  if (
+    isStagedChatInputOrigin(options.inputOrigin)
+    && (!canonicalStagedInput || canonicalStagedInput.inputOrigin !== options.inputOrigin)
+  ) {
+    throw new Error("staged chat turn requires canonical envelope provenance");
+  }
+  if (
+    canonicalStagedInput
+    && (!isStagedChatInputOrigin(options.inputOrigin)
+      || canonicalStagedInput.inputOrigin !== options.inputOrigin)
+  ) {
+    throw new Error("canonical staged provenance does not match input origin");
+  }
+  const originSource = canonicalStagedInput?.source ?? null;
   // Per-turn streaming filter for the <suggested_replies> block. Withholds
   // chunks that could be (or are) part of the trailing tag, surfaces the
   // parsed list when the turn ends. See
@@ -204,6 +216,7 @@ export async function runStreamedTurn(
     undefined,
     {
       ...(originSource ? { originSource } : {}),
+      ...(canonicalStagedInput ? { canonicalStagedInput } : {}),
       ...(options.attachments && options.attachments.length > 0
         ? { attachments: options.attachments }
         : {}),

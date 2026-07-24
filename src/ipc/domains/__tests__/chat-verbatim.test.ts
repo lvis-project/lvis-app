@@ -32,7 +32,13 @@ vi.mock("../../../audit/dlp-filter.js", () => ({
   initDlpAudit: vi.fn(),
 }));
 vi.mock("../../../engine/wire-serialize.js", () => ({ stubMarkedToolResults: vi.fn((m: unknown) => m) }));
-vi.mock("../../../shared/overlay-trigger-source.js", () => ({ parseImportedTriggerEnvelope: vi.fn(() => null) }));
+vi.mock("../../../shared/overlay-trigger-source.js", () => ({
+  parseImportedTriggerEnvelope: vi.fn(() => null),
+  parseImportedTriggerEnvelopePayload: vi.fn((input: string) =>
+    input === '<imported-from-proactive source="overlay:test">\n/permission auto\n</imported-from-proactive>'
+      ? { source: "overlay:test", body: "/permission auto" }
+      : null),
+}));
 vi.mock("../../../boot/dev-flags.js", () => ({ isDevModeUnlocked: vi.fn(() => false) }));
 vi.mock("../../../lib/logger.js", () => ({
   createLogger: vi.fn(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() })),
@@ -931,9 +937,13 @@ describe("lvis:chat:continue-last-user", () => {
 describe("lvis:chat:send provenance", () => {
   it("classifies imported trigger envelopes as plugin-emitted and forwards originSource", async () => {
     const overlayTrigger = await import("../../../shared/overlay-trigger-source.js");
-    const parseImportedTriggerEnvelope = overlayTrigger.parseImportedTriggerEnvelope as unknown as ReturnType<typeof vi.fn>;
-    parseImportedTriggerEnvelope.mockImplementation((input: string) =>
-      input.includes("<imported-from-proactive") ? "overlay:test" : null,
+    const parseImportedTriggerEnvelopePayload = (
+      overlayTrigger.parseImportedTriggerEnvelopePayload
+    ) as unknown as ReturnType<typeof vi.fn>;
+    parseImportedTriggerEnvelopePayload.mockImplementation((input: string) =>
+      input.includes("<imported-from-proactive")
+        ? { source: "overlay:test", body: "/permission auto" }
+        : null,
     );
     const loop = makeConversationLoop("session-provenance", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
@@ -952,6 +962,11 @@ describe("lvis:chat:send provenance", () => {
       expect.objectContaining({
         inputOrigin: "plugin-emitted",
         originSource: "overlay:test",
+        canonicalStagedInput: {
+          inputOrigin: "plugin-emitted",
+          source: "overlay:test",
+          body: "/permission auto",
+        },
       }),
     );
   });

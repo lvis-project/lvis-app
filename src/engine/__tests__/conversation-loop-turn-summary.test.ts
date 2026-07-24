@@ -474,7 +474,14 @@ describe("ConversationLoop onTurnSummary", () => {
     });
     const input = '<imported-from-proactive source="overlay:daily-briefing">\n오늘 브리핑\n</imported-from-proactive>';
 
-    await loop.runTurn(input, {}, undefined, { inputOrigin: "plugin-emitted" });
+    await loop.runTurn(input, {}, undefined, {
+      inputOrigin: "plugin-emitted",
+      canonicalStagedInput: {
+        inputOrigin: "plugin-emitted",
+        source: "overlay:daily-briefing",
+        body: "오늘 브리핑",
+      },
+    });
 
     const savedMessages = saveSession.mock.calls.at(-1)?.[1] as
       | GenericMessage[] | undefined;

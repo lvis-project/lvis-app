@@ -128,6 +128,7 @@ export type RationaleTaint =
   | "file-content"
   | "app-emitted"
   | "plugin-emitted"
+  | "routine"
   | "agent-message"
   | "queue-auto";
 
@@ -772,11 +773,11 @@ function normalizeAndSealRiskVerdict(
 
 const TOOL_TRUST_ORIGINS: readonly string[] = [
   "user-keyboard", "plugin-emitted", "app-emitted", "llm-tool-arg",
-  "agent-message", "file-content", "queue-auto",
+  "routine", "agent-message", "file-content", "queue-auto",
 ];
 const RATIONALE_TAINTS: readonly string[] = [
   "none", "file-content", "app-emitted", "plugin-emitted",
-  "agent-message", "queue-auto",
+  "routine", "agent-message", "queue-auto",
 ];
 
 function assertExactOwnKeys(value: object, expected: readonly string[], label: string): void {

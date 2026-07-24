@@ -82,8 +82,8 @@ const MAX_SOURCE_LEN = 128;
 const MAX_PROMPT_LEN = 4096;
 // `SOURCE_PATTERN` is the strict shape required for the `source` field
 // of every overlay trigger spec. It's the SAME pattern used by the
-// keyword engine, the trigger executor envelope, the IPC bridge's
-// originSource detection, and the permission manager's overlay-trigger
+// host ingress parser, the trigger executor envelope, the turn coordinator's
+// canonical origin source, and the permission manager's overlay-trigger
 // origin override — see `shared/overlay-trigger-source.ts` for the single
 // definition. Without this gate, malformed sources (`overlay:`,
 // `overlay:_x`, `overlay:Bad/Path`) could flow into audit logs and

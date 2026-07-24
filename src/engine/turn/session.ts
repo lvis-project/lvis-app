@@ -221,6 +221,9 @@ export function newConversation(
     self.sessionPluginExpansions = 0;
     self.sessionToolSearches = 0;
     self.sessionActivatedPluginIds.clear();
+    // Explicit keyword scope is session-local; a new chat must not inherit an
+    // activated plugin from the session it replaced.
+    self.lastTurnScope = null;
     self.lastTurnToolNames = null;
     self.compactNum = 0;
     self.rateLimitRecoveryAttempted = false;
@@ -295,6 +298,9 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.sessionPluginExpansions = 0;
     self.sessionToolSearches = 0;
     self.sessionActivatedPluginIds.clear();
+    // Persisted history carries messages, not ambient keyword activation.
+    // Reset it on load so a prior in-memory session cannot widen this one.
+    self.lastTurnScope = null;
     self.lastTurnToolNames = null;
     self.turnAdditionalDirectories = [];
     // Use max compactNum across all checkpoints (monotonic guarantee).

@@ -8,8 +8,8 @@
  * The ENVELOPE is the provenance mechanism — not a side-channel flag. Every consumer
  * reads provenance from the same wrapper:
  *   - `ipc/handlers/chat.ts`  — an `app-emitted` send without the envelope is rejected.
- *   - `ipc/handlers/chat-stream.ts` → `engine/turn/run-turn.ts` — the parsed source
- *     becomes the turn's origin source and the transcript's `imported_trigger` marker.
+ *   - `ipc/handlers/chat-stream.ts` → `engine/turn/run-turn.ts` — canonical ingress
+ *     provenance becomes the turn's origin source and transcript marker.
  *   - `permissions/permission-manager.ts` — {@link isStagedTurnOrigin} forces every
  *     write/shell/network tool to ask the user (the ONE enforcement site).
  *   - `engine/turn/query-loop.ts` — app-authored guidance injected mid-turn downgrades
@@ -56,11 +56,9 @@ export function isStagedTurnOrigin(source: string | null | undefined): boolean {
   return isOverlayTriggerOrigin(source) || isAppMessageOrigin(source);
 }
 
-const APP_MESSAGE_ENVELOPE_PATTERN =
-  /^<app-message\s+source="(app:[A-Za-z0-9][A-Za-z0-9._-]{0,127})"\s*>/;
-
 const APP_MESSAGE_ENVELOPE_FULL_PATTERN =
   /^<app-message\s+source="(app:[A-Za-z0-9][A-Za-z0-9._-]{0,127})"\s*>\s*([\s\S]*?)\s*<\/app-message>\s*$/;
+const APP_MESSAGE_ENVELOPE_CLOSE_PATTERN = /<\/\s*app-message\s*>/i;
 
 export interface AppMessageEnvelope {
   source: string;
@@ -86,12 +84,12 @@ export function formatAppMessageEnvelope(text: string, source: string): string {
 }
 
 /**
- * Parse the `<app-message source="app:...">` prefix. Returns the source tag or
- * `null` when the input does not begin with the envelope.
+ * Parse a complete `<app-message source="app:...">` envelope. Prefixes,
+ * unclosed wrappers, and trailing non-envelope text are rejected so a staged
+ * origin cannot be inferred from only part of untrusted input.
  */
 export function parseAppMessageEnvelope(input: string): string | null {
-  const m = input.trimStart().match(APP_MESSAGE_ENVELOPE_PATTERN);
-  return m ? m[1] : null;
+  return parseAppMessageEnvelopePayload(input)?.source ?? null;
 }
 
 /** Parse the full envelope into provenance + body (transcript / history replay). */
@@ -100,11 +98,6 @@ export function parseAppMessageEnvelopePayload(
 ): AppMessageEnvelope | null {
   const trimmed = input.trim();
   const full = trimmed.match(APP_MESSAGE_ENVELOPE_FULL_PATTERN);
-  if (full) return { source: full[1], body: full[2].trim() };
-  const source = parseAppMessageEnvelope(trimmed);
-  if (!source) return null;
-  return {
-    source,
-    body: trimmed.replace(APP_MESSAGE_ENVELOPE_PATTERN, "").trim(),
-  };
+  if (!full || APP_MESSAGE_ENVELOPE_CLOSE_PATTERN.test(full[2])) return null;
+  return { source: full[1], body: full[2].trim() };
 }

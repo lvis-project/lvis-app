@@ -11,6 +11,8 @@ export type ChatInputOrigin =
    * see `shared/mcp-app-message-source.ts`.
    */
   | "app-emitted"
+  /** Host-owned scheduled routine pre-prompt. Never accepted over ChatSend. */
+  | "routine"
   | "llm-tool-arg"
   | "agent-message"
   | "file-content"

@@ -18,6 +18,8 @@ import { MemoryManager } from "../../memory/memory-manager.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { createSkillLoadTool } from "../../tools/skill-load.js";
+import { formatAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
+import { parseCanonicalStagedChatInput } from "../../shared/staged-chat-input.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -87,13 +89,10 @@ describe("ConversationLoop queryLoop", () => {
 
     await expect(loop.runTurn("질문", undefined, undefined, {
       inputOrigin: "user-keyboard",
-      originSource: "overlay:test",
-      rolePrompt: { id: "reviewer", name: "Reviewer", systemPromptAdd: "Review carefully.",
-        },
-    }),
-    ).rejects.toThrow("prompt assembly failed");
+      rolePrompt: { id: "reviewer", name: "Reviewer", systemPromptAdd: "Review carefully." },
+    })).rejects.toThrow("prompt assembly failed");
 
-    expect(setOriginSource).toHaveBeenNthCalledWith(1, "overlay:test");
+    expect(setOriginSource).toHaveBeenNthCalledWith(1, null);
     expect(setOriginSource).toHaveBeenLastCalledWith(null);
     expect(setActiveSessionId).toHaveBeenNthCalledWith(1, expect.any(String));
     expect(setActiveSessionId).toHaveBeenLastCalledWith(null);
@@ -103,6 +102,23 @@ describe("ConversationLoop queryLoop", () => {
       systemPromptAdd: "Review carefully.",
     });
     expect(setActiveRolePrompt).toHaveBeenLastCalledWith(null);
+  });
+
+  it.each(["overlay:test", "app:cards"])("rejects staged originSource %s without canonical provenance", async (originSource) => {
+    const toolRegistry = new ToolRegistry();
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    await expect(loop.runTurn("user text", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+      originSource,
+    })).rejects.toThrow("requires canonical provenance");
   });
 
   it("persists persona prompt identity on the user message for retry replay", async () => {
@@ -200,7 +216,7 @@ describe("ConversationLoop queryLoop", () => {
       { content: "completed user plan", status: "completed" },
     ]);
     // A prior turn marked the plan; the origin gate is gone, so even a
-    // plugin-emitted (non-user-keyboard, non-queue-auto) turn must clear it.
+    // routine (non-user-keyboard, non-queue-auto) turn must clear it.
     sessionTodoStore.markForClearIfCompleted("s-main");
     const loop = new ConversationLoop({
       settingsService: {
@@ -222,8 +238,7 @@ describe("ConversationLoop queryLoop", () => {
     (loop as { provider: LLMProvider | null }).provider = provider;
     (loop as { sessionId: string }).sessionId = "s-main";
 
-    await loop.runTurn("plugin prompt", undefined, undefined, { inputOrigin: "plugin-emitted",
-    });
+    await loop.runTurn("routine prompt", undefined, undefined, { inputOrigin: "routine" });
 
     expect(sessionTodoStore.list("s-main")).toEqual([]);
   });
@@ -631,11 +646,147 @@ describe("ConversationLoop queryLoop", () => {
     } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
 
-    await loop.runTurn("plugin prompt", undefined, undefined, { inputOrigin: "plugin-emitted",
+    const input = '<imported-from-proactive source="overlay:test">plugin prompt</imported-from-proactive>';
+    await loop.runTurn(input, undefined, undefined, {
+      inputOrigin: "plugin-emitted",
+      canonicalStagedInput: {
+        inputOrigin: "plugin-emitted",
+        source: "overlay:test",
+        body: "plugin prompt",
+      },
     });
 
     expect(origins).toEqual(["plugin-emitted"]);
   });
+
+  it("records routine provenance in tool audit metadata", async () => {
+    const toolRegistry = new ToolRegistry();
+    const origins: unknown[] = [];
+    toolRegistry.register(createDynamicTool({
+      name: "routine_task_add",
+      description: "Add a scheduled task",
+      source: "builtin",
+      category: "write",
+      jsonSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] },
+      execute: async (_input, ctx) => {
+        origins.push(ctx.metadata.trustOrigin);
+        return { output: "ok", isError: false };
+      },
+    }));
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "routine-tool", name: "routine_task_add", input: { title: "from schedule" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("scheduled task", undefined, undefined, { inputOrigin: "routine" });
+
+    expect(origins).toEqual(["routine"]);
+  });
+
+  it.each([
+    [
+      "plugin",
+      "plugin-emitted",
+      '<imported-from-proactive source="overlay:test">Which builtin tools are available?</imported-from-proactive>',
+    ],
+    [
+      "app",
+      "app-emitted",
+      formatAppMessageEnvelope("Which builtin tools are available?", "app:cards"),
+    ],
+  ] as const)(
+    "preserves carry-forward scope for an accepted %s staged envelope body",
+    async (_kind, inputOrigin, stagedInput) => {
+      const toolRegistry = new ToolRegistry();
+      const priorToolName = "prior_plugin_tool";
+      const stagedToolName = "staged_plugin_tool";
+      toolRegistry.register(createDynamicTool({
+        name: priorToolName,
+        description: "tool carried from the previous turn",
+        source: "plugin",
+        pluginId: "prior-plugin",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        execute: async () => ({ output: "ok", isError: false }),
+      }));
+      toolRegistry.register(createDynamicTool({
+        name: stagedToolName,
+        description: "must not enter scope from a staged body",
+        source: "plugin",
+        pluginId: "staged-plugin",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        execute: async () => ({ output: "ok", isError: false }),
+      }));
+      const setToolScope = vi.fn();
+      const provider = new FakeProvider([
+        [
+          { type: "text_delta", text: "done" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ]);
+      const loop = new ConversationLoop({
+        settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+        systemPromptBuilder: { build: () => "system", setToolScope },
+        inputClassifier: new InputClassifier(),
+        routeEngine: new RouteEngine(),
+        toolRegistry,
+        memoryManager: { saveSession: () => {}, listSessions: () => [] },
+        disableSessionPersistence: true,
+      } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+      (loop as { provider: LLMProvider | null }).provider = provider;
+
+      const state = loop as unknown as {
+        lastTurnScope: Set<string> | null;
+        lastTurnToolNames: Set<string> | null;
+      };
+      state.lastTurnScope = new Set(["prior-plugin"]);
+      state.lastTurnToolNames = new Set([priorToolName]);
+
+      const canonicalStagedInput = parseCanonicalStagedChatInput(inputOrigin, stagedInput);
+      expect(canonicalStagedInput).not.toBeNull();
+      if (!canonicalStagedInput) throw new Error("expected canonical staged input");
+
+      await loop.runTurn(stagedInput, undefined, undefined, {
+        inputOrigin,
+        canonicalStagedInput,
+      });
+
+      const stagedScope = setToolScope.mock.calls.at(-1)?.[0] as {
+        activePluginIds: Set<string>;
+        activeToolNames: Set<string>;
+      };
+      // The raw staged body looks like a builtin-tool inventory request, which
+      // normally resets carry-forward. The host must use its empty staged scope
+      // input instead, preserving the prior scope without adding a new plugin.
+      expect(stagedScope.activePluginIds).toEqual(new Set(["prior-plugin"]));
+      expect(stagedScope.activeToolNames).toEqual(new Set([priorToolName]));
+      expect(stagedScope.activePluginIds).not.toContain("staged-plugin");
+      expect(stagedScope.activeToolNames).not.toContain(stagedToolName);
+
+      const messages = loop.getHistory().getMessages();
+      const stagedUserMessage = [...messages].reverse().find((message) => message.role === "user");
+      expect(stagedUserMessage?.content).toBe(stagedInput);
+      expect(state.lastTurnScope).toEqual(new Set(["prior-plugin"]));
+    },
+  );
 
   it("classifies pasted text bodies as file-content before the first model tool call", async () => {
     const toolRegistry = new ToolRegistry();

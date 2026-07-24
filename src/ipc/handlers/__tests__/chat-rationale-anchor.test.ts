@@ -16,6 +16,8 @@ const completedTurn = {
 function makeFixture() {
   const runTurn = vi.fn(async (..._args: unknown[]) => completedTurn);
   const sink = vi.fn();
+  const allocateStreamId = vi.fn(() => 41);
+  const trackStreamTurn = vi.fn((factory: () => Promise<unknown>) => factory());
   const deps = {
     conversationLoop: {
       getSessionId: () => "session-anchor",
@@ -30,10 +32,10 @@ function makeFixture() {
   } as unknown as IpcDeps;
   const context: ChatSendContext = {
     sink,
-    allocateStreamId: () => 41,
-    trackStreamTurn: (factory) => factory(),
+    allocateStreamId,
+    trackStreamTurn: trackStreamTurn as ChatSendContext["trackStreamTurn"],
   };
-  return { deps, context, runTurn, sink };
+  return { deps, context, runTurn, sink, allocateStreamId, trackStreamTurn };
 }
 
 function turnOptions(runTurn: ReturnType<typeof makeFixture>["runTurn"]):
@@ -127,4 +129,111 @@ describe("chat RequestAnchor trust boundary", () => {
       );
     },
   );
+
+  it.each([
+    [
+      "plugin prefix",
+      {
+        input: '<imported-from-proactive source="overlay:test">plugin request',
+        inputOrigin: "plugin-emitted",
+      },
+      "missing-plugin-envelope",
+    ],
+    [
+      "plugin trailing text",
+      {
+        input: '<imported-from-proactive source="overlay:test">plugin request</imported-from-proactive> trailing',
+        inputOrigin: "plugin-emitted",
+      },
+      "missing-plugin-envelope",
+    ],
+    [
+      "plugin malformed source",
+      {
+        input: '<imported-from-proactive source="overlay:Bad">plugin request</imported-from-proactive>',
+        inputOrigin: "plugin-emitted",
+      },
+      "missing-plugin-envelope",
+    ],
+    [
+      "app prefix",
+      {
+        input: '<app-message source="app:test-server">app request',
+        inputOrigin: "app-emitted",
+      },
+      "missing-app-envelope",
+    ],
+    [
+      "app malformed source",
+      {
+        input: '<app-message source="app:bad id">app request</app-message>',
+        inputOrigin: "app-emitted",
+      },
+      "missing-app-envelope",
+    ],
+    [
+      "app trailing text",
+      {
+        input: '<app-message source="app:test-server">app request</app-message> trailing',
+        inputOrigin: "app-emitted",
+      },
+      "missing-app-envelope",
+    ],
+  ] as const)("rejects %s before streaming", async (_label, payload, error) => {
+    const fixture = makeFixture();
+
+    await expect(handleChatSend(fixture.deps, payload, fixture.context)).resolves.toEqual({
+      ok: false,
+      error,
+    });
+
+    expect(fixture.allocateStreamId).not.toHaveBeenCalled();
+    expect(fixture.trackStreamTurn).not.toHaveBeenCalled();
+    expect(fixture.runTurn).not.toHaveBeenCalled();
+  });
+
+  it("rejects the private routine origin over public ChatSend", async () => {
+    const fixture = makeFixture();
+
+    await expect(handleChatSend(
+      fixture.deps,
+      { input: "scheduled prompt", inputOrigin: "routine" },
+      fixture.context,
+    )).resolves.toEqual({ ok: false, error: "missing-input-origin" });
+
+    expect(fixture.runTurn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "plugin",
+      '<imported-from-proactive source="overlay:test">plugin request</imported-from-proactive>',
+      "plugin-emitted",
+      { inputOrigin: "plugin-emitted", source: "overlay:test", body: "plugin request" },
+    ],
+    [
+      "app",
+      formatAppMessageEnvelope("app request", "app:test-server"),
+      "app-emitted",
+      { inputOrigin: "app-emitted", source: "app:test-server", body: "app request" },
+    ],
+  ] as const)("carries canonical %s provenance into the streamed turn", async (
+    _label,
+    input,
+    inputOrigin,
+    canonicalStagedInput,
+  ) => {
+    const fixture = makeFixture();
+
+    await expect(handleChatSend(
+      fixture.deps,
+      { input, inputOrigin },
+      fixture.context,
+    )).resolves.toEqual(completedTurn);
+
+    expect(turnOptions(fixture.runTurn)).toMatchObject({
+      inputOrigin,
+      canonicalStagedInput,
+    });
+  });
 });

@@ -25,6 +25,9 @@ export function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: 
   if (inputOrigin === "agent-message") {
     return "agent-message";
   }
+  if (inputOrigin === "routine") {
+    return "routine";
+  }
   if (inputOrigin === "plugin-emitted") {
     return "plugin-emitted";
   }

@@ -107,6 +107,25 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(loop.getSessionId()).toBe("test-session-id");
   });
 
+  it("clears prior keyword scope when loading or creating a session", () => {
+    const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
+    const loop = new ConversationLoop(resumeDeps({
+      memoryManager: {
+        ...resumeMemory(history),
+        saveSession: vi.fn(async () => {}),
+      },
+    }));
+    const state = loop as unknown as { lastTurnScope: Set<string> | null };
+
+    state.lastTurnScope = new Set(["previous-plugin"]);
+    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(state.lastTurnScope).toBeNull();
+
+    state.lastTurnScope = new Set(["loaded-plugin"]);
+    loop.newConversation();
+    expect(state.lastTurnScope).toBeNull();
+  });
+
   it("does not load or merge parent transcript when resuming a child session", () => {
     const childHistory: GenericMessage[] = [{ role: "user", content: "child only" },
     ];
@@ -342,7 +361,7 @@ describe("ConversationLoop.resetAndResume", () => {
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
     const result = await loop.runTurn("/compact", undefined, undefined, {
-      inputOrigin: "plugin-emitted",
+      inputOrigin: "routine",
     });
 
     expect(result.text).toContain("비키보드 출처의 slash command는 실행하지 않습니다.",

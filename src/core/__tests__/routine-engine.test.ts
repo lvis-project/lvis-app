@@ -42,7 +42,7 @@ describe("RoutineEngine.runRoutine", () => {
       "오늘 하루 알려줘.",
       undefined,
       undefined,
-      { inputOrigin: "plugin-emitted" },
+      { inputOrigin: "routine" },
     );
   });
 

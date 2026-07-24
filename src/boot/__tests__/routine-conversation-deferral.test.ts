@@ -74,8 +74,7 @@ describe("createRoutineConversationLoop — tool-level deferral", () => {
     );
     (loop as unknown as { provider: LLMProvider | null }).provider = provider;
 
-    await loop.runTurn("routine fire", undefined, undefined, { inputOrigin: "plugin-emitted",
-    });
+    await loop.runTurn("routine fire", undefined, undefined, { inputOrigin: "routine" });
 
     expect(provider.observedToolNames[0]).toContain(forcedToolName);
   });
