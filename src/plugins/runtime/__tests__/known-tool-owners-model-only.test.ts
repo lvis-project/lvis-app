@@ -26,7 +26,7 @@
 import { describe, it, expect } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "../../__tests__/test-helpers.js";
 import type { PluginManifest } from "../../types.js";
 
 const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
@@ -60,8 +60,7 @@ const APP_ONLY = ["ap_status", "ap_login", "ap_ui_rows"]; // must NEVER own
 const AUTH_TRIO = ["ap_status", "ap_login"];
 
 function runtimeWithOwners(): PluginRuntime {
-  const rt = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: HOST_ROOT, manifestPaths: [] });
+  const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
   // Populate the ownership snapshot through the REAL setter (the one carrying the
   // MODEL-ONLY `.filter(isModelVisible)`). methodMap stays empty, so
   // `resolveToolOwner` reflects the pre-runtime snapshot exactly.

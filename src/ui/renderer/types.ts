@@ -130,7 +130,7 @@ export type PluginCardSummary = {
   loadStatus?: "loaded" | "preparing" | "failed" | "disabled";
   /** Whether the plugin's tools are currently exposed to the model. */
   active?: boolean;
-  /** Whether the plugin instance is loaded and callable even when inactive. */
+  /** Whether an active immutable plugin generation is currently instantiated. */
   runtimeLoaded?: boolean;
   preparationStatus?: {
     phase: string;
@@ -165,6 +165,16 @@ export type PluginCardSummary = {
   /** Marketplace request slugs that should collapse onto this installed plugin. */
   installAliases?: string[];
 };
+
+export interface PluginContributionTrustRow {
+  kind: "hook" | "mcpServer";
+  pluginId: string;
+  pluginVersion: string;
+  generationId: string;
+  localId: string;
+  fingerprint: string;
+  status: "approved" | "approval_required";
+}
 
 /**
  * Mirror of host-side `PluginAuthSpec` for renderer consumption — kept as a
@@ -413,7 +423,7 @@ export type ProjectQueryOptions = {
 };
 
 export type PluginMarketplaceActionResult =
-  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
+  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; rolledBackTo?: string; version?: string }
   | { ok: false; error: string; message?: string };
 
 export type PluginMarketplaceInstallOptions = {
@@ -773,7 +783,13 @@ export type LvisApi = {
   callPluginMethod: (
     m: string,
     p?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; operationGrantToken?: string },
+  ) => Promise<unknown>;
+  /** LVIS_E2E-only generation/Skill/tool/Hook projection; production fails closed. */
+  e2ePluginBundleSnapshot: (
+    pluginId: string,
+    skillLocalId: string,
+    hookProbeToolName: string,
   ) => Promise<unknown>;
   /**
    * Subscribe to plugin-emitted events forwarded by the host event bridge
@@ -788,9 +804,22 @@ export type LvisApi = {
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
+  listPluginContributionTrust: (pluginId?: string) => Promise<
+    | { ok: true; rows: PluginContributionTrustRow[] }
+    | { ok: false; error: string }
+  >;
+  setPluginContributionTrust: (input: {
+    pluginId: string;
+    localId: string;
+    kind: "hook" | "mcpServer";
+    approved: boolean;
+  }) => Promise<
+    | { ok: true; pluginId: string; localId: string; kind: "hook" | "mcpServer"; approved: boolean }
+    | { ok: false; error: string; message?: string }
+  >;
   /**
-   * #1176 — toggle a plugin active/inactive. Inactive plugins stay loaded but
-   * their tools are hidden from the model's per-turn scope.
+   * Toggle a plugin active/inactive. Disable retires and unloads the active
+   * generation; re-enable re-verifies the receipt and activates a fresh one.
    */
   setPluginEnabled: (
     pluginId: string,
@@ -1613,6 +1642,7 @@ export type LvisHostMarketplaceApi = {
     id: string,
     options?: PluginMarketplaceUninstallOptions,
   ) => Promise<PluginMarketplaceActionResult>;
+  rollbackMarketplacePlugin?: (id: string) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceSkill?: (slug: string) => Promise<PluginMarketplaceActionResult>;
@@ -1637,7 +1667,7 @@ export type LvisMcpApi = {
    * the server's declared policy; main sanitizes it and emits it as the proxy
    * document's CSP response header.
    */
-  readUiResource: (serverId: string, uri: string) => Promise<McpUiResourceBundle>;
+  readUiResource: (serverId: string, uri: string, generationId?: string) => Promise<McpUiResourceBundle>;
   /**
    * MCP Apps `oncalltool` — run a tool on the card's OWN server through the host's
    * risk/consent gate. `serverId` comes from the card payload the renderer holds,
@@ -1647,6 +1677,7 @@ export type LvisMcpApi = {
     serverId: string,
     name: string,
     args: Record<string, unknown>,
+    generationId?: string,
   ) => Promise<McpUiToolCallOutcome>;
   /**
    * MCP Apps `onmessage` (`ui/message`). `serverId` + `sessionId` are bound by the

@@ -2,10 +2,8 @@ name: Web CI
 
 # CI for the monorepo landing site under web/ (Next.js static export → Cloudflare
 # Pages). Runs only when web/ changes so it stays independent of the app CI.
-#   - PR / push touching web/**  → build gate (validates the static export)
-#   - push to main touching web/** → deploy to Cloudflare Pages IF the
-#     CLOUDFLARE_API_TOKEN secret is set (otherwise it warns and skips; the site
-#     still deploys via the manual `wrangler pages deploy` in web/DEPLOY.md).
+# This workflow is a secret-free build gate for PRs and pushes. Deployment is
+# owned by web-deploy.yml and its protected production environment.
 on:
   push:
     branches: [main]
@@ -16,7 +14,6 @@ on:
     paths:
       - 'web/**'
       - '.github/workflows/web-ci.yml'
-  workflow_dispatch:
 
 concurrency:
   group: web-ci-${{ github.workflow }}-${{ github.ref }}
@@ -32,8 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install (retry on transient registry flakes)
         run: |
           for attempt in 1 2 3; do
@@ -48,52 +47,9 @@ jobs:
       - name: Build
         run: bun run build
       - name: Upload static export
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: web-out
           path: web/out
           if-no-files-found: error
           retention-days: 3
-
-  deploy:
-    name: Deploy (Cloudflare Pages)
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - name: Check for Cloudflare token
-        id: cf
-        env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -n "$CF_TOKEN" ]; then
-            echo "have_token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "have_token=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::CLOUDFLARE_API_TOKEN secret is not set — skipping auto-deploy. Deploy manually per web/DEPLOY.md, or add the secret (Cloudflare Pages: Edit) to enable this."
-          fi
-      - uses: oven-sh/setup-bun@v2
-        if: steps.cf.outputs.have_token == 'true'
-      - name: Install (retry on transient registry flakes)
-        if: steps.cf.outputs.have_token == 'true'
-        run: |
-          for attempt in 1 2 3; do
-            if bun install --frozen-lockfile; then exit 0; fi
-            echo "::warning::bun install attempt $attempt failed; clearing cache + retrying"
-            rm -rf ~/.bun/install/cache || true
-            sleep 10
-          done
-          echo "::error::bun install failed after 3 attempts"; exit 1
-      - name: Build
-        if: steps.cf.outputs.have_token == 'true'
-        run: bun run build
-      # out/ + functions/ (+ public/_routes.json copied into out/) deploy together;
-      # wrangler picks up ./functions relative to the working directory.
-      - name: Deploy to Cloudflare Pages
-        if: steps.cf.outputs.have_token == 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: 77a8f0e860cd23f37141248fd4e6935f
-        run: bunx wrangler pages deploy out --project-name=lvisai-xyz --branch=main --commit-dirty=true

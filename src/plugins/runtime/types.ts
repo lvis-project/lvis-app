@@ -7,9 +7,11 @@
 import type {
   PluginAccessSpec,
   PluginManifest,
+  PluginRegistryEntryInstallSource,
   PluginToolHandler,
   RuntimePlugin,
 } from "../types.js";
+import type { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
 
 export type { PluginAccessSpec, PluginManifest, PluginToolHandler, RuntimePlugin };
 
@@ -25,11 +27,13 @@ export type PluginLifecycleHookScope = {
  * tool-visibility primitive.
  */
 export type LoadedPlugin = {
+  activationId: string;
   manifest: PluginManifest;
   pluginRoot: string;
   instance: RuntimePlugin;
   methods: Map<string, PluginToolHandler>;
   approvedPluginAccess?: PluginAccessSpec;
+  hostEffects?: HostApiGenerationScope;
   started?: boolean;
   deactivateHostApi?: () => void;
   drainHostApiOperations?: () => Promise<void>;
@@ -45,6 +49,8 @@ export type ManifestLoadPlan = {
   manifestPath: string;
   enabled: boolean;
   approvedPluginAccess?: PluginAccessSpec;
+  installSource?: PluginRegistryEntryInstallSource;
+  manifestSha256?: string;
 };
 
 /**

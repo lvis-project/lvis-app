@@ -23,6 +23,7 @@ type ExposedApi = {
   takePluginMarketplaceApi: () => {
     installMarketplacePlugin: (pluginId: string) => Promise<unknown>;
     uninstallMarketplacePlugin: (pluginId: string, options?: unknown) => Promise<unknown>;
+    rollbackMarketplacePlugin: (pluginId: string) => Promise<unknown>;
   } | null;
 };
 
@@ -83,6 +84,20 @@ describe("preload plugin action normalization", () => {
     await hostApi.uninstallMarketplacePlugin("meeting", options);
 
     expect(mockInvoke).toHaveBeenCalledWith("lvis:plugins:uninstall", "meeting", options);
+  });
+
+  it("normalizes rollback results and forwards the plugin id", async () => {
+    mockInvoke.mockResolvedValueOnce({ pluginId: "meeting", rolledBackTo: "1.0.0" });
+    const api = await loadExposedApi();
+    const hostApi = api.takePluginMarketplaceApi();
+    if (!hostApi) throw new Error("host plugin marketplace api unavailable");
+
+    await expect(hostApi.rollbackMarketplacePlugin("meeting")).resolves.toEqual({
+      ok: true,
+      pluginId: "meeting",
+      rolledBackTo: "1.0.0",
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:plugins:rollback", "meeting");
   });
 
   it("allows the host marketplace api to be claimed only once", async () => {

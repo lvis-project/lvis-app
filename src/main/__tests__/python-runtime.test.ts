@@ -172,8 +172,14 @@ describe("PythonRuntimeBootstrapper", () => {
     vi.mocked(fsMock.readdir).mockRejectedValue(
       Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
     );
-    // process.resourcesPath를 undefined로 설정 (개발 환경 시뮬레이션)
-    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = undefined;
+    // Electron 43 exposes resourcesPath as a read-only process property.
+    // Re-declare it as a writable test fixture so packaged/development cases
+    // can isolate their process state without depending on Electron internals.
+    Object.defineProperty(process, "resourcesPath", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
   });
 
   afterEach(() => {
@@ -367,7 +373,7 @@ describe("PythonRuntimeBootstrapper", () => {
     const manifestPath = "/installed/local-indexer/plugin.json";
     const defaultLockFilePath = "/installed/local-indexer/python-requirements.lock";
     mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-      runtime: { python: { requirementsLock: "/outside/python.lock" } },
+      python: { requirementsLock: "/outside/python.lock" },
     }));
     mockedAccess
       .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
@@ -396,7 +402,7 @@ describe("PythonRuntimeBootstrapper", () => {
     mockedReadFile.mockImplementation(async (filePath) => {
       if (String(filePath) === declaredLockFilePath) return "pymupdf==1.26.0\n";
       return JSON.stringify({
-        runtime: { python: { requirementsLock: "requirements/python.lock" } },
+        python: { requirementsLock: "requirements/python.lock" },
       });
     });
     mockedAccess.mockImplementation(async (filePath) => {

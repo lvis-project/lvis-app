@@ -11,8 +11,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
-import { compileLegacyToolSurface } from "./test-helpers.js";
+import {
+  compileLegacyToolSurface,
+  TestPluginRuntime as PluginRuntime,
+} from "./test-helpers.js";
 
 function writePlugin(root: string, id: string, opts: {
   name: string;
@@ -97,8 +99,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       },
     });
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
     await runtime.load();
 
     const cards = runtime.listPluginCards();
@@ -131,8 +132,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       ],
     });
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
     await runtime.load();
 
     const card = runtime.listPluginCards()[0];
@@ -160,8 +160,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       },
     });
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
     await runtime.load();
 
     expect(runtime.listPluginCards()[0].networkAccess).toEqual({
@@ -188,8 +187,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     mkdirSync(join(tmp, "example-indexer", "dist", "ui"), { recursive: true });
     writeFileSync(join(tmp, "example-indexer", "dist", "ui", "indexer-control.js"), "export default function mount() {}\n");
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
     await runtime.load();
 
     const first = runtime.listUiExtensions()[0];
@@ -213,8 +211,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       tools: ["plain_do"],
     });
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
     await runtime.load();
 
     const cards = runtime.listPluginCards();
@@ -228,8 +225,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       tools: ["filtered_a", "filtered_b", "filtered_c"],
     });
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, manifestPaths: [manifestA] });
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
     await runtime.load();
 
     // Fake toolRegistry that only exposes filtered_a and filtered_c (filtered_b is denied).
@@ -269,8 +265,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       { id: "example-failed", manifestPath: join(failedDir, "plugin.json"), enabled: true },
     ]);
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, registryPath, pluginsRoot: tmp });
+    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
     await runtime.load();
 
     const cards = runtime.listPluginCards().sort((a, b) => a.id.localeCompare(b.id));
@@ -289,8 +284,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       { id: "marketplace-package-slug", manifestPath, enabled: true },
     ]);
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, registryPath, pluginsRoot: tmp });
+    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
     await runtime.load();
 
     expect(runtime.listPluginCards()).toEqual([
@@ -311,8 +305,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       { id: "marketplace-event-slug", manifestPath, enabled: true },
     ]);
 
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: tmp, registryPath, pluginsRoot: tmp });
+    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
     await runtime.load();
 
     expect(() => runtime.assertPluginEventEmitAccess(

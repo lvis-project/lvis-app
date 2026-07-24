@@ -16,16 +16,13 @@ export interface PluginUninstallLifecycleDeps {
   pluginMarketplace: Pick<PluginMarketplaceService, "uninstall">;
   pluginRuntime: Pick<
     PluginRuntime,
-    | "addPlugin"
-    | "waitForPluginReady"
     | "removePlugin"
+    | "removePluginWithCommit"
     | "getPluginManifest"
     | "resolvePluginId"
     | "resolvePluginInstallId"
     | "resolvePluginInstallIdIfKnown"
     | "clearConfigOverride"
-    | "getConfigOverride"
-    | "setConfigOverride"
     | "cancelPendingRestart"
   >;
   settingsService?: Partial<Pick<SettingsService, "deletePluginConfig" | "deletePluginSecrets">>;
@@ -156,47 +153,22 @@ export async function uninstallPluginWithLifecycle(
     const secretKeys = listSecretKeys(
       deps.pluginRuntime.getPluginManifest(canonicalPluginId)?.configSchema,
     );
-    await deps.pluginRuntime.removePlugin(canonicalPluginId, {
-      preserveConfigOverride: true,
-    });
-    await drainPluginInstallLockOperations(canonicalPluginId);
-    // stop() may persist a final config value. Snapshot only after it has
-    // settled, while removePlugin has intentionally retained the override.
-    const runtimeConfigOverride =
-      deps.pluginRuntime.getConfigOverride(canonicalPluginId);
-
-    let result: { pluginId: string; uninstalled: true } | null = null;
     let marketplaceRemoved = false;
-    try {
-      result = await deps.pluginMarketplace.uninstall(installPluginId);
-      marketplaceRemoved = true;
-    } catch (err) {
-      const message = (err as Error).message ?? "uninstall failed";
-      if (!isMissingPluginError(message)) {
+    const result = await deps.pluginRuntime.removePluginWithCommit(
+      canonicalPluginId,
+      async () => {
         try {
-          if (runtimeConfigOverride) {
-            deps.pluginRuntime.setConfigOverride(
-              canonicalPluginId,
-              runtimeConfigOverride,
-            );
-          }
-          // Registry snapshots are keyed by the marketplace/requested id even
-          // when the manifest declares a different canonical runtime id.
-          // removePlugin clears the runtime's alias map, so restoration must
-          // use the original registry identity.
-          const startState = await deps.pluginRuntime.addPlugin(installPluginId);
-          if (startState === "preparing") {
-            await deps.pluginRuntime.waitForPluginReady(installPluginId);
-          }
-        } catch (restoreError) {
-          throw new AggregateError(
-            [err, restoreError],
-            `plugin uninstall and runtime restore both failed: ${canonicalPluginId}`,
-          );
+          const removed = await deps.pluginMarketplace.uninstall(installPluginId);
+          marketplaceRemoved = true;
+          return removed;
+        } catch (err) {
+          const message = (err as Error).message ?? "uninstall failed";
+          if (!isMissingPluginError(message)) throw err;
+          return { pluginId: canonicalPluginId, uninstalled: true as const };
         }
-        throw err;
-      }
-    }
+      },
+    );
+    await drainPluginInstallLockOperations(canonicalPluginId);
 
     deps.pluginRuntime.clearConfigOverride(canonicalPluginId);
     await bestEffortCleanupPluginState(canonicalPluginId, deps, {
@@ -206,7 +178,7 @@ export async function uninstallPluginWithLifecycle(
     deps.emitHostEvent?.("plugin.uninstalled", { pluginId: canonicalPluginId });
     deps.refreshPluginNotifications?.();
 
-    return result ?? { pluginId, uninstalled: true as const };
+    return result;
     },
     (pluginIds) => {
       for (const discoveredPluginId of pluginIds) {

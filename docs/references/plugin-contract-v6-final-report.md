@@ -2,6 +2,10 @@
 
 Status: Final report, written 2026-07-10 after host 0.5.1 + the 0.5.2 host-side contract-reduction wave. Korean summary at the end (한국어 요약).
 
+> 2026-07-23 amendment: composite domain tools add the signed, Tool-local
+> `_meta["lvisai/operationPolicy"]` restriction key. The single `Tool[]` and
+> manifest==wire decisions remain unchanged; no top-level action/policy map exists.
+
 This document answers one question, asked when the legacy-reader removal (R) was commissioned: **compared to the initial #885 design, how consistent is the achieved state — was the tool schema correctly unified?**
 
 ## 1. The initial design (#885, as redefined 2026-05-17)
@@ -17,13 +21,14 @@ Out of scope by design: forcing the plugin contract into MCP JSON-RPC wholesale,
 
 ### 2.1 Tool schema — unified, pure MCP shape ✅
 
-`PluginManifest.tools` is a single colocated array of **pure MCP `Tool` objects** — `{ name, title?, description?, inputSchema, outputSchema?, icons?, _meta? }` (`src/plugins/types.ts:200,240`). **Manifest == wire**: the same object the manifest declares is what the loopback MCP `tools/list` serves. The legacy triple (`tools[]` strings + `toolSchemas` map + `uiActions` map) is gone from the host in both directions:
+`PluginManifest.tools` is a single colocated array of **pure MCP `Tool` objects** — `{ name, title?, description?, inputSchema, outputSchema?, icons?, _meta? }` (`src/plugins/public-contract.ts`). **Manifest == wire**: the same object the manifest declares is what the loopback MCP `tools/list` serves. The legacy triple (`tools[]` strings + `toolSchemas` map + `uiActions` map) is gone from the host in both directions:
 
 | Legacy element | Replacement | Where enforced |
 |---|---|---|
 | `tools: string[]` + `toolSchemas[]` | colocated pure `Tool[]` | AJV (SDK schema) + fail-closed pre-v6 reject with upgrade message (`manifest-validation.ts`) |
 | `uiActions[]` map | per-tool `_meta.ui.visibility: ["model"\|"app"]` (SEP-1865) | `normalizeManifest` materializes the dual default; empty visibility throws |
-| `toolSchemas[*].pathFields` | `_meta["lvisai/pathFields"]` — the **sole** LVIS-proprietary `_meta` key | permission pipeline reads only this |
+| `toolSchemas[*].pathFields` | `_meta["lvisai/pathFields"]` | permission pipeline reads only this |
+| composite operation restrictions (2026-07-23) | `_meta["lvisai/operationPolicy"]` on the same Tool | validated against `inputSchema.operation`; can only raise risk, narrow app visibility, or require a prior read |
 | per-tool manifest `category` | **removed everywhere** — host classifies risk per invocation (`inspectHostRisk`); 0.5.2 #1582 completed the removal for the out-of-process stdio path (wire-declared category is now ignored; it had been shadow-only under `hostClassifiesRisk` anyway) | executor + risk classification |
 | `writesToOwnSandbox`, `version`, `deprecatedSince`, `replacedBy` per-tool fields | removed from the Tool contract (Phase R) | schema `additionalProperties:false` |
 
@@ -31,7 +36,8 @@ The compat layer itself is gone: `normalizeManifest` is a pure-form visibility *
 
 ### 2.2 Host-derived governance ✅ (stronger than the initial design)
 
-The initial design asked for SoT consolidation; the landed state goes further — **no governance signal is read from a plugin self-claim**:
+The initial design asked for SoT consolidation; effective authority remains Host-owned. The signed
+operation-policy amendment is restriction-only and cannot lower a Host verdict:
 
 - Effective per-tool risk category: host-computed per invocation, never declared (see table above).
 - Tool ownership / `writesToOwnSandbox` / model-vs-app routing: host-derived from the manifest's model-visible tools (0.5.0 #1564).
@@ -53,13 +59,13 @@ All 7 first-party plugins are pure v6 (verified 2026-07-10): git 0.1.9 (24 tools
 ## 3. Honest divergences from the initial design
 
 1. **The compat window collapsed to ~zero.** (a2) planned a legacy-reading window until a 0.6.0 removal. In practice the reader shipped in 0.5.0 and was deleted in 0.5.1 — because Plugin Doctor made the time-gate unnecessary. The end state is **purer** than the phased plan, reached faster.
-2. **"SDK as optional helper" is partially achieved.** Authors no longer need SDK *runtime* helpers to write a valid manifest (pure MCP tools + a few identity fields), but the host still imports `compileManifestValidator()` from `@lvis/plugin-sdk` — the schema is SDK-canonical. Fully decoupling schema ownership is the on-hold Option A ph2 decision (#1571/#22), deliberately not pre-empted.
-3. **The authoring schema lagged the host.** Until the 0.5.2 schema-collapse (in flight at time of writing: SDK `feat/plugin-v6-schema-collapse`), the SDK schema still advertised the legacy arm the host already hard-rejects — a publish-but-won't-load trap. The collapse removes the legacy `tools` arm, `toolSchemas`, `uiActions`, `ui[].kind:"action"`, and the legacy `allOf` guards, folds `minItems:0`, re-points the `auth` tool references to app-visible tools, and makes `name` optional. The marketplace publish gate follows the SDK `main` schema within ~60s (remote fetch), with server-side legacy branches cleaned in lockstep.
+2. **"SDK as optional helper" is achieved for authority.** Authors may use the SDK package for compile-time types and the pinned publish schema, but the Host imports neither at runtime. The complete public TypeScript contract and JSDoc live in `src/plugins/public-contract.ts`; the manifest schema lives in `schemas/plugin-manifest.schema.json`. The SDK mechanically mirrors both and owns no declaration-selection or documentation policy.
+3. **The authoring schema lag was closed.** The Host-owned schema now matches the pure reader and rejects legacy `tools` strings, `toolSchemas`, `uiActions`, `ui[].kind:"action"`, and parallel operation/action policy fields. The SDK schema is a verbatim generated mirror for plugin and marketplace CI pinned to an SDK tag.
 4. **Two stale catalog entries remain** (hello-world 0.1.1, git 0.1.8 — both legacy shape, both already unloadable on ≥0.5.0). Republish of git 0.1.9 + a pure hello-world reseed closes this; scheduled with the SDK-bump wave.
 
 ## 4. Verdict
 
-**The tool schema is correctly unified.** One shape (pure MCP `Tool`), declared once, served as-is over the wire, validated by one canonical schema, with every governance signal host-derived and exactly one LVIS-proprietary key (`_meta["lvisai/pathFields"]`) remaining by design. The deviations from the initial plan are all in the direction of *more* consistency (earlier legacy removal, deeper host-derivation, removal of duplicate projections the design hadn't yet identified). Remaining work is closure of the authoring/publishing surface (SDK schema collapse + republish), not contract drift.
+**The tool schema remains correctly unified.** One shape (pure MCP `Tool`), declared once, served as-is over the wire, and validated by one canonical schema. The two LVIS keys are path restrictions and signed composite-operation restrictions; neither can lower Host-derived risk. The operation amendment remains inside the Tool and introduces no parallel map.
 
 ---
 
@@ -68,7 +74,8 @@ All 7 first-party plugins are pure v6 (verified 2026-07-10): git 0.1.9 (24 tools
 **질문: 초기 #885 설계 대비, 툴 스키마가 올바르게 통일되었는가? → 예.**
 
 - 매니페스트 `tools`는 **pure MCP `Tool` 객체 단일 배열**(manifest == wire). 레거시 삼중(`tools[]` 문자열 + `toolSchemas` + `uiActions`)은 코드·문서·에러 문구까지 완전 제거.
-- 표면 노출은 툴별 `_meta.ui.visibility`(SEP-1865), LVIS 전용 키는 `_meta["lvisai/pathFields"]` **하나만** 잔존(설계 의도).
+- 표면 노출은 툴별 `_meta.ui.visibility`(SEP-1865). LVIS 전용 키는 path 제한과
+  2026-07-23에 추가된 Tool-local operation 제한 두 개이며, 별도 action/policy 맵은 없음.
 - per-tool `category` 등 플러그인 자기선언 거버넌스 신호는 전부 제거 — 호스트가 invocation별 산출(`inspectHostRisk`). 0.5.2에서 stdio 경로 잔재까지 완결.
 - 레거시 호환 리더는 0.5.1에서 삭제(Plugin Doctor가 타이밍게이트 대체) — 초기 계획(0.6.0 대기)보다 **더 순수한 상태를 더 빨리** 달성.
 - 마켓플레이스의 중복 `tools[]` 프로젝션·미러 필드 제거(0.5.2). 유지된 카탈로그 필드는 사전-설치 표시와 설치 무결성 교차검증 앵커뿐.

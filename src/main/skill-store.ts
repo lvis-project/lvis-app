@@ -18,6 +18,8 @@ import { closeSync, openSync, readdirSync, readSync, realpathSync } from "node:f
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import type { ActivePluginGeneration } from "../plugins/plugin-generation-coordinator.js";
+import type { MaterializedPluginContribution } from "../plugins/plugin-contributions.js";
 const log = createLogger("lvis");
 
 /**
@@ -28,6 +30,8 @@ const log = createLogger("lvis");
  * metacharacters into the resolved file path.
  */
 export const SKILL_NAME_ALLOWLIST = /^[a-zA-Z0-9_-]+$/;
+const PLUGIN_SKILL_SELECTOR_ALLOWLIST = /^plugin:[a-z][a-z0-9-]{2,127}:[a-zA-Z_][a-zA-Z0-9_]*$/;
+export const SKILL_SELECTOR_ALLOWLIST = /^(?:[a-zA-Z0-9_-]+|plugin:[a-z][a-z0-9-]{2,127}:[a-zA-Z_][a-zA-Z0-9_]*)$/;
 
 /** C2(e): skills with a body larger than this are refused at load time. */
 export const SKILL_MAX_BODY_BYTES = 8 * 1024;
@@ -37,16 +41,64 @@ export interface SkillFrontmatter {
   description?: string;
 }
 
+function materializedSkill(
+  generation: ActivePluginGeneration,
+  contribution: MaterializedPluginContribution,
+): LoadedSkill {
+  const entryPath = `${contribution.path}/SKILL.md`;
+  const entry = contribution.files.find((file) => file.path === entryPath);
+  if (!entry) throw new Error(`materialized Skill '${contribution.localId}' is missing SKILL.md`);
+  const { fm, body } = parseFrontmatter(entry.content);
+  const trimmedBody = body.trim();
+  if (Buffer.byteLength(trimmedBody, "utf-8") > SKILL_MAX_BODY_BYTES) {
+    throw new Error(`materialized Skill '${contribution.localId}' exceeds ${SKILL_MAX_BODY_BYTES} bytes`);
+  }
+  const owner: PluginSkillOwner = Object.freeze({
+    pluginId: generation.pluginId,
+    pluginVersion: generation.pluginVersion,
+    generationId: generation.generationId,
+    localId: contribution.localId,
+    fingerprint: contribution.fingerprint,
+  });
+  const selector = `plugin:${owner.pluginId}:${owner.localId}`;
+  return Object.freeze({
+    name: selector,
+    description: fm.description ?? "",
+    body: trimmedBody,
+    filePath: `plugin://${owner.pluginId}/${owner.localId}/SKILL.md`,
+    approvalKey: [owner.pluginId, owner.pluginVersion, owner.generationId, owner.localId, owner.fingerprint].join("|"),
+    pluginOwner: owner,
+  });
+}
+
 export interface LoadedSkill {
   name: string;
   description: string;
   body: string;
   filePath: string;
+  /** Exact cache/approval identity for plugin-owned materialized bytes. */
+  approvalKey?: string;
+  pluginOwner?: PluginSkillOwner;
 }
 
 export interface SkillCatalogEntry {
   name: string;
   description: string;
+  pluginOwner?: PluginSkillOwner;
+}
+
+interface PluginSkillOwner {
+  pluginId: string;
+  pluginVersion: string;
+  generationId: string;
+  localId: string;
+  fingerprint: string;
+}
+
+export interface PreparedPluginSkillGeneration {
+  readonly pluginId: string;
+  readonly generationId: string;
+  publish(): void;
 }
 
 interface SkillCatalogRecord extends SkillCatalogEntry {
@@ -95,6 +147,7 @@ export interface SkillStoreOptions {
 
 export class SkillStore {
   private readonly userDir: string;
+  private pluginSkills = new Map<string, LoadedSkill>();
 
   constructor(opts: SkillStoreOptions = {}) {
     this.userDir = opts.userDir ?? USER_SKILLS_DIR;
@@ -105,7 +158,7 @@ export class SkillStore {
     const out = await this.scanDir(this.userDir);
     const byName = new Map<string, LoadedSkill>();
     for (const s of out) byName.set(s.name, s);
-    return [...byName.values()];
+    return [...byName.values(), ...this.pluginSkills.values()];
   }
 
   /**
@@ -121,10 +174,20 @@ export class SkillStore {
         description: s.description,
       });
     }
-    return [...byName.values()];
+    return [
+      ...byName.values(),
+      ...[...this.pluginSkills.values()].map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        pluginOwner: skill.pluginOwner,
+      })),
+    ];
   }
 
   async load(name: string): Promise<LoadedSkill | null> {
+    if (PLUGIN_SKILL_SELECTOR_ALLOWLIST.test(name)) {
+      return this.pluginSkills.get(name) ?? null;
+    }
     if (!SKILL_NAME_ALLOWLIST.test(name)) return null;
     let canonicalDir: string;
     try {
@@ -163,6 +226,83 @@ export class SkillStore {
       return null;
     }
     return loaded[0] ?? null;
+  }
+
+  /** Resolve a plugin Skill only from an already-admitted immutable generation. */
+  loadPluginGeneration(generation: ActivePluginGeneration, selector: string): LoadedSkill | null {
+    const prefix = `plugin:${generation.pluginId}:`;
+    if (!selector.startsWith(prefix)) return null;
+    const localId = selector.slice(prefix.length);
+    const contribution = generation.contributions.find(
+      (entry) => entry.kind === "skill" && entry.localId === localId,
+    );
+    return contribution ? materializedSkill(generation, contribution) : null;
+  }
+
+  /** Publish materialized Skill bytes for exactly one active plugin generation. */
+  publishPluginGeneration(generation: ActivePluginGeneration): void {
+    this.preparePluginGeneration(generation).publish();
+  }
+
+  /** Parse and prebuild the complete Skill snapshot before durable commit. */
+  preparePluginGeneration(generation: ActivePluginGeneration): PreparedPluginSkillGeneration {
+    const next = new Map(this.pluginSkills);
+    for (const [selector, skill] of next) {
+      if (skill.pluginOwner?.pluginId === generation.pluginId) next.delete(selector);
+    }
+    for (const contribution of generation.contributions) {
+      if (contribution.kind !== "skill") continue;
+      const skill = materializedSkill(generation, contribution);
+      if (next.has(skill.name)) {
+        throw new Error(`duplicate plugin Skill selector: ${skill.name}`);
+      }
+      next.set(skill.name, skill);
+    }
+    let published = false;
+    return Object.freeze({
+      pluginId: generation.pluginId,
+      generationId: generation.generationId,
+      publish: () => {
+        if (published) return;
+        this.pluginSkills = next;
+        published = true;
+      },
+    });
+  }
+
+  /** Prebuild exact plugin catalog removal; leased overlays keep their body. */
+  preparePluginRemoval(pluginId: string, generationId: string): PreparedPluginSkillGeneration {
+    const next = new Map(this.pluginSkills);
+    for (const [selector, skill] of next) {
+      if (skill.pluginOwner?.pluginId === pluginId && skill.pluginOwner.generationId === generationId) {
+        next.delete(selector);
+      }
+    }
+    let published = false;
+    return Object.freeze({
+      pluginId,
+      generationId,
+      publish: () => {
+        if (published) return;
+        this.pluginSkills = next;
+        published = true;
+      },
+    });
+  }
+
+  /** Remove one retired generation without touching user/global skill files. */
+  removePluginGeneration(pluginId: string, generationId: string): void {
+    for (const [selector, skill] of this.pluginSkills) {
+      if (skill.pluginOwner?.pluginId === pluginId && skill.pluginOwner.generationId === generationId) {
+        this.pluginSkills.delete(selector);
+      }
+    }
+  }
+
+  removePlugin(pluginId: string): void {
+    for (const [selector, skill] of this.pluginSkills) {
+      if (skill.pluginOwner?.pluginId === pluginId) this.pluginSkills.delete(selector);
+    }
   }
 
   private async scanDir(dir: string): Promise<LoadedSkill[]> {

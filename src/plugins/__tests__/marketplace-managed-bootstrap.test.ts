@@ -5,13 +5,16 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import {
+  makeTestPluginPaths,
+  TestPluginMarketplaceService,
+} from "./test-helpers.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
 
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
   const fetcher = new MockMarketplaceFetcher(marketplacePath);
-  return new PluginMarketplaceService(paths, fetcher);
+  return new TestPluginMarketplaceService(paths, fetcher);
 }
 
 describe("PluginMarketplaceService managed bootstrap", () => {
@@ -344,6 +347,44 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.failed).toEqual([{ id: "meeting", error: "download failed" }]);
     expect(result.updated).toEqual([]);
     expect(result.installed).toEqual([]);
+  });
+
+  it("preserves managed durable state when staged candidate activation fails", async () => {
+    await writeAdminCatalog("2.0.0");
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
+    const beforeRegistry = await readFile(registryPath, "utf-8");
+    const service = makeManagedService(testDir, marketplacePath);
+    const durableCommit = vi.fn(async () => "meeting/plugin.json");
+    vi.spyOn(
+      service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
+      "installWithDependencies",
+    ).mockImplementation(async (...args: unknown[]) => {
+      const activate = args[5] as ((prepared: unknown) => Promise<unknown>) | undefined;
+      if (!activate) throw new Error("missing managed generation activation seam");
+      await activate({
+        pluginRoot: join(testDir, "staged-meeting"),
+        manifest: { id: "meeting", version: "2.0.0" },
+        receiptRaw: "{}",
+        durableCommit,
+      });
+      return { pluginId: "meeting", installed: true };
+    });
+    const activatePreparedArtifact = vi.fn(async () => {
+      throw new Error("managed candidate start failed");
+    });
+
+    const result = await service.ensureManagedInstalled({
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    });
+
+    expect(result).toMatchObject({
+      installed: [],
+      updated: [],
+      failed: [{ id: "meeting", error: "managed candidate start failed" }],
+    });
+    expect(activatePreparedArtifact).toHaveBeenCalledOnce();
+    expect(durableCommit).not.toHaveBeenCalled();
+    expect(await readFile(registryPath, "utf-8")).toBe(beforeRegistry);
   });
 
   it("keeps managed install failures as Doctor diagnostics until a later success", async () => {

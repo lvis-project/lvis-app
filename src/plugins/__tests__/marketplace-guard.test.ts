@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths, writeTestPluginRegistry } from "./test-helpers.js";
+import {
+  makeTestPluginPaths,
+  TestPluginMarketplaceService,
+  writeTestPluginRegistry,
+} from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
 
 /**
@@ -86,7 +90,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
       pluginsRoot: paths.pluginsRoot,
     });
     const fetcher = new MockMarketplaceFetcher(marketplacePath);
-    return new PluginMarketplaceService(paths, fetcher, guard);
+    return new TestPluginMarketplaceService(paths, fetcher, guard);
   }
 
   it("install() escalates admin-policy catalog item to actor=it-admin (passes guard)", async () => {

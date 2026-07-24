@@ -49,6 +49,8 @@ import type {
   RationaleRequiredExecuteOneOutcome,
   RationaleResumeExecutionContext,
 } from "./invocation-runner.js";
+import type { ResolvedPluginOperation } from "./plugin-operation-governance.js";
+import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
 
 const log = createLogger("executor");
 
@@ -101,6 +103,8 @@ export interface AuthorizationStageContext {
   sessionId: string | undefined;
   startTime: number;
   permissionResult: PermissionCheckResult | undefined;
+  resolvedPluginOperation: ResolvedPluginOperation | undefined;
+  pluginOperationPrincipal: PluginOperationPrincipal | undefined;
 }
 
 export interface AuthorizedInvocation {
@@ -151,6 +155,8 @@ export async function authorizeToolInvocation(
     returnRationaleResumeBlock,
     sessionId,
     startTime,
+    resolvedPluginOperation,
+    pluginOperationPrincipal,
   } = context;
   let { permissionResult, hostShellApprovalDecision } = context;
 
@@ -234,6 +240,46 @@ export async function authorizeToolInvocation(
             reason: `${fallbackReason}: this shell will run without OS isolation and requires an exact allow-once approval`,
             layer: permissionResult.layer,
             forceModal: true,
+          };
+    }
+
+    // A pre-issued app mutation grant replaces only the ordinary foreground
+    // approval ask. Hard denies, layer-1/2 asks, forceModal, operator Hooks,
+    // rate limits, audit, and final one-shot consumption still apply.
+    if (
+      rationaleResumeContext === undefined &&
+      resolvedPluginOperation?.rule.kind === "write" &&
+      pluginOperationPrincipal !== undefined &&
+      invocationPermissionContext.pluginOperation?.grantToken !== undefined &&
+      permissionResult.decision === "ask" &&
+      permissionResult.layer >= 3 &&
+      permissionResult.forceModal !== true
+    ) {
+      const operationPermHook = await runScriptHook(
+        services.scriptHookManager,
+        "perm",
+        toolUse.name,
+        source,
+        invocationCategory,
+        finalInput,
+        sessionId,
+        invocationPermissionContext,
+        tool.mcpServerId,
+        tool.pluginId,
+        undefined,
+        undefined,
+        tool.pluginGeneration !== undefined,
+      );
+      permissionResult = operationPermHook.decision === "deny"
+        ? {
+            decision: "deny",
+            reason: operationPermHook.reason,
+            layer: permissionResult.layer,
+          }
+        : {
+            decision: "allow",
+            reason: "pre-issued app operation grant pending atomic consumption",
+            layer: permissionResult.layer,
           };
     }
 
@@ -435,6 +481,9 @@ export async function authorizeToolInvocation(
         invocationPermissionContext,
         tool.mcpServerId,
         tool.pluginId,
+        undefined,
+        undefined,
+        tool.pluginGeneration !== undefined,
       );
       if (relaxedPermHook.decision === "deny") {
         // Operator perm-hook DENY wins over the relaxation — fail closed exactly
@@ -473,6 +522,9 @@ export async function authorizeToolInvocation(
         invocationPermissionContext,
         tool.mcpServerId,
         tool.pluginId,
+        undefined,
+        undefined,
+        tool.pluginGeneration !== undefined,
       );
       if (panelPermHook.decision === "deny") {
         const msg = t("be_executor.hookPermissionBlock", { reason: panelPermHook.reason });
@@ -822,6 +874,9 @@ export async function authorizeToolInvocation(
           invocationPermissionContext,
           tool.mcpServerId,
           tool.pluginId,
+          undefined,
+          undefined,
+          tool.pluginGeneration !== undefined,
         );
         if (permHook.decision === "deny") {
           return returnRationaleResumeBlock(
@@ -939,6 +994,9 @@ export async function authorizeToolInvocation(
           invocationPermissionContext,
           tool.mcpServerId,
           tool.pluginId,
+          undefined,
+          undefined,
+          tool.pluginGeneration !== undefined,
         );
         if (permHook.decision === "deny") {
           const msg = t("be_executor.hookPermissionBlock", { reason: permHook.reason });

@@ -113,6 +113,19 @@ export interface AuditCommon {
    * nonces, HMACs, and capability reasons.
    */
   executionPlan?: HostShellExecutionPlanAuditProjection;
+  /** Metadata-only lifecycle evidence for one host-issued plugin operation grant. */
+  pluginOperation?: {
+    pluginId: string;
+    operation: string;
+    outcome:
+      | "issued"
+      | "denied"
+      | "consumed"
+      | "rejected"
+      | "indeterminate"
+      | "settled";
+    grantId?: string;
+  };
 
   /** Trust origin propagated through the eval pipeline. */
   trustOrigin: TrustOrigin;

@@ -55,6 +55,7 @@ import { openLinkWindow as openLinkWindowService } from "./main/link-window-serv
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
 import { type AppServices, onEvent } from "./boot/types.js";
+import { revokePluginWebviewsForPlugin } from "./ipc/domains/plugins.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { RoutinesStore } from "./main/routines-store.js";
@@ -85,6 +86,7 @@ import { setupAuditAndNotification } from "./boot/steps/audit-notification.js";
 import { setupWorkBoard } from "./boot/steps/work-board-setup.js";
 import { setupWorkflowStores } from "./boot/steps/workflow-stores.js";
 import { setupMarketplace } from "./boot/steps/marketplace-setup.js";
+import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { wireReviewerAndPermissions } from "./boot/steps/reviewer-permission-wiring.js";
 import { setupPluginToolExecutor } from "./boot/steps/plugin-tool-executor.js";
 import { wireRationaleHost } from "./boot/steps/rationale-host-wiring.js";
@@ -99,6 +101,7 @@ import { initSandboxGate } from "./boot/steps/sandbox-init.js";
 import { createA2ARemoteRuntime } from "./main/a2a-remote-runtime.js";
 import { createRemoteA2AActionController } from "./main/remote-a2a-action-controller.js";
 import { buildSingleFlightAgentActionApprover } from "./permissions/agent-action-approver.js";
+import { PluginBundleLifecycle } from "./plugins/plugin-bundle-lifecycle.js";
 const log = createLogger("lvis");
 
 export type { AppServices } from "./boot/types.js";
@@ -407,6 +410,8 @@ export async function bootstrap(
     runPluginShutdownHandlers,
     pluginPaths,
     loopbackManager,
+    setBundleLifecycleHandler,
+    startPlugins,
   } = await initPluginRuntime({
     projectRoot,
     settingsService,
@@ -431,6 +436,13 @@ export async function bootstrap(
     permissionManager,
     // Idempotency SOT for `hostApi.hasRoutineBySource` (constructed above).
     routinesStore,
+    onPluginUiRevisionChange: (pluginId) => {
+      revokePluginWebviewsForPlugin(
+        pluginId,
+        (appSessionId) => ctx.revokePluginOperationSession?.(appSessionId),
+      );
+    },
+    deferStart: true,
   });
   ctx.pluginRuntime = pluginRuntime;
   ctx.deploymentGuard = deploymentGuard;
@@ -497,6 +509,37 @@ export async function bootstrap(
 
   // §9.5: MCP servers + signed marketplace artifact stores.
   await setupMcp(ctx);
+
+  // Skills, Hook runtime, and external MCP manager now all exist. Bind the
+  // lifecycle callback and replay boot-loaded plugins because initial startAll
+  // intentionally does not emit onEnable.
+  const pluginBundleLifecycle = new PluginBundleLifecycle({
+    pluginRuntime,
+    receiptCacheRoot: pluginPaths.cacheRoot,
+    skillStore: ctx.skillStore,
+    hookManager: ctx.scriptHookManager,
+    mcpManager: ctx.mcpManager,
+    loopbackManager: ctx.pluginLoopbackManager,
+    revokeOperationGeneration: ctx.revokePluginOperationGeneration,
+  });
+  ctx.pluginBundleLifecycle = pluginBundleLifecycle;
+  pluginRuntime.setGenerationAccess(pluginBundleLifecycle);
+  ctx.mcpManager.setPluginGenerationAccess(pluginBundleLifecycle);
+  ctx.scriptHookManager.setPluginGenerationAccess(pluginBundleLifecycle);
+  setBundleLifecycleHandler?.(pluginBundleLifecycle);
+  await startPlugins();
+  await pluginBundleLifecycle.recoverRetirements();
+
+  // Managed installs/updates must run only after the full Skill/Hook/MCP
+  // generation lifecycle is bound.  This lets signed boot-time candidates be
+  // imported and started before their bytes, receipt, registry, and pointer
+  // become durable, preserving a valid predecessor on candidate failure.
+  await runManagedBootstrap({
+    pluginMarketplace: ctx.pluginMarketplace,
+    pluginRuntime,
+    mainWindow,
+    marketplace: ctx.settingsService.get("marketplace"),
+  });
 
   // §691: OS-level tool sandbox — decided exactly once here at boot.
   await initSandboxGate(ctx);

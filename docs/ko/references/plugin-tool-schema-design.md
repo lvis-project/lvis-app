@@ -56,6 +56,10 @@ interface PluginManifest {
   tools: Tool[];
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
+  /**
+   * @deprecated keyword→Tool schema preload only.
+   * Bundled Skill discovery uses manifest.skills.
+   */
   keywords?: Array<{ keyword: string; skillId: string }>;
   /** 폐쇄형 enum — §2.3 Capabilities Taxonomy 참조. */
   capabilities?: string[];
@@ -157,7 +161,7 @@ interface Tool {
 | `entry` | runtime.ts `require()` | boot |
 | `tools[]` (Tool 객체) | Tool Registry 등록 + LLM system prompt tool schema (`inputSchema`/`description`) | boot ToolRegistry 등록 + system prompt 빌드 |
 | `description` | 비활성 플러그인 카탈로그 (`listPluginCards`) | system prompt · UI |
-| `keywords[]` | KeywordEngine 등록 | boot |
+| deprecated `keywords[]` | 일치한 model-visible Tool schema preload (직접 호출/Skill discovery 아님) | boot |
 | `ui[]` | plugin-ui-host.tsx 마운트 | boot + UI 렌더 |
 | `eventSubscriptions[]` | 호스트 이벤트 라우팅 | boot |
 | `notificationEvents[]` | `registerPluginNotifications()` — OS 알림 자동 등록 | boot |
@@ -167,6 +171,10 @@ interface Tool {
 | `dependencies` | Marketplace install **preflight gate**. `required:true` (default — string form / `required` 누락 object 포함) 미설치 시 install 거부 + `MissingPluginDependenciesError`; `required:false` 는 install 통과 + 컨슈머 책임으로 degrade. **Host 는 dep 을 auto-install 하지 않는다** (issue #92). | install |
 | `pluginAccess` | Cross-plugin tool/event access gate + agent approval scope grant | runtime |
 | `publisher` | 감사 로그 · 마켓플레이스 카드 | install + 표시 |
+
+Deprecated `keywords`의 owner는 `lvis-app` plugin runtime입니다. 지원되는
+모든 플러그인이 bundled `manifest.skills`로 이관되고 active manifest의
+`keywords` 선언이 0이 되면 `registerKeywords`와 함께 제거합니다.
 
 **plugin.json 권한 메타데이터 예시 (meeting 플러그인의 핵심 도구 발췌):**
 
@@ -239,8 +247,8 @@ interface Tool {
     }
   ],
   "keywords": [
-    { "keyword": "회의록", "skillId": "meeting" },
-    { "keyword": "녹음", "skillId": "meeting" }
+    { "keyword": "회의록", "skillId": "meeting_sessions" },
+    { "keyword": "녹음", "skillId": "meeting_sessions" }
   ],
   "installPolicy": "user",
   "publisher": "example-publisher"
@@ -472,7 +480,8 @@ plugin.json
 ┌──────────────────────────────────┐
 │ 3. Cross-field checks            │  runtime.ts readManifest()
 │    - tool name regex             │
-│    - keywords[].skillId ∈ tools[] │
+│    - deprecated keywords[].skillId │
+│      names a model-visible Tool    │
 │    - auth tool visibility==["app"]│
 │      (app-only; model 노출 금지)   │
 │    - startupTimeoutMs > 0        │
@@ -995,7 +1004,8 @@ import type { RuntimePluginFactory } from "@lvis/plugin-sdk";
 export const createPlugin: RuntimePluginFactory = async (context) => {
   const { hostApi, config, log } = context;
 
-  hostApi.registerKeywords([{ keyword: "내키워드", skillId: "my-skill" }]);
+  // Deprecated Tool-schema preload. 신규 instruction discovery는 manifest.skills.
+  hostApi.registerKeywords([{ keyword: "내키워드", skillId: "my_action" }]);
 
   return {
     start: async () => { log("플러그인 시작"); },

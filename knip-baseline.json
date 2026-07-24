@@ -604,11 +604,6 @@
     },
     {
       "type": "exports",
-      "file": "src/permissions/effect-kind.ts",
-      "name": "pathEffectClass"
-    },
-    {
-      "type": "exports",
       "file": "src/permissions/evaluation-context.ts",
       "name": "PERMISSION_EVALUATION_CONTEXT_VERSION"
     },
@@ -1745,11 +1740,6 @@
     {
       "type": "types",
       "file": "src/hooks/hook-registry.ts",
-      "name": "ConfigHookRegistryEntry"
-    },
-    {
-      "type": "types",
-      "file": "src/hooks/hook-registry.ts",
       "name": "ShHookRegistryEntry"
     },
     {
@@ -2270,82 +2260,7 @@
     {
       "type": "types",
       "file": "src/plugins/runtime/types.ts",
-      "name": "PluginManifest"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/runtime/types.ts",
       "name": "PluginToolHandler"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/runtime/types.ts",
-      "name": "RuntimePlugin"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "DependencySpec"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "EventSubscription"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "EventSubscriptionHint"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "OpenAuthWindowCookieOptions"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "OpenAuthWindowWithFinalUrlOptions"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "PluginAccessTarget"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "PluginAuthStatus"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "PluginLifecycleEvent"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "PluginRuntimeContext"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "PluginUiResourceDecl"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "PluginWorkerSpec"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "SpawnedPluginWorker"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/types.ts",
-      "name": "StorageEncoding"
     },
     {
       "type": "types",
@@ -2721,11 +2636,6 @@
       "type": "types",
       "file": "src/tools/knowledge-search.ts",
       "name": "KnowledgeSearchResultItem"
-    },
-    {
-      "type": "types",
-      "file": "src/tools/knowledge-search.ts",
-      "name": "KnowledgeWorkerClient"
     },
     {
       "type": "types",

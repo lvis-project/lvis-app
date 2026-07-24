@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "../../__tests__/test-helpers.js";
 
 const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 
@@ -25,8 +25,7 @@ function runtimeWithUiAction(
   method: string,
   handler: (payload?: unknown) => Promise<unknown>,
 ): PluginRuntime {
-  const rt = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: HOST_ROOT, manifestPaths: [] });
+  const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
   const internals = rt as unknown as {
     plugins: Map<string, { manifest: unknown }>;
     methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;

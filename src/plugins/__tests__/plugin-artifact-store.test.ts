@@ -177,6 +177,47 @@ describe("PluginArtifactStore — installDirFor", () => {
 });
 
 describe("PluginArtifactStore — extractZip", () => {
+  it("rejects archive symlink members before extraction", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const zip = new AdmZip();
+      zip.addFile("link", Buffer.from("outside"));
+      const entry = zip.getEntry("link");
+      if (!entry) throw new Error("test fixture entry missing");
+      entry.attr = (0o120777 << 16) >>> 0;
+      await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/unsupported member kind/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects case-colliding archive members", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const zip = new AdmZip();
+      zip.addFile("Hooks/a.json", Buffer.from("one"));
+      zip.addFile("hooks/A.json", Buffer.from("two"));
+      await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/colliding entry/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects Unicode case-folding archive member aliases", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const zip = new AdmZip();
+      zip.addFile("skills/Straße/SKILL.md", Buffer.from("one"));
+      zip.addFile("SKILLS/STRASSE/skill.md", Buffer.from("two"));
+      await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/colliding entry/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("rejects unsafe slugs before staging zip contents", async () => {
     const tmp = makeTmpDir();
     try {
@@ -215,6 +256,70 @@ describe("PluginArtifactStore — extractZip", () => {
     }
   });
 
+  it("leaves the live payload untouched when staged candidate preparation fails", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      const durableCommit = vi.fn(async () => undefined);
+
+      await expect(store.extractZipWithCommit("acme", zip.toBuffer(), durableCommit, {
+        coordinateCommit: async () => {
+          throw new Error("candidate import failed");
+        },
+      })).rejects.toThrow("candidate import failed");
+
+      expect(durableCommit).not.toHaveBeenCalled();
+      expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf8")).version).toBe("old");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("retains the predecessor backup until coordinated generation retirement settles", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installRoot = resolve(tmp, "installed");
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      let releaseRetirement!: () => void;
+      const retirement = new Promise<void>((resolveRetirement) => { releaseRetirement = resolveRetirement; });
+      let durableFinished!: () => void;
+      const durableFinishedPromise = new Promise<void>((resolveDurable) => { durableFinished = resolveDurable; });
+
+      const installing = store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
+        durableFinished();
+        return "committed";
+      }, {
+        coordinateCommit: async ({ durableCommit }) => ({
+          result: await durableCommit(),
+          retirement,
+        }),
+      });
+      await durableFinishedPromise;
+      const backupBeforeDrain = (await readdir(installRoot)).filter((name) => name.startsWith(".acme.old-"));
+      expect(backupBeforeDrain).toHaveLength(1);
+      let installSettled = false;
+      void installing.finally(() => { installSettled = true; });
+      await Promise.resolve();
+      expect(installSettled).toBe(false);
+
+      releaseRetirement();
+      await expect(installing).resolves.toMatchObject({ result: "committed", predecessorRetired: true });
+      expect((await readdir(installRoot)).filter((name) => name.startsWith(".acme.old-"))).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("rejects compressed bytes above the configured ceiling before staging", async () => {
     const tmp = makeTmpDir();
     try {
@@ -246,6 +351,47 @@ describe("PluginArtifactStore — extractZip", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it.runIf(process.platform !== "win32")(
+    "routes a persistently locked failed stage into the boot-swept tombstone namespace",
+    async () => {
+      const tmp = makeTmpDir();
+      const installRoot = resolve(tmp, "installed");
+      try {
+        const store = makeStore(tmp, { artifactLimits: { maxEntryCount: 1 } });
+        const removeStage = vi.spyOn(
+          store as unknown as { removeAbandonedStage: (path: string) => Promise<void> },
+          "removeAbandonedStage",
+        ).mockRejectedValue(Object.assign(new Error("persistent stage lock"), { code: "EACCES" }));
+        const originalTombstone = installedEntryFs.tombstoneAndDeferredRemove;
+        const tombstoneSpy = vi.spyOn(installedEntryFs, "tombstoneAndDeferredRemove").mockImplementation(
+          (path, root, options) => originalTombstone(path, root, { ...options, deferRemoval: false }),
+        );
+        try {
+          const zip = new AdmZip();
+          zip.addFile("one.txt", Buffer.from("1"));
+          zip.addFile("two.txt", Buffer.from("2"));
+
+          await expect(store.extractZip("acme", zip.toBuffer())).rejects.toMatchObject({
+            code: "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
+          });
+
+          expect(removeStage.mock.calls.length).toBeGreaterThan(1);
+          const rootEntries = await readdir(installRoot);
+          expect(rootEntries.filter((name) => name.includes(".stage-"))).toEqual([]);
+          const tombstones = await readdir(resolve(installRoot, TOMBSTONE_SUBDIR));
+          expect(tombstones).toHaveLength(1);
+          expect(tombstones[0]).toMatch(/^\.acme\.stage-/);
+        } finally {
+          tombstoneSpy.mockRestore();
+          removeStage.mockRestore();
+        }
+      } finally {
+        await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      }
+    },
+    10_000,
+  );
 
   it("rejects an excessive declared entry count before enumerating central-directory entries", async () => {
     const tmp = makeTmpDir();

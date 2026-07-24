@@ -18,7 +18,9 @@ This page owns the local plugin authoring loop, manifest shape, HostApi use, UI 
 ## Implementation Anchors
 
 - `package.json`
-- `src/plugins/`
+- `src/plugins/public-contract.ts`
+- `schemas/plugin-manifest.schema.json`
+- `src/plugins/runtime/manifest-validation.ts`
 - `src/main/`
 - `src/ui/renderer/`
 

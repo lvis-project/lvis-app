@@ -132,6 +132,11 @@ type CreateHostApi = (
     isActive: () => boolean;
     isLifecycleHookActive: () => boolean;
   },
+  installPluginId: string | null,
+  candidateRegistryEntry?: {
+    installSource?: "admin" | "user" | "local-dev";
+    manifestSha256?: string;
+  },
 ) => ConfigHostApi;
 
 async function initAndGetFactory(settingsService: unknown): Promise<CreateHostApi> {
@@ -196,6 +201,7 @@ beforeEach(() => {
   runtimeTestState.runtime.restartPlugin.mockClear();
   runtimeTestState.runtime.getWildcardConfigOverride.mockReturnValue({});
   runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+  runtimeTestState.runtime.resolvePluginInstallId.mockClear();
   runtimeTestState.runtime.resolvePluginInstallId.mockImplementation(
     (pluginId: string) => pluginId,
   );
@@ -203,6 +209,24 @@ beforeEach(() => {
 });
 
 describe("HostApi.config.get merged-read precedence", () => {
+  it("fails clearly when immutable install provenance is omitted", async () => {
+    const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
+    const invokeWithoutInstallId = createHostApi as unknown as (
+      pluginId: string,
+      manifest: Parameters<CreateHostApi>[1],
+      pluginDataDir: string,
+      incarnation: ReturnType<typeof activeIncarnation>,
+    ) => unknown;
+
+    expect(() => invokeWithoutInstallId(
+      "plugin-a",
+      { id: "plugin-a", config: {} },
+      mkdtempSync("/tmp/lvis-missing-provenance-"),
+      activeIncarnation(),
+    )).toThrow(/HostApi install provenance missing: plugin-a/);
+    expect(runtimeTestState.runtime.resolvePluginInstallId).not.toHaveBeenCalled();
+  });
+
   it("layers manifest.config < wildcard override < saved plugin config", async () => {
     const store = new Map<string, Record<string, unknown>>([
       ["plugin-a", { p: "cfg", shared: "cfg" }],
@@ -214,6 +238,7 @@ describe("HostApi.config.get merged-read precedence", () => {
       { id: "plugin-a", config: { a: "m", shared: "m" } },
       mkdtempSync("/tmp/lvis-cfg-"),
       activeIncarnation(),
+      "plugin-a",
     );
 
     expect(api.config.get("a")).toBe("m");
@@ -243,6 +268,7 @@ describe("HostApi.config.get merged-read precedence", () => {
       },
       mkdtempSync("/tmp/lvis-cfg-def-"),
       activeIncarnation(),
+      "plugin-a",
     );
 
     // Unset schema-defaulted key now returns the author-declared default
@@ -278,6 +304,7 @@ describe("HostApi.config.set round-trip", () => {
           runtimeTestState.runtime.getPluginManifest("plugin-a") === activeManifest,
         isLifecycleHookActive: () => false,
       },
+      "plugin-a",
     );
   }
 
@@ -311,6 +338,7 @@ describe("HostApi.config.set round-trip", () => {
       activeManifest,
       mkdtempSync("/tmp/lvis-cfg-secret-"),
       activeIncarnation(),
+      "plugin-a",
     );
 
     await expect(api.config.set("secretKey", "leak")).rejects.toThrow(/secret fields must be saved via hostApi\.setSecret/);
@@ -360,6 +388,7 @@ describe("HostApi.config.set round-trip", () => {
         isActive: () => true,
         isLifecycleHookActive: () => true,
       },
+      "plugin-a",
     );
 
     await expect(api.config.set("duringStart", true)).resolves.toBeUndefined();
@@ -448,11 +477,41 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
       manifest,
       mkdtempSync("/tmp/lvis-hostapi-alias-"),
       activeIncarnation(),
+      installAlias,
     );
 
     expect(api.getSecret(secretKey)).toBe("host-secret-value");
     expect(runtimeTestState.runtime.resolvePluginInstallId)
-      .toHaveBeenCalledWith(pluginId);
+      .not.toHaveBeenCalled();
+  });
+
+  it("uses immutable candidate trust before the durable registry cache refresh", async () => {
+    const pluginId = "fresh-admin-plugin";
+    const secretKey = "host.shared.secret";
+    const manifest = {
+      id: pluginId,
+      config: {},
+      hostSecrets: { read: [secretKey] },
+    };
+    const manifestSha256 = createHash("sha256")
+      .update(canonicalJSON(manifest))
+      .digest("hex");
+    const settings = makeSettingsService(new Map());
+    settings.getSecret.mockImplementation((key: string) =>
+      key === secretKey ? "fresh-admin-secret" : undefined
+    );
+    const createHostApi = await initAndGetFactory(settings);
+    const api = createHostApi(
+      pluginId,
+      manifest,
+      mkdtempSync("/tmp/lvis-hostapi-fresh-admin-"),
+      activeIncarnation(),
+      "marketplace-fresh-admin",
+      { installSource: "admin", manifestSha256 },
+    );
+
+    expect(api.getSecret(secretKey)).toBe("fresh-admin-secret");
+    expect(runtimeTestState.readPluginRegistry).toHaveBeenCalledOnce();
   });
 
   it("delivers an emitted event to a same-plugin subscriber with the pluginId injected, and unsubscribe stops delivery", async () => {
@@ -462,6 +521,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
       { id: "plugin-a", config: {}, capabilities: [] },
       mkdtempSync("/tmp/lvis-evt-"),
       activeIncarnation(),
+      "plugin-a",
     );
 
     const handler = vi.fn();
@@ -506,6 +566,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
         isActive: () => active,
         isLifecycleHookActive: () => false,
       },
+      "plugin-a",
     );
 
     const key = await api.resolveApiKey({ purpose: "llm", vendor: "openai" });
@@ -559,6 +620,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
         isActive: () => active,
         isLifecycleHookActive: () => false,
       },
+      "plugin-a",
     );
     expect(api.config.get("before")).toBeUndefined();
 

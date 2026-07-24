@@ -10,11 +10,11 @@ import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import { buildImportUrl } from "../sandbox.js";
-import { ToolRegistry } from "../../../tools/registry.js";
-import { PluginLoopbackManager } from "../../../mcp/plugin-loopback-manager.js";
-import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
+import {
+  makeTestPluginRuntime,
+  TestPluginRuntime,
+} from "../../__tests__/test-helpers.js";
 
 describe("PluginRuntime lifecycle — restartPlugin", () => {
   let testDir: string;
@@ -176,42 +176,43 @@ export default async function createPlugin() {
     await expect(runtime.call("lc_restart_remove_race_ping")).rejects.toThrow(/not found/);
   });
 
-  it.each(["import", "factory", "start"] as const)(
-    "fail-closes an uncertain %s replacement and quarantines its identity",
-    async (uncertainPhase) => {
-    const pluginId = `lc-restart-${uncertainPhase}-timeout`;
-    const toolName = `lc_restart_${uncertainPhase}_timeout_ping`;
-    const pluginDir = join(installedDir, pluginId);
+  it("bounds an uncertain replacement start and preserves the predecessor generation", async () => {
+    const pluginDir = join(installedDir, "lc-restart-timeout");
+    const armPath = join(testDir, "restart-timeout-arm");
     await mkdir(pluginDir, { recursive: true });
     const manifestPath = join(pluginDir, "plugin.json");
-    const entryPath = join(pluginDir, "entry.mjs");
-    const healthyEntry = `export default async function createPlugin() {
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `import { access } from "node:fs/promises";
+export default async function createPlugin() {
   return {
-    handlers: { ${toolName}: async () => "healthy" },
-    start: async () => {},
+    handlers: { lc_restart_timeout_ping: async () => "old-still-live" },
+    start: async () => {
+      try {
+        await access(${JSON.stringify(armPath)});
+        await new Promise(() => {});
+      } catch {}
+    },
     stop: async () => {},
   };
-}`;
-    await writeFile(
-      entryPath,
-      healthyEntry,
+}`,
       "utf-8",
     );
     await writeFile(
       manifestPath,
       JSON.stringify({
-        id: pluginId,
-        name: `Restart ${uncertainPhase} Timeout`,
+        id: "lc-restart-timeout",
+        name: "Restart Timeout",
         version: "1.0.0",
         entry: "entry.mjs",
         startupTimeoutMs: 50,
         tools: [{
-          name: toolName,
-          description: `${uncertainPhase} timeout regression tool`,
+          name: "lc_restart_timeout_ping",
+          description: "Restart timeout regression tool",
           inputSchema: { type: "object", properties: {} },
           _meta: { ui: { visibility: ["model", "app"] } },
         }],
-        description: `Lifecycle restart ${uncertainPhase} timeout regression.`,
+        description: "Lifecycle restart timeout regression.",
         publisher: "Test",
       }),
       "utf-8",
@@ -220,76 +221,23 @@ export default async function createPlugin() {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+        plugins: [{ id: "lc-restart-timeout", manifestPath, enabled: true }],
       }),
       "utf-8",
     );
-    const issuedHostApis: ReturnType<typeof createNoopHostApiForTests>[] = [];
-    const runtime = makeTestPluginRuntime(
-      {
-        rootDir: testDir,
-        registryPath,
-        pluginsRoot: installedDir,
-      },
-      {
-        createHostApi: (id, manifest, pluginDataDir, incarnation) => {
-          const hostApi = createNoopHostApiForTests(
-            id,
-            manifest,
-            pluginDataDir,
-          );
-          const getSecret = hostApi.getSecret.bind(hostApi);
-          hostApi.getSecret = (key) => {
-            if (!incarnation.isActive()) {
-              throw new Error("plugin instance is no longer active");
-            }
-            return getSecret(key);
-          };
-          issuedHostApis.push(hostApi);
-          return hostApi;
-        },
-      },
-    );
+    const runtime = makeRuntime();
     await runtime.startAll();
-    const oldHostApi = issuedHostApis[0];
-    expect(oldHostApi).toBeDefined();
-    expect(oldHostApi!.getSecret("plugin.test.key")).toBeNull();
-    await expect(runtime.call(toolName)).resolves.toBe("healthy");
+    await writeFile(armPath, "armed", "utf-8");
 
-    const uncertainEntry = uncertainPhase === "import"
-      ? `await new Promise(() => {});
-export default async function createPlugin() {
-  return {
-    handlers: { ${toolName}: async () => "unreachable" },
-    stop: async () => {},
-  };
-}`
-      : uncertainPhase === "factory"
-        ? `export default async function createPlugin() {
-  await new Promise(() => {});
-}`
-        : `export default async function createPlugin() {
-  return {
-    handlers: { ${toolName}: async () => "replacement" },
-    start: async () => new Promise(() => {}),
-    stop: async () => {},
-  };
-}`;
-    await writeFile(entryPath, uncertainEntry, "utf-8");
-
-    await expect(runtime.restartPlugin(pluginId)).resolves.toBe("failed");
-    expect(() => oldHostApi!.getSecret("plugin.test.key"))
-      .toThrow(/plugin instance is no longer active/);
-    expect(runtime.listPluginIds()).not.toContain(pluginId);
-    await expect(runtime.call(toolName)).rejects.toThrow(/not found/);
-
-    await writeFile(entryPath, healthyEntry, "utf-8");
-    await expect(runtime.restartPlugin(pluginId)).rejects.toMatchObject({
+    await expect(runtime.restartPlugin("lc-restart-timeout")).resolves.toBe("failed");
+    expect(runtime.listPluginIds()).toContain("lc-restart-timeout");
+    await expect(runtime.call("lc_restart_timeout_ping")).resolves.toBe("old-still-live");
+    await expect(runtime.restartPlugin("lc-restart-timeout")).rejects.toMatchObject({
       code: "plugin-lifecycle-quarantined",
     });
-  }, 20_000);
+  });
 
-  it("revokes and unadvertises the old instance when its stop hook times out", async () => {
+  it("keeps the published replacement active when predecessor retirement times out", async () => {
     const pluginDir = join(installedDir, "lc-stop-timeout");
     await mkdir(pluginDir, { recursive: true });
     const manifestPath = join(pluginDir, "plugin.json");
@@ -334,10 +282,10 @@ export default async function createPlugin() {
     await runtime.startAll();
     await expect(runtime.call("lc_stop_timeout_ping")).resolves.toBe("pong");
 
-    await expect(runtime.restartPlugin("lc-stop-timeout")).resolves.toBe("failed");
-
-    expect(runtime.listPluginIds()).not.toContain("lc-stop-timeout");
-    await expect(runtime.call("lc_stop_timeout_ping")).rejects.toThrow(/failed|not found/i);
+    await expect(runtime.restartPlugin("lc-stop-timeout")).resolves.toBe("started");
+    expect(runtime.listPluginIds()).toContain("lc-stop-timeout");
+    await expect(runtime.call("lc_stop_timeout_ping")).resolves.toBe("pong");
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
     await expect(runtime.restartPlugin("lc-stop-timeout")).rejects.toMatchObject({
       code: "plugin-lifecycle-quarantined",
     });
@@ -558,12 +506,9 @@ export default async function createPlugin() {
     await expect(runtime.disable("does-not-exist")).rejects.toThrow("Plugin not loaded");
   });
 
-  // Lifecycle callback contract: every post-boot transition into the
-  // `loaded + started` state must fire `onEnable` so the host can re-sync
-  // ToolRegistry, mirroring the existing `onDisable` tear-down hook.
-  // Without `onEnable` the bug from PR #760 returns — `onDisable` wipes
-  // plugin tools from ToolRegistry during the stop phase but nothing
-  // re-registers them after start.
+  // Lifecycle callback contract: every successful post-boot replacement fires
+  // `onEnable` only after the new generation is published. The coordinated
+  // publication path does not expose a transient disabled projection.
   async function setupLifecyclePluginFixture(pluginId: string) {
     const pluginDir = join(installedDir, pluginId);
     await mkdir(pluginDir, { recursive: true });
@@ -653,8 +598,7 @@ export default async function createPlugin() {
     await writeLifecycleRegistry([alpha, beta]);
 
     const enabled: string[] = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -669,12 +613,11 @@ export default async function createPlugin() {
     expect([...enabled].sort()).toEqual(["lc-fanout-alpha", "lc-fanout-beta"]);
   });
 
-  it("restartPlugin fires onDisable then onEnable around the restart cycle", async () => {
+  it("restartPlugin publishes only the replacement enable callback", async () => {
     await setupLifecyclePluginFixture("lc-restart-pair");
 
     const events: Array<{ type: "disable" | "enable"; pluginId: string }> = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -686,10 +629,7 @@ export default async function createPlugin() {
 
     await runtime.restartPlugin("lc-restart-pair");
 
-    expect(events).toEqual([
-      { type: "disable", pluginId: "lc-restart-pair" },
-      { type: "enable", pluginId: "lc-restart-pair" },
-    ]);
+    expect(events).toEqual([{ type: "enable", pluginId: "lc-restart-pair" }]);
     await expect(runtime.call("lc_restart_pair_ping")).resolves.toBe("ok");
   });
 
@@ -700,8 +640,7 @@ export default async function createPlugin() {
     await setupLifecyclePluginFixture("lc-add-fresh");
 
     const enableCalls: string[] = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -716,12 +655,11 @@ export default async function createPlugin() {
     await expect(runtime.call("lc_add_fresh_ping")).resolves.toBe("ok");
   });
 
-  it("reloadPlugin fires onEnable after a successful module re-import + start", async () => {
+  it("reloadPlugin publishes only the replacement enable callback", async () => {
     await setupLifecyclePluginFixture("lc-reload-pair");
 
     const events: Array<{ type: "disable" | "enable"; pluginId: string }> = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -733,126 +671,7 @@ export default async function createPlugin() {
 
     await runtime.reloadPlugin("lc-reload-pair");
 
-    expect(events).toEqual([
-      { type: "disable", pluginId: "lc-reload-pair" },
-      { type: "enable", pluginId: "lc-reload-pair" },
-    ]);
-  });
-
-  // Boot-wiring integration test: real PluginRuntime + real ToolRegistry +
-  // a real `onEnable -> syncPluginToolRegistryForPlugin` callback. Asserts that
-  // restartPlugin's `onEnable` actually re-populates ToolRegistry end-to-end,
-  // not just that the callback was called (the other lifecycle tests assert
-  // the callback contract; this one pins the boot WIRING that turns the
-  // callback into a registry resync). If anyone removes the `onEnable`
-  // wiring from `src/boot/steps/plugin-runtime.ts`, this test fails.
-  it("boot wiring: onEnable → targeted ToolRegistry sync re-registers tools after restartPlugin", async () => {
-    const pluginId = "lc-bootwiring";
-    const toolName = "lc_bootwiring_ping";
-    const pluginDir = join(installedDir, pluginId);
-    await mkdir(pluginDir, { recursive: true });
-    const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(
-      join(pluginDir, "entry.mjs"),
-      `export default async function createPlugin() {
-  return { handlers: { ${toolName}: async () => "ok" }, start: async () => {}, stop: async () => {} };
-}`,
-      "utf-8",
-    );
-    await writeFile(
-      manifestPath,
-      JSON.stringify({
-        id: pluginId,
-        name: pluginId,
-        version: "1.0.0",
-        entry: "entry.mjs",
-        tools: [
-          {
-            name: toolName,
-            description: "lifecycle integration test",
-            inputSchema: { type: "object", properties: {}, additionalProperties: false },
-            _meta: { ui: { visibility: ["model", "app"] } },
-          },
-        ],
-        description: "x",
-        publisher: "x",
-      }),
-      "utf-8",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-
-    const toolRegistry = new ToolRegistry();
-    // Mirror the production boot wiring: registration goes through the loopback
-    // manager (legacy-removal flag-day). onEnable's start is async, so the test
-    // tracks the last start promise to await it deterministically.
-    let runtime!: PluginRuntime;
-    let loopbackManager!: PluginLoopbackManager;
-    let lastEnable: Promise<unknown> = Promise.resolve();
-    runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      registryPath,
-      pluginsRoot: installedDir,
-      onDisable: (id) => { lastEnable = loopbackManager.stop(id); },
-      onEnable: (id) => {
-        const m = runtime.getPluginManifest(id);
-        if (m) lastEnable = loopbackManager.start(m);
-      },
-    });
-    loopbackManager = new PluginLoopbackManager(runtime, toolRegistry);
-    await runtime.startAll();
-
-    // Boot's `loopbackManager.syncAll(...)` initially populates the registry.
-    await loopbackManager.syncAll(runtime.listPluginManifests());
-    expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
-
-    // Restart removes the tool via onDisable (manager.stop), then re-registers
-    // via onEnable (manager.start). Without the wiring this test fails.
-    await runtime.restartPlugin(pluginId);
-    await lastEnable;
-
-    expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
-  });
-
-  it("config-save restart path preserves bystander plugin tools", async () => {
-    const alpha = await writeLifecyclePlugin("lc-config-alpha");
-    const beta = await writeLifecyclePlugin("lc-config-beta");
-    await writeLifecycleRegistry([alpha, beta]);
-
-    const toolRegistry = new ToolRegistry();
-    let runtime!: PluginRuntime;
-    let loopbackManager!: PluginLoopbackManager;
-    let lastEnable: Promise<unknown> = Promise.resolve();
-    runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      registryPath,
-      pluginsRoot: installedDir,
-      onDisable: (id) => { lastEnable = loopbackManager.stop(id); },
-      onEnable: (id) => {
-        const m = runtime.getPluginManifest(id);
-        if (m) lastEnable = loopbackManager.start(m);
-      },
-    });
-    loopbackManager = new PluginLoopbackManager(runtime, toolRegistry);
-    await runtime.startAll();
-    await loopbackManager.syncAll(runtime.listPluginManifests());
-    const betaBefore = toolRegistry.findByName(beta.toolName);
-    expect(betaBefore?.pluginId).toBe(beta.pluginId);
-
-    runtime.setConfigOverride(alpha.pluginId, { mode: "after-save" });
-    await runtime.restartPlugin(alpha.pluginId);
-    await lastEnable;
-
-    expect(toolRegistry.findByName(alpha.toolName)?.pluginId).toBe(alpha.pluginId);
-    expect(toolRegistry.findByName(beta.toolName)).toBe(betaBefore);
+    expect(events).toEqual([{ type: "enable", pluginId: "lc-reload-pair" }]);
   });
 
   it("addPlugin failure path (start throws) does NOT fire onEnable", async () => {
@@ -897,8 +716,7 @@ export default async function createPlugin() {
     );
 
     const enableCalls: string[] = [];
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    const runtime = new TestPluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,

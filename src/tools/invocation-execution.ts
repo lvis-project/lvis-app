@@ -1,4 +1,5 @@
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
+import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import type { PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ToolExecutionAuditMetadata } from "../audit/audit-schema.js";
@@ -56,6 +57,11 @@ import {
   type ToolUseBlock,
 } from "./executor-contract.js";
 import type { RationaleResumeExecutionContext } from "./invocation-runner.js";
+import type { ResolvedPluginOperation } from "./plugin-operation-governance.js";
+import {
+  pluginOperationExecutionDomain,
+  type PluginOperationPrincipal,
+} from "../permissions/plugin-operation-grant.js";
 
 const log = createLogger("executor");
 
@@ -101,6 +107,8 @@ export interface ExecutionStageContext {
   effectLedger: EffectLedger;
   targetFilePath: string | undefined;
   preResult: Awaited<ReturnType<HookRunner["runPreHooks"]>>;
+  resolvedPluginOperation: ResolvedPluginOperation | undefined;
+  pluginOperationPrincipal: PluginOperationPrincipal | undefined;
 }
 
 export async function executeAuthorizedToolInvocation(
@@ -141,6 +149,8 @@ export async function executeAuthorizedToolInvocation(
     effectLedger,
     targetFilePath,
     preResult,
+    resolvedPluginOperation,
+    pluginOperationPrincipal,
   } = context;
 
 
@@ -155,6 +165,9 @@ export async function executeAuthorizedToolInvocation(
     invocationPermissionContext,
     tool.mcpServerId,
     tool.pluginId,
+    undefined,
+    undefined,
+    tool.pluginGeneration !== undefined,
   );
   if (scriptPre.decision === "deny") {
     if (rationaleResumeContext) {
@@ -229,33 +242,180 @@ export async function executeAuthorizedToolInvocation(
     }
   }
 
-  if (rationaleResumeContext) {
-    if (!rationaleResumeContext.authorized) {
-      return returnRationaleResumeBlock(
-        "rationale resume authorization was lost before invocation start",
-        finalInput,
-        permissionResult,
-      );
-    }
-    const started = await startRationaleResume(rationaleResumeContext.authorized);
-    if (!started.ok) {
-      return returnRationaleResumeBlock(
-        started.reason,
-        finalInput,
-        permissionResult,
-      );
-    }
-    rationaleResumeContext.started = started.value;
-  }
-
-  emitToolStart(callbacks, toolUse.name, finalInput, meta);
-
-  // ── Step 6: Execute ─────────────────────────────
+  const operationExecutionDomain =
+    resolvedPluginOperation && pluginOperationPrincipal
+      ? pluginOperationExecutionDomain(
+          pluginOperationPrincipal,
+          toolUse.name,
+          resolvedPluginOperation.operation,
+          services.toolRegistry.listAll(),
+        )
+      : undefined;
+  const operationExecutionLease =
+    resolvedPluginOperation &&
+    pluginOperationPrincipal &&
+    operationExecutionDomain
+      ? await services.pluginOperationGrants.acquireExecutionLease(
+          operationExecutionDomain,
+          // A signed read declaration can still reach a Host-observed write
+          // effect. Serialize every governed operation so a dishonest or
+          // compromised handler cannot mutate under a shared read lease.
+          "write",
+          pluginOperationPrincipal,
+          abortSignal,
+        )
+      : undefined;
   let content: string;
   let isError = false;
   let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
   let rawResult: unknown;
   let image: ToolResultImage | undefined;
+  let terminationReason:
+    | "ok"
+    | "ceiling"
+    | "user-abort"
+    | "error"
+    | "indeterminate" = "ok";
+  let consumedPluginOperationGrantId: string | undefined;
+  let deferredOperationSettlement: Promise<unknown> | undefined;
+  let indeterminateAuditPersisted = false;
+  let interruptionReason: "ceiling" | "user-abort" | undefined;
+  try {
+    if (rationaleResumeContext) {
+      if (!rationaleResumeContext.authorized) {
+        return returnRationaleResumeBlock(
+          "rationale resume authorization was lost before invocation start",
+          finalInput,
+          permissionResult,
+        );
+      }
+      const started = await startRationaleResume(rationaleResumeContext.authorized);
+      if (!started.ok) {
+        return returnRationaleResumeBlock(
+          started.reason,
+          finalInput,
+          permissionResult,
+        );
+      }
+      rationaleResumeContext.started = started.value;
+    }
+
+    if (
+      resolvedPluginOperation?.rule.kind === "write" &&
+      pluginOperationPrincipal
+    ) {
+      const readRequirement = resolvedPluginOperation.rule.requiresRead;
+      const grantContext = invocationPermissionContext.pluginOperation;
+      const consumed = grantContext?.appGrantRequired === true
+        ? services.pluginOperationGrants.consume(
+            grantContext.grantToken,
+            {
+              ...pluginOperationPrincipal,
+              toolName: toolUse.name,
+              operation: resolvedPluginOperation.operation,
+              intentHash: resolvedPluginOperation.intentHash,
+              requiresRead: readRequirement !== undefined,
+            },
+            operationExecutionDomain!,
+          )
+        : readRequirement
+          ? services.pluginOperationGrants.consumeRequiredRead(
+              pluginOperationPrincipal,
+              {
+                readTool: readRequirement.tool,
+                readOperations: readRequirement.operations,
+                maxAgeMs: readRequirement.maxAgeMs,
+              },
+              operationExecutionDomain!,
+            )
+          : { ok: true as const };
+      const consumedGrantId =
+        "grantId" in consumed && typeof consumed.grantId === "string"
+          ? consumed.grantId
+          : undefined;
+      if (consumed.ok) consumedPluginOperationGrantId = consumedGrantId;
+      let grantAuditError: unknown;
+      try {
+        const commonGrantAudit = {
+          ts: new Date().toISOString(),
+          auditId: randomUUID(),
+          tool: toolUse.name,
+          source,
+          category: invocationCategory,
+          trustOrigin: invocationPermissionContext.trustOrigin,
+          pluginOperation: {
+            pluginId: pluginOperationPrincipal.ownerPluginId,
+            operation: resolvedPluginOperation.operation,
+            outcome: consumed.ok ? "consumed" : "rejected",
+            ...(consumedGrantId ? { grantId: consumedGrantId } : {}),
+          },
+        } as const;
+        if (consumed.ok) {
+          await services.auditLogger.appendPermissionAuditEntry({
+            ...commonGrantAudit,
+            decision: "allow",
+            layer: 6,
+          });
+        } else {
+          await services.auditLogger.appendPermissionAuditEntry({
+            ...commonGrantAudit,
+            decision: "deny",
+            denyReasons: [{
+              layer: 6,
+              reason: consumed.reason,
+              source: "plugin-operation-grant",
+            }],
+          });
+        }
+      } catch (error) {
+        grantAuditError = error;
+      }
+      if (!consumed.ok || grantAuditError !== undefined) {
+        const reason = consumed.ok
+          ? `permission audit chain failed: ${grantAuditError instanceof Error ? grantAuditError.message : String(grantAuditError)}`
+          : consumed.reason;
+        const msg = `Plugin operation denied: ${reason}`;
+        const durationMs = Date.now() - startTime;
+        const denied: PermissionCheckResult = {
+          decision: "deny",
+          reason,
+          layer: 6,
+        };
+        callbacks?.onToolEnd?.(
+          toolUse.name,
+          msg,
+          true,
+          meta,
+          undefined,
+          durationMs,
+        );
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          source,
+          trust,
+          finalInput,
+          msg,
+          true,
+          startTime,
+          denied,
+          rateResult.remaining,
+          invocationPermissionContext,
+          invocationCategory,
+          executionCwd,
+        );
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: msg,
+          is_error: true,
+          durationMs,
+        });
+      }
+    }
+
+    emitToolStart(callbacks, toolUse.name, finalInput, meta);
+
+    // ── Step 6: Execute ─────────────────────────────
   // Mint only after all permission, hook, rate-limit, and audit gates passed.
   // The permit is private host state, binds this exact final shell action,
   // and is consumed once by the plain requested-sandbox fallback spawn path.
@@ -347,7 +507,6 @@ export async function executeAuthorizedToolInvocation(
     toolUse.name === "agent_spawn"
       ? TOOL_TIMEOUT_POLICY.subAgentCeilingMs
       : TOOL_TIMEOUT_POLICY.globalCeilingMs;
-  let terminationReason: "ok" | "ceiling" | "user-abort" | "error" = "ok";
   const outcome = await runWithCeiling(
     async (signal) => {
       const ctx: ToolExecutionContext = { ...executionContext, abortSignal: signal };
@@ -372,7 +531,21 @@ export async function executeAuthorizedToolInvocation(
               headless: invocationPermissionContext.headless === true,
               toolName: toolUse.name,
             },
-            () => tool.execute(finalInput, ctx),
+            () => {
+              if (
+                pluginOperationPrincipal &&
+                operationExecutionDomain
+              ) {
+                // No await may separate this final revocation check from
+                // handler entry. Session/account/generation teardown that won
+                // the race after lease admission therefore blocks dispatch.
+                services.pluginOperationGrants.assertExecutionAuthorized(
+                  pluginOperationPrincipal,
+                  operationExecutionDomain,
+                );
+              }
+              return tool.execute(finalInput, ctx);
+            },
           ),
         ),
       );
@@ -381,6 +554,52 @@ export async function executeAuthorizedToolInvocation(
     abortSignal,
     toolUse.name,
   );
+  if (
+    resolvedPluginOperation &&
+    operationExecutionDomain
+  ) {
+    if (
+      resolvedPluginOperation.rule.kind === "write" ||
+      outcome.settlement
+    ) {
+      // Declared writes and any interrupted governed execution may have
+      // changed remote state. Advance before the exclusive lease can release.
+      services.pluginOperationGrants.markDomainMutation(
+        operationExecutionDomain,
+      );
+    }
+  }
+  if (
+    outcome.settlement &&
+    resolvedPluginOperation &&
+    pluginOperationPrincipal
+  ) {
+    deferredOperationSettlement = outcome.settlement;
+    terminationReason = "indeterminate";
+    await services.auditLogger.appendPermissionAuditEntry({
+      ts: new Date().toISOString(),
+      auditId: randomUUID(),
+      tool: toolUse.name,
+      source,
+      category: invocationCategory,
+      trustOrigin: invocationPermissionContext.trustOrigin,
+      decision: "deny",
+      denyReasons: [{
+        layer: 6,
+        reason: "authorized governed operation remains unsettled after interruption",
+        source: "plugin-operation-execution",
+      }],
+      pluginOperation: {
+        pluginId: pluginOperationPrincipal.ownerPluginId,
+        operation: resolvedPluginOperation.operation,
+        outcome: "indeterminate",
+        ...(consumedPluginOperationGrantId
+          ? { grantId: consumedPluginOperationGrantId }
+          : {}),
+      },
+    });
+    indeterminateAuditPersisted = true;
+  }
   if (outcome.ok) {
     const result = outcome.value;
     content = result.output;
@@ -400,7 +619,13 @@ export async function executeAuthorizedToolInvocation(
     }
     if (isError) terminationReason = "error";
   } else {
-    terminationReason = outcome.reason;
+    if (
+      outcome.reason === "ceiling" ||
+      outcome.reason === "user-abort"
+    ) {
+      interruptionReason = outcome.reason;
+    }
+    if (!outcome.settlement) terminationReason = outcome.reason;
     content =
       outcome.reason === "ceiling"
         ? `tool execution exceeded global ceiling (${effectiveCeilingMs}ms): ${toolUse.name}`
@@ -417,6 +642,16 @@ export async function executeAuthorizedToolInvocation(
   // read/write classification for this call; it drives NO permission decision
   // here — a later read-recognition gate consumes it.
   const effectSummary = effectLedger.summary();
+  if (
+    operationExecutionDomain &&
+    resolvedPluginOperation?.rule.kind === "read" &&
+    !outcome.settlement &&
+    effectSummary.hasMutatingEffect
+  ) {
+    services.pluginOperationGrants.markDomainMutation(
+      operationExecutionDomain,
+    );
+  }
   // Propagate a MUTATING inner invocation onto the parent (outer wrapper)
   // ledger. Without this a read-declared wrapper W that delegates a mutation
   // via callTool(M) would record `hasMutatingEffect:false` on its OWN ledger
@@ -429,6 +664,25 @@ export async function executeAuthorizedToolInvocation(
       effect: CHOKEPOINT_EFFECT["callTool-child"],
       target: tool.name,
     });
+  }
+  // A signed read declaration alone cannot mint freshness. Record the receipt
+  // only after a successful Host-observable plugin execution with no mutation.
+  if (
+    !isError &&
+    tool.source === "plugin" &&
+    resolvedPluginOperation?.rule.kind === "read" &&
+    pluginOperationPrincipal &&
+    services.pluginOperationGrants.canRecordRead(
+      pluginOperationPrincipal,
+      operationExecutionDomain!,
+    ) &&
+    !effectSummary.hasMutatingEffect
+  ) {
+    services.pluginOperationGrants.recordRead({
+      ...pluginOperationPrincipal,
+      readTool: toolUse.name,
+      readOperation: resolvedPluginOperation.operation,
+    }, operationExecutionDomain!);
   }
   // Emit the EFFECT shadow record for plugin/MCP invocations (builtins never
   // touch the hostApi closures, so their ledger is empty — no reconciliation
@@ -449,8 +703,70 @@ export async function executeAuthorizedToolInvocation(
       services.auditLogger,
     );
   }
+  } finally {
+    if (
+      operationExecutionLease &&
+      deferredOperationSettlement &&
+      indeterminateAuditPersisted &&
+      pluginOperationPrincipal &&
+      resolvedPluginOperation
+    ) {
+      const lease = operationExecutionLease;
+      const pluginId = pluginOperationPrincipal.ownerPluginId;
+      const operation = resolvedPluginOperation.operation;
+      const grantId = consumedPluginOperationGrantId;
+      void deferredOperationSettlement
+        .then(async () => {
+          try {
+            await services.auditLogger.appendPermissionAuditEntry({
+              ts: new Date().toISOString(),
+              auditId: randomUUID(),
+              tool: toolUse.name,
+              source,
+              category: invocationCategory,
+              trustOrigin: invocationPermissionContext.trustOrigin,
+              decision: "allow",
+              layer: 6,
+              pluginOperation: {
+                pluginId,
+                operation,
+                outcome: "settled",
+                ...(grantId ? { grantId } : {}),
+              },
+            });
+            lease.release();
+          } catch (error) {
+            log.error(
+              "late plugin operation settlement audit failed; domain remains poisoned for %s: %s",
+              toolUse.name,
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }, (error) => {
+          log.error(
+            "late plugin operation settlement tracking failed; domain remains poisoned for %s: %s",
+            toolUse.name,
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+    } else if (operationExecutionLease && deferredOperationSettlement) {
+      void deferredOperationSettlement.catch((error) => {
+        log.error(
+          "unaudited late plugin operation settlement tracking failed; domain remains poisoned for %s: %s",
+          toolUse.name,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+      log.error(
+        "plugin operation interruption audit failed; domain remains poisoned for %s",
+        toolUse.name,
+      );
+    } else {
+      operationExecutionLease?.release();
+    }
+  }
 
-  if (terminationReason === "user-abort") {
+  if (interruptionReason === "user-abort") {
     const durationMs = Date.now() - startTime;
     if (!rationaleResumeContext?.started) {
       callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
@@ -508,6 +824,7 @@ export async function executeAuthorizedToolInvocation(
     tool.pluginId,
     content,
     isError,
+    tool.pluginGeneration !== undefined,
   );
 
   // ── #811 m2: PostToolUseFailure (NON-BLOCKING) ──

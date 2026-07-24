@@ -261,6 +261,7 @@ describe("preload contextBridge world shape lock", () => {
             "getStats",
           ],
           "downloadAppUpdate": "function",
+          "e2ePluginBundleSnapshot": "function",
           "exportUsageCsv": "function",
           "generateWorkBoardReport": "function",
           "getAppInfo": "function",
@@ -291,6 +292,7 @@ describe("preload contextBridge world shape lock", () => {
           "listPersonaPromptSummaries": "function",
           "listPersonaPrompts": "function",
           "listPluginCards": "function",
+          "listPluginContributionTrust": "function",
           "listPluginUiExtensions": "function",
           "listRoutineSessionsV2": "function",
           "listRoutinesV2": "function",
@@ -440,6 +442,7 @@ describe("preload contextBridge world shape lock", () => {
           "savePersonaPrompt": "function",
           "setApiKey": "function",
           "setMarketplaceApiKey": "function",
+          "setPluginContributionTrust": "function",
           "setPluginEnabled": "function",
           "setWebApiKey": "function",
           "sideChat": [

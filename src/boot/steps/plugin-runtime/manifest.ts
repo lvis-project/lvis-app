@@ -7,20 +7,9 @@
  */
 import type { PluginManifest } from "../../../plugins/types.js";
 
-// #885 v6 — reads only fields shared across manifest shapes (`config`), so it
-// accepts any manifest object that carries them.
 export function declaresHostManagedPythonRuntime(
-  manifest: Pick<PluginManifest, "config">,
+  manifest: Pick<PluginManifest, "python">,
 ): boolean {
-  const pluginManifest = manifest as Pick<PluginManifest, "config"> & {
-    python?: { managedBy?: unknown; requirementsLock?: unknown };
-    pythonRequirementsLock?: unknown;
-    runtime?: { python?: { requirementsLock?: unknown } };
-    config?: { pythonRequirementsLock?: unknown };
-  };
-  return pluginManifest.python?.managedBy === "lvis-app" ||
-    typeof pluginManifest.python?.requirementsLock === "string" ||
-    typeof pluginManifest.pythonRequirementsLock === "string" ||
-    typeof pluginManifest.runtime?.python?.requirementsLock === "string" ||
-    typeof pluginManifest.config?.pythonRequirementsLock === "string";
+  return manifest.python?.managedBy === "lvis-app" ||
+    typeof manifest.python?.requirementsLock === "string";
 }

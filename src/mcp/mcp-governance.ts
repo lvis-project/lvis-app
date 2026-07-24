@@ -84,12 +84,20 @@ const DEFAULT_POLICY: McpGovernancePolicy = {
 
 export class McpGovernance {
   private policy: McpGovernancePolicy;
+  private runtimeApprovals: Map<string, McpServerApproval>;
   private readonly policyPath: string;
   private refreshTimer: NodeJS.Timeout | null = null;
 
-  constructor(policyPath?: string) {
+  constructor(
+    policyPath?: string,
+    scopedState?: {
+      policy: McpGovernancePolicy;
+      runtimeApprovals: Map<string, McpServerApproval>;
+    },
+  ) {
     this.policyPath = policyPath ?? join(lvisHome(), "governance", "mcp-policy.json");
-    this.policy = this.loadPolicy();
+    this.policy = scopedState?.policy ?? this.loadPolicy();
+    this.runtimeApprovals = scopedState?.runtimeApprovals ?? new Map();
   }
 
 
@@ -174,7 +182,7 @@ export class McpGovernance {
     }
 
     // L1-b: global server count limit
-    const activeCount = this.policy.servers.filter((s) => s.status === "approved").length;
+    const activeCount = this.policy.servers.filter((s) => s.status === "approved").length + this.runtimeApprovals.size;
     if (activeCount > this.policy.globalRules.maxServersTotal) {
       return { valid: false, reason: t("be_mcpGovernance.maxServersExceeded", { activeCount, maxServersTotal: this.policy.globalRules.maxServersTotal }), layer: 1 };
     }
@@ -375,10 +383,86 @@ export class McpGovernance {
     return this.findApproval(serverId);
   }
 
+  /** Register a host-owned, non-persistent approval for one active plugin generation. */
+  registerRuntimeApproval(approval: McpServerApproval): void {
+    if (this.policy.servers.some((entry) => entry.id === approval.id)) {
+      throw new Error(`runtime MCP approval '${approval.id}' collides with managed policy`);
+    }
+    const existing = this.runtimeApprovals.get(approval.id);
+    if (existing && JSON.stringify(existing) !== JSON.stringify(approval)) {
+      throw new Error(`runtime MCP approval '${approval.id}' has conflicting policy`);
+    }
+    this.runtimeApprovals.set(approval.id, Object.freeze({ ...approval }));
+  }
+
+  unregisterRuntimeApproval(serverId: string): void {
+    this.runtimeApprovals.delete(serverId);
+  }
+
+  /** Isolated governance view for hidden candidate discovery. */
+  scopedRuntimeApproval(approval: McpServerApproval): McpGovernance {
+    if (this.policy.servers.some((entry) => entry.id === approval.id)) {
+      throw new Error(`runtime MCP approval '${approval.id}' collides with managed policy`);
+    }
+    const approvals = new Map(this.runtimeApprovals);
+    approvals.set(approval.id, Object.freeze({ ...approval }));
+    return new McpGovernance(this.policyPath, { policy: this.policy, runtimeApprovals: approvals });
+  }
+
+  /** Atomically replace generation-owned approvals after preparation. */
+  replaceRuntimeApprovals(
+    predecessorServerIds: Iterable<string>,
+    approvals: readonly McpServerApproval[],
+  ): void {
+    const next = new Map(this.runtimeApprovals);
+    for (const serverId of predecessorServerIds) next.delete(serverId);
+    for (const approval of approvals) {
+      if (this.policy.servers.some((entry) => entry.id === approval.id)) {
+        throw new Error(`runtime MCP approval '${approval.id}' collides with managed policy`);
+      }
+      const existing = next.get(approval.id);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(approval)) {
+        throw new Error(`runtime MCP approval '${approval.id}' has conflicting policy`);
+      }
+      next.set(approval.id, Object.freeze({ ...approval }));
+    }
+    this.runtimeApprovals = next;
+  }
+
+  /** Validate and prebuild a runtime approval snapshot for atomic publication. */
+  prepareRuntimeApprovals(
+    predecessorServerIds: Iterable<string>,
+    approvals: readonly McpServerApproval[],
+  ): { publish(): void } {
+    const predecessors = Object.freeze([...predecessorServerIds]);
+    const prepared = approvals.map((approval) => Object.freeze({ ...approval }));
+    const next = new Map(this.runtimeApprovals);
+    for (const serverId of predecessors) next.delete(serverId);
+    for (const approval of prepared) {
+      if (this.policy.servers.some((entry) => entry.id === approval.id)) {
+        throw new Error(`runtime MCP approval '${approval.id}' collides with managed policy`);
+      }
+      const existing = next.get(approval.id);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(approval)) {
+        throw new Error(`runtime MCP approval '${approval.id}' has conflicting policy`);
+      }
+      next.set(approval.id, approval);
+    }
+    let published = false;
+    return Object.freeze({
+      publish: () => {
+        if (published) return;
+        for (const serverId of predecessors) this.runtimeApprovals.delete(serverId);
+        for (const approval of prepared) this.runtimeApprovals.set(approval.id, approval);
+        published = true;
+      },
+    });
+  }
+
   // ─── Private Validation ──────────────────────────
 
   private findApproval(serverId: string): McpServerApproval | undefined {
-    return this.policy.servers.find((s) => s.id === serverId);
+    return this.policy.servers.find((s) => s.id === serverId) ?? this.runtimeApprovals.get(serverId);
   }
 
   private validateStdioCommand(config: McpServerConfig, approval: McpServerApproval): ValidationResult {

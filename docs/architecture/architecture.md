@@ -172,11 +172,23 @@ capability checks, marketplace policy, and host APIs.
 
 Key boundaries:
 
+- The complete plugin-author TypeScript contract and its JSDoc are Host-owned in
+  `src/plugins/public-contract.ts`. `src/plugins/types.ts` re-exports that
+  surface and adds Host-private registry/marketplace DTOs. The SDK copies the
+  public module mechanically and adds no declarations, documentation, aliases,
+  or validation policy.
 - plugin code cannot invent its own identity when calling HostApi;
 - installed plugin assets are loaded through host-approved URLs;
 - plugin tools must declare schemas (pure MCP `Tool` objects); per-tool category
   is not a manifest field — the host classifies the effective category per
   invocation;
+- deprecated `keywords[].skillId` must exactly name a model-visible manifest
+  Tool. A matching keyword preloads that Tool schema into the model-visible
+  turn scope; it never invokes the Tool directly and cannot target an app-only
+  Tool. This is separate from bundled `manifest.skills` instruction discovery.
+  Owner: `lvis-app` plugin runtime. Remove after every supported plugin has
+  migrated to bundled `manifest.skills` and no active manifest declares
+  `keywords`;
 - plugin UI can render in host slots but cannot bypass permission review;
 - optional `manifest.onboarding.firstTask` copy is inert, localized metadata:
   the host may prefill the visible composer, but it never auto-submits or invokes
@@ -202,6 +214,33 @@ Key boundaries:
   staging succeeds. Direct and bundle uninstall stage the live directory plus
   all recovery/cleanup-owned paths before deleting the row; unresolved recovery
   backups are never handled by the orphan tombstone sweeper.
+- a plugin artifact may declare plugin-owned `skills`, `hooks`, and `mcpServers`
+  as `{id,path}` entries. IDs are local to the tuple `(plugin id, plugin version,
+  contribution kind)` and paths are normalized relative to the verified plugin
+  root. The Host rejects absolute/traversing/ambiguous paths, declaration or
+  archive-member collisions, links/devices, missing members, and a Skill
+  directory without `SKILL.md`. A contribution-free manifest remains valid.
+- declaration and signature are not execution authority. Skills contribute
+  instructions only; Hook trust is bound to the exact owner/version/local ID and
+  command-policy fingerprint; MCP connection approval is bound to the exact
+  owner/version/local ID and static policy fingerprint. Candidate preparation
+  for MCP is parse/fingerprint-only and performs no spawn, network, discovery,
+  registry write, or plugin execution.
+  An `mcpServers[].path` descriptor is one JSON object containing a standard
+  `stdio` or Streamable HTTP MCP config without `id`, `apiKey`, `sandboxRoot`,
+  or `allowPrivateNetworks`; the Host derives a generation-scoped server ID and
+  an ephemeral strict governance rule. Exact approval connects it without
+  adding it to the user's global `servers.json`. A failed connection is a typed
+  degraded projection with zero tools and does not roll back the plugin bundle.
+- plugin code, handlers, materialized Skill bytes, Hook projections, static MCP
+  descriptors, and operation policy belong to one immutable active generation.
+  Every dispatch first acquires a lease on that generation. Lifecycle transitions
+  prepare a hidden candidate, block new leases, durably commit bytes/receipt/
+  registry identity, then publish with one non-throwing in-memory pointer
+  assignment. Existing predecessor leases may finish; teardown waits for their
+  drain and remains journaled/retriable if fallible cleanup fails. A crash before
+  the durable commit reconstructs the predecessor; a crash after it reconstructs
+  only the committed verified generation.
 - renderer-to-plugin method calls are allowlisted by each tool's
   `_meta.ui.visibility`: only app-visible tools (visibility includes `"app"` —
   the union of app-only `["app"]` and dual `["model","app"]`) are

@@ -106,6 +106,7 @@ export interface AppServices {
    * `serverId === pluginId` is NEVER in `mcpManager.clients` (external-only).
    */
   pluginLoopbackManager: PluginLoopbackManager;
+  pluginBundleLifecycle?: import("../plugins/plugin-bundle-lifecycle.js").PluginBundleLifecycle;
   /**
    * The gated tool-invocation delegate (the plugin-surface `ToolExecutor` →
    * `inspectHostRisk` → reviewer/approval → audit), read LAZILY: it is a late
@@ -118,6 +119,21 @@ export interface AppServices {
    * through `PluginRuntime.callFromUi`, which installs this same delegate itself.
    */
   getPluginToolInvoker: () => PluginToolInvocationDelegate | null;
+  /** Host-owned one-shot grant issuer for a plugin panel mutation. */
+  requestPluginOperationGrant: (request: {
+    pluginId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+    appSessionId: string;
+    origin?: "ui" | "mcp-app";
+    expectedGenerationId?: string;
+  }) => Promise<{
+    operationGrantToken: string;
+    grantId: string;
+    expiresAt: number;
+  }>;
+  /** Revoke one plugin-panel session and its read/grant lifecycle state. */
+  revokePluginOperationSession: (appSessionId: string) => void;
   /**
    * §FU#259 — artifact store rooted at `userData/mcp-servers/`.
    * Constructed at boot when the marketplace fetcher supports verified

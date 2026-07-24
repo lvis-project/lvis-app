@@ -142,6 +142,7 @@ export interface PluginManifest {
   methods: string[];
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
+  /** @deprecated Tool-schema preload only; bundled Skill discovery uses manifest.skills. */
   keywords?: Array<{ keyword: string; skillId: string }>;
 
   // ─── Phase 1.5 신규 (deployment model) ─────────────────

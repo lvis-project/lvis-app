@@ -26,6 +26,7 @@ vi.mock("electron", () => ({
 }));
 
 const CHANNEL = "lvis:mcp:call-tool";
+const LOOPBACK_GENERATION = "generation-acme-1";
 const invoke = makeAppIpcInvoker(handlers);
 
 /**
@@ -38,15 +39,22 @@ async function setup() {
 
   const callFromApp = vi.fn(async () => "plugin-result");
   const invokePluginTool = vi.fn(async () => "external-result");
+  const requestPluginOperationGrant = vi.fn(async () => ({
+    operationGrantToken: "host-one-shot-token",
+    grantId: "grant-1",
+    expiresAt: Date.now() + 60_000,
+  }));
 
   const deps = {
     pluginRuntime: {
-      resolveToolOwner: vi.fn((method: string) => (method === "acme_open" ? "acme-cards" : undefined)),
+      resolveToolOwner: vi.fn((method: string) =>
+        method === "acme_open" || method === "acme_write" ? "acme-cards" : undefined),
       callFromApp,
       getPerfStats: vi.fn(() => ({})),
     },
     pluginLoopbackManager: {
       has: vi.fn((serverId: string) => serverId === "acme-cards"),
+      assertCardGeneration: vi.fn(),
       readUiResource: vi.fn(),
     },
     mcpManager: {
@@ -61,10 +69,36 @@ async function setup() {
       findByName: vi.fn((name: string) =>
         name === "mcp_gh_query"
           ? { name: "mcp_gh_query", mcpServerId: "github", appInvokable: true }
+          : name === "acme_write"
+            ? {
+                name: "acme_write",
+                pluginId: "acme-cards",
+                operationPolicy: {
+                  discriminant: "operation",
+                  operations: {
+                    update: {
+                      kind: "write",
+                      minimumRisk: "write",
+                      appVisible: true,
+                      requiresRead: {
+                        tool: "acme_read",
+                        operations: ["get"],
+                        maxAgeMs: 60_000,
+                      },
+                    },
+                    reserve: {
+                      kind: "write",
+                      minimumRisk: "write",
+                      appVisible: true,
+                    },
+                  },
+                },
+              }
           : undefined,
       ),
     },
     getPluginToolInvoker: () => invokePluginTool,
+    requestPluginOperationGrant,
     settingsService: { get: vi.fn(() => ({})) },
     auditLogger: { log: vi.fn() },
     pluginMarketplace: { list: vi.fn(async () => []) },
@@ -75,7 +109,7 @@ async function setup() {
 
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, callFromApp, invokePluginTool };
+  return { deps, callFromApp, invokePluginTool, requestPluginOperationGrant };
 }
 
 beforeEach(() => {
@@ -120,7 +154,13 @@ describe("lvis:mcp:call-tool — tool-owner == serverId (enforced once, here)", 
   it("denies a plugin card asking for a tool its plugin does not own", async () => {
     const { deps, callFromApp } = await setup();
 
-    const result = await invoke(CHANNEL, "acme-cards", "other_plugin_tool", {});
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "other_plugin_tool",
+      {},
+      LOOPBACK_GENERATION,
+    );
 
     expect(result).toEqual({
       ok: false,
@@ -173,12 +213,19 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
   it("routes a plugin card's own tool through PluginRuntime.callFromApp — the APP path, not the panel's callFromUi", async () => {
     const { callFromApp, invokePluginTool } = await setup();
 
-    const result = await invoke(CHANNEL, "acme-cards", "acme_open", { id: 7 });
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_open",
+      { id: 7 },
+      LOOPBACK_GENERATION,
+    );
 
     expect(result).toEqual({ ok: true, result: "plugin-result" });
-    // Two args — the app path has no `userAction` option to pass: a gesture claim
-    // from inside an untrusted iframe is unverifiable, so it does not exist here.
-    expect(callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 });
+    expect(callFromApp).toHaveBeenCalledWith("acme_open", { id: 7 }, {
+      appSessionId: "mcp-app:acme-cards:0:0",
+      expectedGenerationId: LOOPBACK_GENERATION,
+    });
     expect(invokePluginTool).not.toHaveBeenCalled();
   });
 
@@ -191,22 +238,108 @@ describe("lvis:mcp:call-tool — allowed calls take the gated backend", () => {
     expect(invokePluginTool).toHaveBeenCalledWith(
       "mcp_gh_query",
       { q: "x" },
-      { origin: "mcp-app", userAction: false },
+      {
+        origin: "mcp-app",
+        userAction: false,
+        appInvocation: { surface: "mcp-app", sessionId: "mcp-app:github:0:0" },
+        expectedMcpServerId: "github",
+      },
     );
     expect(callFromApp).not.toHaveBeenCalled();
   });
 
   it("coerces non-object args to an empty input rather than forwarding junk", async () => {
     const { callFromApp } = await setup();
-    await invoke(CHANNEL, "acme-cards", "acme_open", "not-an-object");
-    expect(callFromApp).toHaveBeenCalledWith("acme_open", {});
+    await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_open",
+      "not-an-object",
+      LOOPBACK_GENERATION,
+    );
+    expect(callFromApp).toHaveBeenCalledWith("acme_open", {}, {
+      appSessionId: "mcp-app:acme-cards:0:0",
+      expectedGenerationId: LOOPBACK_GENERATION,
+    });
+  });
+
+  it("keeps a governed write grant inside main and binds it to the Host-minted card session", async () => {
+    const { callFromApp, requestPluginOperationGrant } = await setup();
+
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_write",
+      {
+        operation: "update",
+        employeeId: "E-7",
+      },
+      LOOPBACK_GENERATION,
+    );
+
+    expect(result).toEqual({ ok: true, result: "plugin-result" });
+    expect(requestPluginOperationGrant).toHaveBeenCalledWith({
+      pluginId: "acme-cards",
+      toolName: "acme_write",
+      input: { operation: "update", employeeId: "E-7" },
+      appSessionId: "mcp-app:acme-cards:0:0",
+      origin: "mcp-app",
+      expectedGenerationId: LOOPBACK_GENERATION,
+    });
+    expect(callFromApp).toHaveBeenCalledWith(
+      "acme_write",
+      { operation: "update", employeeId: "E-7" },
+      {
+        appSessionId: "mcp-app:acme-cards:0:0",
+        operationGrantToken: "host-one-shot-token",
+        expectedGenerationId: LOOPBACK_GENERATION,
+      },
+    );
+  });
+
+  it("mints and forwards a one-shot grant for a no-read write", async () => {
+    const { callFromApp, requestPluginOperationGrant } = await setup();
+    const input = { operation: "reserve", roomId: "R-9" };
+
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_write",
+      input,
+      LOOPBACK_GENERATION,
+    );
+
+    expect(result).toEqual({ ok: true, result: "plugin-result" });
+    expect(requestPluginOperationGrant).toHaveBeenCalledWith({
+      pluginId: "acme-cards",
+      toolName: "acme_write",
+      input,
+      appSessionId: "mcp-app:acme-cards:0:0",
+      origin: "mcp-app",
+      expectedGenerationId: LOOPBACK_GENERATION,
+    });
+    expect(callFromApp).toHaveBeenCalledWith(
+      "acme_write",
+      input,
+      {
+        appSessionId: "mcp-app:acme-cards:0:0",
+        operationGrantToken: "host-one-shot-token",
+        expectedGenerationId: LOOPBACK_GENERATION,
+      },
+    );
   });
 
   it("turns a gate DENIAL into an outcome (never a throw across the IPC)", async () => {
     const { deps, callFromApp } = await setup();
     callFromApp.mockRejectedValueOnce(new Error("Tool execution denied by user"));
 
-    const result = await invoke(CHANNEL, "acme-cards", "acme_open", {});
+    const result = await invoke(
+      CHANNEL,
+      "acme-cards",
+      "acme_open",
+      {},
+      LOOPBACK_GENERATION,
+    );
 
     expect(result).toEqual({
       ok: false,

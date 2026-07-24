@@ -97,6 +97,13 @@ import {
 } from "./invocation-services.js";
 import { authorizeToolInvocation } from "./invocation-authorization.js";
 import { executeAuthorizedToolInvocation } from "./invocation-execution.js";
+import {
+  resolvePluginOperation,
+  type ResolvedPluginOperation,
+} from "./plugin-operation-governance.js";
+import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
+import type { HostPluginGenerationState } from "../plugins/plugin-host-generation.js";
+import type { PluginGenerationLease } from "../plugins/plugin-generation-coordinator.js";
 
 const log = createLogger("executor");
 
@@ -190,6 +197,103 @@ export async function runToolInvocation(
       await auditCurrentToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, t("be_executor.toolNotFoundAudit"), true, startTime, { decision: "deny", reason: t("be_executor.toolNotFoundAudit"), layer: 0 }, Infinity, permissionContext);
       callbacks?.onToolEnd?.(toolUse.name, t("be_executor.toolNotFound", { name: toolUse.name }), true, meta, undefined, durationMs);
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: t("be_executor.toolNotFound", { name: toolUse.name }), is_error: true, durationMs });
+    }
+    let generationAccess: ReturnType<
+      InvocationRunnerServices["pluginGenerationAccessProvider"]
+    >;
+    let generationLease: PluginGenerationLease<HostPluginGenerationState> | undefined;
+    if (tool.pluginGeneration) {
+      generationAccess = services.pluginGenerationAccessProvider();
+      try {
+        if (!generationAccess) {
+          throw new Error("plugin generation access is unavailable");
+        }
+        generationLease = await generationAccess.acquireExact(
+          tool.pluginGeneration.pluginId,
+          tool.pluginGeneration.generationId,
+        );
+      } catch (error) {
+        const durationMs = Date.now() - startTime;
+        const reason = `Plugin generation admission denied: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        const denied: PermissionCheckResult = {
+          decision: "deny",
+          reason,
+          layer: 0,
+        };
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          tool.source,
+          trustFromSource(tool.source),
+          toolUse.input,
+          reason,
+          true,
+          startTime,
+          denied,
+          Infinity,
+          permissionContext,
+        );
+        callbacks?.onToolEnd?.(
+          toolUse.name,
+          reason,
+          true,
+          meta,
+          undefined,
+          durationMs,
+        );
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: reason,
+          is_error: true,
+          durationMs,
+        });
+      }
+    }
+    const executeAdmitted = async (): Promise<
+      ToolResult | RationaleRequiredExecuteOneOutcome
+    > => {
+    if (
+      permissionContext?.expectedMcpServerId &&
+      tool.mcpServerId !== permissionContext.expectedMcpServerId
+    ) {
+      const durationMs = Date.now() - startTime;
+      const reason = `MCP tool owner changed: expected '${
+        permissionContext.expectedMcpServerId
+      }', got '${tool.mcpServerId ?? "unknown"}'`;
+      const denied: PermissionCheckResult = {
+        decision: "deny",
+        reason,
+        layer: 0,
+      };
+      await auditCurrentToolCall(
+        sessionId,
+        toolUse.name,
+        tool.source,
+        trustFromSource(tool.source),
+        toolUse.input,
+        reason,
+        true,
+        startTime,
+        denied,
+        Infinity,
+        permissionContext,
+      );
+      callbacks?.onToolEnd?.(
+        toolUse.name,
+        reason,
+        true,
+        meta,
+        undefined,
+        durationMs,
+      );
+      return withHostShellExecutionPlan({
+        tool_use_id: toolUse.id,
+        content: reason,
+        is_error: true,
+        durationMs,
+      });
     }
     source = tool.source;
     trust = trustFromSource(source);
@@ -347,6 +451,83 @@ export async function runToolInvocation(
     const finalInput = preResult.action === "modify" && preResult.updatedInput
       ? preResult.updatedInput
       : toolUse.input;
+    let resolvedPluginOperation: ResolvedPluginOperation | undefined;
+    let pluginOperationPrincipal: PluginOperationPrincipal | undefined;
+    if (tool.operationPolicy) {
+      const ambientOrigin = currentInvocationOrigin();
+      const operationOrigin = ambientOrigin === undefined ? "model" : ambientOrigin;
+      try {
+        resolvedPluginOperation = resolvePluginOperation(
+          tool.operationPolicy,
+          finalInput,
+          operationOrigin,
+        );
+        const hostContext =
+          permissionContext?.pluginOperation ??
+          services.pluginOperationIdentityProvider(tool, sessionId);
+        if (hostContext && tool.pluginId) {
+          if (
+            !tool.pluginGeneration ||
+            hostContext.generationId !== tool.pluginGeneration.generationId
+          ) {
+            throw new Error("host-derived operation generation does not match the resolved tool");
+          }
+          const appGrantRequired =
+            operationOrigin === "ui" || operationOrigin === "mcp-app";
+          if (hostContext.appGrantRequired !== appGrantRequired) {
+            throw new Error("host-derived operation grant policy does not match the effective origin");
+          }
+          pluginOperationPrincipal = {
+            ownerPluginId: tool.pluginId,
+            ownerVersion: hostContext.ownerVersion,
+            generationId: hostContext.generationId,
+            appSessionId: hostContext.appSessionId,
+            accountHash: hostContext.accountHash,
+          };
+        } else {
+          throw new Error("host-derived operation identity is missing");
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const msg = `Plugin operation denied: ${reason}`;
+        const durationMs = Date.now() - startTime;
+        const denied: PermissionCheckResult = {
+          decision: "deny",
+          reason,
+          layer: 0,
+        };
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(
+          toolUse.name,
+          msg,
+          true,
+          meta,
+          undefined,
+          durationMs,
+        );
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          source,
+          trust,
+          finalInput,
+          msg,
+          true,
+          startTime,
+          denied,
+          Infinity,
+          permissionContext,
+          invocationCategory,
+          executionCwd,
+        );
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: msg,
+          is_error: true,
+          durationMs,
+        });
+      }
+    }
     if (rationaleResumeContext) {
       let inputsMatch = false;
       try {
@@ -405,6 +586,7 @@ export async function runToolInvocation(
       finalInput,
       invocationAllowedScope.directories,
       effectLedger.correlationId,
+      resolvedPluginOperation?.rule.minimumRisk,
     );
     meta.category = invocationCategory;
     // Freeze the shell substrate before any reviewer, memory, or approval path.
@@ -1006,6 +1188,8 @@ export async function runToolInvocation(
       sessionId,
       startTime,
       permissionResult,
+      resolvedPluginOperation,
+      pluginOperationPrincipal,
     });
     if ("tool_use_id" in authorization || authorization.outcome === "rationale-required") {
       return authorization;
@@ -1048,5 +1232,15 @@ export async function runToolInvocation(
       effectLedger,
       targetFilePath,
       preResult,
+      resolvedPluginOperation,
+      pluginOperationPrincipal,
     });
+    };
+    try {
+      return generationAccess && generationLease
+        ? await generationAccess.runWithLease(generationLease, executeAdmitted)
+        : await executeAdmitted();
+    } finally {
+      generationLease?.release();
+    }
   }

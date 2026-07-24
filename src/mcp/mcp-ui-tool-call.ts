@@ -40,9 +40,35 @@
  */
 import type { Tool } from "../tools/base.js";
 import type { PluginToolInvocationDelegate } from "../plugins/runtime/index.js";
+import { resolvePluginOperation } from "../tools/plugin-operation-governance.js";
+
+export interface McpAppToolInvocation {
+  /** Host-minted; the card/renderer cannot choose this authority identity. */
+  appSessionId: string;
+  /** Host-issued one-shot token, retained inside main and never exposed to the card. */
+  operationGrantToken?: string;
+  /** Exact immutable plugin generation bound to a loopback card. */
+  expectedGenerationId?: string;
+}
+
+export interface McpOperationGrantTarget {
+  pluginId: string;
+  toolName: string;
+}
+
+function operationGrantTarget(
+  tool: Tool | undefined,
+  args: Record<string, unknown>,
+): McpOperationGrantTarget | undefined {
+  if (!tool?.pluginId || !tool.operationPolicy) return undefined;
+  const resolved = resolvePluginOperation(tool.operationPolicy, args, "mcp-app");
+  return resolved.rule.kind === "write"
+    ? { pluginId: tool.pluginId, toolName: tool.name }
+    : undefined;
+}
 
 /** The `PluginRuntime` subset the loopback (first-party plugin) source needs. */
-export interface PluginToolCallRuntime {
+interface PluginToolCallRuntime {
   /** `method → owning pluginId` (a loopback server's id IS its pluginId). */
   resolveToolOwner(method: string): string | undefined;
   /**
@@ -52,7 +78,21 @@ export interface PluginToolCallRuntime {
    * delegates to the ToolExecutor — for every app-visible tool, app-only ones
    * included. It takes no `userAction` argument: an app never has one.
    */
-  callFromApp(method: string, payload?: unknown): Promise<unknown>;
+  callFromApp(
+    method: string,
+    payload?: unknown,
+    options?: {
+      appSessionId?: string;
+      operationGrantToken?: string;
+      expectedGenerationId?: string;
+    },
+  ): Promise<unknown>;
+}
+
+export interface LoopbackToolCallDeps {
+  runtime: PluginToolCallRuntime;
+  /** Canonical registry lookup for the Host-owned operation-policy sidecar. */
+  findTool(name: string): Tool | undefined;
 }
 
 /** What the external (foreign MCP server) source needs from the host. */
@@ -70,18 +110,31 @@ export interface ExternalToolCallDeps {
  * host, so its tools are plugin methods. Ownership comes from the runtime's method
  * map; the visibility MUST and the gate both live inside `callFromApp`.
  */
-export function createLoopbackToolCallSource(runtime: PluginToolCallRuntime): {
+export function createLoopbackToolCallSource(deps: LoopbackToolCallDeps): {
   resolveToolOwner(serverId: string, toolName: string): string | undefined;
-  callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
+  resolveOperationGrantTarget(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): McpOperationGrantTarget | undefined;
+  callTool(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    invocation: McpAppToolInvocation,
+  ): Promise<unknown>;
 } {
   return {
     // The runtime's method map is global (a method name is owned by exactly one
     // plugin), so the owner is resolved from the NAME alone; the caller compares it
     // against the card's serverId.
-    resolveToolOwner: (_serverId, toolName) => runtime.resolveToolOwner(toolName),
+    resolveToolOwner: (_serverId, toolName) => deps.runtime.resolveToolOwner(toolName),
+    resolveOperationGrantTarget: (_serverId, toolName, args) =>
+      operationGrantTarget(deps.findTool(toolName), args),
     // `callFromApp`, never `callFromUi` — the app is not the plugin's panel (see
     // the file header). No `userAction` argument exists on this path.
-    callTool: (_serverId, toolName, args) => runtime.callFromApp(toolName, args),
+    callTool: (_serverId, toolName, args, invocation) =>
+      deps.runtime.callFromApp(toolName, args, invocation),
   };
 }
 
@@ -93,7 +146,17 @@ export function createLoopbackToolCallSource(runtime: PluginToolCallRuntime): {
  */
 export function createExternalToolCallSource(deps: ExternalToolCallDeps): {
   resolveToolOwner(serverId: string, toolName: string): string | undefined;
-  callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
+  resolveOperationGrantTarget(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): McpOperationGrantTarget | undefined;
+  callTool(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    invocation: McpAppToolInvocation,
+  ): Promise<unknown>;
 } {
   // An app names its server's tools by their SERVER-LOCAL name; the registry knows
   // them namespaced. One lookup, used by both members.
@@ -107,11 +170,22 @@ export function createExternalToolCallSource(deps: ExternalToolCallDeps): {
     // `undefined` / a different id and is denied by the caller's ONE comparison.
     resolveToolOwner: (serverId, toolName) => lookup(serverId, toolName)?.mcpServerId,
 
-    callTool: async (serverId, toolName, args) => {
+    resolveOperationGrantTarget: (serverId, toolName, args) => {
+      const tool = lookup(serverId, toolName);
+      if (!tool || tool.mcpServerId !== serverId) return undefined;
+      return operationGrantTarget(tool, args);
+    },
+
+    callTool: async (serverId, toolName, args, invocation) => {
       const tool = lookup(serverId, toolName);
       // Unreachable via the IPC handler (its owner check already denied an unknown
       // tool), but this source is the one place that must never invoke blind.
       if (!tool) throw new Error(`Tool not found: ${toolName}`);
+      if (tool.mcpServerId !== serverId) {
+        throw new Error(
+          `Tool '${toolName}' owner changed during MCP App call: expected '${serverId}', got '${tool.mcpServerId ?? "unknown"}'`,
+        );
+      }
 
       // ── SPEC MUST (external arm) ──────────────────────────────────────────────
       // The host MUST reject an app's `tools/call` for a tool whose
@@ -136,7 +210,19 @@ export function createExternalToolCallSource(deps: ExternalToolCallDeps): {
       // backs it, and neither arm is the trusted panel. It is still a foreground
       // (non-headless) call the user can be asked about; what it is NOT is a call
       // that can claim a user gesture (`userAction` is never set — see the header).
-      return invoke(tool.name, args, { origin: "mcp-app", userAction: false });
+      return invoke(tool.name, args, {
+        origin: "mcp-app",
+        userAction: false,
+        ...(tool.pluginId ? { ownerPluginId: tool.pluginId } : {}),
+        appInvocation: {
+          surface: "mcp-app",
+          sessionId: invocation.appSessionId,
+          ...(invocation.operationGrantToken
+            ? { operationGrantToken: invocation.operationGrantToken }
+            : {}),
+        },
+        expectedMcpServerId: serverId,
+      });
     },
   };
 }

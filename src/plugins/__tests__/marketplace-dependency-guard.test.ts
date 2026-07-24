@@ -110,7 +110,7 @@ describe("marketplace install dependency guard (S14)", () => {
           version?: string,
           onProgress?: unknown,
           opts?: { commit?: (manifestPath: string, manifestAbsPath: string) => Promise<void> },
-        ) => Promise<string>;
+      ) => Promise<{ manifestPath: string; predecessorRetired: boolean }>;
       },
       "installArtifact",
     ).mockImplementation(async (plugin, _version, _onProgress, opts) => {
@@ -130,7 +130,7 @@ describe("marketplace install dependency guard (S14)", () => {
         }),
       );
       await opts?.commit?.(manifestRelPath, manifestAbsPath);
-      return manifestRelPath;
+      return { manifestPath: manifestRelPath, predecessorRetired: true };
     });
   });
 

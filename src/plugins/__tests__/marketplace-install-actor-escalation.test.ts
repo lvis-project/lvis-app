@@ -22,7 +22,10 @@ import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import {
+  makeTestPluginPaths,
+  TestPluginMarketplaceService,
+} from "./test-helpers.js";
 
 interface CapturedAuditEntry {
   timestamp: string;
@@ -111,7 +114,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     const fetcher = new MockMarketplaceFetcher(marketplacePath);
     // The AuditLogger interface accepts a structural subset, the test
     // fixture mock matches it via the `log({ ... })` shape only.
-    return new PluginMarketplaceService(
+    return new TestPluginMarketplaceService(
       paths,
       fetcher,
       guard,
@@ -187,7 +190,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     });
     const fetcher = new MockMarketplaceFetcher(marketplacePath);
     vi.spyOn(fetcher, "listPlugins").mockRejectedValue(new Error("network down"));
-    const service = new PluginMarketplaceService(
+    const service = new TestPluginMarketplaceService(
       paths,
       fetcher,
       guard,
@@ -213,7 +216,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     });
     const fetcher = new MockMarketplaceFetcher(marketplacePath);
     const detailSpy = vi.spyOn(fetcher, "getPluginDetail");
-    const service = new PluginMarketplaceService(
+    const service = new TestPluginMarketplaceService(
       paths,
       fetcher,
       guard,

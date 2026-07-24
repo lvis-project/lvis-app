@@ -8,6 +8,8 @@
  */
 
 import { dirname } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type {
   InstallPolicy,
   PluginAccessSpec,
@@ -16,12 +18,15 @@ import type {
   PluginHostApi,
   PluginManifest,
   PluginOnboardingSpec,
+  PluginRegistryEntry,
   PluginToolHandler,
   PluginUiExtension,
   RuntimePlugin,
 } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
+import { installReceiptPath } from "../plugin-install-receipt.js";
+import type { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
 import { withResolvedPluginInstallLocks } from "../install-lifecycle.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
@@ -66,7 +71,6 @@ const log = createLogger("plugin-runtime");
 export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
 export { runPluginFactoryWithTimeout, runPluginImportWithTimeout, runStartWithTimeout };
-export { createNoopHostApiForTests } from "./sandbox.js";
 export type { PluginPerfStats };
 
 export type { InstallPolicy };
@@ -148,6 +152,8 @@ export interface PluginToolInvocationContext {
   origin: InvocationOrigin;
   callerPluginId?: string;
   ownerPluginId?: string;
+  /** Host-admitted runtime activation; never inferred from mutable live state. */
+  ownerGenerationId?: string;
   /**
    * True only when the renderer call was made during an active browser user
    * activation. Renderer-provided booleans are not trusted directly; preload
@@ -185,6 +191,14 @@ export interface PluginToolInvocationContext {
    * SoT: {@link InvocationOrigin}.
    */
   parentOrigin?: InvocationOrigin;
+  /** Host-owned app-call envelope. The renderer may carry only the opaque token. */
+  appInvocation?: {
+    surface: "trusted-panel" | "mcp-app";
+    sessionId: string;
+    operationGrantToken?: string;
+  };
+  /** Exact foreign MCP owner captured from the card and rechecked at dispatch. */
+  expectedMcpServerId?: string;
 }
 
 export type PluginToolInvocationDelegate = (
@@ -210,11 +224,28 @@ export interface PluginStartPreparationContext {
   reportProgress?: (status: PluginPreparationProgressInput) => void;
 }
 
+export interface PreparedArtifactRuntimeActivationInput<T> {
+  installId: string;
+  pluginRoot: string;
+  manifest: PluginManifest;
+  receiptRaw: string;
+  registryEntry: Readonly<
+    Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+  >;
+  approvedPluginAccess?: PluginAccessSpec;
+  durableCommit(): Promise<T>;
+}
+
 export interface PluginHostApiIncarnation {
   registerDisposer(dispose: () => void): void;
   trackOperation<T>(operation: Promise<T>): Promise<T>;
   isActive(): boolean;
   isLifecycleHookActive(): boolean;
+  /**
+   * Optional generation-wide effect scope. Prepared generations stage
+   * registrations here until the generation is atomically published.
+   */
+  generationScope?: HostApiGenerationScope;
 }
 
 export interface PluginRuntimeOptions {
@@ -229,6 +260,10 @@ export interface PluginRuntimeOptions {
     manifest: PluginManifest,
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
+    installPluginId: string | null,
+    candidateRegistryEntry?: Readonly<
+      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
+    >,
   ) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
@@ -252,13 +287,18 @@ export interface PluginRuntimeOptions {
 
 
   onEnable?: (pluginId: string) => void;
+  /** Revokes renderer authority whenever a plugin UI generation changes. */
+  onPluginUiRevisionChange?: (pluginId: string) => void;
   /**
    * Fires when the user toggles active/inactive without unloading the runtime.
    * Unlike {@link onDisable}, this MUST NOT unregister plugin tools from the
    * execution registry: auth/config/UI calls remain runtime-callable while
    * model exposure is gated by ConversationLoop scope.
    */
-  onActiveStateChange?: (pluginId: string, enabled: boolean) => void;
+  onActiveStateChange?: (
+    pluginId: string,
+    enabled: boolean,
+  ) => Promise<void> | void;
   /**
    * Optional dependency preparation gate. When this returns a Promise, plugin
    * loading/start is deferred without blocking app boot; calls into the
@@ -297,18 +337,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
-    const { pluginId } = entry;
-    this.throwIfPluginNotStarted(pluginId);
-    const stats = this.perf.beginCall(pluginId);
-    const t0 = Date.now();
-    try {
-      return await entry.handler(payload);
-    } catch (err) {
-      stats.errorCount += 1;
-      throw err;
-    } finally {
-      stats.totalExecMs += Date.now() - t0;
-    }
+    return this.callForPlugin(entry.pluginId, method, payload);
   }
 
   resolveToolOwner(method: string): string | undefined {
@@ -374,27 +403,27 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
-    const plugin = this.plugins.get(entry.pluginId);
-    this.throwIfPluginNotStarted(entry.pluginId);
-    assertUiActionInvokable({
-      method,
-      pluginId: entry.pluginId,
-      uiInvokable: plugin ? declaredUiInvokableMethods(plugin.manifest) : [],
+    return this.withPinnedGeneration(entry.pluginId, async (projection) => {
+      assertUiActionInvokable({
+        method,
+        pluginId: entry.pluginId,
+        uiInvokable: declaredUiInvokableMethods(projection.manifest),
+      });
+      const handler = projection.methods.get(method);
+      if (!handler) throw new Error(`Plugin method not found in active generation: ${method}`);
+      this.auditLog?.("info", "plugin_ui_action_invoked", {
+        pluginId: entry.pluginId,
+        method,
+      });
+      const outcome = await runWithCeiling(
+        async () => handler(payload),
+        ceilingMs,
+        undefined,
+        method,
+      );
+      if (!outcome.ok) throw outcome.error;
+      return outcome.value;
     });
-    this.auditLog?.("info", "plugin_ui_action_invoked", {
-      pluginId: entry.pluginId,
-      method,
-    });
-    const outcome = await runWithCeiling(
-      () => this.call(method, payload),
-      ceilingMs,
-      undefined,
-      method,
-    );
-    if (!outcome.ok) {
-      throw outcome.error;
-    }
-    return outcome.value;
   }
 
   /**
@@ -410,28 +439,44 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   async callFromUi(
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean },
+    options?: {
+      userAction?: boolean;
+      appSessionId?: string;
+      operationGrantToken?: string;
+      expectedGenerationId?: string;
+    },
   ): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
       this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
-    const plugin = this.plugins.get(entry.pluginId);
-    this.throwIfPluginNotStarted(entry.pluginId);
-    assertUiActionInvokable({
-      method,
-      pluginId: entry.pluginId,
-      uiInvokable: plugin ? declaredUiInvokableMethods(plugin.manifest) : [],
-    });
-    if (!this.toolInvocationDelegate) {
-      throw new Error("Plugin tool executor is not wired; UI plugin call denied");
-    }
-    return this.toolInvocationDelegate(method, payload, {
-      origin: "ui",
-      ownerPluginId: entry.pluginId,
-      userAction: options?.userAction === true,
-    });
+    return this.withPinnedGeneration(entry.pluginId, async (projection, generationId) => {
+      const manifest = projection.manifest;
+      assertUiActionInvokable({
+        method,
+        pluginId: entry.pluginId,
+        uiInvokable: declaredUiInvokableMethods(manifest),
+      });
+      if (!this.toolInvocationDelegate) {
+        throw new Error("Plugin tool executor is not wired; UI plugin call denied");
+      }
+      return this.toolInvocationDelegate(method, payload, {
+        origin: "ui",
+        ownerPluginId: entry.pluginId,
+        ownerGenerationId: generationId,
+        userAction: options?.userAction === true,
+        ...(options?.appSessionId
+          ? {
+              appInvocation: {
+                surface: "trusted-panel" as const,
+                sessionId: options.appSessionId,
+                ...(options.operationGrantToken ? { operationGrantToken: options.operationGrantToken } : {}),
+              },
+            }
+          : {}),
+      });
+    }, options?.expectedGenerationId);
   }
 
   /**
@@ -486,36 +531,55 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    *    contained to this method — `assertUiActionInvokable`, the `"ui"` panel path,
    *    and `isAppOnlyRuntimeInvocation` are untouched.
    */
-  async callFromApp(method: string, payload?: unknown): Promise<unknown> {
+  async callFromApp(
+    method: string,
+    payload?: unknown,
+    options?: {
+      appSessionId?: string;
+      operationGrantToken?: string;
+      expectedGenerationId?: string;
+    },
+  ): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
       this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
-    const plugin = this.plugins.get(entry.pluginId);
-    this.throwIfPluginNotStarted(entry.pluginId);
-    assertUiActionInvokable({
-      method,
-      pluginId: entry.pluginId,
-      uiInvokable: plugin ? declaredUiInvokableMethods(plugin.manifest) : [],
-    });
-    const auth = plugin?.manifest.auth;
-    if (auth && (method === auth.statusTool || method === auth.loginTool || method === auth.logoutTool)) {
-      throw new Error(
-        `[${MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE}] Tool '${method}' is this plugin's manifest-declared ` +
-          `auth tool and is reserved for the plugin's own trusted panel: a card cannot invoke it. ` +
-          `auth.loginTool opens a credentialed auth window, and an untrusted card must never be able ` +
-          `to summon one, gated or not.`,
-      );
-    }
-    if (!this.toolInvocationDelegate) {
-      throw new Error("Plugin tool executor is not wired; MCP App plugin call denied");
-    }
-    return this.toolInvocationDelegate(method, payload, {
-      origin: "mcp-app",
-      ownerPluginId: entry.pluginId,
-      userAction: false,
-    });
+    return this.withPinnedGeneration(entry.pluginId, async (projection, generationId) => {
+      const manifest = projection.manifest;
+      assertUiActionInvokable({
+        method,
+        pluginId: entry.pluginId,
+        uiInvokable: declaredUiInvokableMethods(manifest),
+      });
+      const auth = manifest?.auth;
+      if (auth && (method === auth.statusTool || method === auth.loginTool || method === auth.logoutTool)) {
+        throw new Error(
+          `[${MCP_APP_AUTH_TOOL_NOT_APP_CALLABLE}] Tool '${method}' is this plugin's manifest-declared ` +
+            `auth tool and is reserved for the plugin's own trusted panel: a card cannot invoke it. ` +
+            `auth.loginTool opens a credentialed auth window, and an untrusted card must never be able ` +
+            `to summon one, gated or not.`,
+        );
+      }
+      if (!this.toolInvocationDelegate) {
+        throw new Error("Plugin tool executor is not wired; MCP App plugin call denied");
+      }
+      return this.toolInvocationDelegate(method, payload, {
+        origin: "mcp-app",
+        ownerPluginId: entry.pluginId,
+        ownerGenerationId: generationId,
+        userAction: false,
+        ...(options?.appSessionId
+          ? {
+              appInvocation: {
+                surface: "mcp-app" as const,
+                sessionId: options.appSessionId,
+                ...(options.operationGrantToken ? { operationGrantToken: options.operationGrantToken } : {}),
+              },
+            }
+          : {}),
+      });
+    }, options?.expectedGenerationId);
   }
 
   /**
@@ -548,6 +612,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     pluginId: string,
     uri: string,
     ceilingMs: number = TOOL_TIMEOUT_POLICY.pluginUiResourceReadMs,
+    expectedGenerationId?: string,
   ): Promise<string> {
     // Gate parity with pluginRuntimeToolDelegate (Gate 4): registry-enabled OR
     // session-activated for the CALLING session (read from the ALS store;
@@ -567,26 +632,23 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       );
     }
 
-    const plugin = this.plugins.get(pluginId);
-    if (!plugin) {
-      throw new Error(`Plugin '${pluginId}' is not loaded; cannot serve '${uri}'.`);
-    }
-    const readUiResource = plugin.instance.readUiResource;
-    if (typeof readUiResource !== "function") {
-      throw new Error(
-        `Plugin '${pluginId}' declares ui:// resources but does not implement readUiResource(); cannot serve '${uri}'.`,
+    const html = await this.withPinnedGeneration(pluginId, async (projection) => {
+      const instance = projection.instance;
+      const readUiResource = instance.readUiResource;
+      if (typeof readUiResource !== "function") {
+        throw new Error(
+          `Plugin '${pluginId}' declares ui:// resources but does not implement readUiResource(); cannot serve '${uri}'.`,
+        );
+      }
+      const outcome = await runWithCeiling(
+        async () => readUiResource.call(instance, uri),
+        ceilingMs,
+        undefined,
+        `${pluginId}.readUiResource`,
       );
-    }
-
-    const outcome = await runWithCeiling(
-      async () => readUiResource.call(plugin.instance, uri),
-      ceilingMs,
-      undefined,
-      `${pluginId}.readUiResource`,
-    );
-    if (!outcome.ok) throw outcome.error;
-
-    const html = outcome.value;
+      if (!outcome.ok) throw outcome.error;
+      return outcome.value;
+    }, expectedGenerationId);
     if (typeof html !== "string") {
       throw new Error(
         `Plugin '${pluginId}' readUiResource('${uri}') returned ${typeof html}, expected the card HTML as a string.`,
@@ -627,6 +689,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     handler: (payload?: unknown) => Promise<unknown>,
   ): void {
     const stub: LoadedPlugin = {
+      activationId: randomUUID(),
       manifest: {
         id: pluginId,
         name: pluginId,
@@ -730,15 +793,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   }
 
   /**
-   * #1176 — toggle a plugin's active/inactive state. Persists `enabled` to the
-   * registry atomically and updates the in-memory mirror. Deliberately does NOT
-   * unload/reload the plugin: tool exposure is recomputed per turn from
-   * {@link isPluginEnabled}, so a disabled plugin's tools simply vanish from the
-   * next turn's scope (and reappear on re-enable) with no runtime churn.
-   * Active-state changes use `onActiveStateChange`; runtime lifecycle
-   * `onDisable`/`onEnable` remains reserved for actual unload/reload paths.
-   *
-   * @throws if `pluginId` is not a known/loaded plugin.
+   * Atomically move a plugin between an active immutable generation and the
+   * inactive pointer. Disable drains all predecessor leases before reporting
+   * success. Re-enable rebuilds from installed bytes and reverifies the receipt
+   * before its registry commit and generation publication linearize together.
    */
   async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
     // A restart may own the already-known canonical lock while dependency
@@ -756,45 +814,137 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
         ];
       },
       async () => {
-      const canonicalPluginId = this.resolveKnownPluginId(pluginId);
-      if (
-        !this.knownPluginManifests.has(canonicalPluginId)
-        && !this.plugins.has(canonicalPluginId)
-      ) {
-        throw new Error(`Plugin not found: ${pluginId}`);
-      }
-      const installClaim = this.getPluginInstallClaim(canonicalPluginId);
-      if (installClaim === undefined) {
-        throw new Error(`Plugin install provenance unknown: ${pluginId}`);
-      }
-      if (this.registryPath) {
-        // Static manifests have no registry row, so their active toggle is
-        // session-local. Registry installs persist through their raw install id.
-        if (installClaim !== null) {
-          await updatePluginRegistry(this.registryPath, (registry) => {
-            const entry = registry.plugins.find(({ id }) => id === installClaim);
-            if (!entry) {
-              throw new Error(`Plugin not found in registry: ${installClaim}`);
+        const canonicalPluginId = this.resolveKnownPluginId(pluginId);
+        if (
+          !this.knownPluginManifests.has(canonicalPluginId)
+          && !this.plugins.has(canonicalPluginId)
+        ) {
+          throw new Error(`Plugin not found: ${pluginId}`);
+        }
+        const installClaim = this.getPluginInstallClaim(canonicalPluginId);
+        if (installClaim === undefined) {
+          throw new Error(`Plugin install provenance unknown: ${pluginId}`);
+        }
+        const generationLifecycle = this.requireGenerationLifecycle(
+          "plugin enabled-state change",
+        );
+        await generationLifecycle.runInLifecycleQueue(canonicalPluginId, async () => {
+          if (!this.inactivePluginIds.has(canonicalPluginId) === enabled) return;
+          const persist = async (): Promise<void> => {
+            // Static manifests have no registry row, so their active toggle is
+            // session-local. Registry installs persist through their raw install id.
+            if (this.registryPath && installClaim !== null) {
+              await updatePluginRegistry(this.registryPath, (registry) => {
+                const entry = registry.plugins.find(({ id }) => id === installClaim);
+                if (!entry) {
+                  throw new Error(`Plugin not found in registry: ${installClaim}`);
+                }
+                entry.enabled = enabled;
+              });
             }
-            entry.enabled = enabled;
-          });
-        }
-      }
-      if (enabled) {
-        this.inactivePluginIds.delete(canonicalPluginId);
-        try {
-          this.onActiveStateChange?.(canonicalPluginId, true);
-        } catch (err) {
-          log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, true): %s`, (err as Error).message);
-        }
-      } else {
-        this.inactivePluginIds.add(canonicalPluginId);
-        try {
-          this.onActiveStateChange?.(canonicalPluginId, false);
-        } catch (err) {
-          log.error(`onActiveStateChange failed during setPluginEnabled(${canonicalPluginId}, false): %s`, (err as Error).message);
-        }
-      }
+          };
+
+          let retirementError: unknown;
+          if (!enabled) {
+            if (!generationLifecycle.getActive(canonicalPluginId)) {
+              throw new Error(
+                `cannot disable plugin without an active generation: ${canonicalPluginId}`,
+              );
+            }
+            const { retirement } = await generationLifecycle.deactivateWithCommit(
+              canonicalPluginId,
+              persist,
+            );
+            this.inactivePluginIds.add(canonicalPluginId);
+            this.disabledPluginIds.add(canonicalPluginId);
+            retirementError = await this.captureCommittedRetirementFailure(
+              canonicalPluginId,
+              retirement,
+              "plugin enabled-state disable",
+            );
+          } else {
+            if (generationLifecycle.getActive(canonicalPluginId)) {
+              throw new Error(
+                `cannot re-enable plugin while a generation is active: ${canonicalPluginId}`,
+              );
+            }
+            if (!this.installReceiptCacheRoot) {
+              throw new Error("plugin re-enable requires installReceiptCacheRoot");
+            }
+            const loadPlan = await this.resolveManifestLoadPlanInternal();
+            const targetPlan = loadPlan.find((plan) =>
+              plan.pluginIdHint === canonicalPluginId
+              || (installClaim !== null && plan.pluginIdHint === installClaim)
+              || this.matchesManifestPath(plan.manifestPath, canonicalPluginId)
+            );
+            if (!targetPlan) {
+              throw new Error(`Plugin not found in registry: ${canonicalPluginId}`);
+            }
+            const manifest = await this.readManifest(targetPlan.manifestPath);
+            if (manifest.id !== canonicalPluginId) {
+              throw new Error(
+                `plugin re-enable manifest identity changed: expected ${canonicalPluginId}, got ${manifest.id}`,
+              );
+            }
+            const pluginRoot = dirname(targetPlan.manifestPath);
+            const receiptPluginId = installClaim ?? canonicalPluginId;
+            const integrity = await this.verifyReceiptAndDevGuard(
+              receiptPluginId,
+              pluginRoot,
+            );
+            if (!integrity.ok) {
+              throw new Error(
+                `plugin re-enable receipt verification failed: ${canonicalPluginId}`,
+              );
+            }
+            const receiptRaw = await readFile(
+              installReceiptPath(this.installReceiptCacheRoot, receiptPluginId),
+              "utf8",
+            );
+            await this.activatePreparedArtifact({
+              installId: receiptPluginId,
+              pluginRoot,
+              manifest,
+              receiptRaw,
+              registryEntry: {
+                installSource: targetPlan.installSource,
+                manifestSha256: targetPlan.manifestSha256,
+              },
+              approvedPluginAccess:
+                targetPlan.approvedPluginAccess
+                ?? this.knownPluginAccessGrants.get(canonicalPluginId),
+              durableCommit: persist,
+            });
+            this.inactivePluginIds.delete(canonicalPluginId);
+            this.disabledPluginIds.delete(canonicalPluginId);
+          }
+
+          // The generation pointer and durable registry are already committed.
+          // Keep this runtime view aligned even if a downstream host projection
+          // callback reports a post-commit fault; later requests must queue behind
+          // that callback and observe the committed state.
+          let callbackError: unknown;
+          try {
+            await this.onActiveStateChange?.(canonicalPluginId, enabled);
+          } catch (error) {
+            callbackError = error;
+          }
+          if (retirementError !== undefined && callbackError !== undefined) {
+            throw new AggregateError(
+              [
+                retirementError instanceof Error
+                  ? retirementError
+                  : new Error(String(retirementError)),
+                callbackError instanceof Error
+                  ? callbackError
+                  : new Error(String(callbackError)),
+              ],
+              `plugin '${canonicalPluginId}' committed disable cleanup failed`,
+            );
+          }
+          if (retirementError !== undefined) throw retirementError;
+          if (callbackError !== undefined) throw callbackError;
+        });
       },
       (pluginIds) => {
         for (const discoveredPluginId of pluginIds) {
@@ -946,10 +1096,6 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     return result;
   }
 
-  getPluginInstance<T = unknown>(pluginId: string): T | undefined {
-    return this.plugins.get(pluginId)?.instance as T | undefined;
-  }
-
   getPluginEntryDir(pluginId: string): string | undefined {
     const plugin = this.plugins.get(pluginId);
     if (!plugin) return undefined;
@@ -1014,6 +1160,143 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       }
     }
     return result;
+  }
+
+  async callForPlugin(
+    pluginId: string,
+    method: string,
+    payload?: unknown,
+    expectedGenerationId?: string,
+  ): Promise<unknown> {
+    this.throwIfPluginNotStarted(pluginId);
+    return this.withPinnedGeneration(pluginId, async (projection) => {
+      const handler = projection.methods.get(method);
+      if (!handler) throw new Error(`Plugin method not found in active generation: ${method}`);
+      const stats = this.perf.beginCall(pluginId);
+      const t0 = Date.now();
+      try {
+        return await handler(payload);
+      } catch (err) {
+        stats.errorCount += 1;
+        throw err;
+      } finally {
+        stats.totalExecMs += Date.now() - t0;
+      }
+    }, expectedGenerationId);
+  }
+
+  getPluginOperationAccountHash(pluginId: string, generationId: string): string | undefined {
+    return this.pluginAccountHashes.get(`${pluginId}\0${generationId}`)?.principalHash;
+  }
+
+  /**
+   * Claim publication order for any auth lifecycle invocation. Starting login
+   * or logout immediately removes the current principal, so neither a failed
+   * nor partial transition can retain stale write authority. The caller must
+   * synchronously revoke grants for the returned hash before awaiting plugin
+   * execution and pass the epoch to {@link observePluginAuthResult}.
+   */
+  beginPluginAuthInvocation(
+    pluginId: string,
+    generationId: string,
+    toolName: string,
+  ): {
+    epoch: number;
+    invalidatedAccountHash?: string;
+  } | undefined {
+    const active = this.requireGenerationAccess("plugin auth invocation").getActive(pluginId);
+    if (!active || active.generationId !== generationId) return undefined;
+    const auth = active.manifest.auth;
+    if (
+      !auth ||
+      (
+        toolName !== auth.statusTool &&
+        toolName !== auth.loginTool &&
+        toolName !== auth.logoutTool
+      )
+    ) {
+      return undefined;
+    }
+    const epoch = ++this.nextPluginAuthInvocationEpoch;
+    const key = `${pluginId}\0${generationId}`;
+    this.pluginAuthInvocationEpochs.set(key, epoch);
+    if (toolName !== auth.loginTool && toolName !== auth.logoutTool) {
+      return { epoch };
+    }
+    const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+    this.pluginAccountHashes.delete(key);
+    return invalidatedAccountHash
+      ? { epoch, invalidatedAccountHash }
+      : { epoch };
+  }
+
+  /**
+   * Observe only manifest-declared auth tools after a successful invocation.
+   * The account hash is derived exclusively from statusTool output; login and
+   * logout results cannot mint or restore write authority.
+   */
+  observePluginAuthResult(
+    pluginId: string,
+    generationId: string,
+    toolName: string,
+    result: unknown,
+    invocationEpoch: number | undefined,
+  ): { invalidatedAccountHash?: string } {
+    const active = this.requireGenerationAccess("plugin auth result observation").getActive(pluginId);
+    if (!active || active.generationId !== generationId) return {};
+    const manifest = active.manifest;
+    const auth = manifest?.auth;
+    if (!auth) return {};
+    const key = `${pluginId}\0${generationId}`;
+    if (
+      (toolName === auth.statusTool || toolName === auth.logoutTool) &&
+      (
+        invocationEpoch === undefined ||
+        this.pluginAuthInvocationEpochs.get(key) !== invocationEpoch
+      )
+    ) {
+      return {};
+    }
+    if (toolName === auth.logoutTool) {
+      const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+      this.pluginAccountHashes.delete(key);
+      return invalidatedAccountHash ? { invalidatedAccountHash } : {};
+    }
+    if (toolName !== auth.statusTool) return {};
+    const outer = result && typeof result === "object" && !Array.isArray(result)
+      ? result as Record<string, unknown>
+      : undefined;
+    const nested = outer?.data && typeof outer.data === "object" && !Array.isArray(outer.data)
+      ? outer.data as Record<string, unknown>
+      : outer;
+    if (nested?.authenticated !== true || typeof nested.account !== "string" || !nested.account.trim()) {
+      const invalidatedAccountHash = this.pluginAccountHashes.get(key)?.principalHash;
+      this.pluginAccountHashes.delete(key);
+      return invalidatedAccountHash ? { invalidatedAccountHash } : {};
+    }
+    const identityHash = createHash("sha256")
+      .update("plugin-account-identity/v1\0")
+      .update(nested.account.trim().toLowerCase())
+      .digest("hex");
+    const existing = this.pluginAccountHashes.get(key);
+    if (existing?.identityHash === identityHash) return {};
+    const principalHash = createHash("sha256")
+      .update("plugin-account-session/v1\0")
+      .update(identityHash)
+      .update("\0")
+      .update(randomUUID())
+      .digest("hex");
+    this.pluginAccountHashes.set(key, { identityHash, principalHash });
+    return existing ? { invalidatedAccountHash: existing.principalHash } : {};
+  }
+
+  clearPluginOperationAccount(pluginId: string): void {
+    for (const key of this.pluginAccountHashes.keys()) {
+      if (key.startsWith(`${pluginId}\0`)) this.pluginAccountHashes.delete(key);
+    }
+    for (const key of this.pluginAuthInvocationEpochs.keys()) {
+      if (key.startsWith(`${pluginId}\0`)) this.pluginAuthInvocationEpochs.delete(key);
+    }
   }
 
 }

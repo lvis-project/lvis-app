@@ -58,7 +58,14 @@ function invokeMemorySearch<T>(
 }
 
 type PluginActionResult =
-  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
+  | {
+      ok: true;
+      pluginId: string;
+      installed?: true;
+      uninstalled?: true;
+      rolledBackTo?: string;
+      version?: string;
+    }
   | { ok: false; error: string; message?: string };
 
 function invalidPluginActionResult(): PluginActionResult {
@@ -75,12 +82,20 @@ export function normalizePluginActionResult(result: unknown): PluginActionResult
   }
 
   const payload = result && typeof result === "object"
-    ? result as { pluginId?: unknown; installed?: unknown; uninstalled?: unknown; version?: unknown }
+    ? result as {
+        pluginId?: unknown;
+        installed?: unknown;
+        uninstalled?: unknown;
+        rolledBackTo?: unknown;
+        version?: unknown;
+      }
     : {};
   const pluginId = typeof payload.pluginId === "string" ? payload.pluginId.trim() : "";
   const installed = payload.installed === true;
   const uninstalled = payload.uninstalled === true;
-  if (!pluginId || (!installed && !uninstalled)) {
+  const rolledBackTo =
+    typeof payload.rolledBackTo === "string" ? payload.rolledBackTo.trim() : "";
+  if (!pluginId || (!installed && !uninstalled && !rolledBackTo)) {
     return invalidPluginActionResult();
   }
   const normalized: PluginActionResult = {
@@ -92,6 +107,9 @@ export function normalizePluginActionResult(result: unknown): PluginActionResult
   }
   if (uninstalled) {
     normalized.uninstalled = true;
+  }
+  if (rolledBackTo) {
+    normalized.rolledBackTo = rolledBackTo;
   }
   if (typeof payload.version === "string") {
     normalized.version = payload.version;
@@ -430,13 +448,35 @@ export function buildInternalApiSurface() {
   // ({ ok, pluginId, enabled } | { ok:false, error, message }).
   setPluginEnabled: async (pluginId: string, enabled: boolean) =>
     ipcRenderer.invoke(CHANNELS.plugins.setEnabled, pluginId, enabled),
+  listPluginContributionTrust: async (pluginId?: string) =>
+    ipcRenderer.invoke(CHANNELS.plugins.contributionTrustList, pluginId),
+  setPluginContributionTrust: async (input: {
+    pluginId: string;
+    localId: string;
+    kind: "hook" | "mcpServer";
+    approved: boolean;
+  }) => ipcRenderer.invoke(CHANNELS.plugins.contributionTrustSet, input),
   callPluginMethod: async (
     method: string,
     payload?: unknown,
-    options?: { userAction?: boolean },
+    options?: { userAction?: boolean; operationGrantToken?: string },
   ) => ipcRenderer.invoke(CHANNELS.plugins.call, method, payload, {
     userAction: options?.userAction === true && navigator.userActivation?.isActive === true,
+    ...(options?.operationGrantToken
+      ? { operationGrantToken: options.operationGrantToken }
+      : {}),
   }),
+  e2ePluginBundleSnapshot: async (
+    pluginId: string,
+    skillLocalId: string,
+    hookProbeToolName: string,
+  ) =>
+    ipcRenderer.invoke(
+      CHANNELS.plugins.e2eBundleSnapshot,
+      pluginId,
+      skillLocalId,
+      hookProbeToolName,
+    ) as Promise<unknown>,
 
 
   // ─── Overlay trigger lifecycle ────────────────────────────────────────
@@ -801,14 +841,26 @@ export function buildInternalApiSurface() {
     addConfig: async (config: McpServerConfig) => ipcRenderer.invoke(CHANNELS.mcp.configAdd, config),
     setApiKey: async (id: string, apiKey: string) => ipcRenderer.invoke(CHANNELS.mcp.configSetApiKey, id, apiKey),
     removeConfig: async (id: string) => ipcRenderer.invoke(CHANNELS.mcp.configRemove, id),
-    readUiResource: async (serverId: string, uri: string) => ipcRenderer.invoke(CHANNELS.mcp.uiResource, serverId, uri) as Promise<unknown>,
+    readUiResource: async (serverId: string, uri: string, generationId?: string) =>
+      ipcRenderer.invoke(CHANNELS.mcp.uiResource, serverId, uri, generationId) as Promise<unknown>,
     // MCP Apps `oncalltool` — the app calls a tool on ITS OWN server. `serverId` is
     // supplied by the TRUSTED renderer from the card's payload (the app has no
     // channel to name a server), and main re-checks that the tool is actually owned
     // by it. Never resolves to a thrown error: main returns an outcome the bridge
     // handler turns into an MCP-style `CallToolResult`.
-    callTool: async (serverId: string, name: string, args: Record<string, unknown>) =>
-      ipcRenderer.invoke(CHANNELS.mcp.callTool, serverId, name, args) as Promise<unknown>,
+    callTool: async (
+      serverId: string,
+      name: string,
+      args: Record<string, unknown>,
+      generationId?: string,
+    ) =>
+      ipcRenderer.invoke(
+        CHANNELS.mcp.callTool,
+        serverId,
+        name,
+        args,
+        generationId,
+      ) as Promise<unknown>,
     // MCP Apps `onmessage` — the app asks for its text to enter the conversation (or the
     // notification surface). BOTH bindings come from the TRUSTED renderer: `serverId`
     // (the card's server) and `sessionId` (the chat session the card belongs to). The

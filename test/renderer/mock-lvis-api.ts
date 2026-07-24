@@ -478,6 +478,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     listPluginUiExtensions: vi.fn(async () => pluginUiExtensions),
     listPluginCards: vi.fn(async () => pluginCards),
     callPluginMethod: vi.fn(async () => ({ ok: true })),
+    e2ePluginBundleSnapshot: vi.fn(async () => ({
+      ok: false,
+      error: "production-disabled",
+    })),
     onPluginEvent: vi.fn((eventType: string, handler: (p: unknown) => void) => {
       let set = pluginEventHandlers.get(eventType);
       if (!set) {

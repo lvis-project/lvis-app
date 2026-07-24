@@ -151,6 +151,8 @@ export function buildLvisHostWorld() {
         options?: { doctorCleanup?: { installFailureKind?: string } },
       ) =>
         normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.uninstall, pluginId, options)),
+      rollbackMarketplacePlugin: async (pluginId: string) =>
+        normalizePluginActionResult(await ipcRenderer.invoke(CHANNELS.plugins.rollback, pluginId)),
       installMarketplaceAgent: async (slug: string) =>
         normalizeMarketplacePackageActionResult(await ipcRenderer.invoke(CHANNELS.agents.install, slug), "agentId"),
       uninstallMarketplaceAgent: async (slug: string) =>

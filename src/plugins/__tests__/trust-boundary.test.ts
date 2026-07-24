@@ -14,7 +14,6 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import { join } from "node:path";
-import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import {
   hashReceiptFiles,
@@ -26,7 +25,11 @@ import {
   isDevModeUnlocked,
   setIsPackaged,
 } from "../../boot/dev-flags.js";
-import { writeTestPluginRegistry } from "./test-helpers.js";
+import {
+  makeTestTreeWritable,
+  TestPluginRuntime as PluginRuntime,
+  writeTestPluginRegistry,
+} from "./test-helpers.js";
 
 const ENTRY_SOURCE = `export default async function createPlugin(ctx) {
   return { handlers: { tb_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };
@@ -50,6 +53,7 @@ describe("Phase 1 — plugin trust boundary", () => {
   });
 
   afterEach(async () => {
+    await makeTestTreeWritable(testDir);
     await rm(testDir, { recursive: true, force: true });
   });
 
@@ -100,7 +104,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       await writeTestPluginRegistry({ registryPath }, [{ id: "tb-user", manifestPath }]);
 
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -117,7 +120,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       await writeTestPluginRegistry({ registryPath }, [{ id: "tb-host", manifestPath }]);
 
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -134,7 +136,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       await writeTestPluginRegistry({ registryPath }, [{ id: "tb-rogue", manifestPath }]);
 
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -165,7 +166,6 @@ describe("Phase 1 — plugin trust boundary", () => {
         await writeTestPluginRegistry({ registryPath }, [{ id: "tb-evil", manifestPath: linkedManifest }]);
 
         const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
           hostRoot,
           registryPath,
           pluginsRoot,
@@ -187,7 +187,6 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -209,7 +208,6 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -231,7 +229,6 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -260,7 +257,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       await writeTestPluginRegistry({ registryPath }, [{ id: "tb-receipt-pyc", manifestPath }]);
 
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -288,7 +284,6 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -327,7 +322,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       ]);
 
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -495,7 +489,6 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       const auditCalls: Array<{ level: string; message: string; extras?: Record<string, unknown> }> = [];
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -536,7 +529,6 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       await writeTestPluginRegistry({ registryPath }, [{ id: "tb-v1-dev-signer", manifestPath, installedBy: "user" }]);
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -571,7 +563,6 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       await writeTestPluginRegistry({ registryPath }, [{ id: "tb-v1-mkt", manifestPath, installedBy: "user" }]);
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -602,7 +593,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       await writeTestPluginRegistry({ registryPath }, [{ id: "tb-dev-signer-unpkg", manifestPath, installedBy: "user" }]);
 
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,
@@ -634,7 +624,6 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       // Load successfully in dev mode
       const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
         hostRoot,
         registryPath,
         pluginsRoot,

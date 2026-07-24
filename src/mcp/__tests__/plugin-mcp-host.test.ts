@@ -21,6 +21,7 @@ import {
   resolveReviewerSandboxCapability,
   setActiveSandboxCapability,
 } from "../../permissions/sandbox-capability.js";
+import { testLoopbackHost } from "./plugin-mcp-test-helpers.js";
 
 // #885 v6 — the loopback consumes the NORMALIZED pure `Tool[]` (manifest == wire).
 const MANIFEST: PluginManifest = {
@@ -49,6 +50,17 @@ const MANIFEST: PluginManifest = {
   ],
 };
 
+async function publishTestHost(
+  host: PluginMcpHost,
+  pluginId: string,
+  registry: ToolRegistry,
+): Promise<string[]> {
+  const tools = await host.prepareTools();
+  registry.reservePluginReplacement(pluginId, tools, []).publish();
+  host.publishPrepared(tools);
+  return tools.map((tool) => tool.name);
+}
+
 describe("PluginMcpHost — first-party loopback registration + round-trip", () => {
   afterEach(() => {
     __resetActiveSandboxCapabilityForTest();
@@ -66,9 +78,9 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
       },
     }));
     const registry = new ToolRegistry();
-    const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
+    const host = testLoopbackHost(MANIFEST, delegate, registry);
 
-    const registered = await host.start();
+    const registered = await publishTestHost(host, MANIFEST.id, registry);
 
     // Natural names — NO mcp_ namespace (first-party plugin, not external server).
     expect(registered).toEqual(["notes_read", "notes_save"]);
@@ -108,6 +120,68 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     ).not.toHaveProperty("csp");
   });
 
+  it("fails preparation when the wire operation policy differs from the signed Tool", async () => {
+    const manifest = structuredClone(MANIFEST);
+    manifest.tools[0]._meta = {
+      ...manifest.tools[0]._meta,
+      "lvisai/operationPolicy": {
+        discriminant: "operation",
+        operations: { read: { kind: "read", minimumRisk: "read", appVisible: true } },
+      },
+    };
+    const registry = new ToolRegistry();
+    const host = testLoopbackHost(
+      manifest,
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      registry,
+    );
+    manifest.tools[0]._meta!["lvisai/operationPolicy"] = {
+      discriminant: "operation",
+      operations: { write: { kind: "write", minimumRisk: "write", appVisible: true } },
+    };
+
+    await expect(host.prepareTools()).rejects.toThrow(/differs from its signed manifest/);
+    expect(registry.findByName("notes_read")).toBeUndefined();
+  });
+
+  it("accepts and registers an unchanged signed operation policy from the loopback wire", async () => {
+    const manifest = structuredClone(MANIFEST);
+    const policy = {
+      discriminant: "operation" as const,
+      operations: {
+        read: {
+          kind: "read" as const,
+          minimumRisk: "read" as const,
+          appVisible: true,
+        },
+      },
+    };
+    manifest.tools[0] = {
+      ...manifest.tools[0],
+      inputSchema: {
+        type: "object",
+        properties: { operation: { const: "read" } },
+        required: ["operation"],
+        additionalProperties: false,
+      },
+      _meta: {
+        ...manifest.tools[0]._meta,
+        ui: { visibility: ["model", "app"] },
+        "lvisai/operationPolicy": policy,
+      },
+    };
+    const registry = new ToolRegistry();
+    const host = testLoopbackHost(
+      manifest,
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      registry,
+    );
+
+    await publishTestHost(host, manifest.id, registry);
+
+    expect(registry.findByName("notes_read")?.operationPolicy).toEqual(policy);
+  });
+
   it("IGNORES the legacy xyz.lvis/rawResult — the dual-read was removed alongside the _meta rename", async () => {
     // rawResult is a DATA channel (not a security field), but the legacy read was
     // removed in the same sweep for consistency: a plugin emitting ONLY the legacy
@@ -117,8 +191,8 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
       _meta: { "xyz.lvis/rawResult": { note: "structured" } },
     }));
     const registry = new ToolRegistry();
-    const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
-    await host.start();
+    const host = testLoopbackHost(MANIFEST, delegate, registry);
+    await publishTestHost(host, MANIFEST.id, registry);
 
     const result = await registry.findByName("notes_read")!.execute({ path: "/a.md" }, {} as never);
     expect(result.metadata).toBeUndefined();
@@ -133,8 +207,8 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
       },
     }));
     const registry = new ToolRegistry();
-    const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
-    await host.start();
+    const host = testLoopbackHost(MANIFEST, delegate, registry);
+    await publishTestHost(host, MANIFEST.id, registry);
 
     const result = await registry.findByName("notes_read")!.execute({ path: "/a.md" }, {} as never);
     expect((result.metadata as { rawResult?: unknown }).rawResult).toEqual({ from: "new" });
@@ -151,12 +225,12 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     markPluginWorkerWrapped("com.example.notes", "notes-worker");
 
     const registry = new ToolRegistry();
-    const host = PluginMcpHost.loopback(
+    const host = testLoopbackHost(
       MANIFEST,
       async () => ({ content: [{ type: "text", text: "ok" }] }),
       registry,
     );
-    await host.start();
+    await publishTestHost(host, MANIFEST.id, registry);
 
     const save = registry.findByName("notes_save");
     expect(save?.workerId).toBeUndefined();
@@ -176,22 +250,23 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
       throw new Error("note locked");
     };
     const registry = new ToolRegistry();
-    const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
-    await host.start();
+    const host = testLoopbackHost(MANIFEST, delegate, registry);
+    await publishTestHost(host, MANIFEST.id, registry);
 
     const result = await registry.findByName("notes_read")!.execute({ path: "/x" }, {} as never);
     expect(result.isError).toBe(true);
     expect(result.output).toContain("note locked");
   });
 
-  it("stop() unregisters the plugin's tools", async () => {
+  it("retires through an inactive registry publication before transport disposal", async () => {
     const delegate: PluginToolDelegate = async () => ({ content: [{ type: "text", text: "ok" }] });
     const registry = new ToolRegistry();
-    const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
-    await host.start();
+    const host = testLoopbackHost(MANIFEST, delegate, registry);
+    await publishTestHost(host, MANIFEST.id, registry);
     expect(registry.findByName("notes_read")).toBeDefined();
 
-    await host.stop();
+    registry.reservePluginReplacement(MANIFEST.id, [], []).publish();
+    await host.dispose();
     expect(registry.findByName("notes_read")).toBeUndefined();
     expect(registry.findByName("notes_save")).toBeUndefined();
   });
@@ -220,18 +295,19 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     };
     const delegate: PluginToolDelegate = async () => ({ content: [{ type: "text", text: "ok" }] });
     const registry = new ToolRegistry();
-    const host = PluginMcpHost.loopback(badManifest, delegate, registry);
+    const host = testLoopbackHost(badManifest, delegate, registry);
 
-    const registered = await host.start();
+    const registered = await publishTestHost(host, badManifest.id, registry);
     expect(registered).toEqual(["good_tool"]); // bad_tool dropped fail-soft
     expect(registry.findByName("bad_tool")).toBeUndefined();
   });
 
-  it("rejects double start", async () => {
+  it("rejects preparation after publication", async () => {
     const delegate: PluginToolDelegate = async () => ({ content: [{ type: "text", text: "ok" }] });
-    const host = PluginMcpHost.loopback(MANIFEST, delegate, new ToolRegistry());
-    await host.start();
-    await expect(host.start()).rejects.toThrow(/already started/);
+    const registry = new ToolRegistry();
+    const host = testLoopbackHost(MANIFEST, delegate, registry);
+    await publishTestHost(host, MANIFEST.id, registry);
+    await expect(host.prepareTools()).rejects.toThrow(/already started/);
   });
 
   it("readUiResource round-trips resources/read through the loopback to the provider", async () => {
@@ -245,13 +321,14 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
       ],
       readHtml: async () => "<h1>note</h1>",
     });
-    const host = PluginMcpHost.loopback(
+    const registry = new ToolRegistry();
+    const host = testLoopbackHost(
       MANIFEST,
       async () => ({ content: [{ type: "text", text: "ok" }] }),
-      new ToolRegistry(),
+      registry,
       provider,
     );
-    await host.start();
+    await publishTestHost(host, MANIFEST.id, registry);
 
     const res = await host.readUiResource("ui://com.example.notes/read.html");
     expect(res).toEqual({
@@ -266,13 +343,14 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
       declarations: [{ uri: "ui://com.example.notes/read.html" }],
       readHtml: async () => "<h1>note</h1>",
     });
-    const host = PluginMcpHost.loopback(
+    const registry = new ToolRegistry();
+    const host = testLoopbackHost(
       MANIFEST,
       async () => ({ content: [{ type: "text", text: "ok" }] }),
-      new ToolRegistry(),
+      registry,
       provider,
     );
-    await host.start();
+    await publishTestHost(host, MANIFEST.id, registry);
     await expect(host.readUiResource("ui://other-plugin/read.html")).rejects.toThrow(/own namespace/i);
   });
 });

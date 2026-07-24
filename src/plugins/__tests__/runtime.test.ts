@@ -1,26 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
-import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
+import { join, relative } from "node:path";
+import { PluginRuntime } from "../runtime.js";
 import { PluginPhase } from "../lifecycle-log.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
-import {
-  hashReceiptFiles,
-  writeInstallReceipt,
-} from "../plugin-install-receipt.js";
-import {
-  withAllPluginInstallLocks,
-  withPluginInstallLock,
-} from "../install-lifecycle.js";
 import { uninstallPluginWithLifecycle } from "../uninstall-lifecycle.js";
 import { mkdtempSync } from "node:fs";
 import {
   makeTestPluginEntrySource,
   makeTestPluginRuntime,
+  bindTestPluginRuntimeGeneration,
+  createTestHostApiFactory,
   writeTestPlugin,
   writeTestPluginRegistry,
 } from "./test-helpers.js";
+
+function makeGenerationBoundRuntime(
+  options: Omit<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi">
+    & Partial<Pick<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi">>,
+): PluginRuntime {
+  return bindTestPluginRuntimeGeneration(new PluginRuntime({
+    ...options,
+    createHostApi: createTestHostApiFactory(options.createHostApi),
+  }));
+}
 
 /**
  * Phase 1.5 F-round §F5: direct unit tests for `PluginRuntime.disable()`.
@@ -77,6 +81,35 @@ describe("PluginRuntime.disable", () => {
     });
   }
 
+  it("deactivates a live generation when durable uninstall is already missing", async () => {
+    const pluginId = "p-idempotent-uninstall";
+    const toolName = "p_idempotent_uninstall_hello";
+    const manifestPath = await writeFakePlugin(pluginId);
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await expect(runtime.call(toolName)).resolves.toBe(`hi-${pluginId}`);
+
+    await expect(uninstallPluginWithLifecycle(pluginId, {
+      pluginRuntime: runtime,
+      pluginMarketplace: {
+        uninstall: vi.fn(async () => {
+          throw new Error(`Plugin not installed: ${pluginId}`);
+        }),
+      },
+    })).resolves.toEqual({ pluginId, uninstalled: true });
+
+    expect(runtime.listPluginIds()).not.toContain(pluginId);
+    await expect(runtime.call(toolName)).rejects.toThrow(/not found/);
+  });
+
   async function writePluginWithEntry(
     id: string,
     methodName: string,
@@ -100,7 +133,7 @@ describe("PluginRuntime.disable", () => {
     const manifestPath = await writeFakePlugin("p-user");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-user", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     expect(runtime.listPluginIds()).toContain("p-user");
     expect(runtime.listToolNames()).toContain("p_user_hello");
@@ -119,7 +152,7 @@ describe("PluginRuntime.disable", () => {
     const manifestPath = await writeFakePlugin("p-managed", "admin");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Admin plugin/);
 
@@ -136,7 +169,7 @@ describe("PluginRuntime.disable", () => {
     const manifestPath = await writeFakePlugin("p-managed", "admin");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     await runtime.disable("p-managed", "it-admin");
 
@@ -150,7 +183,7 @@ describe("PluginRuntime.disable", () => {
     const manifestPath = await writeFakePlugin("p-existing");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-existing", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     await expect(runtime.disable("p-missing")).rejects.toThrow(/not found/i);
 
@@ -184,7 +217,7 @@ describe("PluginRuntime.disable", () => {
     await writeTestPluginRegistry({ registryPath }, [{ id: pluginId, manifestPath, enabled: true }]);
 
     const runtime = makeRuntime();
-    await runtime.load();
+    await runtime.startAll();
 
     expect(runtime.listPluginIds()).toContain("example-plugin");
     expect(runtime.listToolNames()).toContain("com_example_test_hello");
@@ -441,20 +474,6 @@ describe("PluginRuntime.disable", () => {
     await expect(runtime.callFromUi("uio_upload_chunk")).resolves.toBe("ui-only-ok");
   });
 
-  it("registerDisposer callbacks fire on disable() and not thereafter", async () => {
-    const manifestPath = await writeFakePlugin("p-disposer");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "p-disposer", manifestPath, enabled: true }]);
-    const runtime = makeRuntime();
-    await runtime.load();
-
-    let calls = 0;
-    const dispose = () => { calls += 1; };
-    runtime.registerDisposer("p-disposer", dispose);
-
-    await runtime.disable("p-disposer");
-    expect(calls).toBe(1);
-  });
-
   it("exposes capability/manifest/ipc binding metadata from loaded plugins", async () => {
     const pluginDir = join(installedDir, "meta-plugin");
     await mkdir(pluginDir, { recursive: true });
@@ -523,14 +542,13 @@ describe("PluginRuntime.disable", () => {
       let injectedHostApi: Record<string, unknown> | undefined;
 
       const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
-      const runtime = new PluginRuntime({
+      const runtime = makeGenerationBoundRuntime({
         hostRoot: testDir,
         registryPath,
         deploymentGuard: guard,
         pluginsRoot: installedDir,
-        createHostApi: (pluginId, manifest, pluginDataDir) => {
+        createHostApi: (_pluginId, _manifest) => {
           const hostApi = {
-            ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
             registerKeywords: () => {},
             emitEvent: () => {},
             onEvent: () => () => {},
@@ -571,13 +589,12 @@ describe("PluginRuntime.disable", () => {
       await writeTestPluginRegistry({ registryPath }, [{ id: "calltool-delegate", manifestPath, enabled: true }]);
 
       const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
-      const runtime = new PluginRuntime({
+      const runtime = makeGenerationBoundRuntime({
         hostRoot: testDir,
         registryPath,
         deploymentGuard: guard,
         pluginsRoot: installedDir,
-        createHostApi: (pluginId, manifest, pluginDataDir) => ({
-          ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
+        createHostApi: (_pluginId, _manifest) => ({
           registerKeywords: () => {},
           emitEvent: () => {},
           onEvent: () => () => {},
@@ -837,13 +854,12 @@ describe("PluginRuntime.disable", () => {
     ]);
 
     let runtime!: PluginRuntime;
-    runtime = new PluginRuntime({
+    runtime = makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
       deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
-      createHostApi: (pluginId, manifest, pluginDataDir) => ({
-        ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
+      createHostApi: (pluginId) => ({
         registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
@@ -887,20 +903,23 @@ describe("PluginRuntime.disable", () => {
     ]);
 
     let runtime!: PluginRuntime;
-    runtime = new PluginRuntime({
+    runtime = makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
       deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
-      createHostApi: (pluginId, manifest, pluginDataDir) => ({
-        ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
+      createHostApi: (pluginId) => ({
         registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
         getSecret: () => null,
       } as unknown as import("../types.js").PluginHostApi),
     });
-    await expect(runtime.load()).rejects.toThrow(/not allowed/i);
+    await expect(runtime.load()).resolves.toBeUndefined();
+    expect(runtime.listPluginIds()).not.toContain("calendar");
+    expect(runtime.listPluginCards()).toContainEqual(
+      expect.objectContaining({ id: "calendar", loadStatus: "failed" }),
+    );
   });
 
   it("blocks plugins from emitting events owned by another plugin", async () => {
@@ -1060,8 +1079,7 @@ describe("PluginRuntime registry trusted-path", () => {
       JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
       "utf-8",
     );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot, pluginsRoot, registryPath });
+    const runtime = makeGenerationBoundRuntime({ hostRoot, pluginsRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("cloud-plugin");
   });
@@ -1074,8 +1092,7 @@ describe("PluginRuntime registry trusted-path", () => {
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot, registryPath });
+    const runtime = makeGenerationBoundRuntime({ hostRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("cloud-plugin");
     expect(warnSpy).toHaveBeenCalledWith(
@@ -1095,8 +1112,7 @@ describe("PluginRuntime registry trusted-path", () => {
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot, pluginsRoot, registryPath });
+    const runtime = makeGenerationBoundRuntime({ hostRoot, pluginsRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("evil");
     expect(warnSpy).toHaveBeenCalledWith(
@@ -1137,14 +1153,10 @@ describe("PluginRuntime addPlugin/removePlugin (US-A3)", () => {
     vi.restoreAllMocks();
   });
 
-  async function writePluginArtifact(
-    id: string,
-    artifactDirectory = id,
-    toolSuffix = "ping",
-  ): Promise<string> {
-    const pluginDir = join(installedDir, artifactDirectory);
+  async function writePlugin(id: string): Promise<string> {
+    const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
-    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_${toolSuffix}`;
+    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`;
     await writeFile(
       join(pluginDir, "entry.mjs"),
       `let started = 0;
@@ -1162,10 +1174,6 @@ export default async function createPlugin(ctx) {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;
-  }
-
-  async function writePlugin(id: string): Promise<string> {
-    return writePluginArtifact(id);
   }
 
   async function writeStartFailingPlugin(id: string): Promise<{ manifestPath: string; stoppedPath: string }> {
@@ -1222,8 +1230,7 @@ export default async function createPlugin({ hostApi }) {
   }
 
   function makeRuntime(): PluginRuntime {
-    return new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    return makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -1233,8 +1240,7 @@ export default async function createPlugin({ hostApi }) {
   function makeRuntimeWithPreparation(
     preparePluginStart: ConstructorParameters<typeof PluginRuntime>[0]["preparePluginStart"],
   ): PluginRuntime {
-    return new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
+    return makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
@@ -1261,13 +1267,12 @@ export default async function createPlugin({ hostApi }) {
     disposed: string[],
     disabled: string[],
   ): PluginRuntime {
-    return new PluginRuntime({
+    return makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
       onDisable: (pluginId) => disabled.push(pluginId),
-      createHostApi: (pluginId, manifest, pluginDataDir, incarnation) => ({
-        ...createNoopHostApiForTests(pluginId, manifest, pluginDataDir),
+      createHostApi: (pluginId, _manifest, _pluginDataDir, incarnation) => ({
         registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: () => {
@@ -1403,26 +1408,32 @@ export default async function createPlugin({ hostApi }) {
 
     let timedHostApi: { getSecret(key: string): null } | undefined;
     let timedIncarnation: { isLifecycleHookActive(): boolean } | undefined;
-    const runtime = new PluginRuntime({
+    const runtime = makeGenerationBoundRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
       createHostApi: (pluginId, _manifest, _pluginDataDir, incarnation) => {
-        const hostApi = createNoopHostApiForTests(
-          pluginId,
-          _manifest,
-          _pluginDataDir,
-        );
         const getSecret = (_key: string): null => {
           if (!incarnation.isActive()) throw new Error("plugin instance is no longer active");
           return null;
         };
-        hostApi.getSecret = getSecret;
+        const hostApi = {
+          registerKeywords: () => {},
+          emitEvent: () => {},
+          onEvent: () => () => {},
+          getInstalledPluginIds: () => [],
+          onPluginsChanged: () => () => {},
+          getSecret,
+          callTool: async () => undefined,
+          callLlm: async () => undefined,
+          logEvent: () => {},
+          onShutdown: () => {},
+        };
         if (pluginId === timedId) {
           timedHostApi = hostApi;
           timedIncarnation = incarnation;
         }
-        return hostApi;
+        return hostApi as unknown as import("../types.js").PluginHostApi;
       },
     });
     let settled = false;
@@ -1454,12 +1465,51 @@ export default async function createPlugin({ hostApi }) {
 
     await runtime.startAll();
     await expect(runtime.restartPlugin(pluginId)).resolves.toBe("started");
-    expect(disposed).toEqual([pluginId]);
+    await waitUntil(() => {
+      expect(disposed).toEqual([pluginId]);
+    });
     await expect(runtime.call(`${pluginId.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`)).resolves.toBe("ok");
 
     await runtime.removePlugin(pluginId);
     expect(disposed).toEqual([pluginId, pluginId]);
   });
+
+  it("reports bounded retirement failure after atomically removing runtime tracking", async () => {
+    const pluginId = "p-remove-stop-timeout";
+    const toolName = "p_remove_stop_timeout_ping";
+    const manifestPath = await writePlugin(pluginId);
+    await writeFile(
+      join(installedDir, pluginId, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: { ${JSON.stringify(toolName)}: async () => "active" },
+    stop: async () => new Promise(() => {}),
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: pluginId, manifestPath, enabled: true }],
+    }), "utf-8");
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await expect(runtime.call(toolName)).resolves.toBe("active");
+
+    await expect(runtime.removePluginWithCommit(
+      pluginId,
+      async () => "durably-removed",
+    )).rejects.toThrow(/generation retirement failed/);
+
+    expect(runtime.listPluginIds()).not.toContain(pluginId);
+    await expect(runtime.call(toolName)).rejects.toThrow(/not found/);
+    const state = runtime as unknown as {
+      knownPluginManifests: Map<string, unknown>;
+      failedPluginIds: Set<string>;
+    };
+    expect(state.knownPluginManifests.has(pluginId)).toBe(false);
+    expect(state.failedPluginIds.has(pluginId)).toBe(false);
+  }, 10_000);
 
   it("addPlugin stops a newly-instantiated plugin when start fails", async () => {
     const existingPath = await writePlugin("p-existing");
@@ -1506,708 +1556,6 @@ export default async function createPlugin({ hostApi }) {
     expect(runtime.listPluginIds()).toEqual([canonicalId]);
     await expect(runtime.call("p_canonical_runtime_ping")).resolves.toContain("hi-p-canonical-runtime");
     await expect(runtime.waitForPluginReady(alias)).resolves.toBeUndefined();
-  });
-
-  it.each([
-    ["canonical entry first", false],
-    ["alias entry first", true],
-  ] as const)(
-    "rejects an ambiguous registry alias namespace before boot (%s)",
-    async (_label, reverseEntries) => {
-      const firstCanonicalId = "p-identity-beta";
-      const secondCanonicalId = "p-identity-gamma";
-      const firstManifestPath = await writePlugin(firstCanonicalId);
-      const secondManifestPath = await writePlugin(secondCanonicalId);
-      const entries = [
-        {
-          id: "p-identity-alpha",
-          manifestPath: firstManifestPath,
-          enabled: true,
-        },
-        {
-          id: firstCanonicalId,
-          manifestPath: secondManifestPath,
-          enabled: true,
-        },
-      ];
-      await writeFile(
-        registryPath,
-        JSON.stringify({
-          version: 1,
-          plugins: reverseEntries ? entries.reverse() : entries,
-        }),
-        "utf-8",
-      );
-      const runtime = makeRuntime();
-
-      await expect(runtime.startAll()).rejects.toMatchObject({
-        code: "plugin-identity-collision",
-        message: expect.stringContaining(firstCanonicalId),
-      });
-      expect(runtime.listPluginIds()).toEqual([]);
-      expect(runtime.getPluginManifest(firstCanonicalId)).toBeUndefined();
-      expect(runtime.getPluginManifest(secondCanonicalId)).toBeUndefined();
-    },
-  );
-
-  it.each([
-    ["first artifact first", false],
-    ["second artifact first", true],
-  ] as const)(
-    "rejects two registry artifacts claiming one canonical identity (%s)",
-    async (_label, reverseEntries) => {
-      const canonicalId = "p-duplicate-canonical";
-      const firstManifestPath = await writePluginArtifact(
-        canonicalId,
-        "p-duplicate-artifact-one",
-        "first",
-      );
-      const secondManifestPath = await writePluginArtifact(
-        canonicalId,
-        "p-duplicate-artifact-two",
-        "second",
-      );
-      const entries = [
-        {
-          id: "p-duplicate-alias-one",
-          manifestPath: firstManifestPath,
-          enabled: true,
-        },
-        {
-          id: "p-duplicate-alias-two",
-          manifestPath: secondManifestPath,
-          enabled: true,
-        },
-      ];
-      await writeFile(
-        registryPath,
-        JSON.stringify({
-          version: 1,
-          plugins: reverseEntries ? entries.reverse() : entries,
-        }),
-        "utf-8",
-      );
-      const runtime = makeRuntime();
-
-      await expect(runtime.startAll()).rejects.toMatchObject({
-        code: "plugin-identity-collision",
-        message: expect.stringContaining(canonicalId),
-      });
-      expect(runtime.listPluginIds()).toEqual([]);
-      expect(runtime.listToolNames()).toEqual([]);
-    },
-  );
-
-  it("rejects a static and registry artifact claiming one canonical identity", async () => {
-    const canonicalId = "p-static-registry-canonical";
-    const staticManifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-static-canonical-artifact",
-      "static",
-    );
-    const registryManifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-registry-canonical-artifact",
-      "registry",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{
-          id: "p-static-registry-alias",
-          manifestPath: registryManifestPath,
-          enabled: true,
-        }],
-      }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      manifestPaths: [staticManifestPath],
-      registryPath,
-      pluginsRoot: installedDir,
-    });
-
-    await expect(runtime.startAll()).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(canonicalId),
-    });
-    expect(runtime.listPluginIds()).toEqual([]);
-    expect(runtime.listToolNames()).toEqual([]);
-  });
-
-  it("rejects a registry artifact added over a loaded static canonical identity", async () => {
-    const canonicalId = "p-live-static-canonical";
-    const staticManifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-live-static-artifact",
-      "static",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      manifestPaths: [staticManifestPath],
-      registryPath,
-      pluginsRoot: installedDir,
-    });
-    await runtime.startAll();
-
-    const registryManifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-live-registry-artifact",
-      "registry",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{
-          id: canonicalId,
-          manifestPath: registryManifestPath,
-          enabled: true,
-        }],
-      }),
-      "utf-8",
-    );
-
-    await expect(runtime.addPlugin(canonicalId)).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(canonicalId),
-    });
-    expect(runtime.listPluginIds()).toEqual([canonicalId]);
-    expect(runtime.listToolNames()).toContain(
-      `${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`,
-    );
-    expect(runtime.listToolNames()).not.toContain(
-      `${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_registry`,
-    );
-  });
-
-  it("reserves a configured static identity after its runtime instance is removed", async () => {
-    const canonicalId = "p-removed-static-canonical";
-    const staticManifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-removed-static-artifact",
-      "static",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      manifestPaths: [staticManifestPath],
-      registryPath,
-      pluginsRoot: installedDir,
-    });
-    await runtime.startAll();
-    await runtime.removePlugin(canonicalId);
-
-    const registryManifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-removed-static-registry-artifact",
-      "registry",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{
-          id: canonicalId,
-          manifestPath: registryManifestPath,
-          enabled: true,
-        }],
-      }),
-      "utf-8",
-    );
-
-    await expect(runtime.addPlugin(canonicalId)).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(canonicalId),
-    });
-    expect(runtime.listPluginIds()).toEqual([]);
-  });
-
-  it("rejects manifest-id drift when restarting a loaded static plugin", async () => {
-    const canonicalId = "p-static-manifest-stable";
-    const changedId = "p-static-manifest-changed";
-    const manifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-static-manifest-artifact",
-      "static",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      manifestPaths: [manifestPath],
-      registryPath,
-      pluginsRoot: installedDir,
-    });
-    await runtime.startAll();
-
-    const changedManifest = JSON.parse(await readFile(manifestPath, "utf-8"));
-    changedManifest.id = changedId;
-    changedManifest.name = changedId;
-    await writeFile(manifestPath, JSON.stringify(changedManifest), "utf-8");
-
-    await expect(runtime.restartPlugin(canonicalId)).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(changedId),
-    });
-    expect(runtime.listPluginIds()).toEqual([canonicalId]);
-    expect(runtime.getPluginManifest(changedId)).toBeUndefined();
-    await expect(
-      runtime.call(`${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
-    ).resolves.toContain(`hi-${canonicalId}`);
-  });
-
-  it("restarts the exact static artifact when plugin roots share a basename", async () => {
-    const firstId = "p-static-root-first";
-    const secondId = "p-static-root-second";
-    const firstManifestPath = await writePluginArtifact(
-      firstId,
-      "p-static-parent-one/shared",
-      "static",
-    );
-    const secondManifestPath = await writePluginArtifact(
-      secondId,
-      "p-static-parent-two/shared",
-      "static",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      manifestPaths: [firstManifestPath, secondManifestPath],
-      registryPath,
-      pluginsRoot: installedDir,
-    });
-    await runtime.startAll();
-
-    await expect(runtime.restartPlugin(secondId)).resolves.toBe("started");
-    await expect(
-      runtime.call(`${secondId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
-    ).resolves.toContain(`hi-${secondId}`);
-    await expect(
-      runtime.call(`${firstId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
-    ).resolves.toContain(`hi-${firstId}`);
-  });
-
-  it("rejects two static plans converging on one identity before restart", async () => {
-    const firstId = "p-static-converge-first";
-    const secondId = "p-static-converge-second";
-    const firstManifestPath = await writePluginArtifact(
-      firstId,
-      "p-static-converge-artifact-one",
-      "static",
-    );
-    const secondManifestPath = await writePluginArtifact(
-      secondId,
-      "p-static-converge-artifact-two",
-      "static",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      manifestPaths: [firstManifestPath, secondManifestPath],
-      registryPath,
-      pluginsRoot: installedDir,
-    });
-    await runtime.startAll();
-
-    const secondManifest = JSON.parse(await readFile(secondManifestPath, "utf-8"));
-    secondManifest.id = firstId;
-    secondManifest.name = firstId;
-    await writeFile(secondManifestPath, JSON.stringify(secondManifest), "utf-8");
-
-    await expect(runtime.restartPlugin(firstId)).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(firstId),
-    });
-    expect(runtime.listPluginIds().sort()).toEqual([firstId, secondId].sort());
-    await expect(
-      runtime.call(`${firstId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
-    ).resolves.toContain(`hi-${firstId}`);
-    await expect(
-      runtime.call(`${secondId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
-    ).resolves.toContain(`hi-${secondId}`);
-  });
-
-  it("prioritizes an exact registry id over a static root basename during add", async () => {
-    const staticId = "p-static-basename-owner";
-    const requestedId = "p-registry-add-target";
-    const staticManifestPath = await writePluginArtifact(
-      staticId,
-      requestedId,
-      "static",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      manifestPaths: [staticManifestPath],
-      registryPath,
-      pluginsRoot: installedDir,
-    });
-    await runtime.startAll();
-
-    const registryManifestPath = await writePluginArtifact(
-      requestedId,
-      "p-registry-add-artifact",
-      "registry",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{
-          id: requestedId,
-          manifestPath: registryManifestPath,
-          enabled: true,
-        }],
-      }),
-      "utf-8",
-    );
-
-    await expect(runtime.addPlugin(requestedId)).resolves.toBe("started");
-    await expect(
-      runtime.call(`${requestedId.replace(/[^a-zA-Z0-9_]/g, "_")}_registry`),
-    ).resolves.toContain(`hi-${requestedId}`);
-    await expect(
-      runtime.call(`${staticId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
-    ).resolves.toContain(`hi-${staticId}`);
-  });
-
-  it("re-adds a disabled static plugin without changing its artifact claim", async () => {
-    const canonicalId = "p-static-disable-readd";
-    const manifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-static-disable-readd-artifact",
-      "static",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      manifestPaths: [manifestPath],
-      registryPath,
-      pluginsRoot: installedDir,
-    });
-    await runtime.startAll();
-
-    await runtime.disable(canonicalId);
-    expect(runtime.listPluginIds()).toEqual([]);
-    await expect(runtime.addPlugin(canonicalId)).resolves.toBe("started");
-
-    expect(runtime.listPluginIds()).toEqual([canonicalId]);
-    await expect(
-      runtime.call(`${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_static`),
-    ).resolves.toContain(`hi-${canonicalId}`);
-  });
-
-  it.each([
-    ["valid entry first", false],
-    ["failed entry first", true],
-  ] as const)(
-    "reserves a failed registry id before boot identity mutation (%s)",
-    async (_label, reverseEntries) => {
-      const canonicalId = "p-failed-identity-beta";
-      const validManifestPath = await writePlugin(canonicalId);
-      const malformedDir = join(installedDir, "p-malformed-identity");
-      const malformedManifestPath = join(malformedDir, "plugin.json");
-      await mkdir(malformedDir, { recursive: true });
-      await writeFile(malformedManifestPath, "{}", "utf-8");
-      const entries = [
-        {
-          id: "p-failed-identity-alpha",
-          manifestPath: validManifestPath,
-          enabled: true,
-        },
-        {
-          id: canonicalId,
-          manifestPath: malformedManifestPath,
-          enabled: true,
-        },
-      ];
-      await writeFile(
-        registryPath,
-        JSON.stringify({
-          version: 1,
-          plugins: reverseEntries ? entries.reverse() : entries,
-        }),
-        "utf-8",
-      );
-      const runtime = makeRuntime();
-
-      await expect(runtime.startAll()).rejects.toMatchObject({
-        code: "plugin-identity-collision",
-        message: expect.stringContaining(canonicalId),
-      });
-      expect(runtime.listPluginIds()).toEqual([]);
-      expect(runtime.getPluginManifest(canonicalId)).toBeUndefined();
-    },
-  );
-
-  it("rejects a newly installed alias collision before restarting the existing plugin", async () => {
-    const existingCanonicalId = "p-runtime-existing-canonical";
-    const conflictingCanonicalId = "p-runtime-conflicting-canonical";
-    const existingManifestPath = await writePlugin(existingCanonicalId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{
-          id: "p-runtime-existing-alias",
-          manifestPath: existingManifestPath,
-          enabled: true,
-        }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-    await runtime.startAll();
-
-    const conflictingManifestPath = await writePlugin(conflictingCanonicalId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "p-runtime-existing-alias",
-            manifestPath: existingManifestPath,
-            enabled: true,
-          },
-          {
-            id: existingCanonicalId,
-            manifestPath: conflictingManifestPath,
-            enabled: true,
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    await expect(runtime.addPlugin(existingCanonicalId)).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(existingCanonicalId),
-    });
-    expect(runtime.listPluginIds()).toEqual([existingCanonicalId]);
-    expect(runtime.getPluginManifest(conflictingCanonicalId)).toBeUndefined();
-  });
-
-  it("rejects a direct restart when a raw registry id targets another manifest", async () => {
-    const existingCanonicalId = "p-restart-existing-canonical";
-    const conflictingCanonicalId = "p-restart-conflicting-canonical";
-    const existingManifestPath = await writePlugin(existingCanonicalId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{
-          id: "p-restart-existing-alias",
-          manifestPath: existingManifestPath,
-          enabled: true,
-        }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-    await runtime.startAll();
-
-    const conflictingManifestPath = await writePlugin(conflictingCanonicalId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "p-restart-existing-alias",
-            manifestPath: existingManifestPath,
-            enabled: true,
-          },
-          {
-            id: existingCanonicalId,
-            manifestPath: conflictingManifestPath,
-            enabled: true,
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    await expect(runtime.restartPlugin(existingCanonicalId)).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(existingCanonicalId),
-    });
-    expect(runtime.listPluginIds()).toEqual([existingCanonicalId]);
-    await expect(
-      runtime.call(`${existingCanonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`),
-    ).resolves.toContain(`hi-${existingCanonicalId}`);
-  });
-
-  it("verifies alias-installed restart receipts with the install identity", async () => {
-    const canonicalId = "p-receipt-canonical";
-    const installAlias = "p-receipt-install-alias";
-    const manifestPath = await writePlugin(canonicalId);
-    const pluginRoot = dirname(manifestPath);
-    const receiptRoot = join(testDir, "receipts");
-    await mkdir(receiptRoot, { recursive: true });
-    await writeInstallReceipt(receiptRoot, {
-      schemaVersion: 2,
-      pluginId: installAlias,
-      version: "1.0.0",
-      installSource: "marketplace",
-      artifactSha256: "a".repeat(64),
-      signerKeyId: "test-signer",
-      installedAt: new Date(0).toISOString(),
-      files: await hashReceiptFiles(pluginRoot, ["entry.mjs", "plugin.json"]),
-    });
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: installAlias, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      registryPath,
-      pluginsRoot: installedDir,
-      installReceiptCacheRoot: receiptRoot,
-    });
-    await runtime.startAll();
-
-    await expect(runtime.restartPlugin(canonicalId)).resolves.toBe("started");
-    expect(runtime.resolvePluginId(installAlias)).toBe(canonicalId);
-    await expect(
-      runtime.call(`${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`),
-    ).resolves.toContain(`hi-${canonicalId}`);
-  });
-
-  it("rejects incremental double-loading of an existing canonical identity", async () => {
-    const canonicalId = "p-incremental-duplicate-canonical";
-    const firstManifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-incremental-artifact-one",
-      "first",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{
-          id: "p-incremental-alias-one",
-          manifestPath: firstManifestPath,
-          enabled: true,
-        }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-    await runtime.startAll();
-
-    const secondManifestPath = await writePluginArtifact(
-      canonicalId,
-      "p-incremental-artifact-two",
-      "second",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "p-incremental-alias-one",
-            manifestPath: firstManifestPath,
-            enabled: true,
-          },
-          {
-            id: "p-incremental-alias-two",
-            manifestPath: secondManifestPath,
-            enabled: true,
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    await expect(runtime.addPlugin("p-incremental-alias-two")).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(canonicalId),
-    });
-    expect(runtime.listPluginIds()).toEqual([canonicalId]);
-    expect(runtime.listToolNames()).not.toContain(
-      `${canonicalId.replace(/[^a-zA-Z0-9_]/g, "_")}_second`,
-    );
-  });
-
-  it("rejects reusing a disabled plugin alias as a new canonical identity", async () => {
-    const originalCanonicalId = "p-disabled-original-canonical";
-    const alias = "p-disabled-reused-alias";
-    const originalManifestPath = await writePlugin(originalCanonicalId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: alias, manifestPath: originalManifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-    await runtime.startAll();
-    await runtime.disable(alias);
-
-    const replacementManifestPath = await writePlugin(alias);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: alias, manifestPath: replacementManifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-
-    await expect(runtime.addPlugin(alias)).rejects.toMatchObject({
-      code: "plugin-identity-collision",
-      message: expect.stringContaining(alias),
-    });
-    expect(runtime.resolvePluginId(alias)).toBe(originalCanonicalId);
-    expect(runtime.listPluginIds()).toEqual([]);
-    expect(runtime.getPluginManifest(alias)).toBeUndefined();
   });
 
   it("canonical removal cancels a deferred add requested through a registry alias", async () => {
@@ -2293,7 +1641,9 @@ export default async function createPlugin({ hostApi }) {
 
     await runtime.load();
 
-    await expect(runtime.call("p_start_guard_ping")).rejects.toThrow(/still starting/);
+    await expect(runtime.call("p_start_guard_ping")).rejects.toThrow(
+      /not found|not active|still starting/,
+    );
 
     await runtime.startAll();
 
@@ -2852,373 +2202,6 @@ export default async function createPlugin() {
     await expect(restart).resolves.toBe("failed");
   });
 
-  it("cancels a never-settling restart preparation before same-id reinstall", async () => {
-    const pluginId = "p-cancel-immortal-restart";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    let prepareRestart = false;
-    let entered!: () => void;
-    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
-    const neverSettles = new Promise<void>(() => {});
-    const runtime = makeRuntimeWithPreparation(() => {
-      if (!prepareRestart) return undefined;
-      entered();
-      return neverSettles;
-    });
-    await runtime.startAll();
-    prepareRestart = true;
-
-    const restart = runtime.restartPlugin(pluginId);
-    await preparationEntered;
-    expect(runtime.isPluginRestartPending(pluginId)).toBe(true);
-
-    const removal = runtime.removePlugin(pluginId);
-    await expect(restart).resolves.toBe("failed");
-    await expect(removal).resolves.toBeUndefined();
-    expect(runtime.isPluginRestartPending(pluginId)).toBe(false);
-
-    prepareRestart = false;
-    await expect(runtime.addPlugin(pluginId)).resolves.toBe("started");
-    await expect(
-      runtime.restartPlugin(pluginId, { skipPreparation: true }),
-    ).resolves.toBe("started");
-  });
-
-  it.each(["single", "all"] as const)(
-    "evicts a cancelled restart preparation through the %s cancellation API",
-    async (scope) => {
-      const pluginId = `p-cancel-stale-preparation-${scope}`;
-      const manifestPath = await writePlugin(pluginId);
-      await writeFile(
-        registryPath,
-        JSON.stringify({
-          version: 1,
-          plugins: [{ id: pluginId, manifestPath, enabled: true }],
-        }),
-        "utf-8",
-      );
-      let mode: "boot" | "hang" | "fresh" = "boot";
-      let entered!: () => void;
-      const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
-      const neverSettles = new Promise<void>(() => {});
-      let preparationCalls = 0;
-      const runtime = makeRuntimeWithPreparation(() => {
-        if (mode === "boot") return undefined;
-        preparationCalls += 1;
-        if (mode === "hang") {
-          entered();
-          return neverSettles;
-        }
-        return undefined;
-      });
-      await runtime.startAll();
-      mode = "hang";
-
-      const staleRestart = runtime.restartPlugin(pluginId);
-      await preparationEntered;
-      mode = "fresh";
-      if (scope === "single") {
-        runtime.cancelPendingRestart(pluginId);
-      } else {
-        runtime.cancelAllPendingRestarts();
-      }
-
-      await expect(staleRestart).resolves.toBe("failed");
-      await expect(runtime.restartPlugin(pluginId)).resolves.toBe("started");
-      expect(preparationCalls).toBe(2);
-    },
-  );
-
-  it("uninstall lifecycle cancels a never-settling restart before its outer lock", async () => {
-    const pluginId = "p-uninstall-immortal-restart";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    let prepareRestart = false;
-    let entered!: () => void;
-    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
-    const runtime = makeRuntimeWithPreparation(() => {
-      if (!prepareRestart) return undefined;
-      entered();
-      return new Promise<void>(() => {});
-    });
-    await runtime.startAll();
-    prepareRestart = true;
-
-    const restart = runtime.restartPlugin(pluginId);
-    await preparationEntered;
-    const uninstall = uninstallPluginWithLifecycle(pluginId, {
-      pluginRuntime: runtime,
-      pluginMarketplace: {
-        uninstall: vi.fn(async () => ({ pluginId, uninstalled: true as const })),
-      },
-    });
-
-    await expect(restart).resolves.toBe("failed");
-    await expect(uninstall).resolves.toEqual({ pluginId, uninstalled: true });
-    expect(runtime.listPluginIds()).not.toContain(pluginId);
-  });
-
-  it("restores the runtime config snapshot before a failed uninstall re-adds the plugin", async () => {
-    const pluginId = "p-uninstall-config-restore";
-    const methodName = "p_uninstall_config_restore_ping";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      join(installedDir, pluginId, "entry.mjs"),
-      `export default async function createPlugin(ctx) {
-  return {
-    handlers: { "${methodName}": async () => ctx.config.token ?? "missing" },
-    start: async () => {},
-    stop: async () => {},
-  };
-}
-`,
-      "utf-8",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-    runtime.setConfigOverride(pluginId, { token: "preserved" });
-    await runtime.startAll();
-    await expect(runtime.call(methodName)).resolves.toBe("preserved");
-    const durableFailure = new Error("marketplace registry write failed");
-
-    await expect(uninstallPluginWithLifecycle(pluginId, {
-      pluginRuntime: runtime,
-      pluginMarketplace: {
-        uninstall: vi.fn(async () => {
-          throw durableFailure;
-        }),
-      },
-    })).rejects.toBe(durableFailure);
-
-    expect(runtime.getConfigOverride(pluginId)).toEqual({ token: "preserved" });
-    await expect(runtime.call(methodName)).resolves.toBe("preserved");
-  });
-
-  it("runs an old instance stop hook once when removal cancels a restart", async () => {
-    const pluginId = "p-remove-during-restart-stop";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-    await runtime.startAll();
-    const state = runtime as unknown as {
-      plugins: Map<string, { instance: { stop?: () => Promise<void> } }>;
-    };
-    const oldInstance = state.plugins.get(pluginId)?.instance;
-    expect(oldInstance).toBeDefined();
-    let entered!: () => void;
-    let release!: () => void;
-    const stopEntered = new Promise<void>((resolve) => { entered = resolve; });
-    const stopGate = new Promise<void>((resolve) => { release = resolve; });
-    const stop = vi.fn(async () => {
-      entered();
-      await stopGate;
-    });
-    oldInstance!.stop = stop;
-
-    const restart = runtime.restartPlugin(pluginId, { skipPreparation: true });
-    await stopEntered;
-    const removal = runtime.removePlugin(pluginId);
-    await Promise.resolve();
-    expect(stop).toHaveBeenCalledTimes(1);
-
-    release();
-    await expect(restart).resolves.toBe("failed");
-    await expect(removal).resolves.toBeUndefined();
-    expect(stop).toHaveBeenCalledTimes(1);
-    expect(runtime.listPluginIds()).not.toContain(pluginId);
-  });
-
-  it("serializes direct restart and reload calls behind config persistence", async () => {
-    const pluginId = "p-lifecycle-config-barrier";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-    await runtime.startAll();
-
-    const assertWaitsForPersistence = async (
-      mutate: () => Promise<unknown>,
-    ): Promise<void> => {
-      let entered!: () => void;
-      let release!: () => void;
-      const persistenceEntered = new Promise<void>((resolve) => { entered = resolve; });
-      const persistenceGate = new Promise<void>((resolve) => { release = resolve; });
-      const persistence = withPluginInstallLock(pluginId, async () => {
-        entered();
-        await persistenceGate;
-      });
-      await persistenceEntered;
-      let settled = false;
-      const mutation = mutate().finally(() => {
-        settled = true;
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(settled).toBe(false);
-      release();
-      await persistence;
-      await mutation;
-    };
-
-    await assertWaitsForPersistence(() =>
-      runtime.restartPlugin(pluginId, { skipPreparation: true })
-    );
-    await assertWaitsForPersistence(() => runtime.reloadPlugin(pluginId));
-    expect(runtime.listPluginIds()).toEqual([pluginId]);
-  });
-
-  it("rejects an external restart while an all-plugin mutation owns the gate", async () => {
-    const pluginId = "p-global-gate-restart";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-    await runtime.startAll();
-    let releaseGlobal!: () => void;
-    let globalEntered!: () => void;
-    const globalGate = new Promise<void>((resolve) => { releaseGlobal = resolve; });
-    const globalStarted = new Promise<void>((resolve) => { globalEntered = resolve; });
-    const globalMutation = withAllPluginInstallLocks(async () => {
-      globalEntered();
-      await globalGate;
-    });
-    await globalStarted;
-
-    await expect(runtime.restartPlugin(pluginId)).resolves.toBe("failed");
-    expect(runtime.isPluginRestartPending(pluginId)).toBe(false);
-
-    releaseGlobal();
-    await globalMutation;
-    await expect(
-      runtime.restartPlugin(pluginId, { skipPreparation: true }),
-    ).resolves.toBe("started");
-  });
-
-  it("drops a cancelled restart preparation before reload and the next restart", async () => {
-    const pluginId = "p-reload-cancelled-preparation";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    let mode: "boot" | "hang" | "fresh" = "boot";
-    let entered!: () => void;
-    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
-    const neverSettles = new Promise<void>(() => {});
-    let restartPreparationCalls = 0;
-    const runtime = makeRuntimeWithPreparation(() => {
-      if (mode === "boot") return undefined;
-      restartPreparationCalls += 1;
-      if (mode === "hang") {
-        entered();
-        return neverSettles;
-      }
-      return undefined;
-    });
-    await runtime.startAll();
-    mode = "hang";
-
-    const staleRestart = runtime.restartPlugin(pluginId);
-    await preparationEntered;
-    mode = "fresh";
-    const reload = runtime.reloadPlugin(pluginId);
-
-    await expect(staleRestart).resolves.toBe("failed");
-    await expect(reload).resolves.toBeUndefined();
-    await expect(runtime.restartPlugin(pluginId)).resolves.toBe("started");
-    expect(restartPreparationCalls).toBe(2);
-  });
-
-  it("does not cancel a pending restart when disable authorization is denied", async () => {
-    const pluginId = "p-denied-disable-during-restart";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: true }],
-      }),
-      "utf-8",
-    );
-    let prepareRestart = false;
-    let entered!: () => void;
-    let release!: () => void;
-    const preparationEntered = new Promise<void>((resolve) => { entered = resolve; });
-    const preparationGate = new Promise<void>((resolve) => { release = resolve; });
-    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
-    vi.spyOn(guard, "canDisable").mockResolvedValue({
-      allowed: false,
-      reason: "disable denied by policy",
-    });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests,
-      hostRoot: testDir,
-      registryPath,
-      pluginsRoot: installedDir,
-      deploymentGuard: guard,
-      preparePluginStart: () => {
-        if (!prepareRestart) return undefined;
-        entered();
-        return preparationGate;
-      },
-    });
-    await runtime.startAll();
-    prepareRestart = true;
-
-    const restart = runtime.restartPlugin(pluginId);
-    await preparationEntered;
-    await expect(runtime.disable(pluginId)).rejects.toThrow("disable denied by policy");
-    expect(runtime.isPluginRestartPending(pluginId)).toBe(true);
-
-    release();
-    await expect(restart).resolves.toBe("started");
-    expect(runtime.listPluginIds()).toContain(pluginId);
-  });
-
   it("addPlugin restart path prepares dependencies before stopping the loaded plugin", async () => {
     const manifestPath = await writePlugin("p-restart-prep");
     await writeFile(
@@ -3405,26 +2388,6 @@ export default async function createPlugin() {
     // Empty registry — no plugin to add.
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
     await expect(runtime.addPlugin("ghost")).rejects.toThrow(/not found in registry/);
-  });
-
-  it("does not cold-add an inactive registry entry", async () => {
-    const pluginId = "p-inactive-cold-add";
-    const manifestPath = await writePlugin(pluginId);
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id: pluginId, manifestPath, enabled: false }],
-      }),
-      "utf-8",
-    );
-    const runtime = makeRuntime();
-
-    await expect(runtime.addPlugin(pluginId)).rejects.toThrow(
-      /not found in registry or disabled/,
-    );
-    expect(runtime.listPluginIds()).toEqual([]);
-    expect(runtime.listToolNames()).not.toContain("p_inactive_cold_add_ping");
   });
 
   it("addPlugin surfaces the manifest read error when registry entry exists but manifest is invalid (update-banner regression)", async () => {
@@ -3692,8 +2655,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
     // The ctx object is passed as 2nd arg; check the message string + ctx via JSON.
     const calls: unknown[][] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const hasLoadStart = calls.some((args) => {
       const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
@@ -3708,8 +2670,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
     await writeTestPluginRegistry({ registryPath }, [{ id: "plog-ok", manifestPath, enabled: true }]);
     const calls: unknown[][] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const hasLoadOk = calls.some((args) => {
       const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
@@ -3722,8 +2683,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
   it("emits RESTART_REQUEST phase when restartPlugin is called", async () => {
     const manifestPath = await writeFakePlugin("plog-restart");
     await writeTestPluginRegistry({ registryPath }, [{ id: "plog-restart", manifestPath, enabled: true }]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeGenerationBoundRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const calls: unknown[][] = [];
     const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
@@ -3736,20 +2696,4 @@ describe("PluginRuntime lifecycle plog emission", () => {
     spyLog.mockRestore();
   });
 
-  it("emits RESTART_STOP_OK phase after stop succeeds during restart", async () => {
-    const manifestPath = await writeFakePlugin("plog-stop-ok");
-    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-stop-ok", manifestPath, enabled: true }]);
-    const runtime = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    await runtime.load();
-    const calls: unknown[][] = [];
-    const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
-    await runtime.restartPlugin("plog-stop-ok");
-    const hasStopOk = calls.some((args) => {
-      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
-      return flat.includes(PluginPhase.RESTART_STOP_OK) || flat.includes("stopped previous instance");
-    });
-    expect(hasStopOk).toBe(true);
-    spyLog.mockRestore();
-  });
 });

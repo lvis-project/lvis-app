@@ -427,7 +427,7 @@ export function McpAppView({
       }
     }
 
-    window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri)
+    window.lvis.mcp.readUiResource(payload.serverId, payload.resourceUri, payload.generationId)
       .then((next) => {
         if (cancelled) return;
         setBundle(next);
@@ -484,7 +484,12 @@ export function McpAppView({
         {
           onResize: handleResize,
           openLink: (url) => getApi().openExternalUrl(url),
-          callTool: (name, args) => window.lvis.mcp.callTool(payload.serverId, name, args),
+          callTool: (name, args) => window.lvis.mcp.callTool(
+            payload.serverId,
+            name,
+            args,
+            payload.generationId,
+          ),
           // `onmessage` is bound to BOTH the card's server and the card's origin
           // session. The app names neither, so it can neither impersonate another
           // server nor speak into a conversation the user has left.

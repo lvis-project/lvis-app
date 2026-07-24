@@ -6,7 +6,8 @@ import {
   isAppOnlyRuntimeInvocation,
   appOnlyRuntimeInvocationRequiresUserAction,
 } from "../plugin-tool-invocation.js";
-import { createNoopHostApiForTests, PluginRuntime, type PluginToolInvocationContext } from "../../plugins/runtime.js";
+import type { PluginToolInvocationContext } from "../../plugins/runtime.js";
+import { TestPluginRuntime as PluginRuntime } from "../../plugins/__tests__/test-helpers.js";
 import {
   currentInvocationOrigin,
   runWithInvocationOrigin,
@@ -87,6 +88,20 @@ describe("plugin app-only runtime invocation", () => {
         "ui",
       ),
     ).toBe(true);
+  });
+
+  it("keeps governed app-only tools on ToolExecutor instead of the trusted-panel bypass", () => {
+    const manifest = normalize({ uiActions: { meeting_write: {} } });
+    const tool = manifest.tools.find((candidate) => candidate.name === "meeting_write");
+    tool!._meta = {
+      ...tool!._meta,
+      "lvisai/operationPolicy": {
+        discriminant: "operation",
+        operations: { save: { kind: "write", minimumRisk: "write", appVisible: true } },
+      },
+    };
+    const runtime = { listPluginManifests: () => [{ pluginId: "meeting", manifest }] } as any;
+    expect(isAppOnlyRuntimeInvocation(runtime, "meeting_write", { origin: "ui", ownerPluginId: "meeting" }, "ui")).toBe(false);
   });
 
   it("keeps LLM-facing tools on the ToolExecutor path", () => {
@@ -192,8 +207,7 @@ describe("invokePluginTool app-only branch — reaches the structural ceiling (#
     method: string,
     handler: (payload?: unknown) => Promise<unknown>,
   ): PluginRuntime {
-    const rt = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: HOST_ROOT, manifestPaths: [] });
+    const rt = new PluginRuntime({ hostRoot: HOST_ROOT, manifestPaths: [] });
     const internals = rt as unknown as {
       plugins: Map<string, { manifest: unknown }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
@@ -504,8 +518,7 @@ describe("invokePluginTool routing — app-origin calls land on the governed exe
     uiActions?: Record<string, { description?: string }>;
     auth?: { statusTool: string; loginTool: string };
   }): PluginRuntime {
-    const rt = new PluginRuntime({
-      createHostApi: createNoopHostApiForTests, hostRoot: HOST_ROOT_2, manifestPaths: [] });
+    const rt = new PluginRuntime({ hostRoot: HOST_ROOT_2, manifestPaths: [] });
     const internals = rt as unknown as {
       plugins: Map<string, { manifest: unknown }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;

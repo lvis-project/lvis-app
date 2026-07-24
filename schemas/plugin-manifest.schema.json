@@ -162,6 +162,7 @@
     },
     "keywords": {
       "type": "array",
+      "description": "DEPRECATED keyword-to-Tool-schema preload entries; this is not Skill discovery. Each skillId must exactly name a model-visible Tool in tools[]. A match adds that Tool schema to the model-visible turn scope and never invokes it directly. Owner: lvis-app plugin runtime. Remove after every supported plugin migrates to bundled manifest.skills and no active manifest declares keywords.",
       "items": {
         "type": "object",
         "required": [
@@ -172,14 +173,34 @@
         "properties": {
           "keyword": {
             "type": "string",
+            "description": "Case-insensitive substring matched against user input.",
             "minLength": 1
           },
           "skillId": {
             "type": "string",
+            "description": "Exact name of the model-visible Tool schema to preload; despite the legacy field name, this is not a bundled Skill id.",
             "minLength": 1
           }
         }
       }
+    },
+    "skills": {
+      "type": "array",
+      "description": "Plugin-owned Skill directories. Each path is relative to the verified plugin root and must contain SKILL.md.",
+      "maxItems": 64,
+      "items": { "$ref": "#/definitions/pluginContributionDeclaration" }
+    },
+    "hooks": {
+      "type": "array",
+      "description": "Plugin-owned declarative Hook configuration files. Declaration does not grant execution trust.",
+      "maxItems": 64,
+      "items": { "$ref": "#/definitions/pluginContributionDeclaration" }
+    },
+    "mcpServers": {
+      "type": "array",
+      "description": "Plugin-owned declarative MCP server configuration files. Declaration does not grant connection approval.",
+      "maxItems": 64,
+      "items": { "$ref": "#/definitions/pluginContributionDeclaration" }
     },
     "capabilities": {
       "type": "array",
@@ -760,6 +781,62 @@
         "composerPrompt": { "type": "string", "minLength": 1, "maxLength": 512 }
       }
     },
+    "pluginContributionDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "pluginToolOperationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discriminant", "operations"],
+      "properties": {
+        "discriminant": { "const": "operation" },
+        "operations": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/definitions/pluginToolOperationRule" }
+        }
+      }
+    },
+    "pluginToolOperationRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "minimumRisk"],
+      "properties": {
+        "kind": { "enum": ["read", "write"] },
+        "minimumRisk": { "enum": ["read", "write", "network", "shell"] },
+        "appVisible": { "type": "boolean" },
+        "requiresRead": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool", "operations", "maxAgeMs"],
+          "properties": {
+            "tool": { "type": "string", "minLength": 1 },
+            "operations": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "maxAgeMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
+          }
+        }
+      }
+    },
     "tool": {
       "$comment": "PURE (v6) MCP Tool object — manifest == wire (#885). additionalProperties:false rejects the removed legacy fields (category/workerId/writesToOwnSandbox/version/deprecatedSince/replacedBy); they are not Tool properties.",
       "type": "object",
@@ -838,6 +915,9 @@
                 "minLength": 1,
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
               }
+            },
+            "lvisai/operationPolicy": {
+              "$ref": "#/definitions/pluginToolOperationPolicy"
             }
           }
         }
