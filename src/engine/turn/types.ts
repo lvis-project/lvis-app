@@ -315,14 +315,12 @@ export interface ConversationLoopDeps {
   pluginOperationIdentityProvider?: import("../../tools/invocation-services.js").PluginOperationIdentityProvider;
   /**
    * Fixed-scope support for callers that already made a plugin-scope decision.
-   * These plugin ids are always eligible for catalog/preload checks even when
-   * the child/routine instruction text does not repeat a plugin keyword.
+   * These plugin ids are always eligible for catalog and fixed-surface checks.
    */
   forcedActivePluginIds?: ReadonlySet<string>;
   /**
    * Explicit tool-schema allowlist for fixed-surface callers such as
-   * sub-agents. These names enter `tools[]` directly even when no keyword
-   * preloads them.
+   * sub-agents. These names enter `tools[]` directly.
    */
   forcedActiveToolNames?: ReadonlySet<string>;
   /**
@@ -339,8 +337,7 @@ export interface ConversationLoopDeps {
   modelOverride?: string;
   /**
    * Hard plugin allowlist for scoped callers such as routines. When set,
-   * keyword matches, forced plugins, and request_plugin expansions are all
-   * intersected with this set.
+   * forced plugins and request_plugin expansions are intersected with this set.
    */
   allowedPluginIds?: ReadonlySet<string>;
   /** Background/routine loop: write tools must ask and cannot rely on auto/allow cache. */
@@ -418,8 +415,6 @@ export interface ToolScope {
 
 
   activeToolNames: Set<string>;
-  /** Tools loaded because this turn's text directly matched tool keywords. */
-  preloadedToolNames: Set<string>;
   /** Tools kept visible by an explicit fixed-surface allowlist. */
   forcedToolNames: Set<string>;
   includeBuiltins: boolean;
