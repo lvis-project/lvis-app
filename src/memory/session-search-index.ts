@@ -3,10 +3,11 @@
  *
  * Replaces the JSONL linear-scan `MemoryManager.searchSessions()` used to run
  * (50-file cap, one match per session, whole-file reads on every keystroke).
- * `better-sqlite3` is already a production `dependencies` entry (postinstall
- * runs `electron-rebuild --only better-sqlite3,node-pty`) — this module is
- * its first runtime consumer, so the native module load path is exercised by
- * the packaged-app smoke test (see `scripts/smoke-packaged-app.mjs`).
+ * `better-sqlite3` is already a production `dependencies` entry (v13 is N-API
+ * and ships a per-platform prebuild — `prebuilds/<platform>-<arch>.node` — so
+ * no per-Electron-ABI `electron-rebuild` step is needed) — this module is its
+ * first runtime consumer, so the native module load path is exercised by the
+ * packaged-app smoke test (see `scripts/smoke-packaged-app.mjs`).
  *
  * Storage: `<lvisDir>/search/index.db` — resolved from the *same* `lvisDir`
  * the owning `MemoryManager` instance uses (never a global singleton), so
@@ -288,8 +289,8 @@ export class SessionSearchIndex {
       // the deleteFile→rebuild recovery path is still testable.
       if (IS_TEST_ENV && isNativeLoadFailure(err)) {
         throw new Error(
-          `better-sqlite3 native module failed to load (ABI mismatch?) — search index cannot open. ` +
-            `In CI this means the addon was built for the wrong runtime (e.g. Electron ABI under a node/bun test). ` +
+          `better-sqlite3 native load failed (corrupt prebuild?) — search index cannot open. ` +
+            `In CI this usually means the shipped N-API prebuild is missing or corrupt for this platform+arch. ` +
             `Original: ${(err as Error).message}`,
         );
       }
