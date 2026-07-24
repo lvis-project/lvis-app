@@ -6,7 +6,7 @@
  * standard all treat as the primary distribution channel) so it can be injected
  * as a distinct layer BELOW the global personal `~/.lvis/AGENTS.md`.
  *
- * Phase 1 discovers exactly `<projectRoot>/AGENTS.md`. LVIS has no per-turn
+ * The first step discovers exactly `<projectRoot>/AGENTS.md`. LVIS has no per-turn
  * working-subdir signal distinct from `projectRoot`, so a genuine root-to-leaf
  * closest-wins chain (and multi-root fan-out over additionalDirectories) would
  * be dead code today; the shape below keeps that extension cheap without
@@ -19,7 +19,7 @@
 import { closeSync, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
-export interface ProjectAgentsMdLayer {
+interface ProjectAgentsMdLayer {
   /** Path relative to the project root (always `AGENTS.md` in phase 1). */
   relativePath: string;
   /** LF-normalized content, head-truncated to the remaining byte budget. */
