@@ -125,6 +125,7 @@ type CreateHostApi = (
     isActive: () => boolean;
     isLifecycleHookActive: () => boolean;
   },
+  installPluginId: string | null,
 ) => PluginHostApi;
 
 /** Build a REAL hostApi + the captured networkFetch mock (the wire). */
@@ -186,6 +187,7 @@ async function buildRealHostApi(): Promise<{
       isActive: () => true,
       isLifecycleHookActive: () => false,
     },
+    null,
   );
   return { hostApi, networkFetch };
 }
