@@ -1,5 +1,5 @@
 {
-  "$schema": "https://unpkg.com/knip@6.23.0/schema.json",
+  "$schema": "https://unpkg.com/knip@6.29.0/schema.json",
   // Code-diet baseline (#1410).
   //
   // Keep structural debt visible as warnings while failing on new dependency
@@ -49,5 +49,11 @@
     "subst",
     "taskkill",
     "where"
-  ]
+  ],
+  // knip 6.29 resolves absolute-path spawn targets as module specifiers and
+  // reports them as `unresolved`. `/usr/bin/codesign` is the canonical macOS
+  // system binary (auto-updater Developer-ID probe) — absolute by design to
+  // avoid PATH interposition — so it is intentionally external, not a missing
+  // import. Matched as a regex against the unresolved specifier.
+  "ignoreUnresolved": ["/usr/bin/codesign"]
 }
