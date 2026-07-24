@@ -37,13 +37,11 @@ The manifest should include:
 `_meta.ui.visibility`; operation restrictions belong on the same Tool at
 `_meta["lvisai/operationPolicy"]`.
 
-Deprecated `keywords[]` entries bind a case-insensitive keyword to an exact
-model-visible Tool name in `skillId`. A match preloads that Tool schema into the
-model-visible turn scope; it does not invoke the Tool. This is not Skill
-discovery: instruction bundles belong in `manifest.skills`. Missing and app-only
-targets are rejected. Owner: `lvis-app` plugin runtime. Remove after every
-supported plugin has migrated to bundled `manifest.skills` and no active
-manifest declares `keywords`.
+`manifest.skills` optionally declares instruction bundles. The Host exposes
+their catalog metadata and loads an instruction body only through the Skill
+lifecycle; a Skill does not activate a plugin, select a Tool, or invoke a Tool.
+Host-selected plugin scope and `tool_search` control model-visible Tool
+discovery.
 
 ## HostApi Boundaries
 

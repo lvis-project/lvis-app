@@ -150,7 +150,7 @@ bun run start
 
 부팅 로그에서:
 
-- ✅ 정상 로드: `[lvis] plugin:<id> registered <N> keywords` (또는 `tools` 등록 로그) — `src/boot/steps/plugin-runtime.ts:645` 부근
+- ✅ 정상 로드: 플러그인 Tool 등록 로그와 manifest 검증 성공 로그가 모두 보임
 - ✅ 서명 우회 경고: `[lvis] boot: LVIS_DEV_SKIP_SIG=1 — plugin signature verification disabled (dev-only)` — `src/boot/steps/plugin-runtime.ts:601`
 - ❌ 거부됨: `[plugin-runtime] ignoring untrusted registry manifest path for <id>: <path>` → §3-1 참고
 - ❌ 매니페스트 자체 invalid: `[plugin-runtime] <id> rejected — <reason>`

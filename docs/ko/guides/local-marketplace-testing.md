@@ -314,7 +314,7 @@ ls "$HOME/.lvis/plugins/<slug>/"
 cat "$HOME/.lvis/plugins/registry.json"
 ```
 
-부팅 로그에 `[lvis] plugin:<id> registered <N> keywords` (또는 tools 등록 로그) 가 보이면 정상.
+부팅 로그에 플러그인 Tool 등록 로그와 manifest 검증 성공 로그가 보이면 정상.
 
 ---
 
