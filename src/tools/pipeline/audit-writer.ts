@@ -225,10 +225,12 @@ export class AuditWriter {
       ? (isError ? "governed operation failed" : "governed operation completed")
       : output;
     // ── #811 m2: PermissionDenied (NON-BLOCKING) ──
-    // `auditToolCall` is the single chokepoint every tool-deny path funnels
-    // through, so firing here observes the deny EXACTLY ONCE where it is
-    // finalized. OBSERVE-ONLY: the lifecycle hook's verdict is recorded but the
-    // deny stands regardless (control flow already returned the deny result).
+    // `auditToolCall` is the single chokepoint every ordinary tool-deny path
+    // funnels through, so firing here observes the deny EXACTLY ONCE where it is
+    // finalized. Governed plugin operations deliberately suppress this
+    // effect-capable extension boundary: several deny paths occur before an
+    // operation lease exists, and arbitrary hooks cannot be part of the
+    // serialized provider-state proof.
     // A user-abort is a CANCEL, not a permission denial — exclude it so a policy
     // hook never sees false "denied" signals. `denyReason.reason` carries the
     // finalized reason so a hook can discriminate the remaining cases (e.g.
@@ -237,6 +239,7 @@ export class AuditWriter {
       permission?.decision === "deny" &&
       permissionContext !== undefined &&
       terminationReason !== "user-abort" &&
+      governedTool === undefined &&
       !suppressPermissionDeniedLifecycle
     ) {
       await this.fireLifecycleEvent(

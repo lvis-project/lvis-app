@@ -24,6 +24,8 @@ export interface PluginOperationInvocationContext {
   generationId: string;
   /** Host-owned receipt scope. App calls use the renderer session; other calls use the executor session. */
   appSessionId: string;
+  /** Stable Host-private account scope. It never grants authority. */
+  accountScopeHash: string;
   accountHash: string;
   /** True only for UI/MCP-App writes that must consume an opaque one-shot grant. */
   appGrantRequired: boolean;

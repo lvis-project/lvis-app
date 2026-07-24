@@ -10,6 +10,7 @@ const principal = {
   ownerVersion: "1.2.3",
   generationId: "gen-1",
   appSessionId: "window-7",
+  accountScopeHash: "acct-scope-hash",
   accountHash: "acct-hash",
 };
 const requiredRead = {
@@ -68,7 +69,11 @@ describe("PluginOperationGrantCoordinator", () => {
       tools,
     );
     const anotherAccount = pluginOperationExecutionDomain(
-      { ...principal, accountHash: "another-account" },
+      {
+        ...principal,
+        accountScopeHash: "another-account-scope",
+        accountHash: "another-account",
+      },
       "ep_attendance_write",
       "clock",
       tools,
@@ -114,6 +119,73 @@ describe("PluginOperationGrantCoordinator", () => {
     thirdLease.release();
   });
 
+  it("serializes a replacement generation through the stable plugin-account scope", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const predecessorDomain = "3".repeat(64);
+    const replacementDomain = "4".repeat(64);
+    const predecessor = await coordinator.acquireExecutionLease(
+      predecessorDomain,
+      principal,
+    );
+    const replacementPrincipal = {
+      ...principal,
+      ownerVersion: "2.0.0",
+      generationId: "gen-2",
+      accountHash: "rotated-account-principal",
+    };
+    let replacementStarted = false;
+    const replacement = coordinator.acquireExecutionLease(
+      replacementDomain,
+      replacementPrincipal,
+    ).then((lease) => {
+      replacementStarted = true;
+      return lease;
+    });
+
+    await Promise.resolve();
+    expect(replacementStarted).toBe(false);
+    coordinator.revokeGeneration(
+      principal.ownerPluginId,
+      principal.generationId,
+    );
+    expect(replacementStarted).toBe(false);
+
+    predecessor.release();
+    const replacementLease = await replacement;
+    expect(replacementStarted).toBe(true);
+    replacementLease.release();
+  });
+
+  it("rejects a queued replacement when predecessor completion poisons the stable scope", async () => {
+    const coordinator = new PluginOperationGrantCoordinator();
+    const predecessorDomain = "5".repeat(64);
+    const replacementDomain = "6".repeat(64);
+    const predecessor = await coordinator.acquireExecutionLease(
+      predecessorDomain,
+      principal,
+    );
+    const replacement = coordinator.acquireExecutionLease(
+      replacementDomain,
+      {
+        ...principal,
+        ownerVersion: "2.0.0",
+        generationId: "gen-2",
+        accountHash: "replacement-account-principal",
+      },
+    );
+
+    coordinator.poisonDomain(predecessorDomain);
+    coordinator.revokeGeneration(
+      principal.ownerPluginId,
+      principal.generationId,
+    );
+    predecessor.release();
+
+    await expect(replacement).rejects.toThrow(
+      "plugin operation domain is indeterminate",
+    );
+  });
+
   it("releases an aborted queued execution lease without blocking the domain", async () => {
     const coordinator = new PluginOperationGrantCoordinator();
     const domain = "b".repeat(64);
@@ -157,7 +229,7 @@ describe("PluginOperationGrantCoordinator", () => {
       executionDomains: Map<string, unknown>;
       domainRevisions: Map<string, unknown>;
     };
-    expect(state.executionDomains.has(grantDomain)).toBe(false);
+    expect(state.executionDomains.size).toBe(0);
     expect(state.domainRevisions.has(grantDomain)).toBe(false);
   });
 
@@ -240,7 +312,11 @@ describe("PluginOperationGrantCoordinator", () => {
     let otherAccountStarted = false;
     const otherAccountWrite = coordinator.acquireExecutionLease(
       secondAccountDomain,
-      { ...principal, accountHash: "other-account" },
+      {
+        ...principal,
+        accountScopeHash: "other-account-scope",
+        accountHash: "other-account",
+      },
     ).then((lease) => {
       otherAccountStarted = true;
       return lease;
@@ -451,6 +527,7 @@ describe("PluginOperationGrantCoordinator", () => {
       ownerVersion: "2.0.0",
       generationId: "gen-2",
       appSessionId: "replacement-window",
+      accountHash: "replacement-principal",
     };
     const replacementDomain = "1".repeat(64);
     await expect(
@@ -464,6 +541,7 @@ describe("PluginOperationGrantCoordinator", () => {
 
     const otherAccount = {
       ...replacement,
+      accountScopeHash: "different-account-scope",
       accountHash: "different-account",
     };
     const otherAccountLease = await coordinator.acquireExecutionLease(

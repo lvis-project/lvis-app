@@ -16,11 +16,12 @@ unsigned.
   declare its successful structured-result statuses. Missing or unsuccessful
   status values remain visible to the caller but fail closed, and every new
   read attempt invalidates older freshness receipts and grants.
-- **Effect-capable post hooks cannot race read freshness.** Governed-operation
-  leases now cover post hooks and required final audit persistence. Hook command
-  descendants are reaped at root completion, and any observed or uncertain hook
-  poisons the same plugin/account scope across session, update, and rollback so
-  old-generation work cannot race a later read-authorized write.
+- **Governed operations are isolated from extension hooks.** PreToolUse,
+  PostToolUse, PostToolUseFailure, and PermissionDenied hooks are not dispatched
+  for manifest-governed operations because arbitrary commands cannot be part of
+  the provider-state proof. A Host-private stable account scope now serializes
+  execution across reauthentication, update, and rollback while authority stays
+  bound to a revocable per-generation principal.
 - **Retired contracts stay retired.** The Host-owned manifest and public API do
   not restore keyword dispatch, UI-action tool aliases, or plugin-specific Host
   branches; the SDK remains a generated projection of the app contract.

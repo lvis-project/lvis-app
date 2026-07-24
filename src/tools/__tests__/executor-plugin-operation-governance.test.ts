@@ -14,6 +14,7 @@ const principal = {
   ownerVersion: "2.0.0",
   generationId: "gen-2",
   appSessionId: "window-4",
+  accountScopeHash: "account-scope-hash",
   accountHash: "account-hash",
 };
 
@@ -188,6 +189,7 @@ function setup(options: {
             ownerVersion: principal.ownerVersion,
             generationId: principal.generationId,
             appSessionId: sessionId ?? "model-session",
+            accountScopeHash: principal.accountScopeHash,
             accountHash: principal.accountHash,
             appGrantRequired: false,
           })
@@ -293,281 +295,32 @@ describe("ToolExecutor plugin operation governance", () => {
     })).not.toThrow();
   });
 
-  it("holds the domain lease through post hooks and withholds freshness from an effect-capable hook", async () => {
-    const { executor, read, write } = setup();
-    await runWithInvocationOrigin("ui", undefined, () =>
-      executor.executeAll(
-        [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
-        options(),
-      ),
-    );
-    const staleGrant = executor.issuePluginOperationGrant({
-      toolName: "domain_write",
-      input: { operation: "save", value: 1 },
-      principal,
-    });
-
-    let signalPostStarted!: () => void;
-    const postStarted = new Promise<void>((resolve) => {
-      signalPostStarted = resolve;
-    });
-    let releasePost!: () => void;
-    const postBlocked = new Promise<void>((resolve) => {
-      releasePost = resolve;
-    });
-    let postCalls = 0;
-    executor.getHookRunner().registerPostHook("effect-capable-post", async () => {
-      postCalls += 1;
-      if (postCalls !== 1) return;
-      signalPostStarted();
-      await postBlocked;
-    });
-
-    const refresh = runWithInvocationOrigin("ui", undefined, () =>
-      executor.executeAll(
-        [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
-        options(),
-      ),
-    );
-    await postStarted;
-
-    const queuedRead = runWithInvocationOrigin("ui", undefined, () =>
-      executor.executeAll(
-        [{ id: "r3", name: "domain_read", input: { operation: "status" } }],
-        options(),
-      ),
-    );
-    const staleWrite = runWithInvocationOrigin("ui", undefined, () =>
-      executor.executeAll(
-        [{ id: "w", name: "domain_write", input: { operation: "save", value: 1 } }],
-        options(staleGrant.token),
-      ),
-    );
-    await Promise.resolve();
-    expect(read).toHaveBeenCalledTimes(2);
-    expect(write).not.toHaveBeenCalled();
-    expect(() => executor.issuePluginOperationGrant({
-      toolName: "domain_write",
-      input: { operation: "save", value: 2 },
-      principal,
-    })).toThrow(/required read is missing or stale/);
-
-    releasePost();
-    await refresh;
-    await queuedRead;
-    const [staleWriteResult] = await staleWrite;
-    expect(read).toHaveBeenCalledTimes(2);
-    expect(staleWriteResult.is_error).toBe(true);
-    expect(write).not.toHaveBeenCalled();
-    expect(() => executor.issuePluginOperationGrant({
-      toolName: "domain_write",
-      input: { operation: "save", value: 3 },
-      principal,
-    })).toThrow(/required read is missing or stale/);
-  });
-
-  it("rejects later reads and direct writes after a post-hook poisons the domain", async () => {
+  it("never dispatches effect-capable extension hooks for governed operations", async () => {
     const scriptHookManager = new ScriptHookManager();
-    vi.spyOn(scriptHookManager, "runPostToolUse")
-      .mockResolvedValueOnce({
-        decision: "allow",
-        reason: "no matching hooks of this type",
-        results: [],
-      })
-      .mockResolvedValueOnce({
-        decision: "allow",
-        reason: "post hook observed",
-        results: [{
-          hookPath: "/test/post-hook",
-          hookType: "post",
-          decision: "allow",
-          reason: "observed",
-          rawStdout: "{\"action\":\"allow\",\"reason\":\"observed\"}",
-          exitCode: 0,
-          timedOut: false,
-          durationMs: 1,
-          source: "config",
-          commandIdentity: "a".repeat(64),
-        }],
-      })
-      .mockResolvedValue({
-        decision: "allow",
-        reason: "no matching hooks of this type",
-        results: [],
-      });
-    const { executor, write, directWrite } = setup({
-      scriptHookManager,
-      provideModelIdentity: true,
-    });
+    const scriptPre = vi.spyOn(scriptHookManager, "runPreToolUse");
+    const scriptPost = vi.spyOn(scriptHookManager, "runPostToolUse");
+    const lifecycle = vi.spyOn(scriptHookManager, "runLifecycleEvent");
+    const { executor, read, directWrite } = setup({ scriptHookManager });
+    const inProcessPre = vi.fn(() => ({
+      action: "deny" as const,
+      reason: "must not run",
+    }));
+    const inProcessPost = vi.fn();
+    executor.getHookRunner().registerPreHook("must-not-run", inProcessPre);
+    executor.getHookRunner().registerPostHook("must-not-run", inProcessPost);
 
-    await runWithInvocationOrigin("ui", undefined, () =>
+    const [successfulRead] = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll(
-        [{ id: "r1", name: "domain_read", input: { operation: "status" } }],
+        [{ id: "successful-read", name: "domain_read", input: { operation: "status" } }],
         options(),
       ),
     );
-    const grant = executor.issuePluginOperationGrant({
-      toolName: "domain_write",
-      input: { operation: "save", value: 1 },
-      principal,
-    });
-    const [writeResult] = await runWithInvocationOrigin("ui", undefined, () =>
-      executor.executeAll(
-        [{ id: "w1", name: "domain_write", input: { operation: "save", value: 1 } }],
-        options(grant.token),
-      ),
-    );
-    expect(writeResult.is_error).toBeFalsy();
-    expect(write).toHaveBeenCalledTimes(1);
+    expect(successfulRead.is_error).toBeFalsy();
 
-    const [laterRead] = await runWithInvocationOrigin("ui", undefined, () =>
-      executor.executeAll(
-        [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
-        options(),
-      ),
-    );
-    expect(laterRead.is_error).toBe(true);
-    expect(laterRead.content).toContain("domain is indeterminate");
-
-    expect(() => executor.issuePluginOperationGrant({
-      toolName: "domain_write",
-      input: { operation: "save", value: 1 },
-      principal,
-    })).toThrow(/required read is missing or stale/);
-    expect(() => executor.issuePluginOperationGrant({
-      toolName: "direct_write",
-      input: { operation: "reserve", target: "room-1" },
-      principal,
-    })).toThrow(/domain is indeterminate/);
-
-    const [modelWrite] = await executor.executeAll(
-      [{
-        id: "model-direct-after-poison",
-        name: "direct_write",
-        input: { operation: "reserve", target: "room-2" },
-      }],
-      {
-        sessionId: "model-session",
-        permissionContext: {
-          trustOrigin: "llm-tool-arg",
-          allowedPluginIds: new Set([principal.ownerPluginId]),
-        },
-      },
-    );
-    expect(modelWrite.is_error).toBe(true);
-    expect(modelWrite.content).toContain("domain is indeterminate");
-    expect(directWrite).not.toHaveBeenCalled();
-  });
-
-  it("holds the lease through PostToolUseFailure and rejects a queued direct write", async () => {
-    const scriptHookManager = new ScriptHookManager();
-    let signalFailureHookStarted!: () => void;
-    const failureHookStarted = new Promise<void>((resolve) => {
-      signalFailureHookStarted = resolve;
-    });
-    let releaseFailureHook!: () => void;
-    const failureHookBlocked = new Promise<void>((resolve) => {
-      releaseFailureHook = resolve;
-    });
-    vi.spyOn(scriptHookManager, "runLifecycleEvent")
-      .mockImplementation(async (event) => {
-        expect(event).toBe("PostToolUseFailure");
-        signalFailureHookStarted();
-        await failureHookBlocked;
-        return {
-          decision: "allow",
-          reason: "failure hook observed",
-          results: [{
-            hookPath: "/test/post-tool-use-failure",
-            hookType: "PostToolUseFailure",
-            decision: "allow",
-            reason: "observed",
-            rawStdout: "{\"action\":\"allow\",\"reason\":\"observed\"}",
-            exitCode: 0,
-            timedOut: false,
-            durationMs: 1,
-            source: "config",
-            commandIdentity: "b".repeat(64),
-          }],
-        };
-      });
-    const { executor, read, directWrite } = setup({
-      scriptHookManager,
-      provideModelIdentity: true,
-    });
-    const issuedBeforeFailure = executor.issuePluginOperationGrant({
-      toolName: "direct_write",
-      input: { operation: "reserve", target: "room-1" },
-      principal,
-    });
     read.mockImplementationOnce(async () => ({
       output: "provider read failed",
       isError: true,
     }));
-
-    const failedRead = runWithInvocationOrigin("ui", undefined, () =>
-      executor.executeAll(
-        [{ id: "failed-read", name: "domain_read", input: { operation: "status" } }],
-        options(),
-      ),
-    );
-    await failureHookStarted;
-
-    const queuedWrite = runWithInvocationOrigin("ui", undefined, () =>
-      executor.executeAll(
-        [{
-          id: "queued-direct-write",
-          name: "direct_write",
-          input: { operation: "reserve", target: "room-1" },
-        }],
-        options(issuedBeforeFailure.token),
-      ),
-    );
-    await Promise.resolve();
-    expect(directWrite).not.toHaveBeenCalled();
-
-    releaseFailureHook();
-    const [failedReadResult] = await failedRead;
-    const [queuedWriteResult] = await queuedWrite;
-    expect(failedReadResult.is_error).toBe(true);
-    expect(queuedWriteResult.is_error).toBe(true);
-    expect(queuedWriteResult.content).toContain("domain is indeterminate");
-    expect(directWrite).not.toHaveBeenCalled();
-    expect(() => executor.issuePluginOperationGrant({
-      toolName: "direct_write",
-      input: { operation: "reserve", target: "room-2" },
-      principal,
-    })).toThrow(/domain is indeterminate/);
-
-    const [modelWrite] = await executor.executeAll(
-      [{
-        id: "model-direct-after-failure-hook",
-        name: "direct_write",
-        input: { operation: "reserve", target: "room-3" },
-      }],
-      {
-        sessionId: "model-session",
-        permissionContext: {
-          trustOrigin: "llm-tool-arg",
-          allowedPluginIds: new Set([principal.ownerPluginId]),
-        },
-      },
-    );
-    expect(modelWrite.is_error).toBe(true);
-    expect(modelWrite.content).toContain("domain is indeterminate");
-    expect(directWrite).not.toHaveBeenCalled();
-  });
-
-  it("poisons the domain when PostToolUseFailure dispatch is uncertain", async () => {
-    const scriptHookManager = new ScriptHookManager();
-    vi.spyOn(scriptHookManager, "runLifecycleEvent")
-      .mockRejectedValue(new Error("lifecycle dispatch unavailable"));
-    const { executor, read } = setup({ scriptHookManager });
-    read.mockImplementationOnce(async () => ({
-      output: "provider read failed",
-      isError: true,
-    }));
-
     const [failedRead] = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll(
         [{ id: "failed-read", name: "domain_read", input: { operation: "status" } }],
@@ -575,11 +328,24 @@ describe("ToolExecutor plugin operation governance", () => {
       ),
     );
     expect(failedRead.is_error).toBe(true);
-    expect(() => executor.issuePluginOperationGrant({
-      toolName: "direct_write",
-      input: { operation: "reserve", target: "room-1" },
-      principal,
-    })).toThrow(/domain is indeterminate/);
+
+    const [deniedWrite] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "denied-write",
+          name: "direct_write",
+          input: { operation: "reserve", target: "missing-grant" },
+        }],
+        options(),
+      ),
+    );
+    expect(deniedWrite.is_error).toBe(true);
+    expect(directWrite).not.toHaveBeenCalled();
+    expect(inProcessPre).not.toHaveBeenCalled();
+    expect(inProcessPost).not.toHaveBeenCalled();
+    expect(scriptPre).not.toHaveBeenCalled();
+    expect(scriptPost).not.toHaveBeenCalled();
+    expect(lifecycle).not.toHaveBeenCalled();
   });
 
   it("holds the lease and withholds freshness until the required final audit persists", async () => {
@@ -1143,7 +909,7 @@ describe("ToolExecutor plugin operation governance", () => {
       readAbort.abort();
       const [readbackResult] = await readback;
       expect(readbackResult.is_error).toBe(true);
-      expect(readbackResult.content).toContain("aborted");
+      expect(readbackResult.content).toContain("취소");
     } finally {
       vi.useRealTimers();
     }
@@ -1220,7 +986,7 @@ describe("ToolExecutor plugin operation governance", () => {
       readAbort.abort();
       const [readbackResult] = await readback;
       expect(readbackResult.is_error).toBe(true);
-      expect(readbackResult.content).toContain("aborted");
+      expect(readbackResult.content).toContain("취소");
     } finally {
       vi.useRealTimers();
     }
@@ -1738,6 +1504,7 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(serialized).toContain("status");
     expect(serialized).not.toContain("Sensitive Person");
     expect(serialized).not.toContain("bearer-must-not-log");
+    expect(serialized).not.toContain(principal.accountScopeHash);
     expect(serialized).not.toContain(principal.accountHash);
     expect(serialized).not.toContain("fresh");
   });
@@ -1756,12 +1523,13 @@ describe("ToolExecutor plugin operation governance", () => {
     })).toThrow(/generation access is not wired/);
   });
 
-  it("fails closed for a generation-owned tool when the script Hook manager is not wired", async () => {
+  it("does not require a script Hook manager for a hook-isolated governed operation", async () => {
     const { executor, read } = setup({ wireHooks: false });
-    await expect(runWithInvocationOrigin("ui", undefined, () =>
+    const [result] = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll([{ id: "r", name: "domain_read", input: { operation: "status" } }], options()),
-    )).rejects.toThrow(/script Hook manager is not wired/);
+    );
 
-    expect(read).not.toHaveBeenCalled();
+    expect(result.is_error).toBeFalsy();
+    expect(read).toHaveBeenCalledTimes(1);
   });
 });
