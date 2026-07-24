@@ -4,8 +4,9 @@
 
 
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 
 import type {
@@ -38,6 +39,64 @@ import type {
 export const DEFAULT_WINDOWS_PROXY_PORT_RANGE: readonly [number, number] = [
   60080, 60089,
 ];
+
+/**
+ * The `app.asar` → `app.asar.unpacked` path-segment rewrite, kept in ONE place.
+ *
+ * When LVIS runs from a packaged Electron build, `@anthropic-ai/sandbox-runtime`
+ * resolves to a VIRTUAL path inside `resources/app.asar`, but its vendored
+ * payload (`vendor/srt-win/**`, selected by electron-builder `asarUnpack`) is
+ * physically extracted to the sibling `app.asar.unpacked` tree. Any on-disk path
+ * into that payload — the srt-win.exe binary, the ACL grant target — must have
+ * its `.asar` segment rewritten to `.asar.unpacked`. In a dev checkout there is
+ * no `.asar` segment, so the rewrite is a no-op.
+ *
+ * SINGLE AUTHORITY: {@link getVendoredSrtWinExePath} (the srt-win.exe path) and
+ * the Windows-backend ACL target resolver (asrt-windows-support.ts) both rewrite
+ * through THIS function, so the segment regex lives in exactly one spot.
+ */
+const APP_ASAR_PATH_SEGMENT = /(^|[\\/])app\.asar(?=$|[\\/])/i;
+
+export function rewriteAsarPathToUnpacked(pathValue: string): string {
+  return pathValue.replace(APP_ASAR_PATH_SEGMENT, "$1app.asar.unpacked");
+}
+
+/**
+ * The explicit, absolute path to ASRT's vendored `srt-win.exe` — the SINGLE
+ * SOURCE OF TRUTH for the Windows sandbox helper binary.
+ *
+ * ⚠️ WHY THIS EXISTS (ASRT 0.0.67 breaking change) ⚠️
+ * ASRT 0.0.67 REMOVED implicit vendored-binary resolution: `resolveSrtWin(cfg)`
+ * now THROWS unless `cfg.path` is set (`SrtWinConfigSchema.path` is required).
+ * The packaged exe lives under the package root, which in a dev checkout sits
+ * inside the working-tree write grant, so ASRT deliberately refuses to
+ * auto-resolve it (a planted `srt-win.exe` there would otherwise be spawned as
+ * the broker). Every Windows entry point — {@link buildSandboxConfig} →
+ * `SandboxManager.initialize`, the boot dependency gate
+ * ({@link checkAsrtDependencies}), and the per-worker ACL grant
+ * ({@link grantWindowsWorkerFilesystemAccess}) — MUST therefore supply this path
+ * explicitly, or the Windows OS-sandbox silently degrades at runtime (tsc cannot
+ * catch it — the config field and the `resolveSrtWin` param are both optional).
+ *
+ * Resolution mirrors ASRT's own `VENDORED_SRT_WIN_EXE`: the package root
+ * (`@anthropic-ai/sandbox-runtime/package.json` → dirname), rewritten for a
+ * packaged `app.asar.unpacked` layout, then
+ * `vendor/srt-win/<arch>/srt-win.exe` (arch from `process.arch`).
+ *
+ * SYNC + PURE so {@link buildSandboxConfig} stays synchronous for the unit tests
+ * (same rationale as the DEFAULT_WINDOWS_PROXY_PORT_RANGE mirror). A pin test
+ * (asrt-sandbox.test.ts) asserts this equals ASRT's real `VENDORED_SRT_WIN_EXE`,
+ * so any upstream drift in the vendored layout fails CI rather than silently
+ * resolving a wrong/absent path.
+ */
+export function getVendoredSrtWinExePath(): string {
+  const packageJson = createRequire(import.meta.url).resolve(
+    "@anthropic-ai/sandbox-runtime/package.json",
+  );
+  const root = rewriteAsarPathToUnpacked(dirname(packageJson));
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  return join(root, "vendor", "srt-win", arch, "srt-win.exe");
+}
 
 /**
  * The subset of ASRT configuration that is ONLY ever permitted to originate
@@ -165,7 +224,7 @@ export interface TrustedSandboxSettings {
  * per command, and it can only ever NARROW or RE-SHAPE the filesystem jail —
  * it cannot widen network egress and cannot carry any sandbox-weakening flag.
  *
- * Windows ASRT 0.0.66 note: `srt-win exec` supports per-exec `denyRead` /
+ * Windows ASRT 0.0.67 note: `srt-win exec` supports per-exec `denyRead` /
  * `denyWrite` only. Non-empty per-exec `allowRead` / `allowWrite` is rejected
  * before calling ASRT. Long-lived plugin workers that need explicit read/write
  * grants use {@link grantWindowsWorkerFilesystemAccess} with a dedicated
@@ -333,7 +392,7 @@ export function assertPerExecFilesystemSupported(
     return;
   }
   throw new Error(
-    `${caller}: ASRT 0.0.66 on Windows does not support per-exec ` +
+    `${caller}: ASRT 0.0.67 on Windows does not support per-exec ` +
       "filesystem.allowRead/allowWrite; only per-exec denyRead/denyWrite " +
       "are supported. Long-lived plugin workers must use the holder-PID " +
       "Windows ACL grant path instead.",
@@ -445,7 +504,7 @@ export function isAsrtSandboxActive(): boolean {
  * PLATFORM: every entry is a LITERAL absolute path (NO glob chars). On macOS the
  * stripped path is a recursive seatbelt subpath; on Linux bwrap deny-binds the
  * literal path (bwrap cannot glob — ASRT only `expandGlobPattern`s entries that
- * CONTAIN glob chars, so literals are safe on both). On Windows, ASRT 0.0.66
+ * CONTAIN glob chars, so literals are safe on both). On Windows, ASRT 0.0.67
  * applies filesystem rules through the srt-sandbox user ACL backend.
  *
  * NO-FALLBACK (deny-by-default): paths are derived from `os.homedir()` /
@@ -714,6 +773,11 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
             ...(trustedSettings.windows?.proxyPortRange ??
               DEFAULT_WINDOWS_PROXY_PORT_RANGE),
           ] as [number, number],
+          // ASRT 0.0.67: srt-win path is REQUIRED — no implicit vendored
+          // resolution. Supply the explicit SoT path so SandboxManager.initialize
+          // (+ wrapWithSandboxArgv + the in-initialize dependency check) can spawn
+          // the backend instead of throwing. See getVendoredSrtWinExePath.
+          srtWin: { path: getVendoredSrtWinExePath() },
         }
       : undefined;
 
@@ -737,7 +801,7 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
 
 /**
  * A fixed, no-I/O workload used only to prove that Linux can actually start the
- * configured ASRT/bwrap wrapper. ASRT 0.0.66's dependency check verifies
+ * configured ASRT/bwrap wrapper. ASRT 0.0.67's dependency check verifies
  * binaries, but cannot detect hosts that prohibit the wrapper's user namespace
  * / seccomp setup until a wrapped process starts.
  *
@@ -1001,18 +1065,34 @@ export async function initializeAsrtSandbox(
 }
 
 /**
- * Check that the platform's sandbox dependencies are present (Linux: bwrap +
- * socat + ripgrep). Returns ASRT's `{ errors, warnings }` — a non-empty
- * `errors` means the sandbox CANNOT run on this host. Boot uses this to
- * fail-closed (refuse to run unsandboxed) when the gate is ON but the deps are
- * missing, rather than silently downgrading to isolation=none.
+ * Check that the platform's sandbox dependencies are present:
+ *   - Linux: bwrap + socat + ripgrep (via `SandboxManager.checkDependenciesAsync`);
+ *   - Windows: the srt-win backend is spawnable + the WFP/sandbox-user state is
+ *     usable, via ASRT's `checkWindowsDependenciesAsync` with the EXPLICIT
+ *     srt-win path (0.0.67 no longer resolves it implicitly);
+ *   - macOS: no external deps (Seatbelt is built in).
+ *
+ * Returns ASRT's `{ errors, warnings }` — a non-empty `errors` means the sandbox
+ * CANNOT run on this host. Boot uses this to fail-closed (refuse to run
+ * unsandboxed) when the gate is ON but the deps are missing, rather than silently
+ * downgrading to isolation=none.
+ *
+ * Adopts the ASYNC dependency twins (`checkDependenciesAsync` /
+ * `checkWindowsDependenciesAsync`) so the boot gate never blocks the event loop
+ * on the underlying srt-win / binary probes.
  */
 export async function checkAsrtDependencies(): Promise<{
   errors: string[];
   warnings: string[];
 }> {
+  if (process.platform === "win32") {
+    const mod = await import("@anthropic-ai/sandbox-runtime");
+    return mod.checkWindowsDependenciesAsync({
+      srtWin: mod.resolveSrtWin({ path: getVendoredSrtWinExePath() }),
+    });
+  }
   const SandboxManager = await loadSandboxManager();
-  return SandboxManager.checkDependencies();
+  return SandboxManager.checkDependenciesAsync();
 }
 
 /**
@@ -1337,11 +1417,17 @@ export async function unregisterWorkerUnixSocketDir(socketDir: string): Promise<
 
 /**
  * Apply a Windows-only, worker-lifetime filesystem grant under a dedicated
- * holder PID. ASRT 0.0.66 cannot carry per-exec allowRead/allowWrite through
+ * holder PID. ASRT 0.0.67 cannot carry per-exec allowRead/allowWrite through
  * `wrapWithSandboxArgv()`, and `updateConfig()` explicitly does not apply
  * Windows filesystem changes live. The supported live primitive is therefore
  * srt-win's refcounted ACL grant/revoke path, keyed by a holder PID that the
  * caller owns for exactly one worker.
+ *
+ * ASRT 0.0.67: every srt-win-backed helper (status query, grant, revoke) takes
+ * an EXPLICIT `srtWin` spawn descriptor — there is no implicit vendored fallback.
+ * We resolve it ONCE here (from the SoT {@link getVendoredSrtWinExePath}) and
+ * thread it through the status probe, the grant, and BOTH revoke paths (the
+ * grant-failure rollback and the returned release() closure).
  */
 export async function grantWindowsWorkerFilesystemAccess(opts: {
   readonly holderPid: number;
@@ -1361,9 +1447,11 @@ export async function grantWindowsWorkerFilesystemAccess(opts: {
     grantWindowsAcl,
     revokeWindowsAcl,
     expandWindowsFsPaths,
+    resolveSrtWin,
   } = await import("@anthropic-ai/sandbox-runtime");
 
-  const user = getWindowsSandboxUserStatus();
+  const srtWin = resolveSrtWin({ path: getVendoredSrtWinExePath() });
+  const user = getWindowsSandboxUserStatus({ srtWin });
   const sandboxUserSid = user.sid;
   if (!user.provisioned || !user.credPresent || sandboxUserSid === undefined) {
     throw new Error(
@@ -1388,9 +1476,10 @@ export async function grantWindowsWorkerFilesystemAccess(opts: {
         holderPid: opts.holderPid,
         read: allowRead,
         write: allowWrite,
+        srtWin,
       });
     } catch (err) {
-      revokeWindowsAcl({ sandboxUserSid, holderPid: opts.holderPid });
+      revokeWindowsAcl({ sandboxUserSid, holderPid: opts.holderPid, srtWin });
       throw err;
     }
   }
@@ -1402,7 +1491,10 @@ export async function grantWindowsWorkerFilesystemAccess(opts: {
     release: () => {
       if (released) return;
       released = true;
-      revokeWindowsAcl({ sandboxUserSid, holderPid: opts.holderPid });
+      // Capture srtWin in the closure — the release may run long after the
+      // dynamic import scope has gone; it still needs the explicit spawn
+      // descriptor (0.0.67 has no implicit vendored fallback).
+      revokeWindowsAcl({ sandboxUserSid, holderPid: opts.holderPid, srtWin });
     },
   };
 }
