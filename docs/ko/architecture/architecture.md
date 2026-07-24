@@ -2953,7 +2953,7 @@ graph TB
         DOWNLOAD["Download"]
         VALIDATE["Validate<br/>(서명·권한·정책 확인)"]
         INSTALL["Install<br/>(파일 배치·의존성 해결)"]
-        ACTIVATE["Activate<br/>(스킬·도구·UI·Hook·키워드 등록)"]
+        ACTIVATE["Activate<br/>(스킬·도구·Hook·MCP 활성화)"]
 
         DISCOVER --> DIFF --> DOWNLOAD --> VALIDATE --> INSTALL --> ACTIVATE
     end
