@@ -400,6 +400,11 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
   ): ActivePluginGeneration<HostPluginGenerationState> | undefined => {
     const existing = active.get(pluginId);
     if (existing) return existing;
+    if (runtime.resolvePluginInstallIdIfKnown(pluginId) === undefined) {
+      (runtime as unknown as {
+        rememberPluginInstallAlias(id: string, alias: undefined): void;
+      }).rememberPluginInstallAlias(pluginId, undefined);
+    }
     const projection = runtime.getRuntimeGenerationProjection(pluginId);
     if (!projection) return undefined;
     const methods = new Map(

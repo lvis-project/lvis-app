@@ -9,7 +9,7 @@ import type { PluginManifest } from "../../types.js";
 
 class IncarnationTestRuntime extends PluginRuntime {
   buildPending(pluginId: string, manifest: PluginManifest, dataDir: string) {
-    return this.buildHostApiIncarnation(pluginId, manifest, dataDir);
+    return this.buildHostApiIncarnation(pluginId, manifest, dataDir, undefined, null);
   }
 
   invalidate(pluginId: string): void {
