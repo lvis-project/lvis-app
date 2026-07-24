@@ -473,6 +473,36 @@ export class SystemPromptBuilder {
       },
     });
 
+    // Project AGENTS.md (id=2.2) — the active project's committed, team-shared
+    // AGENTS.md, injected as a distinct layer immediately BELOW the global
+    // personal file (id=2) and above the rolling summary. Emitted only when a
+    // project root is bound. Provenance-labeled and framed as project-provided
+    // conventions that rank below the personal file, the user, and the
+    // safety/permission gates. The global file is never merged or mutated.
+    this.sources.push({
+      id: 2.2,
+      name: "Project AGENTS.md",
+      refresh: "on-change",
+      build: () => {
+        const root = this.projectContext?.projectRoot;
+        if (!root) return "";
+        const found = memoryManager.getProjectAgentsMd(root);
+        if (found.layers.length === 0) return "";
+        const projectName = this.projectContext?.projectName ?? "";
+        const body = found.layers.map((layer) => layer.content).join("\n\n");
+        const truncated = found.layers.some((layer) => layer.truncated);
+        return [
+          `<lvis-project-agents-context source="${escapeAttribute(projectName || "project")}" trust="project-provided">`,
+          t("be_systemPromptBuilder.projectAgentsContextIntro"),
+          t("be_systemPromptBuilder.projectAgentsContextProvenance"),
+          "",
+          body,
+          ...(truncated ? ["", t("be_systemPromptBuilder.projectAgentsContextTruncated")] : []),
+          "</lvis-project-agents-context>",
+        ].join("\n");
+      },
+    });
+
     // Employee Profile — SSO/LDAP 의존
     // Org Context — 서버 인프라 의존
 
