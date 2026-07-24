@@ -540,6 +540,16 @@ export async function parsePluginJson(
           `set tools[]. _meta.ui.visibility to include "app" or remove appVisible`,
         );
       }
+      if (
+        rule.successfulResultStatuses !== undefined &&
+        rule.kind !== "read"
+      ) {
+        fail(
+          `${policyPath}.operations.${operation}.successfulResultStatuses`,
+          "is valid only for a read operation",
+          `remove successfulResultStatuses or set kind to "read"`,
+        );
+      }
     }
     for (const [operation, rule] of Object.entries(policy.operations)) {
       if (!rule.requiresRead) continue;

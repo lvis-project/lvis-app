@@ -796,6 +796,12 @@
         "kind": { "enum": ["read", "write"] },
         "minimumRisk": { "enum": ["read", "write", "network", "shell"] },
         "appVisible": { "type": "boolean" },
+        "successfulResultStatuses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
         "requiresRead": {
           "type": "object",
           "additionalProperties": false,
