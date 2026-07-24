@@ -730,9 +730,17 @@ export class SystemPromptBuilder {
         name: "MCP Server Guidance",
         refresh: "per-turn",
         build: () => {
-          const servers = mcpServerGuidanceProvider().filter(
-            (server) => server.instructions.trim().length > 0,
-          );
+          // `instructions` originates from untrusted server wire data. Guard the
+          // type here too (defense-in-depth beside the boundary coercion in
+          // mcp-client) so a non-string can never reach `.trim()` and abort the
+          // whole prompt build. Bound the server count like the MCP App Context
+          // slot cap.
+          const servers = mcpServerGuidanceProvider()
+            .filter(
+              (server) =>
+                typeof server.instructions === "string" && server.instructions.trim().length > 0,
+            )
+            .slice(0, MAX_MCP_GUIDANCE_SERVERS);
           if (servers.length === 0) return "";
           const lines = [
             '<lvis-mcp-server-guidance trust="untrusted-metadata">',
@@ -740,11 +748,18 @@ export class SystemPromptBuilder {
             t("be_systemPromptBuilder.mcpServerGuidanceNoInstructions"),
           ];
           for (const server of servers) {
+            const trimmed = server.instructions.trim();
+            // Per-server char cap so one server cannot bloat every turn (mirrors
+            // the MCP App Context per-slot char cap).
+            const capped =
+              trimmed.length > MAX_MCP_GUIDANCE_CHARS
+                ? `${trimmed.slice(0, MAX_MCP_GUIDANCE_CHARS)}…`
+                : trimmed;
             lines.push("");
             lines.push(`server "${escapeAttribute(server.serverId)}":`);
             // Neutralize the body against its OWN closing tag so server text
             // cannot break out of the inert fence.
-            lines.push(neutralizeFenceClose(server.instructions.trim(), "lvis-mcp-server-guidance"));
+            lines.push(neutralizeFenceClose(capped, "lvis-mcp-server-guidance"));
           }
           lines.push("</lvis-mcp-server-guidance>");
           return lines.join("\n");
@@ -1033,5 +1048,9 @@ const MAX_SKILL_CATALOG_ENTRIES = 80;
 // scope while capping pathological catalogs; overflow is reachable via
 // skill_list. The 80-entry cap remains a cheap pre-filter.
 const SKILL_CATALOG_TOKEN_BUDGET = 6000;
+// MCP Server Guidance caps (mirror the MCP App Context slot bounds): a
+// compromised connected server cannot bloat every main-chat turn.
+const MAX_MCP_GUIDANCE_SERVERS = 16;
+const MAX_MCP_GUIDANCE_CHARS = 8192;
 const MAX_SKILL_NAME_CHARS = 96;
 const MAX_SKILL_DESCRIPTION_CHARS = 320;
