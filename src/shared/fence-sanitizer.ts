@@ -17,7 +17,11 @@
  */
 
 /** Every provenance fence the host builds around untrusted text. */
-export type FenceTag = "app-message" | "imported-from-proactive" | "mcp-app-context";
+export type FenceTag =
+  | "app-message"
+  | "imported-from-proactive"
+  | "mcp-app-context"
+  | "lvis-mcp-server-guidance";
 
 /**
  * Neutralize any closing tag for `tag` inside app/plugin-authored `text`, so the body

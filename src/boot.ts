@@ -559,6 +559,14 @@ export async function bootstrap(
       ctx.skillOverlay.buildSection(sessionId),
     getAppModelContext: (sessionId) =>
       mcpAppModelContext.buildSection(sessionId),
+    mcpServerGuidanceProvider: () =>
+      ctx.mcpManager
+        .listServers()
+        .flatMap((server) =>
+          server.status === "connected" && server.instructions
+            ? [{ serverId: server.id, instructions: server.instructions }]
+            : [],
+        ),
   });
   ctx.systemPromptBuilder = systemPromptBuilder;
 
