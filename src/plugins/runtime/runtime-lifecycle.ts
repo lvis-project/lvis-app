@@ -353,11 +353,6 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         plog("debug", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_OK, toolName }, "tool registered");
       }
 
-      if (manifest.keywords && manifest.keywords.length > 0) {
-        hostApi.registerKeywords(manifest.keywords);
-        plog("debug", { pluginId: manifest.id, phase: PluginPhase.REGISTER_KEYWORDS_OK, count: manifest.keywords.length }, "keywords registered");
-      }
-
       commit();
       this.plugins.set(manifest.id, {
         activationId,
@@ -379,8 +374,8 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       plog("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
       // NOTE: inactive-plugin model visibility is not a runtime load concern.
       // Boot sync still registers loaded tools for host/UI/auth execution;
-      // ConversationLoop scope and the hostApi.registerKeywords gate suppress
-      // model-visible tools/keywords for inactive plugins.
+      // ConversationLoop scope suppresses model-visible tools for inactive
+      // plugins.
     }
     this.loaded = true;
   }
@@ -826,9 +821,6 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
       });
       await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
       return "failed";
-    }
-    if (manifest.keywords && manifest.keywords.length > 0) {
-      hostApi.registerKeywords(manifest.keywords);
     }
     const candidate: PluginRuntimeGenerationProjection = Object.freeze({
       activationId,
@@ -1285,9 +1277,6 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
         throw new Error(`Duplicate plugin method registered: ${toolName}`);
       }
     }
-    if (manifest.keywords && manifest.keywords.length > 0) {
-      hostApi.registerKeywords(manifest.keywords);
-    }
     const candidate: PluginRuntimeGenerationProjection = Object.freeze({
       activationId,
       installId: this.requirePluginInstallClaim(manifest.id),
@@ -1504,9 +1493,6 @@ export class PluginRuntimeLifecycle extends PluginRuntimeState {
           "tool disabled — missing handler in prepared artifact",
         ),
       );
-      if (manifest.keywords && manifest.keywords.length > 0) {
-        hostApi.registerKeywords(manifest.keywords);
-      }
       if (instance.start) {
         await runStartWithTimeout(
           () => this.runPluginLifecycleHook(

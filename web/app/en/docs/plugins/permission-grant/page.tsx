@@ -23,7 +23,7 @@ export default function Page() {
       <h2 id="what">Items reviewed from the manifest</h2>
       <ul>
         <li><strong>capabilities</strong>: 12 items in a closed enum — <code>mail-source</code>, <code>calendar-source</code>, <code>meeting-recorder</code>, <code>knowledge-index</code>, <code>background-watcher</code>, <code>external-auth-consumer</code>, <code>document-indexer</code>, <code>routine-provider</code>, <code>lifecycle-observer</code>, <code>worker-client</code>, <code>ms-graph-consumer</code>, <code>host:overlay</code>.</li>
-        <li><strong>tools[]</strong>: the list of tool names. Each tool's <code>toolSchemas.&lt;name&gt;.category</code> — <code>read | write | shell | network | meta</code> — is grouped by category and shown to the user.</li>
+        <li><strong>tools[]</strong>: pure MCP <code>Tool</code> objects. The Host classifies risk from each input schema and execution path; signed operation policy may only raise the minimum risk or require read-before-write.</li>
         <li><strong>pluginAccess</strong>: which other plugin's tools/events this plugin will use (e.g. work-assistant calling ms-graph's <code>msgraph_calendar_today</code>).</li>
         <li><strong>agentApprovalScopes</strong>: standard labels for cross-plugin risky actions (e.g. <code>agent_file_share</code>, <code>agent_task_delegate</code>, <code>agent_external_api_call</code>).</li>
         <li><strong>hostSecrets / llmKeySource</strong>: secret access / LLM key vendor declarations.</li>
@@ -36,7 +36,7 @@ export default function Page() {
           { title: "Deeplink from Marketplace", body: <p>The "Install" button on the web page fires <code>lvis://install/&lt;slug&gt;</code> or <code>lvis://install/&lt;type&gt;/&lt;slug&gt;</code>. The host receives and handles the URL (<code>lvis-protocol.ts:72</code>).</p> },
           { title: "Package + signature verification", body: <p>The host verifies the Ed25519 signature envelope issued by the Marketplace. It passes once at least one signature matches a known public key (<code>marketplace/server/src/lvis_marketplace/signing.py:219</code>).</p>, badge: "sig" },
           { title: "Permission dialog — everything at once", body: <p>The parsed manifest is grouped by category — capabilities / tools / pluginAccess / secrets — and shown together. The grant is saved once the user confirms.</p> },
-          { title: "First activation", body: <p>Its own namespace <code>{"~/.lvis/plugins/<pluginId>/"}</code> is created (0o700). The plugin's <code>start()</code> callback is called — <code>hostApi.registerKeywords</code> is registered if present.</p>, badge: "start()" },
+          { title: "First activation", body: <p>Its own namespace <code>{"~/.lvis/plugins/<pluginId>/"}</code> is created (0o700). The validated Skills, Hooks, and MCP servers are activated atomically with the plugin runtime.</p>, badge: "start()" },
         ]}
       />
 

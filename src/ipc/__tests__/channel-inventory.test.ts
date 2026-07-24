@@ -97,7 +97,8 @@ vi.mock("electron", () => {
       defaultSession: { setPermissionRequestHandler: () => {} },
     },
     contextBridge: { exposeInMainWorld: () => {} },
-    ipcRenderer: { invoke: async () => {}, on: () => {}, send: () => {}, removeListener: () => {} },
+    ipcRenderer: { invoke: async () => {}, on: () => {}, send: () => {}, removeListener: () => {},
+    },
   };
   return { ...electron, default: electron };
 });
@@ -116,7 +117,7 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "pluginMarketplace",
   "settingsService",
   "memoryManager",
-  "keywordEngine",
+  "inputClassifier",
   "routeEngine",
   "toolRegistry",
   "systemPromptBuilder",

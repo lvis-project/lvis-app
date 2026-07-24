@@ -60,8 +60,8 @@ const layers = [
 
 const flowSteps = [
   { title: "사용자 입력", body: <>사용자 입력 → <code>ChatView</code>.</> },
-  { title: "Skill 매칭", body: <>호스트가 <code>registerKeywords</code> 로 등록된 키워드 후보 평가.</> },
-  { title: "도구 호출 결정", body: <>매칭된 Skill 의 toolName 으로 Tool Registry 조회.</> },
+  { title: "Scope 선택", body: <>호스트가 명시적 활성화와 유지된 세션 상태에서 enabled plugin scope를 선택.</> },
+  { title: "도구 호출 결정", body: <>모델이 eager Tool schema를 사용하거나 <code>tool_search</code>로 deferred Tool을 승격.</> },
   { title: "Reviewer 평가", body: <>도구 RiskLevel × Category × 사용자 grant 격자에서 자동/카드/다이얼로그 결정.</> },
   { title: "실행", body: <>승인 시 plugin handler 실행 (<code>callTool</code> 통한 cross-plugin 호출 가능).</> },
   { title: "응답 스트림", body: <>도구 결과 + thinking 토큰 → LLM 컨텍스트 → 채팅 본문 stream.</> },

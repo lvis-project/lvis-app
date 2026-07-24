@@ -32,8 +32,10 @@ const harness = vi.hoisted(() => ({
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
     listPluginIds: vi.fn(() => [] as string[]),
-    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
-    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
+    listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>,
+    ),
+    getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`,
+    ),
     getPluginManifest: vi.fn(() => null),
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     isPluginEnabled: vi.fn(() => true),
@@ -57,7 +59,10 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("../../plugins/runtime.js", () => ({
-  PluginRuntime: vi.fn().mockImplementation(function (this: unknown, options: Record<string, unknown>) {
+  PluginRuntime: vi.fn().mockImplementation(function (
+    this: unknown,
+    options: Record<string, unknown>,
+  ) {
     harness.capturedRuntimeOptions = options;
     return harness.runtime;
   }),
@@ -86,7 +91,10 @@ vi.mock("../../plugins/registry.js", () => ({
 import { initPluginRuntime } from "../../boot/steps/plugin-runtime.js";
 import { KNOWN_CAPABILITIES } from "../../plugins/capabilities.js";
 import { HOSTAPI_EFFECT_BY_PATH } from "../effect-kind.js";
-import { instrumentEffectsByPath, isPlainNamespace } from "../hostapi-effect-recorder.js";
+import {
+  instrumentEffectsByPath,
+  isPlainNamespace,
+} from "../hostapi-effect-recorder.js";
 import {
   createEffectLedger,
   runWithEffectLedger,
@@ -96,7 +104,11 @@ import type { PluginHostApi } from "../../plugins/types.js";
 
 type CreateHostApi = (
   pluginId: string,
-  manifest: { id: string; config?: Record<string, unknown>; capabilities?: string[] },
+  manifest: {
+    id: string;
+    config?: Record<string, unknown>;
+    capabilities?: string[];
+  },
   pluginDataDir: string,
   incarnation: {
     registerDisposer: (dispose: () => void) => void;
@@ -124,7 +136,6 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
       setPluginConfig: vi.fn(),
     } as never,
     memoryManager: {} as never,
-    keywordEngine: { registerKeywords: vi.fn(), unregisterByPlugin: vi.fn() } as never,
     toolRegistry: {
       unregisterByPlugin: vi.fn(),
       register: vi.fn(),
@@ -145,9 +156,16 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
     routinesStore: { list: () => [] } as never,
   });
 
-  const createHostApi = harness.capturedRuntimeOptions?.createHostApi as CreateHostApi | undefined;
-  expect(createHostApi, "initPluginRuntime must register a createHostApi factory").toBeDefined();
-  const pluginDataDir = mkdtempSync(join(tmpdir(), "lvis-hostapi-completeness-"));
+  const createHostApi = harness.capturedRuntimeOptions?.createHostApi as
+    | CreateHostApi
+    | undefined;
+  expect(
+    createHostApi,
+    "initPluginRuntime must register a createHostApi factory",
+  ).toBeDefined();
+  const pluginDataDir = mkdtempSync(
+    join(tmpdir(), "lvis-hostapi-completeness-"),
+  );
   // Build with the FULL capability vocabulary, not a sampled subset. A
   // namespace/method wired ONLY under a capability ABSENT from the fixture would
   // escape BOTH the non-plain-namespace assertion AND the SOT-coverage assertion
@@ -155,7 +173,11 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
   // every conditionally-wired method — declare the maximal capability set.
   return createHostApi!(
     "completeness-plugin",
-    { id: "completeness-plugin", config: {}, capabilities: [...KNOWN_CAPABILITIES] },
+    {
+      id: "completeness-plugin",
+      config: {},
+      capabilities: [...KNOWN_CAPABILITIES],
+    },
     pluginDataDir,
     {
       registerDisposer: vi.fn(),
@@ -189,7 +211,11 @@ function collectFunctionPaths(
     const path = prefix ? `${prefix}.${key}` : key;
     if (typeof value === "function") {
       out.push(path);
-    } else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    } else if (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
       if (!isPlainNamespace(value)) nonPlainNamespaces.push(path);
       collectFunctionPaths(value, path, out, nonPlainNamespaces);
     }
@@ -215,7 +241,6 @@ describe("hostApi effect classification — STRUCTURAL completeness", () => {
     expect(paths).toContain("agentApproval.request");
     expect(paths).toContain("callLlm");
     expect(paths).toContain("openAuthPartitionViewer");
-    expect(paths).toContain("registerKeywords");
 
     // The wrapper only INSTRUMENTS plain namespaces; a non-plain namespace would
     // pass the path check below yet be left uninstrumented by the wrapper. Assert
@@ -238,7 +263,10 @@ describe("hostApi effect classification — STRUCTURAL completeness", () => {
       // CustomProtoNamespace.prototype (NOT Object.prototype) → non-plain.
       doMutation = (): string => "mutated";
     }
-    const fauxHostApi = { registerKeywords: () => {}, ns: new CustomProtoNamespace() };
+    const fauxHostApi = {
+      getInstalledPluginIds: () => [],
+      ns: new CustomProtoNamespace(),
+    };
     const paths: string[] = [];
     const nonPlainNamespaces: string[] = [];
     collectFunctionPaths(fauxHostApi, "", paths, nonPlainNamespaces);
@@ -260,15 +288,20 @@ describe("hostApi effect classification — STRUCTURAL completeness", () => {
       // A pure read method records read; a write method records write — both via
       // the structural wrapper, no manual recordChokepoint at the call-site.
       hostApi.getInstalledPluginIds();
-      hostApi.registerKeywords([{ keyword: "k", skillId: "s" }]);
+      await hostApi.openExternalUrl("https://example.com");
     });
     const summary = ledger.summary();
-    expect(summary.effects.map((e) => e.kind)).toEqual(["getInstalledPluginIds", "registerKeywords"]);
-    expect(summary.hasMutatingEffect).toBe(true); // registerKeywords is a write
+    expect(summary.effects.map((e) => e.kind)).toEqual([
+      "getInstalledPluginIds",
+      "openExternalUrl",
+    ]);
+    expect(summary.hasMutatingEffect).toBe(true); // openExternalUrl is a write
   });
 
   it("an UNMAPPED method records fail-closed as a mutating unclassifiedHostApiMethod", async () => {
-    const wrapped = instrumentEffectsByPath({ futureUnmappedMethod: () => "ok" });
+    const wrapped = instrumentEffectsByPath({
+      futureUnmappedMethod: () => "ok",
+    });
     const ledger: EffectLedger = createEffectLedger("cid-unmapped");
     let ret: unknown;
     await runWithEffectLedger(ledger, async () => {
@@ -278,7 +311,11 @@ describe("hostApi effect classification — STRUCTURAL completeness", () => {
     expect(ret).toBe("ok"); // behavior preserved
     expect(summary.hasMutatingEffect).toBe(true);
     expect(summary.effects).toEqual([
-      { kind: "unclassifiedHostApiMethod", effect: "write", target: "futureUnmappedMethod" },
+      {
+        kind: "unclassifiedHostApiMethod",
+        effect: "write",
+        target: "futureUnmappedMethod",
+      },
     ]);
   });
 

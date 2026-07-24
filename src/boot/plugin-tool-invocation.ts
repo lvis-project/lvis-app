@@ -44,9 +44,9 @@ export function isAppOnlyRuntimeInvocation(
   const manifest = findOwnerManifest(pluginRuntime, context.ownerPluginId);
   if (!manifest) return false;
   // #885 v6 — single-source predicate: ONE array read on ONE object. `isUiOnly`
-  // (SoT §2.3) = `app ∈ vis ∧ model ∉ vis`, the bit-identical restatement of the
-  // old `declaredUiInvokableMethods(m).includes(name) ∧ tools[].includes(name) !==
-  // true` conjunction. A model-visible tool (model-only or dual) is isUiOnly=false
+  // (SoT §2.3) = `app ∈ vis ∧ model ∉ vis`. The old app-action map overlap
+  // check no longer applies; pure Tool visibility is authoritative. A
+  // model-visible tool (model-only or dual) is isUiOnly=false
   // → governed (the load-bearing #1554 rule; "model wins" for dual).
   const tool = manifest.tools.find((t) => t.name === toolName);
   // Operation-governed app-only tools must stay on ToolExecutor. The policy is

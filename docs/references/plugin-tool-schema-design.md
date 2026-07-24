@@ -56,22 +56,15 @@ selectors address nested object fields.
 Path fields should be explicit. Avoid accepting arbitrary nested payloads that
 may contain paths without declaring them.
 
-## Deprecated Keyword Preload
+## Skill and Tool discovery
 
-Each `PluginManifest.keywords[]` entry binds a case-insensitive `keyword` to an
-exact Tool name in `skillId`. The target must exist in `tools[]` and include
-model visibility.
+Natural-language keywords are not a plugin activation or Tool-selection
+contract. Plugin Skills are instruction bundles declared by `manifest.skills`;
+callable methods are the pure Tool objects in `manifest.tools`.
 
-A matching keyword adds that exact Tool schema to the model-visible turn scope.
-It does not invoke the Tool, alias its name, expose an app-only Tool, or discover
-a bundled Skill. Bundled instruction discovery belongs to `manifest.skills`.
-Runtime registrations through the deprecated
-`PluginHostApi.registerKeywords` use the same current-scope membership check
-before preloading.
-
-Owner: `lvis-app` plugin runtime. Remove `keywords` and `registerKeywords` after
-every supported plugin has migrated to bundled `manifest.skills` and no active
-manifest declares `keywords`.
+The Host owns active plugin scope. When the eligible surface crosses the
+deferral ceiling, the model discovers callable Tools through `tool_search`.
+There is no keyword compatibility reader or runtime registration alias.
 
 ## Input Schema Rules
 

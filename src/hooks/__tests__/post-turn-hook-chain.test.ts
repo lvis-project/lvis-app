@@ -97,10 +97,15 @@ describe("PostTurnHookChain", () => {
 
     expect(result.compactedMessages).not.toBeNull();
     // full-compact 요약 marker 는 없음 (mark-stale 만 실행됨)
-    const marker = result.compactedMessages?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
+    const marker = result.compactedMessages?.find(
+      (m) => m.role === "user" && m.meta?.compactBoundary === true,
+    );
     expect(marker).toBeUndefined();
     // 마킹된 (compactedAt set) tool_result 가 *memory 에서는 verbatim*
-    const marked = result.compactedMessages?.filter((m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined) ?? [];
+    const marked =
+      result.compactedMessages?.filter(
+        (m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined,
+      ) ?? [];
     expect(marked.length).toBeGreaterThan(0);
     for (const m of marked) {
       if (m.role === "tool_result") {
@@ -114,7 +119,9 @@ describe("PostTurnHookChain", () => {
     expect(saveSession).toHaveBeenCalledTimes(1);
     const persisted = saveSession.mock.calls[0]?.[1] as GenericMessage[];
     expect(persisted).toBeDefined();
-    const persistedMarked = persisted.filter((m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined);
+    const persistedMarked = persisted.filter(
+      (m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined,
+    );
     expect(persistedMarked.length).toBeGreaterThan(0);
     for (const m of persistedMarked) {
       if (m.role === "tool_result") {
@@ -140,7 +147,8 @@ describe("PostTurnHookChain", () => {
     } as unknown as SettingsService;
     const chain = new PostTurnHookChain({ memoryManager, settingsService });
 
-    const rawOutput = "정리 완료입니다.<title>회의 결과 요약 정리본</title>[checkpoint]";
+    const rawOutput =
+      "정리 완료입니다.<title>회의 결과 요약 정리본</title>[checkpoint]";
     const result = await chain.run({
       sessionId: "session-detect",
       messages: [
@@ -215,7 +223,11 @@ describe("PostTurnHookChain", () => {
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;
-    const chain = new PostTurnHookChain({ memoryManager, settingsService, onCheckpointSuggested });
+    const chain = new PostTurnHookChain({
+      memoryManager,
+      settingsService,
+      onCheckpointSuggested,
+    });
 
     const result = await chain.run({
       sessionId: "session-checkpoint-cb",
@@ -227,7 +239,10 @@ describe("PostTurnHookChain", () => {
     });
 
     expect(onCheckpointSuggested).toHaveBeenCalledOnce();
-    expect(onCheckpointSuggested).toHaveBeenCalledWith("session-checkpoint-cb", result.detector.cleanedText);
+    expect(onCheckpointSuggested).toHaveBeenCalledWith(
+      "session-checkpoint-cb",
+      result.detector.cleanedText,
+    );
   });
 
   it("detect-checkpoint: checkpointSuggested is false and cleanedText unchanged when no markers", async () => {
@@ -318,7 +333,8 @@ describe("PostTurnHookChain", () => {
       sessionId: "session-memory-cleaned",
       messages: createMessages(),
       input: "이거 기억해줘",
-      output: "네, 기억하겠습니다.<title>기억 저장 테스트 제목</title>[checkpoint]",
+      output:
+        "네, 기억하겠습니다.<title>기억 저장 테스트 제목</title>[checkpoint]",
       toolCalls: [],
       route: "chat",
     });
@@ -330,8 +346,13 @@ describe("PostTurnHookChain", () => {
   });
 
   describe("audit route emission", () => {
-    function makeChain(opts: { autoCompact: boolean; logTurn: ReturnType<typeof vi.fn> }) {
-      const auditLogger = { logTurn: opts.logTurn } as unknown as import("../../audit/audit-logger.js").AuditLogger;
+    function makeChain(opts: {
+      autoCompact: boolean;
+      logTurn: ReturnType<typeof vi.fn>;
+    }) {
+      const auditLogger = {
+        logTurn: opts.logTurn,
+      } as unknown as import("../../audit/audit-logger.js").AuditLogger;
       const settingsService = {
         get: vi.fn((key: string) => {
           if (key === "llm") return fakeLlmSettings();
@@ -376,11 +397,11 @@ describe("PostTurnHookChain", () => {
         input: "/help",
         output: "...",
         toolCalls: [],
-        route: "skill",
+        route: "command",
       });
 
       const call = logTurn.mock.calls[0]![0] as { route: string };
-      expect(call.route).toBe("skill");
+      expect(call.route).toBe("command");
     });
 
     it("emits serving provider/model for token-bearing skill routes", async () => {
@@ -393,7 +414,7 @@ describe("PostTurnHookChain", () => {
         input: "메일 읽어줘",
         output: "확인했습니다",
         toolCalls: [],
-        route: "skill",
+        route: "legacy",
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
         vendorProvider: "openai",
         vendorModel: "gpt-5.4-mini",
@@ -414,12 +435,22 @@ describe("PostTurnHookChain", () => {
         output: "완료",
         toolCalls: [],
         route: "llm",
-        tokenUsage: { inputTokens: 1_700_000, outputTokens: 100_000, cacheReadTokens: 500_000, cacheWriteTokens: 200_000 },
+        tokenUsage: {
+          inputTokens: 1_700_000,
+          outputTokens: 100_000,
+          cacheReadTokens: 500_000,
+          cacheWriteTokens: 200_000,
+        },
         usageByModel: [
           {
             vendorProvider: "claude",
             vendorModel: "claude-sonnet-4-6",
-            tokenUsage: { inputTokens: 1_700_000, outputTokens: 100_000, cacheReadTokens: 500_000, cacheWriteTokens: 200_000 },
+            tokenUsage: {
+              inputTokens: 1_700_000,
+              outputTokens: 100_000,
+              cacheReadTokens: 500_000,
+              cacheWriteTokens: 200_000,
+            },
           },
           {
             vendorProvider: "openai",
@@ -435,7 +466,12 @@ describe("PostTurnHookChain", () => {
         usageByModel: Array<{
           vendorProvider: string;
           vendorModel: string;
-          tokenUsage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+          tokenUsage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheReadTokens?: number;
+            cacheWriteTokens?: number;
+          };
         }>;
       };
       expect(call.usageByModel).toEqual([
@@ -522,7 +558,9 @@ describe("PostTurnHookChain", () => {
 
     it("logs cleaned output when stream markers are present", async () => {
       const logTurn = vi.fn();
-      const auditLogger = { logTurn } as unknown as import("../../audit/audit-logger.js").AuditLogger;
+      const auditLogger = {
+        logTurn,
+      } as unknown as import("../../audit/audit-logger.js").AuditLogger;
       const settingsService = {
         get: vi.fn((key: string) => {
           if (key === "llm") return fakeLlmSettings();
@@ -597,5 +635,4 @@ describe("PostTurnHookChain", () => {
       expect(markForClearIfCompleted).toHaveBeenCalledOnce();
     });
   });
-
 });

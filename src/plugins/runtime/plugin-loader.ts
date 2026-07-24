@@ -24,10 +24,10 @@ import { buildImportUrl } from "./sandbox.js";
 /**
  * #885 v6 — the app-visible method names a manifest declares: the normalized
  * `Tool[]` whose `_meta.ui.visibility` includes "app". This is the app-visible
- * tool allowlist that feeds the renderer IPC bridge (`assertUiActionInvokable`) —
+ * tool allowlist that feeds the renderer IPC bridge (`assertAppVisibleToolInvokable`) —
  * the {app-only ∪ dual} set.
  */
-export function declaredUiInvokableMethods(
+export function declaredAppVisibleToolMethods(
   manifest: Pick<PluginManifest, "tools">,
 ): string[] {
   return (manifest.tools ?? []).filter(isAppVisible).map((t) => t.name);
@@ -39,7 +39,8 @@ export function declaredUiInvokableMethods(
  * duplicate names at load. This is the full declared-tool set (the model-visible
  * ∪ app-visible tool union).
  */
-export function declaredRuntimeMethods(manifest: Pick<PluginManifest, "tools">): string[] {
+export function declaredRuntimeMethods(manifest: Pick<PluginManifest, "tools">,
+): string[] {
   return [...new Set((manifest.tools ?? []).map((t) => t.name))];
 }
 

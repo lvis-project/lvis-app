@@ -13,7 +13,7 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="채팅 안 플러그인 패널"
-        description="활성 플러그인이 사이드바에 노출됩니다. 각 플러그인은 manifest 의 ui[] 슬롯과 keywords (Skill 트리거) 로 자신의 진입점을 제공합니다. 호스트 코어는 plugin specific 코드를 직접 import 하지 않습니다."
+        description="활성 플러그인이 사이드바에 노출됩니다. 각 플러그인은 하나의 검증된 manifest 로 UI 슬롯, 지침 Skill, 호출 가능한 Tool을 제공합니다. 호스트 코어는 plugin specific 코드를 직접 import 하지 않습니다."
       />
 
       <ScreenshotGallery columns={1}>
@@ -23,7 +23,7 @@ export default function Page() {
       <FeatureGrid
         columns={3}
         items={[
-          { title: "Skill 키워드", body: <>채팅 입력에 등록 키워드가 들어가면 Skill 카드가 자동 추천. 유일한 runtime register API: <code>hostApi.registerKeywords</code>.</>, tone: "teal" },
+          { title: "번들 Skill", body: <>manifest <code>skills[]</code> 항목이 검증된 <code>SKILL.md</code> 지침 번들을 설치합니다. 자연어 입력만으로 Tool을 암묵 호출하거나 preload하지 않습니다.</>, tone: "teal" },
           { title: "ui[] 슬롯", body: <>plugin.json 의 <code>ui[]</code> 가 <code>slot</code>(sidebar/chat/popover/embedded)·<code>kind</code>(embedded-module/url)·<code>entry</code>·<code>exportName</code>·<code>window</code> 를 선언.</> },
           { title: "Tools list", body: <>도구는 manifest <code>tools[]</code> 에 정적 선언. 핸들러는 <code>RuntimePlugin.handlers</code> map. 도구 이름 정규식 <code>^[a-zA-Z_][a-zA-Z0-9_]*$</code>.</>, tone: "citron" },
         ]}

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AuditLogger } from "../../../audit/audit-logger.js";
 import { MemorySecretStore } from "../../../audit/hmac-chain.js";
 import type { RationaleAuditSink } from "../../../audit/rationale-audit-adapter.js";
-import { KeywordEngine } from "../../../core/keyword-engine.js";
+import { InputClassifier } from "../../../core/input-classifier.js";
 import { RouteEngine } from "../../../core/route-engine.js";
 import {
   ApprovalGate,
@@ -16,15 +16,13 @@ import {
 import { PermissionManager } from "../../../permissions/permission-manager.js";
 import { DeferredQueue } from "../../../permissions/reviewer/deferred-queue.js";
 import {
-  LlmRationaleScopeReviewer,
-} from "../../../permissions/reviewer/rationale-scope-reviewer.js";
+  LlmRationaleScopeReviewer } from "../../../permissions/reviewer/rationale-scope-reviewer.js";
 import { VerdictCache } from "../../../permissions/reviewer/verdict-cache.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { createDynamicTool } from "../../../tools/base.js";
 import { DurableHostInvocationStartCasStore } from "../../../tools/pipeline/rationale-invocation-journal.js";
 import {
-  RATIONALE_RESPONSE_TOOL,
-} from "../../../tools/pipeline/rationale-control.js";
+  RATIONALE_RESPONSE_TOOL } from "../../../tools/pipeline/rationale-control.js";
 import { RationaleHostService } from "../../../tools/pipeline/rationale-host-service.js";
 import type { InvocationAuditRecord } from "../../../tools/pipeline/rationale-ticket-lifecycle.js";
 import { ToolRegistry } from "../../../tools/registry.js";
@@ -182,7 +180,8 @@ describe("foreground rationale real-stack integration", () => {
         output: await write(input),
         isError: false,
       }),
-    }));
+    }),
+    );
 
     const modalRequests: ApprovalRequest[] = [];
     const rationaleLifecycleOrder: string[] = [];
@@ -251,14 +250,16 @@ describe("foreground rationale real-stack integration", () => {
             level: "medium",
             reason: "The exact sealed write remains bounded.",
             scopeAlignment: "unclear",
-            scopeReasons: ["The sealed target scope could not be fully confirmed."],
+            scopeReasons: ["The sealed target scope could not be fully confirmed.",
+              ],
           }),
           tokensIn: 3,
           tokensOut: 2,
           costUsd: 0,
         };
       },
-    }, "scope-review-model");
+    }, "scope-review-model",
+    );
     const invocationStartCas = new DurableHostInvocationStartCasStore({
       filePath: join(directory, "invocation-journal.json"),
       auditSecret: "rationale-real-stack-journal-secret-v1",
@@ -279,7 +280,7 @@ describe("foreground rationale real-stack integration", () => {
       isSessionCurrent: (sessionId) => loop.sessionId === sessionId,
     });
     const provider = new ScriptedProvider();
-    loop = new ConversationLoop(({
+    loop = new ConversationLoop({
       settingsService: {
         get: () => fakeLlmSettings(),
         getSecret: () => "test-key",
@@ -288,8 +289,8 @@ describe("foreground rationale real-stack integration", () => {
         build: () => "system",
         setToolScope: vi.fn(),
       },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry: registry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry: registry,
       permissionManager: createPermissionManager(directory),
       approvalGate,
@@ -298,7 +299,7 @@ describe("foreground rationale real-stack integration", () => {
       disableSessionPersistence: true,
       rationaleCoordinatorFactory: coordinatorFactory,
       enableDormantRationaleForTesting: true,
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
 
     try {
@@ -374,7 +375,8 @@ describe("foreground rationale real-stack integration", () => {
       });
       expect(Object.keys(
         (modalRequests[0]?.args ?? {}) as Record<string, unknown>,
-      ).sort()).toEqual([
+      ).sort(),
+      ).toEqual([
         "affectedResources",
         "canonicalTargets",
         "contractVersion",
@@ -397,16 +399,16 @@ describe("foreground rationale real-stack integration", () => {
         "started",
         "completed",
       ]);
-      expect(projectionRecords.map((projection) => projection.terminalReason)).toEqual([
+      expect(projectionRecords.map((projection) => projection.terminalReason),
+      ).toEqual([
         null,
-        "allowed-once",
-      ]);
-      expect(rationaleLifecycleOrder.indexOf("projection:user-pending")).toBeLessThan(
-        rationaleLifecycleOrder.indexOf("modal"),
-      );
-      expect(rationaleLifecycleOrder.indexOf("projection:allowed-once")).toBeLessThan(
-        rationaleLifecycleOrder.indexOf("invocation:authorized"),
-      );
+        "allowed-once"]);
+      expect(rationaleLifecycleOrder.indexOf("projection:user-pending"),
+      ).toBeLessThan(
+        rationaleLifecycleOrder.indexOf("modal"));
+      expect(rationaleLifecycleOrder.indexOf("projection:allowed-once"),
+      ).toBeLessThan(
+        rationaleLifecycleOrder.indexOf("invocation:authorized"));
 
       const protectedSurfaces = JSON.stringify({
         providerRequests: provider.requests,
@@ -426,7 +428,8 @@ describe("foreground rationale real-stack integration", () => {
   });
 
   it("auto-approves an aligned non-high reviewer terminal with no modal and a sealed resume", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "lvis-rationale-auto-approve-"));
+    const directory = mkdtempSync(join(tmpdir(), "lvis-rationale-auto-approve-"),
+    );
     const registry = new ToolRegistry();
     const write = vi.fn(async () => "write-complete");
     registry.register(createDynamicTool({
@@ -445,7 +448,8 @@ describe("foreground rationale real-stack integration", () => {
         output: await write(input),
         isError: false,
       }),
-    }));
+    }),
+    );
 
     const modalRequests: ApprovalRequest[] = [];
     const rationaleLifecycleOrder: string[] = [];
@@ -507,7 +511,8 @@ describe("foreground rationale real-stack integration", () => {
         tokensOut: 2,
         costUsd: 0,
       }),
-    }, "scope-review-model");
+    }, "scope-review-model",
+    );
     const invocationStartCas = new DurableHostInvocationStartCasStore({
       filePath: join(directory, "invocation-journal.json"),
       auditSecret: "rationale-auto-approve-journal-secret-v1",
@@ -528,7 +533,7 @@ describe("foreground rationale real-stack integration", () => {
       isSessionCurrent: (sessionId) => loop.sessionId === sessionId,
     });
     const provider = new ScriptedProvider();
-    loop = new ConversationLoop(({
+    loop = new ConversationLoop({
       settingsService: {
         get: () => fakeLlmSettings(),
         getSecret: () => "test-key",
@@ -537,8 +542,8 @@ describe("foreground rationale real-stack integration", () => {
         build: () => "system",
         setToolScope: vi.fn(),
       },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry: registry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry: registry,
       permissionManager: createPermissionManager(directory),
       approvalGate,
@@ -547,7 +552,7 @@ describe("foreground rationale real-stack integration", () => {
       disableSessionPersistence: true,
       rationaleCoordinatorFactory: coordinatorFactory,
       enableDormantRationaleForTesting: true,
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
 
     try {
@@ -589,7 +594,8 @@ describe("foreground rationale real-stack integration", () => {
         modalFallbackRequired: false,
         autoApproved: true,
       });
-      const protectedSurfaces = JSON.stringify({ projectionRecords, invocationRecords });
+      const protectedSurfaces = JSON.stringify({ projectionRecords, invocationRecords,
+      });
       expect(protectedSurfaces).not.toContain(RAW_ANCHOR_SECRET);
     } finally {
       hostService.shutdown();
@@ -618,7 +624,8 @@ describe("foreground rationale real-stack integration", () => {
         output: await write(input),
         isError: false,
       }),
-    }));
+    }),
+    );
 
     const modalRequests: ApprovalRequest[] = [];
     let approvalGate!: ApprovalGate;
@@ -651,8 +658,9 @@ describe("foreground rationale real-stack integration", () => {
       materializeRationaleControl,
     }));
     const provider = new AttachmentDirectModalProvider();
-    const executorAuditLogger = new AuditLogger(join(directory, "executor-audit"));
-    const loop = new ConversationLoop(({
+    const executorAuditLogger = new AuditLogger(join(directory, "executor-audit"),
+    );
+    const loop = new ConversationLoop({
       settingsService: {
         get: () => fakeLlmSettings(),
         getSecret: () => "test-key",
@@ -661,8 +669,8 @@ describe("foreground rationale real-stack integration", () => {
         build: () => "system",
         setToolScope: vi.fn(),
       },
-      keywordEngine: new KeywordEngine(),
-      routeEngine: new RouteEngine({ toolRegistry: registry }),
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
       toolRegistry: registry,
       permissionManager: createPermissionManager(directory),
       approvalGate,
@@ -671,7 +679,7 @@ describe("foreground rationale real-stack integration", () => {
       disableSessionPersistence: true,
       rationaleCoordinatorFactory,
       enableDormantRationaleForTesting: true,
-    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
     (loop as { provider: LLMProvider | null }).provider = provider;
 
     try {
@@ -686,18 +694,21 @@ describe("foreground rationale real-stack integration", () => {
             type: "image",
             image: "data:image/png;base64,aW1hZ2U=",
             mimeType: "image/png",
-          }],
+          },
+          ],
         },
       );
 
       expect(write).toHaveBeenCalledTimes(1);
-      expect(result.toolCalls.map((call) => call.result)).toEqual(["write-complete"]);
+      expect(result.toolCalls.map((call) => call.result)).toEqual(["write-complete",
+      ]);
       expect(rationaleCoordinatorFactory).toHaveBeenCalledTimes(1);
       expect(materializeRationaleControl).not.toHaveBeenCalled();
       expect(provider.requests).toHaveLength(2);
       expect(provider.requests.flatMap((request) =>
         request.tools?.map((tool) => tool.name) ?? [],
-      )).not.toContain(RATIONALE_RESPONSE_TOOL);
+      ),
+      ).not.toContain(RATIONALE_RESPONSE_TOOL);
       expect(modalRequests).toHaveLength(1);
       expect(modalRequests[0]?.kind ?? "tool").toBe("tool");
       expect(modalRequests[0]?.allowedChoices).toBeUndefined();

@@ -27,9 +27,9 @@ export default function Page() {
       />
 
       <Callout tone="info" title="플러그인 등록 모델 — 정적 manifest">
-        도구·Skill·이벤트·UI 슬롯은 모두 <code>plugin.json</code> manifest 에 정적 선언합니다.
+        도구·Skill·Hook·MCP 서버·이벤트·UI 슬롯은 모두 <code>plugin.json</code> manifest 에 정적 선언합니다.
         런타임 <code>registerTool</code>/<code>registerSkill</code>/<code>registerCommand</code> 같은 API는 SDK 에 존재하지 않습니다.
-        유일한 runtime register API는 <code>hostApi.registerKeywords</code> — Skill 트리거 키워드 추가용.
+        Skill은 지침을 제공하고, 호출 가능한 표면은 순수 manifest <code>Tool</code> 객체뿐입니다.
       </Callout>
 
       <div className="my-8 grid gap-3 sm:grid-cols-2">
@@ -59,7 +59,7 @@ export default function Page() {
         <li>웹 페이지가 <code>lvis://install/&lt;slug&gt;</code> deeplink 발사.</li>
         <li>호스트 (<code>src/main/lvis-protocol.ts</code>) 가 URL을 파싱해 manifest 검증 + Ed25519 서명 확인.</li>
         <li>플러그인 권한 다이얼로그 → 사용자 확인 → 자기 namespace <code>{"~/.lvis/plugins/<pluginId>/"}</code> 생성.</li>
-        <li>플러그인 <code>start()</code> 호출, <code>hostApi.registerKeywords</code> 가 있다면 등록.</li>
+        <li>검증된 선언형 번들을 하나의 단위로 활성화하고 플러그인 <code>start()</code> 콜백을 호출.</li>
       </ol>
 
       <Callout tone="info" title="과거 → 현재 통합 이력">
