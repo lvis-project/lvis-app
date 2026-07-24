@@ -43,6 +43,12 @@ describe("main process plugin lifecycle regression guards", () => {
     expect(lifecycleHelperIndex).toBeGreaterThanOrEqual(0);
     expect(lifecycleSection).toContain("pluginRuntime: activeServices.pluginRuntime");
     expect(lifecycleSection).toContain("pluginMarketplace: activeServices.pluginMarketplace");
+    expect(lifecycleSection).toContain(
+      "const cleanupServices = requirePluginCleanupServices(activeServices)",
+    );
+    expect(lifecycleSection).toContain(
+      "ensurePluginStateReadyForInstall(candidatePluginId",
+    );
     expect(lifecycleSection).not.toContain("activeServices.pluginRuntime.addPlugin(pluginId)");
     expect(lifecycleSection).not.toContain("activeServices.pluginMarketplace.uninstall(pluginId)");
     expect(progressBridgeIndex).toBeGreaterThanOrEqual(0);

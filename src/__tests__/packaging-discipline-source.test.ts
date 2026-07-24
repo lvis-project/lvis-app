@@ -95,6 +95,82 @@ describe("installer smoke and packaging discipline", () => {
     expect(webCi).not.toContain("CLOUDFLARE_API_TOKEN");
   });
 
+  it("keeps private E2E acquisition separate from candidate execution", () => {
+    const workflow = readRepoFile(".github/workflows/e2e.yml");
+    const stage = workflow.slice(
+      workflow.indexOf("  stage-inputs:"),
+      workflow.indexOf("  e2e:"),
+    );
+    const execute = workflow.slice(workflow.indexOf("  e2e:"));
+
+    expect(stage).toContain("secrets.LVIS_REPO_READ_TOKEN");
+    expect(stage).toContain("git -C \"$repo\" archive");
+    expect(stage).toContain("manifest.tsv");
+    expect(stage).toContain("artifact-digest");
+    for (const forbidden of [
+      "bun install",
+      "bun run build",
+      "playwright test",
+      "node scripts/",
+      "npm ",
+    ]) {
+      expect(stage).not.toContain(forbidden);
+    }
+
+    expect(execute).toContain("Download staged E2E inputs");
+    expect(execute).toContain("EXPECTED_MANIFEST_SHA256");
+    expect(execute).toContain("sha256sum \"$archive\"");
+    expect(execute).toContain("tar -xzf \"$archive\" -C sources");
+    expect(execute).toContain("bun install --frozen-lockfile");
+    expect(execute).toContain("bunx playwright test");
+    expect(execute).not.toContain("secrets.");
+    expect(execute).not.toContain("LVIS_REPO_READ_TOKEN");
+  });
+
+  it("deploys only a digest-bound web export on the protected runner", () => {
+    const workflow = readRepoFile(".github/workflows/web-deploy.yml");
+    const build = workflow.slice(
+      workflow.indexOf("  build:"),
+      workflow.indexOf("  deploy:"),
+    );
+    const deploy = workflow.slice(workflow.indexOf("  deploy:"));
+
+    expect(build).toContain("bun install --frozen-lockfile");
+    expect(build).toContain("bun run build");
+    expect(build).toContain("bundle.sha256");
+    expect(build).toContain("artifact-digest");
+    expect(build).not.toContain("environment: web-production");
+    expect(build).not.toContain("CLOUDFLARE_API_TOKEN");
+
+    expect(deploy).toContain("environment: web-production");
+    expect(deploy).toContain("EXPECTED_BUNDLE_SHA256");
+    expect(deploy).toContain("sha256sum -c bundle.sha256");
+    expect(deploy).toContain(
+      "cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3",
+    );
+    expect(deploy).toContain('wranglerVersion: "4.114.0"');
+    expect(deploy).not.toContain("actions/checkout");
+    expect(deploy).not.toContain("setup-bun");
+    expect(deploy).not.toContain("bun install");
+    expect(deploy).not.toContain("bun run build");
+  });
+
+  it("pins every external workflow action to a reviewed commit SHA", () => {
+    const workflowDirectory = resolve(root, ".github/workflows");
+    for (const name of readdirSync(workflowDirectory).filter((entry) =>
+      /\.ya?ml$/u.test(entry)
+    )) {
+      const source = readRepoFile(`.github/workflows/${name}`);
+      for (const match of source.matchAll(/uses:\s+([^@\s]+)@([^\s#]+)/gu)) {
+        const [, action, revision] = match;
+        expect(
+          revision,
+          `${name}: ${action} must be pinned to an immutable commit`,
+        ).toMatch(/^[0-9a-f]{40}$/u);
+      }
+    }
+  });
+
 
   it("runs the NSIS smoke before win-unpacked and owner-cleans HKCU afterward", () => {
     const smoke = readRepoFile("scripts/smoke-packaged-app.mjs");

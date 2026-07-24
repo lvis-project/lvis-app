@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "./fixtures";
-import { builtMainExists, launchSeededElectron, teardownSeededElectron } from "./seeded-electron";
+import { builtMainExists, launchSeededElectron, teardownSeededElectron,
+} from "./seeded-electron";
 import { closeSettingsWindow, openSettingsWindow } from "./settings-window";
 import { makeTestT } from "./i18n";
 
@@ -56,7 +57,7 @@ function writeUsageAudit(lvisHome: string): void {
       timestamp: `${day}T12:05:00.000Z`,
       sessionId: "unknown-cost-session",
       type: "turn",
-      route: "skill",
+      route: "legacy",
       input: "unknown cost historical turn",
       tokenUsage: {
         inputTokens: 10_000,
@@ -73,24 +74,40 @@ function writeUsageAudit(lvisHome: string): void {
 }
 
 test.describe("usage dashboard token cost e2e", () => {
-  test.skip(!builtMainExists(), "dist/src/main/main.js not built; run bun run build first");
+  test.skip(
+    !builtMainExists(),
+    "dist/src/main/main.js not built; run bun run build first",
+  );
 
   test("historical mixed-provider rows keep their provider pricing and unknown-cost rows stay unknown", async () => {
     const ctx = await launchSeededElectron({
       sessionTitle: "usage dashboard token cost",
       historyRows: [
-        { index: 0, role: "user", content: "사용량 대시보드 e2e", createdAt: Date.now() - 1000 },
+        {
+          index: 0,
+          role: "user",
+          content: "사용량 대시보드 e2e",
+          createdAt: Date.now() - 1000,
+        },
       ],
     });
 
     try {
       writeUsageAudit(ctx.lvisHome);
-      const settingsWindow = await openSettingsWindow(ctx.app, ctx.page, "usage");
+      const settingsWindow = await openSettingsWindow(
+        ctx.app,
+        ctx.page,
+        "usage",
+      );
       try {
-        await expect(settingsWindow.getByTestId("usage-dashboard")).toBeVisible({
-          timeout: 10_000,
-        });
-        await expect(settingsWindow.getByText(t("usageDashboard.perVendor"))).toBeVisible();
+        await expect(settingsWindow.getByTestId("usage-dashboard")).toBeVisible(
+          {
+            timeout: 10_000,
+          },
+        );
+        await expect(
+          settingsWindow.getByText(t("usageDashboard.perVendor")),
+        ).toBeVisible();
 
         const vendorTableRows = settingsWindow
           .locator("table")
@@ -102,9 +119,13 @@ test.describe("usage dashboard token cost e2e", () => {
         const unknownRow = vendorTableRows.filter({ hasText: "unknown" });
 
         await expect(claudeRow).toContainText("claude");
-        await expect(claudeRow).not.toContainText(t("tokenCostBadge.pricingUnknownBadge"));
+        await expect(claudeRow).not.toContainText(
+          t("tokenCostBadge.pricingUnknownBadge"),
+        );
         await expect(openaiRow).toContainText("openai");
-        await expect(openaiRow).not.toContainText(t("tokenCostBadge.pricingUnknownBadge"));
+        await expect(openaiRow).not.toContainText(
+          t("tokenCostBadge.pricingUnknownBadge"),
+        );
 
         await expect(unknownRow).toContainText("unknown");
         await expect(unknownRow).toContainText(
@@ -112,13 +133,19 @@ test.describe("usage dashboard token cost e2e", () => {
         );
         // unknownCostIncluded is "{base} + 미정 포함"; assert the static suffix
         // (after the dynamic {base}) via the catalog rather than a literal.
-        const unknownIncludedSuffix = t("usageDashboard.unknownCostIncluded", { base: "" })
+        const unknownIncludedSuffix = t("usageDashboard.unknownCostIncluded", {
+          base: "",
+        })
           .split("+")
           .pop()!
           .trim();
-        await expect(settingsWindow.getByText(unknownIncludedSuffix).first()).toBeVisible();
+        await expect(
+          settingsWindow.getByText(unknownIncludedSuffix).first(),
+        ).toBeVisible();
 
-        await expect(settingsWindow.getByText("claude-sonnet-4-6")).toBeVisible();
+        await expect(
+          settingsWindow.getByText("claude-sonnet-4-6"),
+        ).toBeVisible();
         await expect(settingsWindow.getByText("gpt-5.4-mini")).toBeVisible();
       } finally {
         await closeSettingsWindow(ctx.app, settingsWindow);

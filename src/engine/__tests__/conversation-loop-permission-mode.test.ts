@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent, StreamTurnInput } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnInput,
+} from "../llm/types.js";
 
 class UnusedProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -17,8 +18,8 @@ class UnusedProvider implements LLMProvider {
 
 function makeLoop() {
   const toolRegistry = new ToolRegistry();
-  const keywordEngine = new KeywordEngine();
-  const routeEngine = new RouteEngine({ toolRegistry });
+  const inputClassifier = new InputClassifier();
+  const routeEngine = new RouteEngine();
   let mode: "default" | "strict" | "auto" | "allow" = "default";
   const permissionManager = {
     getMode: vi.fn(() => mode),
@@ -39,7 +40,7 @@ function makeLoop() {
     isPermissionAuditChainReady: vi.fn(() => true),
     appendPermissionAuditEntry: vi.fn(async () => undefined),
   };
-  const loop = new ConversationLoop(({
+  const loop = new ConversationLoop({
     settingsService: {
       get: () => fakeLlmSettings(),
       getSecret: () => "test-key",
@@ -48,7 +49,7 @@ function makeLoop() {
       build: () => "system",
       setToolScope: () => {},
     },
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager: {
@@ -59,7 +60,7 @@ function makeLoop() {
     approvalGate,
     auditLogger,
     disableSessionPersistence: true,
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as unknown as { provider: LLMProvider | null }).provider = new UnusedProvider();
   return { loop, permissionManager, approvalGate, auditLogger };
 }

@@ -1,29 +1,11 @@
-/**
- * uiActions security model — runtime scope enforcement.
- *
- * The runtime no longer blocks verbs by suffix. Instead:
- *   1. tools[] is the LLM registration surface.
- *   2. uiActions[] may name UI-only runtime methods that are not in tools[].
- *   3. callFromUi() re-checks the method is declared in that plugin's
- *      uiActions at invocation time (defense in depth against stale maps).
- *
- * Security properties come from:
- *   - code review of the plugin source,
- *   - marketplace approval before publish,
- *   - marketplace install receipt integrity before runtime load,
- * NOT from naming conventions. Any suffix (_delete, _remove, _send, _reply,
- * _create, _update, …) is permitted regardless of install policy. The
- * plugin developer is responsible for destructive-action confirmation UX in
- * their own renderer surface — see `index_remove_folder` which ships this way
- * today (note: `email_reply` is in tools[] only, not uiActions[]).
- */
+/** Pure Tool app-visibility and runtime invocation-scope enforcement. */
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  compileLegacyToolSurface,
+  pureTool,
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
 
@@ -32,20 +14,22 @@ const __dirname = dirname(__filename);
 
 async function writeTempPlugin(opts: {
   installPolicy: "admin" | "user";
-  tools: string[];
-  uiActions: Record<string, unknown>;
+  modelTools: string[];
+  appTools: string[];
 }): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), "lvis-ui-actions-"));
   const manifest = {
     id: `test-${Math.random().toString(36).slice(2, 8)}`,
-    name: "uiActions Test",
+    name: "App visibility test",
     version: "1.0.0",
     description: "Test fixture.",
     publisher: "Test fixture",
     entry: "dist/index.js",
-    // Pure v6: the legacy tools[]/uiActions surface is compiled to Tool objects
-    // with explicit visibility (uiActions-only → ["app"]).
-    tools: compileLegacyToolSurface({ tools: opts.tools, uiActions: opts.uiActions as Record<string, { description?: string }> }),
+    tools: [...new Set([...opts.modelTools, ...opts.appTools])].map((name) =>
+      pureTool(name, [
+        ...(opts.modelTools.includes(name) ? (["model"] as const) : []),
+        ...(opts.appTools.includes(name) ? (["app"] as const) : []),
+      ])),
     installPolicy: opts.installPolicy,
   };
   writeFileSync(join(root, "plugin.json"), JSON.stringify(manifest, null, 2));
@@ -73,12 +57,12 @@ const PREVIOUSLY_BLOCKED_VERBS = [
   "thing_truncate",
 ];
 
-describe("uiActions runtime-method validation", () => {
-  it("accepts UI-only methods that are not in tools[]", async () => {
+describe("app-visible Tool runtime-method validation", () => {
+  it("accepts app-only Tools that are not model-visible", async () => {
     const manifestPath = await writeTempPlugin({
       installPolicy: "user",
-      tools: ["foo_get"],
-      uiActions: { foo_get: {}, foo_missing: {} },
+      modelTools: ["foo_get"],
+      appTools: ["foo_get", "foo_missing"],
     });
     const rt = new PluginRuntime({
       hostRoot: resolve(__dirname, "..", "..", ".."),
@@ -88,16 +72,11 @@ describe("uiActions runtime-method validation", () => {
     await expect(parse(manifestPath)).resolves.toBeDefined();
   });
 
-  // NOTE (#885 Phase R): the "rejects non-string uiActions entries" test was
-  // removed — `uiActions` is no longer a manifest field; surface membership is
-  // expressed by each Tool's `_meta.ui.visibility`, so there is no uiActions-map
-  // structural validation left to exercise.
-
-  it("accepts when every uiActions entry is also declared in tools[]", async () => {
+  it("accepts Tools visible to both model and app", async () => {
     const manifestPath = await writeTempPlugin({
       installPolicy: "user",
-      tools: ["foo_get", "foo_list"],
-      uiActions: { foo_get: {}, foo_list: {} },
+      modelTools: ["foo_get", "foo_list"],
+      appTools: ["foo_get", "foo_list"],
     });
     const rt = new PluginRuntime({
       hostRoot: resolve(__dirname, "..", "..", ".."),
@@ -108,13 +87,13 @@ describe("uiActions runtime-method validation", () => {
   });
 });
 
-describe("uiActions accepts any suffix regardless of install policy", () => {
+describe("app-visible Tool names do not infer destructive authority", () => {
   for (const verb of PREVIOUSLY_BLOCKED_VERBS) {
     it(`[user] accepts '${verb}' when it is in tools[]`, async () => {
       const manifestPath = await writeTempPlugin({
         installPolicy: "user",
-        tools: [verb],
-        uiActions: { [verb]: {} },
+        modelTools: [verb],
+        appTools: [verb],
       });
       const rt = new PluginRuntime({
         hostRoot: resolve(__dirname, "..", "..", ".."),
@@ -127,8 +106,8 @@ describe("uiActions accepts any suffix regardless of install policy", () => {
     it(`[admin] accepts '${verb}' when it is in tools[]`, async () => {
       const manifestPath = await writeTempPlugin({
         installPolicy: "admin",
-        tools: [verb],
-        uiActions: { [verb]: {} },
+        modelTools: [verb],
+        appTools: [verb],
       });
       const rt = new PluginRuntime({
         hostRoot: resolve(__dirname, "..", "..", ".."),
@@ -149,7 +128,7 @@ describe("callFromUi scope enforcement", () => {
     await expect(rt.callFromUi("nonexistent_method")).rejects.toThrow(/not found/);
   });
 
-  it("throws when method is declared in tools[] but missing from uiActions[]", async () => {
+  it("throws when a method is model-visible but not app-visible", async () => {
     // Build a runtime with a hand-crafted plugin map so we can exercise
     // callFromUi without spinning up a real plugin entry file.
     const rt = new PluginRuntime({
@@ -160,8 +139,7 @@ describe("callFromUi scope enforcement", () => {
       plugins: Map<string, { manifest: unknown }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
-    // #885 v6 — normalized manifest: foo_get is UI-invokable (visibility ["app"]),
-    // foo_delete is model-only (["model"]) so it is NOT a declared UI action.
+    // foo_get is app-visible; foo_delete is model-only.
     internals.plugins.set("test.plugin", {
       manifest: {
         tools: [
@@ -184,11 +162,11 @@ describe("callFromUi scope enforcement", () => {
       return entry.handler(payload);
     });
 
-    await expect(rt.callFromUi("foo_delete")).rejects.toThrow(/not declared as a UI action/);
+    await expect(rt.callFromUi("foo_delete")).rejects.toThrow(/not an app-visible Tool/);
     await expect(rt.callFromUi("foo_get")).resolves.toBe("ok");
   });
 
-  it("fails closed when a UI action method has no executor delegate", async () => {
+  it("fails closed when an app-visible Tool has no executor delegate", async () => {
     const rt = new PluginRuntime({
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [],
@@ -197,7 +175,7 @@ describe("callFromUi scope enforcement", () => {
       plugins: Map<string, { manifest: unknown }>;
       methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
     };
-    // #885 v6 — foo_get is a declared UI action (visibility ["app"]).
+    // foo_get is app-visible.
     internals.plugins.set("test.plugin", {
       manifest: {
         tools: [

@@ -48,8 +48,6 @@ export type SerializedHistoryMessage = {
   createdAt?: number;
   /** User-visible text when durable content carries routing/provenance wrappers. */
   displayText?: string;
-  /** Skill route provenance for user-turn replay. */
-  routeSkill?: NonNullable<MessageMeta["routeSkill"]>;
   /** Proactive/plugin imported-trigger provenance for card replay. */
   importedTrigger?: SerializedImportedTriggerMeta;
   /** Tool result display metadata for live/reload parity. */
@@ -77,7 +75,6 @@ export function serializeHistoryMessage(
   const toolDisplay = serializeToolDisplay(meta?.toolDisplay);
   const importedTrigger = serializeImportedTrigger(meta?.importedTrigger);
   const systemNotice = serializeSystemNotice(meta?.systemNotice);
-  const routeSkill = serializeRouteSkill(meta?.routeSkill);
   const displayText = typeof meta?.displayText === "string" ? meta.displayText : undefined;
   const createdAt =
     typeof meta?.createdAt === "number" && Number.isFinite(meta.createdAt)
@@ -86,7 +83,6 @@ export function serializeHistoryMessage(
   const metaFields = {
     ...(createdAt !== undefined ? { createdAt } : {}),
     ...(displayText !== undefined ? { displayText } : {}),
-    ...(routeSkill !== undefined ? { routeSkill } : {}),
     ...(importedTrigger !== undefined ? { importedTrigger } : {}),
     ...(toolDisplay !== undefined ? { toolDisplay } : {}),
     ...(m.meta?.turnSummary !== undefined ? { turnSummary: m.meta.turnSummary } : {}),
@@ -132,14 +128,6 @@ export function serializeHistoryMessage(
   }
 
   return base;
-}
-
-function serializeRouteSkill(
-  routeSkill: MessageMeta["routeSkill"] | undefined,
-): NonNullable<MessageMeta["routeSkill"]> | undefined {
-  if (!routeSkill || typeof routeSkill.skillId !== "string") return undefined;
-  if (!/^[a-zA-Z0-9_-]+$/.test(routeSkill.skillId)) return undefined;
-  return { skillId: routeSkill.skillId };
 }
 
 function serializeImportedTrigger(

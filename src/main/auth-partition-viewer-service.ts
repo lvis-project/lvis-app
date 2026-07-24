@@ -84,6 +84,8 @@ export interface OpenAuthPartitionViewerOptions {
 }
 
 const VIEWER_PARTITION_PREFIX = "persist:plugin-auth:";
+const activeViewersByPartition = new Map<string, Set<BrowserWindow>>();
+const partitionCleanupCounts = new Map<string, number>();
 
 function partitionFor(pluginId: string): string {
   return `${VIEWER_PARTITION_PREFIX}${encodeURIComponent(pluginId)}`;
@@ -104,6 +106,75 @@ function safeUrlForLog(url: string): string {
  * `session.on(...)` does not de-dupe listeners.
  */
 const installedSessions = new WeakSet<Electron.Session>();
+
+function trackViewer(partition: string, win: BrowserWindow): void {
+  const viewers = activeViewersByPartition.get(partition) ?? new Set();
+  viewers.add(win);
+  activeViewersByPartition.set(partition, viewers);
+  win.once("closed", () => untrackViewer(partition, win));
+}
+
+function untrackViewer(partition: string, win: BrowserWindow): void {
+  const viewers = activeViewersByPartition.get(partition);
+  viewers?.delete(win);
+  if (viewers?.size === 0) activeViewersByPartition.delete(partition);
+}
+
+/**
+ * Destroy every viewer that can still write to a partition, then wait until
+ * Electron confirms that its webContents are gone. Partition storage must not
+ * be cleared before this barrier or a live page could immediately recreate it.
+ */
+async function closeAuthPartitionViewers(
+  partition: string,
+): Promise<void> {
+  const viewers = [...(activeViewersByPartition.get(partition) ?? [])];
+  await Promise.all(
+    viewers.map((win) =>
+      new Promise<void>((resolve, reject) => {
+        if (win.isDestroyed()) {
+          untrackViewer(partition, win);
+          resolve();
+          return;
+        }
+        let settled = false;
+        const complete = () => {
+          if (settled) return;
+          settled = true;
+          untrackViewer(partition, win);
+          resolve();
+        };
+        win.once("closed", complete);
+        try {
+          // destroy() is deliberate: a remote beforeunload handler must not be
+          // able to postpone Host-owned credential deletion.
+          win.destroy();
+          if (win.isDestroyed()) complete();
+        } catch (error) {
+          reject(error);
+        }
+      }),
+    ),
+  );
+}
+
+export async function withAuthPartitionViewersClosed<T>(
+  partition: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  partitionCleanupCounts.set(
+    partition,
+    (partitionCleanupCounts.get(partition) ?? 0) + 1,
+  );
+  try {
+    await closeAuthPartitionViewers(partition);
+    return await operation();
+  } finally {
+    const remaining = (partitionCleanupCounts.get(partition) ?? 1) - 1;
+    if (remaining === 0) partitionCleanupCounts.delete(partition);
+    else partitionCleanupCounts.set(partition, remaining);
+  }
+}
 
 /**
  * Install one-time session-level guards on the partition: deny every
@@ -146,6 +217,11 @@ export async function openAuthPartitionViewer(
     );
   }
   const partition = partitionFor(opts.pluginId);
+  if ((partitionCleanupCounts.get(partition) ?? 0) > 0) {
+    throw new Error(
+      "openAuthPartitionViewer: partition cleanup is in progress",
+    );
+  }
   ensurePartitionSessionGuards(
     partition,
     opts.audit,
@@ -177,6 +253,7 @@ export async function openAuthPartitionViewer(
     },
   });
   win.setMenu(null);
+  trackViewer(partition, win);
 
   // setWindowOpenHandler always denies — viewer must not spawn popups
   // (target=_blank, window.open). If the user really needs to open a
@@ -249,10 +326,16 @@ export async function openAuthPartitionViewer(
     });
     win.webContents.once("did-fail-load", (_e, code, desc) => {
       if (code === -3) return; // ABORTED — usually a redirect/user-action
-      settle(() => reject(new Error(`auth-partition viewer load failed (${code}): ${desc}`)));
+      settle(() => {
+        reject(new Error(`auth-partition viewer load failed (${code}): ${desc}`));
+        if (!win.isDestroyed()) win.destroy();
+      });
     });
     win.loadURL(opts.url).catch((err) => {
-      settle(() => reject(err));
+      settle(() => {
+        reject(err);
+        if (!win.isDestroyed()) win.destroy();
+      });
     });
   });
 }
@@ -262,4 +345,6 @@ export const __internals = {
   partitionFor,
   safeUrlForLog,
   urlHostMatchesAllowList,
+  activeViewerCount: (partition: string) =>
+    activeViewersByPartition.get(partition)?.size ?? 0,
 };

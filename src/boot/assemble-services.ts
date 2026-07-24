@@ -31,7 +31,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     a2aRemoteRuntime: ctx.a2aRemoteRuntime,
     remoteA2AActionController: ctx.remoteA2AActionController,
     memoryManager: ctx.memoryManager,
-    keywordEngine: ctx.keywordEngine,
+    inputClassifier: ctx.inputClassifier,
     routeEngine: ctx.routeEngine,
     toolRegistry: ctx.toolRegistry,
     systemPromptBuilder: ctx.systemPromptBuilder,
@@ -89,7 +89,8 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     startWorkBoardDueSoon: ctx.startWorkBoardDueSoon,
     refreshPluginNotifications: () => {
       ctx.disposePluginNotifications();
-      ctx.disposePluginNotifications = registerPluginNotifications(ctx.pluginRuntime, ctx.pluginEventBridgeWindow, ctx.notificationService, ctx.bootAuditLogger);
+      ctx.disposePluginNotifications = registerPluginNotifications(ctx.pluginRuntime, ctx.pluginEventBridgeWindow, ctx.notificationService, ctx.bootAuditLogger,
+      );
       ctx.replacePluginEventBridge(ctx.pluginEventBridgeWindow);
     },
     registerPluginEventBridge: ctx.replacePluginEventBridge,
@@ -125,8 +126,12 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
         attempt(() => ctx.routinesScheduler.stop());
         if (ctx.dueSoonTimer) attempt(() => clearInterval(ctx.dueSoonTimer));
 
-        attempt(() => ctx.conversationLoop.abortCurrentTurn(new Error("application shutdown")));
-        attempt(() => ctx.sideChatConversationLoop.abortCurrentTurn(new Error("application shutdown")));
+        attempt(() => ctx.conversationLoop.abortCurrentTurn(new Error("application shutdown"),
+          ),
+        );
+        attempt(() => ctx.sideChatConversationLoop.abortCurrentTurn(new Error("application shutdown"),
+          ),
+        );
         attempt(() => ctx.rationaleHostService?.shutdown());
 
         attempt(() => ctx.approvalGate.disposeAll());
@@ -137,7 +142,8 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
         await attemptAsync(() => ctx.auditService.stop());
 
         if (errors.length > 0) {
-          throw new AggregateError(errors, "application service shutdown failed");
+          throw new AggregateError(errors, "application service shutdown failed",
+          );
         }
       })();
       return shutdownPromise;

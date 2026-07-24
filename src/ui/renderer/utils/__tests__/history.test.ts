@@ -15,15 +15,19 @@ describe("historyToEntries", () => {
         thought: "검색 계획을 세웁니다.",
         toolCalls: [{ id: "t1", name: "web_search", input: { q: "LVIS" } }],
       },
-      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "web_search", content: "검색 결과" },
+      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "web_search", content: "검색 결과",
+      },
       {
         index: 3,
         role: "assistant",
         content: "",
         thought: "결과를 검증합니다.",
-        toolCalls: [{ id: "t2", name: "web_fetch", input: { url: "https://example.com" } }],
+        toolCalls: [{ id: "t2", name: "web_fetch", input: { url: "https://example.com" },
+          },
+        ],
       },
-      { index: 4, role: "tool_result", toolUseId: "t2", toolName: "web_fetch", content: "본문" },
+      { index: 4, role: "tool_result", toolUseId: "t2", toolName: "web_fetch", content: "본문",
+      },
       { index: 5, role: "assistant", content: "최종 답변입니다." },
     ]);
 
@@ -35,13 +39,17 @@ describe("historyToEntries", () => {
       "tool_group",
       "assistant",
     ]);
-    expect(entries[1]).toMatchObject({ kind: "reasoning", text: "검색 계획을 세웁니다.", streaming: false });
+    expect(entries[1]).toMatchObject({ kind: "reasoning", text: "검색 계획을 세웁니다.", streaming: false,
+    });
     expect(entries[2]).toMatchObject({
       kind: "tool_group",
       status: "done",
-      tools: [{ toolUseId: "t1", name: "web_search", status: "done", result: "검색 결과" }],
+      tools: [{ toolUseId: "t1", name: "web_search", status: "done", result: "검색 결과",
+        },
+      ],
     });
-    expect(entries[5]).toMatchObject({ kind: "assistant", text: "최종 답변입니다.", streaming: false });
+    expect(entries[5]).toMatchObject({ kind: "assistant", text: "최종 답변입니다.", streaming: false,
+    });
   });
 
   it("does not create blank assistant bubbles for structural empty tool-use rounds", () => {
@@ -53,12 +61,15 @@ describe("historyToEntries", () => {
         content: "",
         toolCalls: [{ id: "t1", name: "calendar_list", input: {} }],
       },
-      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "calendar_list", content: "[]" },
+      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "calendar_list", content: "[]",
+      },
       { index: 3, role: "assistant", content: "일정이 없습니다." },
     ]);
 
-    expect(entries.filter((entry) => entry.kind === "assistant")).toHaveLength(1);
-    expect(entries.at(-1)).toMatchObject({ kind: "assistant", text: "일정이 없습니다." });
+    expect(entries.filter((entry) => entry.kind === "assistant")).toHaveLength(1,
+    );
+    expect(entries.at(-1)).toMatchObject({ kind: "assistant", text: "일정이 없습니다.",
+    });
   });
 
   it("preserves persisted tool routing metadata for activity panels", () => {
@@ -79,7 +90,8 @@ describe("historyToEntries", () => {
           },
         ],
       },
-      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "meeting_lookup", content: "https://example.com/meeting" },
+      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "meeting_lookup", content: "https://example.com/meeting",
+      },
     ]);
 
     expect(entries[1]).toMatchObject({
@@ -105,12 +117,15 @@ describe("historyToEntries", () => {
         content: "\n  ",
         toolCalls: [{ id: "t1", name: "calendar_list", input: {} }],
       },
-      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "calendar_list", content: "[]" },
+      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "calendar_list", content: "[]",
+      },
       { index: 3, role: "assistant", content: "일정이 없습니다." },
     ]);
 
-    expect(entries.filter((entry) => entry.kind === "assistant")).toHaveLength(1);
-    expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group", "assistant"]);
+    expect(entries.filter((entry) => entry.kind === "assistant")).toHaveLength(1,
+    );
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group", "assistant",
+    ]);
   });
 
   it("strips persisted assistant meta markers during replay", () => {
@@ -148,8 +163,10 @@ describe("historyToEntries", () => {
   it("preserves old consecutive tool_result history as one work group", () => {
     const entries = historyToEntries([
       { index: 0, role: "user", content: "두 도구 결과" },
-      { index: 1, role: "tool_result", toolUseId: "t1", toolName: "a", content: "A" },
-      { index: 2, role: "tool_result", toolUseId: "t2", toolName: "b", content: "B" },
+      { index: 1, role: "tool_result", toolUseId: "t1", toolName: "a", content: "A",
+      },
+      { index: 2, role: "tool_result", toolUseId: "t2", toolName: "b", content: "B",
+      },
       { index: 3, role: "assistant", content: "완료" },
     ]);
 
@@ -223,30 +240,18 @@ describe("historyToEntries", () => {
     });
   });
 
-  it("uses persisted displayText for skill-routed user messages", () => {
+  it("uses persisted displayText for wrapped user messages", () => {
     const entries = historyToEntries([
       {
         index: 0,
         role: "user",
-        content: "[스킬: msgraph_email_list] 지금 메일 읽어줘",
+        content: "prompt-bearing wrapper",
         displayText: "지금 메일 읽어줘",
-        routeSkill: { skillId: "msgraph_email_list" },
       },
     ]);
 
-    expect(entries[0]).toMatchObject({ kind: "user", text: "지금 메일 읽어줘" });
-  });
-
-  it("migrates legacy skill prefixes out of visible user bubbles", () => {
-    const entries = historyToEntries([
-      {
-        index: 0,
-        role: "user",
-        content: "[스킬: msgraph_email_list] 지금 메일 읽어줘",
-      },
-    ]);
-
-    expect(entries[0]).toMatchObject({ kind: "user", text: "지금 메일 읽어줘" });
+    expect(entries[0]).toMatchObject({ kind: "user", text: "지금 메일 읽어줘",
+    });
   });
 
   it("replays inert tool result display metadata onto tool rows", () => {
@@ -255,7 +260,9 @@ describe("historyToEntries", () => {
         index: 0,
         role: "assistant",
         content: "",
-        toolCalls: [{ id: "t1", name: "read_tool_result_chunk", input: { toolUseId: "long-1" } }],
+        toolCalls: [{ id: "t1", name: "read_tool_result_chunk", input: { toolUseId: "long-1" },
+          },
+        ],
       },
       {
         index: 1,
@@ -324,10 +331,12 @@ describe("historyToEntries", () => {
         toolName: "ask_user_question",
         content: JSON.stringify({ answers: [{ choice: "IT/경제" }] }),
       },
-      { index: 3, role: "assistant", content: "IT/경제 기준으로 정리하겠습니다." },
+      { index: 3, role: "assistant", content: "IT/경제 기준으로 정리하겠습니다.",
+      },
     ]);
 
-    expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group", "ask_user_answer", "assistant"]);
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group", "ask_user_answer", "assistant",
+    ]);
     expect(entries[2]).toMatchObject({
       kind: "ask_user_answer",
       sourceToolUseId: "ask-1",
@@ -345,7 +354,8 @@ describe("historyToEntries", () => {
       const user = entries.find((e) => e.kind === "user");
       const assistant = entries.find((e) => e.kind === "assistant");
       expect(user?.kind === "user" ? user.createdAt : undefined).toBe(ts);
-      expect(assistant?.kind === "assistant" ? assistant.createdAt : undefined).toBe(ts + 500);
+      expect(assistant?.kind === "assistant" ? assistant.createdAt : undefined,
+      ).toBe(ts + 500);
     });
 
     it("leaves createdAt undefined for legacy messages without it", () => {
@@ -354,7 +364,8 @@ describe("historyToEntries", () => {
         { index: 1, role: "assistant", content: "old a" },
       ]);
       const assistant = entries.find((e) => e.kind === "assistant");
-      expect(assistant?.kind === "assistant" ? assistant.createdAt : undefined).toBeUndefined();
+      expect(assistant?.kind === "assistant" ? assistant.createdAt : undefined,
+      ).toBeUndefined();
     });
   });
 
@@ -485,8 +496,10 @@ describe("historyToEntries", () => {
         },
       ]);
 
-      expect(entries.filter((entry) => entry.kind === "context_usage")).toHaveLength(1);
-      expect(entries.find((entry) => entry.kind === "turn_summary")).toBeUndefined();
+      expect(entries.filter((entry) => entry.kind === "context_usage"),
+      ).toHaveLength(1);
+      expect(entries.find((entry) => entry.kind === "turn_summary"),
+      ).toBeUndefined();
     });
 
     it("keeps post-compact turn summaries newer than the checkpoint carrier", () => {
@@ -520,10 +533,12 @@ describe("historyToEntries", () => {
         },
       ]);
 
-      expect(entries.find((entry) => entry.kind === "context_usage")).toMatchObject({
+      expect(entries.find((entry) => entry.kind === "context_usage"),
+      ).toMatchObject({
         tokensIn: 40_000,
       });
-      expect(entries.find((entry) => entry.kind === "turn_summary")).toMatchObject({
+      expect(entries.find((entry) => entry.kind === "turn_summary"),
+      ).toMatchObject({
         tokensIn: 45_000,
       });
     });

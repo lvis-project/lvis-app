@@ -43,14 +43,22 @@ import type { BrowserWindow } from "electron";
 import { resolve } from "node:path";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
 import { preparePluginRegistryForBoot } from "./plugins/plugin-boot-recovery.js";
-import { purgeStaleSessionDiffDirs, clearSessionDiffCache } from "./tools/write-diff-cache.js";
+import { purgeStaleSessionDiffDirs, clearSessionDiffCache,
+} from "./tools/write-diff-cache.js";
 import { resolvePluginPaths } from "./plugins/plugin-paths.js";
 import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
 import {
   openAuthWindow as openAuthWindowService,
   clearAuthPartition as clearAuthPartitionService,
+  forgetTrackedPluginAuthPartitions,
+  getTrackedPluginAuthPartitions,
 } from "./main/auth-window-service.js";
+import {
+  ensurePluginStateReadyForInstall,
+  recoverPendingPluginUninstallCleanups,
+} from "./plugins/uninstall-lifecycle.js";
+import { drainPluginInstallLockOperations } from "./plugins/install-lifecycle.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
@@ -68,7 +76,8 @@ import {
 import { McpAppModelContextStore } from "./mcp/mcp-app-model-context.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
-import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
+import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck,
+} from "./boot/steps/post-boot.js";
 import { migrateCanonicalization } from "./permissions/user-approval-store.js";
 import { reconcileWorkspaceRoots } from "./permissions/workspace-root-reconciler.js";
 import { createLogger } from "./lib/logger.js";
@@ -137,7 +146,9 @@ export async function bootstrap(
       log.info(`boot: seeded lvis-home docs: ${seeded.seeded.join(", ")}`);
     }
     if (seeded.upgraded.length > 0) {
-      log.info(`boot: lvis-home docs upgrade available: ${seeded.upgraded.join(", ")}`);
+      log.info(
+        `boot: lvis-home docs upgrade available: ${seeded.upgraded.join(", ")}`,
+      );
     }
     lvisHomeDocUpgradeMarkers = listLvisHomeDocUpgradeMarkers();
     if (lvisHomeDocUpgradeMarkers.length > 0) {
@@ -159,7 +170,7 @@ export async function bootstrap(
     auditService,
     settingsService,
     memoryManager,
-    keywordEngine,
+    inputClassifier,
     toolRegistry,
     routeEngine,
   } = core;
@@ -169,7 +180,7 @@ export async function bootstrap(
   ctx.auditService = auditService;
   ctx.settingsService = settingsService;
   ctx.memoryManager = memoryManager;
-  ctx.keywordEngine = keywordEngine;
+  ctx.inputClassifier = inputClassifier;
   ctx.toolRegistry = toolRegistry;
   ctx.routeEngine = routeEngine;
 
@@ -186,28 +197,47 @@ export async function bootstrap(
   // the per-plugin HostApi factory can wire `agentApproval` namespace to the
   // live gate — without this ordering, plugins receive a hostApi missing the
   // namespace and §8 main-process approval routing silently no-ops.
-  const approvalGate = await createApprovalGate(mainWindow, ctx.bootAuditLogger, ctx.notificationService);
+  const approvalGate = await createApprovalGate(
+    mainWindow,
+    ctx.bootAuditLogger,
+    ctx.notificationService,
+  );
   ctx.approvalGate = approvalGate;
   const remoteA2AAgentActionApprover = buildSingleFlightAgentActionApprover(
     approvalGate,
     {
-      onConcurrent: () => ctx.bootAuditLogger.log({ timestamp: new Date().toISOString(), sessionId: "a2a-remote", type: "warn", input: "a2a-remote:approval-concurrent-denied" }),
-      onError: () => ctx.bootAuditLogger.log({ timestamp: new Date().toISOString(), sessionId: "a2a-remote", type: "warn", input: "a2a-remote:approval-error-denied" }),
+      onConcurrent: () =>
+        ctx.bootAuditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "a2a-remote",
+          type: "warn",
+          input: "a2a-remote:approval-concurrent-denied",
+        }),
+      onError: () =>
+        ctx.bootAuditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "a2a-remote",
+          type: "warn",
+          input: "a2a-remote:approval-error-denied",
+        }),
     },
     { allowOnceOnly: true },
   );
-  if (!remoteA2AAgentActionApprover) throw new Error("a2a-remote-approval-unavailable");
-  ctx.a2aRemoteRuntime = createA2ARemoteRuntime({
-    settings: settingsService,
-    agentActionApprover: remoteA2AAgentActionApprover,
-    projectRoot,
-    audit: (code) => ctx.bootAuditLogger.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "a2a-remote",
-      type: "warn",
-      input: `a2a-remote:${code}`,
-    }),
-  }) ?? undefined;
+  if (!remoteA2AAgentActionApprover)
+    throw new Error("a2a-remote-approval-unavailable");
+  ctx.a2aRemoteRuntime =
+    createA2ARemoteRuntime({
+      settings: settingsService,
+      agentActionApprover: remoteA2AAgentActionApprover,
+      projectRoot,
+      audit: (code) =>
+        ctx.bootAuditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "a2a-remote",
+          type: "warn",
+          input: `a2a-remote:${code}`,
+        }),
+    }) ?? undefined;
   await ctx.a2aRemoteRuntime?.ready();
   ctx.remoteA2AActionController = ctx.a2aRemoteRuntime?.gates.outboundRouting
     ? createRemoteA2AActionController({
@@ -236,7 +266,11 @@ export async function bootstrap(
   // restored from its durable backup metadata.
   await preparePluginRegistryForBoot(sweeperPluginPaths)
     .then(({ recovered, unresolved, removals, pendingRecoverySkipped }) => {
-      if (removals.restored.length > 0 || removals.cleaned.length > 0 || removals.unresolved.length > 0) {
+      if (
+        removals.restored.length > 0 ||
+        removals.cleaned.length > 0 ||
+        removals.unresolved.length > 0
+      ) {
         log.info(
           "boot: plugin-removal-recovery restored=%d cleaned=%d unresolved=%d",
           removals.restored.length,
@@ -252,7 +286,9 @@ export async function bootstrap(
         });
       }
       if (pendingRecoverySkipped) {
-        log.warn("boot: pending plugin recovery skipped because removal recovery is unresolved");
+        log.warn(
+          "boot: pending plugin recovery skipped because removal recovery is unresolved",
+        );
       }
       if (recovered.length > 0 || unresolved.length > 0) {
         log.info(
@@ -272,7 +308,10 @@ export async function bootstrap(
       }
     })
     .catch((err) => {
-      log.warn("boot: plugin migration/recovery failed (pending rows remain hidden): %s", (err as Error).message);
+      log.warn(
+        "boot: plugin migration/recovery failed (pending rows remain hidden): %s",
+        (err as Error).message,
+      );
       ctx.bootAuditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: "boot",
@@ -305,7 +344,10 @@ export async function bootstrap(
       }
     })
     .catch((err) => {
-      log.warn("boot: orphan-uninstall-sweeper crashed (non-fatal): %s", (err as Error).message);
+      log.warn(
+        "boot: orphan-uninstall-sweeper crashed (non-fatal): %s",
+        (err as Error).message,
+      );
     });
 
   // Issue #749 — boot-time purge of stale write-file diff sidecar dirs.
@@ -315,7 +357,11 @@ export async function bootstrap(
   void purgeStaleSessionDiffDirs(DIFF_CACHE_MAX_AGE_MS)
     .then(({ swept, failed }) => {
       if (swept.length > 0 || failed.length > 0) {
-        log.info("boot: diff-cache-sweeper swept=%d failed=%d", swept.length, failed.length);
+        log.info(
+          "boot: diff-cache-sweeper swept=%d failed=%d",
+          swept.length,
+          failed.length,
+        );
       }
       if (failed.length > 0) {
         ctx.bootAuditLogger.log({
@@ -328,7 +374,10 @@ export async function bootstrap(
       }
     })
     .catch((err) => {
-      log.warn("boot: diff-cache-sweeper crashed (non-fatal): %s", (err as Error).message);
+      log.warn(
+        "boot: diff-cache-sweeper crashed (non-fatal): %s",
+        (err as Error).message,
+      );
     });
 
   // #893 Stage 2 — Load the marketplace whitelist registry BEFORE
@@ -349,13 +398,17 @@ export async function bootstrap(
   // scope pruning can succeed before the permission registry is narrowed.
   const routinesStore = new RoutinesStore();
   await routinesStore.load().catch((err) => {
-    log.warn("boot: routines load failed (non-fatal): %s", (err as Error).message);
+    log.warn(
+      "boot: routines load failed (non-fatal): %s",
+      (err as Error).message,
+    );
   });
   ctx.routinesStore = routinesStore;
   // Open every durable conversation namespace before reconciliation. The same
   // instances are wired into the live loops below, preserving root tombstones
   // against late writes in this process.
-  const isolatedConversationMemoryManagers = createIsolatedConversationMemoryManagers();
+  const isolatedConversationMemoryManagers =
+    createIsolatedConversationMemoryManagers();
   const workspaceSessionStores = [
     memoryManager,
     isolatedConversationMemoryManagers.sideChatMemoryManager,
@@ -390,7 +443,10 @@ export async function bootstrap(
       }
       if (errors.length > 0) {
         throw Object.assign(
-          new AggregateError(errors, "workspace-root-durable-scope-cleanup-failed"),
+          new AggregateError(
+            errors,
+            "workspace-root-durable-scope-cleanup-failed",
+          ),
           { code: "WORKSPACE_ROOT_DURABLE_SCOPE_CLEANUP_FAILED" },
         );
       }
@@ -400,8 +456,6 @@ export async function bootstrap(
       await detachWorkspaceRootSessions(runtimeRoot, workspaceSessionStores);
     },
   });
-
-
 
   const {
     pluginRuntime,
@@ -416,7 +470,6 @@ export async function bootstrap(
     projectRoot,
     settingsService,
     memoryManager,
-    keywordEngine,
     toolRegistry,
     pythonPath,
     pythonRuntime,
@@ -426,7 +479,8 @@ export async function bootstrap(
     getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
-    openAuthPartitionViewerService: (_parent, opts) => openAuthPartitionViewerService(opts),
+    openAuthPartitionViewerService: (_parent, opts) =>
+      openAuthPartitionViewerService(opts),
     clearAuthPartitionService,
     shellOpenExternal: (url: string) => shell.openExternal(url),
     approvalGate,
@@ -437,9 +491,8 @@ export async function bootstrap(
     // Idempotency SOT for `hostApi.hasRoutineBySource` (constructed above).
     routinesStore,
     onPluginUiRevisionChange: (pluginId) => {
-      revokePluginWebviewsForPlugin(
-        pluginId,
-        (appSessionId) => ctx.revokePluginOperationSession?.(appSessionId),
+      revokePluginWebviewsForPlugin(pluginId, (appSessionId) =>
+        ctx.revokePluginOperationSession?.(appSessionId),
       );
     },
     deferStart: true,
@@ -462,6 +515,29 @@ export async function bootstrap(
   await setupWorkBoard(ctx);
   await setupWorkflowStores(ctx);
   await setupMarketplace(ctx);
+  const unresolvedUninstallCleanups =
+    await recoverPendingPluginUninstallCleanups({
+      pluginMarketplace: ctx.pluginMarketplace,
+      pluginRuntime,
+      settingsService,
+      pluginPaths,
+      clearAuthPartitionService,
+      listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
+      forgetPluginAuthPartitionsService:
+        forgetTrackedPluginAuthPartitions,
+      drainPluginInstallLockOperationsService:
+        drainPluginInstallLockOperations,
+      log,
+    });
+  if (unresolvedUninstallCleanups.length > 0) {
+    ctx.bootAuditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "boot",
+      type: "warn",
+      input: "plugin-uninstall-cleanup-unresolved",
+      output: JSON.stringify(unresolvedUninstallCleanups),
+    });
+  }
 
   // §4.5.9: SystemPromptBuilder.
   // Skills use progressive disclosure: lightweight catalog every turn, full
@@ -479,8 +555,10 @@ export async function bootstrap(
     toolRegistry,
     pluginRuntime,
     getAvailableSkills: () => ctx.skillStore.listCatalogSync(),
-    getActiveSkillsSection: (sessionId) => ctx.skillOverlay.buildSection(sessionId),
-    getAppModelContext: (sessionId) => mcpAppModelContext.buildSection(sessionId),
+    getActiveSkillsSection: (sessionId) =>
+      ctx.skillOverlay.buildSection(sessionId),
+    getAppModelContext: (sessionId) =>
+      mcpAppModelContext.buildSection(sessionId),
   });
   ctx.systemPromptBuilder = systemPromptBuilder;
 
@@ -497,10 +575,12 @@ export async function bootstrap(
   // WorkBoardEngine/reporter, and manifest-driven plugin IPC bridges.
   await wireConversation(
     ctx,
-    [...new Set([
-      ...rootReconciliation.removed.map((removed) => removed.runtimePath),
-      ...(rootReconciliation.inactiveRoots ?? []),
-    ])],
+    [
+      ...new Set([
+        ...rootReconciliation.removed.map((removed) => removed.runtimePath),
+        ...(rootReconciliation.inactiveRoots ?? []),
+      ]),
+    ],
     isolatedConversationMemoryManagers,
   );
 
@@ -537,6 +617,20 @@ export async function bootstrap(
   await runManagedBootstrap({
     pluginMarketplace: ctx.pluginMarketplace,
     pluginRuntime,
+    ensurePluginStateReadyForInstall: (pluginId) =>
+      ensurePluginStateReadyForInstall(pluginId, {
+        pluginMarketplace: ctx.pluginMarketplace,
+        pluginRuntime,
+        settingsService,
+        pluginPaths,
+        clearAuthPartitionService,
+        listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
+        forgetPluginAuthPartitionsService:
+          forgetTrackedPluginAuthPartitions,
+        drainPluginInstallLockOperationsService:
+          drainPluginInstallLockOperations,
+        log,
+      }),
     mainWindow,
     marketplace: ctx.settingsService.get("marketplace"),
   });
@@ -544,12 +638,21 @@ export async function bootstrap(
   // §691: OS-level tool sandbox — decided exactly once here at boot.
   await initSandboxGate(ctx);
 
-  log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, ctx.mcpManager.listServers().filter(s => s.status === "connected").length);
+  log.info(
+    "boot: ready (%d tools, %d plugins, %d mcp)",
+    toolRegistry.size,
+    pluginRuntime.listPluginIds().length,
+    ctx.mcpManager.listServers().filter((s) => s.status === "connected").length,
+  );
 
   // Watcher telemetry consumer — plugin-emitted watcher poll events are
   // appended to ~/.lvis/logs/watcher-poll.jsonl. This is the pre-metrics
   // pipeline raw source for cold-seed latency / payload distribution tuning.
-  const watcherTelemetryLogPath = resolve(lvisHome(), "logs", "watcher-poll.jsonl");
+  const watcherTelemetryLogPath = resolve(
+    lvisHome(),
+    "logs",
+    "watcher-poll.jsonl",
+  );
   const watcherTelemetryCollector = startWatcherTelemetryCollector({
     filePath: watcherTelemetryLogPath,
     subscribe: (type, handler) => onEvent(type, handler),
@@ -567,9 +670,13 @@ export async function bootstrap(
   // Fire-and-forget: quit must not block on I/O.
   app.prependOnceListener("before-quit", () => {
     const sid = ctx.conversationLoop.getSessionId();
-    if (sid) void clearSessionDiffCache(sid).catch((err: unknown) => {
-      log.warn("before-quit: diff-cache clear failed: %s", (err as Error).message);
-    });
+    if (sid)
+      void clearSessionDiffCache(sid).catch((err: unknown) => {
+        log.warn(
+          "before-quit: diff-cache clear failed: %s",
+          (err as Error).message,
+        );
+      });
   });
 
   // Starred store + feedback store.

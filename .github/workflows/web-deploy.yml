@@ -12,25 +12,128 @@ on:
 permissions:
   contents: read
 
-defaults:
-  run:
-    working-directory: web
-
 jobs:
+  build:
+    if: github.repository == 'lvis-project/lvis-app'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      bundle_sha256: ${{ steps.bundle.outputs.bundle_sha256 }}
+      source_sha: ${{ steps.verify.outputs.source_sha }}
+    env:
+      REQUESTED_HEAD: ${{ github.event.client_payload.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.REQUESTED_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: verify
+        name: Verify exact default-branch source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          actual="$(git rev-parse HEAD)"
+          [ "$actual" = "$REQUESTED_HEAD" ]
+          git show-ref --verify --quiet refs/remotes/origin/main
+          git merge-base --is-ancestor \
+            "$REQUESTED_HEAD" \
+            refs/remotes/origin/main
+          printf 'source_sha=%s\n' "$REQUESTED_HEAD" >> "$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Build static export
+        working-directory: web
+        run: bun run build
+
+      - id: bundle
+        name: Create deterministic deploy bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find web/out -type l -print -quit | grep -q .; then
+            echo "::error::web export must not contain symbolic links"
+            exit 1
+          fi
+          mkdir -p staged-web
+          (
+            cd web/out
+            find . -type f -print0 |
+              LC_ALL=C sort -z |
+              xargs -0 sha256sum
+          ) > staged-web/files.sha256
+          tar --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf staged-web/web-out.tar.gz \
+            -C web/out .
+          bundle_sha256="$(sha256sum staged-web/web-out.tar.gz | cut -d ' ' -f 1)"
+          printf '%s  web-out.tar.gz\n' "$bundle_sha256" > staged-web/bundle.sha256
+          printf '%s\n' "$REQUESTED_HEAD" > staged-web/source.sha
+          printf 'bundle_sha256=%s\n' "$bundle_sha256" >> "$GITHUB_OUTPUT"
+
+      - id: upload
+        name: Upload digest-bound web export
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staged-web
+          if-no-files-found: error
+          retention-days: 3
+
   deploy:
+    needs: build
     if: github.repository == 'lvis-project/lvis-app'
     runs-on: ubuntu-latest
     environment: web-production
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download verified web export
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      - name: Deploy to Cloudflare Pages
+          name: web-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staged-web
+
+      - name: Verify and extract deploy bundle
+        shell: bash
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: 77a8f0e860cd23f37141248fd4e6935f
-        run: bunx wrangler pages deploy out --project-name=lvisai-xyz --branch=main --commit-dirty=true
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+          EXPECTED_BUNDLE_SHA256: ${{ needs.build.outputs.bundle_sha256 }}
+          EXPECTED_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_BUNDLE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [ "$(cat staged-web/source.sha)" = "$EXPECTED_SOURCE_SHA" ]
+          (cd staged-web && sha256sum -c bundle.sha256)
+          [ "$(sha256sum staged-web/web-out.tar.gz | cut -d ' ' -f 1)" = "$EXPECTED_BUNDLE_SHA256" ]
+          while IFS= read -r entry; do
+            case "$entry" in
+              /*|../*|*/../*|*/..) echo "::error::unsafe web archive path: $entry"; exit 1 ;;
+            esac
+          done < <(tar -tzf staged-web/web-out.tar.gz)
+          mkdir verified-out
+          tar -xzf staged-web/web-out.tar.gz -C verified-out
+          (cd verified-out && sha256sum -c ../staged-web/files.sha256)
+
+      - name: Deploy verified static files to Cloudflare Pages
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 77a8f0e860cd23f37141248fd4e6935f
+          wranglerVersion: "4.114.0"
+          packageManager: npm
+          command: pages deploy verified-out --project-name=lvisai-xyz --branch=main --commit-dirty=true

@@ -6,7 +6,7 @@
  * every host-mediated effect a plugin tool produces must be observable on the
  * per-invocation {@link EffectLedger}. Per-closure manual `recordChokepoint`
  * calls kept missing methods across review rounds (storage → auth → conversation
- * → openAuthPartitionViewer / agentApproval.request / callLlm / registerKeywords).
+ * → openAuthPartitionViewer / agentApproval.request / callLlm).
  * An un-instrumented MUTATING method yields an empty ledger and is recorded as a
  * confirmed READ — a fail-open seed for the future read-recognition gate.
  *
@@ -36,7 +36,8 @@ import {
   type Effect,
   type StaticChokepointKind,
 } from "./effect-kind.js";
-import { recordChokepoint, recordEffect, type EffectEntry } from "./effect-ledger.js";
+import { recordChokepoint, recordEffect, type EffectEntry,
+} from "./effect-ledger.js";
 
 const log = createLogger("hostapi-effect-recorder");
 
@@ -140,7 +141,8 @@ function recordEffectForPath(path: string, args: readonly unknown[]): void {
  * custom prototype) would otherwise pass completeness yet be copied verbatim and
  * left UNINSTRUMENTED by the wrapper (a silent fail-open one level up).
  */
-export function isPlainNamespace(value: unknown): value is Record<string, unknown> {
+export function isPlainNamespace(value: unknown,
+): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
@@ -169,7 +171,8 @@ function hasFunctionLeaf(value: unknown): boolean {
  * @param target  the hostApi object (or a nested namespace).
  * @param prefix  dotted path prefix for nested namespaces (e.g. `"storage"`).
  */
-export function instrumentEffectsByPath<T extends object>(target: T, prefix = ""): T {
+export function instrumentEffectsByPath<T extends object>(target: T, prefix = "",
+): T {
   if ((target as Record<symbol, unknown>)[INSTRUMENTED]) return target;
 
   const wrapped: Record<string, unknown> = {};
@@ -178,7 +181,10 @@ export function instrumentEffectsByPath<T extends object>(target: T, prefix = ""
     const path = prefix ? `${prefix}.${key}` : key;
     if (typeof value === "function") {
       const original = value as (...callArgs: unknown[]) => unknown;
-      wrapped[key] = function instrumented(this: unknown, ...callArgs: unknown[]): unknown {
+      wrapped[key] = function instrumented(
+        this: unknown,
+        ...callArgs: unknown[]
+      ): unknown {
         // Recording is a PURE side-effect — it must never alter hostApi
         // behavior, so any failure here (bad arg shape, URL parse) is swallowed.
         try {
@@ -218,6 +224,9 @@ export function instrumentEffectsByPath<T extends object>(target: T, prefix = ""
       wrapped[key] = value;
     }
   }
-  Object.defineProperty(wrapped, INSTRUMENTED, { value: true, enumerable: false });
+  Object.defineProperty(wrapped, INSTRUMENTED, {
+    value: true,
+    enumerable: false,
+  });
   return wrapped as T;
 }

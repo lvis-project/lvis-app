@@ -1,39 +1,34 @@
 name: Playwright E2E (Electron)
 
-# Secret-bearing private sibling checkouts run only from trusted default-branch
-# workflow code. Runs on:
-#   - repository_dispatch with an exact main-ancestor Host SHA
-#   - a nightly schedule against main — catches default-changing PRs (i18n,
-#     onboarding, activation) that the opt-in label skipped, within 24h, without
-#     adding ~75 min of ARM latency to every PR. (#1212: the i18n/activation flip
-#     broke the suite for ~10 PRs because nobody labeled them e2e.)
-# Keeps normal CI fast; this is the full Electron UI suite (merged from the
-# former e2e + ui-e2e workflows, which ran the identical suite).
+# The dispatch/schedule workflow is always loaded from the trusted default
+# branch. Private-repository credentials exist only in stage-inputs, which
+# performs Git operations and archives tracked files but never executes source.
 on:
   repository_dispatch:
     types: [host-e2e]
   schedule:
-    # 02:00 KST (17:00 UTC) daily — off-peak; runs against the default branch.
+    # 02:00 KST (17:00 UTC) daily.
     - cron: '0 17 * * *'
 
 concurrency:
   group: e2e-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  e2e:
+  stage-inputs:
     if: github.repository == 'lvis-project/lvis-app'
-    runs-on: ubuntu-24.04-arm
-    # github-hosted ARM64 (4 vCPU, single worker) is slower than the old
-    # self-hosted Oracle box, and the full Electron suite is heavy — give it
-    # generous headroom since this never blocks the per-PR gate.
-    timeout-minutes: 75
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      manifest_sha256: ${{ steps.stage.outputs.manifest_sha256 }}
     env:
-      E2E: "1"
-      LVIS_E2E: "1"
       HOST_SHA: ${{ github.event.client_payload.host_ref || github.sha }}
     steps:
-      - name: Checkout lvis-app
+      - name: Checkout exact lvis-app input
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: lvis-app
@@ -41,52 +36,143 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify exact Host main ancestor
+      - name: Checkout local-indexer input
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lvis-project/lvis-plugin-local-indexer
+          path: lvis-plugin-local-indexer
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Checkout meeting input
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lvis-project/lvis-plugin-meeting
+          path: lvis-plugin-meeting
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Checkout work-assistant input
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lvis-project/lvis-plugin-work-assistant
+          path: lvis-plugin-work-assistant
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
+          persist-credentials: false
+
+      - id: stage
+        name: Verify exact refs and create execution-only archives
+        shell: bash
         run: |
           set -euo pipefail
           if [[ ! "$HOST_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::host_ref must be an exact 40-character lowercase commit SHA"
             exit 1
           fi
-          actual="$(git -C lvis-app rev-parse HEAD)"
-          if [ "$actual" != "$HOST_SHA" ]; then
-            echo "::error::Host checkout $actual does not match $HOST_SHA"
-            exit 1
-          fi
-          git -C lvis-app fetch origin main --quiet
-          git -C lvis-app merge-base --is-ancestor "$HOST_SHA" origin/main
 
-      - name: Checkout local-indexer fixture
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: lvis-project/lvis-plugin-local-indexer
-          path: lvis-plugin-local-indexer
-          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
-          persist-credentials: false
+          mkdir -p staged-inputs
+          : > staged-inputs/manifest.tsv
+          for repo in \
+            lvis-app \
+            lvis-plugin-local-indexer \
+            lvis-plugin-meeting \
+            lvis-plugin-work-assistant
+          do
+            actual="$(git -C "$repo" rev-parse HEAD)"
+            if [[ ! "$actual" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::$repo did not resolve to an exact commit"
+              exit 1
+            fi
+            if [ "$repo" = lvis-app ] && [ "$actual" != "$HOST_SHA" ]; then
+              echo "::error::Host checkout $actual does not match $HOST_SHA"
+              exit 1
+            fi
+            git -C "$repo" show-ref --verify --quiet refs/remotes/origin/main
+            git -C "$repo" merge-base --is-ancestor \
+              "$actual" \
+              refs/remotes/origin/main
+            if git -C "$repo" ls-files -s | grep -q '^120000 '; then
+              echo "::error::$repo contains a symbolic-link entry"
+              exit 1
+            fi
+            git -C "$repo" archive \
+              --format=tar \
+              --prefix="$repo/" \
+              "$actual" |
+              gzip -n > "staged-inputs/$repo.tar.gz"
+            digest="$(sha256sum "staged-inputs/$repo.tar.gz" | cut -d ' ' -f 1)"
+            printf '%s\t%s\t%s\n' "$repo" "$actual" "$digest" >> staged-inputs/manifest.tsv
+          done
 
-      - name: Checkout meeting fixture
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: lvis-project/lvis-plugin-meeting
-          path: lvis-plugin-meeting
-          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
-          persist-credentials: false
+          manifest_sha256="$(sha256sum staged-inputs/manifest.tsv | cut -d ' ' -f 1)"
+          printf 'manifest_sha256=%s\n' "$manifest_sha256" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout work-assistant fixture
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - id: upload
+        name: Upload digest-bound E2E inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          repository: lvis-project/lvis-plugin-work-assistant
-          path: lvis-plugin-work-assistant
-          token: ${{ secrets.LVIS_REPO_READ_TOKEN }}
-          persist-credentials: false
+          name: host-e2e-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staged-inputs
+          if-no-files-found: error
+          retention-days: 1
+
+  e2e:
+    needs: stage-inputs
+    if: github.repository == 'lvis-project/lvis-app'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      E2E: "1"
+      LVIS_E2E: "1"
+    steps:
+      - name: Download staged E2E inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: host-e2e-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staged-inputs
+
+      - name: Verify and extract exact E2E inputs
+        shell: bash
+        env:
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.stage-inputs.outputs.artifact_digest }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.stage-inputs.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          actual_manifest_sha256="$(sha256sum staged-inputs/manifest.tsv | cut -d ' ' -f 1)"
+          [ "$actual_manifest_sha256" = "$EXPECTED_MANIFEST_SHA256" ]
+
+          mkdir -p sources
+          while IFS=$'\t' read -r repo exact_ref expected_sha256; do
+            [[ "$repo" =~ ^[a-z0-9-]+$ ]]
+            [[ "$exact_ref" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$expected_sha256" =~ ^[0-9a-f]{64}$ ]]
+            archive="staged-inputs/$repo.tar.gz"
+            actual_sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+            [ "$actual_sha256" = "$expected_sha256" ]
+            while IFS= read -r entry; do
+              case "$entry" in
+                /*|../*|*/../*|*/..) echo "::error::unsafe archive path: $entry"; exit 1 ;;
+              esac
+            done < <(tar -tzf "$archive")
+            tar -xzf "$archive" -C sources
+          done < staged-inputs/manifest.tsv
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "20"
 
-      - name: Install xvfb + Electron runtime deps
-        if: runner.os == 'Linux'
+      - name: Install xvfb and Electron runtime dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -96,34 +182,28 @@ jobs:
             libatk-bridge2.0-0 libcups2 libpangocairo-1.0-0 \
             libpango-1.0-0 libcairo2
 
-      # OS deps first, language toolchain second — keeps a corp-proxy
-      # apt outage from wasting the bun install before it fails the job.
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
-      - name: Install lvis-app deps
-        working-directory: lvis-app
+      - name: Install lvis-app dependencies
+        working-directory: sources/lvis-app
         run: bun install --frozen-lockfile
 
       - name: Install Playwright Chromium
-        working-directory: lvis-app
-        # Hard-fail on download errors: a silent install miss surfaces
-        # downstream as a confusing "browser executable not found" during
-        # `playwright test`, hiding the actual cause (registry hiccup,
-        # corp proxy block).
+        working-directory: sources/lvis-app
         run: bunx playwright install chromium
 
       - name: Build app
-        working-directory: lvis-app
+        working-directory: sources/lvis-app
         run: bun run build
 
-      - name: Run Playwright E2E (Linux)
-        working-directory: lvis-app
+      - name: Run Playwright E2E
+        working-directory: sources/lvis-app
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" bunx playwright test
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
-          path: lvis-app/playwright-report
+          path: sources/lvis-app/playwright-report
           if-no-files-found: ignore

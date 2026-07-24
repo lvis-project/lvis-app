@@ -5,8 +5,8 @@
  * {@link spawnWorker} is the host half of worker-confinement-via-ASRT for an
  * HTTP plugin worker the HOST connects INBOUND to. It is added to the host +
  * hostApi surface here, but no production Tool descriptor is host-routed
- * through it yet. Until that producer exists, manifest `toolSchemas.workerId`
- * remains advisory and must not be promoted to `Tool.workerId`.
+ * through it yet. No manifest worker-routing field is accepted; a future
+ * producer must introduce a Host-owned contract instead of reviving one.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHY A UDS CONTROL CHANNEL (the egress gap this closes)

@@ -38,14 +38,16 @@ describe("instrumentEffectsByPath — static effect + selfRecorded skip", () => 
     const effects = await record({ getInstalledPluginIds: noop }, (w) => {
       w.getInstalledPluginIds();
     });
-    expect(effects).toEqual([{ kind: "getInstalledPluginIds", effect: "read", target: undefined }]);
+    expect(effects).toEqual([{ kind: "getInstalledPluginIds", effect: "read", target: undefined },
+    ]);
   });
 
   it("records a static WRITE for a write-classified method (no target)", async () => {
-    const effects = await record({ registerKeywords: noop }, (w) => {
-      w.registerKeywords([{ keyword: "k", skillId: "s" }]);
+    const effects = await record({ callLlm: noop }, (w) => {
+      w.callLlm("prompt");
     });
-    expect(effects).toEqual([{ kind: "registerKeywords", effect: "write", target: undefined }]);
+    expect(effects).toEqual([{ kind: "callLlm", effect: "write", target: undefined },
+    ]);
   });
 
   it("SKIPS hostFetch — the only verb-derived chokepoint is selfRecorded in its closure", async () => {
@@ -72,7 +74,8 @@ describe("instrumentEffectsByPath — target extractors (valid + degenerate)", (
     const ok = await record({ config: { get: noop } }, (w) => {
       w.config.get("theme");
     });
-    expect(ok).toEqual([{ kind: "config.get", effect: "read", target: "theme" }]);
+    expect(ok).toEqual([{ kind: "config.get", effect: "read", target: "theme" },
+    ]);
 
     const bad = await record({ config: { get: noop } }, (w) => {
       (w.config.get as (k: unknown) => unknown)(123);
@@ -125,7 +128,9 @@ describe("instrumentEffectsByPath — target extractors (valid + degenerate)", (
     const source = await record({ triggerConversation: noop }, (w) => {
       w.triggerConversation({ source: "overlay:meeting", prompt: "x" });
     });
-    expect(source).toEqual([{ kind: "triggerConversation", effect: "write", target: "overlay:meeting" }]);
+    expect(source).toEqual([{ kind: "triggerConversation", effect: "write", target: "overlay:meeting",
+      },
+    ]);
 
     const absent = await record({ triggerConversation: noop }, (w) => {
       (w.triggerConversation as (s: unknown) => unknown)({ prompt: "x" });
@@ -143,7 +148,8 @@ describe("instrumentEffectsByPath — target extractors (valid + degenerate)", (
       w.spawnWorker({
         workerId: "embed",
         command: "C:/Python/python.exe",
-        allowReadPaths: ["C:/worker.py", "C:/Python/python.exe", "C:/worker.py"],
+        allowReadPaths: ["C:/worker.py", "C:/Python/python.exe", "C:/worker.py",
+        ],
         allowWritePaths: ["C:/index"],
       });
     });
@@ -197,7 +203,8 @@ describe("instrumentEffectsByPath — recursion, idempotence, passthrough", () =
       },
     );
     expect(effects).toEqual([
-      { kind: "agentApprovalRequest", effect: "write", target: "agent_task_delegate" },
+      { kind: "agentApprovalRequest", effect: "write", target: "agent_task_delegate",
+      },
       { kind: "agentApprovalRespond", effect: "write", target: undefined },
     ]);
   });
@@ -236,8 +243,10 @@ describe("instrumentEffectsByPath — fail-closed default + purity", () => {
       (w as { brandNewMethod: () => unknown }).brandNewMethod();
     });
     expect(effects).toEqual([
-      { kind: "unclassifiedHostApiMethod", effect: "write", target: "brandNewMethod" },
-      { kind: "unclassifiedHostApiMethod", effect: "write", target: "brandNewMethod" },
+      { kind: "unclassifiedHostApiMethod", effect: "write", target: "brandNewMethod",
+      },
+      { kind: "unclassifiedHostApiMethod", effect: "write", target: "brandNewMethod",
+      },
     ]);
   });
 
@@ -262,12 +271,14 @@ describe("instrumentEffectsByPath — fail-closed default + purity", () => {
   });
 
   it("is a no-op outside any ledger scope (never throws, records nothing)", () => {
-    const wrapped = instrumentEffectsByPath({ registerKeywords: noop });
-    expect(() => wrapped.registerKeywords([])).not.toThrow();
+    const wrapped = instrumentEffectsByPath({ getInstalledPluginIds: noop });
+    expect(() => wrapped.getInstalledPluginIds()).not.toThrow();
   });
 
   it("recording never breaks the host — a throwing ledger.record is swallowed", async () => {
-    const wrapped = instrumentEffectsByPath({ registerKeywords: () => "ok" });
+    const wrapped = instrumentEffectsByPath({
+      getInstalledPluginIds: () => "ok",
+    });
     const explodingLedger: EffectLedger = {
       correlationId: "boom",
       record() {
@@ -279,7 +290,7 @@ describe("instrumentEffectsByPath — fail-closed default + purity", () => {
     };
     let ret: unknown;
     await runWithEffectLedger(explodingLedger, async () => {
-      ret = wrapped.registerKeywords([]);
+      ret = wrapped.getInstalledPluginIds();
     });
     expect(ret).toBe("ok"); // method still ran + returned despite the recording failure
   });
@@ -295,23 +306,33 @@ describe("instrumentEffectsByPath — a hostile arg getter cannot suppress the e
 
   it("triggerConversation: a throwing spec.source getter costs only the target, never the write effect", async () => {
     const effects = await record({ triggerConversation: noop }, (w) => {
-      (w.triggerConversation as (s: unknown) => unknown)(throwingField("source"));
+      (w.triggerConversation as (s: unknown) => unknown)(
+        throwingField("source"),
+      );
     });
-    expect(effects).toEqual([{ kind: "triggerConversation", effect: "write", target: undefined }]);
+    expect(effects).toEqual([
+      { kind: "triggerConversation", effect: "write", target: undefined },
+    ]);
   });
 
   it("openAuthWindow: a throwing opts.url getter still records the write effect", async () => {
     const effects = await record({ openAuthWindow: noop }, (w) => {
       (w.openAuthWindow as (o: unknown) => unknown)(throwingField("url"));
     });
-    expect(effects).toEqual([{ kind: "openAuthWindow", effect: "write", target: undefined }]);
+    expect(effects).toEqual([
+      { kind: "openAuthWindow", effect: "write", target: undefined },
+    ]);
   });
 
   it("agentApproval.request: a throwing input.scope getter still records the write effect", async () => {
     const effects = await record({ agentApproval: { request: noop } }, (w) => {
-      (w.agentApproval.request as (i: unknown) => unknown)(throwingField("scope"));
+      (w.agentApproval.request as (i: unknown) => unknown)(
+        throwingField("scope"),
+      );
     });
-    expect(effects).toEqual([{ kind: "agentApprovalRequest", effect: "write", target: undefined }]);
+    expect(effects).toEqual([
+      { kind: "agentApprovalRequest", effect: "write", target: undefined },
+    ]);
   });
 
   it("the suppression-resistant record flips hasMutatingEffect to true", async () => {
@@ -320,7 +341,9 @@ describe("instrumentEffectsByPath — a hostile arg getter cannot suppress the e
     await runWithEffectLedger(ledger, async () => {
       // A throwing target getter costs only the forensic descriptor — the static
       // write effect is already on the ledger, so the plugin cannot hide its write.
-      (wrapped.triggerConversation as (s: unknown) => unknown)(throwingField("source"));
+      (wrapped.triggerConversation as (s: unknown) => unknown)(
+        throwingField("source"),
+      );
     });
     expect(ledger.summary().hasMutatingEffect).toBe(true); // a plugin cannot hide its own write
   });
@@ -345,6 +368,8 @@ describe("instrumentEffectsByPath — non-plain namespace is left UNINSTRUMENTED
     // Only the instrumented top-level method recorded; the non-plain namespace's
     // method left no effect — exactly why the completeness test rejects such a
     // namespace so it can never ship.
-    expect(effects).toEqual([{ kind: "getInstalledPluginIds", effect: "read", target: undefined }]);
+    expect(effects).toEqual([
+      { kind: "getInstalledPluginIds", effect: "read", target: undefined },
+    ]);
   });
 });

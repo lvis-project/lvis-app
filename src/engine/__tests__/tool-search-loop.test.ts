@@ -14,10 +14,11 @@
  */
 import { describe, it, expect, vi } from "vitest";
 
-import { KeywordEngine } from "../../core/keyword-engine.js";
+import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams,
+} from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../tools/registry.js";
@@ -68,45 +69,55 @@ function makeLoop(opts: {
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   // tool_search builtin (statically registered; visible with builtins).
-  toolRegistry.register(createDynamicTool({
-    name: TOOL_SEARCH_TOOL_NAME,
-    description: "도구 검색",
-    source: "builtin",
-    category: "read",
-    isReadOnly: () => true,
-    jsonSchema: { type: "object", required: ["query"], properties: { query: { type: "string" } } },
-    execute: async () => ({ output: "unreachable", isError: false }),
-  }));
-  toolRegistry.register(readonlyPluginTool("meeting_start", "com.example.meeting"));
-  toolRegistry.register(readonlyPluginTool("meeting_stop", "com.example.meeting"));
+  toolRegistry.register(
+    createDynamicTool({
+      name: TOOL_SEARCH_TOOL_NAME,
+      description: "도구 검색",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: {
+        type: "object",
+        required: ["query"],
+        properties: { query: { type: "string" } },
+      },
+      execute: async () => ({ output: "unreachable", isError: false }),
+    }),
+  );
+  toolRegistry.register(
+    readonlyPluginTool("meeting_start", "com.example.meeting"),
+  );
+  toolRegistry.register(
+    readonlyPluginTool("meeting_stop", "com.example.meeting"),
+  );
   toolRegistry.register(readonlyPluginTool("email_list", "com.example.email"));
-  toolRegistry.register(readonlyPluginTool("msgraph_email_list", "com.example.msgraph"));
-  toolRegistry.register(createDynamicTool({
-    name: "mcp_fetch",
-    description: "MCP fetch",
-    source: "mcp",
-    category: "read",
-    mcpServerId: "browser",
-    jsonSchema: { type: "object", properties: {} },
-    execute: async () => ({ output: "mcp", isError: false }),
-  }));
+  toolRegistry.register(
+    readonlyPluginTool("msgraph_email_list", "com.example.msgraph"),
+  );
+  toolRegistry.register(
+    createDynamicTool({
+      name: "mcp_fetch",
+      description: "MCP fetch",
+      source: "mcp",
+      category: "read",
+      mcpServerId: "browser",
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: "mcp", isError: false }),
+    }),
+  );
   // Synthetic extra meeting tools — used by the ceiling test to push the
   // eligible count past EAGER_TOOL_EXPOSURE_CEILING.
   for (let i = 0; i < (opts.extraMeetingTools ?? 0); i += 1) {
-    toolRegistry.register(readonlyPluginTool(`meeting_extra_${i}`, "com.example.meeting"));
+    toolRegistry.register(
+      readonlyPluginTool(`meeting_extra_${i}`, "com.example.meeting"),
+    );
   }
 
-  const keywordEngine = new KeywordEngine();
-  // "회의" keyword → plugin scope (meeting) AND tool preload (meeting_start).
-  keywordEngine.registerKeywords([
-    { keyword: "회의", skillId: "meeting_start", pluginId: "com.example.meeting" },
-    { keyword: "메일", skillId: "email_list", pluginId: "com.example.email" },
-    { keyword: "msgraph", skillId: "msgraph_email_list", pluginId: "com.example.msgraph" },
-  ]);
-  const routeEngine = new RouteEngine({ toolRegistry });
+  const inputClassifier = new InputClassifier();
+  const routeEngine = new RouteEngine();
   const inactive = opts.inactivePluginIds ?? new Set<string>();
 
-  const loop = new ConversationLoop(({
+  const loop = new ConversationLoop({
     settingsService: {
       get: (key: string) => (key === "experimental" ? {} : fakeLlmSettings()),
       getSecret: () => "test-key",
@@ -115,7 +126,7 @@ function makeLoop(opts: {
       build: () => "system",
       setToolScope: () => {},
     },
-    keywordEngine,
+    inputClassifier,
     routeEngine,
     toolRegistry,
     memoryManager: {
@@ -123,13 +134,21 @@ function makeLoop(opts: {
       listSessions: () => [],
     },
     pluginRuntime: {
-      listPluginIds: () => ["com.example.meeting", "com.example.email", "com.example.msgraph"],
+      listPluginIds: () => [
+        "com.example.meeting",
+        "com.example.email",
+        "com.example.msgraph",
+      ],
       isPluginEnabled: (pluginId: string) => !inactive.has(pluginId),
     },
+    // Active plugin scope is host-selected. Natural-language keywords do not
+    // activate plugins or preload Tool schemas.
+    forcedActivePluginIds: ["com.example.meeting"],
     headless: opts.headless,
     ...(opts.auditLogger ? { auditLogger: opts.auditLogger } : {}),
-  } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
-  (loop as unknown as { provider: LLMProvider | null }).provider = opts.provider;
+  } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+  (loop as unknown as { provider: LLMProvider | null }).provider =
+    opts.provider;
   return loop;
 }
 
@@ -148,7 +167,9 @@ describe("ConversationLoop — eager active-plugin tool exposure (#1176)", () =>
       ],
     ]);
     const loop = makeLoop({ provider });
-    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
     expect(result.text).toBe("완료");
 
     // Round 0: the full meeting suite is loaded up front (both tools), so the
@@ -161,7 +182,9 @@ describe("ConversationLoop — eager active-plugin tool exposure (#1176)", () =>
     const searchCalls = loop
       .getHistory()
       .getMessages()
-      .filter((m) => m.role === "tool_result" && m.toolName === TOOL_SEARCH_TOOL_NAME);
+      .filter(
+        (m) => m.role === "tool_result" && m.toolName === TOOL_SEARCH_TOOL_NAME,
+      );
     expect(searchCalls).toHaveLength(0);
   });
 
@@ -180,7 +203,9 @@ describe("ConversationLoop — eager active-plugin tool exposure (#1176)", () =>
       },
     );
     const loop = makeLoop({ provider, auditLogger });
-    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     expect(captured).toHaveLength(1);
     const exposure = captured[0];
@@ -207,7 +232,9 @@ describe("ConversationLoop — active/inactive plugin gating (#1176)", () => {
       provider,
       inactivePluginIds: new Set(["com.example.meeting"]),
     });
-    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     // The meeting plugin is inactive → its tools are absent from the loaded
     // schema entirely (they are not deferred to a catalog — they are gone).
@@ -225,7 +252,9 @@ describe("ConversationLoop — active/inactive plugin gating (#1176)", () => {
       ],
     ]);
     const loop = makeLoop({ provider }); // active
-    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
     expect(provider.observedToolNames[0]).toContain("meeting_start");
     expect(provider.observedToolNames[0]).toContain("meeting_stop");
   });
@@ -241,14 +270,20 @@ describe("ConversationLoop — active/inactive plugin gating (#1176)", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const loop = makeLoop({ provider });
-    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const inactivePluginIds = new Set<string>();
+    const loop = makeLoop({ provider, inactivePluginIds });
+    await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
     expect(provider.observedToolNames[0]).toContain("meeting_start");
 
     // Simulate the disable hook firing — the carried-forward meeting scope is
-    // pruned so a follow-up non-keyword turn no longer revives meeting tools.
+    // pruned so a follow-up turn no longer revives meeting tools.
+    inactivePluginIds.add("com.example.meeting");
     loop.onPluginDisabled("com.example.meeting");
-    await loop.runTurn("계속 진행해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("계속 진행해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
     expect(provider.observedToolNames[1]).not.toContain("meeting_start");
     expect(provider.observedToolNames[1]).not.toContain("meeting_stop");
   });
@@ -258,13 +293,18 @@ describe("ConversationLoop — deferral ceiling (#1176)", () => {
   it("falls back to deferral at/above the eligible-tool ceiling", async () => {
     // meeting suite base = 2 (meeting_start + meeting_stop). Add enough extra
     // meeting tools to cross EAGER_TOOL_EXPOSURE_CEILING. With deferral on, the
-    // non-keyword-preloaded meeting tools must be deferred (catalog), so the
-    // model needs tool_search to reach meeting_stop.
+    // Meeting tools must be deferred into the catalog, so the model needs
+    // tool_search to reach meeting_stop.
     // Headless excludes MCP so the eligible count is exactly the meeting suite.
     const extra = EAGER_TOOL_EXPOSURE_CEILING; // 2 + 200 = 202 eligible >= 200
     const provider = new RecordingProvider([
       [
-        { type: "tool_call", id: "tu-1", name: TOOL_SEARCH_TOOL_NAME, input: { query: "meeting_stop" } },
+        {
+          type: "tool_call",
+          id: "tu-1",
+          name: TOOL_SEARCH_TOOL_NAME,
+          input: { query: "meeting_stop" },
+        },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
@@ -276,13 +316,18 @@ describe("ConversationLoop — deferral ceiling (#1176)", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const loop = makeLoop({ provider, extraMeetingTools: extra, headless: true });
-    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const loop = makeLoop({
+      provider,
+      extraMeetingTools: extra,
+      headless: true,
+    });
+    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
     expect(result.text).toBe("완료");
 
-    // Deferral on: only the keyword-preloaded meeting_start loads up front;
-    // meeting_stop is deferred until tool_search promotes it.
-    expect(provider.observedToolNames[0]).toContain("meeting_start");
+    // Deferral on: plugin Tool schemas are discovered through tool_search.
+    expect(provider.observedToolNames[0]).not.toContain("meeting_start");
     expect(provider.observedToolNames[0]).not.toContain("meeting_stop");
     expect(provider.observedToolNames[0]).toContain(TOOL_SEARCH_TOOL_NAME);
     // After tool_search the next round sees meeting_stop.
@@ -305,8 +350,14 @@ describe("ConversationLoop — deferral ceiling (#1176)", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const loop = makeLoop({ provider, extraMeetingTools: extra, headless: true });
-    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const loop = makeLoop({
+      provider,
+      extraMeetingTools: extra,
+      headless: true,
+    });
+    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
     expect(result.text).toBe("완료");
 
     // Eager (eligible = ceiling - 1 < ceiling): meeting_stop loaded directly,
@@ -316,7 +367,9 @@ describe("ConversationLoop — deferral ceiling (#1176)", () => {
     const searchCalls = loop
       .getHistory()
       .getMessages()
-      .filter((m) => m.role === "tool_result" && m.toolName === TOOL_SEARCH_TOOL_NAME);
+      .filter(
+        (m) => m.role === "tool_result" && m.toolName === TOOL_SEARCH_TOOL_NAME,
+      );
     expect(searchCalls).toHaveLength(0);
   });
 
@@ -330,11 +383,17 @@ describe("ConversationLoop — deferral ceiling (#1176)", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const loop = makeLoop({ provider, extraMeetingTools: extra, headless: true });
-    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const loop = makeLoop({
+      provider,
+      extraMeetingTools: extra,
+      headless: true,
+    });
+    await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
-    // Deferral on at exactly the ceiling: meeting_stop is deferred (not loaded).
-    expect(provider.observedToolNames[0]).toContain("meeting_start");
+    // Deferral on at exactly the ceiling: plugin Tools are not loaded yet.
+    expect(provider.observedToolNames[0]).not.toContain("meeting_start");
     expect(provider.observedToolNames[0]).not.toContain("meeting_stop");
     expect(provider.observedToolNames[0]).toContain(TOOL_SEARCH_TOOL_NAME);
   });
@@ -349,7 +408,9 @@ describe("ConversationLoop — headless MCP scope (#1176 eager)", () => {
       ],
     ]);
     const loop = makeLoop({ provider, headless: true });
-    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
 
     expect(result.text).toBe("no mcp");
     // Headless excludes MCP entirely; meeting suite is eager.

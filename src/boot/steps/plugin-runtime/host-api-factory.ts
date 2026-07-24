@@ -57,7 +57,6 @@ import type {
 } from "../../../plugins/types.js";
 import type { SettingsService } from "../../../data/settings-store.js";
 import type { RoutinesStore } from "../../../main/routines-store.js";
-import type { KeywordEngine } from "../../../core/keyword-engine.js";
 import { emitEvent, onEvent } from "../../types.js";
 import { t } from "../../../i18n/index.js";
 import { createLogger } from "../../../lib/logger.js";
@@ -151,7 +150,6 @@ export interface CreateHostApiFactoryDeps {
     pluginId: string,
   ) => Pick<PluginRegistryEntry, "installSource" | "manifestSha256"> | undefined;
   hostClassifiesRiskEnabled: () => boolean;
-  keywordEngine: KeywordEngine;
   pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }>;
   readAppPreference: (pluginId: string, key: string) => unknown;
   settingsService: SettingsService;
@@ -198,7 +196,6 @@ export function createHostApiFactory(
     lateBinding,
     getRegistryEntry,
     hostClassifiesRiskEnabled,
-    keywordEngine,
     pluginShutdownHandlers,
     readAppPreference,
     settingsService,
@@ -475,31 +472,6 @@ export function createHostApiFactory(
           // Auto-cleanup on plugin disable to mirror onEvent semantics.
           return registerOwnedDisposer(unsubscribe);
         },
-      },
-      registerKeywords: (keywords) => {
-        // #1176 M3: inactive plugins must not register keywords at start() time.
-        // onActiveStateChange(true) re-registers them if the plugin is later
-        // activated without a runtime restart.
-        if (!pluginRuntime.isPluginEnabled(pluginId)) {
-          log.debug(`plugin:${pluginId} skipping keyword registration — plugin inactive`);
-          return;
-        }
-        if (hostEffects) {
-          const generationToken = hostEffects.token;
-          const prepared = keywords.map((keyword) => ({ ...keyword }));
-          const publication = keywordEngine.preparePluginGeneration(
-            pluginId,
-            generationToken,
-            prepared,
-          );
-          hostEffects.stagePublish(publication.publish);
-          hostEffects.onSupersede(() => {
-            keywordEngine.removePluginGeneration(pluginId, generationToken);
-          });
-        } else {
-          keywordEngine.registerKeywords(keywords.map((k) => ({ ...k, pluginId })));
-        }
-        log.info(`plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
         plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
