@@ -373,6 +373,8 @@ export async function wireConversation(
       bashAstValidator,
       hookRunner,
       scriptHookManager,
+      pluginOperationGrants,
+      pluginOperationIdentityProvider,
       auditLogger: bootAuditLogger,
       getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
       ...(conversationLoop.deps?.isDefaultProjectRoot

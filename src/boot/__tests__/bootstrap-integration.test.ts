@@ -644,6 +644,8 @@ describe("bootstrap() integration lock", () => {
     const mainDeps = h.captured["mainConversationDeps"] as {
       rationaleCoordinatorFactory?: unknown;
       closeRationaleSession?: unknown;
+      pluginOperationGrants?: unknown;
+      pluginOperationIdentityProvider?: unknown;
     };
     const sideDeps = h.captured["sideConversationDeps"] as {
       rationaleCoordinatorFactory?: unknown;
@@ -673,5 +675,11 @@ describe("bootstrap() integration lock", () => {
       subAgentOptions.parentDeps["rationaleCoordinatorFactory"],
     ).toBeUndefined();
     expect(subAgentOptions.parentDeps["closeRationaleSession"]).toBeUndefined();
+    expect(subAgentOptions.parentDeps["pluginOperationGrants"]).toBe(
+      mainDeps["pluginOperationGrants"],
+    );
+    expect(subAgentOptions.parentDeps["pluginOperationIdentityProvider"]).toBe(
+      mainDeps["pluginOperationIdentityProvider"],
+    );
   });
 });
