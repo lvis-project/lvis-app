@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginRuntime } from "../runtime.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import { PluginPhase } from "../lifecycle-log.js";
 import { mkdtempSync } from "node:fs";
 import { compileLegacyToolSurface } from "./test-helpers.js";
@@ -79,7 +79,8 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
 
   it("B-1: AJV rejects manifests with malformed version", async () => {
     await writePlugin("p-ajv-version", { tools: ["pav_hello", "pav_delete"], version: "1.0" });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const ctxArgs: unknown[] = [];
     const origErr = console.error;
     console.error = (_msg: string, ctx?: unknown) => { if (ctx) ctxArgs.push(ctx); };
@@ -94,7 +95,8 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
 
   it("B-1: AJV rejects manifests with description > 280 chars", async () => {
     await writePlugin("p-ajv-desc", { tools: ["pad_hello", "pad_delete"], description: "x".repeat(300) });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const origErr = console.error;
     const errors: string[] = [];
     console.error = (msg: string) => errors.push(String(msg));
@@ -108,7 +110,8 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
 
   it("B-3: uiActions not in tools[] is accepted as UI-only runtime method", async () => {
     await writePlugin("p-ui-missing", { tools: ["pum_hello", "pum_delete"], uiActions: { p_ui_missing_ghost: {} } });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const origErr = console.error;
     const ctxArgs: unknown[] = [];
     console.error = (_msg: string, ctx?: unknown) => { if (ctx) ctxArgs.push(ctx); };
@@ -127,14 +130,16 @@ describe("Sprint 4-B — AJV + uiActions + destructive guards", () => {
       uiActions: { pd_delete: {} },
       installPolicy: "user",
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("p-destructive");
   });
 
   it("B-3: read-like uiActions tool is permitted", async () => {
     await writePlugin("p-ok", { tools: ["pok_get", "pok_delete"], uiActions: { pok_get: {} }, installPolicy: "user" });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = new PluginRuntime({
+      createHostApi: createNoopHostApiForTests, hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("p-ok");
   });

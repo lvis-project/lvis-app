@@ -82,7 +82,11 @@ async function setup() {
     },
     pluginRuntime: {
       resolvePluginId: vi.fn((pluginId: string) => pluginId),
+      resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
+      resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
+      cancelPendingRestart: vi.fn(),
       clearConfigOverride: vi.fn(),
+      getConfigOverride: vi.fn(() => undefined),
       addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
       waitForPluginReady: vi.fn(async () => undefined),
       removePlugin: vi.fn(async () => undefined),
@@ -206,7 +210,9 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await expect(invoke("lvis:plugins:install", "lvis-plugin-meeting")).rejects.toThrow("restart failed");
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("meeting");
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("meeting", {
+      preserveConfigOverride: true,
+    });
     expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("meeting");
     expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("meeting");
     for (const win of appWindows) {
@@ -316,7 +322,9 @@ describe("plugins IPC lifecycle broadcast", () => {
     await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("prepare failed");
 
     expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("agent-hub");
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub", {
+      preserveConfigOverride: true,
+    });
     expect(deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0]).toBeLessThan(
       deps.pluginMarketplace.install.mock.invocationCallOrder[0],
     );
@@ -364,7 +372,9 @@ describe("plugins IPC lifecycle broadcast", () => {
     await invoke("lvis:plugins:uninstall", "agent-hub");
 
     expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("agent-hub");
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub", {
+      preserveConfigOverride: true,
+    });
     expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledWith("agent-hub");
     expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledWith("agent-hub", new Set(["apiKey", "sttApiKey"]));
     expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:agent-hub");
@@ -380,7 +390,9 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up catalog grant mismatch diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
-    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstalledVersion
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",
@@ -424,7 +436,9 @@ describe("plugins IPC lifecycle broadcast", () => {
 
   it("cleans up manifest validation diagnostics without bypassing general admin uninstall policy", async () => {
     const { deps, appWindows } = await setup();
-    deps.pluginMarketplace.getInstalledVersion.mockResolvedValueOnce(null);
+    deps.pluginMarketplace.getInstalledVersion
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
     deps.pluginMarketplace.getInstallFailureDiagnostics.mockReturnValueOnce([
       {
         id: "meeting",
@@ -536,7 +550,9 @@ describe("plugins IPC lifecycle broadcast", () => {
 
     await expect(invoke("lvis:plugins:uninstall", "agent-hub")).rejects.toThrow("EACCES");
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub", {
+      preserveConfigOverride: true,
+    });
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",
@@ -571,7 +587,9 @@ describe("plugins IPC lifecycle broadcast", () => {
       uninstalled: true,
     });
 
-    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub", {
+      preserveConfigOverride: true,
+    });
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:uninstall-result",
@@ -666,6 +684,9 @@ describe("plugins IPC lifecycle broadcast", () => {
         installLocal: vi.fn(async () => ({ pluginId: "local-plugin", installed: true })),
       },
       pluginRuntime: {
+        resolvePluginId: vi.fn((pluginId: string) => pluginId),
+        resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
+        cancelPendingRestart: vi.fn(),
         addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
         waitForPluginReady: vi.fn(async () => undefined),
         removePlugin: vi.fn(async () => undefined),

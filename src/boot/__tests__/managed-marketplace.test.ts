@@ -6,6 +6,7 @@ import {
 } from "../managed-marketplace.js";
 import type { PluginMarketplaceService } from "../../plugins/marketplace.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
+import { withPluginInstallLock } from "../../plugins/install-lifecycle.js";
 
 describe("resolveManagedPluginBootstrap", () => {
   it("disables network-managed bootstrap in isolated E2E test mode", () => {
@@ -50,7 +51,11 @@ describe("runManagedBootstrap concurrency", () => {
     );
     const restartAll = vi.fn(async () => undefined);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const pluginRuntime = { restartAll } as unknown as PluginRuntime;
+    const cancelAllPendingRestarts = vi.fn();
+    const pluginRuntime = {
+      restartAll,
+      cancelAllPendingRestarts,
+    } as unknown as PluginRuntime;
 
     const input = {
       pluginMarketplace,
@@ -77,6 +82,9 @@ describe("runManagedBootstrap concurrency", () => {
 
     expect(ensureManagedInstalled).toHaveBeenCalledTimes(1);
     expect(restartAll).toHaveBeenCalledTimes(1);
+    expect(cancelAllPendingRestarts).toHaveBeenCalledTimes(1);
+    expect(cancelAllPendingRestarts.mock.invocationCallOrder[0])
+      .toBeLessThan(ensureManagedInstalled.mock.invocationCallOrder[0]);
   });
 
   it("triggers a single restartAll when a managed plugin was auto-updated (nothing freshly installed)", async () => {
@@ -84,7 +92,10 @@ describe("runManagedBootstrap concurrency", () => {
     const ensureManagedInstalled = vi.fn(async () => ensureResult);
     const restartAll = vi.fn(async () => undefined);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const pluginRuntime = { restartAll } as unknown as PluginRuntime;
+    const pluginRuntime = {
+      restartAll,
+      cancelAllPendingRestarts: vi.fn(),
+    } as unknown as PluginRuntime;
 
     await runManagedBootstrap({
       pluginMarketplace,
@@ -104,7 +115,10 @@ describe("runManagedBootstrap concurrency", () => {
     const ensureResult = { installed: [], failed: [] };
     const ensureManagedInstalled = vi.fn(async () => ensureResult);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const pluginRuntime = { restartAll: vi.fn() } as unknown as PluginRuntime;
+    const pluginRuntime = {
+      restartAll: vi.fn(),
+      cancelAllPendingRestarts: vi.fn(),
+    } as unknown as PluginRuntime;
 
     const input = {
       pluginMarketplace,
@@ -119,5 +133,39 @@ describe("runManagedBootstrap concurrency", () => {
     await runManagedBootstrap(input);
     await runManagedBootstrap(input);
     expect(ensureManagedInstalled).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels pending per-plugin work before the managed all-plugin lock queues", async () => {
+    let releaseRestart!: () => void;
+    let restartEntered!: () => void;
+    const restartGate = new Promise<void>((resolve) => { releaseRestart = resolve; });
+    const restartStarted = new Promise<void>((resolve) => { restartEntered = resolve; });
+    const restart = withPluginInstallLock("managed-plugin", async () => {
+      restartEntered();
+      await restartGate;
+    });
+    await restartStarted;
+
+    const ensureManagedInstalled = vi.fn(async () => ({
+      installed: [],
+      updated: [],
+      failed: [],
+    }));
+    const pluginRuntime = {
+      cancelAllPendingRestarts: vi.fn(() => releaseRestart()),
+      restartAll: vi.fn(),
+    } as unknown as PluginRuntime;
+
+    await expect(runManagedBootstrap({
+      pluginMarketplace: { ensureManagedInstalled } as unknown as PluginMarketplaceService,
+      pluginRuntime,
+      mainWindow: null,
+      marketplace: {
+        backend: "real-cloud",
+        cloudBaseUrl: "https://marketplace.example.com",
+      },
+    })).resolves.toBeUndefined();
+    await restart;
+    expect(ensureManagedInstalled).toHaveBeenCalledTimes(1);
   });
 });

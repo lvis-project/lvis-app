@@ -90,6 +90,17 @@ import type { LateBindingRefs } from "../plugin-runtime.js";
 
 const log = createLogger("lvis");
 
+function assertActiveHostApi(
+  pluginId: string,
+  incarnation: PluginHostApiIncarnation,
+  memberPath: string,
+): void {
+  if (incarnation.isActive()) return;
+  throw new Error(
+    `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
+  );
+}
+
 /** Revoke every callable surface of an obsolete HostApi incarnation. */
 function enforceActiveHostApi(
   pluginId: string,
@@ -106,11 +117,7 @@ function enforceActiveHostApi(
         const memberPath = `${path}.${String(property)}`;
         if (typeof value === "function") {
           return (...args: unknown[]) => {
-            if (!incarnation.isActive()) {
-              throw new Error(
-                `[plugin:${pluginId}] ${memberPath}: plugin instance is no longer active`,
-              );
-            }
+            assertActiveHostApi(pluginId, incarnation, memberPath);
             const result = Reflect.apply(value, currentTarget, args) as unknown;
             if (
               memberPath !== "hostApi.config.set"
@@ -215,6 +222,9 @@ export function createHostApiFactory(
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
+    const installPluginId = pluginRuntime.resolvePluginInstallId(pluginId);
+    const getCurrentRegistryEntry = () =>
+      installPluginId === null ? undefined : getRegistryEntry(installPluginId);
     const hostIncarnation = incarnation;
     const assertIssuedCapabilityActive = (memberPath: string): void => {
       if (!hostIncarnation.isActive()) {
@@ -357,16 +367,16 @@ export function createHostApiFactory(
           });
           return merged[key] as T | undefined;
         },
-        set: async <T = unknown>(key: string, value: T): Promise<void> => {
+        set: <T = unknown>(key: string, value: T): Promise<void> => {
           const schemaProp = manifest.configSchema?.properties?.[key];
           if (schemaProp?.type === "string" && schemaProp.format === "secret") {
-            throw new Error(
+            return Promise.reject(new Error(
               `[plugin:${pluginId}] config.set('${key}'): secret fields must be saved via hostApi.setSecret(), not config.set().`,
-            );
+            ));
           }
           const nestedLifecycleMutation =
             isPluginInstallLockHeld(pluginId) || hostIncarnation.isLifecycleHookActive();
-          await hostIncarnation.trackOperation(withPluginInstallLock(pluginId, async () => {
+          const persistence = withPluginInstallLock(pluginId, async () => {
             // The HostApi object belongs to this exact manifest incarnation.
             // A queued write from a stopped/uninstalled instance must not
             // recreate persisted config for a removed or reinstalled plugin.
@@ -389,25 +399,37 @@ export function createHostApiFactory(
             // for the reload.
             pluginRuntime.setConfigOverride(pluginId, nextRecord);
             emitPluginConfigChange(pluginId, key, value);
-          }));
-          // Lifecycle hooks inherit the owning mutation context. Persist their
-          // write, but never recursively restart the instance whose start/stop
-          // Promise is currently being awaited. A config-triggered replacement
-          // is likewise already the pending restart for this plugin.
-          if (nestedLifecycleMutation || pluginRuntime.isPluginRestartPending?.(pluginId)) return;
-          try {
-            const restartResult = await pluginRuntime.restartPlugin(
-              pluginId,
-              { skipPreparation: true },
-            );
-            if (restartResult !== "started") {
-              throw new Error(`runtime reload returned ${restartResult ?? "not-loaded"}`);
+          });
+          // Return the tracked chain directly. Crossing an async/await wrapper
+          // here would transfer a detached rejection to an untracked native
+          // Promise and let the owning lifecycle mutation resolve early.
+          const operation = persistence.then(async () => {
+            // Lifecycle hooks inherit the owning mutation context. Persist
+            // their write, but never recursively restart the instance whose
+            // start/stop Promise is currently being awaited.
+            if (
+              nestedLifecycleMutation
+              || pluginRuntime.isPluginRestartPending?.(pluginId)
+            ) {
+              return;
             }
-          } catch (err) {
-            throw new Error(
-              `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
-            );
-          }
+            try {
+              const restartResult = await pluginRuntime.restartPlugin(
+                pluginId,
+                { skipPreparation: true },
+              );
+              if (restartResult !== "started") {
+                throw new Error(
+                  `runtime reload returned ${restartResult ?? "not-loaded"}`,
+                );
+              }
+            } catch (err) {
+              throw new Error(
+                `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
+              );
+            }
+          });
+          return hostIncarnation.trackOperation(operation);
         },
         onChange: <T = unknown>(
           key: string,
@@ -521,7 +543,7 @@ export function createHostApiFactory(
               registryInstallSource?: "admin" | "user" | "local-dev";
               registryManifestSha256?: string;
             } => {
-              const entry = getRegistryEntry(pluginId);
+              const entry = getCurrentRegistryEntry();
               return {
                 ...(entry?.installSource !== undefined ? { registryInstallSource: entry.installSource } : {}),
                 ...(entry?.manifestSha256 !== undefined ? { registryManifestSha256: entry.manifestSha256 } : {}),
@@ -649,7 +671,7 @@ export function createHostApiFactory(
           // the plugin's writable surface so a malicious post-install
           // patch could flip `installPolicy:"admin"` and inherit Tier-3
           // bypass if manifest-only metadata were trusted here.
-          const registryEntry = getRegistryEntry(pluginId);
+          const registryEntry = getCurrentRegistryEntry();
           const registryInstallSource = registryEntry?.installSource;
           const effectiveInstallPolicy: "admin" | "user" =
             registryInstallSource === "admin" ? "admin" : "user";
@@ -824,11 +846,10 @@ export function createHostApiFactory(
         // AFTER the capability + SSRF gates so only an egress that would actually
         // happen can prompt. Origin-only target (no path/query that can carry tokens).
         //
-        // Flag-OFF short-circuit BEFORE the await: when `hostClassifiesRisk` is
-        // OFF (disabled/unset; the shipped default is ON) the gate is skipped
-        // entirely — not even an awaited
-        // already-resolved Promise (one microtask tick) — so the flag-OFF egress
-        // path is byte-for-byte today's behaviour with ZERO extra work.
+        // Flag-OFF short-circuit BEFORE the approval await: when
+        // `hostClassifiesRisk` is OFF, the gate is skipped entirely. The
+        // synchronous incarnation recheck remains mandatory because upstream
+        // capability/SSRF validation can itself cross async boundaries.
         if (hostClassifiesRiskEnabled()) {
           await gateMutatingEffect({
             pluginId,
@@ -839,6 +860,7 @@ export function createHostApiFactory(
             flagEnabled: hostClassifiesRiskEnabled,
           });
         }
+        assertActiveHostApi(pluginId, hostIncarnation, "hostApi.hostFetch");
         // The host-observed effect for this egress was recorded above from the
         // SAME verb snapshot that drives `decision` and pins the wire below, so
         // the recorded effect == decision.effect == the wire verb (no divergence).
@@ -1314,7 +1336,13 @@ export function createHostApiFactory(
         return routinesStore.list().some((r) => r.source === source);
       },
         }),
-        { pluginId, approvalGate, flagEnabled: hostClassifiesRiskEnabled },
+        {
+          pluginId,
+          approvalGate,
+          flagEnabled: hostClassifiesRiskEnabled,
+          assertActive: () =>
+            assertActiveHostApi(pluginId, hostIncarnation, "hostApi.approvedEffect"),
+        },
       ));
   };
 }
