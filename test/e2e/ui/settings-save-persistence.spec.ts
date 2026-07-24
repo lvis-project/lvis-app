@@ -71,3 +71,34 @@ test('immediate-apply toggle persists privacy redaction without explicit Save', 
   ).toHaveAttribute('aria-checked', 'true');
   await closeSettingsWindow(app, reopenedSettingsWindow);
 });
+
+
+test('inline close flushes a pending immediate-apply setting', async ({
+  app,
+  mainWindow,
+  t,
+}) => {
+  const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
+  const redactToggle = settingsWindow.getByRole('checkbox', {
+    name: t('privacyTab.piiRedactToggleLabel'),
+  });
+
+  await expect(redactToggle).toBeVisible({ timeout: 10_000 });
+  const nextState = (await redactToggle.getAttribute('aria-checked')) === 'true'
+    ? 'false'
+    : 'true';
+  await redactToggle.click();
+  await expect(redactToggle).toHaveAttribute('aria-checked', nextState);
+
+  // Do not wait for the 200ms debounce: the inline close path must flush it
+  // before unmount cleanup can cancel the pending timer.
+  await closeSettingsWindow(app, settingsWindow);
+
+  const reopenedSettingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
+  await expect(
+    reopenedSettingsWindow.getByRole('checkbox', {
+      name: t('privacyTab.piiRedactToggleLabel'),
+    }),
+  ).toHaveAttribute('aria-checked', nextState);
+  await closeSettingsWindow(app, reopenedSettingsWindow);
+});

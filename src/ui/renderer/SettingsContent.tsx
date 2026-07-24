@@ -179,6 +179,16 @@ export function SettingsContent({
   const chatSave = useDebouncedSave(() => void s.save("chat"));
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
+  const flushPendingSaves = useCallback(() => {
+    llmSave.flush();
+    chatSave.flush();
+    webSave.flush();
+    marketplaceSave.flush();
+  }, [llmSave, chatSave, webSave, marketplaceSave]);
+  const handleClose = useCallback(() => {
+    flushPendingSaves();
+    onClose?.();
+  }, [flushPendingSaves, onClose]);
   const openMarketplaceTab = useCallback((filter: MarketplacePackageFilter = "all") => {
     setMarketplaceFilter(filter);
     setTab("marketplace");
@@ -201,19 +211,13 @@ export function SettingsContent({
   // cleanup also fires `cancel()`, so the pre-conversion Dialog
   // `open=false` cancel-effect was retired — see PR #890 review.)
   useEffect(() => {
-    const flushAll = () => {
-      llmSave.flush();
-      chatSave.flush();
-      webSave.flush();
-      marketplaceSave.flush();
-    };
-    window.addEventListener("beforeunload", flushAll);
-    window.addEventListener("pagehide", flushAll);
+    window.addEventListener("beforeunload", flushPendingSaves);
+    window.addEventListener("pagehide", flushPendingSaves);
     return () => {
-      window.removeEventListener("beforeunload", flushAll);
-      window.removeEventListener("pagehide", flushAll);
+      window.removeEventListener("beforeunload", flushPendingSaves);
+      window.removeEventListener("pagehide", flushPendingSaves);
     };
-  }, [llmSave, chatSave, webSave, marketplaceSave]);
+  }, [flushPendingSaves]);
 
   // Reset tab + clear stale error banner whenever a new `initialTab` arrives
   // (mount or IPC-driven tab change). Depending on the whole `s` orchestration
@@ -381,7 +385,7 @@ export function SettingsContent({
             type="button"
             variant="ghost"
             size="icon"
-            onClick={onClose}
+            onClick={handleClose}
             aria-label={t("settingsContent.closeButton")}
             data-testid="settings-close"
             className="size-8 shrink-0"
@@ -495,6 +499,19 @@ export function SettingsContent({
             <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />
             {t("settingsContent.sidebarHeading")}
           </button>
+          {onClose ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleClose}
+              aria-label={t("settingsContent.closeButton")}
+              data-testid="settings-mobile-close"
+              className="ml-auto size-8 shrink-0"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
       )}
       <div ref={rightPaneRef} className="flex min-w-0 flex-1 min-h-0 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] px-4 pt-2 pb-12 scroll-pb-12 sm:px-8 lvis-settings-scroll">
