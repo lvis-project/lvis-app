@@ -179,6 +179,9 @@ export class PluginOperationGrantCoordinator {
     this.assertPrincipalNotRevoked(key);
     this.trimSnapshots();
     const domain = this.requireDomain(domainKey, key);
+    if (domain.poisoned) {
+      throw new Error("plugin operation domain is indeterminate");
+    }
     const revision = randomUUID();
     const keyString = snapshotKey(key);
     const sequence = ++this.nextReadSequence;
@@ -202,7 +205,10 @@ export class PluginOperationGrantCoordinator {
    */
   beginRead(key: PluginReadSnapshotKey, domainKey: string): void {
     this.assertPrincipalNotRevoked(key);
-    this.requireDomain(domainKey, key);
+    const domain = this.requireDomain(domainKey, key);
+    if (domain.poisoned) {
+      throw new Error("plugin operation domain is indeterminate");
+    }
     const keyString = snapshotKey(key);
     this.snapshots.delete(keyString);
     this.latestReadSequences.set(keyString, ++this.nextReadSequence);
@@ -253,6 +259,9 @@ export class PluginOperationGrantCoordinator {
     this.assertPrincipalNotRevoked(binding);
     this.collectExpired();
     const domain = this.requireDomain(domainKey, binding);
+    if (domain.poisoned) {
+      throw new Error("plugin operation domain is indeterminate");
+    }
     let reservedRead: ReservedReadSnapshot | undefined;
     if (binding.readRevision === null) {
       if (requiredRead) {
@@ -325,9 +334,23 @@ export class PluginOperationGrantCoordinator {
         grantId: stored.id,
       };
     }
+    const currentDomain = this.domainRevisions.get(domainKey);
+    if (!currentDomain || currentDomain.revoked) {
+      return {
+        ok: false,
+        reason: "operation grant domain is revoked",
+        grantId: stored.id,
+      };
+    }
+    if (currentDomain.poisoned) {
+      return {
+        ok: false,
+        reason: "operation grant domain is indeterminate",
+        grantId: stored.id,
+      };
+    }
     if (binding.readRevision !== null) {
-      const domain = this.domainRevisions.get(domainKey);
-      if (!domain || stored.domainRevision !== domain.revision) {
+      if (stored.domainRevision !== currentDomain.revision) {
         return {
           ok: false,
           reason: "operation grant required read was invalidated by an intervening write",
@@ -410,8 +433,8 @@ export class PluginOperationGrantCoordinator {
    * Permanently fail closed for a domain whose state may still be changing
    * outside Host-observable effect boundaries.
    *
-   * A new read cannot clear this state. Only generation/account/session
-   * retirement can replace the domain identity, so detached or delayed work
+   * A new read cannot clear this state. Only generation/account retirement can
+   * replace the domain identity, so detached or delayed work
    * from an effect-capable post hook can never race a newly minted write grant.
    */
   poisonDomain(domainKey: string): void {
@@ -434,7 +457,10 @@ export class PluginOperationGrantCoordinator {
     }
     try {
       this.assertPrincipalNotRevoked(principal);
-      this.requireDomain(domainKey, principal);
+      const domain = this.requireDomain(domainKey, principal);
+      if (domain.poisoned) {
+        throw new Error("plugin operation domain is indeterminate");
+      }
     } catch (error) {
       return Promise.reject(error);
     }
@@ -531,6 +557,7 @@ export class PluginOperationGrantCoordinator {
     const domain = this.domainRevisions.get(domainKey);
     return domain !== undefined &&
       !domain.revoked &&
+      !domain.poisoned &&
       domain.ownerPluginId === principal.ownerPluginId &&
       domain.generationId === principal.generationId &&
       domain.accountHash === principal.accountHash;
@@ -594,6 +621,9 @@ export class PluginOperationGrantCoordinator {
     const domain = this.domainRevisions.get(domainKey);
     if (!domain || domain.revoked) {
       throw new Error("plugin operation domain is revoked");
+    }
+    if (domain.poisoned) {
+      throw new Error("plugin operation domain is indeterminate");
     }
     if (
       domain.ownerPluginId !== principal.ownerPluginId ||
@@ -731,9 +761,11 @@ export class PluginOperationGrantCoordinator {
           ? principalRevocationReason
           : !domain || domain.revoked
             ? "plugin operation domain is revoked"
-            : request.signal?.aborted
-              ? "plugin operation execution lease aborted"
-              : undefined;
+            : domain.poisoned
+              ? "plugin operation domain is indeterminate"
+              : request.signal?.aborted
+                ? "plugin operation execution lease aborted"
+                : undefined;
       if (!invalidReason) break;
       state.queue.shift();
       if (request.signal && request.onAbort) {

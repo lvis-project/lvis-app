@@ -349,7 +349,7 @@ describe("ToolExecutor plugin operation governance", () => {
     await refresh;
     await queuedRead;
     const [staleWriteResult] = await staleWrite;
-    expect(read).toHaveBeenCalledTimes(3);
+    expect(read).toHaveBeenCalledTimes(2);
     expect(staleWriteResult.is_error).toBe(true);
     expect(write).not.toHaveBeenCalled();
     expect(() => executor.issuePluginOperationGrant({
@@ -359,7 +359,7 @@ describe("ToolExecutor plugin operation governance", () => {
     })).toThrow(/required read is missing or stale/);
   });
 
-  it("keeps a post-hook domain poisoned after a write and later hook-free reads", async () => {
+  it("rejects later reads and direct writes after a post-hook poisons the domain", async () => {
     const scriptHookManager = new ScriptHookManager();
     vi.spyOn(scriptHookManager, "runPostToolUse")
       .mockResolvedValueOnce({
@@ -388,7 +388,10 @@ describe("ToolExecutor plugin operation governance", () => {
         reason: "no matching hooks of this type",
         results: [],
       });
-    const { executor, write } = setup({ scriptHookManager });
+    const { executor, write, directWrite } = setup({
+      scriptHookManager,
+      provideModelIdentity: true,
+    });
 
     await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll(
@@ -410,18 +413,166 @@ describe("ToolExecutor plugin operation governance", () => {
     expect(writeResult.is_error).toBeFalsy();
     expect(write).toHaveBeenCalledTimes(1);
 
-    await runWithInvocationOrigin("ui", undefined, () =>
+    const [laterRead] = await runWithInvocationOrigin("ui", undefined, () =>
       executor.executeAll(
         [{ id: "r2", name: "domain_read", input: { operation: "status" } }],
         options(),
       ),
     );
+    expect(laterRead.is_error).toBe(true);
+    expect(laterRead.content).toContain("domain is indeterminate");
 
     expect(() => executor.issuePluginOperationGrant({
       toolName: "domain_write",
       input: { operation: "save", value: 1 },
       principal,
     })).toThrow(/required read is missing or stale/);
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "room-1" },
+      principal,
+    })).toThrow(/domain is indeterminate/);
+
+    const [modelWrite] = await executor.executeAll(
+      [{
+        id: "model-direct-after-poison",
+        name: "direct_write",
+        input: { operation: "reserve", target: "room-2" },
+      }],
+      {
+        sessionId: "model-session",
+        permissionContext: {
+          trustOrigin: "llm-tool-arg",
+          allowedPluginIds: new Set([principal.ownerPluginId]),
+        },
+      },
+    );
+    expect(modelWrite.is_error).toBe(true);
+    expect(modelWrite.content).toContain("domain is indeterminate");
+    expect(directWrite).not.toHaveBeenCalled();
+  });
+
+  it("holds the lease through PostToolUseFailure and rejects a queued direct write", async () => {
+    const scriptHookManager = new ScriptHookManager();
+    let signalFailureHookStarted!: () => void;
+    const failureHookStarted = new Promise<void>((resolve) => {
+      signalFailureHookStarted = resolve;
+    });
+    let releaseFailureHook!: () => void;
+    const failureHookBlocked = new Promise<void>((resolve) => {
+      releaseFailureHook = resolve;
+    });
+    vi.spyOn(scriptHookManager, "runLifecycleEvent")
+      .mockImplementation(async (event) => {
+        expect(event).toBe("PostToolUseFailure");
+        signalFailureHookStarted();
+        await failureHookBlocked;
+        return {
+          decision: "allow",
+          reason: "failure hook observed",
+          results: [{
+            hookPath: "/test/post-tool-use-failure",
+            hookType: "PostToolUseFailure",
+            decision: "allow",
+            reason: "observed",
+            rawStdout: "{\"action\":\"allow\",\"reason\":\"observed\"}",
+            exitCode: 0,
+            timedOut: false,
+            durationMs: 1,
+            source: "config",
+            commandIdentity: "b".repeat(64),
+          }],
+        };
+      });
+    const { executor, read, directWrite } = setup({
+      scriptHookManager,
+      provideModelIdentity: true,
+    });
+    const issuedBeforeFailure = executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "room-1" },
+      principal,
+    });
+    read.mockImplementationOnce(async () => ({
+      output: "provider read failed",
+      isError: true,
+    }));
+
+    const failedRead = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "failed-read", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    await failureHookStarted;
+
+    const queuedWrite = runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{
+          id: "queued-direct-write",
+          name: "direct_write",
+          input: { operation: "reserve", target: "room-1" },
+        }],
+        options(issuedBeforeFailure.token),
+      ),
+    );
+    await Promise.resolve();
+    expect(directWrite).not.toHaveBeenCalled();
+
+    releaseFailureHook();
+    const [failedReadResult] = await failedRead;
+    const [queuedWriteResult] = await queuedWrite;
+    expect(failedReadResult.is_error).toBe(true);
+    expect(queuedWriteResult.is_error).toBe(true);
+    expect(queuedWriteResult.content).toContain("domain is indeterminate");
+    expect(directWrite).not.toHaveBeenCalled();
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "room-2" },
+      principal,
+    })).toThrow(/domain is indeterminate/);
+
+    const [modelWrite] = await executor.executeAll(
+      [{
+        id: "model-direct-after-failure-hook",
+        name: "direct_write",
+        input: { operation: "reserve", target: "room-3" },
+      }],
+      {
+        sessionId: "model-session",
+        permissionContext: {
+          trustOrigin: "llm-tool-arg",
+          allowedPluginIds: new Set([principal.ownerPluginId]),
+        },
+      },
+    );
+    expect(modelWrite.is_error).toBe(true);
+    expect(modelWrite.content).toContain("domain is indeterminate");
+    expect(directWrite).not.toHaveBeenCalled();
+  });
+
+  it("poisons the domain when PostToolUseFailure dispatch is uncertain", async () => {
+    const scriptHookManager = new ScriptHookManager();
+    vi.spyOn(scriptHookManager, "runLifecycleEvent")
+      .mockRejectedValue(new Error("lifecycle dispatch unavailable"));
+    const { executor, read } = setup({ scriptHookManager });
+    read.mockImplementationOnce(async () => ({
+      output: "provider read failed",
+      isError: true,
+    }));
+
+    const [failedRead] = await runWithInvocationOrigin("ui", undefined, () =>
+      executor.executeAll(
+        [{ id: "failed-read", name: "domain_read", input: { operation: "status" } }],
+        options(),
+      ),
+    );
+    expect(failedRead.is_error).toBe(true);
+    expect(() => executor.issuePluginOperationGrant({
+      toolName: "direct_write",
+      input: { operation: "reserve", target: "room-1" },
+      principal,
+    })).toThrow(/domain is indeterminate/);
   });
 
   it("invalidates an older successful read when a refresh resolves non-success", async () => {
@@ -916,7 +1067,9 @@ describe("ToolExecutor plugin operation governance", () => {
       await Promise.resolve();
       expect(read).toHaveBeenCalledTimes(1);
       readAbort.abort();
-      await expect(readback).rejects.toThrow(/aborted/);
+      const [readbackResult] = await readback;
+      expect(readbackResult.is_error).toBe(true);
+      expect(readbackResult.content).toContain("aborted");
     } finally {
       vi.useRealTimers();
     }
@@ -991,7 +1144,9 @@ describe("ToolExecutor plugin operation governance", () => {
         }),
       );
       readAbort.abort();
-      await expect(readback).rejects.toThrow(/aborted/);
+      const [readbackResult] = await readback;
+      expect(readbackResult.is_error).toBe(true);
+      expect(readbackResult.content).toContain("aborted");
     } finally {
       vi.useRealTimers();
     }
@@ -1356,7 +1511,9 @@ describe("ToolExecutor plugin operation governance", () => {
     );
     await Promise.resolve();
     executor.revokePluginOperationSession(principal.appSessionId);
-    await expect(revoked).rejects.toThrow("session is revoked");
+    const [revokedResult] = await revoked;
+    expect(revokedResult.is_error).toBe(true);
+    expect(revokedResult.content).toContain("session is revoked");
     expect(read).not.toHaveBeenCalled();
 
     releaseHolder();

@@ -263,20 +263,69 @@ export async function executeAuthorizedToolInvocation(
           services.toolRegistry.listAll(),
         )
       : undefined;
-  const operationExecutionLease =
-    resolvedPluginOperation &&
-    pluginOperationPrincipal &&
-    operationExecutionDomain
-      ? await services.pluginOperationGrants.acquireExecutionLease(
-          operationExecutionDomain,
-          // A signed read declaration can still reach a Host-observed write
-          // effect. Serialize every governed operation so a dishonest or
-          // compromised handler cannot mutate under a shared read lease.
-          "write",
-          pluginOperationPrincipal,
-          abortSignal,
-        )
-      : undefined;
+  let operationExecutionLease:
+    | Awaited<ReturnType<
+        typeof services.pluginOperationGrants.acquireExecutionLease
+      >>
+    | undefined;
+  try {
+    operationExecutionLease =
+      resolvedPluginOperation &&
+      pluginOperationPrincipal &&
+      operationExecutionDomain
+        ? await services.pluginOperationGrants.acquireExecutionLease(
+            operationExecutionDomain,
+            // A signed read declaration can still reach a Host-observed write
+            // effect. Serialize every governed operation so a dishonest or
+            // compromised handler cannot mutate under a shared read lease.
+            "write",
+            pluginOperationPrincipal,
+            abortSignal,
+          )
+        : undefined;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (rationaleResumeContext) {
+      return returnRationaleResumeBlock(
+        `governed operation admission failed: ${msg}`,
+        finalInput,
+        permissionResult,
+      );
+    }
+    const durationMs = Date.now() - startTime;
+    emitToolStart(callbacks, toolUse.name, finalInput, meta);
+    callbacks?.onToolEnd?.(
+      toolUse.name,
+      msg,
+      true,
+      meta,
+      undefined,
+      durationMs,
+    );
+    await auditCurrentToolCall(
+      sessionId,
+      toolUse.name,
+      source,
+      trust,
+      finalInput,
+      msg,
+      true,
+      startTime,
+      { decision: "deny", reason: msg, layer: 6 },
+      rateResult.remaining,
+      invocationPermissionContext,
+      invocationCategory,
+      executionCwd,
+      undefined,
+      "error",
+    );
+    return withHostShellExecutionPlan({
+      tool_use_id: toolUse.id,
+      content: msg,
+      is_error: true,
+      durationMs,
+    });
+  }
   let content: string;
   let isError = false;
   let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
@@ -883,6 +932,22 @@ export async function executeAuthorizedToolInvocation(
       tool.pluginGeneration !== undefined,
     );
     postHookMayHaveUnobservedEffects ||= scriptPost.results.length > 0;
+    if (isError) {
+      const failureLifecycle =
+        await services.auditWriter.fireLifecycleEvent(
+          "PostToolUseFailure",
+          sessionId,
+          invocationPermissionContext,
+          {
+            toolName: toolUse.name,
+            errorMessage: content,
+            durationMs: Date.now() - startTime,
+          },
+        );
+      postHookMayHaveUnobservedEffects ||=
+        failureLifecycle.status === "executed" ||
+        failureLifecycle.status === "uncertain";
+    }
     postHookBoundaryCompleted = true;
   } finally {
     try {
@@ -913,24 +978,6 @@ export async function executeAuthorizedToolInvocation(
         operationExecutionLease?.release();
       }
     }
-  }
-
-  // ── #811 m2: PostToolUseFailure (NON-BLOCKING) ──
-  // Fires alongside PostToolUse when the tool's execute() returned isError.
-  // OBSERVE-ONLY: the deny is recorded for audit but never alters the result
-  // that already returned (mirrors PostToolUse). Payload adds errorMessage
-  // (DLP-redacted by the manager) + durationMs.
-  if (isError) {
-    await services.auditWriter.fireLifecycleEvent(
-      "PostToolUseFailure",
-      sessionId,
-      invocationPermissionContext,
-      {
-        toolName: toolUse.name,
-        errorMessage: content,
-        durationMs: Date.now() - startTime,
-      },
-    );
   }
 
   if (postFeedback) content = `${content}\n\n[Hook Feedback]\n${postFeedback}`;
