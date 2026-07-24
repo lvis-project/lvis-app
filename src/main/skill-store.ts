@@ -13,7 +13,7 @@
  *   ---
  *   <markdown body>              # loaded into the current-turn prompt overlay
  */
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat, open } from "node:fs/promises";
 import { closeSync, openSync, readdirSync, readSync, realpathSync } from "node:fs";
 import { resolve, join, relative, isAbsolute, dirname, basename, sep } from "node:path";
 import { createLogger } from "../lib/logger.js";
@@ -74,6 +74,26 @@ function isSafeResourcePath(resourcePath: string): boolean {
 function assertSafeResourcePath(resourcePath: string): void {
   if (!isSafeResourcePath(resourcePath)) {
     throw new Error("rejected unsafe skill resource path");
+  }
+}
+
+/**
+ * Does a `relative()` result leave its root? Checked precisely: a plain
+ * `startsWith("..")` would also reject a legitimate `..notes.md` filename.
+ */
+function escapesRoot(rel: string): boolean {
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
+
+/**
+ * `skill_read` is a TEXT surface: content is decoded as UTF-8 and handed to the
+ * model. A binary file would arrive as lossy replacement characters (and could
+ * carry a raw NUL into the result), so refuse it explicitly rather than return
+ * corrupted bytes that read like content.
+ */
+function assertTextResource(content: string, resourcePath: string): void {
+  if (content.includes("\u0000")) {
+    throw new Error(`resource is not UTF-8 text: ${resourcePath}`);
   }
 }
 
@@ -344,6 +364,7 @@ export class SkillStore {
     if (bytes > SKILL_RESOURCE_MAX_BYTES) {
       throw new Error(`skill resource exceeds ${SKILL_RESOURCE_MAX_BYTES} bytes`);
     }
+    assertTextResource(file.content, resourcePath);
     return { path: resourcePath, content: file.content, bytes };
   }
 
@@ -356,29 +377,76 @@ export class SkillStore {
    * let one approved skill read every sibling skill's bytes — approval is
    * per-skill and body-hash-bound, and that must not become transitive.
    */
-  async readUserResource(skill: LoadedSkill, resourcePath: string): Promise<SkillResourceContent> {
+  async readUserResource(
+    skill: Pick<LoadedSkill, "filePath"> & { pluginOwner?: LoadedSkill["pluginOwner"] },
+    resourcePath: string,
+  ): Promise<SkillResourceContent> {
     if (skill.pluginOwner) throw new Error("plugin skill resources load through readPluginResource");
-    if (basename(skill.filePath) !== "SKILL.md") {
-      throw new Error("flat skills have no bundled resources");
-    }
     assertSafeResourcePath(resourcePath);
     const skillDir = dirname(skill.filePath);
     const canonicalDir = await realpath(skillDir);
-    const canonicalFile = await realpath(join(skillDir, resourcePath));
+    if (!(await this.isBundleRoot(canonicalDir, basename(skill.filePath)))) {
+      throw new Error("flat skills have no bundled resources");
+    }
+    // Resolve inside a try so a missing file cannot leak the absolute host path
+    // (the error text is returned to the model by `skill_read`).
+    let canonicalFile: string;
+    try {
+      canonicalFile = await realpath(join(skillDir, resourcePath));
+    } catch {
+      throw new Error(`resource not found: ${resourcePath}`);
+    }
     const rel = relative(canonicalDir, canonicalFile);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
+    if (escapesRoot(rel)) {
       throw new Error("skill resource escapes its skill directory");
     }
     if (rel.split(sep).join("/") === "SKILL.md") {
       throw new Error("SKILL.md is the skill body, not a resource");
     }
-    const info = await stat(canonicalFile);
-    if (!info.isFile()) throw new Error("skill resource is not a regular file");
-    if (info.size > SKILL_RESOURCE_MAX_BYTES) {
-      throw new Error(`skill resource exceeds ${SKILL_RESOURCE_MAX_BYTES} bytes`);
+    // Bind the size check and the read to ONE file handle: re-opening by path
+    // after `stat` leaves a swap window (mirrors the fd-bound read in
+    // `tools/file-tools.ts`).
+    const handle = await open(canonicalFile, "r");
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw new Error("skill resource is not a regular file");
+      // A hardlink can name an out-of-tree inode from inside the directory, so
+      // containment alone would not hold — the plugin ingest path rejects
+      // `nlink > 1` for the same reason.
+      if (info.nlink > 1) throw new Error("skill resource is a hardlink");
+      if (info.size > SKILL_RESOURCE_MAX_BYTES) {
+        throw new Error(`skill resource exceeds ${SKILL_RESOURCE_MAX_BYTES} bytes`);
+      }
+      const content = await handle.readFile("utf-8");
+      assertTextResource(content, resourcePath);
+      return { path: resourcePath, content, bytes: info.size };
+    } finally {
+      await handle.close().catch(() => {});
     }
-    const content = await readFile(canonicalFile, "utf-8");
-    return { path: resourcePath, content, bytes: info.size };
+  }
+
+  /**
+   * A bundle root must be the skill's OWN directory: a DIRECT CHILD of the
+   * skills root, entered through `<name>/SKILL.md`.
+   *
+   * Anchoring on the skills root rather than on the filename is what makes this
+   * safe. A flat file named `SKILL.md` sitting at the skills root — or a
+   * `<name>/SKILL.md` symlinked to the root — has a `SKILL.md` basename yet its
+   * directory IS the shared root, which would turn one approved skill into a
+   * reader of every sibling skill's bytes. Approval is per-skill and
+   * body-hash-bound; it must never become transitive.
+   */
+  private async isBundleRoot(canonicalDir: string, entryFileName: string): Promise<boolean> {
+    if (entryFileName !== "SKILL.md") return false;
+    let canonicalRoot: string;
+    try {
+      canonicalRoot = await realpath(this.userDir);
+    } catch {
+      canonicalRoot = resolve(this.userDir);
+    }
+    const rootRel = relative(canonicalRoot, canonicalDir);
+    if (rootRel === "" || rootRel.startsWith("..") || isAbsolute(rootRel)) return false;
+    return rootRel.split(sep).length === 1;
   }
 
   /** Publish materialized Skill bytes for exactly one active plugin generation. */
@@ -525,8 +593,9 @@ export class SkillStore {
     // Stage-3: only the directory layout (`<name>/SKILL.md`) owns a bundle
     // directory. A flat `<name>.md` skill has no directory of its own — its
     // parent IS the shared skills root — so it never carries resources.
-    const resources = basename(canonicalFile) === "SKILL.md"
-      ? await this.listSkillResources(dirname(canonicalFile))
+    const skillDir = dirname(canonicalFile);
+    const resources = (await this.isBundleRoot(skillDir, basename(canonicalFile)))
+      ? await this.listSkillResources(skillDir)
       : [];
     return {
       name,
@@ -556,6 +625,10 @@ export class SkillStore {
     }
     const found: SkillResourceRef[] = [];
     const queue: Array<{ dir: string; depth: number }> = [{ dir: canonicalDir, depth: 0 }];
+    // Canonical paths already visited. A symlink cycle (`loop -> .`) otherwise
+    // re-emits the same file until the caps fill up, crowding real resources
+    // out of both the manifest and the trusted overlay.
+    const seen = new Set<string>([canonicalDir]);
     let scanned = 0;
     while (queue.length > 0) {
       const current = queue.shift();
@@ -582,10 +655,12 @@ export class SkillStore {
           continue;
         }
         const rel = relative(canonicalDir, canonicalChild);
-        if (rel.startsWith("..") || isAbsolute(rel)) {
+        if (escapesRoot(rel)) {
           log.warn(`skill resources: skipped ${childPath} — escapes ${canonicalDir}`);
           continue;
         }
+        if (seen.has(canonicalChild)) continue;
+        seen.add(canonicalChild);
         if (info.isDirectory()) {
           if (current.depth + 1 < SKILL_RESOURCE_DEPTH_CAP) {
             queue.push({ dir: canonicalChild, depth: current.depth + 1 });
@@ -593,6 +668,10 @@ export class SkillStore {
           continue;
         }
         if (!info.isFile()) continue;
+        // A hardlink can name an out-of-tree inode from inside the directory,
+        // so containment alone would not hold (the plugin ingest path rejects
+        // `nlink > 1` for the same reason).
+        if (info.nlink > 1) continue;
         const posixRel = rel.split(sep).join("/");
         if (posixRel === "SKILL.md") continue;
         if (!isSafeResourcePath(posixRel)) {
