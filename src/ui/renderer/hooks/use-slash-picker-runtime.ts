@@ -17,15 +17,22 @@
  * freshly-installed skill shows up without a restart.
  */
 import { useEffect, useState } from "react";
-import type { McpToolEntry, SkillEntry } from "../components/slash-picker-data.js";
+import type {
+  McpPromptEntry,
+  McpToolEntry,
+  SkillEntry,
+} from "../components/slash-picker-data.js";
 
 export interface SlashPickerRuntime {
   mcpTools: McpToolEntry[];
+  /** Server-declared prompts — a USER-controlled primitive, never model-callable. */
+  mcpPrompts: McpPromptEntry[];
   skills: SkillEntry[];
 }
 
 export function useSlashPickerRuntime(enabled: boolean): SlashPickerRuntime {
   const [mcpTools, setMcpTools] = useState<McpToolEntry[]>([]);
+  const [mcpPrompts, setMcpPrompts] = useState<McpPromptEntry[]>([]);
   const [skills, setSkills] = useState<SkillEntry[]>([]);
 
   useEffect(() => {
@@ -36,13 +43,28 @@ export function useSlashPickerRuntime(enabled: boolean): SlashPickerRuntime {
       const servers = (await window.lvis?.mcp?.servers?.()) ?? [];
       if (cancelled) return;
       const tools: McpToolEntry[] = [];
+      const prompts: McpPromptEntry[] = [];
       for (const s of servers) {
         if (s.status !== "connected") continue;
         for (const name of s.registeredTools) {
           tools.push({ name, serverId: s.id });
         }
+        for (const prompt of s.prompts ?? []) {
+          prompts.push({
+            name: prompt.name,
+            serverId: s.id,
+            ...(prompt.title ? { title: prompt.title } : {}),
+            ...(prompt.description ? { description: prompt.description } : {}),
+            arguments: (prompt.arguments ?? []).map((argument) => ({
+              name: argument.name,
+              ...(argument.description ? { description: argument.description } : {}),
+              required: argument.required === true,
+            })),
+          });
+        }
       }
       setMcpTools(tools);
+      setMcpPrompts(prompts);
     })();
 
     void (async () => {
@@ -57,5 +79,5 @@ export function useSlashPickerRuntime(enabled: boolean): SlashPickerRuntime {
     };
   }, [enabled]);
 
-  return { mcpTools, skills };
+  return { mcpTools, mcpPrompts, skills };
 }

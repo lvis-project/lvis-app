@@ -869,6 +869,13 @@ export function buildInternalApiSurface() {
     // the live loop and falls back to a notification on mismatch.
     postUiMessage: async (serverId: string, sessionId: string, params: unknown) =>
       ipcRenderer.invoke(CHANNELS.mcp.uiMessage, serverId, sessionId, params) as Promise<unknown>,
+    // MCP server prompt (`prompts/get`) — the user picked a prompt from the picker.
+    // Returns the server's messages ALREADY wrapped in their provenance envelope;
+    // the renderer hands that envelope to `chat.send` under `mcp-prompt-emitted`,
+    // and the send gate re-checks the envelope there. Nothing here starts a turn,
+    // and the renderer never assembles the envelope itself.
+    getPrompt: async (serverId: string, name: string, args: Record<string, string>) =>
+      ipcRenderer.invoke(CHANNELS.mcp.getPrompt, serverId, name, args) as Promise<unknown>,
     // MCP Apps `ondownloadfile` — the app hands over inline bytes; main decodes, bounds,
     // and shows a save dialog. `serverId` is bound by the TRUSTED renderer (for the audit
     // trail; the app names no server). Main NEVER fetches an app-supplied URI, so nothing

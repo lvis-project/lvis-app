@@ -1,3 +1,5 @@
+import { isStagedSendOrigin } from "./staged-origins.js";
+
 export type ChatInputOrigin =
   | "user-keyboard"
   | "plugin-emitted"
@@ -11,6 +13,15 @@ export type ChatInputOrigin =
    * see `shared/mcp-app-message-source.ts`.
    */
   | "app-emitted"
+  /**
+   * MCP server prompt (`prompts/get`) — the USER explicitly selected a prompt the
+   * server declared, but the returned messages are SERVER-authored. Never
+   * `user-keyboard`: the user chose to run it, not what it says, so the text is
+   * staged with untrusted provenance and its tool calls are non-user provenance.
+   * Provenance travels in the `<mcp-prompt source="mcp-prompt:<serverId>">`
+   * envelope — see `shared/staged-origins.ts`.
+   */
+  | "mcp-prompt-emitted"
   | "llm-tool-arg"
   | "agent-message"
   | "file-content"
@@ -18,10 +29,20 @@ export type ChatInputOrigin =
 
   | "queue-auto";
 
-export type ChatSendInputOrigin = Extract<
+/**
+ * The origins whose text arrives inside a provenance envelope. Named so the
+ * staged-origin registry can be a TOTAL `Record` over them: every lookup by a
+ * literal member is then compile-checked and cannot be `undefined`, which removes
+ * the defensive `!`/throw at each module-level lookup.
+ */
+export type StagedChatInputOrigin = Extract<
   ChatInputOrigin,
-  "user-keyboard" | "plugin-emitted" | "app-emitted" | "queue-auto"
+  "plugin-emitted" | "app-emitted" | "mcp-prompt-emitted"
 >;
+
+export type ChatSendInputOrigin =
+  | StagedChatInputOrigin
+  | Extract<ChatInputOrigin, "user-keyboard" | "queue-auto">;
 export type TrustOriginWithUnknown = ChatInputOrigin | "unknown";
 
 export interface ChatSendPayload {
@@ -52,12 +73,11 @@ export function isUserKeyboardOrigin(origin: ChatInputOrigin): boolean {
 }
 
 export function isChatSendInputOrigin(value: unknown): value is ChatSendInputOrigin {
-  return (
-    value === "user-keyboard" ||
-    value === "plugin-emitted" ||
-    value === "app-emitted" ||
-    value === "queue-auto"
-  );
+  // The staged half is DERIVED from the staged-origin registry. Listing those
+  // literals here by hand is how a registered origin gets silently rejected at
+  // the send gate: the type union widens, the runtime guard does not, and tsc
+  // sees nothing because the guard is a hand-written predicate.
+  return value === "user-keyboard" || value === "queue-auto" || isStagedSendOrigin(value);
 }
 
 export function hasUserKeyboardIntent(value: unknown): value is UserKeyboardIntent {

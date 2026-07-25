@@ -49,6 +49,7 @@ import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
+import type { McpPromptEntry } from "./components/slash-picker-data.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
 import {
@@ -127,7 +128,7 @@ export function App() {
   // cycle) is what lets the two hooks reference each other safely.
   const handleAskRef = useRef<(
     q: string,
-    mode?: "default" | "trigger-import" | "app-message",
+    mode?: "default" | "trigger-import" | "app-message" | "mcp-prompt",
     userIntent?: UserKeyboardIntentSnapshot,
   ) => Promise<void>>(
     async () => { /* populated below */ },
@@ -621,6 +622,77 @@ export function App() {
     llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,
   });
 
+  // Run a server-declared MCP prompt. The host fetches it and returns the text
+  // ALREADY wrapped in its provenance envelope; we send that verbatim under the
+  // staged `mcp-prompt` mode. It deliberately does NOT go through the composer
+  // draft: a draft the user then submits would enter as `user-keyboard`, which
+  // would launder server-authored text into a fully trusted turn.
+  // Arguments are collected by HOST chrome (McpPromptArgsDialog) — the renderer
+  // has no `window.prompt`, and a composer draft would re-enter as
+  // `user-keyboard`. An argument-less prompt skips the form entirely.
+  const [mcpPromptAwaitingArgs, setMcpPromptAwaitingArgs] = useState<McpPromptEntry | null>(null);
+
+  const runMcpPrompt = useCallback(
+    async (prompt: McpPromptEntry, args: Record<string, string>) => {
+      // The prompt NAME is server-authored, so it is bounded before it goes near
+      // host chrome (React escapes it; this is about layout, and about the toast
+      // staying readable).
+      const label = prompt.name.slice(0, 64);
+      const fail = (error?: string) => {
+        // The handler distinguishes rate-limited from empty-prompt from
+        // prompt-failed. Collapsing them into one string is what makes "it just
+        // doesn't work" undiagnosable — `formatIpcError` already owns the wording
+        // for each code, and falls back to the generic line for an unknown one.
+        statusPushToast({
+          severity: "error",
+          message: formatIpcError(error, undefined, {
+            fallbackContext: t("app.mcpPromptFailed", { name: label }),
+          }),
+          ttlMs: 10000,
+        });
+      };
+      // One catch for the whole path: an IPC rejection, a missing bridge, or a
+      // send-gate refusal all surface as a toast rather than an unhandled
+      // rejection the user never sees.
+      try {
+        const outcome = await window.lvis?.mcp?.getPrompt?.(prompt.serverId, prompt.name, args);
+        if (!outcome || outcome.ok !== true) {
+          fail(outcome?.ok === false ? outcome.error : undefined);
+          return;
+        }
+        // The host clipped what the server returned. Saying so is the difference
+        // between a prompt that looks complete and one the user knows is partial.
+        if (outcome.truncated || (outcome.omittedBlocks ?? 0) > 0) {
+          statusPushToast({
+            severity: "warning",
+            message: t("app.mcpPromptClipped", { name: label }),
+            ttlMs: 8000,
+          });
+        }
+        await handleAskRef.current?.(outcome.envelope, "mcp-prompt");
+      } catch {
+        fail();
+      }
+    },
+    [handleAskRef, statusPushToast, t],
+  );
+
+  const handleRunMcpPrompt = useCallback((prompt: McpPromptEntry) => {
+    if (prompt.arguments.length > 0) {
+      setMcpPromptAwaitingArgs(prompt);
+      return;
+    }
+    void runMcpPrompt(prompt, {});
+  }, [runMcpPrompt]);
+
+  const handleMcpPromptArgsSubmit = useCallback(
+    (prompt: McpPromptEntry, args: Record<string, string>) => {
+      setMcpPromptAwaitingArgs(null);
+      void runMcpPrompt(prompt, args);
+    },
+    [runMcpPrompt],
+  );
+
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
   // Strict variant — `undefined` means "model not in catalog" so the cost
@@ -863,6 +935,7 @@ export function App() {
             workspaceProjects={workspaceProjects}
             onNewChatForProject={onNewChatForProject}
             onRefreshProjects={refreshWorkspaceProjects}
+            onRunMcpPrompt={handleRunMcpPrompt}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}
@@ -921,6 +994,9 @@ export function App() {
         onTourDismiss={onTourDismiss}
         pluginCards={pluginCards}
         onComposerSeedText={setQuestion}
+        mcpPromptAwaitingArgs={mcpPromptAwaitingArgs}
+        onMcpPromptArgsCancel={() => setMcpPromptAwaitingArgs(null)}
+        onMcpPromptArgsSubmit={handleMcpPromptArgsSubmit}
       />
     </AppProviders>
   );

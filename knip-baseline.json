@@ -2729,11 +2729,6 @@
     },
     {
       "type": "types",
-      "file": "src/ui/renderer/hooks/use-send-message.ts",
-      "name": "SendMode"
-    },
-    {
-      "type": "types",
       "file": "src/ui/renderer/hooks/use-side-chat.ts",
       "name": "SideChatSessionSummary"
     },

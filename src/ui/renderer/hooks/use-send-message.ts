@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
+import { resolveIpcErrorKey } from "../format-ipc-error.js";
 import { supportsVision } from "../../../engine/llm/vendor-capabilities.js";
 import {
   composeImportedTriggerOutgoing,
@@ -13,7 +14,10 @@ import {
 } from "../utils/compose.js";
 import type { getApi } from "../api-client.js";
 import type { useTranslation } from "../../../i18n/react.js";
-import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import type {
+  ChatSendInputOrigin,
+  UserKeyboardIntentSnapshot,
+} from "../../../shared/chat-origin.js";
 import type { Attachment } from "../types/attachments.js";
 import type { useChatState } from "./use-chat-state.js";
 import type { useSessions } from "./use-sessions.js";
@@ -65,7 +69,21 @@ export interface UseSendMessageDeps {
  * envelope, both skip the user bubble, and both classify as a non-`user-keyboard`
  * trust origin in main.
  */
-export type SendMode = "default" | "trigger-import" | "app-message";
+export type SendMode = "default" | "trigger-import" | "app-message" | "mcp-prompt";
+
+/**
+ * Send mode → turn-entry origin. A TOTAL map, not a ternary chain: the previous
+ * chain fell through to `"user-keyboard"`, so a new staged mode that nobody
+ * remembered to branch on would have sent actor-authored text as a fully
+ * trusted, user-typed turn. `Record<SendMode, …>` makes omitting a mode a
+ * compile error instead.
+ */
+export const SEND_MODE_ORIGIN: Record<SendMode, ChatSendInputOrigin> = {
+  default: "user-keyboard",
+  "trigger-import": "plugin-emitted",
+  "app-message": "app-emitted",
+  "mcp-prompt": "mcp-prompt-emitted",
+};
 
 export interface UseSendMessageResult {
   handleAsk: (
@@ -118,7 +136,12 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         if (debugStreamEnabled) debugLog("handleAsk", "skip:empty");
         return;
       }
-      if (mode === "default" && streaming) {
+      // `mcp-prompt` joins `default` here because both are USER-initiated: the
+      // picker is live while a turn streams, so without this a click lands on
+      // `trackStreamTurn` and surfaces a raw "stream already active" error. The
+      // staged modes that are NOT user-initiated stay out — they are queued or
+      // injected by the host, and must never abort the turn the user is watching.
+      if ((mode === "default" || mode === "mcp-prompt") && streaming) {
         // Issue #622: interrupt the current turn and start a new one.
         // chatAbort awaits until the active stream turn settles (interrupted),
         // then returns. The in-flight turn's finally block calls
@@ -205,13 +228,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         await api.chatSend(
           outgoing,
           outgoingAttachments,
-          opts?.inputOrigin === "queue-auto"
-            ? "queue-auto"
-            : mode === "trigger-import"
-              ? "plugin-emitted"
-              : mode === "app-message"
-                ? "app-emitted"
-                : "user-keyboard",
+          opts?.inputOrigin === "queue-auto" ? "queue-auto" : SEND_MODE_ORIGIN[mode],
 
 
           opts?.inputOrigin === "queue-auto"
@@ -235,7 +252,19 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
             err: (err as Error)?.message,
           });
         }
-        setErrorWithThought(t("app.errorGeneric", { message: (err as Error).message }));
+        // A rejected send carries an IPC code as its message — the send gate and the
+        // stream chokepoint both THROW their fail-closed code rather than returning
+        // an `{ok:false}` frame, so it never passes the code→sentence table. Electron
+        // wraps a rejection as `Error invoking remote method '<ch>': Error: <code>`,
+        // hence recovering the code from the tail. Anything unmapped keeps the
+        // previous localized framing — an unmapped failure must not lose it just
+        // because this path learned to map the mapped ones.
+        const rawMessage = (err as Error).message;
+        const code = rawMessage.match(/(?:^|Error:\s*)([a-z][a-z0-9-]*)\s*$/)?.[1];
+        const mappedKey = resolveIpcErrorKey(code);
+        setErrorWithThought(
+          mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage }),
+        );
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
         if (debugStreamEnabled) {

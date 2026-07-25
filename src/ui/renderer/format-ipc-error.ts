@@ -14,6 +14,14 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "missing-input-origin": "formatIpcError.missingInputOrigin",
   "cross-plugin-call-denied": "formatIpcError.crossPluginCallDenied",
   "missing-plugin-envelope": "formatIpcError.missingPluginEnvelope",
+  // Every staged origin returns its own missing-envelope code (see
+  // shared/staged-origins.ts) — all of them are reachable from `chat:send`, so
+  // all of them need a message rather than leaking the kebab-case code.
+  "missing-app-envelope": "formatIpcError.missingAppEnvelope",
+  "missing-mcp-prompt-envelope": "formatIpcError.missingMcpPromptEnvelope",
+  // The mirror case: the text CARRIES a staged envelope while the send claims a
+  // non-staged origin.
+  "origin-envelope-mismatch": "formatIpcError.originEnvelopeMismatch",
   "assistant-context-origin-restricted": "formatIpcError.assistantContextOriginRestricted",
   "role-prompt-origin-restricted": "formatIpcError.rolePromptOriginRestricted",
   "persona-prompt-origin-restricted": "formatIpcError.personaPromptOriginRestricted",
@@ -191,6 +199,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // notification service to be running for its popup path.
   "cross-server-call-denied": "formatIpcError.crossServerCallDenied",
   "invalid-server-id": "formatIpcError.invalidServerId",
+  // ── MCP server prompts (mcp.getPrompt) ──
+  // A server prompt the user picked can fail on a malformed request, on a server
+  // that returned nothing renderable, or on the server itself; the server's own
+  // error text is never forwarded (it can carry host paths).
+  "invalid-request": "formatIpcError.invalidRequest",
+  "empty-prompt": "formatIpcError.emptyPrompt",
+  "prompt-failed": "formatIpcError.promptFailed",
   // `onupdatemodelcontext` — the renderer binds serverId + session + cardId; a malformed
   // binding is a host bug, and the card cannot be identified.
   "invalid-binding": "formatIpcError.invalidBinding",
@@ -235,15 +250,36 @@ export interface FormatIpcErrorOptions {
   fallbackContext?: string;
 }
 
+/**
+ * Resolve a code to its i18n key, or `undefined` when the table does not know it.
+ *
+ * Split out of {@link formatIpcError} because that function always returns a
+ * string: a caller that wants its OWN fallback phrasing (the send path keeps a
+ * localized wrapper for unmapped errors) otherwise has to re-implement the lookup,
+ * and then this table has two guarded readers instead of one.
+ *
+ * `Object.hasOwn` because callers may pass an arbitrary `Error.message` as the code
+ * (a rejected `invoke` carries its code in the message). A bare index would resolve
+ * `constructor`/`toString` to an inherited function and hand it to `t()`.
+ */
+export function resolveIpcErrorKey(code: string | undefined): string | undefined {
+  if (!code) return undefined;
+  return Object.hasOwn(COMMON_IPC_ERROR_MESSAGES, code)
+    ? COMMON_IPC_ERROR_MESSAGES[code]
+    : undefined;
+}
+
 export function formatIpcError(
   error: string | undefined,
   message: string | undefined,
   opts: FormatIpcErrorOptions = {},
 ): string {
   if (error) {
-    const override = opts.codeMap?.[error];
+    const override = opts.codeMap && Object.hasOwn(opts.codeMap, error)
+      ? opts.codeMap[error]
+      : undefined;
     if (override) return override;
-    const commonKey = COMMON_IPC_ERROR_MESSAGES[error];
+    const commonKey = resolveIpcErrorKey(error);
     if (commonKey) return t(commonKey);
   }
   if (message && message.trim().length > 0) {

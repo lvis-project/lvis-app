@@ -26,6 +26,7 @@ import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./subagents/types.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
+import type { McpPromptEntry } from "./components/slash-picker-data.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
@@ -57,6 +58,8 @@ export interface ChatViewProps {
     intent?: UserKeyboardIntentSnapshot,
     opts?: { injectHint?: "queue" | "interrupt"; inputOrigin?: "queue-auto" },
   ) => void | Promise<void>;
+  /** Run a server-declared MCP prompt (staged, untrusted provenance). */
+  onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
   onToggleStar: (idx: number) => void | Promise<void>;
@@ -125,7 +128,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
+export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -774,6 +777,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         viewMode={viewMode}
         streaming={streaming}
         onInsertSlashCommand={handleInsertSlashCommand}
+        onRunMcpPrompt={onRunMcpPrompt}
         commandPopoverOpen={commandPopoverOpen}
         onCommandPopoverOpenChange={onCommandPopoverOpenChange}
         ringSlot={ringSlot}

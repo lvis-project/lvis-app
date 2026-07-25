@@ -2,7 +2,7 @@
 
 
 
-import { Terminal, Zap, Puzzle, Server, Sparkles, type LucideIcon } from "lucide-react";
+import { Terminal, Zap, Puzzle, Server, Sparkles, MessageSquareText, type LucideIcon } from "lucide-react";
 import { t } from "../../../i18n/runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
@@ -13,6 +13,19 @@ export interface McpToolEntry {
   name: string;
   /** Originating MCP server id. */
   serverId: string;
+}
+
+/**
+ * A prompt a connected MCP server declared. Prompts are a USER-controlled
+ * primitive: the user picks one here, the host fetches it, and the server's text
+ * enters the turn with untrusted provenance. Never model-callable.
+ */
+export interface McpPromptEntry {
+  name: string;
+  serverId: string;
+  title?: string;
+  description?: string;
+  arguments: Array<{ name: string; description?: string; required: boolean }>;
 }
 
 /** A single registered assistant skill. */
@@ -52,16 +65,17 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 /** The drill-down category model — one step per group, with a global search. */
-export type Category = "command" | "shortcut" | "plugin" | "mcp" | "skills";
+export type Category = "command" | "shortcut" | "plugin" | "mcp" | "mcp-prompts" | "skills";
 
 /** Stable category order for both the popover drill-down and the inline menu. */
-export const CATEGORY_ORDER: Category[] = ["command", "shortcut", "plugin", "mcp", "skills"];
+export const CATEGORY_ORDER: Category[] = ["command", "shortcut", "plugin", "mcp", "mcp-prompts", "skills"];
 
 export const CATEGORY_ICON: Record<Category, LucideIcon> = {
   command: Terminal,
   shortcut: Zap,
   plugin: Puzzle,
   mcp: Server,
+  "mcp-prompts": MessageSquareText,
   skills: Sparkles,
 };
 
@@ -76,6 +90,8 @@ export function catLabel(category: Category): string {
       return t("slashPicker.catPlugin");
     case "mcp":
       return t("slashPicker.catMcp");
+    case "mcp-prompts":
+      return t("slashPicker.catMcpPrompts");
     case "skills":
       return t("slashPicker.catSkills");
   }
@@ -92,6 +108,8 @@ export function catDescription(category: Category): string {
       return t("slashPicker.catPluginDesc");
     case "mcp":
       return t("slashPicker.catMcpDesc");
+    case "mcp-prompts":
+      return t("slashPicker.catMcpPromptsDesc");
     case "skills":
       return t("slashPicker.catSkillsDesc");
   }
@@ -134,6 +152,18 @@ export function filterMcpTools(tools: McpToolEntry[], query: string): McpToolEnt
   if (!q) return tools;
   return tools.filter(
     (m) => m.name.toLowerCase().includes(q) || m.serverId.toLowerCase().includes(q),
+  );
+}
+
+/** Filter server-declared prompts by name, title, description, or server id. */
+export function filterMcpPrompts(prompts: McpPromptEntry[], query: string): McpPromptEntry[] {
+  const q = normalizeSlashQuery(query);
+  if (!q) return prompts;
+  return prompts.filter((p) =>
+    p.name.toLowerCase().includes(q)
+    || p.serverId.toLowerCase().includes(q)
+    || (p.title ?? "").toLowerCase().includes(q)
+    || (p.description ?? "").toLowerCase().includes(q),
   );
 }
 
