@@ -43,6 +43,8 @@ import {
   type McpToolEntry,
   type SkillEntry,
   type SlashCommand,
+  filterMcpPrompts,
+  type McpPromptEntry,
 } from "./slash-picker-data.js";
 
 interface SlashPickerPanelProps {
@@ -50,6 +52,13 @@ interface SlashPickerPanelProps {
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
   onInsert: (cmd: string) => void;
+  /**
+   * Run a server-declared MCP prompt. The result is SENT directly with its
+   * provenance envelope — never inserted into the draft, because a draft the
+   * user then submits would enter as `user-keyboard`, laundering server-authored
+   * text into a fully trusted turn.
+   */
+  onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   onClose: () => void;
 }
 
@@ -91,6 +100,7 @@ export function SlashPickerPanel({
   plugins,
   onSelectPlugin,
   onInsert,
+  onRunMcpPrompt,
   onClose,
 }: SlashPickerPanelProps) {
   const { t } = useTranslation();
@@ -102,7 +112,7 @@ export function SlashPickerPanel({
   const openNativeContextMenu = useNativeContextMenu();
   // Live MCP-server tools + registered skills (real host IPC, fetched while
   // the panel is mounted/open).
-  const { mcpTools, skills } = useSlashPickerRuntime(true);
+  const { mcpTools, mcpPrompts, skills } = useSlashPickerRuntime(true);
 
   useEffect(() => {
     const id = setTimeout(() => inputRef.current?.focus(), 50);
@@ -167,6 +177,7 @@ export function SlashPickerPanel({
   const matchedActions = filterActions(actions, query);
   const matchedPlugins = filterPlugins(plugins, query);
   const matchedMcpTools = filterMcpTools(mcpTools, query);
+  const matchedMcpPrompts = filterMcpPrompts(mcpPrompts, query);
   const matchedSkills = filterSkills(skills, query);
 
   const counts: Record<Category, number> = {
@@ -174,6 +185,7 @@ export function SlashPickerPanel({
     shortcut: matchedActions.length,
     plugin: matchedPlugins.length,
     mcp: matchedMcpTools.length,
+    "mcp-prompts": matchedMcpPrompts.length,
     skills: matchedSkills.length,
   };
 
@@ -253,6 +265,23 @@ export function SlashPickerPanel({
   };
 
   const McpIcon = CATEGORY_ICON.mcp;
+  const renderMcpPromptRow = (p: McpPromptEntry) => (
+    <CommandItem
+      key={`${p.serverId}/${p.name}`}
+      className={PICKER_ROW_CLASS}
+      value={`${p.name} ${p.title ?? ""} ${p.serverId}`}
+      onSelect={() => { onClose(); onRunMcpPrompt(p); }}
+    >
+      <PickerIconSlot>
+        <McpPromptIcon className={PICKER_ICON_CLASS} />
+      </PickerIconSlot>
+      <PickerText
+        title={p.title ?? p.name}
+        subtitle={p.description ? `${p.serverId} — ${p.description}` : p.serverId}
+      />
+    </CommandItem>
+  );
+
   const renderMcpRow = (m: McpToolEntry) => (
     <CommandItem
       key={`${m.serverId}/${m.name}`}
@@ -271,6 +300,7 @@ export function SlashPickerPanel({
     </CommandItem>
   );
 
+  const McpPromptIcon = CATEGORY_ICON["mcp-prompts"];
   const SkillIcon = CATEGORY_ICON.skills;
   const renderSkillRow = (s: SkillEntry) => (
     <CommandItem
@@ -402,6 +432,15 @@ export function SlashPickerPanel({
           {visibleCategories.includes("mcp") && (searching || step === "mcp") && (
             <CommandGroup className={PICKER_GROUP_CLASS} heading={catLabel("mcp")} data-testid="slash-group-mcp">
               {matchedMcpTools.map(renderMcpRow)}
+            </CommandGroup>
+          )}
+          {visibleCategories.includes("mcp-prompts") && (searching || step === "mcp-prompts") && (
+            <CommandGroup
+              className={PICKER_GROUP_CLASS}
+              heading={catLabel("mcp-prompts")}
+              data-testid="slash-group-mcp-prompts"
+            >
+              {matchedMcpPrompts.map(renderMcpPromptRow)}
             </CommandGroup>
           )}
           {visibleCategories.includes("skills") && (searching || step === "skills") && (

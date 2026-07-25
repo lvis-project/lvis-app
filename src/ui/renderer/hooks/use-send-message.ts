@@ -13,7 +13,10 @@ import {
 } from "../utils/compose.js";
 import type { getApi } from "../api-client.js";
 import type { useTranslation } from "../../../i18n/react.js";
-import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import type {
+  ChatSendInputOrigin,
+  UserKeyboardIntentSnapshot,
+} from "../../../shared/chat-origin.js";
 import type { Attachment } from "../types/attachments.js";
 import type { useChatState } from "./use-chat-state.js";
 import type { useSessions } from "./use-sessions.js";
@@ -65,7 +68,21 @@ export interface UseSendMessageDeps {
  * envelope, both skip the user bubble, and both classify as a non-`user-keyboard`
  * trust origin in main.
  */
-export type SendMode = "default" | "trigger-import" | "app-message";
+export type SendMode = "default" | "trigger-import" | "app-message" | "mcp-prompt";
+
+/**
+ * Send mode → turn-entry origin. A TOTAL map, not a ternary chain: the previous
+ * chain fell through to `"user-keyboard"`, so a new staged mode that nobody
+ * remembered to branch on would have sent actor-authored text as a fully
+ * trusted, user-typed turn. `Record<SendMode, …>` makes omitting a mode a
+ * compile error instead.
+ */
+export const SEND_MODE_ORIGIN: Record<SendMode, ChatSendInputOrigin> = {
+  default: "user-keyboard",
+  "trigger-import": "plugin-emitted",
+  "app-message": "app-emitted",
+  "mcp-prompt": "mcp-prompt-emitted",
+};
 
 export interface UseSendMessageResult {
   handleAsk: (
@@ -205,13 +222,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         await api.chatSend(
           outgoing,
           outgoingAttachments,
-          opts?.inputOrigin === "queue-auto"
-            ? "queue-auto"
-            : mode === "trigger-import"
-              ? "plugin-emitted"
-              : mode === "app-message"
-                ? "app-emitted"
-                : "user-keyboard",
+          opts?.inputOrigin === "queue-auto" ? "queue-auto" : SEND_MODE_ORIGIN[mode],
 
 
           opts?.inputOrigin === "queue-auto"
