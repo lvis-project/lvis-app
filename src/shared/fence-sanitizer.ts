@@ -38,12 +38,22 @@ export type FenceTag =
  * an exact one, and each variant this failed to cover was a way out of the fence. The
  * `\b` keeps it from matching a longer tag name (`</app-messages>` is not this fence).
  *
+ * That trailing span is BOUNDED, and the bound is load-bearing rather than tidy. An
+ * unbounded `[^>]*` is quadratic on a body of repeated UNTERMINATED close tags
+ * (`</app-message` with no `>`): every start position matches the tag name, then scans
+ * to end-of-string for a `>` that never comes. Measured at 8.9 s for one 512 KB body —
+ * a main-process freeze an untrusted party can author, since one caller neutralizes
+ * before it caps. A close tag a model reads as a tag carries tens of characters of
+ * attributes, never thousands, so the bound gives up nothing real.
+ *
  * The original spelling is preserved, with the `<` escaped — the text stays readable
  * and the tag stops being a tag.
  */
+const FENCE_CLOSE_TRAILING_MAX = 120;
+
 export function neutralizeFenceClose(text: string, tag: FenceTag): string {
   return text.replace(
-    new RegExp(`<\\s*/\\s*${tag}\\b[^>]*>`, "gi"),
+    new RegExp(`<\\s*/\\s*${tag}\\b[^>]{0,${FENCE_CLOSE_TRAILING_MAX}}>`, "gi"),
     (match) => `<\\${match.slice(1)}`,
   );
 }

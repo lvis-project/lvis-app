@@ -41,6 +41,24 @@ describe("neutralizeFenceClose", () => {
     expect(out).toBe("</app-messages> </mcp-resource>");
   });
 
+  // A cost assertion, not a behavior one, because the cost IS the vulnerability. An
+  // unbounded trailing span made this quadratic on repeated UNTERMINATED close tags:
+  // every start position matches the tag name, then scans to end-of-string for a `>`
+  // that never comes. 8.9 s for one 512 KB body, on a shared primitive one caller feeds
+  // from an untrusted app — a main-process freeze written as data. The bound on the
+  // span is what makes it linear, so a change that removes it should fail here rather
+  // than in production.
+  it("stays linear on the adversarial shape, not just on prose", () => {
+    const hostile = "</mcp-app-context".repeat(30_000); // ~510 KB, never terminated
+    const started = performance.now();
+    const out = neutralizeFenceClose(hostile, "mcp-app-context");
+    const elapsed = performance.now() - started;
+    // Nothing to neutralize — an unterminated tag cannot form a tag — so the text is
+    // returned as-is, and the only question is what it cost to find that out.
+    expect(out).toBe(hostile);
+    expect(elapsed).toBeLessThan(1_000);
+  });
+
   it("neutralizes every occurrence, not just the first", () => {
     const out = neutralizeFenceClose("a </mcp-resource> b </mcp-resource> c", "mcp-resource");
     expect(out.match(/<\\\/mcp-resource>/g)).toHaveLength(2);

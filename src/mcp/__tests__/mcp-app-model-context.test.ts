@@ -138,6 +138,19 @@ describe("serializeAppContext — untrusted app data, fenced", () => {
     expect(body).toContain('"items": 3');
   });
 
+  // The app controls this length and `ui/update-model-context` has no rate limiter, so
+  // anything the host walks before refusing is work done on an untrusted party's
+  // behalf. The body is bounded BEFORE the fence pass rather than after: one char past
+  // the cap, which is all `update` needs to still report `too-large` unchanged.
+  it("bounds the body before walking it, keeping the over-cap outcome", () => {
+    const body = serializeAppContext({
+      content: [{ type: "text", text: "x".repeat(MCP_APP_MODEL_CONTEXT_MAX_CHARS * 60) }],
+    });
+
+    expect(body.length).toBe(MCP_APP_MODEL_CONTEXT_MAX_CHARS + 1);
+    expect(body.length).toBeGreaterThan(MCP_APP_MODEL_CONTEXT_MAX_CHARS);
+  });
+
   it("carries only text blocks — an image/audio block is not smuggled through", () => {
     const body = serializeAppContext({
       content: [
