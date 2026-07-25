@@ -14,6 +14,12 @@ export const en = {
     "Resource URI, exactly as listed by mcp_resource_list. Unlisted URIs are refused.",
   "be_mcpResourceTools.invalidRequest":
     "serverId and uri are both required, and uri must be within the host's length bound.",
+  "be_mcpResourceTools.invalidServerId":
+    "serverId must be a string, exactly as reported by mcp_resource_list.",
+  "be_mcpResourceTools.invalidOffset":
+    "offset must be a non-negative whole number.",
+  "be_mcpResourceTools.offsetDescription":
+    "Skip this many resources before listing, to page past a response the host trimmed. Use the nextOffset value from the previous call.",
   "be_mcpResourceTools.notReady":
     "MCP resource access is not ready yet; the server connections are still starting. Try again shortly.",
   "be_mcpResourceTools.readFailed":
@@ -34,6 +40,12 @@ export const ko: Record<keyof typeof en, string> = {
     "리소스 URI. mcp_resource_list 에 나온 그대로 사용하세요. 목록에 없는 URI 는 거부됩니다.",
   "be_mcpResourceTools.invalidRequest":
     "serverId 와 uri 는 모두 필수이며, uri 는 호스트의 길이 제한 안이어야 합니다.",
+  "be_mcpResourceTools.invalidServerId":
+    "serverId 는 문자열이어야 하며, mcp_resource_list 가 보고한 값을 그대로 사용해야 합니다.",
+  "be_mcpResourceTools.invalidOffset":
+    "offset 은 0 이상의 정수여야 합니다.",
+  "be_mcpResourceTools.offsetDescription":
+    "목록을 만들기 전에 건너뛸 리소스 개수. 호스트가 잘라낸 응답의 다음 페이지를 볼 때 이전 호출의 nextOffset 값을 사용하세요.",
   "be_mcpResourceTools.notReady":
     "MCP 리소스 접근이 아직 준비되지 않았습니다. 서버 연결이 시작 중입니다. 잠시 후 다시 시도하세요.",
   "be_mcpResourceTools.readFailed":

@@ -224,7 +224,7 @@ describe("resource tools — wiring and bounds", () => {
   // The dominant axis is ONE server's catalogue: discovery caps resources at 200 but
   // never their bytes, and a narrowed call always yields exactly one server — so a
   // whole-servers-only bound would never fire for the biggest realistic payload.
-  it("drops descriptions before resources, keeping the catalogue complete", async () => {
+  it("drops descriptions before resources, keeping most of the catalogue", async () => {
     const one = [{
       serverId: "srv",
       resources: Array.from({ length: 200 }, (_, i) => ({
@@ -238,11 +238,16 @@ describe("resource tools — wiring and bounds", () => {
     const out = parse(rawOut);
     const servers = out.servers as Array<{ serverId: string; resources: unknown[] }>;
     expect(rawOut.length).toBeLessThanOrEqual(MCP_RESOURCE_LIST_MAX_CHARS);
-    // Cheapest loss first: the prose goes, every resource stays. uri + name is what a
-    // read needs, so the catalogue is still fully usable.
+    // Cheapest loss first: the prose goes so the ENTRIES survive. uri + name is what a
+    // read needs, so nearly the whole catalogue stays usable — 197 of 200 here, where
+    // keeping the descriptions instead would have fit only a handful. The guarantee is
+    // the ORDER of loss, not completeness: 200 entries of any size cannot all fit a
+    // budget sized to the wire cap.
     expect(out.descriptionsOmitted).toBe(true);
-    expect(servers[0].resources).toHaveLength(200);
-    expect(out.omittedResources).toBeUndefined();
+    expect(servers[0].resources.length).toBeGreaterThan(150);
+    // …and what did not fit is both counted and resumable.
+    expect(out.omittedResources).toBe(200 - servers[0].resources.length);
+    expect(out.nextOffset).toBe(servers[0].resources.length);
   });
 
   it("trims resources from a server too large even without descriptions", async () => {
@@ -265,6 +270,72 @@ describe("resource tools — wiring and bounds", () => {
     expect(servers[0].resources.length).toBeLessThan(200);
     // …and says how much it withheld.
     expect(out.omittedResources).toBe(200 - servers[0].resources.length);
+  });
+
+  // The bound has to hold when the OMISSION LIST is the payload. Two reviewers found
+  // the same hole independently: dropped ids were pushed without being charged, and
+  // the postcondition loop exits on "nothing kept" rather than on fitting — so a few
+  // dozen long server ids could leave an over-budget response with no tier left.
+  it("bounds the response even when almost everything is omitted", async () => {
+    const many = Array.from({ length: 200 }, (_, s) => ({
+      serverId: `srv-${"x".repeat(100)}-${s}`,
+      resources: Array.from({ length: 20 }, (_, i) => ({
+        uri: `file:///s${s}/f${i}`,
+        name: `f${i}`,
+        description: "d".repeat(500),
+      })),
+    }));
+    const tool = createMcpResourceListTool(() => deps({ listResources: () => many }));
+    const rawOut = (await tool.execute({}, ctx())).output;
+    const out = parse(rawOut);
+    expect(rawOut.length).toBeLessThanOrEqual(MCP_RESOURCE_LIST_MAX_CHARS);
+    // Named ids are capped; the rest are a count, so nothing is silently lost.
+    expect((out.omittedServerIds as string[]).length).toBeLessThanOrEqual(20);
+    expect(out.unnamedOmittedServers).toBeGreaterThan(0);
+  });
+
+  // Trimming at the SOURCE means the tail never reaches the wire, so unlike a stubbed
+  // result it cannot be paged back with `read_tool_result_chunk`. Without an offset the
+  // head was a permanent ceiling on what the model could ever see.
+  it("lets the model page past what the host trimmed", async () => {
+    const one = [{
+      serverId: "srv",
+      resources: Array.from({ length: 200 }, (_, i) => ({
+        uri: `file:///f${i}`,
+        name: `f${i}`,
+      })),
+    }];
+    const tool = createMcpResourceListTool(() => deps({ listResources: () => one }));
+    const first = parse((await tool.execute({}, ctx())).output);
+    const firstServers = first.servers as Array<{ resources: Array<{ uri: string }> }>;
+    expect(first.nextOffset).toBe(firstServers[0].resources.length);
+
+    const second = parse((await tool.execute({ offset: first.nextOffset }, ctx())).output);
+    const secondServers = second.servers as Array<{ resources: Array<{ uri: string }> }>;
+    // The second page starts exactly where the first stopped, and reaches the tail.
+    expect(secondServers[0].resources[0].uri)
+      .toBe(`file:///f${firstServers[0].resources.length}`);
+    const lastUri = secondServers[0].resources[secondServers[0].resources.length - 1].uri;
+    expect(lastUri).toBe("file:///f199");
+    // Nothing withheld on the last page ⇒ no resume marker.
+    expect(second.nextOffset).toBeUndefined();
+  });
+
+  it("rejects a malformed offset instead of guessing", async () => {
+    const tool = createMcpResourceListTool(() => deps());
+    for (const offset of [-1, 1.5, "3", Number.NaN]) {
+      const result = await tool.execute({ offset }, ctx());
+      expect(result.isError, String(offset)).toBe(true);
+    }
+  });
+
+  it("tells the model which argument was wrong", async () => {
+    // The list tool has no `uri` parameter, so reusing the read tool's message told
+    // the model to supply an argument its own schema rejects.
+    const tool = createMcpResourceListTool(() => deps());
+    const out = parse((await tool.execute({ serverId: 42 }, ctx())).output);
+    expect(String(out.error)).toContain("serverId");
+    expect(String(out.error)).not.toContain("uri");
   });
 
   it("declares the MCP scope dependency on both tools", () => {
