@@ -7,11 +7,11 @@
  * envelope around the text — never a side-channel flag — so any consumer can
  * recover it from the input alone.
  *
- * WHY A TABLE. Each staged origin previously had to be hand-registered at eight
+ * WHY A TABLE. Each staged origin previously had to be hand-registered at nine
  * independent sites (send-gate envelope requirement, stream origin derivation,
- * tool-trust classification, transcript marker, force-ask predicate, command
- * suppression, model-facing guidance, UI label), and only ONE of those had a
- * compile-time guard. Every missed site failed OPEN — most severely, a missing
+ * mid-turn guidance escalation, tool-trust classification, transcript marker,
+ * force-ask predicate, command suppression, model-facing guidance, UI label),
+ * and only ONE of those had a compile-time guard. Every missed site failed OPEN — most severely, a missing
  * stream-derivation branch silently leaves the turn with no staged origin, which
  * disables the permission force-ask entirely. Adding an origin is now a single
  * entry here, and each consumer resolves through {@link stagedOriginForInput} /
@@ -20,13 +20,20 @@
  * INVARIANT: a `ChatInputOrigin` listed here MUST be rejected by the send gate
  * unless its envelope is present, and MUST be treated as untrusted downstream.
  */
-import type { ChatInputOrigin } from "./chat-origin.js";
+import type { ChatInputOrigin, ChatSendInputOrigin } from "./chat-origin.js";
 import { type FenceTag, neutralizeFenceClose } from "./fence-sanitizer.js";
 import { stripLeadingSlash } from "./slash-sanitizer.js";
 
 export interface StagedOriginKind {
-  /** Turn-entry origin this envelope authorizes (`ChatSendInputOrigin` member). */
-  readonly inputOrigin: ChatInputOrigin;
+  /**
+   * Turn-entry origin this envelope authorizes.
+   *
+   * Typed as `ChatSendInputOrigin` because `isChatSendInputOrigin` derives its
+   * staged half FROM this table: a wider type here would let one registration
+   * widen the `chat:send` accept gate to a non-send origin with no compile error —
+   * the same fail-open one level up.
+   */
+  readonly inputOrigin: ChatSendInputOrigin;
   /** Fence tag wrapping the untrusted body. Closed union ⇒ compile-time guard. */
   readonly fenceTag: FenceTag;
   /** Strict, bounded shape of the provenance tag (e.g. `app:<serverId>`). */
@@ -44,6 +51,12 @@ export interface StagedOriginKind {
     readonly lineKeys: readonly string[];
   };
   /**
+   * i18n key for the transcript's trust chip. Registered here for the same reason
+   * the guidance is: a hand-written label switch falls through to `default` and
+   * renders the raw kebab-case origin at the user.
+   */
+  readonly labelKey: string;
+  /**
    * IPC rejection code when a send claims this origin without its envelope.
    * Part of the renderer's error contract (`ui/renderer/format-ipc-error.ts`),
    * so it is spelled out here rather than derived from the fence tag.
@@ -55,6 +68,18 @@ export interface StagedOriginKind {
   readonly envelopeFullPattern: RegExp;
 }
 
+/**
+ * Both patterns are anchored and their source group is bounded, so neither can be
+ * driven super-linearly by a long input.
+ *
+ * The body group is GREEDY and has no `\s*` beside it on purpose. The obvious
+ * spelling — `>\s*([\s\S]*?)\s*</tag>` — puts three quantifiers that all match a
+ * space next to each other, and on a header followed by whitespace and NO closing
+ * tag the engine explores their overlap: measured cubic (~2.5s at 2,000 chars,
+ * ~50s at 6,000). The greedy form scans to the end once and walks back to the last
+ * `</tag>`; because `$` anchors the match either way, it selects the same body as
+ * the lazy form. Whitespace around the body is trimmed by the caller instead.
+ */
 function envelopePatterns(fenceTag: string, sourceBody: string): {
   prefix: RegExp;
   full: RegExp;
@@ -62,7 +87,7 @@ function envelopePatterns(fenceTag: string, sourceBody: string): {
   return {
     prefix: new RegExp(`^<${fenceTag}\\s+source="(${sourceBody})"\\s*>`),
     full: new RegExp(
-      `^<${fenceTag}\\s+source="(${sourceBody})"\\s*>\\s*([\\s\\S]*?)\\s*</${fenceTag}>\\s*$`,
+      `^<${fenceTag}\\s+source="(${sourceBody})"\\s*>([\\s\\S]*)</${fenceTag}>\\s*$`,
     ),
   };
 }
@@ -83,6 +108,7 @@ const mcpPromptEnvelope = envelopePatterns("mcp-prompt", MCP_PROMPT_SOURCE_BODY)
 export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
   Object.freeze({
     inputOrigin: "plugin-emitted",
+    labelKey: "trustOriginLabel.pluginEmitted",
     fenceTag: "imported-from-proactive",
     sourcePattern: new RegExp(`^${OVERLAY_SOURCE_BODY}$`),
     guidance: {
@@ -104,6 +130,7 @@ export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
   } as const),
   Object.freeze({
     inputOrigin: "app-emitted",
+    labelKey: "trustOriginLabel.appEmitted",
     fenceTag: "app-message",
     sourcePattern: new RegExp(`^${APP_SOURCE_BODY}$`),
     guidance: {
@@ -120,6 +147,7 @@ export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
   } as const),
   Object.freeze({
     inputOrigin: "mcp-prompt-emitted",
+    labelKey: "trustOriginLabel.mcpPromptEmitted",
     fenceTag: "mcp-prompt",
     sourcePattern: new RegExp(`^${MCP_PROMPT_SOURCE_BODY}$`),
     guidance: {
@@ -184,7 +212,9 @@ export interface StagedEnvelope {
  * match the kind's pattern — an unenveloped staged message must never reach the
  * loop (No-Fallback), and a malformed tag is a host bug.
  *
- * This is the ONLY place a staged body is sanitized, so both rules live here:
+ * This is the ONLY place a staged body is sanitized — the overlay and app builders
+ * (`formatPluginPendingPrompt`, `formatAppMessageEnvelope`) delegate here — so both
+ * rules live in one place:
  * strip a leading slash so the text cannot dispatch a host slash command, and
  * neutralize the body's own closing tag so it cannot escape its provenance fence
  * and continue outside it.
@@ -213,15 +243,27 @@ export function parseStagedEnvelope(
   return null;
 }
 
-/** Match any registered envelope and split out provenance + body. */
+/**
+ * Match any registered envelope and split out provenance + body.
+ *
+ * Ordered cheapest-first, and that order is load-bearing: the prefix match is
+ * anchored and bounded, so it settles immediately and tells us WHICH kind to
+ * consider, and a plain `endsWith` then rules out an unclosed envelope before the
+ * full pattern runs at all. Handing an unclosed body to the quantifier first is
+ * reachable from imported session JSONL — those rows carry no provenance meta, so
+ * the envelope-recovery path is what runs on them.
+ */
 export function parseStagedEnvelopePayload(input: string): StagedEnvelope | null {
   const trimmed = input.trim();
-  for (const kind of STAGED_ORIGIN_KINDS) {
-    const full = trimmed.match(kind.envelopeFullPattern);
-    if (full) return { kind, source: full[1], body: full[2].trim() };
-  }
   const prefix = parseStagedEnvelope(trimmed);
   if (!prefix) return null;
+  if (trimmed.endsWith(`</${prefix.kind.fenceTag}>`)) {
+    const full = trimmed.match(prefix.kind.envelopeFullPattern);
+    if (full) return { kind: prefix.kind, source: full[1], body: full[2].trim() };
+  }
+  // Header without a matching close: provenance is still known and the body is
+  // whatever followed the header. Callers that require a CLOSED envelope (the
+  // transcript replay path) check the closing tag themselves.
   return {
     kind: prefix.kind,
     source: prefix.source,

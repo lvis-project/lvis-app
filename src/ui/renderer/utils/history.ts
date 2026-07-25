@@ -232,6 +232,14 @@ function visibleUserText(message: PersistedHistoryMessage): string {
   return textContent(message.content);
 }
 
+/**
+ * Bound on the replayed provenance summary. The persisted transcript is a file the
+ * user (or a conversation IMPORT) can write, and this string is rendered as
+ * markdown in host chrome — the live path caps it at staging time, so replay caps
+ * it too rather than trusting the row.
+ */
+const REPLAYED_SUMMARY_CAP = 2_000;
+
 function importedTriggerFromMessage(
   message: PersistedHistoryMessage,
 ): Extract<ChatEntry, { kind: "imported_trigger" }> | null {
@@ -242,7 +250,7 @@ function importedTriggerFromMessage(
       sessionId: message.importedTrigger.sessionId,
       source: message.importedTrigger.source,
       prompt: message.importedTrigger.prompt,
-      summary: message.importedTrigger.summary,
+      summary: message.importedTrigger.summary.slice(0, REPLAYED_SUMMARY_CAP),
       toolCallCount: message.importedTrigger.toolCallCount,
       importedAt: message.importedTrigger.importedAt,
     };
@@ -260,7 +268,7 @@ function importedTriggerFromMessage(
     sessionId: `history-imported-${message.index}`,
     source: parsed.source,
     prompt: textContent(message.content),
-    summary: parsed.body,
+    summary: parsed.body.slice(0, REPLAYED_SUMMARY_CAP),
     toolCallCount: 0,
     importedAt:
       message.createdAt !== undefined

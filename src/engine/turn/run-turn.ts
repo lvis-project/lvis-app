@@ -300,13 +300,22 @@ export async function runTurn(
         }
       : undefined;
     // Staged (non-user-authored) input renders as an `imported_trigger` marker, not a
-    // user bubble — for a plugin overlay trigger AND for an MCP App's confirmed
-    // `ui/message`. Both read provenance from their own envelope; `source` is what the
-    // transcript shows (`overlay:…` / `app:…`).
+    // user bubble — for a plugin overlay trigger, an MCP App's confirmed `ui/message`,
+    // and an MCP server prompt. Each reads provenance from its own envelope; `source`
+    // is what the transcript shows (`overlay:…` / `app:…` / `mcp-prompt:…`).
     // Table-driven: a per-origin ternary here defaulted to `null`, and a missing
     // branch made server/app-authored text render as a genuine USER bubble.
-    const importedTrigger = stagedOriginForInput(inputOrigin)
-      ? parseStagedEnvelopePayload(turnInput)
+    //
+    // The parse is pinned to the CLAIMED origin's own envelope. `chat:send` binds the
+    // two, but direct `runTurn` callers (the routine engine) do not go through that
+    // gate — accepting any kind's envelope there would let a routine's prompt label
+    // its transcript row with someone else's provenance.
+    const stagedKind = stagedOriginForInput(inputOrigin);
+    const importedTrigger = stagedKind
+      ? (() => {
+          const parsed = parseStagedEnvelopePayload(turnInput);
+          return parsed && parsed.kind === stagedKind ? parsed : null;
+        })()
       : null;
     if (inputOrigin === "agent-message") {
       agentMessageInputId = randomUUID();

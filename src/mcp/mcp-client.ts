@@ -24,6 +24,12 @@ import {
   fetchPublicHttpResponse,
   validateHttpUrl,
 } from "../core/network-guard.js";
+import {
+  isUsablePromptName,
+  MCP_PROMPT_ARG_NAME_MAX_CHARS,
+  MCP_PROMPT_MAX_BLOCKS,
+  MCP_PROMPT_NAME_MAX_CHARS,
+} from "./mcp-prompt-render.js";
 import { createLogger } from "../lib/logger.js";
 import { resolveStdioSpawnCommand } from "./uvx-command.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -553,15 +559,24 @@ export class McpClient {
           HANDSHAKE_TIMEOUT_MS,
         );
         for (const p of result.prompts ?? []) {
+          // Everything here is WIRE data — the declared TS types are casts, not
+          // checks. A non-string name reaches the renderer and is rendered as a
+          // React child (throws); a name main will later reject for length would
+          // render a field the user can fill but the host silently drops. Both are
+          // filtered at this boundary so one shape reaches every consumer.
+          if (!isUsablePromptName(p.name, MCP_PROMPT_NAME_MAX_CHARS)) continue;
+          const args = (Array.isArray(p.arguments) ? p.arguments : [])
+            .filter((a) => a && isUsablePromptName(a.name, MCP_PROMPT_ARG_NAME_MAX_CHARS))
+            .map((a) => ({
+              name: a.name,
+              ...(typeof a.description === "string" ? { description: a.description } : {}),
+              required: a.required === true,
+            }));
           prompts.push({
             name: p.name,
-            title: p.title,
-            description: p.description,
-            arguments: p.arguments?.map((a) => ({
-              name: a.name,
-              description: a.description,
-              required: a.required,
-            })),
+            ...(typeof p.title === "string" ? { title: p.title } : {}),
+            ...(typeof p.description === "string" ? { description: p.description } : {}),
+            ...(args.length > 0 ? { arguments: args } : {}),
           });
         }
         cursor = result.nextCursor;
@@ -601,7 +616,13 @@ export class McpClient {
       name,
       ...(Object.keys(args).length > 0 ? { arguments: args } : {}),
     });
-    const blocks = (result.messages ?? []).map((message) => ({
+    // Sliced BEFORE mapping: `renderMcpPrompt`'s block cap applies to the mapped
+    // array, so a server returning a huge `messages` array would already have paid
+    // for the allocation by then.
+    const messages = Array.isArray(result.messages)
+      ? result.messages.slice(0, MCP_PROMPT_MAX_BLOCKS)
+      : [];
+    const blocks = messages.map((message) => ({
       role: typeof message.role === "string" ? message.role : "user",
       type: typeof message.content?.type === "string" ? message.content.type : "text",
       ...(typeof message.content?.text === "string" ? { text: message.content.text } : {}),

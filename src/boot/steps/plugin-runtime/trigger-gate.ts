@@ -12,9 +12,9 @@ import type {
   ConversationTriggerResult,
   ConversationTriggerSpec,
 } from "../../../plugins/types.js";
-import { OVERLAY_TRIGGER_SOURCE_PATTERN, isOverlayTriggerOrigin } from "../../../shared/overlay-trigger-source.js";
+import { OVERLAY_TRIGGER_SOURCE_PATTERN } from "../../../shared/overlay-trigger-source.js";
 import { CAPABILITY_HOST_OVERLAY } from "../../../plugins/capabilities.js";
-import { neutralizeFenceClose } from "../../../shared/fence-sanitizer.js";
+import { formatStagedEnvelope, stagedOriginForInput } from "../../../shared/staged-origins.js";
 import { stripLeadingSlash } from "../../../shared/slash-sanitizer.js";
 import { stripUntrustedTags } from "../../../lib/strip-untrusted-tags.js";
 import { t } from "../../../i18n/index.js";
@@ -110,21 +110,19 @@ export function sanitizePluginPendingPrompt(prompt: string): string {
 }
 
 /**
- * Wrap a plugin-authored prompt in its provenance fence. The body is neutralized
- * against its OWN closing tag (`shared/fence-sanitizer.ts` — the same helper the
- * `<app-message>` and `<mcp-app-context>` fences use): a prompt carrying a literal
- * `</imported-from-proactive>` would otherwise author text that reads, to the model, as
- * sitting outside the plugin-provenance fence.
+ * Wrap a plugin-authored prompt in its provenance fence.
+ *
+ * Construction and body sanitization — leading slash stripped, the body's own
+ * closing tag neutralized so a prompt carrying a literal
+ * `</imported-from-proactive>` cannot author text that reads, to the model, as
+ * sitting outside its provenance fence — belong to `shared/staged-origins.ts`,
+ * which every staged kind shares. A rule added there covers overlay prompts too,
+ * instead of needing this copy to be found and edited as well.
  */
 export function formatPluginPendingPrompt(prompt: string, source: string): string {
-  if (!isOverlayTriggerOrigin(source)) {
-    throw new Error(`invalid overlay trigger source for pending prompt: ${source}`);
-  }
-  const body = neutralizeFenceClose(
-    sanitizePluginPendingPrompt(prompt),
-    "imported-from-proactive",
-  );
-  return `<imported-from-proactive source="${source}">\n${body}\n</imported-from-proactive>`;
+  const kind = stagedOriginForInput("plugin-emitted");
+  if (!kind) throw new Error("plugin-emitted staged origin is not registered");
+  return formatStagedEnvelope(kind, prompt, source);
 }
 
 export const OVERLAY_SUMMARY_DISPLAY_CAP = 2_000;
@@ -183,6 +181,20 @@ export class TriggerConversationRateLimiter {
 }
 
 export const triggerConversationRateLimiter = new TriggerConversationRateLimiter();
+
+/**
+ * Separate bucket for round-trips the USER initiated (running a server-declared
+ * MCP prompt from the picker). Sharing the actor bucket above let a chatty plugin
+ * or app card spend the budget and block the user's own clicks on that server —
+ * one throttle, two unrelated budgets. Same shape, its own counters; the cap is
+ * higher because a person clicking a picker row is self-limiting, and it exists to
+ * bound a stuck UI loop rather than an adversary.
+*/
+const USER_PROMPT_RATE_LIMIT_MAX_CALLS = 20;
+export const userPromptRateLimiter = new TriggerConversationRateLimiter(
+  TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS,
+  USER_PROMPT_RATE_LIMIT_MAX_CALLS,
+);
 
 /**
  * Suppress a flood of identical denial audit rows. Without this, a plugin in

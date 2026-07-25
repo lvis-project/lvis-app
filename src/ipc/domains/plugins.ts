@@ -54,12 +54,19 @@ import { parseMcpAppDownload, type McpUiDownloadOutcome } from "../../mcp/mcp-ap
 import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
 import { appMessageSource, formatAppMessageEnvelope, isAppMessageOrigin } from "../../shared/mcp-app-message-source.js";
 import { formatStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
-import { renderMcpPrompt } from "../../mcp/mcp-prompt-render.js";
+import {
+  isUsablePromptName,
+  MCP_PROMPT_ARG_NAME_MAX_CHARS,
+  MCP_PROMPT_ARG_VALUE_MAX_CHARS,
+  MCP_PROMPT_NAME_MAX_CHARS,
+  renderMcpPrompt,
+} from "../../mcp/mcp-prompt-render.js";
 // The MCP-app `ui/message` staging path reuses the plugin overlay gate's rate limiter
 // (one mechanism for "staged conversation proposals") and the same overlay push channel.
 import {
   deriveOverlaySummaryForDisplay,
   triggerConversationRateLimiter,
+  userPromptRateLimiter,
 } from "../../boot/steps/plugin-runtime/trigger-gate.js";
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
@@ -1520,7 +1527,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         input,
       });
     };
-    if (typeof serverId !== "string" || typeof name !== "string" || name.length === 0) {
+    // `name` is bounded and control-char-free by the same predicate the client's
+    // discovery boundary and the argument form use, so one shape reaches the audit
+    // line below, the server, and the dialog.
+    if (typeof serverId !== "string" || !isUsablePromptName(name, MCP_PROMPT_NAME_MAX_CHARS)) {
       return { ok: false, error: "invalid-request" };
     }
     const kind = stagedOriginForInput("mcp-prompt-emitted");
@@ -1530,17 +1540,22 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!kind || !kind.sourcePattern.test(source)) {
       return { ok: false, error: "invalid-server-id" };
     }
-    if (triggerConversationRateLimiter.isOverCap(serverId)) {
+    // Throttled on its OWN bucket, not the plugin/app actor bucket: this round-trip
+    // is one the user clicked for, and sharing a budget with `triggerConversation()`
+    // and `ui/message` let a chatty card starve the user's own prompt runs.
+    if (userPromptRateLimiter.isOverCap(serverId)) {
       auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get rate limited`);
       return { ok: false, error: "rate-limited" };
     }
-    triggerConversationRateLimiter.record(serverId);
-    // Arguments come from the user's form; keep only string values and bound them.
-    const promptArgs: Record<string, string> = {};
+    userPromptRateLimiter.record(serverId);
+    // Arguments come from the user's form; keep only string values, and accept only
+    // keys the dialog could legitimately have rendered — `Object.create(null)` so a
+    // key like `__proto__` or `toString` cannot reach an inherited slot.
+    const promptArgs: Record<string, string> = Object.create(null) as Record<string, string>;
     if (args && typeof args === "object" && !Array.isArray(args)) {
       for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
-        if (typeof value === "string" && key.length <= 64) {
-          promptArgs[key] = value.slice(0, 4096);
+        if (typeof value === "string" && isUsablePromptName(key, MCP_PROMPT_ARG_NAME_MAX_CHARS)) {
+          promptArgs[key] = value.slice(0, MCP_PROMPT_ARG_VALUE_MAX_CHARS);
         }
       }
     }

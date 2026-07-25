@@ -135,7 +135,12 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         if (debugStreamEnabled) debugLog("handleAsk", "skip:empty");
         return;
       }
-      if (mode === "default" && streaming) {
+      // `mcp-prompt` joins `default` here because both are USER-initiated: the
+      // picker is live while a turn streams, so without this a click lands on
+      // `trackStreamTurn` and surfaces a raw "stream already active" error. The
+      // staged modes that are NOT user-initiated stay out — they are queued or
+      // injected by the host, and must never abort the turn the user is watching.
+      if ((mode === "default" || mode === "mcp-prompt") && streaming) {
         // Issue #622: interrupt the current turn and start a new one.
         // chatAbort awaits until the active stream turn settles (interrupted),
         // then returns. The in-flight turn's finally block calls
