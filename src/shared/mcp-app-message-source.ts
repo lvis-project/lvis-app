@@ -24,8 +24,8 @@
  * (`shared/fence-sanitizer.ts` — the same helper the other two fences use).
  */
 import { neutralizeFenceClose } from "./fence-sanitizer.js";
-import { isOverlayTriggerOrigin } from "./overlay-trigger-source.js";
 import { stripLeadingSlash } from "./slash-sanitizer.js";
+import { isStagedTurnSource } from "./staged-origins.js";
 
 /**
  * Strict `app:<serverId>` shape. serverIds are MCP server ids / plugin ids
@@ -53,7 +53,10 @@ export function isAppMessageOrigin(source: string | null | undefined): boolean {
  * force-ask gate.
  */
 export function isStagedTurnOrigin(source: string | null | undefined): boolean {
-  return isOverlayTriggerOrigin(source) || isAppMessageOrigin(source);
+  // Delegates to the staged-origin registry so registering a new kind there is
+  // the ONLY step needed to bring it under the force-ask gate. Kept exported
+  // here because this is the import site every consumer already uses.
+  return isStagedTurnSource(source);
 }
 
 const APP_MESSAGE_ENVELOPE_PATTERN =

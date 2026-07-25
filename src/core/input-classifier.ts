@@ -1,5 +1,4 @@
-import { parseImportedTriggerEnvelope } from "../shared/overlay-trigger-source.js";
-import { parseAppMessageEnvelope } from "../shared/mcp-app-message-source.js";
+import { parseStagedEnvelope } from "../shared/staged-origins.js";
 
 export type InputClassification =
   | { type: "command"; command: string; args: string }
@@ -17,10 +16,7 @@ export class InputClassifier {
 
     // Imported plugin/MCP app envelopes are data staged by a trusted host path,
     // never user-authored command syntax.
-    if (
-      parseImportedTriggerEnvelope(trimmed) !== null ||
-      parseAppMessageEnvelope(trimmed) !== null
-    ) {
+    if (parseStagedEnvelope(trimmed) !== null) {
       return { type: "general", input: trimmed };
     }
 

@@ -19,8 +19,7 @@ import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import type { UserContentPart } from "../../engine/llm/types.js";
-import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
-import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
+import { stagedOriginForInput } from "../../shared/staged-origins.js";
 import {
   createStreamingFilter,
   stripSuggestedReplies,
@@ -82,12 +81,15 @@ export async function runStreamedTurn(
   // separate flag. `overlay:*` for a plugin trigger, `app:*` for an MCP App's confirmed
   // `ui/message`. It becomes the permission manager's staged-origin (write/shell/network
   // forced to ask) and the transcript's provenance marker.
-  const originSource =
-    options.inputOrigin === "plugin-emitted"
-      ? parseImportedTriggerEnvelope(input)
-      : options.inputOrigin === "app-emitted"
-        ? parseAppMessageEnvelope(input)
-        : null;
+  // Table-driven (shared/staged-origins.ts): a per-origin if/else chain here used
+  // to default to `null`, and a missing branch silently produced a turn with NO
+  // staged origin — which disables the permission force-ask entirely. Resolving
+  // the kind from the registry makes a newly registered origin work by default
+  // instead of failing open.
+  const stagedKind = stagedOriginForInput(options.inputOrigin);
+  const originSource = stagedKind
+    ? (input.trimStart().match(stagedKind.envelopePrefixPattern)?.[1] ?? null)
+    : null;
   // Per-turn streaming filter for the <suggested_replies> block. Withholds
   // chunks that could be (or are) part of the trailing tag, surfaces the
   // parsed list when the turn ends. See

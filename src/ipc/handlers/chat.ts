@@ -21,8 +21,7 @@ import type { GenericMessage } from "../../engine/llm/types.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
-import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
-import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
+import { stagedOriginForInput } from "../../shared/staged-origins.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -305,15 +304,17 @@ export function parseChatSendPayload(
   if (candidate.inputOrigin === "user-keyboard" && candidate.userActivation !== true) {
     return { ok: false, error: "user-keyboard-required" };
   }
-  if (candidate.inputOrigin === "plugin-emitted" && !parseImportedTriggerEnvelope(candidate.input)) {
-    return { ok: false, error: "missing-plugin-envelope" };
-  }
-  // An `app-emitted` send is an MCP App's `ui/message` that the USER confirmed from the
-  // staging card. The envelope is the provenance mechanism, so a send that claims the
-  // origin without carrying it is rejected here — the one place a claimed origin is
-  // checked against the text (mirrors the plugin envelope rule directly above).
-  if (candidate.inputOrigin === "app-emitted" && !parseAppMessageEnvelope(candidate.input)) {
-    return { ok: false, error: "missing-app-envelope" };
+  // Every STAGED origin (plugin overlay trigger, MCP App `ui/message`, MCP server
+  // prompt) carries its provenance in an envelope around the text. This is the one
+  // place a claimed origin is checked against the text, and it is table-driven
+  // (shared/staged-origins.ts) so a newly registered origin is rejected-without-
+  // envelope by default rather than needing its own hand-written branch here.
+  const stagedKind = stagedOriginForInput(candidate.inputOrigin);
+  if (stagedKind) {
+    const enveloped = candidate.input.trimStart().match(stagedKind.envelopePrefixPattern);
+    if (!enveloped) {
+      return { ok: false, error: stagedKind.missingEnvelopeError };
+    }
   }
   const personaPrompt = normalizePersonaPromptId(candidate.inputOrigin, candidate.personaPromptId);
   if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
