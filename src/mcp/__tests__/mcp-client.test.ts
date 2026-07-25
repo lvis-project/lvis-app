@@ -1706,3 +1706,76 @@ describe("MCP prompts discovery", () => {
     await client.disconnect();
   });
 });
+
+describe("MCP getPrompt gating", () => {
+  it("refuses a prompt the server never declared, and serves a declared one", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      const method = readRpcMethod(init);
+      const id = readRpcId(init) ?? 0;
+      switch (method) {
+        case "server/discover":
+          return jsonRpcResponse(id, { ...RC_DISCOVER_RESULT, capabilities: { tools: {}, prompts: {} } });
+        case "notifications/initialized":
+          return new Response(null, { status: 202 });
+        case "tools/list":
+          return jsonRpcResponse(id, { tools: [] });
+        case "prompts/list":
+          return jsonRpcResponse(id, { prompts: [{ name: "code_review", description: "Review" }] });
+        case "prompts/get":
+          return jsonRpcResponse(id, {
+            description: "Review",
+            messages: [{ role: "user", content: { type: "text", text: "REVIEW BODY" } }],
+          });
+        default:
+          return new Response("unexpected", { status: 500 });
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const gov = governanceWithPolicy(
+      buildPolicy([
+        httpApproval("psrv2", "https://psrv2.example.com/mcp", {
+          allowedCapabilities: ["tools", "prompts"] as McpGovernancePolicy["servers"][number]["allowedCapabilities"],
+        }),
+      ]),
+    );
+    const client = new McpClient(
+      { id: "psrv2", transport: "http", url: "https://psrv2.example.com/mcp" },
+      gov,
+      new ToolRegistry(),
+    );
+    await client.connect();
+
+    // A name the host never saw at discovery is refused BEFORE any request.
+    await expect(client.getPrompt("not_declared", {})).rejects.toThrow(/did not declare prompt/);
+
+    const got = await client.getPrompt("code_review", { diff: "x" });
+    expect(got.description).toBe("Review");
+    expect(got.blocks).toEqual([{ role: "user", type: "text", text: "REVIEW BODY" }]);
+    await client.disconnect();
+  });
+
+  it("refuses getPrompt when the server never advertised prompts", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      const method = readRpcMethod(init);
+      const id = readRpcId(init) ?? 0;
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "notifications/initialized") return new Response(null, { status: 202 });
+      return new Response("unexpected", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const gov = governanceWithPolicy(
+      buildPolicy([httpApproval("psrv3", "https://psrv3.example.com/mcp")]),
+    );
+    const client = new McpClient(
+      { id: "psrv3", transport: "http", url: "https://psrv3.example.com/mcp" },
+      gov,
+      new ToolRegistry(),
+    );
+    await client.connect();
+    await expect(client.getPrompt("anything", {})).rejects.toThrow(/did not advertise prompts/);
+    await client.disconnect();
+  });
+});
