@@ -360,18 +360,54 @@ describe("lvis:mcp:attach-resource-template — filling an offer", () => {
     expect(Object.getPrototypeOf(carried)).toBe(Map.prototype);
   });
 
-  it("drops keys no catalogued template could have declared, and bounds the rest", async () => {
+  it("drops keys no catalogued template could have declared", async () => {
     const { serverId, templateReadMock } = await setup();
-    const overLong = "v".repeat(MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS + 50);
     await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", {
-      path: overLong,
+      path: "notes.md",
       "not a name": "dropped",
       "": "dropped",
       nested: { toString: () => "not a string" },
     });
     const values = (templateReadMock.mock.calls[0] as [string, string, Map<string, string>])[2];
-    expect(values.get("path")).toHaveLength(MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS);
     expect([...values.keys()]).toEqual(["path"]);
+    expect(values.get("path")).toBe("notes.md");
+  });
+
+  // The one place the prompt path's rule deliberately does NOT carry over. A clipped
+  // prompt argument is a shorter question; a clipped path segment is a DIFFERENT
+  // resource, read without anyone being told — and clipping here is exactly what would
+  // stop `expandResourceUriTemplate`'s own over-long refusal from ever firing.
+  it("refuses an over-long value rather than clipping it into another resource", async () => {
+    const { serverId, templateReadMock } = await setup();
+    const overLong = "v".repeat(MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS + 1);
+
+    expect(await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", { path: overLong }))
+      .toEqual({ ok: false, error: "invalid-request" });
+    expect(templateReadMock).not.toHaveBeenCalled();
+
+    // …and the value at the limit is carried WHOLE, so the refusal is a boundary and
+    // not a quiet ceiling one character lower.
+    const atLimit = "v".repeat(MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS);
+    await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", { path: atLimit });
+    const values = (templateReadMock.mock.calls[0] as [string, string, Map<string, string>])[2];
+    expect(values.get("path")).toBe(atLimit);
+  });
+
+  // The bucket protects the SERVER from round-trips made on the user's behalf. A request
+  // refused before any of them never reaches one, so charging the user's per-server
+  // budget for it would let a renderer bug spend the budget the user needs.
+  it("does not spend the rate budget on a request it refuses", async () => {
+    const { serverId, templateReadMock } = await setup();
+    for (let i = 0; i <= USER_PROMPT_RATE_LIMIT_MAX_CALLS + 5; i += 1) {
+      const result = await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", {
+        path: "v".repeat(MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS + 1),
+      });
+      expect(result).toEqual({ ok: false, error: "invalid-request" });
+    }
+    // …and a well-formed request afterwards still goes through.
+    expect(await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", { path: "a.md" }))
+      .toMatchObject({ ok: true });
+    expect(templateReadMock).toHaveBeenCalledTimes(1);
   });
 
   it("bounds how many variables one request may carry", async () => {
