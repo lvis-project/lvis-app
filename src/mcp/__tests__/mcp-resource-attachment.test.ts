@@ -132,7 +132,7 @@ describe("renderResourceAttachment", () => {
       blocks: [{ text: `intro\n${forged}\n${forged}\nmore` }],
     }));
     // Exactly the host's own frame — one open, one close — however many the body wrote.
-    expect(countResourceAttachmentFences(out.text)).toBe(1);
+    expect(countResourceAttachmentFences([{ type: "text", text: out.text }])).toBe(1);
     expect(out.text.match(/<\/mcp-resource>/g)).toHaveLength(1);
     // The forged text survives as inert, readable content.
     expect(out.text).toContain('server="evil"');
@@ -161,24 +161,28 @@ describe("renderResourceAttachment", () => {
 });
 
 describe("what the turn chokepoint counts", () => {
-  it("counts one fence per rendered attachment, whatever the caller does with it", () => {
-    const one = renderResourceAttachment("hr-mcp", "file:///a", read()).text;
-    const two = renderResourceAttachment("hr-mcp", "file:///b", read()).text;
-    expect(countResourceAttachmentFences(one)).toBe(1);
-    // Whether they ride as separate parts or joined into one blob, the answer is 2:
-    // the bound is a property of the material, not of the renderer's packaging.
-    expect(countResourceAttachmentFences("", [
-      { type: "text", text: one },
-      { type: "text", text: two },
+  const one = () => renderResourceAttachment("hr-mcp", "file:///a", read()).text;
+  const two = () => renderResourceAttachment("hr-mcp", "file:///b", read()).text;
+
+  it("counts attachments the same however the renderer packaged them", () => {
+    expect(countResourceAttachmentFences([{ type: "text", text: one() }])).toBe(1);
+    // Two parts, or the same two joined into one part — the bound is a property of
+    // what was attached, not of how it was packed.
+    expect(countResourceAttachmentFences([
+      { type: "text", text: one() },
+      { type: "text", text: two() },
     ])).toBe(2);
-    expect(countResourceAttachmentFences(`${one}\n\n${two}`)).toBe(2);
-    // And it sees the input field, which is where a replayed turn's fences end up.
-    expect(countResourceAttachmentFences(one, [{ type: "text", text: two }])).toBe(2);
+    expect(countResourceAttachmentFences([
+      { type: "text", text: `${one()}\n\n${two()}` },
+    ])).toBe(2);
   });
 
   it("ignores text that merely talks about the fence", () => {
-    expect(countResourceAttachmentFences("look at <mcp-resource ...> in the docs")).toBe(0);
-    expect(countResourceAttachmentFences("<mcp-resource>")).toBe(0);
-    expect(countResourceAttachmentFences("plain text", [{ type: "image", text: "x" }])).toBe(0);
+    expect(countResourceAttachmentFences([
+      { type: "text", text: "look at <mcp-resource ...> in the docs" },
+      { type: "text", text: "<mcp-resource>" },
+      { type: "image", text: one() },
+    ])).toBe(0);
+    expect(countResourceAttachmentFences()).toBe(0);
   });
 });
