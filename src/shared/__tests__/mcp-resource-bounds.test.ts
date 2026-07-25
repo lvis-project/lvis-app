@@ -130,10 +130,11 @@ describe("isUsableResourceUri", () => {
     expect(isUsableResourceUri("file:///Users/ken/문서/정상.md")).toBe(true);
     expect(isUsableResourceUri("file:///docs/年度報告.pdf")).toBe(true);
     expect(isUsableResourceUri("file:///docs/café-résumé.txt")).toBe(true);
+  });
 
-    // ...and the cost of ONE shared class, pinned as an EXPECTED refusal rather than
-    // left to be discovered as a bug: a name carrying an emoji variation selector or a
-    // ZWJ sequence is refused too. Keeping it is deliberate - after a non-emoji
+  it("refuses an emoji variation selector and a ZWJ sequence, the cost of one class", () => {
+    // The cost of ONE shared class, pinned as an EXPECTED refusal rather than left to
+    // be discovered as a bug. Keeping it is deliberate: after a non-emoji
     // character a variation selector renders as nothing, so allowing it in an identifier
     // would let two different URIs render identically, and subtracting it for the URI
     // alone would reinstate the two-policies-over-one-class problem this replaced.
