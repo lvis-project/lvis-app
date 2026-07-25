@@ -2818,6 +2818,7 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.toolCallFailed": "La llamada a la herramienta de esta app fue denegada o falló.",
   "formatIpcError.notificationUnavailable": "El servicio de notificaciones no está en ejecución, por lo que no se pudo entregar el mensaje de la app.",
   "composer.resourceMentionHint": "Enter adjunta el recurso · Esc cierra",
+  "composer.resourceMentionTemplateHint": "Enter abre el formulario de la plantilla · Esc cierra",
   "composer.resourceMentionTemplateBadge": "plantilla",
   "composer.resourceLimit": "Como máximo {max} recursos por mensaje: envía este y luego adjunta más.",
   "composer.resourceAttachFailed": "No se pudo adjuntar ese recurso. Puede que el servidor se haya desconectado.",

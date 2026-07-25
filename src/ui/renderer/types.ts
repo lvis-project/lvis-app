@@ -1726,15 +1726,22 @@ export type LvisMcpApi = {
   /**
    * The URI TEMPLATES half of that catalogue. A template is an OFFER, not a resource:
    * the picker renders it as a row that opens a form rather than one that attaches.
+   *
+   * OPTIONAL because the picker treats it as optional: a surface without it degrades to
+   * resources-only rather than losing the whole catalogue. Declaring it required would
+   * make that guard look like dead code and force the test that pins it to cast around
+   * the type it is supposed to be checking.
    */
-  listResourceTemplates: () => Promise<
+  listResourceTemplates?: () => Promise<
     | { ok: true; servers: Array<{ serverId: string; templates: McpResourceTemplateSummary[] }> }
     | { ok: false; error: string }
   >;
   /**
    * Fill a declared template and attach what it reads. The renderer sends the TEMPLATE
    * and the user's values; main expands and reads. `uri` comes back for the chip's
-   * label — there is no channel that accepts a URI, so it cannot be replayed as a read.
+   * label. Safe to hand back because no channel accepts an UNLISTED URI — `attachResource`
+   * does take one, and replaying an expansion through it hits the listed-URI gate inside
+   * the client, which a template expansion was never in.
    */
   attachResourceTemplate: (
     serverId: string,

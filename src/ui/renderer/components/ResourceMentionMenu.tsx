@@ -78,8 +78,9 @@ export function ResourceMentionMenu({
           >
             {/*
               A different icon for a template, because accepting one does something
-              different: it opens a form instead of attaching. A row that looked identical
-              would make "Enter attaches the resource" false for half the menu.
+              different: it opens a form instead of attaching. The footer hint below
+              follows the active row for the same reason — an icon distinguishes the rows
+              but does not change what a sentence underneath them says.
             */}
             {item.target.kind === "template" ? (
               <FormInput className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -103,8 +104,18 @@ export function ResourceMentionMenu({
           </div>
         );
       })}
-      <div className="px-2 pb-1 pt-1.5 text-[10px] text-muted-foreground">
-        {t("composer.resourceMentionHint")}
+      {/*
+        Follows the ACTIVE row, because the two kinds of row answer Enter differently and
+        the icon does not change what this sentence says. A fixed "Enter attaches the
+        resource" is simply false while a template row is selected.
+      */}
+      <div
+        className="px-2 pb-1 pt-1.5 text-[10px] text-muted-foreground"
+        data-testid="resource-mention-hint"
+      >
+        {t(items[activeIndex]?.target.kind === "template"
+          ? "composer.resourceMentionTemplateHint"
+          : "composer.resourceMentionHint")}
       </div>
     </div>,
     document.body,

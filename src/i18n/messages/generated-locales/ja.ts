@@ -2817,6 +2817,7 @@ export const jaMessages: Record<string, string> = {
   "workGroup.work": "仕事",
   "workGroup.working": "働く...",
   "composer.resourceMentionHint": "Enter でリソースを添付 · Esc で閉じる",
+  "composer.resourceMentionTemplateHint": "Enter でテンプレート入力を開く · Esc で閉じる",
   "composer.resourceMentionTemplateBadge": "テンプレート",
   "composer.resourceLimit": "1 メッセージあたりリソースは最大 {max} 件です — これを送信してから追加してください。",
   "composer.resourceAttachFailed": "このリソースを添付できませんでした。サーバーの接続が切れた可能性があります。",

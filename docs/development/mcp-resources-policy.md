@@ -131,8 +131,12 @@ well-formed expression and validating the literal skeleton with `isUsableResourc
 the two rules cannot drift — a template cannot smuggle in a scheme or an invisible
 character that a plain URI could not.
 
-`notifications/resources/list_changed` re-runs discovery, debounced, and only for a
-server that declared `listChanged`.
+`notifications/resources/list_changed` is **not handled** — no listener exists for it in
+`src`, for resources or for templates. An earlier version of this line described a
+debounced re-discovery as if it were implemented; it never was. Until it is, a catalogue
+is what the server declared at connect, and a server that adds a resource mid-session
+does not appear until the next connection. Corrected rather than deleted, because "we
+consume the notification" is the kind of claim someone plans against.
 
 ## 4. Reading
 
@@ -227,10 +231,13 @@ Stage 3 — the user path, split at the process boundary the way stages 1 and 2 
     `lvis:mcp:list-resource-templates`, fetched together — two effects would each set the
     catalogue and the later one would erase the other's rows). A resource row attaches; a
     TEMPLATE row opens a host dialog, because a template is an offer rather than an
-    identifier. The dialog collects values only: it never composes a URI, and the renderer
-    has no channel that would accept one. `lvis:mcp:attach-resource-template` takes the
-    template plus the values, and main expands, reads, and fences — keyed on the URI IT
-    produced. Values cross the boundary as a plain object and become a `Map` immediately,
+    identifier. The dialog collects values only; it never composes a URI.
+    `lvis:mcp:attach-resource-template` takes the template plus the values, and main
+    expands, reads, and fences — keyed on the URI IT produced, which it hands back for the
+    chip's label. That echo is safe because no channel accepts an **unlisted** URI, not
+    because none accepts a URI: `attach-resource` takes one, and an expansion replayed
+    through it meets the listed-URI gate inside the client, which the expansion was never
+    in. Values cross the boundary as a plain object and become a `Map` immediately,
     so a variable named `__proto__` or `toString` is an ordinary key rather than an
     inherited slot. Both attach channels share the user-initiated rate bucket with
     `prompts/get`: one server, one budget for round-trips the user asked for.
