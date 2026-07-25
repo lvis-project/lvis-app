@@ -189,14 +189,19 @@ export function useResourceMention({
     let cancelled = false;
     void (async () => {
       try {
+        // Each half absorbs its OWN failure before they are joined, so one cannot take
+        // the other down. A bare `Promise.all` rejects as a unit: a template fetch that
+        // rejected — or a method that was not there to call — would reach the catch
+        // below, which empties the catalogue, and the user would lose their RESOURCES
+        // because TEMPLATES were unavailable. Degrading to resources-only is the honest
+        // outcome, and it is a consequence, not a story about a preload that shipped
+        // separately.
+        const unavailable = { ok: false as const, error: "unavailable" };
         const [resources, templates] = await Promise.all([
-          mcp.listResources(),
-          // Guarded the same way the line above guards `listResources`, and for a
-          // consequence rather than a version story: a missing method inside
-          // `Promise.all` throws, the catch below empties the catalogue, and the user
-          // loses their RESOURCES because templates were unavailable. Degrading to
-          // resources-only is the honest failure.
-          mcp.listResourceTemplates?.() ?? Promise.resolve({ ok: false as const, error: "" }),
+          mcp.listResources().catch(() => unavailable),
+          (mcp.listResourceTemplates?.() ?? Promise.resolve(unavailable)).catch(
+            () => unavailable,
+          ),
         ]);
         if (cancelled) return;
         const flat: CatalogueEntry[] = [];
@@ -249,6 +254,13 @@ export function useResourceMention({
                 label,
                 hint: `${server.serverId} · ${safeTemplate}`,
                 search: `${label} ${server.serverId} ${safeTemplate}`.toLowerCase(),
+                // Same treatment as the resource row above, for the same reason: the
+                // picker answers "what can be attached right now". Without this a
+                // `https://…/{doc}` template looks fillable, and the refusal arrives
+                // AFTER the user has filled a form — blaming the server for a host rule.
+                ...(template.hostFetchRefused
+                  ? { unavailableReason: t("composer.resourceNotFetchable") }
+                  : {}),
               });
             }
           }

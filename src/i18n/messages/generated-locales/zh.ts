@@ -2817,6 +2817,7 @@ export const zhMessages: Record<string, string> = {
   "workGroup.work": "工作",
   "workGroup.working": "在职的...",
   "composer.resourceMentionHint": "Enter 附加资源 · Esc 关闭",
+  "composer.resourceMentionTemplateHint": "Enter 打开模板表单 · Esc 关闭",
   "composer.resourceMentionTemplateBadge": "模板",
   "composer.resourceLimit": "每条消息最多 {max} 个资源 — 请先发送，然后再附加。",
   "composer.resourceAttachFailed": "无法附加该资源。服务器可能已断开连接。",

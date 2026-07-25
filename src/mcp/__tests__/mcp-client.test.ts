@@ -2051,6 +2051,32 @@ describe("MCP resources discovery and read", () => {
     await client.disconnect();
   });
 
+  it("flags a template whose LITERAL scheme the host will not fetch", async () => {
+    // Not a guess: the literal part is fixed at discovery, so if the scheme is literally
+    // `https:` then every expansion of it is too. The picker disables the row on this,
+    // which is what stops a user filling a form whose only outcome is a refusal.
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [
+        {
+          resourceTemplates: [
+            { uriTemplate: "https://example.com/{doc}", name: "web" },
+            { uriTemplate: "file:///project/{path}", name: "local" },
+          ],
+        },
+      ],
+    });
+    await client.connect();
+
+    const templates = client.getState().resourceTemplates ?? [];
+    expect(templates[0]).toMatchObject({ uriTemplate: "https://example.com/{doc}", hostFetchRefused: true });
+    // …and the flag is ABSENT rather than false on a template the host will fetch, so a
+    // consumer cannot read "we checked and it is fine" off a missing property.
+    expect(templates[1]).not.toHaveProperty("hostFetchRefused");
+    await client.disconnect();
+  });
+
   it("expands a declared template host-side and reads the produced URI", async () => {
     const { client, readCalls } = connectWith({
       advertiseResources: true,

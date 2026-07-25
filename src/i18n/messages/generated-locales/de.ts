@@ -2796,6 +2796,7 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.toolCallFailed": "Der Tool-Aufruf dieser App wurde abgelehnt oder ist fehlgeschlagen.",
   "formatIpcError.notificationUnavailable": "Der Benachrichtigungsdienst läuft nicht, daher konnte die Nachricht der App nicht zugestellt werden.",
   "composer.resourceMentionHint": "Enter fügt die Ressource an · Esc schließt",
+  "composer.resourceMentionTemplateHint": "Enter öffnet das Vorlagenformular · Esc schließt",
   "composer.resourceMentionTemplateBadge": "Vorlage",
   "composer.resourceLimit": "Höchstens {max} Ressourcen pro Nachricht — senden Sie diese und fügen Sie dann weitere an.",
   "composer.resourceAttachFailed": "Diese Ressource konnte nicht angefügt werden. Der Server ist möglicherweise getrennt.",
