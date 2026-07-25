@@ -28,16 +28,16 @@
 import {
   formatStagedEnvelope,
   parseStagedEnvelope,
-  stagedOriginForInput,
+  stagedOriginFor,
 } from "./staged-origins.js";
 
 /**
  * The APP row of the staged-origin table. Resolved once here so this module's
- * envelope helpers cannot drift from the patterns every consumer reads. Frozen at
- * module load: an app origin that is not registered is a host bug, not a runtime
- * condition to recover from.
+ * envelope helpers cannot drift from the patterns every consumer reads. The registry
+ * is a total `Record` over the staged origins, so this lookup is compile-checked —
+ * no `!`, and no unreachable branch to explain.
  */
-const APP_KIND = stagedOriginForInput("app-emitted")!;
+const APP_KIND = stagedOriginFor("app-emitted");
 
 /**
  * Strict `app:<serverId>` shape. serverIds are MCP server ids / plugin ids

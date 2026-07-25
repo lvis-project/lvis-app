@@ -10,41 +10,14 @@
  * must not be able to make the host quietly omit part of what it returned, and
  * unrendered bytes must not reach the model as if they were text.
  *
- * Pure — no filesystem, no IPC, no logging.
+ * Pure — no filesystem, no IPC, no logging. The BOUNDS it enforces live in
+ * `shared/mcp-prompt-bounds.ts`, because main and the renderer must agree on them.
  */
 
-/**
- * Bounds the whole prompt chain shares. Declared here, next to the render caps,
- * because main, the renderer dialog, and the client discovery boundary must agree:
- * a form field the user can fill but main later drops is worse than no field, and
- * an unbounded server-authored name reaches audit rows and host chrome.
- */
-export const MCP_PROMPT_NAME_MAX_CHARS = 128;
-export const MCP_PROMPT_ARG_NAME_MAX_CHARS = 64;
-export const MCP_PROMPT_ARG_VALUE_MAX_CHARS = 4 * 1024;
-
-const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
-
-/**
- * Is this a name every consumer can carry? Wire data is typed but NOT checked —
- * `prompts/list` output arrives as a cast — so a non-string name would reach the
- * renderer and throw when rendered as a React child, and a name used to index a
- * plain object (`toString`) would read off `Object.prototype`. Control characters
- * are rejected because the name is interpolated into audit lines and labels.
- */
-export function isUsablePromptName(value: unknown, maxChars: number): value is string {
-  return (
-    typeof value === "string"
-    && value.length > 0
-    && value.length <= maxChars
-    && !CONTROL_CHARS_RE.test(value)
-  );
-}
-
-/** Hard bound on the rendered text so one prompt cannot flood a turn. */
-export const MCP_PROMPT_MAX_CHARS = 16 * 1024;
-/** Hard bound on how many message blocks are rendered. */
-export const MCP_PROMPT_MAX_BLOCKS = 64;
+import {
+  MCP_PROMPT_MAX_BLOCKS,
+  MCP_PROMPT_MAX_CHARS,
+} from "../shared/mcp-prompt-bounds.js";
 
 export interface McpPromptBlock {
   role: string;

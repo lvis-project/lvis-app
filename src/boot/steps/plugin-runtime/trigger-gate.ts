@@ -14,7 +14,7 @@ import type {
 } from "../../../plugins/types.js";
 import { OVERLAY_TRIGGER_SOURCE_PATTERN } from "../../../shared/overlay-trigger-source.js";
 import { CAPABILITY_HOST_OVERLAY } from "../../../plugins/capabilities.js";
-import { formatStagedEnvelope, stagedOriginForInput } from "../../../shared/staged-origins.js";
+import { formatStagedEnvelope, stagedOriginFor } from "../../../shared/staged-origins.js";
 import { stripLeadingSlash } from "../../../shared/slash-sanitizer.js";
 import { stripUntrustedTags } from "../../../lib/strip-untrusted-tags.js";
 import { t } from "../../../i18n/index.js";
@@ -120,9 +120,7 @@ export function sanitizePluginPendingPrompt(prompt: string): string {
  * instead of needing this copy to be found and edited as well.
  */
 export function formatPluginPendingPrompt(prompt: string, source: string): string {
-  const kind = stagedOriginForInput("plugin-emitted");
-  if (!kind) throw new Error("plugin-emitted staged origin is not registered");
-  return formatStagedEnvelope(kind, prompt, source);
+  return formatStagedEnvelope(stagedOriginFor("plugin-emitted"), prompt, source);
 }
 
 export const OVERLAY_SUMMARY_DISPLAY_CAP = 2_000;

@@ -29,7 +29,7 @@ import {
   MCP_PROMPT_ARG_NAME_MAX_CHARS,
   MCP_PROMPT_MAX_BLOCKS,
   MCP_PROMPT_NAME_MAX_CHARS,
-} from "./mcp-prompt-render.js";
+} from "../shared/mcp-prompt-bounds.js";
 import { createLogger } from "../lib/logger.js";
 import { resolveStdioSpawnCommand } from "./uvx-command.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -604,7 +604,12 @@ export class McpClient {
   async getPrompt(
     name: string,
     args: Record<string, string>,
-  ): Promise<{ description?: string; blocks: Array<{ role: string; type: string; text?: string }> }> {
+  ): Promise<{
+    description?: string;
+    blocks: Array<{ role: string; type: string; text?: string }>;
+    /** Message blocks the host refused to carry past its cap. */
+    droppedBlocks: number;
+  }> {
     if (!this.promptsAdvertised) {
       throw new Error(`[mcp-client] server '${this.config.id}' did not advertise prompts`);
     }
@@ -618,12 +623,13 @@ export class McpClient {
     });
     // Sliced BEFORE mapping: `renderMcpPrompt`'s block cap applies to the mapped
     // array, so a server returning a huge `messages` array would already have paid
-    // for the allocation by then. ONE past the cap, deliberately: the renderer
-    // reports truncation by comparing against what it was given, so slicing exactly
-    // to the cap would hide the clip from the user while still clipping it.
-    const messages = Array.isArray(result.messages)
-      ? result.messages.slice(0, MCP_PROMPT_MAX_BLOCKS + 1)
-      : [];
+    // for the allocation by then. The clip is reported EXPLICITLY rather than left
+    // for the renderer to infer from the array length — inferring it made the count
+    // depend on this slice over-reading by exactly one, which is the kind of
+    // arithmetic a later simplification silently breaks.
+    const returnedBlocks = Array.isArray(result.messages) ? result.messages : [];
+    const messages = returnedBlocks.slice(0, MCP_PROMPT_MAX_BLOCKS);
+    const droppedBlocks = returnedBlocks.length - messages.length;
     const blocks = messages.map((message) => ({
       role: typeof message.role === "string" ? message.role : "user",
       type: typeof message.content?.type === "string" ? message.content.type : "text",
@@ -632,6 +638,7 @@ export class McpClient {
     return {
       ...(typeof result.description === "string" ? { description: result.description } : {}),
       blocks,
+      droppedBlocks,
     };
   }
 

@@ -19,8 +19,21 @@
  *
  * INVARIANT: a `ChatInputOrigin` listed here MUST be rejected by the send gate
  * unless its envelope is present, and MUST be treated as untrusted downstream.
+ *
+ * WHEN A CLAIM AND AN ENVELOPE DISAGREE, three sites answer differently, and each
+ * answer is deliberate — the rule is "never resolve DOWNWARD in trust":
+ *   - `ipc/handlers/chat.ts` (the send gate) REJECTS. The renderer authors both
+ *     halves there, so a disagreement is a bug or an attempt, never a fact.
+ *   - `ipc/handlers/chat-stream.ts` ADOPTS THE ENVELOPE. Its replay callers resend
+ *     stored text under a fixed `user-keyboard` default, so the text is the only
+ *     evidence of who wrote it; adopting it escalates, and a staged claim with no
+ *     readable envelope throws rather than silently losing the origin.
+ *   - `engine/turn/run-turn.ts` KEEPS THE CLAIM and drops a foreign envelope from
+ *     the transcript row, so a direct `runTurn` caller (the routine engine) cannot
+ *     label its row with another actor's provenance.
+ * Each site is annotated with its own reason; this is the map.
  */
-import type { ChatInputOrigin, ChatSendInputOrigin } from "./chat-origin.js";
+import type { ChatInputOrigin, StagedChatInputOrigin } from "./chat-origin.js";
 import { type FenceTag, neutralizeFenceClose } from "./fence-sanitizer.js";
 import { stripLeadingSlash } from "./slash-sanitizer.js";
 
@@ -28,12 +41,12 @@ export interface StagedOriginKind {
   /**
    * Turn-entry origin this envelope authorizes.
    *
-   * Typed as `ChatSendInputOrigin` because `isChatSendInputOrigin` derives its
-   * staged half FROM this table: a wider type here would let one registration
-   * widen the `chat:send` accept gate to a non-send origin with no compile error —
-   * the same fail-open one level up.
+   * Typed as `StagedChatInputOrigin` because `isChatSendInputOrigin` derives its
+   * staged half FROM this table: a wider type here would let one registration widen
+   * the `chat:send` accept gate to a non-send origin with no compile error — the
+   * same fail-open one level up.
    */
-  readonly inputOrigin: ChatSendInputOrigin;
+  readonly inputOrigin: StagedChatInputOrigin;
   /** Fence tag wrapping the untrusted body. Closed union ⇒ compile-time guard. */
   readonly fenceTag: FenceTag;
   /** Strict, bounded shape of the provenance tag (e.g. `app:<serverId>`). */
@@ -101,12 +114,17 @@ const appEnvelope = envelopePatterns("app-message", APP_SOURCE_BODY);
 const mcpPromptEnvelope = envelopePatterns("mcp-prompt", MCP_PROMPT_SOURCE_BODY);
 
 /**
- * The registry. Order is not significant — lookups are by `inputOrigin` or by
- * matching the source tag / envelope, both of which are mutually exclusive
- * because the namespaces are disjoint.
+ * The registry, keyed by turn-entry origin.
+ *
+ * TOTAL over `StagedChatInputOrigin`, so adding a member to that union without a
+ * row here is a compile error, and a lookup by a literal member cannot be
+ * `undefined` — which is what lets the module-level consumers resolve their row
+ * without a defensive `!` or throw. Order is not significant: lookups are by
+ * `inputOrigin` or by matching the source tag / envelope, and the namespaces are
+ * disjoint.
  */
-export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
-  Object.freeze({
+const STAGED_ORIGINS: Readonly<Record<StagedChatInputOrigin, StagedOriginKind>> = Object.freeze({
+  "plugin-emitted": Object.freeze({
     inputOrigin: "plugin-emitted",
     labelKey: "trustOriginLabel.pluginEmitted",
     fenceTag: "imported-from-proactive",
@@ -128,7 +146,7 @@ export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
     envelopePrefixPattern: overlayEnvelope.prefix,
     envelopeFullPattern: overlayEnvelope.full,
   } as const),
-  Object.freeze({
+  "app-emitted": Object.freeze({
     inputOrigin: "app-emitted",
     labelKey: "trustOriginLabel.appEmitted",
     fenceTag: "app-message",
@@ -145,7 +163,7 @@ export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
     envelopePrefixPattern: appEnvelope.prefix,
     envelopeFullPattern: appEnvelope.full,
   } as const),
-  Object.freeze({
+  "mcp-prompt-emitted": Object.freeze({
     inputOrigin: "mcp-prompt-emitted",
     labelKey: "trustOriginLabel.mcpPromptEmitted",
     fenceTag: "mcp-prompt",
@@ -162,7 +180,20 @@ export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
     envelopePrefixPattern: mcpPromptEnvelope.prefix,
     envelopeFullPattern: mcpPromptEnvelope.full,
   } as const),
-]);
+});
+
+/** Iteration order for consumers that scan every kind (parsers, invariants). */
+export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze(
+  Object.values(STAGED_ORIGINS),
+);
+
+/**
+ * The row for a KNOWN staged origin. Total, so this is the lookup to use with a
+ * literal — `stagedOriginForInput` is for the case where the origin is data.
+ */
+export function stagedOriginFor(inputOrigin: StagedChatInputOrigin): StagedOriginKind {
+  return STAGED_ORIGINS[inputOrigin];
+}
 
 /** The kind that owns a turn-entry origin, or undefined for non-staged origins. */
 export function stagedOriginForInput(

@@ -116,8 +116,10 @@ describe("lvis:mcp:get-prompt — outcome", () => {
     expect(result.ok).toBe(true);
     // Exactly one real closing fence — the host's own.
     expect(result.envelope.split("</mcp-prompt>").length - 1).toBe(1);
-    // The body cannot open the turn with a slash command.
-    expect(result.envelope).not.toMatch(/^<mcp-prompt[^>]*>\n\/clear/);
+    // The leading-slash strip is NOT asserted here: `renderMcpPrompt` always
+    // prefixes a line with `prompt: ` or `[role] `, so no server input can make the
+    // body start with `/` at this layer — an assertion here could not fail. The rule
+    // is pinned where it lives, on the builder (`shared/__tests__/staged-origins`).
   });
 
   it("keeps only bounded string arguments from the caller", async () => {

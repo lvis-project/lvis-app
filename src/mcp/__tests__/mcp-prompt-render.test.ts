@@ -7,11 +7,11 @@
  */
 import { describe, it, expect } from "vitest";
 
+import { renderMcpPrompt } from "../mcp-prompt-render.js";
 import {
-  renderMcpPrompt,
-  MCP_PROMPT_MAX_CHARS,
   MCP_PROMPT_MAX_BLOCKS,
-} from "../mcp-prompt-render.js";
+  MCP_PROMPT_MAX_CHARS,
+} from "../../shared/mcp-prompt-bounds.js";
 
 describe("renderMcpPrompt", () => {
   it("renders text blocks with role annotations and the prompt description", () => {
