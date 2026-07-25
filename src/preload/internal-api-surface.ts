@@ -880,6 +880,23 @@ export function buildInternalApiSurface() {
       ipcRenderer.invoke(CHANNELS.mcp.attachResource, serverId, uri) as Promise<unknown>,
     listResources: async () =>
       ipcRenderer.invoke(CHANNELS.mcp.listResources) as Promise<unknown>,
+    listResourceTemplates: async () =>
+      ipcRenderer.invoke(CHANNELS.mcp.listResourceTemplates) as Promise<unknown>,
+    // The template read. The renderer passes the TEMPLATE and the values the user typed
+    // into the host's own dialog — never a URI. Main matches the template against what
+    // the client listed and builds the URI there, so nothing the renderer holds can name
+    // a resource the server did not publish.
+    attachResourceTemplate: async (
+      serverId: string,
+      uriTemplate: string,
+      values: Record<string, string>,
+    ) =>
+      ipcRenderer.invoke(
+        CHANNELS.mcp.attachResourceTemplate,
+        serverId,
+        uriTemplate,
+        values,
+      ) as Promise<unknown>,
     // MCP Apps `ondownloadfile` — the app hands over inline bytes; main decodes, bounds,
     // and shows a save dialog. `serverId` is bound by the TRUSTED renderer (for the audit
     // trail; the app names no server). Main NEVER fetches an app-supplied URI, so nothing

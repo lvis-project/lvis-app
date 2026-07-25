@@ -234,6 +234,21 @@ export const CHANNELS = {
     // is disabled by the PICKER, which answers the different question "what can be
     // attached right now".
     listResources: "lvis:mcp:list-resources",
+    // The URI TEMPLATES half of that catalogue, from
+    // `McpManager.listDeclaredResourceTemplates()`.
+    //
+    // A sibling channel rather than another field on `listResources` for the reason the
+    // two projections are separate in the manager: a template's identity is its
+    // `uriTemplate` and a resource's is its `uri`, so one payload carrying both would
+    // make every consumer discriminate before it could validate an entry — and the
+    // picker is not the only consumer this surface will ever have.
+    listResourceTemplates: "lvis:mcp:list-resource-templates",
+    // INTERNAL, same posture as `attachResource`, and the reason it is a SEPARATE
+    // channel: the renderer sends the TEMPLATE plus the user's values, never a URI.
+    // Main matches the template against what the client listed and expands it there.
+    // Accepting a URI here instead would mean matching an arbitrary URI back against a
+    // pattern, and a matcher for `file:///{path}` accepts `file:///../../etc/passwd`.
+    attachResourceTemplate: "lvis:mcp:attach-resource-template",
     // MCP Apps `ondownloadfile` (`ui/download-file`) — the app hands over INLINE bytes it
     // already possessed and asks the host to save them. The host never fetches an
     // app-supplied URI (a `resource_link` is rejected at parse time), so this channel

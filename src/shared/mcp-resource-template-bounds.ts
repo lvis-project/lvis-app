@@ -46,11 +46,36 @@ export const MCP_RESOURCE_TEMPLATE_MAX_VARIABLES = 8;
 export const MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS = 512;
 
 /**
- * A Level 1 expression: `{name}`, where the name is the unreserved-ish subset RFC 6570
- * allows for varnames minus the dotted/pct forms we do not support. Anything else in
- * braces — an operator, a modifier, an empty name — makes the whole template unusable.
+ * What a variable may be NAMED, written once.
+ *
+ * The subset of RFC 6570 varnames minus the dotted and pct-encoded forms we do not
+ * support. Both the expression pattern below and the standalone name predicate are built
+ * from this string, so the rule that decides "this template declares `path`" and the rule
+ * that decides "this IPC key is a variable name" cannot drift apart — and a key the
+ * dialog could not have rendered is refused at the boundary rather than carried to an
+ * expansion that would ignore it.
  */
-const TEMPLATE_EXPRESSION_RE = /\{([A-Za-z0-9_]{1,64})\}/g;
+const VARIABLE_NAME_PATTERN = "[A-Za-z0-9_]{1,64}";
+
+/**
+ * A Level 1 expression: `{name}`. Anything else in braces — an operator, a modifier, an
+ * empty name — makes the whole template unusable.
+ */
+const TEMPLATE_EXPRESSION_RE = new RegExp(`\\{(${VARIABLE_NAME_PATTERN})\\}`, "g");
+
+const TEMPLATE_VARIABLE_NAME_RE = new RegExp(`^${VARIABLE_NAME_PATTERN}$`);
+
+/**
+ * Is this a name a catalogued template could have declared?
+ *
+ * The boundary check for values arriving from the renderer. Expansion only reads names
+ * the template itself contains, so an unknown key is already inert — but an unbounded
+ * one would still be carried, counted and (in a future audit line) printed, and the cost
+ * of refusing it here is one comparison.
+ */
+export function isUsableTemplateVariableName(value: unknown): value is string {
+  return typeof value === "string" && TEMPLATE_VARIABLE_NAME_RE.test(value);
+}
 
 /** Any brace-delimited run, used to prove nothing exotic hides between the good ones. */
 const ANY_BRACE_RUN_RE = /\{[^}]*\}|[{}]/g;

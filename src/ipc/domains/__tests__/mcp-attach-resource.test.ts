@@ -13,6 +13,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { makeAppIpcInvoker } from "./test-helpers.js";
 import { USER_PROMPT_RATE_LIMIT_MAX_CALLS } from "../../../boot/steps/plugin-runtime/trigger-gate.js";
+import {
+  MCP_RESOURCE_TEMPLATE_MAX_VARIABLES,
+  MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS,
+} from "../../../shared/mcp-resource-template-bounds.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -30,7 +34,10 @@ vi.mock("electron", () => ({
 const CHANNEL = "lvis:mcp:attach-resource";
 const invoke = makeAppIpcInvoker(handlers);
 
-async function setup(readDeclaredResource?: ReturnType<typeof vi.fn>) {
+async function setup(
+  readDeclaredResource?: ReturnType<typeof vi.fn>,
+  readDeclaredResourceTemplate?: ReturnType<typeof vi.fn>,
+) {
   handlers.clear();
   vi.clearAllMocks();
   // Fresh serverId per test — the rate limiter is a module singleton.
@@ -41,6 +48,16 @@ async function setup(readDeclaredResource?: ReturnType<typeof vi.fn>) {
       blocks: [{ uri: "file:///policy.md", mimeType: "text/markdown", text: "POLICY BODY" }],
       droppedBlocks: 0,
       truncated: false,
+    }));
+  // The template read returns the URI MAIN produced — the manager's contract, and what
+  // the fence header and the audit row are keyed on.
+  const templateReadMock =
+    readDeclaredResourceTemplate ??
+    vi.fn(async () => ({
+      blocks: [{ uri: "file:///project/a.md", mimeType: "text/markdown", text: "TEMPLATE BODY" }],
+      droppedBlocks: 0,
+      truncated: false,
+      uri: "file:///project/a.md",
     }));
 
   const deps = {
@@ -53,6 +70,8 @@ async function setup(readDeclaredResource?: ReturnType<typeof vi.fn>) {
       namespacedToolName: vi.fn(),
       getPrompt: vi.fn(),
       readDeclaredResource: readMock,
+      listDeclaredResourceTemplates: vi.fn(() => []),
+      readDeclaredResourceTemplate: templateReadMock,
     },
     toolRegistry: { size: 0, findByName: vi.fn() },
     getPluginToolInvoker: () => vi.fn(),
@@ -71,7 +90,7 @@ async function setup(readDeclaredResource?: ReturnType<typeof vi.fn>) {
 
   const { registerPluginsHandlers } = await import("../plugins.js");
   registerPluginsHandlers(deps as never);
-  return { deps, serverId, readMock };
+  return { deps, serverId, readMock, templateReadMock };
 }
 
 beforeEach(() => {
@@ -223,5 +242,194 @@ describe("lvis:mcp:list-resources — the picker's catalogue", () => {
     const result = await handler({ senderFrame: { url: "https://evil.example.com/x" } } as never);
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
     expect(deps.mcpManager.listDeclaredResources).not.toHaveBeenCalled();
+  });
+});
+
+describe("lvis:mcp:list-resource-templates — the offers half of the catalogue", () => {
+  it("returns the host's template projection verbatim", async () => {
+    const { deps } = await setup();
+    const catalogue = [
+      {
+        serverId: "hr-mcp",
+        templates: [
+          { uriTemplate: "file:///project/{path}", name: "Project file", variables: ["path"] },
+        ],
+      },
+    ];
+    deps.mcpManager.listDeclaredResourceTemplates.mockReturnValue(catalogue as never);
+
+    expect(await invoke("lvis:mcp:list-resource-templates")).toEqual({
+      ok: true,
+      servers: catalogue,
+    });
+  });
+
+  it("rejects an unauthorized sender frame", async () => {
+    const { deps } = await setup();
+    const handler = handlers.get("lvis:mcp:list-resource-templates")!;
+    const result = await handler({ senderFrame: { url: "https://evil.example.com/x" } } as never);
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(deps.mcpManager.listDeclaredResourceTemplates).not.toHaveBeenCalled();
+  });
+});
+
+describe("lvis:mcp:attach-resource-template — filling an offer", () => {
+  const TEMPLATE_CHANNEL = "lvis:mcp:attach-resource-template";
+
+  it("rejects an unauthorized sender frame before reaching the server", async () => {
+    const { serverId, templateReadMock } = await setup();
+    const handler = handlers.get(TEMPLATE_CHANNEL)!;
+    const result = await handler(
+      { senderFrame: { url: "https://evil.example.com/x" } } as never,
+      serverId,
+      "file:///project/{path}",
+      { path: "a.md" },
+    );
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(templateReadMock).not.toHaveBeenCalled();
+  });
+
+  it("passes the TEMPLATE and a Map of values, and fences what main read", async () => {
+    const { serverId, templateReadMock } = await setup();
+    const result = (await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", {
+      path: "a.md",
+    })) as { ok: boolean; uri: string; attachment: { text: string } };
+
+    expect(result.ok).toBe(true);
+    // A `Map`, never a `Record` — the property the prompt-arguments dialog states, held
+    // on the main side too, because this one is built from renderer input.
+    const [, template, values] = templateReadMock.mock.calls[0] as [string, string, unknown];
+    expect(template).toBe("file:///project/{path}");
+    expect(values).toBeInstanceOf(Map);
+    expect((values as Map<string, string>).get("path")).toBe("a.md");
+    // Keyed on the URI MAIN produced, not on anything the renderer sent.
+    expect(result.uri).toBe("file:///project/a.md");
+    expect(result.attachment.text).toContain('uri="file:///project/a.md"');
+    expect(result.attachment.text).toContain("TEMPLATE BODY");
+  });
+
+  it("refuses a template shape the host would never catalogue, before any request", async () => {
+    const { serverId, templateReadMock } = await setup();
+    for (const uriTemplate of [
+      "file:///project/{+path}", // reserved expansion — the traversal operator
+      "file:///project/{path*}",
+      "ui://widget/{id}",
+      "file:///project/README.md", // a concrete URI is not a template
+      "javascript:alert({x})",
+      "",
+      42,
+    ]) {
+      const result = await invoke(TEMPLATE_CHANNEL, serverId, uriTemplate, { path: "a.md" });
+      expect(result, String(uriTemplate).slice(0, 32)).toEqual({
+        ok: false,
+        error: "invalid-request",
+      });
+    }
+    expect(templateReadMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a serverId that cannot be a server id", async () => {
+    const { templateReadMock } = await setup();
+    for (const bad of ["bad id with spaces", "s".repeat(500), "-leading-dash", ""]) {
+      const result = await invoke(TEMPLATE_CHANNEL, bad, "file:///project/{path}", {});
+      expect(result, bad.slice(0, 24)).toEqual({ ok: false, error: "invalid-server-id" });
+    }
+    expect(templateReadMock).not.toHaveBeenCalled();
+  });
+
+  // A variable named `__proto__` is a name the form would happily render and the user
+  // would happily fill. In a `Record` it reaches the prototype setter; in the `Map` main
+  // builds it is an ordinary key — and the value survives to the expansion either way,
+  // which is the part a "we filtered it out" implementation would silently lose.
+  it("carries a prototype-shaped variable name as an ordinary key", async () => {
+    const { serverId, templateReadMock } = await setup();
+    // Built with `JSON.parse`, not an object literal: `{ __proto__: … }` is the
+    // prototype-setter SYNTAX and defines no own property, so a literal fixture here
+    // would assert nothing while looking like it asserted the whole point. What arrives
+    // over IPC is a structured clone of renderer data, which does carry `__proto__` as
+    // an ordinary own key — this is that.
+    const values = JSON.parse('{"__proto__":"PAYLOAD","toString":"SECOND"}') as
+      Record<string, string>;
+    await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{__proto__}/{toString}", values);
+    const carried = (templateReadMock.mock.calls[0] as [string, string, Map<string, string>])[2];
+    // A plain `{}` accumulator swallows the first one (it reaches the prototype setter)
+    // and shadows an inherited method with the second. The Map has neither problem, and
+    // the user's value survives to the expansion — which is what they filled in.
+    expect(carried.get("__proto__")).toBe("PAYLOAD");
+    expect(carried.get("toString")).toBe("SECOND");
+    expect(Object.getPrototypeOf(carried)).toBe(Map.prototype);
+  });
+
+  it("drops keys no catalogued template could have declared, and bounds the rest", async () => {
+    const { serverId, templateReadMock } = await setup();
+    const overLong = "v".repeat(MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS + 50);
+    await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", {
+      path: overLong,
+      "not a name": "dropped",
+      "": "dropped",
+      nested: { toString: () => "not a string" },
+    });
+    const values = (templateReadMock.mock.calls[0] as [string, string, Map<string, string>])[2];
+    expect(values.get("path")).toHaveLength(MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS);
+    expect([...values.keys()]).toEqual(["path"]);
+  });
+
+  it("bounds how many variables one request may carry", async () => {
+    const { serverId, templateReadMock } = await setup();
+    const many = Object.fromEntries(
+      Array.from({ length: MCP_RESOURCE_TEMPLATE_MAX_VARIABLES + 5 }, (_, i) => [`v${i}`, "x"]),
+    );
+    await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", many);
+    const values = (templateReadMock.mock.calls[0] as [string, string, Map<string, string>])[2];
+    expect(values.size).toBe(MCP_RESOURCE_TEMPLATE_MAX_VARIABLES);
+  });
+
+  it("fails closed on an empty read and on a server error", async () => {
+    const empty = await setup(
+      undefined,
+      vi.fn(async () => ({
+        blocks: [],
+        droppedBlocks: 0,
+        truncated: false,
+        uri: "file:///project/a.md",
+      })),
+    );
+    expect(
+      await invoke(TEMPLATE_CHANNEL, empty.serverId, "file:///project/{path}", { path: "a.md" }),
+    ).toEqual({ ok: false, error: "empty-resource" });
+
+    const boom = await setup(
+      undefined,
+      vi.fn(async () => {
+        throw new Error("ENOENT: C:/Users/secret/path leaked");
+      }),
+    );
+    const failed = await invoke(TEMPLATE_CHANNEL, boom.serverId, "file:///project/{path}", {
+      path: "a.md",
+    });
+    expect(failed).toEqual({ ok: false, error: "resource-failed" });
+    expect(JSON.stringify(failed)).not.toContain("secret");
+  });
+
+  // The same bucket as the plain attach and `prompts/get`: one server, one budget for
+  // round-trips the user asked for. A separate bucket here would be a second budget a
+  // renderer could spend against the same server.
+  it("shares the user-initiated rate bucket with the plain attach", async () => {
+    const { serverId, templateReadMock } = await setup();
+    let limited = false;
+    for (let i = 0; i <= USER_PROMPT_RATE_LIMIT_MAX_CALLS; i += 1) {
+      const result = (await invoke(CHANNEL, serverId, "file:///x")) as { error?: string };
+      if (result.error === "rate-limited") {
+        limited = true;
+        break;
+      }
+    }
+    expect(limited).toBe(true);
+
+    const result = await invoke(TEMPLATE_CHANNEL, serverId, "file:///project/{path}", {
+      path: "a.md",
+    });
+    expect(result).toMatchObject({ ok: false, error: "rate-limited" });
+    expect(templateReadMock).not.toHaveBeenCalled();
   });
 });

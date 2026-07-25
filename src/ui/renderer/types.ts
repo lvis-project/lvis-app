@@ -5,7 +5,7 @@ import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
-import type { McpResourceSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
+import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpAppDetachedPayload } from "../../shared/mcp-app-detached-payload.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
@@ -1721,6 +1721,33 @@ export type LvisMcpApi = {
    */
   listResources: () => Promise<
     | { ok: true; servers: Array<{ serverId: string; resources: McpResourceSummary[] }> }
+    | { ok: false; error: string }
+  >;
+  /**
+   * The URI TEMPLATES half of that catalogue. A template is an OFFER, not a resource:
+   * the picker renders it as a row that opens a form rather than one that attaches.
+   */
+  listResourceTemplates: () => Promise<
+    | { ok: true; servers: Array<{ serverId: string; templates: McpResourceTemplateSummary[] }> }
+    | { ok: false; error: string }
+  >;
+  /**
+   * Fill a declared template and attach what it reads. The renderer sends the TEMPLATE
+   * and the user's values; main expands and reads. `uri` comes back for the chip's
+   * label — there is no channel that accepts a URI, so it cannot be replayed as a read.
+   */
+  attachResourceTemplate: (
+    serverId: string,
+    uriTemplate: string,
+    values: Record<string, string>,
+  ) => Promise<
+    | {
+      ok: true;
+      attachment: { type: "text"; text: string };
+      uri: string;
+      truncated?: boolean;
+      omittedBlocks?: number;
+    }
     | { ok: false; error: string }
   >;
   postUiMessage: (
