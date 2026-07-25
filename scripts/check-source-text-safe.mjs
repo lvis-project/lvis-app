@@ -25,6 +25,7 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOTS = ["src", "scripts", "test"];
 const EXTENSIONS = [".ts", ".tsx", ".mjs", ".js", ".jsx", ".json", ".css"];
@@ -100,10 +101,7 @@ export function scanSourceTextSafety(repoRoot, roots = ROOTS, grandfathered = GR
   return { offenders, stale };
 }
 
-const invokedDirectly = process.argv[1]
-  && resolve(process.argv[1]).endsWith("check-source-text-safe.mjs");
-
-if (invokedDirectly) {
+if (import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { offenders, stale } = scanSourceTextSafety(resolve(import.meta.dirname, ".."));
 
   if (stale.length > 0) {
