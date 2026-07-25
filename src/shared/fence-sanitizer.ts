@@ -36,7 +36,11 @@ export type FenceTag =
  * name inside the angle brackets (`</app-message x>`): the consumer is a MODEL READING
  * PROSE, not a strict XML parser, so every near-miss close is as effective an escape as
  * an exact one, and each variant this failed to cover was a way out of the fence. The
- * `\b` keeps it from matching a longer tag name (`</app-messages>` is not this fence).
+ * `\b` keeps it from matching a longer ALPHANUMERIC name (`</app-messages>` is not this
+ * fence) — but not a hyphenated one, since `-` is itself a non-word character, so
+ * `</app-message-log>` is escaped too. Every tag here is hyphenated, so that is the
+ * likely collision rather than the plural: over-escaping is the safe direction (a
+ * foreign tag picks up a backslash, its text intact) and it is pinned as a choice.
  *
  * That trailing span is BOUNDED, and the bound is load-bearing rather than tidy. An
  * unbounded `[^>]*` is quadratic on a body of repeated UNTERMINATED close tags
