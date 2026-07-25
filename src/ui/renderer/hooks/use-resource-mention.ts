@@ -11,9 +11,16 @@
  * user's. The hook therefore owns an async accept and the failure modes that come with
  * it, and the marker it puts in the body is a reference — never the content.
  *
- * The catalogue comes from `listResources` (the host's ONE projection). The picker never
- * derives "which resources are attachable" from server state itself: a second answer to
- * that question is how a picker starts offering URIs the read path refuses.
+ * The catalogue comes from `listResources` and `listResourceTemplates` (the host's ONE
+ * projection each). The picker never derives "which resources are attachable" from server
+ * state itself: a second answer to that question is how a picker starts offering URIs the
+ * read path refuses.
+ *
+ * Two kinds of row, and the difference is the whole reason this hook has a second state
+ * machine. A resource row is a finished identifier and accepting it reads. A TEMPLATE row
+ * is an offer — the user has to fill it in — so accepting it opens a host dialog and the
+ * read happens on submit. The renderer never builds the URI: it hands back the template
+ * and the values, and main expands. (`mcp-resources-policy.md` §3.)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
@@ -38,15 +45,27 @@ import type { ResourceAttachment } from "../types/attachments.js";
  */
 const MENTION_MAX_ROWS = 50;
 
-/** One offered resource, already display-normalized. */
+/**
+ * What accepting a row does, as a closed union rather than two optional fields.
+ *
+ * A resource carries a finished URI; a template carries the PATTERN and the variables to
+ * ask for. Written this way so no code path can read a `uri` off a template row — the
+ * distinction is the difference between a read and a form, and the two channels take
+ * different arguments for a reason main enforces.
+ */
+type ResourceMentionTarget =
+  | { kind: "resource"; uri: string }
+  | { kind: "template"; uriTemplate: string; variables: readonly string[] };
+
+/** One offered row, already display-normalized. */
 export interface ResourceMentionItem {
   key: string;
   serverId: string;
-  /** The URI as the server published it — passed back to the read UNCHANGED. */
-  uri: string;
+  /** The URI to read, or the template to fill — passed back UNCHANGED either way. */
+  target: ResourceMentionTarget;
   /** Label for the eye: name/title, invisible and reordering characters removed. */
   label: string;
-  /** Secondary text: `serverId` plus the same treatment of the URI. */
+  /** Secondary text: `serverId` plus the same treatment of the URI or template. */
   hint: string;
   /**
    * Why this row cannot be attached right now, or `undefined` when it can.
@@ -84,6 +103,23 @@ export interface UseResourceMentionArgs {
   onError: (message: string) => void;
 }
 
+/**
+ * A template row the user accepted, waiting on the form.
+ *
+ * Carries the composer position captured at ACCEPT time, because the read happens after
+ * a dialog the user may have spent a minute in. The Composer's `onAttach` re-checks that
+ * position against the live text and appends instead of splicing when it has moved, so
+ * this is a hint, never an authority.
+ */
+export interface PendingResourceTemplate {
+  serverId: string;
+  uriTemplate: string;
+  variables: readonly string[];
+  label: string;
+  range: { start: number; end: number };
+  mentionToken: string;
+}
+
 export interface UseResourceMentionResult {
   open: boolean;
   items: ResourceMentionItem[];
@@ -92,16 +128,26 @@ export interface UseResourceMentionResult {
   move: (delta: number) => void;
   accept: (index?: number) => void;
   close: () => void;
+  /** The template awaiting values, or null. The Composer renders the dialog for it. */
+  pendingTemplate: PendingResourceTemplate | null;
+  /** Fill it and read. Values are the user's, keyed by the template's variable names. */
+  submitTemplate: (values: Record<string, string>) => void;
+  cancelTemplate: () => void;
 }
 
 interface CatalogueEntry {
   serverId: string;
-  uri: string;
+  target: ResourceMentionTarget;
   label: string;
   hint: string;
-  /** Lowercased haystack for matching: label + serverId + uri. */
+  /** Lowercased haystack for matching: label + serverId + uri (or template). */
   search: string;
   unavailableReason?: string;
+}
+
+/** Stable identity for a row, and the React key. */
+function targetId(target: ResourceMentionTarget): string {
+  return target.kind === "resource" ? target.uri : target.uriTemplate;
 }
 
 export function useResourceMention({
@@ -119,6 +165,7 @@ export function useResourceMention({
   const [catalogue, setCatalogue] = useState<CatalogueEntry[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [dismissedToken, setDismissedToken] = useState<string | null>(null);
+  const [pendingTemplate, setPendingTemplate] = useState<PendingResourceTemplate | null>(null);
   // Guards a second read while one is in flight: the accept path is async and a user
   // can hit Enter twice, which would attach the same resource under two markers.
   const attachingRef = useRef(false);
@@ -133,38 +180,74 @@ export function useResourceMention({
   // Refetched whenever a mention token appears rather than cached for the session: a
   // server connects or drops between two messages, and a catalogue that outlives the
   // connection offers URIs whose read can only fail.
+  //
+  // Both halves in ONE effect with one `cancelled` flag. Two effects would each set the
+  // catalogue and the second to land would erase the first's rows — resources and
+  // templates are one list to the user, so they are one fetch here.
   useEffect(() => {
     if (!active || !mcp?.listResources) return;
     let cancelled = false;
     void (async () => {
       try {
-        const result = await mcp.listResources();
+        const [resources, templates] = await Promise.all([
+          mcp.listResources(),
+          // Optional so a preload that predates this channel degrades to resources only
+          // rather than throwing away the whole catalogue.
+          mcp.listResourceTemplates?.() ?? Promise.resolve({ ok: false as const, error: "" }),
+        ]);
         if (cancelled) return;
-        if (!result.ok) {
-          setCatalogue([]);
-          return;
-        }
         const flat: CatalogueEntry[] = [];
-        for (const server of result.servers) {
-          for (const resource of server.resources) {
-            const label =
-              displaySafeLabel(resource.title, MCP_RESOURCE_NAME_MAX_CHARS)
-              || displaySafeLabel(resource.name, MCP_RESOURCE_NAME_MAX_CHARS)
-              || displaySafeLabel(resource.uri, MCP_RESOURCE_NAME_MAX_CHARS);
-            const safeUri = displaySafeLabel(resource.uri, MCP_RESOURCE_NAME_MAX_CHARS);
-            flat.push({
-              serverId: server.serverId,
-              uri: resource.uri,
-              label,
-              hint: `${server.serverId} · ${safeUri}`,
-              search: `${label} ${server.serverId} ${safeUri}`.toLowerCase(),
-              // Shown and disabled rather than hidden. A user whose `https:` resource
-              // silently vanished from the picker would report the picker as broken; a row
-              // that says why is the difference between a bug and an explanation.
-              ...(resource.hostFetchRefused
-                ? { unavailableReason: t("composer.resourceNotFetchable") }
-                : {}),
-            });
+        if (resources.ok) {
+          for (const server of resources.servers) {
+            for (const resource of server.resources) {
+              const label =
+                displaySafeLabel(resource.title, MCP_RESOURCE_NAME_MAX_CHARS)
+                || displaySafeLabel(resource.name, MCP_RESOURCE_NAME_MAX_CHARS)
+                || displaySafeLabel(resource.uri, MCP_RESOURCE_NAME_MAX_CHARS);
+              const safeUri = displaySafeLabel(resource.uri, MCP_RESOURCE_NAME_MAX_CHARS);
+              flat.push({
+                serverId: server.serverId,
+                target: { kind: "resource", uri: resource.uri },
+                label,
+                hint: `${server.serverId} · ${safeUri}`,
+                search: `${label} ${server.serverId} ${safeUri}`.toLowerCase(),
+                // Shown and disabled rather than hidden. A user whose `https:` resource
+                // silently vanished from the picker would report the picker as broken; a row
+                // that says why is the difference between a bug and an explanation.
+                ...(resource.hostFetchRefused
+                  ? { unavailableReason: t("composer.resourceNotFetchable") }
+                  : {}),
+              });
+            }
+          }
+        }
+        if (templates.ok) {
+          for (const server of templates.servers) {
+            for (const template of server.templates) {
+              const label =
+                displaySafeLabel(template.title, MCP_RESOURCE_NAME_MAX_CHARS)
+                || displaySafeLabel(template.name, MCP_RESOURCE_NAME_MAX_CHARS)
+                || displaySafeLabel(template.uriTemplate, MCP_RESOURCE_NAME_MAX_CHARS);
+              const safeTemplate = displaySafeLabel(
+                template.uriTemplate,
+                MCP_RESOURCE_NAME_MAX_CHARS,
+              );
+              // `variables` comes from the HOST's discovery, derived once from the
+              // template it catalogued. Deriving it here from the string would be a
+              // second parser for the same grammar, and the form and the expansion
+              // would eventually disagree about what the template asks for.
+              flat.push({
+                serverId: server.serverId,
+                target: {
+                  kind: "template",
+                  uriTemplate: template.uriTemplate,
+                  variables: template.variables,
+                },
+                label,
+                hint: `${server.serverId} · ${safeTemplate}`,
+                search: `${label} ${server.serverId} ${safeTemplate}`.toLowerCase(),
+              });
+            }
           }
         }
         setCatalogue(flat);
@@ -177,7 +260,7 @@ export function useResourceMention({
     return () => {
       cancelled = true;
     };
-  }, [active, mcp]);
+  }, [active, mcp, t]);
 
   const items = useMemo<ResourceMentionItem[]>(() => {
     if (!trigger) return [];
@@ -186,9 +269,9 @@ export function useResourceMention({
       ? catalogue
       : catalogue.filter((entry) => entry.search.includes(query));
     return matched.slice(0, MENTION_MAX_ROWS).map((entry) => ({
-      key: `${entry.serverId}::${entry.uri}`,
+      key: `${entry.serverId}::${entry.target.kind}::${targetId(entry.target)}`,
       serverId: entry.serverId,
-      uri: entry.uri,
+      target: entry.target,
       label: entry.label,
       hint: entry.hint,
       ...(entry.unavailableReason ? { unavailableReason: entry.unavailableReason } : {}),
@@ -209,28 +292,31 @@ export function useResourceMention({
     setDismissedToken(triggerKey);
   }, [triggerKey]);
 
-  const accept = useCallback((index?: number) => {
-    if (!trigger || !mcp?.attachResource) return;
-    const item = items[index ?? activeIndex];
-    if (!item) return;
-    // A row the read would refuse says so instead of spending a round-trip to fail.
-    if (item.unavailableReason) {
-      onError(item.unavailableReason);
-      return;
-    }
-    // Capped in the UI at the SAME number main enforces, so the user is stopped by a
-    // message naming the limit instead of by a refused send at the end of the turn.
-    if (resourceCount >= MCP_RESOURCE_ATTACHMENTS_PER_TURN) {
-      onError(t("composer.resourceLimit", { max: MCP_RESOURCE_ATTACHMENTS_PER_TURN }));
-      return;
-    }
+  /**
+   * The read, shared by both kinds of row.
+   *
+   * One place decides what an attachment looks like and how a failure is reported, so a
+   * template attachment cannot drift into a different chip, a different marker, or a
+   * hand-written error mapping. Only the round trip differs, and the caller supplies it.
+   */
+  const runAttach = useCallback((
+    context: {
+      serverId: string;
+      label: string;
+      uri: string;
+      range: { start: number; end: number };
+      mentionToken: string;
+    },
+    read: () => Promise<
+      | { ok: true; attachment: { text: string }; uri?: string; truncated?: boolean }
+      | { ok: false; error: string }
+    >,
+  ) => {
     if (attachingRef.current) return;
     attachingRef.current = true;
-    const range = { start: trigger.start, end: trigger.end };
-    const mentionToken = text.slice(trigger.start, trigger.end);
     void (async () => {
       try {
-        const result = await mcp.attachResource(item.serverId, item.uri);
+        const result = await read();
         if (!result.ok) {
           // Through the SAME code table the rest of the app uses, rather than a second
           // hand-written mapping here. Stage 3a already registered every code this
@@ -246,18 +332,20 @@ export function useResourceMention({
         const n = allocateN();
         onAttach(
           {
-            id: `res-${item.serverId}-${n}`,
+            id: `res-${context.serverId}-${n}`,
             n,
             kind: "resource",
-            serverId: item.serverId,
-            uri: item.uri,
-            label: item.label,
+            serverId: context.serverId,
+            // For a template this is the URI MAIN produced, echoed back for the chip.
+            // The renderer never composes it — it has no channel that would take one.
+            uri: result.uri ?? context.uri,
+            label: context.label,
             text: result.attachment.text,
             truncated: result.truncated === true,
           },
           `[Resource #${n}] `,
-          range,
-          mentionToken,
+          context.range,
+          context.mentionToken,
         );
       } catch {
         onError(t("composer.resourceAttachFailed"));
@@ -265,7 +353,90 @@ export function useResourceMention({
         attachingRef.current = false;
       }
     })();
-  }, [trigger, items, activeIndex, mcp, resourceCount, allocateN, onAttach, onError, t]);
+  }, [allocateN, onAttach, onError, t]);
 
-  return { open, items, activeIndex, setActiveIndex, move, accept, close };
+  const accept = useCallback((index?: number) => {
+    if (!trigger || !mcp?.attachResource) return;
+    const item = items[index ?? activeIndex];
+    if (!item) return;
+    // A row the read would refuse says so instead of spending a round-trip to fail.
+    if (item.unavailableReason) {
+      onError(item.unavailableReason);
+      return;
+    }
+    // Capped in the UI at the SAME number main enforces, so the user is stopped by a
+    // message naming the limit instead of by a refused send at the end of the turn.
+    // Checked again when a template's form is submitted, because the answer can change
+    // while that form is open.
+    if (resourceCount >= MCP_RESOURCE_ATTACHMENTS_PER_TURN) {
+      onError(t("composer.resourceLimit", { max: MCP_RESOURCE_ATTACHMENTS_PER_TURN }));
+      return;
+    }
+    const range = { start: trigger.start, end: trigger.end };
+    const mentionToken = text.slice(trigger.start, trigger.end);
+    if (item.target.kind === "template") {
+      if (!mcp.attachResourceTemplate) {
+        onError(t("composer.resourceAttachFailed"));
+        return;
+      }
+      // No read yet — a template is an offer. The menu is dismissed here so it is not
+      // sitting open behind the dialog, and the position is captured now because the
+      // user is about to spend time in a form.
+      setDismissedToken(triggerKey);
+      setPendingTemplate({
+        serverId: item.serverId,
+        uriTemplate: item.target.uriTemplate,
+        variables: item.target.variables,
+        label: item.label,
+        range,
+        mentionToken,
+      });
+      return;
+    }
+    const uri = item.target.uri;
+    runAttach(
+      { serverId: item.serverId, label: item.label, uri, range, mentionToken },
+      () => mcp.attachResource(item.serverId, uri),
+    );
+  }, [trigger, triggerKey, items, activeIndex, mcp, resourceCount, onError, runAttach, t, text]);
+
+  const cancelTemplate = useCallback(() => setPendingTemplate(null), []);
+
+  const submitTemplate = useCallback((values: Record<string, string>) => {
+    const pending = pendingTemplate;
+    if (!pending || !mcp?.attachResourceTemplate) return;
+    setPendingTemplate(null);
+    // Re-checked, not inherited from the accept: the form was open while the rest of the
+    // composer stayed live, and a user can add attachments from another surface in that
+    // time. Refusing here costs a message; not refusing costs a send.
+    if (resourceCount >= MCP_RESOURCE_ATTACHMENTS_PER_TURN) {
+      onError(t("composer.resourceLimit", { max: MCP_RESOURCE_ATTACHMENTS_PER_TURN }));
+      return;
+    }
+    runAttach(
+      {
+        serverId: pending.serverId,
+        label: pending.label,
+        // Only a fallback for the chip if main ever stops echoing the expansion; the
+        // renderer cannot expand the template itself and does not try.
+        uri: pending.uriTemplate,
+        range: pending.range,
+        mentionToken: pending.mentionToken,
+      },
+      () => mcp.attachResourceTemplate(pending.serverId, pending.uriTemplate, values),
+    );
+  }, [mcp, onError, pendingTemplate, resourceCount, runAttach, t]);
+
+  return {
+    open,
+    items,
+    activeIndex,
+    setActiveIndex,
+    move,
+    accept,
+    close,
+    pendingTemplate,
+    submitTemplate,
+    cancelTemplate,
+  };
 }

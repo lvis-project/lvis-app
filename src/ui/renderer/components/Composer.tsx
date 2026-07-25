@@ -25,6 +25,7 @@ import { findMarkerAt, parseMarkers } from "../utils/attachment-markers.js";
 import { handleClipboardPaste } from "../utils/clipboard-paste.js";
 import { InlineSlashMenu } from "./InlineSlashMenu.js";
 import { ResourceMentionMenu } from "./ResourceMentionMenu.js";
+import { McpResourceTemplateDialog } from "../dialogs/McpResourceTemplateDialog.js";
 import { useInlineSlashMenu } from "../hooks/use-inline-slash-menu.js";
 import { useResourceMention } from "../hooks/use-resource-mention.js";
 import { useSlashPickerRuntime } from "../hooks/use-slash-picker-runtime.js";
@@ -783,6 +784,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         anchorRef={taRef}
         onHover={resourceMention.setActiveIndex}
         onSelect={resourceMention.accept}
+      />
+      {/*
+        A template row needs values before anything is read, and the host chrome asks for
+        them — never a composer draft, which would put the user's own submission between
+        the offer and the read. The dialog hands back values only; the URI is main's.
+      */}
+      <McpResourceTemplateDialog
+        pending={resourceMention.pendingTemplate}
+        onCancel={resourceMention.cancelTemplate}
+        onSubmit={resourceMention.submitTemplate}
       />
     </div>
   );

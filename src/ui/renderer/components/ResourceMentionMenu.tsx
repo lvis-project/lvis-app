@@ -13,7 +13,7 @@
 import { useRef } from "react";
 import { createPortal } from "react-dom";
 import type { RefObject } from "react";
-import { Database } from "lucide-react";
+import { Database, FormInput } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { useCaretAnchoredBox } from "../hooks/use-caret-anchored-box.js";
 import type { ResourceMentionItem } from "../hooks/use-resource-mention.js";
@@ -76,10 +76,27 @@ export function ResourceMentionMenu({
               active ? "bg-accent text-accent-foreground" : "text-foreground"
             }`}
           >
-            <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            {/*
+              A different icon for a template, because accepting one does something
+              different: it opens a form instead of attaching. A row that looked identical
+              would make "Enter attaches the resource" false for half the menu.
+            */}
+            {item.target.kind === "template" ? (
+              <FormInput className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            )}
             <span className={`truncate text-xs${item.unavailableReason ? " opacity-(--opacity-strong)" : ""}`}>
               {item.label}
             </span>
+            {item.target.kind === "template" ? (
+              <span
+                className="shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground"
+                data-testid={`resource-mention-template-badge-${index}`}
+              >
+                {t("composer.resourceMentionTemplateBadge")}
+              </span>
+            ) : null}
             <span className="ml-auto truncate pl-2 text-[11px] text-muted-foreground">
               {item.unavailableReason ?? item.hint}
             </span>
