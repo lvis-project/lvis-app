@@ -1739,9 +1739,10 @@ export type LvisMcpApi = {
   /**
    * Fill a declared template and attach what it reads. The renderer sends the TEMPLATE
    * and the user's values; main expands and reads. `uri` comes back for the chip's
-   * label. Safe to hand back because no channel accepts an UNLISTED URI — `attachResource`
-   * does take one, and replaying an expansion through it hits the listed-URI gate inside
-   * the client, which a template expansion was never in.
+   * label. Handing it back grants nothing: `attachResource` is the only channel that
+   * routes a renderer-supplied URI into the CORE-capability read, and that read is gated
+   * on the listed set inside the client, which a template expansion was never in. (See
+   * the handler in `ipc/domains/plugins.ts` for why this is stated so narrowly.)
    */
   attachResourceTemplate: (
     serverId: string,

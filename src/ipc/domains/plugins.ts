@@ -1746,7 +1746,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       const templateValues = new Map<string, string>();
       if (values && typeof values === "object" && !Array.isArray(values)) {
         for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
-          if (templateValues.size >= MCP_RESOURCE_TEMPLATE_MAX_VARIABLES) break;
           if (typeof value !== "string" || !isUsableTemplateVariableName(key)) continue;
           // REFUSED, not clipped — and this is the one place the prompt path's rule does
           // not carry over. A clipped prompt argument is a shorter question; a clipped
@@ -1761,6 +1760,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           if (value.length > MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS) {
             return { ok: false, error: "invalid-request" };
           }
+          // The variable cap is applied AFTER the per-value refusal, so whether an
+          // over-long value is refused does not depend on where it happens to sit in
+          // `Object.entries` order — which hoists integer-like keys, so a renderer could
+          // otherwise decide the outcome by naming its variables `0`…`7`.
+          if (templateValues.size >= MCP_RESOURCE_TEMPLATE_MAX_VARIABLES) break;
           templateValues.set(key, value);
         }
       }
@@ -1797,13 +1801,20 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           omittedBlocks: rendered.omittedBlocks,
           // For the chip's label.
           //
-          // Handing a URI back to the renderer is safe because no channel accepts an
-          // UNLISTED one — not because no channel accepts a URI. `attachResource` takes
-          // one and is three lines from this channel in the preload; replaying an
-          // expansion through it reaches `readDeclaredResource`, which is gated on
-          // `state.resources` (`mcp-client.ts`), and a template expansion was never
-          // listed there. Stating it the other way round — as an earlier version of this
-          // comment did — is how the check that actually holds gets dropped later.
+          // Handing a URI back to the renderer grants nothing, and it has taken three
+          // attempts to say why without asserting something false, so precisely:
+          // `attachResource` is the only channel that routes a renderer-supplied URI into
+          // the CORE-capability read, and that read is gated on `state.resources` in
+          // `readDeclaredResource` — a template expansion was never listed there, so
+          // replaying one fails.
+          //
+          // NOT "no channel accepts a URI" (`attachResource` does) and NOT "no channel
+          // accepts an unlisted URI" (`CHANNELS.mcp.uiResource` does, on its external
+          // arm, with no listed-set check in main). That last one is a pre-existing hole
+          // this feature neither opens nor widens: a renderer able to call it already has
+          // strictly more reach than replaying an expansion, and has it without this
+          // channel. Named here rather than contradicted, because the previous two
+          // versions of this comment were each refuted by a reviewer reading the code.
           uri: read.uri,
         };
       } catch (err) {

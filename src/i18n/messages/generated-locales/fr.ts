@@ -2804,6 +2804,7 @@ export const frMessages: Record<string, string> = {
   "composer.resourceMentionTemplateBadge": "modèle",
   "composer.resourceLimit": "{max} ressources au maximum par message — envoyez celui-ci, puis joignez-en d'autres.",
   "composer.resourceAttachFailed": "Cette ressource n'a pas pu être jointe. Le serveur s'est peut-être déconnecté.",
+  "composer.resourceAttachBusy": "La ressource précédente est encore en cours de rattachement — réessayez dans un instant.",
   "attachmentChip.resourceFromServer": "Du serveur MCP {server} · contenu non fiable",
   "attachmentChip.resourceClipped": "Du serveur MCP {server} · non fiable, tronqué",
   "composer.resourceNotFetchable": "Le serveur la publie pour un accès client direct — l'hôte ne la récupère pas",

@@ -244,10 +244,12 @@ Stage 3 — the user path, split at the process boundary the way stages 1 and 2 
     identifier. The dialog collects values only; it never composes a URI.
     `lvis:mcp:attach-resource-template` takes the template plus the values, and main
     expands, reads, and fences — keyed on the URI IT produced, which it hands back for the
-    chip's label. That echo is safe because no channel accepts an **unlisted** URI, not
-    because none accepts a URI: `attach-resource` takes one, and an expansion replayed
-    through it meets the listed-URI gate inside the client, which the expansion was never
-    in. Values cross the boundary as a plain object and become a `Map` immediately,
+    chip's label. That echo grants nothing: `attach-resource` is the only channel routing a
+    renderer-supplied URI into the **core-capability** read, and that read is gated on the
+    listed set, which an expansion was never in. Stated that narrowly on purpose — "no
+    channel accepts a URI" is false (`attach-resource` does) and so is "no channel accepts
+    an unlisted URI" (`mcp:ui-resource` does, on its external arm; see §7).
+    Values cross the boundary as a plain object and become a `Map` immediately,
     so a variable named `__proto__` or `toString` is an ordinary key rather than an
     inherited slot. Both attach channels share the user-initiated rate bucket with
     `prompts/get`: one server, one budget for round-trips the user asked for.
@@ -343,12 +345,39 @@ DLP surface, not to the composer PR that made it reachable.
 - **Host-side `https:` fetching.** Per §4, SSRF.
 - **Resource-derived tool provenance.** Per §2, the turn stays the user's.
 
+### Known gap, out of scope here: `mcp:ui-resource`
+
+Found while reviewing the template work, pre-existing and **not introduced or widened by
+it**, recorded so the invariants below are not read as covering more than they do.
+
+`CHANNELS.mcp.uiResource` takes a renderer-supplied `serverId` + `uri`. On the LOOPBACK
+arm it is properly gated — `plugin-ui-resource-provider.ts` refuses anything that is not a
+declared `ui:` URI. On the EXTERNAL arm it reaches `client.readResource(uri)` and issues
+`resources/read` with **no scheme check and no listed-set check in main**; the `ui://`
+restriction lives only in the renderer (`mcp-app-bridge/handlers/on-read-resource.ts`),
+which is the side the threat model assumes can be compromised. Governance permits it: the
+`ui://` short-circuit aside, it falls through to requiring `resources`, which any
+resource-publishing server has.
+
+Consequence: a compromised renderer can already read any URI from any connected external
+server. That is strictly more reach than replaying a template expansion, which is why the
+templates work does not change this posture — but it does mean the listed-set gate is a
+property of `readDeclaredResource`, not of the host as a whole. Fixing it belongs with the
+MCP-Apps path, not here.
+
 ## Security invariants
 
 - No `resources/*` request leaves the host unless the capability was advertised at
   discovery AND approved by governance; unclassified methods fail closed.
-- `resources/read` accepts only a URI the host listed; the URI is an opaque
-  identifier the host never resolves.
+- `readDeclaredResource` accepts only a URI the host listed, and
+  `readDeclaredResourceTemplate` only a TEMPLATE the host listed, expanding it itself;
+  the URI is an opaque identifier the host never resolves. This is a property of those
+  two methods — `readResource`, the MCP-Apps path, does not share it (see §7).
+- Nothing a user types into a template can move the read off the component the server put
+  the variable in: values are percent-encoded, so they cannot span components, and cannot
+  BE a dot segment either — `.` is unreserved, so that one needs its own refusal. The
+  expansion is then re-validated with the ordinary URI predicate, which is what stops a
+  variable in scheme position from producing a reserved scheme.
 - Resource text is bounded wherever it enters the host, and the shape it enters in
   depends on the surface: a `tool_result` for the model path (stage 2 — the channel
   every tool result uses), and an untrusted FENCE with the body's own closing tag

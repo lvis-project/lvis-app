@@ -92,6 +92,12 @@ export function isUsableTemplateVariableName(value: unknown): value is string {
 const ANY_BRACE_RUN_RE = /\{[^}]*\}|[{}]/g;
 
 /**
+ * A surrogate code unit with no partner — the input that makes `encodeURIComponent` throw
+ * rather than return. Not global, so `lastIndex` is never carried between calls.
+ */
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
  * Variable names in declaration order, first occurrence only.
  *
  * Order matters because it is the order the dialog renders fields in, and a server that
@@ -124,13 +130,23 @@ export function isUsableResourceUriTemplate(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
 
-  // Every brace run must be a Level 1 expression. Counting them is how an operator
-  // (`{+path}`), a modifier (`{path:3}`), an explode (`{list*}`), an empty `{}` or a
-  // stray unmatched brace is refused: those match the loose pattern and not the strict
-  // one, so the counts differ.
+  // The cheap half first. A string with no Level 1 expression at all is not a template,
+  // and this is also the ONLY one of the two counts that decides a case by itself —
+  // ordered this way because the loose scan below is ~1000× dearer on a pathological
+  // brace run, and discovery runs it once per entry a server publishes.
   const strict = [...value.matchAll(TEMPLATE_EXPRESSION_RE)];
-  const loose = [...value.matchAll(ANY_BRACE_RUN_RE)];
   if (strict.length === 0) return false;
+
+  // Then: every brace run must BE one of those expressions. An operator (`{+path}`), a
+  // modifier (`{path:3}`), an explode (`{list*}`), an empty `{}` or a stray brace matches
+  // the loose pattern and not the strict one, so the counts differ.
+  //
+  // Redundant in practice, and deliberately kept: a brace that survives this check also
+  // survives into the skeleton, and `isUsableResourceUri` refuses `{` and `}` outright —
+  // so the skeleton is what actually kills every operator fixture. The count stays
+  // because it refuses for the RIGHT REASON, at the layer that knows about RFC 6570,
+  // rather than relying on a URI rule that happens to exclude braces for its own reasons.
+  const loose = [...value.matchAll(ANY_BRACE_RUN_RE)];
   if (strict.length !== loose.length) return false;
   if (resourceTemplateVariables(value).length > MCP_RESOURCE_TEMPLATE_MAX_VARIABLES) {
     return false;
@@ -144,14 +160,45 @@ export function isUsableResourceUriTemplate(value: unknown): value is string {
 }
 
 /**
+ * Does any path segment of this URI mean "here" or "up one"?
+ *
+ * `encodeURIComponent` leaves `.` alone — it is unreserved — so a value of `..` reaches
+ * the server verbatim AS A DOT SEGMENT. `file:///project/{dir}/{name}` filled with `..`
+ * and `id_rsa` produces `file:///project/../id_rsa`, which resolves to `file:///id_rsa`.
+ * Percent-encoding stops a value spanning segments; it does nothing about a value that
+ * IS one. RFC 3986 dot-segment removal is not a "badly written server" hazard either: it
+ * is what `new URL()` and `fileURLToPath` do, for non-special schemes too.
+ *
+ * Checked on the FINISHED string rather than on each value, because a literal can compose
+ * one: `file:///project/.{x}` with `x="."` is a dot segment neither half contains. Query
+ * and fragment are dropped first — a `..` after `?` is not a path segment, and the only
+ * way one gets there is from a literal the server itself wrote.
+ */
+function hasDotSegment(uri: string): boolean {
+  const scheme = uri.indexOf(":");
+  const afterScheme = scheme === -1 ? uri : uri.slice(scheme + 1);
+  const pathEnd = afterScheme.search(/[?#]/);
+  const path = pathEnd === -1 ? afterScheme : afterScheme.slice(0, pathEnd);
+  return path.split("/").some((segment) => segment === "." || segment === "..");
+}
+
+/**
  * Fill a template. Returns the URI, or `null` when the result is not one the host would
  * have accepted from `resources/list` in the first place.
  *
  * Every value is percent-encoded with `encodeURIComponent`, which is Level 1's rule and
- * the reason a user cannot type their way out of the path the server published. The
- * result is then validated with the ORDINARY URI predicate — belt to that suspenders,
- * and the thing that makes this function's output indistinguishable from a listed URI to
- * every consumer downstream.
+ * the reason a value cannot span components: `/`, `?`, `#`, `:` and `@` all encode. What
+ * that does NOT do is stop a value from BEING a dot segment, which is why
+ * {@link hasDotSegment} runs on the result — see its comment, and note that the test
+ * which "proved" traversal was neutralized used `../../etc/passwd`, whose slashes encode.
+ * Bare `..` went untried until a review found it.
+ *
+ * The result is then validated with the ORDINARY URI predicate. That is NOT a belt to
+ * anything's suspenders, despite what an earlier version of this comment called it: a
+ * variable may sit in scheme position (`{scheme}://host/{p}` catalogues, because the
+ * skeleton `x://host/x` is a legal custom scheme), and percent-encoding cannot help there
+ * because `javascript` and `ui` are already unreserved. This line is the only thing
+ * between that template and a reserved scheme, and it is pinned by its own test.
  *
  * A missing or over-long value is a refusal rather than an empty substitution: silently
  * expanding `{path}` to nothing yields a URI pointing at the directory above it, which
@@ -176,9 +223,19 @@ export function expandResourceUriTemplate(
       refused = true;
       return "";
     }
+    // A lone surrogate makes `encodeURIComponent` THROW. Refused here so this function
+    // keeps the contract its signature states — returns a string or `null`, never
+    // raises — which the one caller today survives by luck of a `try` it has for other
+    // reasons. Reachable from the dialog, whose `maxLength` can clip a pasted emoji in
+    // half.
+    if (LONE_SURROGATE_RE.test(trimmed)) {
+      refused = true;
+      return "";
+    }
     return encodeURIComponent(trimmed);
   });
   if (refused) return null;
   if (expanded.length > MCP_RESOURCE_URI_MAX_CHARS) return null;
+  if (hasDotSegment(expanded)) return null;
   return isUsableResourceUri(expanded) ? expanded : null;
 }
