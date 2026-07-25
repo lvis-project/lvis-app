@@ -13,6 +13,7 @@ import type {
   ConversationTriggerSpec,
 } from "../../../plugins/types.js";
 import { OVERLAY_TRIGGER_SOURCE_PATTERN } from "../../../shared/overlay-trigger-source.js";
+import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../../shared/mcp-resource-bounds.js";
 import { CAPABILITY_HOST_OVERLAY } from "../../../plugins/capabilities.js";
 import { formatStagedEnvelope, stagedOriginFor } from "../../../shared/staged-origins.js";
 import { stripLeadingSlash } from "../../../shared/slash-sanitizer.js";
@@ -190,13 +191,17 @@ export const triggerConversationRateLimiter = new TriggerConversationRateLimiter
  *
  * The two user surfaces share this budget on purpose: what it protects is the server
  * (and the host's own event loop) from a renderer looping on the user's behalf, and
- * that concern does not care which of the two calls is looping. The arithmetic is
- * worth knowing, because it is no longer one click per call — a turn carrying the
- * full 8 resource attachments spends 8 of the 20, so two such turns inside the window
- * leave room for 4 more calls of either kind. That is deliberate headroom for a
- * person, and still a hard stop for a loop.
+ * that concern does not care which of the two calls is looping.
+ *
+ * The cap is DERIVED from the per-turn attachment bound because the two now collide:
+ * attaching is no longer one click per call, so a flat 20 meant three
+ * full-attachment turns in a minute hit `rate-limited` mid-turn — a person working
+ * normally, told they are going too fast. Six turns' worth leaves room for prompt
+ * runs alongside them, and a derived number cannot drift when the attachment bound
+ * moves. Still a hard stop for a loop: an adversary is a renderer bug here, not a
+ * person, and it exhausts this in well under a second.
 */
-const USER_PROMPT_RATE_LIMIT_MAX_CALLS = 20;
+export const USER_PROMPT_RATE_LIMIT_MAX_CALLS = MCP_RESOURCE_ATTACHMENTS_PER_TURN * 6;
 export const userPromptRateLimiter = new TriggerConversationRateLimiter(
   TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS,
   USER_PROMPT_RATE_LIMIT_MAX_CALLS,

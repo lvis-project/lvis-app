@@ -165,15 +165,35 @@ Stage 3 — the user path, split at the process boundary the way stages 1 and 2 
     handler.
   - **3b:** the composer mention (`@server:uri`) with autocomplete, and templates.
 
-The per-turn cap lives at the turn-entry chokepoint (`runStreamedTurn`), for the same
-reason the turn's staged origin is read from the text there: `chat send` and
-`sidechat send` parse their payloads separately, and the replay paths (edit-resend,
-continue-last-user, retry-effort) reach neither gate. It counts fence OCCURRENCES
-across the input and every text part, so the bound is a property of the turn's
-content rather than of how the renderer packaged it — a composer that joins several
+The per-turn cap lives at the turn-entry chokepoint (`runStreamedTurn`) because
+`chat send` and `sidechat send` parse their payloads separately, so a bound in one
+would not exist for the other, and that is the one place attachments enter a turn. It
+counts fence OCCURRENCES in the attached parts, so the bound is a property of what was
+attached rather than of how the renderer packaged it — a composer that joins several
 attachments into one part cannot spend more than the budget — and it REFUSES the turn
-rather than trimming, because dropping the extras would leave the model answering
-from fewer documents than the user believes it read.
+rather than trimming, because dropping the extras would leave the model answering from
+fewer documents than the user believes it read.
+
+Two things follow from counting ATTACHMENTS rather than all of a turn's text, and both
+are decisions rather than omissions:
+
+  - The user's own message text is never counted, even though a fence pasted there is
+    indistinguishable from a host-built one. Counting it looked stricter and was worse:
+    a refusal is only ever explainable when the host built the material, and a
+    developer pasting an LVIS transcript excerpt — which contains these fences verbatim
+    — would otherwise be told to remove resources they never attached, with no way to
+    discover why. A fence a user types frames their OWN words as less trusted, so it
+    buys a forger nothing. It also kept the refusal off the replay paths, which matters
+    more than it looks: `retryEffort` truncates history BEFORE streaming, so a throw
+    there would leave a conversation permanently shortened.
+  - Stage 3b therefore carries a hard constraint: **a mention must resolve to an
+    attachment part**, never to text spliced into the user's message. That is the one
+    field this bound does not measure, so 3b lands with a test that fails if the
+    composer inlines a fence — a comment will not hold it.
+
+The bound also sizes the user-initiated MCP rate bucket, which prompts and attachments
+share: attaching is no longer one click per call, so the bucket is derived from this
+number rather than being a flat count that a few full turns would exhaust.
 
 The fence is `<mcp-resource trust="untrusted-server-data">`, registered in the
 `FenceTag` union so its builder had to answer the escape question. Inside the fence

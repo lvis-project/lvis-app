@@ -1070,15 +1070,40 @@ B${i}
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
-    // The natural composer implementation — splice every fence into the text the user
-    // typed — and the one the prefix test counted as a single attachment.
+    // One part carrying twelve attachments — the natural way to put fences beside the
+    // user's own words, and what the prefix test counted as a single attachment.
     const joined = Array.from({ length: 12 }, (_, i) => resourceFence(i)).join("\n\n");
     await expect(invoke("lvis:chat:send", {
-      input: `summarize these\n\n${joined}`,
+      input: "summarize these",
       inputOrigin: "user-keyboard",
       userActivation: true,
+      attachments: [{ type: "text", text: joined }],
     })).rejects.toThrow("too-many-resource-attachments");
     expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
+  // The other direction, and a deliberate decision rather than an oversight: the bound
+  // governs what the HOST attached, so the user's own message text is never counted.
+  // A developer pasting an LVIS transcript excerpt — which contains these fences
+  // verbatim — must not have their message refused and be told to remove resources
+  // they never attached, with no way to find out why.
+  it("never refuses a turn for fences the user typed themselves", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    const pasted = Array.from({ length: 12 }, (_, i) => resourceFence(i)).join("\n\n");
+    const result = await invoke("lvis:chat:send", {
+      input: `why were these ignored?\n\n${pasted}`,
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    });
+
+    expect(result).not.toMatchObject({ ok: false });
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+    // The text reaches the model verbatim — a fence the user typed frames their own
+    // words as less trusted, which costs a forger nothing.
+    expect(loop.runTurn.mock.calls[0][0]).toContain(MCP_RESOURCE_FENCE_OPEN);
   });
 
   it("rejects chat sends that omit explicit inputOrigin", async () => {
