@@ -14,6 +14,11 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "missing-input-origin": "formatIpcError.missingInputOrigin",
   "cross-plugin-call-denied": "formatIpcError.crossPluginCallDenied",
   "missing-plugin-envelope": "formatIpcError.missingPluginEnvelope",
+  // Every staged origin returns its own missing-envelope code (see
+  // shared/staged-origins.ts) — all of them are reachable from `chat:send`, so
+  // all of them need a message rather than leaking the kebab-case code.
+  "missing-app-envelope": "formatIpcError.missingAppEnvelope",
+  "missing-mcp-prompt-envelope": "formatIpcError.missingMcpPromptEnvelope",
   "assistant-context-origin-restricted": "formatIpcError.assistantContextOriginRestricted",
   "role-prompt-origin-restricted": "formatIpcError.rolePromptOriginRestricted",
   "persona-prompt-origin-restricted": "formatIpcError.personaPromptOriginRestricted",
@@ -191,6 +196,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // notification service to be running for its popup path.
   "cross-server-call-denied": "formatIpcError.crossServerCallDenied",
   "invalid-server-id": "formatIpcError.invalidServerId",
+  // ── MCP server prompts (mcp.getPrompt) ──
+  // A server prompt the user picked can fail on a malformed request, on a server
+  // that returned nothing renderable, or on the server itself; the server's own
+  // error text is never forwarded (it can carry host paths).
+  "invalid-request": "formatIpcError.invalidRequest",
+  "empty-prompt": "formatIpcError.emptyPrompt",
+  "prompt-failed": "formatIpcError.promptFailed",
   // `onupdatemodelcontext` — the renderer binds serverId + session + cardId; a malformed
   // binding is a host bug, and the card cannot be identified.
   "invalid-binding": "formatIpcError.invalidBinding",
