@@ -25,6 +25,11 @@ import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import { createSkillLoadTool, type SkillLoadEvent, type SkillLoadToolDeps } from "../tools/skill-load.js";
 import { createSkillListTool } from "../tools/skill-list.js";
 import { createSkillReadTool } from "../tools/skill-read.js";
+import {
+  createMcpResourceListTool,
+  createMcpResourceReadTool,
+  type McpResourceToolDeps,
+} from "../tools/mcp-resource-tools.js";
 import { createAgentListTool } from "../tools/agent-list.js";
 import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
@@ -184,6 +189,12 @@ export interface WorkflowToolDeps {
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
   acquirePluginSkillGeneration?: NonNullable<SkillLoadToolDeps["acquirePluginGeneration"]>;
+  /**
+   * Lazy-resolved MCP resource access. Lazy because the MCP manager is built in a
+   * LATER boot step than the builtin tools, and narrow (list + read only) so this
+   * surface cannot reach `callTool`.
+   */
+  getMcpResourceAccess?: () => McpResourceToolDeps | undefined;
 }
 
 export function registerBuiltinTools(
@@ -267,6 +278,24 @@ export function registerBuiltinTools(
         acquirePluginGeneration: workflowDeps.acquirePluginSkillGeneration,
       }),
     );
+  }
+
+  // MCP resources — the MODEL's path to server-declared documents/schemas. The
+  // user's path (a composer mention) is a separate surface; reference hosts expose
+  // both. Registered only when resource access is wired, so a host build without
+  // the MCP manager does not advertise tools that cannot work.
+  const mcpResourceAccess = workflowDeps?.getMcpResourceAccess;
+  if (mcpResourceAccess) {
+    const access: McpResourceToolDeps = {
+      listResources: () => mcpResourceAccess()?.listResources() ?? [],
+      readResource: async (serverId, uri) => {
+        const live = mcpResourceAccess();
+        if (!live) throw new Error("mcp resource access is not ready");
+        return live.readResource(serverId, uri);
+      },
+    };
+    builtins.push(createMcpResourceListTool(access));
+    builtins.push(createMcpResourceReadTool(access));
   }
 
   toolRegistry.registerBatch(builtins);
