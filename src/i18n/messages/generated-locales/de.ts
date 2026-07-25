@@ -511,6 +511,7 @@ export const deMessages: Record<string, string> = {
   "be_mcpResourceTools.serverIdDescription": "Id des verbundenen MCP-Servers, genau wie von mcp_resource_list gemeldet.",
   "be_mcpResourceTools.uriDescription": "Ressourcen-URI, genau wie von mcp_resource_list aufgelistet. Nicht aufgelistete URIs werden abgelehnt.",
   "be_mcpResourceTools.invalidRequest": "serverId und uri sind beide erforderlich, und uri muss innerhalb der Längengrenze des Hosts liegen.",
+  "be_mcpResourceTools.notReady": "Der MCP-Ressourcenzugriff ist noch nicht bereit; die Serververbindungen starten noch. Versuche es gleich erneut.",
   "be_mcpResourceTools.readFailed": "Die Ressource konnte nicht gelesen werden. Möglicherweise wurde sie von diesem Server nicht deklariert, ihr Schema wird vom Host nicht abgerufen, oder der Server ist fehlgeschlagen.",
   "be_mcpManager.apiKeyControlChars": "Der API-Schlüssel enthält Steuerzeichen (CR/LF usw.).",
   "be_mcpManager.apiKeyEmpty": "Der API-Schlüssel ist leer.",

@@ -23,6 +23,19 @@ function makeBuiltin(name: string) {
   });
 }
 
+/** A BUILTIN that surfaces MCP-server data and therefore declares the MCP scope. */
+function makeMcpScopedBuiltin(name: string) {
+  return createDynamicTool({
+    name,
+    description: `mcp-scoped builtin ${name}`,
+    source: "builtin",
+    category: "read",
+    requiresMcpScope: true,
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => ({ output: "", isError: false }),
+  });
+}
+
 function makePluginTool(name: string, pluginId: string) {
   return createDynamicTool({
     name,
@@ -79,6 +92,30 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
     });
     const names = schemas.map((s) => s.name).sort();
     expect(names).toEqual(["bash", "web_search"]);
+  });
+
+  // A builtin that hands the model untrusted MCP content honors the SAME switch as
+  // an MCP tool. Headless (routine) loops run with `includeMcp: false` on purpose,
+  // and a builtin badge must not be a way around that decision.
+  it("withholds an mcp-scoped builtin when MCP is out of scope", () => {
+    // Registered here rather than in `seed()` so the other cases keep asserting
+    // exact tool lists without this one perturbing them.
+    const r = seed();
+    r.register(makeMcpScopedBuiltin("mcp_resource_list"));
+    const withoutMcp = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      includeBuiltins: true,
+      includeMcp: false,
+    }).map((s) => s.name);
+    expect(withoutMcp).not.toContain("mcp_resource_list");
+    expect(withoutMcp).toContain("bash");
+
+    const withMcp = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      includeBuiltins: true,
+      includeMcp: true,
+    }).map((s) => s.name);
+    expect(withMcp).toContain("mcp_resource_list");
   });
 
   it("plugin schemas load individually by activeToolNames", () => {

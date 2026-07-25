@@ -23,12 +23,21 @@
  * the model path and the user path cannot drift apart in what they allow.
  */
 import { createDynamicTool, type Tool } from "./base.js";
+import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
-import {
-  MCP_RESOURCE_MAX_PER_SERVER,
-  MCP_RESOURCE_URI_MAX_CHARS,
-} from "../shared/mcp-resource-bounds.js";
+import { MCP_RESOURCE_URI_MAX_CHARS } from "../shared/mcp-resource-bounds.js";
 import type { McpResourceSummary } from "../mcp/types.js";
+
+const log = createLogger("lvis");
+
+/**
+ * Bound on ONE list response, counted over the serialized payload rather than a
+ * per-server count. The per-server cap is already spent at discovery, so counting
+ * again there would be an unreachable branch; what is genuinely unbounded here is
+ * server_count x catalogue_size, and this is the axis that reaches the model's
+ * context window. A clip is REPORTED, never silent.
+ */
+const MCP_RESOURCE_LIST_MAX_CHARS = 24 * 1024;
 
 /**
  * The slice of the MCP manager these tools need. Narrow on purpose: a tool that
@@ -47,11 +56,22 @@ function errorResult(message: string): { output: string; isError: true } {
   return { output: JSON.stringify({ error: message }), isError: true };
 }
 
-export function createMcpResourceListTool(deps: McpResourceToolDeps): Tool {
+/**
+ * Resource access is resolved per call, not captured: the MCP manager is built in
+ * a later boot step than the builtin tools, so a captured value would be the
+ * `undefined` from registration time forever. Resolving here also gives the
+ * not-ready case its own visible outcome instead of a generic failure.
+ */
+export type McpResourceAccessResolver = () => McpResourceToolDeps | undefined;
+
+export function createMcpResourceListTool(getAccess: McpResourceAccessResolver): Tool {
   return createDynamicTool({
     name: "mcp_resource_list",
     description: t("be_mcpResourceTools.listDescription"),
     source: "builtin",
+    // Surfaces MCP-server data, so the turn scope's `includeMcp` switch applies:
+    // headless loops (routines) run with MCP withheld on purpose.
+    requiresMcpScope: true,
     category: "read",
     isReadOnly: () => true,
     jsonSchema: {
@@ -64,17 +84,16 @@ export function createMcpResourceListTool(deps: McpResourceToolDeps): Tool {
       },
     },
     execute: async (rawInput) => {
+      const access = getAccess();
+      if (!access) return errorResult(t("be_mcpResourceTools.notReady"));
       const a = (rawInput ?? {}) as Record<string, unknown>;
       const wanted = typeof a.serverId === "string" ? a.serverId : undefined;
-      const servers = deps
+      const servers = access
         .listResources()
         .filter((entry) => (wanted ? entry.serverId === wanted : true))
         .map((entry) => ({
           serverId: entry.serverId,
-          // Already validated and bounded at the client boundary; the cap is
-          // re-applied here so a future discovery change cannot widen what the
-          // model sees in one turn.
-          resources: entry.resources.slice(0, MCP_RESOURCE_MAX_PER_SERVER).map((resource) => ({
+          resources: entry.resources.map((resource) => ({
             uri: resource.uri,
             name: resource.name,
             ...(resource.title ? { title: resource.title } : {}),
@@ -86,16 +105,36 @@ export function createMcpResourceListTool(deps: McpResourceToolDeps): Tool {
             ...(resource.hostFetchRefused ? { hostFetchRefused: true } : {}),
           })),
         }));
-      return { output: JSON.stringify({ servers }), isError: false };
+      // Bounded on the axis that is actually unbounded — server count times
+      // catalogue size — by dropping whole servers from the tail until the payload
+      // fits, and saying how many were dropped.
+      let omittedServers = 0;
+      while (
+        servers.length > 1
+        && JSON.stringify({ servers }).length > MCP_RESOURCE_LIST_MAX_CHARS
+      ) {
+        servers.pop();
+        omittedServers += 1;
+      }
+      return {
+        output: JSON.stringify({
+          servers,
+          ...(omittedServers > 0 ? { omittedServers } : {}),
+        }),
+        isError: false,
+      };
     },
   });
 }
 
-export function createMcpResourceReadTool(deps: McpResourceToolDeps): Tool {
+export function createMcpResourceReadTool(getAccess: McpResourceAccessResolver): Tool {
   return createDynamicTool({
     name: "mcp_resource_read",
     description: t("be_mcpResourceTools.readDescription"),
     source: "builtin",
+    // Surfaces MCP-server data, so the turn scope's `includeMcp` switch applies:
+    // headless loops (routines) run with MCP withheld on purpose.
+    requiresMcpScope: true,
     // Pure read: no filesystem mutation, no system-prompt mutation. The content
     // lands in a tool_result, so it needs no approval modal of its own — the gates
     // that matter (capability approved, URI previously listed) are structural.
@@ -116,6 +155,8 @@ export function createMcpResourceReadTool(deps: McpResourceToolDeps): Tool {
       },
     },
     execute: async (rawInput) => {
+      const access = getAccess();
+      if (!access) return errorResult(t("be_mcpResourceTools.notReady"));
       const a = (rawInput ?? {}) as Record<string, unknown>;
       const serverId = typeof a.serverId === "string" ? a.serverId.trim() : "";
       const uri = typeof a.uri === "string" ? a.uri.trim() : "";
@@ -123,7 +164,7 @@ export function createMcpResourceReadTool(deps: McpResourceToolDeps): Tool {
         return errorResult(t("be_mcpResourceTools.invalidRequest"));
       }
       try {
-        const read = await deps.readResource(serverId, uri);
+        const read = await access.readResource(serverId, uri);
         return {
           output: JSON.stringify({
             uri,
@@ -135,10 +176,15 @@ export function createMcpResourceReadTool(deps: McpResourceToolDeps): Tool {
           isError: false,
         };
       } catch (err) {
-        // The server's own message can carry host paths, so it is logged by the
-        // client and not forwarded here. The model gets a stable reason instead,
-        // which is also what keeps a failed read from becoming a probe channel.
-        void err;
+        // The model gets a stable reason — a server message can carry host paths,
+        // and a detailed failure turns a refused read into a probe channel. The
+        // operator still needs the real cause, so it is logged HERE: nothing on the
+        // client read path logs, so discarding it left the failure observable to
+        // no one.
+        log.warn(
+          `mcp_resource_read failed server=${serverId} uri=${uri}: `
+            + `${err instanceof Error ? err.message : String(err)}`,
+        );
         return errorResult(t("be_mcpResourceTools.readFailed"));
       }
     },
