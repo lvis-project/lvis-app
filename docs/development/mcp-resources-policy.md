@@ -99,7 +99,11 @@ At connect, after `tools/list` and `prompts/list`:
   they clicked. Refusing at the boundary rather than normalizing per consumer is forced
   by one consumer that CANNOT normalize: the audit row is a forensic record, and
   rewriting it would falsify it. Deliberately NOT the whole non-ASCII range — a
-  filesystem server publishing a CJK or Hangul path is honest and common. Display
+  filesystem server publishing a CJK or Hangul path is honest and common — but it is not
+  "any non-ASCII is fine" either: the class is shared with the display sanitizer, so a
+  name carrying an emoji variation selector or a ZWJ sequence is refused too. That is an
+  ACCEPTED COST of one definition rather than two policies, and the boundary test pins it
+  as an expected refusal so nobody later reads it as a bug. Display
   strings (`name`, `title`) are prose and take the opposite treatment: every codepoint
   is legitimate in them, so they are normalized at the render site instead.
 
