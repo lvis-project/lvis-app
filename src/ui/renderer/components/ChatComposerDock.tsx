@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useState, type RefObject } from "react";
 import { SessionTodoPanel } from "./SessionTodoPanel.js";
 import { MessageQueuePanel } from "./MessageQueuePanel.js";
 import { DeferredApprovalChip } from "./DeferredApprovalChip.js";
@@ -175,6 +175,14 @@ export function ChatComposerDock({
   // conversation always centers the composer the same way, key or no key.
   const centeredMarginClass = centered ? "mb-[clamp(9rem,32vh,20rem)]" : "mb-0";
 
+  // Stable identity, not an inline arrow. `allocateN` is a dependency of the mention
+  // hook's accept callback, which is a dependency of the composer's memoized keydown
+  // handler — so a fresh arrow per render rebuilt that handler on every render. The
+  // behaviour was correct (a fresh handler is never stale) but it made the handler's
+  // dependency array decorative: a missing dependency could not be observed, which is
+  // exactly how the mention menu shipped with a dead keyboard. The counter itself is a
+  // ref, so there is nothing to close over.
+  const allocateN = useCallback(() => ++attachmentNCounter.current, [attachmentNCounter]);
   return (
     <div
       className={[
@@ -261,7 +269,7 @@ export function ChatComposerDock({
           onTextChange={setQuestion}
           attachments={attachments}
           onAttachmentsChange={setAttachments}
-          allocateN={() => ++attachmentNCounter.current}
+          allocateN={allocateN}
           saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
           openExternal={(p) => window.lvis.attach.openExternal(p)}
           onSend={onComposerSend}

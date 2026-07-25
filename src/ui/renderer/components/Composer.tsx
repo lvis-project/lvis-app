@@ -222,12 +222,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // Resources are counted in their OWN lane, and the partition is derived here so both
   // caps read one answer instead of each site re-filtering the array.
   //
-  // `ATTACH_MAX_COUNT` is a bound on the chip strip — how many images, files and pastes
-  // stay legible side by side. A resource is bounded by something unrelated: how much
-  // server text one TURN may carry, which main enforces. Folding them together would
-  // mean five attached documents stops the user adding a screenshot, and would make the
-  // per-turn bound unreachable from the only surface that produces resource attachments
-  // — a documented number nothing can reach.
+  // The two caps measure different things, which is the whole reason they are separate
+  // lanes. `ATTACH_MAX_COUNT` bounds what the PICKER paths may add — an image, a file, a
+  // paste each cost a round trip and a thumbnail; a resource is bounded instead by how
+  // much server text one TURN may carry, which main enforces independently.
+  //
+  // Note what this is NOT: it is not that resources stay out of the chip strip. They
+  // render there like anything else, so a turn can show thirteen chips. An earlier
+  // version of this comment claimed the strip's legibility was the reason, which is not
+  // the true one — the true one is that the numbers bound different resources.
+  //
+  // Folding them would mean five attached documents stops the user adding a screenshot,
+  // and would make the per-turn bound unreachable from the only surface that produces
+  // resource attachments: a documented number nothing can reach.
   const resourceCount = useMemo(
     () => liveAttachments.filter((a) => a.kind === "resource").length,
     [liveAttachments],
