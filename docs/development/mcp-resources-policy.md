@@ -202,6 +202,14 @@ Because these builtins hand the model untrusted server content, they declare
 does to MCP tools. Without it a builtin badge would be a way around the decision
 that headless (routine) loops run with no MCP surface.
 
+**Templates are deliberately NOT on the model path.** The expansion would still be
+host-side and still percent-encoded, so this is not a containment gap — it is a reach
+decision. A listed resource is a finite set the server chose to publish; a template is a
+FAMILY, and handing the model one turns "read what this server published" into "read
+anything matching this shape", with the model choosing the values. That is a wider reach
+than stage 2 was argued for, and it should be argued for on its own rather than arriving
+as a side effect of the picker work. Recorded here as a non-goal, not an omission.
+
 Stage 3 — the user path, split at the process boundary the way stages 1 and 2 were:
 
   - **3a (landed):** `lvis:mcp:attach-resource` reads a declared resource and
