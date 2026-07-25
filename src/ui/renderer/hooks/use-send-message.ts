@@ -38,6 +38,7 @@ export interface UseSendMessageDeps {
   checkApiKey: () => Promise<boolean>;
   composeOutgoing: ComposeOutgoingFn;
   appendUserEntry: ChatState["appendUserEntry"];
+  dropUserEntry: ChatState["dropUserEntry"];
   resetStreamAccumulators: ChatState["resetStreamAccumulators"];
   beginStreamingRequest: ChatState["beginStreamingRequest"];
   finishStreamingRequest: ChatState["finishStreamingRequest"];
@@ -110,7 +111,7 @@ export interface UseSendMessageResult {
 export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
   const {
     api, t, streaming, checkApiKey, composeOutgoing,
-    appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
+    appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
     llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,
@@ -188,6 +189,13 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       const requestId = ++turnRequestRef.current;
       const streamingRequestId = beginStreamingRequest();
       if (debugStreamEnabled) debugLog("handleAsk", "begin", { requestId, streamingRequestId });
+      // Snapshot BEFORE clearing. `setQuestion("")` commits, and the composer's
+      // marker-sync effect reads that empty body, finds no `[...#N]` markers, and drops
+      // every attachment — so by the time an awaited send is refused there is nothing
+      // left to put back. Restoring only the text would leave the draft carrying
+      // `[Resource #1]` with no attachment behind it: a dangling reference that resends
+      // as a marker the model cannot resolve, silently.
+      const draftAttachments = attachments;
       setQuestion("");
       // Staged modes send the enveloped text VERBATIM — composeOutgoing's composer
       // affordances (attachment markers, persona prompt) belong to typed input only.
@@ -265,6 +273,35 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         setErrorWithThought(
           mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage }),
         );
+        // Put the turn back the way it was. The bubble was appended optimistically and
+        // the composer was cleared before the IPC resolved; a REFUSED send means main
+        // recorded nothing, so leaving either would show the user a message that was
+        // never sent and lose the text they typed. The vision-capability guard above
+        // already restores the draft for its own refusal — this is the same repair for
+        // every other one, which until now only the guard had.
+        //
+        if (mode === "default") {
+          dropUserEntry(trimmed);
+          // Text AND attachments, together. They are one thing: the composer derives its
+          // chips from the markers in the body, so a body restored without its
+          // attachments is a draft with dangling references. Restored only when the
+          // composer is still empty, so a draft started during the send wins.
+          if (draftAttachments.length > 0) {
+            setAttachments((current) => (current.length > 0 ? current : draftAttachments));
+          }
+          // Restored INSIDE the guard. For a staged mode `q` is the provenance
+          // ENVELOPE, not anything the user typed (`App.tsx` hands this function
+          // `outcome.envelope` for an MCP-server prompt), and putting that in the
+          // composer would hand the user server-authored text as their own draft —
+          // the laundering shape this whole feature exists to prevent, reintroduced by
+          // the repair for a UX complaint. The send gate does reject it
+          // (`origin-envelope-mismatch`), so nothing downstream would treat it as
+          // staged; it should never be offered in the first place.
+          //
+          // Functional form so a draft typed WHILE the send was in flight wins over the
+          // one being restored — the same race the composer's own `textRef` handles.
+          setQuestion((current) => (current.length > 0 ? current : q));
+        }
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
         if (debugStreamEnabled) {
@@ -284,6 +321,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       checkApiKey,
       composeOutgoing,
       appendUserEntry,
+      dropUserEntry,
       resetStreamAccumulators,
       beginStreamingRequest,
       finishStreamingRequest,

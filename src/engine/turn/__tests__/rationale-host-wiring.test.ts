@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { MCP_RESOURCE_FENCE_OPEN } from "../../../shared/mcp-resource-bounds.js";
 import { InputClassifier } from "../../../core/input-classifier.js";
 import { RouteEngine } from "../../../core/route-engine.js";
 import { ConversationLoop } from "../../conversation-loop.js";
@@ -283,4 +284,46 @@ describe("RequestAnchor and rationale provenance host wiring", () => {
     expect(closeRationaleSession).toHaveBeenCalledTimes(2);
   });
 
+
+  // The replay case. `continueFromLastUserTurn` folds every text part of a stored turn
+  // into the prompt BODY, so a resource turn arrives at `runTurn` with no attachment
+  // parts at all — and the taint used to be derived from `attachmentParts.length`. The
+  // effect was that Retry on a resource turn told the Layer-5 reviewer the server's text
+  // was ordinary model-generated input, and wrote that verdict into the UNTAINTED cache
+  // partition. Deriving from the material instead is what makes the fold survivable.
+  //
+  // Asserted through the permission context rather than by calling the predicate, so it
+  // covers the wiring the defect actually lived in.
+  it("keeps file-content taint when a resource fence arrives folded into the turn text", async () => {
+    const folded = [
+      "summarize [Resource #1]",
+      `${MCP_RESOURCE_FENCE_OPEN} server="hr-mcp" uri="file:///policy.md">`,
+      "SERVER BODY",
+      "</mcp-resource>",
+    ].join("\n");
+    const fixture = makeHarness([toolRound("bash-1", "bash"), endRound]);
+
+    // No `attachments` option — this is exactly the shape the replay produces.
+    await fixture.loop.runTurn(folded, undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    // `trustOrigin`, not `rationaleProvenance`: a replay carries no RequestAnchor, so
+    // provenance is absent on this path by construction. `trustOrigin` is the field the
+    // reviewer prompt and the verdict-cache partition actually read, which is where the
+    // defect had its effect.
+    expect(fixture.permissionContexts.map((context) => context.trustOrigin))
+      .toEqual(["file-content"]);
+  });
+
+  it("leaves an ordinary keyboard turn untainted", async () => {
+    // The counterweight: without this, a predicate that returned `file-content` for
+    // everything would satisfy the case above and nothing would notice.
+    const fixture = makeHarness([toolRound("bash-1", "bash"), endRound]);
+    await fixture.loop.runTurn("just a question about mcp-resource handling", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+    expect(fixture.permissionContexts.map((context) => context.trustOrigin))
+      .toEqual(["llm-tool-arg"]);
+  });
 });

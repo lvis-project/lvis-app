@@ -18,6 +18,7 @@ import { MemoryManager } from "../../memory/memory-manager.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { createSkillLoadTool } from "../../tools/skill-load.js";
+import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -1314,5 +1315,82 @@ describe("ConversationLoop queryLoop", () => {
     };
     expect(assistant.content).toBe("the answer");
     expect(assistant.thought).toBe("step1 step2");
+  });
+
+  // A resource attachment carries up to a read's worth of SERVER text. It has to reach
+  // the model (that is the point) but it must not be replayed inside the user's own
+  // transcript bubble, where it would read as something the user typed. `displayText`
+  // is the seam the staged-origin work already established for that, and the marker the
+  // user typed is what stands in for the body — exactly as an image's marker does.
+  it("keeps an attached resource's body out of the user's transcript bubble", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system", setActiveRolePrompt: vi.fn() },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const fence = [
+      `${MCP_RESOURCE_FENCE_OPEN} server="hr-mcp" uri="file:///policy.md">`,
+      "SERVER BODY THE USER DID NOT WRITE",
+      "</mcp-resource>",
+    ].join("\n");
+    await loop.runTurn("summarize [Resource #1]", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+      attachments: [{ type: "text", text: fence }],
+    });
+
+    const [firstMessage] = withoutRuntimeMeta(loop.getHistory().getMessages());
+    // The model DOES receive it — the parts are intact.
+    expect(firstMessage.content).toEqual([
+      { type: "text", text: "summarize [Resource #1]" },
+      { type: "text", text: fence },
+    ]);
+    // …and the transcript shows the user's own words only.
+    const meta = (firstMessage as { meta?: { displayText?: string } }).meta;
+    expect(meta?.displayText).toBe("summarize [Resource #1]");
+    expect(meta?.displayText).not.toContain("SERVER BODY");
+  });
+
+  it("adds no displayText to a turn with no resource attachment", async () => {
+    // The seam exists for server-authored parts. An ordinary turn must not acquire a
+    // second copy of its own text in meta — that is what would make the two drift.
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system", setActiveRolePrompt: vi.fn() },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("plain question", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+      attachments: [{ type: "image", image: "data:image/png;base64,xx", mimeType: "image/png" }],
+    });
+
+    const [firstMessage] = withoutRuntimeMeta(loop.getHistory().getMessages());
+    expect((firstMessage as { meta?: { displayText?: string } }).meta?.displayText)
+      .toBeUndefined();
   });
 });

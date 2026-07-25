@@ -4,6 +4,8 @@ import type { Attachment } from "../types/attachments.js";
 import { extractFileEditDiff, type FileEditDiffData } from "../utils/file-diff.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import { getToolDisplayName } from "../utils/tool-display.js";
+import { displaySafeLabel } from "../../../shared/display-safe-text.js";
+import { MCP_RESOURCE_URI_MAX_CHARS } from "../../../shared/mcp-resource-bounds.js";
 
 type ToolItem = Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
 
@@ -426,6 +428,24 @@ export function collectChatPreviewModel({
         previewTargetId: targetId,
         canOpenExternal: true,
       }, fileIds);
+    } else if (attachment.kind === "resource") {
+      // Preview shows the fence VERBATIM, framing included. This panel exists to show
+      // what the model will actually receive, and the untrusted framing is part of that
+      // — stripping it here would preview a message the host never sends.
+      addUnique(targets, {
+        id: `attachment:resource:${attachment.id}`,
+        // `kind` selects the preview renderer (plain text), it is NOT a provenance
+        // label — this content is a server's, not the user's clipboard. The subtitle
+        // carries the real provenance.
+        kind: "paste",
+        title: `Resource #${attachment.n}`,
+        subtitle: `${attachment.serverId} · ${displaySafeLabel(attachment.uri, MCP_RESOURCE_URI_MAX_CHARS)}`,
+        sourceLabel: "attachment",
+        createdOrder: order++,
+        text: trimPreviewText(attachment.text),
+        lines: attachment.text.split("\n").length,
+        chars: attachment.text.length,
+      }, targetIds);
     } else {
       addUnique(targets, {
         id: `attachment:paste:${attachment.id}`,

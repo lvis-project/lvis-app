@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectSlashQuery } from "../slash-trigger.js";
+import { detectMentionQuery, detectSlashQuery } from "../slash-trigger.js";
 
 describe("detectSlashQuery", () => {
   it("triggers on a slash at the start of the text", () => {
@@ -50,5 +50,34 @@ describe("detectSlashQuery", () => {
 
   it("returns null when there is no slash before the caret", () => {
     expect(detectSlashQuery("hello", 5)).toBeNull();
+  });
+});
+
+describe("detectMentionQuery", () => {
+  it("opens on an @ that starts a token", () => {
+    expect(detectMentionQuery("@pol", 4)).toEqual({ query: "pol", start: 0, end: 4 });
+    expect(detectMentionQuery("look at @pol", 12)).toEqual({ query: "pol", start: 8, end: 12 });
+    expect(detectMentionQuery("line\n@x", 7)).toEqual({ query: "x", start: 5, end: 7 });
+    // Bare sigil: an empty query offers the whole catalogue.
+    expect(detectMentionQuery("@", 1)).toEqual({ query: "", start: 0, end: 1 });
+  });
+
+  it("never opens inside an email address", () => {
+    // The reason the rule is shared with the slash detector rather than re-written: the
+    // "must start a token" clause is what keeps `foo@example.com` from opening a picker,
+    // exactly as it keeps `https://` from opening the command menu.
+    expect(detectMentionQuery("mail ken@example.com", 20)).toBeNull();
+    expect(detectMentionQuery("ken@ex", 6)).toBeNull();
+  });
+
+  it("closes once the token ends", () => {
+    expect(detectMentionQuery("@pol icy", 8)).toBeNull();
+    expect(detectMentionQuery("no sigil here", 13)).toBeNull();
+  });
+
+  it("does not confuse the two sigils", () => {
+    // Each detector answers for its own trigger, so one token can never be both.
+    expect(detectMentionQuery("/cmd", 4)).toBeNull();
+    expect(detectSlashQuery("@res", 4)).toBeNull();
   });
 });

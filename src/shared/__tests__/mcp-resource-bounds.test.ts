@@ -105,6 +105,44 @@ describe("isUsableResourceUri", () => {
     // A scheme may not contain `/`, so a path segment with a colon is not a scheme.
     expect(isUsableResourceUri("some/path:with-colon")).toBe(false);
   });
+
+  // Security review found the first cut of this rule enumerated ranges and leaked 14 of
+  // 17 sampled members of the class. It now shares ONE definition with the display
+  // sanitizer, so this samples the class rather than re-listing what someone remembered.
+  it("refuses invisible and reordering characters, sampling the class", () => {
+    const invisibles = [
+      0x00ad, 0x034f, 0x061c, 0x115f, 0x1160, 0x17b4, 0x180b, 0x180e,
+      0x200b, 0x200e, 0x2065, 0x202e, 0x2066, 0x3164, 0xfe0f, 0xffa0,
+      0xe0001, 0xe0041,
+    ];
+    for (const codePoint of invisibles) {
+      const uri = `file:///poli${String.fromCodePoint(codePoint)}cy.md`;
+      expect(isUsableResourceUri(uri), codePoint.toString(16)).toBe(false);
+    }
+    // Percent-encoded is the round-trip-safe way to express one, and stays usable.
+    expect(isUsableResourceUri("file:///poli%E2%80%AEcy.md")).toBe(true);
+  });
+
+  it("still catalogues legitimate non-ASCII paths", () => {
+    // The counterweight that keeps the rule surgical. A filesystem server publishing a
+    // Hangul or CJK path is honest and common; refusing it to stop a spoof would break
+    // real servers, so the class must not become "anything unfamiliar".
+    expect(isUsableResourceUri("file:///Users/example/문서/정상.md")).toBe(true);
+    expect(isUsableResourceUri("file:///docs/年度報告.pdf")).toBe(true);
+    expect(isUsableResourceUri("file:///docs/café-résumé.txt")).toBe(true);
+  });
+
+  it("refuses an emoji variation selector and a ZWJ sequence, the cost of one class", () => {
+    // The cost of ONE shared class, pinned as an EXPECTED refusal rather than left to
+    // be discovered as a bug. Keeping it is deliberate: after a non-emoji
+    // character a variation selector renders as nothing, so allowing it in an identifier
+    // would let two different URIs render identically, and subtracting it for the URI
+    // alone would reinstate the two-policies-over-one-class problem this replaced.
+    const VS16 = String.fromCodePoint(0xfe0f);
+    const ZWJ = String.fromCodePoint(0x200d);
+    expect(isUsableResourceUri(`file:///docs/❤${VS16}notes.md`)).toBe(false);
+    expect(isUsableResourceUri(`file:///docs/a${ZWJ}b.md`)).toBe(false);
+  });
 });
 
 describe("isHostFetchRefusedUri", () => {
