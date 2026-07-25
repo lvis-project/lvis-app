@@ -152,6 +152,23 @@ interface McpToolsListResult {
   tools: McpToolSchema[];
 }
 
+/**
+ * `prompts/get` result. Content blocks mirror tool-result blocks: `text` is the
+ * only kind LVIS renders inline; image/audio/resource are surfaced as explicit
+ * placeholders so a server cannot smuggle unrendered bytes into the turn.
+ */
+interface McpPromptGetResult {
+  description?: string;
+  messages: Array<{
+    role?: string;
+    content?: {
+      type?: string;
+      text?: string;
+      [key: string]: unknown;
+    };
+  }>;
+}
+
 interface McpPromptsListResult {
   prompts: Array<{
     name: string;
@@ -557,6 +574,42 @@ export class McpClient {
         `${this.config.id} prompts/list discovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  /**
+   * Fetch one server-declared prompt (`prompts/get`).
+   *
+   * Prompts are a USER-controlled primitive: this runs only from an explicit
+   * user selection, never from the model. The request is gated by the same
+   * per-request capability check as every other call (`prompts` must be both
+   * advertised and approved), and the prompt must be one the server actually
+   * declared at discovery — a name the host never saw is refused rather than
+   * forwarded.
+   */
+  async getPrompt(
+    name: string,
+    args: Record<string, string>,
+  ): Promise<{ description?: string; blocks: Array<{ role: string; type: string; text?: string }> }> {
+    if (!this.promptsAdvertised) {
+      throw new Error(`[mcp-client] server '${this.config.id}' did not advertise prompts`);
+    }
+    const declared = this.state.prompts?.some((prompt) => prompt.name === name);
+    if (!declared) {
+      throw new Error(`[mcp-client] server '${this.config.id}' did not declare prompt '${name}'`);
+    }
+    const result = await this.sendRequest<McpPromptGetResult>("prompts/get", {
+      name,
+      ...(Object.keys(args).length > 0 ? { arguments: args } : {}),
+    });
+    const blocks = (result.messages ?? []).map((message) => ({
+      role: typeof message.role === "string" ? message.role : "user",
+      type: typeof message.content?.type === "string" ? message.content.type : "text",
+      ...(typeof message.content?.text === "string" ? { text: message.content.text } : {}),
+    }));
+    return {
+      ...(typeof result.description === "string" ? { description: result.description } : {}),
+      blocks,
+    };
   }
 
   /** 서버 연결 해제 + 도구 제거 */
