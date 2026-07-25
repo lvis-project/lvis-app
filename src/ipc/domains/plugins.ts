@@ -55,6 +55,9 @@ import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.j
 import { appMessageSource, formatAppMessageEnvelope, isAppMessageOrigin } from "../../shared/mcp-app-message-source.js";
 import { formatStagedEnvelope, stagedOriginFor } from "../../shared/staged-origins.js";
 import { renderMcpPrompt } from "../../mcp/mcp-prompt-render.js";
+import { renderResourceAttachment } from "../../mcp/mcp-resource-attachment.js";
+import { isUsableResourceUri } from "../../shared/mcp-resource-bounds.js";
+import { scrubShortError } from "../../shared/dlp.js";
 import {
   isUsablePromptName,
   MCP_PROMPT_ARG_NAME_MAX_CHARS,
@@ -1585,6 +1588,73 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       const message = err instanceof Error ? err.message : String(err);
       auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get '${name}' failed: ${message}`);
       return { ok: false, error: "prompt-failed" };
+    }
+  });
+
+  // ─── MCP resources — the USER's path (`resources/read` → a fenced attachment) ────
+  //
+  // The renderer resolves a mention to (serverId, uri) and asks the host for the
+  // block to attach. The HOST builds the fence, never the renderer: server text
+  // lands beside the user's own words, so the untrusted framing has to come from the
+  // side that cannot be talked into omitting it.
+  //
+  // The turn stays the user's — this is attached DATA, not a staged origin (see the
+  // resources policy doc §2). Same guards as `getPrompt`: host-renderer sender only,
+  // and the user-initiated rate bucket, because it reaches a server on their behalf.
+  ipcMain.handle(CHANNELS.mcp.attachResource, async (e, serverId: unknown, uri: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.attachResource, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const auditAttach = (type: "info" | "error", input: string) => {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-resource",
+        type,
+        input,
+      });
+    };
+    if (typeof serverId !== "string" || !isUsableResourceUri(uri)) {
+      return { ok: false, error: "invalid-request" };
+    }
+    if (userPromptRateLimiter.isOverCap(serverId)) {
+      auditAttach("error", `[mcp-resource:${serverId}] attach rate limited`);
+      return { ok: false, error: "rate-limited" };
+    }
+    userPromptRateLimiter.record(serverId);
+    try {
+      const read = await deps.mcpManager.readDeclaredResource(serverId, uri);
+      const rendered = renderResourceAttachment(serverId, uri, read);
+      // The BODY, not the rendered string: an empty read still renders a full fence
+      // with its framing, so `text.length` is never zero. Attaching framing with no
+      // material behind it reads as content.
+      if (rendered.bodyChars === 0) {
+        auditAttach("error", `[mcp-resource:${serverId}] read returned no text`);
+        return { ok: false, error: "empty-resource" };
+      }
+      auditAttach(
+        "info",
+        `[mcp-resource:${serverId}] attached ${uri.slice(0, 256)} → ${rendered.text.length} chars`
+          + `${rendered.truncated ? " (truncated)" : ""}`
+          + `${rendered.omittedBlocks > 0 ? ` (${rendered.omittedBlocks} non-text block(s))` : ""}`,
+      );
+      return {
+        ok: true,
+        // Shaped as the user-content part the send path already accepts, so the
+        // renderer attaches it verbatim rather than assembling anything itself.
+        attachment: { type: "text", text: rendered.text },
+        truncated: rendered.truncated,
+        omittedBlocks: rendered.omittedBlocks,
+      };
+    } catch (err) {
+      // Scrubbed and bounded: a server's error message is unbounded and may echo a
+      // credential it was handed. The renderer gets a stable code.
+      auditAttach(
+        "error",
+        `[mcp-resource:${serverId}] attach ${uri.slice(0, 256)} failed: `
+          + scrubShortError(err instanceof Error ? err.message : String(err)),
+      );
+      return { ok: false, error: "resource-failed" };
     }
   });
 

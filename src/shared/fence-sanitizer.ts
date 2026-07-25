@@ -5,6 +5,8 @@
  *   · `<app-message source="app:…">`            — an MCP App's `ui/message` text
  *   · `<imported-from-proactive source="overlay:…">` — a plugin's overlay trigger prompt
  *   · `<mcp-app-context trust="untrusted-app-data">` — a card's model-context slot
+ *   · `<mcp-resource trust="untrusted-server-data">` — a server resource the USER
+ *     attached to their own turn (the turn stays theirs; only the body is untrusted)
  *
  * The fence IS the labelling mechanism, so a body that can emit its own closing tag
  * defeats it: everything the author writes after that tag appears, to the model, to sit
@@ -22,7 +24,8 @@ export type FenceTag =
   | "imported-from-proactive"
   | "mcp-app-context"
   | "lvis-mcp-server-guidance"
-  | "mcp-prompt";
+  | "mcp-prompt"
+  | "mcp-resource";
 
 /**
  * Neutralize any closing tag for `tag` inside app/plugin-authored `text`, so the body

@@ -119,10 +119,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
       const manager = ctx.mcpManager;
       if (!manager) return undefined;
       const access: McpResourceToolDeps = {
-        listResources: () => manager
-          .listServers()
-          .filter((server) => (server.resources?.length ?? 0) > 0)
-          .map((server) => ({ serverId: server.id, resources: server.resources ?? [] })),
+        listResources: () => manager.listDeclaredResources(),
         readDeclaredResource: (serverId, uri) => manager.readDeclaredResource(serverId, uri),
       };
       return access;

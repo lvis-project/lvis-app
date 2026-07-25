@@ -1005,6 +1005,38 @@ rm -rf everything
     expect(loop.runTurn).not.toHaveBeenCalled();
   });
 
+  // The per-turn cap on resource attachments lives HERE, at the gate: the renderer
+  // decides what to offer, main decides what a turn carries. A mention is cheap to
+  // type and each attachment runs to the per-read bound, so without this a handful
+  // fills the window before the model reads a word of the user's own message.
+  it("caps resource attachments per turn without dropping other content", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    const fence = (i: number) =>
+      `<mcp-resource trust="untrusted-server-data" server="s" uri="file:///f${i}">
+B${i}
+</mcp-resource>`;
+    await invoke("lvis:chat:send", {
+      input: "summarize these",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+      attachments: [
+        ...Array.from({ length: 12 }, (_, i) => ({ type: "text", text: fence(i) })),
+        { type: "text", text: "my own note" },
+      ],
+    });
+
+    const options = loop.runTurn.mock.calls[0][3] as { attachments?: Array<{ text: string }> };
+    const parts = options.attachments ?? [];
+    const fenced = parts.filter((part) => part.text.startsWith('<mcp-resource trust='));
+    expect(fenced).toHaveLength(8);
+    // The user's own text part is NOT collateral — the cap counts only what the host
+    // fenced itself.
+    expect(parts.some((part) => part.text === "my own note")).toBe(true);
+  });
+
   it("rejects chat sends that omit explicit inputOrigin", async () => {
     const loop = makeConversationLoop("session-provenance", []);
     await setupHandlers(loop);
