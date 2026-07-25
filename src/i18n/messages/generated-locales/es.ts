@@ -2822,6 +2822,7 @@ export const esMessages: Record<string, string> = {
   "composer.resourceMentionTemplateBadge": "plantilla",
   "composer.resourceLimit": "Como máximo {max} recursos por mensaje: envía este y luego adjunta más.",
   "composer.resourceAttachFailed": "No se pudo adjuntar ese recurso. Puede que el servidor se haya desconectado.",
+  "composer.resourceAttachBusy": "Todavía se está adjuntando el recurso anterior; inténtalo de nuevo en un momento.",
   "attachmentChip.resourceFromServer": "Del servidor MCP {server} · contenido no confiable",
   "attachmentChip.resourceClipped": "Del servidor MCP {server} · no confiable, recortado",
   "composer.resourceNotFetchable": "El servidor lo publica para acceso directo del cliente: el host no lo obtiene",

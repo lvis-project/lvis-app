@@ -327,7 +327,13 @@ export function useResourceMention({
       | { ok: false; error: string }
     >,
   ) => {
-    if (attachingRef.current) return;
+    if (attachingRef.current) {
+      // Told, not swallowed. A silent return is survivable for a picker row — the row is
+      // still there — but a template form has already taken the user's typed values and
+      // closed over them, so returning quietly loses work with no explanation.
+      onError(t("composer.resourceAttachBusy"));
+      return;
+    }
     attachingRef.current = true;
     void (async () => {
       try {
@@ -371,9 +377,18 @@ export function useResourceMention({
   }, [allocateN, onAttach, onError, t]);
 
   const accept = useCallback((index?: number) => {
-    if (!trigger || !mcp?.attachResource) return;
+    // Guarded per KIND, not on `attachResource` for both. A surface exposing only one of
+    // the two channels would otherwise make the other kind's rows silently inert — the
+    // menu accepts the keypress and nothing happens, which reads as a broken app rather
+    // than an absent capability.
+    if (!trigger || !mcp) return;
     const item = items[index ?? activeIndex];
     if (!item) return;
+    const channel = item.target.kind === "template" ? mcp.attachResourceTemplate : mcp.attachResource;
+    if (!channel) {
+      onError(t("composer.resourceAttachFailed"));
+      return;
+    }
     // A row the read would refuse says so instead of spending a round-trip to fail.
     if (item.unavailableReason) {
       onError(item.unavailableReason);
@@ -390,10 +405,6 @@ export function useResourceMention({
     const range = { start: trigger.start, end: trigger.end };
     const mentionToken = text.slice(trigger.start, trigger.end);
     if (item.target.kind === "template") {
-      if (!mcp.attachResourceTemplate) {
-        onError(t("composer.resourceAttachFailed"));
-        return;
-      }
       // No read yet — a template is an offer. The menu is dismissed here so it is not
       // sitting open behind the dialog, and the position is captured now because the
       // user is about to spend time in a form.

@@ -52,6 +52,24 @@ describe("isUsableResourceUriTemplate", () => {
     }
   });
 
+  it("refuses a MIXED template — one good variable plus one operator", () => {
+    // The realistic hostile shape, and the only one where the two counts actually differ
+    // while a strict match exists. A predicate that checked "is there at least one Level 1
+    // expression" would accept every one of these.
+    for (const template of [
+      "file:///project/{ok}/{+path}",
+      "file:///project/{ok}{?query}",
+      "file:///project/{ok}/{path*}",
+      "file:///project/{ok}/{",
+    ]) {
+      expect(isUsableResourceUriTemplate(template), template).toBe(false);
+    }
+    // Nested braces are the case where the COUNTS agree (one loose run, one strict match)
+    // — the skeleton is what refuses it, because a leftover brace is not a legal URI
+    // character. Both halves of the predicate earn their keep on different inputs.
+    expect(isUsableResourceUriTemplate("file:///{a{b}")).toBe(false);
+  });
+
   it("refuses a template with no variable at all", () => {
     // A concrete URI is not a template. Accepting one would give the same resource two
     // code paths — a listed URI and a zero-variable template — with different gates.
@@ -131,6 +149,55 @@ describe("expandResourceUriTemplate", () => {
     // And a value that looks like a whole other URI stays a value.
     expect(expandResourceUriTemplate("file:///project/{path}", values({ path: "javascript:alert(1)" })))
       .toBe("file:///project/javascript%3Aalert(1)");
+  });
+
+  it("cannot be typed into a DOT SEGMENT, which encoding does not touch", () => {
+    // Found in review, and the case the traversal test above missed for the most
+    // embarrassing reason: `../../etc/passwd` is neutralized by its SLASHES, and bare
+    // `..` has none. `.` is unreserved, so `encodeURIComponent` returns it verbatim and
+    // the server receives a real dot segment — `new URL()` and `fileURLToPath` both
+    // resolve it, for non-special schemes too.
+    expect(expandResourceUriTemplate(
+      "file:///project/{dir}/{name}",
+      values({ dir: "..", name: "id_rsa" }),
+    )).toBeNull();
+    // One level up is enough on its own, and `.` is refused with it — a value that means
+    // "here" is not a resource name either.
+    expect(expandResourceUriTemplate("file:///project/{path}", values({ path: ".." }))).toBeNull();
+    expect(expandResourceUriTemplate("file:///project/{path}", values({ path: "." }))).toBeNull();
+    // Trimmed first, so padding buys nothing.
+    expect(expandResourceUriTemplate("file:///project/{path}", values({ path: "  ..  " })))
+      .toBeNull();
+    // The accept case from the very first test in this describe — with `..` it escapes
+    // `repos/` and names another repository's issue.
+    expect(expandResourceUriTemplate(
+      "github://repos/{owner}/{repo}/issues/{number}",
+      values({ owner: "..", repo: "widgets", number: "42" }),
+    )).toBeNull();
+    // Checked on the FINISHED string, so a literal dot next to the variable cannot
+    // compose one either — neither half is a dot segment on its own.
+    expect(expandResourceUriTemplate("file:///project/.{x}/y", values({ x: "." }))).toBeNull();
+
+    // …and a name that merely CONTAINS dots is still perfectly ordinary.
+    expect(expandResourceUriTemplate("file:///project/{path}", values({ path: "..hidden" })))
+      .toBe("file:///project/..hidden");
+    expect(expandResourceUriTemplate("file:///project/{path}", values({ path: "v1.2.3" })))
+      .toBe("file:///project/v1.2.3");
+    expect(expandResourceUriTemplate("file:///project/{path}", values({ path: "..." })))
+      .toBe("file:///project/...");
+  });
+
+  it("refuses a lone surrogate instead of throwing", () => {
+    // `encodeURIComponent` RAISES on an unpaired surrogate, so without this the function
+    // breaks the contract its own signature states. Reachable from the dialog, whose
+    // `maxLength` clips a pasted string at 512 UTF-16 units and can cut an emoji in half.
+    const clipped = `${"x".repeat(511)}😀`.slice(0, 512);
+    expect(clipped.endsWith("\uD83D")).toBe(true);
+    expect(expandResourceUriTemplate("file:///p/{path}", values({ path: clipped }))).toBeNull();
+    expect(expandResourceUriTemplate("file:///p/{path}", values({ path: "\uDC00" }))).toBeNull();
+    // The paired form is fine — this refuses broken input, not non-ASCII.
+    expect(expandResourceUriTemplate("file:///p/{path}", values({ path: "😀" })))
+      .toBe("file:///p/%F0%9F%98%80");
   });
 
   it("cannot be typed into a scheme the host reserves", () => {

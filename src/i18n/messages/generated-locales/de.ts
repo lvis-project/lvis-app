@@ -2800,6 +2800,7 @@ export const deMessages: Record<string, string> = {
   "composer.resourceMentionTemplateBadge": "Vorlage",
   "composer.resourceLimit": "Höchstens {max} Ressourcen pro Nachricht — senden Sie diese und fügen Sie dann weitere an.",
   "composer.resourceAttachFailed": "Diese Ressource konnte nicht angefügt werden. Der Server ist möglicherweise getrennt.",
+  "composer.resourceAttachBusy": "Die vorherige Ressource wird noch angehängt — bitte gleich erneut versuchen.",
   "attachmentChip.resourceFromServer": "Von MCP-Server {server} · nicht vertrauenswürdiger Inhalt",
   "attachmentChip.resourceClipped": "Von MCP-Server {server} · nicht vertrauenswürdig, gekürzt",
   "composer.resourceNotFetchable": "Der Server veröffentlicht dies für den direkten Client-Zugriff — der Host ruft es nicht ab",
