@@ -1617,6 +1617,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (typeof serverId !== "string" || !isUsableResourceUri(uri)) {
       return { ok: false, error: "invalid-request" };
     }
+    // Shape-checked BEFORE the rate bucket and the audit line, as `getPrompt` does:
+    // an unbounded serverId becomes a permanent key in a shared limiter map and is
+    // interpolated into audit rows. The registry's own tag pattern is the authority
+    // on what a server id may look like.
+    const resourceKind = stagedOriginFor("mcp-prompt-emitted");
+    if (!resourceKind.sourcePattern.test(`mcp-prompt:${serverId}`)) {
+      return { ok: false, error: "invalid-server-id" };
+    }
     if (userPromptRateLimiter.isOverCap(serverId)) {
       auditAttach("error", `[mcp-resource:${serverId}] attach rate limited`);
       return { ok: false, error: "rate-limited" };

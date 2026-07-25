@@ -37,6 +37,21 @@ export const MCP_RESOURCE_MAX_PAGES = 20;
 const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
 
 /**
+ * Characters RFC 3986 excludes from a URI, which therefore cannot appear unencoded
+ * in a legitimate one: space, double quote, `<`, `>`, backslash, backtick, `^`,
+ * `{`, `}`, `|`.
+ *
+ * Rejected HERE rather than escaped at each consumer, because the same string is
+ * later printed into a provenance fence's attributes, serialized into a tool
+ * result, interpolated into an audit line, and (soon) rendered in a picker. A URI
+ * containing `">` let a listed resource close the untrusted fence on its first line
+ * and place server-authored prose OUTSIDE it, beside the user's own words — the one
+ * position the fence exists to prevent. Escaping per consumer would have left the
+ * next consumer to rediscover that; a URI that cannot hold the character cannot.
+ */
+const URI_EXCLUDED_CHARS_RE = /[\s"<>\\^`{}|]/;
+
+/**
  * URI schemes the host will carry as an OPAQUE identifier.
  *
  * The host never resolves any of these itself — it hands the string back to the
@@ -82,6 +97,7 @@ export function isUsableResourceUri(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (CONTROL_CHARS_RE.test(value)) return false;
+  if (URI_EXCLUDED_CHARS_RE.test(value)) return false;
   const lowered = value.toLowerCase();
   if (RESERVED_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return false;
   if (ALLOWED_URI_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return true;
