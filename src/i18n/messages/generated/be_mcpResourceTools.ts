@@ -14,6 +14,8 @@ export const en = {
     "Resource URI, exactly as listed by mcp_resource_list. Unlisted URIs are refused.",
   "be_mcpResourceTools.invalidRequest":
     "serverId and uri are both required, and uri must be within the host's length bound.",
+  "be_mcpResourceTools.notReady":
+    "MCP resource access is not ready yet; the server connections are still starting. Try again shortly.",
   "be_mcpResourceTools.readFailed":
     "The resource could not be read. It may not be declared by that server, its scheme may be one the host does not fetch, or the server failed.",
 } as const;
@@ -32,6 +34,8 @@ export const ko: Record<keyof typeof en, string> = {
     "리소스 URI. mcp_resource_list 에 나온 그대로 사용하세요. 목록에 없는 URI 는 거부됩니다.",
   "be_mcpResourceTools.invalidRequest":
     "serverId 와 uri 는 모두 필수이며, uri 는 호스트의 길이 제한 안이어야 합니다.",
+  "be_mcpResourceTools.notReady":
+    "MCP 리소스 접근이 아직 준비되지 않았습니다. 서버 연결이 시작 중입니다. 잠시 후 다시 시도하세요.",
   "be_mcpResourceTools.readFailed":
     "리소스를 읽을 수 없습니다. 해당 서버가 선언하지 않았거나, 호스트가 가져오지 않는 스킴이거나, 서버가 실패했을 수 있습니다.",
 };

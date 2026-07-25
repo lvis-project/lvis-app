@@ -825,11 +825,8 @@ export class McpClient {
     this.rejectAllPending(t("be_mcpClient.serverDisconnected"));
     this.clearRegisteredToolOverrides();
 
-    // ToolRegistry에서 도구 제거
-    this.toolRegistry.unregisterByMcp(this.config.id);
-    this.state.registeredTools = [];
-    this.state.prompts = undefined;
-    this.state.instructions = undefined;
+    // ToolRegistry에서 도구 제거 + 디스커버리 산출물 정리
+    this.clearDiscoveredSurfaces();
 
     // transport 종료
     await this.closeTransport();
@@ -1210,6 +1207,21 @@ export class McpClient {
     }
   }
 
+  /**
+   * Drop everything discovery produced. Called by BOTH teardown paths, because a
+   * catalogue that outlives its connection is worse than an empty one: every
+   * consumer keeps offering names and URIs whose call can only fail, and the
+   * failure surfaces far from the cause. `handleTransportClose` used to clear the
+   * tools and leave prompts and resources behind.
+   */
+  private clearDiscoveredSurfaces(): void {
+    this.toolRegistry.unregisterByMcp(this.config.id);
+    this.state.registeredTools = [];
+    this.state.prompts = undefined;
+    this.state.resources = undefined;
+    this.state.instructions = undefined;
+  }
+
   private handleTransportClose(reason: string): void {
     if (this.state.status === "disconnected") return; // normal shutdown
 
@@ -1217,8 +1229,7 @@ export class McpClient {
     this.state.lastError = reason;
     this.rejectAllPending(reason);
     this.clearRegisteredToolOverrides();
-    this.toolRegistry.unregisterByMcp(this.config.id);
-    this.state.registeredTools = [];
+    this.clearDiscoveredSurfaces();
     this.stopHealthCheck();
   }
 

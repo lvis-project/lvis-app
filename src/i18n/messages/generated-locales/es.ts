@@ -514,6 +514,7 @@ export const esMessages: Record<string, string> = {
   "be_mcpResourceTools.serverIdDescription": "Id del servidor MCP conectado, exactamente como lo informa mcp_resource_list.",
   "be_mcpResourceTools.uriDescription": "URI del recurso, exactamente como la lista mcp_resource_list. Las URIs no listadas se rechazan.",
   "be_mcpResourceTools.invalidRequest": "serverId y uri son obligatorios, y uri debe estar dentro del límite de longitud del host.",
+  "be_mcpResourceTools.notReady": "El acceso a los recursos MCP aún no está listo; las conexiones con los servidores todavía se están iniciando. Inténtalo de nuevo en un momento.",
   "be_mcpResourceTools.readFailed": "No se pudo leer el recurso. Puede que ese servidor no lo haya declarado, que su esquema sea uno que el host no descarga, o que el servidor haya fallado.",
   "be_mcpManager.apiKeyControlChars": "La clave API contiene caracteres de control (CR/LF, etc.).",
   "be_mcpManager.apiKeyEmpty": "La clave API está vacía.",

@@ -49,13 +49,13 @@ function parse(output: string): Record<string, unknown> {
 
 describe("mcp_resource_list", () => {
   it("is a read-only read-category tool", () => {
-    const tool = createMcpResourceListTool(deps());
+    const tool = createMcpResourceListTool(() => deps());
     expect(tool.category).toBe("read");
     expect(tool.isReadOnly?.({})).toBe(true);
   });
 
   it("lists every server, and narrows when serverId is given", async () => {
-    const tool = createMcpResourceListTool(deps());
+    const tool = createMcpResourceListTool(() => deps());
     const all = parse((await tool.execute({}, ctx())).output);
     expect((all.servers as unknown[]).length).toBe(2);
 
@@ -67,7 +67,7 @@ describe("mcp_resource_list", () => {
 
   it("tells the model which resources the host will not fetch", async () => {
     // Hiding them would leave the model retrying a read that can never succeed.
-    const tool = createMcpResourceListTool(deps());
+    const tool = createMcpResourceListTool(() => deps());
     const out = parse((await tool.execute({}, ctx())).output);
     const first = (out.servers as Array<{ resources: Array<Record<string, unknown>> }>)[0];
     expect(first.resources[1]).toMatchObject({ hostFetchRefused: true });
@@ -77,7 +77,7 @@ describe("mcp_resource_list", () => {
 
 describe("mcp_resource_read", () => {
   it("is a read-only read-category tool", () => {
-    const tool = createMcpResourceReadTool(deps());
+    const tool = createMcpResourceReadTool(() => deps());
     expect(tool.category).toBe("read");
     expect(tool.isReadOnly?.({})).toBe(true);
   });
@@ -88,7 +88,7 @@ describe("mcp_resource_read", () => {
       droppedBlocks: 3,
       truncated: true,
     }));
-    const tool = createMcpResourceReadTool(deps({ readResource }));
+    const tool = createMcpResourceReadTool(() => deps({ readResource }));
     const out = parse((await tool.execute({ serverId: "hr-mcp", uri: "file:///policy.md" }, ctx())).output);
     expect(readResource).toHaveBeenCalledWith("hr-mcp", "file:///policy.md");
     expect(out.blocks).toEqual([{ text: "BODY" }, { omittedKind: "binary" }]);
@@ -98,7 +98,7 @@ describe("mcp_resource_read", () => {
   });
 
   it("omits the clip fields when nothing was clipped", async () => {
-    const tool = createMcpResourceReadTool(deps());
+    const tool = createMcpResourceReadTool(() => deps());
     const out = parse((await tool.execute({ serverId: "hr-mcp", uri: "file:///policy.md" }, ctx())).output);
     expect(out.truncated).toBeUndefined();
     expect(out.droppedBlocks).toBeUndefined();
@@ -106,7 +106,7 @@ describe("mcp_resource_read", () => {
 
   it("rejects a malformed or over-long request before calling the client", async () => {
     const readResource = vi.fn();
-    const tool = createMcpResourceReadTool(deps({ readResource: readResource as never }));
+    const tool = createMcpResourceReadTool(() => deps({ readResource: readResource as never }));
     for (const args of [
       {},
       { serverId: "hr-mcp" },
@@ -124,7 +124,7 @@ describe("mcp_resource_read", () => {
   it("never forwards the server's own failure text to the model", async () => {
     // The client logs the real reason; a server message can carry host paths, and a
     // detailed failure would also make a refused read a probe channel.
-    const tool = createMcpResourceReadTool(
+    const tool = createMcpResourceReadTool(() =>
       deps({
         readResource: async () => {
           throw new Error("ENOENT: C:/Users/secret/path leaked");
@@ -135,5 +135,67 @@ describe("mcp_resource_read", () => {
     expect(result.isError).toBe(true);
     expect(result.output).not.toContain("secret");
     expect(result.output).not.toContain("ENOENT");
+  });
+});
+
+describe("resource tools — wiring and bounds", () => {
+  // The MCP manager is built in a LATER boot step than the builtin tools, so the
+  // window exists in every real launch. It gets its own outcome rather than a
+  // generic failure, or an operator sees "could not be read" for a host that was
+  // simply still starting.
+  it("says so when resource access is not wired yet", async () => {
+    const list = createMcpResourceListTool(() => undefined);
+    const read = createMcpResourceReadTool(() => undefined);
+    const listed = await list.execute({}, ctx());
+    const readOut = await read.execute({ serverId: "hr-mcp", uri: "file:///x" }, ctx());
+    expect(listed.isError).toBe(true);
+    expect(readOut.isError).toBe(true);
+    // Both tools report the SAME not-ready reason…
+    expect(parse(listed.output).error).toBe(parse(readOut.output).error);
+    // …and it is distinguishable from a real read failure, which is the point: an
+    // operator must not see "could not be read" for a host that was still starting.
+    const failing = createMcpResourceReadTool(() =>
+      deps({ readResource: async () => { throw new Error("boom"); } }),
+    );
+    const failed = await failing.execute({ serverId: "hr-mcp", uri: "file:///x" }, ctx());
+    expect(parse(failed.output).error).not.toBe(parse(readOut.output).error);
+  });
+
+  it("resolves access per call, so a late-arriving manager is picked up", async () => {
+    // Capturing the value at construction would freeze the registration-time
+    // `undefined` forever — the bug the resolver exists to prevent.
+    let access: McpResourceToolDeps | undefined;
+    const tool = createMcpResourceListTool(() => access);
+    expect((await tool.execute({}, ctx())).isError).toBe(true);
+    access = deps();
+    const after = await tool.execute({}, ctx());
+    expect(after.isError).toBe(false);
+    expect((parse(after.output).servers as unknown[]).length).toBe(2);
+  });
+
+  it("bounds one list response and reports what it dropped", async () => {
+    // The unbounded axis is server_count x catalogue_size, and it lands in the
+    // model's context window. Dropping servers silently would read as "that is all
+    // there is".
+    const many = Array.from({ length: 40 }, (_, s) => ({
+      serverId: `srv-${s}`,
+      resources: Array.from({ length: 50 }, (_, i) => ({
+        uri: `file:///s${s}/f${i}`,
+        name: `f${i}`,
+        description: "d".repeat(200),
+      })),
+    }));
+    const tool = createMcpResourceListTool(() => deps({ listResources: () => many }));
+    const out = parse((await tool.execute({}, ctx())).output);
+    expect((out.servers as unknown[]).length).toBeLessThan(many.length);
+    expect(out.omittedServers).toBe(many.length - (out.servers as unknown[]).length);
+  });
+
+  it("declares the MCP scope dependency on both tools", () => {
+    // Builtins are otherwise always eager. These two hand the model untrusted
+    // server content, so they must honor the same `includeMcp` switch that keeps
+    // MCP tools out of headless (routine) loops.
+    expect(createMcpResourceListTool(() => deps()).requiresMcpScope).toBe(true);
+    expect(createMcpResourceReadTool(() => deps()).requiresMcpScope).toBe(true);
   });
 });
