@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 
 import { isChatSendInputOrigin } from "../chat-origin.js";
+import { trustOriginLabel } from "../../ui/renderer/utils/trust-origin-label.js";
 import { generatedEn } from "../../i18n/messages/generated/index.js";
 import {
   STAGED_ORIGIN_KINDS,
@@ -128,6 +129,43 @@ describe("staged-origin registry", () => {
       // Only the first line names the provenance, so it is the one that must
       // carry the {source} placeholder.
       expect(catalog[kind.guidance.lineKeys[0]]).toContain("{source}");
+    }
+  });
+
+  // A header with no closing tag is not exotic: an IMPORTED conversation strips
+  // message meta, so every imported user row runs through the envelope-recovery
+  // path. The obvious lazy-body pattern took ~50s on 6,000 spaces (cubic), which
+  // wedges the renderer for as long as the row is on screen.
+  it("parses an unclosed envelope in constant time, without the full pattern", () => {
+    const kind = STAGED_ORIGIN_KINDS[0];
+    const source = sampleSource[kind.inputOrigin];
+    const unclosed = `<${kind.fenceTag} source="${source}">${" ".repeat(50_000)}`;
+    const started = performance.now();
+    const parsed = parseStagedEnvelopePayload(unclosed);
+    const elapsedMs = performance.now() - started;
+    // Bound is loose on purpose — the point is orders of magnitude, not a budget.
+    expect(elapsedMs).toBeLessThan(1_000);
+    // Provenance is still recovered; the body is simply empty.
+    expect(parsed?.source).toBe(source);
+    expect(parsed?.body).toBe("");
+  });
+
+  it("selects the same body as the lazy form on adversarially closed input", () => {
+    const kind = STAGED_ORIGIN_KINDS[0];
+    const source = sampleSource[kind.inputOrigin];
+    // A second closing tag can only appear in text the host did NOT build (a
+    // hand-edited transcript), and it must not truncate the body early — the `$`
+    // anchor is what makes greedy and lazy agree here.
+    const forged =
+      `<${kind.fenceTag} source="${source}">a</${kind.fenceTag}>evil</${kind.fenceTag}>`;
+    expect(parseStagedEnvelopePayload(forged)?.body).toBe(`a</${kind.fenceTag}>evil`);
+  });
+
+  it("labels every registered origin instead of leaking the raw origin string", () => {
+    const catalog = generatedEn as Record<string, string>;
+    for (const kind of STAGED_ORIGIN_KINDS) {
+      expect(catalog[kind.labelKey], `missing i18n key ${kind.labelKey}`).toBeTypeOf("string");
+      expect(trustOriginLabel(kind.inputOrigin)).not.toBe(kind.inputOrigin);
     }
   });
 

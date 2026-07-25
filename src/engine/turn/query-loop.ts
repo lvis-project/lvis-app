@@ -41,7 +41,7 @@ import { markStaleToolResults, evictAgedToolResultImages, getModelPreflightThres
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { GUIDE_JOINED_MAX_CHARS } from "./guidance-limits.js";
-import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
+import { parseStagedEnvelope } from "../../shared/staged-origins.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { MAX_TOOL_CALLS_PER_ROUND } from "../../shared/subagent-policy.js";
@@ -414,19 +414,25 @@ export async function queryLoop(
         && self.guidanceQueue.length > 0
         && continuationPrefillText === undefined
       ) {
-        // MCP-App guidance (`ui/message` while a turn was in flight) is NOT the user's
-        // own mid-stream guide: it arrives wrapped in `<app-message source="app:…">`,
-        // which is the provenance mechanism the whole feature reads. The moment any
-        // app-authored text enters this turn, the REST of the turn runs under that
-        // staged origin — the permission manager then forces every write/shell/network
-        // tool to ask, and tool provenance is recorded as `app-emitted` rather than the
-        // user's. Checked on the WHOLE queue before head-truncation can drop an entry.
-        const appGuidanceSource = self.guidanceQueue
-          .map((entry) => parseAppMessageEnvelope(entry.text))
-          .find((source): source is string => source !== null);
-        if (appGuidanceSource !== undefined) {
-          stagedOrigin = appGuidanceSource;
-          toolTrustOrigin = "app-emitted";
+        // Guidance that arrives mid-turn from a NON-USER actor is not the user's own
+        // mid-stream guide: it carries a provenance envelope, which is the mechanism
+        // the whole feature reads. The moment such text enters this turn, the REST of
+        // the turn runs under that staged origin — the permission manager then forces
+        // every write/shell/network tool to ask, and tool provenance is recorded as
+        // the actor's rather than the user's. Checked on the WHOLE queue before
+        // head-truncation can drop an entry.
+        //
+        // Table-driven (shared/staged-origins.ts). This site used to recognize only
+        // `<app-message>`: any other staged kind reaching the queue would leave the
+        // rest of the turn running with the force-ask gate OFF and the user recorded
+        // as the author — a fail-open that a hand-written check cannot be trusted to
+        // avoid for the next origin.
+        const stagedGuidance = self.guidanceQueue
+          .map((entry) => parseStagedEnvelope(entry.text))
+          .find((parsed) => parsed !== null);
+        if (stagedGuidance) {
+          stagedOrigin = stagedGuidance.source;
+          toolTrustOrigin = stagedGuidance.kind.inputOrigin;
         }
         // Truncate from the head — preserve the user's MOST RECENT guides
         // since older queued items may have been superseded. Worst case

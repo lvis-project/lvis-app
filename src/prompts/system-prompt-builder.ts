@@ -538,7 +538,7 @@ export class SystemPromptBuilder {
     // (a first-party plugin's templated suggestion vs. a third-party app frame
     // vs. a server-authored prompt body), so the TEXT differs per kind — but the
     // registration does not: it is one source resolving `shared/staged-origins`,
-    // which is the same table the hard gate (`isStagedTurnOrigin` → force-ask)
+    // which is the same table the hard gate (`isStagedTurnSource` → force-ask)
     // reads. Registering the two halves apart is how a staged origin previously
     // shipped with a permission gate and no model-facing warning; the table
     // makes that combination unrepresentable.

@@ -4,7 +4,6 @@ import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { AppProviders } from "./AppProviders.js";
 import { AppDialogs } from "./AppDialogs.js";
-import { McpPromptArgsDialog } from "./dialogs/McpPromptArgsDialog.js";
 import { AppShell } from "./AppShell.js";
 
 // ─── Imports: types / constants / helpers / components / tabs ────────
@@ -635,21 +634,44 @@ export function App() {
 
   const runMcpPrompt = useCallback(
     async (prompt: McpPromptEntry, args: Record<string, string>) => {
+      // The prompt NAME is server-authored, so it is bounded before it goes near
+      // host chrome (React escapes it; this is about layout, and about the toast
+      // staying readable).
+      const label = prompt.name.slice(0, 64);
+      const fail = (error?: string) => {
+        // The handler distinguishes rate-limited from empty-prompt from
+        // prompt-failed. Collapsing them into one string is what makes "it just
+        // doesn't work" undiagnosable — `formatIpcError` already owns the wording
+        // for each code, and falls back to the generic line for an unknown one.
+        statusPushToast({
+          severity: "error",
+          message: formatIpcError(error, undefined, {
+            fallbackContext: t("app.mcpPromptFailed", { name: label }),
+          }),
+          ttlMs: 10000,
+        });
+      };
       // One catch for the whole path: an IPC rejection, a missing bridge, or a
-      // send-gate refusal all surface as the same toast rather than an unhandled
+      // send-gate refusal all surface as a toast rather than an unhandled
       // rejection the user never sees.
       try {
-        const outcome = (await window.lvis?.mcp?.getPrompt?.(prompt.serverId, prompt.name, args)) as
-          | { ok: true; envelope: string }
-          | { ok: false; error: string }
-          | undefined;
+        const outcome = await window.lvis?.mcp?.getPrompt?.(prompt.serverId, prompt.name, args);
         if (!outcome || outcome.ok !== true) {
-          statusPushToast({ severity: "error", message: t("app.mcpPromptFailed", { name: prompt.name }), ttlMs: 10000 });
+          fail(outcome?.ok === false ? outcome.error : undefined);
           return;
+        }
+        // The host clipped what the server returned. Saying so is the difference
+        // between a prompt that looks complete and one the user knows is partial.
+        if (outcome.truncated || (outcome.omittedBlocks ?? 0) > 0) {
+          statusPushToast({
+            severity: "warning",
+            message: t("app.mcpPromptClipped", { name: label }),
+            ttlMs: 8000,
+          });
         }
         await handleAskRef.current?.(outcome.envelope, "mcp-prompt");
       } catch {
-        statusPushToast({ severity: "error", message: t("app.mcpPromptFailed", { name: prompt.name }), ttlMs: 10000 });
+        fail();
       }
     },
     [handleAskRef, statusPushToast, t],
@@ -898,7 +920,6 @@ export function App() {
             }}
           >
           <MainContent
-          onRunMcpPrompt={handleRunMcpPrompt}
             activeView={activeView}
             api={api}
             appMode={appMode}
@@ -914,6 +935,7 @@ export function App() {
             workspaceProjects={workspaceProjects}
             onNewChatForProject={onNewChatForProject}
             onRefreshProjects={refreshWorkspaceProjects}
+            onRunMcpPrompt={handleRunMcpPrompt}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}
@@ -961,11 +983,6 @@ export function App() {
           </ErrorBoundary>
       </AppShell>
 
-      <McpPromptArgsDialog
-        onCancel={() => setMcpPromptAwaitingArgs(null)}
-        onSubmit={handleMcpPromptArgsSubmit}
-        prompt={mcpPromptAwaitingArgs}
-      />
       <AppDialogs
         api={api}
         deferredQueueOpen={deferredQueueOpen}
@@ -977,6 +994,9 @@ export function App() {
         onTourDismiss={onTourDismiss}
         pluginCards={pluginCards}
         onComposerSeedText={setQuestion}
+        mcpPromptAwaitingArgs={mcpPromptAwaitingArgs}
+        onMcpPromptArgsCancel={() => setMcpPromptAwaitingArgs(null)}
+        onMcpPromptArgsSubmit={handleMcpPromptArgsSubmit}
       />
     </AppProviders>
   );

@@ -1001,7 +1001,7 @@ rm -rf everything
       userActivation: true,
     });
 
-    expect(result).toEqual({ ok: false, error: "missing-mcp-prompt-envelope" });
+    expect(result).toEqual({ ok: false, error: "origin-envelope-mismatch" });
     expect(loop.runTurn).not.toHaveBeenCalled();
   });
 

@@ -19,6 +19,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // all of them need a message rather than leaking the kebab-case code.
   "missing-app-envelope": "formatIpcError.missingAppEnvelope",
   "missing-mcp-prompt-envelope": "formatIpcError.missingMcpPromptEnvelope",
+  // The mirror case: the text CARRIES a staged envelope while the send claims a
+  // non-staged origin.
+  "origin-envelope-mismatch": "formatIpcError.originEnvelopeMismatch",
   "assistant-context-origin-restricted": "formatIpcError.assistantContextOriginRestricted",
   "role-prompt-origin-restricted": "formatIpcError.rolePromptOriginRestricted",
   "persona-prompt-origin-restricted": "formatIpcError.personaPromptOriginRestricted",

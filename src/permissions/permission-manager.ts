@@ -7,7 +7,7 @@ import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } 
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import type { ReviewerInteractiveAutoApprove } from "./permission-settings-store.js";
-import { isStagedTurnOrigin } from "../shared/mcp-app-message-source.js";
+import { isStagedTurnSource } from "../shared/staged-origins.js";
 import type { UserApprovalHitPayload, UserApprovalVerdict } from "../shared/permissions-events.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
@@ -1076,12 +1076,13 @@ export class PermissionManager {
       }
     }
     const trust = this.resolveTrust(toolName, source);
-    // Strict patterns (shared with the rest of the staged-origin flow — see
-    // shared/overlay-trigger-source.ts + shared/mcp-app-message-source.ts). Loose
-    // `startsWith` would accept malformed values like "overlay:Bad/Path" or "app:" that
-    // no upstream gate emits but a future hand-injected codepath might; fail-closed on
-    // malformed input.
-    const isOverlayTrigger = isStagedTurnOrigin(overlayTriggerOrigin ?? null);
+    // Strict patterns, owned by `shared/staged-origins.ts` — the same table the send
+    // gate, the stream derivation, and the model-facing guidance read. Loose
+    // `startsWith` would accept malformed values like "overlay:Bad/Path" or "app:"
+    // that no upstream gate emits but a future hand-injected codepath might;
+    // fail-closed on malformed input. THIS is the one enforcement site — grep
+    // `isStagedTurnSource` to find it.
+    const isOverlayTrigger = isStagedTurnSource(overlayTriggerOrigin ?? null);
     const resolvedCategory: ToolCategory = category;
     const isMutating =
       resolvedCategory === "write" ||

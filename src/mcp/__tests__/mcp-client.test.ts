@@ -1673,6 +1673,39 @@ describe("MCP prompts discovery", () => {
     expect(client.getState().prompts).toBeUndefined();
   });
 
+  // `prompts/list` output is wire data: the declared types are casts. A non-string
+  // name reaches the renderer and throws when React renders it, and a name main
+  // would later reject for length renders a field the user can fill but the host
+  // silently drops. Both are filtered HERE so one shape reaches every consumer.
+  it("drops prompts and arguments whose declared names are unusable", async () => {
+    const { client } = connectWith({
+      advertisePrompts: true,
+      approveCapabilities: ["tools", "prompts"],
+      promptPages: [
+        {
+          prompts: [
+            { name: 42 },
+            { name: "" },
+            { name: "x".repeat(200) },
+            {
+              name: "ok",
+              arguments: [
+                { name: "good", required: true },
+                { name: { nested: true }, required: true },
+                { name: "y".repeat(65), required: false },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    await client.connect();
+    expect(client.getState().prompts).toEqual([
+      { name: "ok", arguments: [{ name: "good", required: true }] },
+    ]);
+    await client.disconnect();
+  });
+
   it("does NOT call prompts/list when advertised but not approved", async () => {
     const { client, promptsCalls } = connectWith({ advertisePrompts: true, approveCapabilities: ["tools"] });
     await client.connect();
