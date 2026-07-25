@@ -16,38 +16,25 @@
  * some data. Marking the turn staged would revoke their authorship and force-ask
  * every write on a turn they genuinely authored — see policy §2 for why that is the
  * wrong trade. What the fence buys instead is that the model can tell the body from
- * the request, and the closing tag is neutralized so the body cannot end its own
- * frame and continue outside it.
+ * the request, and the body cannot write either half of the frame: not the closing tag
+ * (which would end the region and let the rest read as the user's own words), not an
+ * opening one (which would forge frames past the turn's budget), and not an attribute
+ * that breaks out of the header.
  *
  * Pure — no IPC, no filesystem, no logging.
  */
-import { neutralizeFenceClose } from "../shared/fence-sanitizer.js";
 import {
+  fenceAttrValue,
+  neutralizeFenceClose,
+  neutralizeFenceOpen,
+} from "../shared/fence-sanitizer.js";
+import { MAX_SERVER_ID_LEN } from "../shared/mcp-app-partition.js";
+import {
+  MCP_RESOURCE_FENCE_OPEN,
   MCP_RESOURCE_MAX_CHARS,
   MCP_RESOURCE_URI_MAX_CHARS,
 } from "../shared/mcp-resource-bounds.js";
 import { t } from "../i18n/index.js";
-
-/** The fence tag every resource attachment carries. Recognizable by the send gate. */
-export const MCP_RESOURCE_FENCE_OPEN = '<mcp-resource trust="untrusted-server-data"';
-
-/**
- * Make a server-chosen value safe to print INSIDE the fence's open tag.
- *
- * `neutralizeFenceClose` protects the body; the header needs its own guard, and
- * this is the second half of the same rule. A value carrying `">` would close the
- * fence on line 1 and put whatever followed OUTSIDE it, beside the user's own words
- * — with the untrusted framing then applying to nothing. The catalogue boundary
- * already rejects those characters in a URI (`isUsableResourceUri`), so this is
- * belt to that suspenders: this module states that it owns escape prevention, and a
- * builder that depends on its caller having validated the input does not.
- */
-function fenceAttr(value: string, maxChars: number): string {
-  // Whitespace collapses too, so the guarantee holds on its own rather than because
-  // the boundary happens to reject spaces: without it, a bypassed value could put
-  // prose inside the open tag, ahead of the framing lines.
-  return value.slice(0, maxChars).replace(/["<>]/g, "").replace(/\s+/g, " ").trim();
-}
 
 export interface ResourceReadBlocks {
   blocks: Array<{ uri?: string; mimeType?: string; text?: string; omittedKind?: string }>;
@@ -63,12 +50,18 @@ export interface RenderedResourceAttachment {
   /** Blocks that were not text and became placeholders. */
   omittedBlocks: number;
   /**
-   * Characters of actual BODY, before the fence and the framing lines.
+   * Characters of rendered BODY, before the fence and the framing lines.
    *
    * The caller needs this rather than `text.length`: a read with nothing in it still
    * renders a complete fence with its untrusted labeling, so the rendered string is
    * never empty. Attaching that would put framing in front of the model with no
    * material behind it — worse than refusing, because it reads as content.
+   *
+   * A placeholder standing in for non-text content COUNTS as body, so a resource
+   * that is entirely binary still attaches. That is the useful outcome: the model
+   * learns the user pointed at something it cannot read and can say so, which beats
+   * a refusal the user has to guess the reason for. Zero means the read produced
+   * nothing at all — no text, no blocks — and that is what the caller refuses.
    */
   bodyChars: number;
 }
@@ -108,8 +101,8 @@ export function renderResourceAttachment(
   }
 
   const header = [
-    `${MCP_RESOURCE_FENCE_OPEN} server="${fenceAttr(serverId, 128)}"`
-      + ` uri="${fenceAttr(uri, MCP_RESOURCE_URI_MAX_CHARS)}">`,
+    `${MCP_RESOURCE_FENCE_OPEN} server="${fenceAttrValue(serverId, MAX_SERVER_ID_LEN)}"`
+      + ` uri="${fenceAttrValue(uri, MCP_RESOURCE_URI_MAX_CHARS)}">`,
     t("be_mcpResourceAttachment.untrusted"),
     t("be_mcpResourceAttachment.noInstructions"),
     ...(truncated ? [t("be_mcpResourceAttachment.truncated")] : []),
@@ -119,16 +112,15 @@ export function renderResourceAttachment(
   return {
     text: [
       ...header,
-      neutralizeFenceClose(body, "mcp-resource"),
+      // BOTH halves of the frame: the close so the body cannot end the region and
+      // continue outside it, the open so a body cannot forge extra frames — the turn
+      // chokepoint counts open tags to bound how much server text one turn carries,
+      // and a resource printing its own would spend the user's whole budget.
+      neutralizeFenceOpen(neutralizeFenceClose(body, "mcp-resource"), "mcp-resource"),
       "</mcp-resource>",
     ].join("\n"),
     truncated,
     omittedBlocks,
     bodyChars: body.length,
   };
-}
-
-/** Does this user-content text part carry a resource attachment fence? */
-export function isResourceAttachmentText(text: string): boolean {
-  return text.trimStart().startsWith(MCP_RESOURCE_FENCE_OPEN);
 }

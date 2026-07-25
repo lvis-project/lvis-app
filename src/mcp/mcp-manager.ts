@@ -999,17 +999,23 @@ export class McpManager {
   /**
    * Servers that currently declare resources, with their catalogues.
    *
-   * The ONE projection: the model-facing tools, the attach path, and any UI read it,
-   * so they cannot disagree about which servers have resources or what a catalogue
-   * holds. Only CONNECTED servers are listed — a disconnected client has already had
-   * its catalogue cleared, and listing one whose read can only fail is how a caller
-   * ends up offering a dead URI.
+   * The ONE projection for callers that need the catalogue as a list. Today that is
+   * the model-facing tools; the attach path deliberately does NOT use it — it calls
+   * `readDeclaredResource` and lets the listed-URI gate inside the client decide,
+   * so there is one place a URI is checked against what the server published rather
+   * than a second copy of that check in the handler.
+   *
+   * Only CONNECTED servers are listed. That cannot currently change an outcome —
+   * `clearDiscoveredSurfaces` nulls the catalogue on both teardown paths, and
+   * `connect()` flips the status in the same continuation as discovery — so it stands
+   * as an explicit invariant, not as a filter something is expected to fall through.
    */
   listDeclaredResources(): Array<{ serverId: string; resources: readonly McpResourceSummary[] }> {
     return this.listServers()
       .filter((server) => server.status === "connected" && (server.resources?.length ?? 0) > 0)
       .map((server) => ({ serverId: server.id, resources: server.resources ?? [] }));
   }
+
   /**
    * Read one resource the server declared (`resources/read`, core capability).
    *

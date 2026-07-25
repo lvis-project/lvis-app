@@ -26,10 +26,61 @@ export const MCP_RESOURCE_DESCRIPTION_MAX_CHARS = 512;
  *
  * A mention is cheap to type and each attachment is up to the per-read bound, so
  * without this a handful of them fills the window before the model reads a word
- * of the user's own message. Enforced in main at the send gate, not in the
- * composer: the renderer decides what to offer, main decides what a turn carries.
+ * of the user's own message. Enforced in main, not in the composer: the renderer
+ * decides what to offer, main decides what a turn carries — see
+ * {@link countResourceAttachmentFences} for why the count is over FENCES rather
+ * than over content parts.
  */
 export const MCP_RESOURCE_ATTACHMENTS_PER_TURN = 8;
+
+/**
+ * The open tag every resource attachment carries.
+ *
+ * Lives here, with the bounds, rather than with the builder: it is the same kind of
+ * cross-layer contract as the numbers above — the builder writes it, the turn-entry
+ * chokepoint counts it, and a renderer that displays or strips the frame reads it.
+ * A second spelling of this string anywhere is a silently-uncounted attachment.
+ */
+export const MCP_RESOURCE_FENCE_OPEN = '<mcp-resource trust="untrusted-server-data"';
+
+/**
+ * How many resource fences a turn's material carries, across the input text AND
+ * every text part.
+ *
+ * Counts OCCURRENCES, not parts. The first cut of this test asked whether a part
+ * *starts with* the fence, which made the bound a property of the renderer's
+ * packaging instead of the turn's content: a composer that joined twelve
+ * attachments into one text part — the natural way to put a fence beside the
+ * user's own words — counted as one, and ~384 KB of server-authored text entered a
+ * turn whose bound was meant to be 8 reads. Counting the tag makes the answer the
+ * same however the material is packaged.
+ *
+ * `input` is included because the fenced blocks END UP there: `continue-last-user`
+ * joins a turn's text parts into the prompt body, so any check that only sees
+ * attachments stops applying after one replay. Same lesson as the turn's staged
+ * origin, which is likewise derived from the text at the turn-entry chokepoint
+ * rather than trusted from the send payload.
+ *
+ * Deliberately blind to authorship: a user who pastes the tag into their own
+ * message spends budget for it. The host cannot tell its own fence from a forged
+ * one once both are text in the same field, and the fence is a trust DEMOTION
+ * marker — so the conservative reading (count it) costs a forger nothing and
+ * protects the window either way.
+ */
+export function countResourceAttachmentFences(
+  input: string,
+  parts?: ReadonlyArray<{ type?: unknown; text?: unknown }>,
+): number {
+  let count = occurrences(input);
+  for (const part of parts ?? []) {
+    if (part?.type === "text" && typeof part.text === "string") count += occurrences(part.text);
+  }
+  return count;
+}
+
+function occurrences(text: string): number {
+  return text.split(MCP_RESOURCE_FENCE_OPEN).length - 1;
+}
 
 /** Bounded page walk so a hostile `nextCursor` loop cannot hang the handshake. */
 export const MCP_RESOURCE_MAX_PAGES = 20;

@@ -79,14 +79,23 @@ At connect, after `tools/list` and `prompts/list`:
   dropped there, so one shape reaches every consumer. This is the lesson from the
   prompt work, where a non-string `name` would have thrown when React rendered it.
 - URI validation is a host-side allowlist of schemes PLUS a character exclusion over
-  string: `file:`, `git:`, `https:`, and server-custom schemes are permitted as
-  OPAQUE identifiers — the host never resolves them itself. `ui:` is reserved for
-  the MCP-Apps extension path and is excluded here so the two never cross.
+  the whole string. `file:`, `git:`, `https:`, and server-custom schemes are permitted
+  as OPAQUE identifiers — the host never resolves them itself. `ui:` is reserved for
+  the MCP-Apps extension path and is excluded here so the two never cross. The
+  characters RFC 3986 excludes from a URI (space, `"`, `<`, `>`, `\`, backtick, `^`,
+  `{`, `}`, `|`) are refused outright, so no consumer has to escape them: the same
+  string is printed into a fence attribute, a tool result, an audit line, and soon a
+  picker, and one of those already let a `">` in a URI break out of the fence. A
+  legitimate URI percent-encodes them, so nothing expressible is lost — but note the
+  consequence for stage 3b: an RFC 6570 template (`file:///{path}`) is rejected by
+  this rule, so templates need their own predicate rather than a flag on this one.
 
-`resources/templates/list` is discovered the same way but is **display-only** in
-stage 1: a template is a URI pattern the user must fill, which is the argument-form
-problem the prompt dialog already solved, and it belongs in the same stage as the
-mention UI rather than the plumbing.
+`resources/templates/list` is **not discovered yet** — it appears only in the
+governance capability map. A template is a URI pattern the user must fill, which is
+the argument-form problem the prompt dialog already solved, so it lands with the
+mention UI in stage 3b rather than with the plumbing. Discovering it earlier would
+have meant carrying a catalogue nothing could render, under a URI rule that rejects
+the very braces a template is made of.
 
 `notifications/resources/list_changed` re-runs discovery, debounced, and only for a
 server that declared `listChanged`.
@@ -148,16 +157,32 @@ Stage 3 — the user path, split at the process boundary the way stages 1 and 2 
     returns the fenced block to attach. The HOST builds the fence — never the
     renderer — because this text lands beside the user's own words, which is the one
     place the model has the most reason to read it as the user speaking. The
-    per-turn attachment cap is enforced at the send gate, not in the composer: the
-    renderer decides what to offer, main decides what a turn carries. One projection
-    (`McpManager.listDeclaredResources`) now serves the model tools, this path, and
-    the coming picker, and it lists only CONNECTED servers.
+    per-turn cap is enforced in main, not in the composer: the renderer decides what
+    to offer, main decides what a turn carries. `McpManager.listDeclaredResources`
+    is the one projection for callers that need the catalogue as a list (the model
+    tools today); the attach path deliberately does not use it, so the listed-URI
+    check stays in one place inside the client instead of being copied into the
+    handler.
   - **3b:** the composer mention (`@server:uri`) with autocomplete, and templates.
 
+The per-turn cap lives at the turn-entry chokepoint (`runStreamedTurn`), for the same
+reason the turn's staged origin is read from the text there: `chat send` and
+`sidechat send` parse their payloads separately, and the replay paths (edit-resend,
+continue-last-user, retry-effort) reach neither gate. It counts fence OCCURRENCES
+across the input and every text part, so the bound is a property of the turn's
+content rather than of how the renderer packaged it — a composer that joins several
+attachments into one part cannot spend more than the budget — and it REFUSES the turn
+rather than trimming, because dropping the extras would leave the model answering
+from fewer documents than the user believes it read.
+
 The fence is `<mcp-resource trust="untrusted-server-data">`, registered in the
-`FenceTag` union so its builder had to answer the escape question, with the body's
-own closing tag neutralized and a clip admitted in a line the model reads rather
-than a flag the UI could ignore.
+`FenceTag` union so its builder had to answer the escape question. Inside the fence
+the body's own closing tag is neutralized (it cannot end the region and continue
+outside it) and so is any opening tag (it cannot forge frames, which would let one
+hostile resource spend the whole per-turn budget and refuse the user's send).
+Attribute values printed into the open tag go through the same module's
+`fenceAttrValue`, because an attribute carrying `">` is the other way out of a fence.
+A clip is admitted in a line the model reads rather than a flag the UI could ignore.
 
 Stages land as separate PRs. Stage 1 touches no cluster-sensitive path; stages 2
 and 3 do (`src/tools`, `src/ipc`), so they carry the 3-role attestation.

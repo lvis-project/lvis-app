@@ -9,7 +9,8 @@
  * a link or an iframe by mistake.
  */
 import { describe, expect, it } from "vitest";
-import { isUsableMcpServerId } from "../mcp-app-partition.js";
+import { isUsableMcpServerId, MAX_SERVER_ID_LEN } from "../mcp-app-partition.js";
+import { stagedOriginFor } from "../staged-origins.js";
 import {
   isHostFetchRefusedUri,
   isUsableResourceUri,
@@ -140,11 +141,43 @@ describe("isUsableMcpServerId", () => {
     // borrowed the `mcp-prompt` staged-origin row's pattern — which exists for envelope
     // parsing, so tightening it for a provenance reason would have silently moved what
     // a server id may be, on a path the policy says is not a staged origin.
-    for (const ok of ["hr-mcp", "com.example.thing", "a", "A0._-", "x".repeat(128)]) {
+    for (const ok of ["hr-mcp", "com.example.thing", "a", "A0._-", "x".repeat(MAX_SERVER_ID_LEN)]) {
       expect(isUsableMcpServerId(ok), ok.slice(0, 24)).toBe(true);
     }
-    for (const bad of ["", "-leading", ".leading", "has space", "x".repeat(129), "unicode✓", 42, null]) {
+    const tooLong = "x".repeat(MAX_SERVER_ID_LEN + 1);
+    for (const bad of ["", "-leading", ".leading", "has space", tooLong, "unicode✓", 42, null]) {
       expect(isUsableMcpServerId(bad as unknown), String(bad).slice(0, 24)).toBe(false);
+    }
+  });
+
+  // `getPrompt` validates the id with the predicate and THEN checks that the id forms a
+  // valid envelope tag. That second check is a belt: it can only fire if the two rules
+  // disagree, so while they agree the branch is unreachable and a drift would land
+  // silently — either the belt starts rejecting ids the predicate accepts (a working
+  // feature breaks), or it stops covering something. This is the test that notices.
+  it("agrees with the envelope source patterns that carry a server id", () => {
+    const cases = [
+      "hr-mcp",
+      "com.example.thing",
+      "a",
+      "A0._-",
+      "x".repeat(MAX_SERVER_ID_LEN),
+      "",
+      "-leading",
+      "has space",
+      "x".repeat(MAX_SERVER_ID_LEN + 1),
+      "unicode✓",
+    ];
+    for (const id of cases) {
+      const usable = isUsableMcpServerId(id);
+      for (const [origin, prefix] of [
+        ["mcp-prompt-emitted", "mcp-prompt"],
+        ["app-emitted", "app"],
+      ] as const) {
+        const kind = stagedOriginFor(origin);
+        expect(kind.sourcePattern.test(`${prefix}:${id}`), `${origin} / ${id.slice(0, 24)}`)
+          .toBe(usable);
+      }
     }
   });
 });

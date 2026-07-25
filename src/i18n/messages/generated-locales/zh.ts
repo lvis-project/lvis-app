@@ -1313,6 +1313,7 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.emptyPrompt": "该提示词没有返回可运行的文本。",
   "formatIpcError.emptyResource": "该资源没有返回可附加的文本。",
   "formatIpcError.resourceFailed": "MCP 服务器无法返回该资源。",
+  "formatIpcError.tooManyResourceAttachments": "单条消息附加的资源过多。请删除一些后重新发送。",
   "formatIpcError.promptFailed": "MCP 服务器无法返回该提示词。",
   "formatIpcError.missingPluginEnvelope": "插件信封信息丢失。",
   "formatIpcError.missingTokens": "令牌信息丢失。",
