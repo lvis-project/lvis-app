@@ -283,6 +283,24 @@ export interface McpPromptSummary {
   arguments?: McpPromptArgumentSummary[];
 }
 
+/**
+ * A resource the server declared (`resources/list`), already validated and bounded
+ * at the client boundary — see `shared/mcp-resource-bounds.ts`. The `uri` is an
+ * OPAQUE identifier: the host hands it back to the publishing server and never
+ * resolves it itself.
+ */
+export interface McpResourceSummary {
+  uri: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+  /** Server-declared size in bytes, when it gave a sane one. */
+  size?: number;
+  /** Listed, but the host refuses to fetch it (`https:` — see the policy doc §4). */
+  hostFetchRefused?: boolean;
+}
+
 export interface McpServerState {
   id: string;
   status: "disconnected" | "connecting" | "connected" | "error";
@@ -293,6 +311,8 @@ export interface McpServerState {
   prompts?: McpPromptSummary[];
   /** Server-level usage guidance from discovery (`instructions`), surfaced read-only. */
   instructions?: string;
+  /** Resources declared by the server (advertised + approved for `resources`). */
+  resources?: McpResourceSummary[];
 }
 
 // ─── Validation Results ────────────────────────────

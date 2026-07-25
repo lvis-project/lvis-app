@@ -989,6 +989,25 @@ export class McpManager {
     return this.withBundledLease(serverId, () => client.getPrompt(name, args));
   }
 
+  /**
+   * Read one resource the server declared (`resources/read`, core capability).
+   *
+   * Leased like every other bundled-server round trip, so a plugin-backed server
+   * cannot be read after its generation is gone. Distinct from
+   * {@link readUiResource}, which serves the MCP-Apps `ui://` extension.
+   */
+  async readDeclaredResource(serverId: string, uri: string): Promise<{
+    blocks: Array<{ uri?: string; mimeType?: string; text?: string; omittedKind?: string }>;
+    droppedBlocks: number;
+    truncated: boolean;
+  }> {
+    const client = this.clients.get(serverId);
+    if (!client) {
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.serverDoesNotExist", { serverId })}`);
+    }
+    return this.withBundledLease(serverId, () => client.readDeclaredResource(uri));
+  }
+
   /** 연결된 서버 수 */
   get connectedCount(): number {
     let count = 0;
