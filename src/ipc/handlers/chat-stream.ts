@@ -82,6 +82,8 @@ export async function runStreamedTurn(
     rolePrompt?: ActiveRolePrompt;
     initialGuidance?: string;
     approvalReasonPrefix?: string;
+    /** Carried by the replay paths so a folded turn keeps the row the user saw. */
+    displayText?: string;
   },
   channels: StreamTurnChannels = DEFAULT_STREAM_CHANNELS,
 ): Promise<TurnResult> {
@@ -260,6 +262,7 @@ export async function runStreamedTurn(
       ...(options.approvalReasonPrefix
         ? { approvalReasonPrefix: options.approvalReasonPrefix }
         : {}),
+      ...(options.displayText !== undefined ? { displayText: options.displayText } : {}),
     },
   );
   const { trailing, suggestedReplies } = suggestedRepliesFilter.finish();

@@ -21,6 +21,16 @@ import {
   MCP_RESOURCE_ATTACHMENTS_PER_TURN,
   MCP_RESOURCE_NAME_MAX_CHARS,
 } from "../../../shared/mcp-resource-bounds.js";
+
+/**
+ * Rows the menu will render at once.
+ *
+ * A server may publish 200 resources and several may be connected, so an empty query
+ * matches everything: without a bound, typing `@` builds a thousand unvirtualized DOM
+ * rows before the user has typed a letter of what they want. The query is how you reach
+ * the rest, which is what an autocomplete is for.
+ */
+const MENTION_MAX_ROWS = 50;
 import { displaySafeLabel } from "../../../shared/display-safe-text.js";
 import { detectMentionQuery } from "../utils/slash-trigger.js";
 import type { LvisApi } from "../types.js";
@@ -36,6 +46,16 @@ export interface ResourceMentionItem {
   label: string;
   /** Secondary text: `serverId` plus the same treatment of the URI. */
   hint: string;
+  /**
+   * Why this row cannot be attached right now, or `undefined` when it can.
+   *
+   * Lives on the ROW, not in the projection. `listDeclaredResources` answers "what did
+   * the host catalogue" — the model-facing tool wants those rows listed, and one of them
+   * is a resource the spec says the CLIENT fetches directly, which the host refuses to
+   * fetch on its behalf. The picker answers a different question, "what can be attached
+   * right now", and that is the one a user is asking when they type `@`.
+   */
+  unavailableReason?: string;
 }
 
 export interface UseResourceMentionArgs {
@@ -65,7 +85,6 @@ export interface UseResourceMentionResult {
   items: ResourceMentionItem[];
   activeIndex: number;
   setActiveIndex: (index: number) => void;
-  loading: boolean;
   move: (delta: number) => void;
   accept: (index?: number) => void;
   close: () => void;
@@ -78,6 +97,7 @@ interface CatalogueEntry {
   hint: string;
   /** Lowercased haystack for matching: label + serverId + uri. */
   search: string;
+  unavailableReason?: string;
 }
 
 export function useResourceMention({
@@ -93,7 +113,6 @@ export function useResourceMention({
 }: UseResourceMentionArgs): UseResourceMentionResult {
   const { t } = useTranslation();
   const [catalogue, setCatalogue] = useState<CatalogueEntry[]>([]);
-  const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [dismissedToken, setDismissedToken] = useState<string | null>(null);
   // Guards a second read while one is in flight: the accept path is async and a user
@@ -113,7 +132,6 @@ export function useResourceMention({
   useEffect(() => {
     if (!active || !mcp?.listResources) return;
     let cancelled = false;
-    setLoading(true);
     void (async () => {
       try {
         const result = await mcp.listResources();
@@ -136,6 +154,12 @@ export function useResourceMention({
               label,
               hint: `${server.serverId} · ${safeUri}`,
               search: `${label} ${server.serverId} ${safeUri}`.toLowerCase(),
+              // Shown and disabled rather than hidden. A user whose `https:` resource
+              // silently vanished from the picker would report the picker as broken; a row
+              // that says why is the difference between a bug and an explanation.
+              ...(resource.hostFetchRefused
+                ? { unavailableReason: t("composer.resourceNotFetchable") }
+                : {}),
             });
           }
         }
@@ -144,8 +168,6 @@ export function useResourceMention({
         // A failed catalogue read is an empty menu, not an error toast: the user typed
         // "@" and may not have meant a resource at all.
         if (!cancelled) setCatalogue([]);
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -159,12 +181,13 @@ export function useResourceMention({
     const matched = query.length === 0
       ? catalogue
       : catalogue.filter((entry) => entry.search.includes(query));
-    return matched.map((entry) => ({
+    return matched.slice(0, MENTION_MAX_ROWS).map((entry) => ({
       key: `${entry.serverId}::${entry.uri}`,
       serverId: entry.serverId,
       uri: entry.uri,
       label: entry.label,
       hint: entry.hint,
+      ...(entry.unavailableReason ? { unavailableReason: entry.unavailableReason } : {}),
     }));
   }, [trigger, catalogue]);
 
@@ -186,6 +209,11 @@ export function useResourceMention({
     if (!trigger || !mcp?.attachResource) return;
     const item = items[index ?? activeIndex];
     if (!item) return;
+    // A row the read would refuse says so instead of spending a round-trip to fail.
+    if (item.unavailableReason) {
+      onError(item.unavailableReason);
+      return;
+    }
     // Capped in the UI at the SAME number main enforces, so the user is stopped by a
     // message naming the limit instead of by a refused send at the end of the turn.
     if (resourceCount >= MCP_RESOURCE_ATTACHMENTS_PER_TURN) {
@@ -199,7 +227,14 @@ export function useResourceMention({
       try {
         const result = await mcp.attachResource(item.serverId, item.uri);
         if (!result.ok) {
-          onError(t("composer.resourceAttachFailed"));
+          // Distinct message per code where the user can act on the difference. The
+          // shared bucket told someone who had simply gone too fast that their server
+          // may have disconnected, which is a wrong answer, not a vague one.
+          onError(t(
+            result.error === "rate-limited"
+              ? "composer.resourceRateLimited"
+              : "composer.resourceAttachFailed",
+          ));
           return;
         }
         const n = allocateN();
@@ -213,7 +248,6 @@ export function useResourceMention({
             label: item.label,
             text: result.attachment.text,
             truncated: result.truncated === true,
-            omittedBlocks: result.omittedBlocks ?? 0,
           },
           `[Resource #${n}] `,
           range,
@@ -226,5 +260,5 @@ export function useResourceMention({
     })();
   }, [trigger, items, activeIndex, mcp, resourceCount, allocateN, onAttach, onError, t]);
 
-  return { open, items, activeIndex, setActiveIndex, loading, move, accept, close };
+  return { open, items, activeIndex, setActiveIndex, move, accept, close };
 }

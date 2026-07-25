@@ -208,6 +208,21 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   }, [liveAttachments, attachments, onAttachmentsChange]);
 
+  // Resources are counted in their OWN lane, and the partition is derived here so both
+  // caps read one answer instead of each site re-filtering the array.
+  //
+  // `ATTACH_MAX_COUNT` is a bound on the chip strip — how many images, files and pastes
+  // stay legible side by side. A resource is bounded by something unrelated: how much
+  // server text one TURN may carry, which main enforces. Folding them together would
+  // mean five attached documents stops the user adding a screenshot, and would make the
+  // per-turn bound unreachable from the only surface that produces resource attachments
+  // — a documented number nothing can reach.
+  const resourceCount = useMemo(
+    () => liveAttachments.filter((a) => a.kind === "resource").length,
+    [liveAttachments],
+  );
+  const chipStripCount = liveAttachments.length - resourceCount;
+
   // Inline "@" resource mention. Its accept path is asynchronous (it reads the resource
   // through the host) and it commits the marker and the attachment TOGETHER here, in one
   // flushSync, for the same reason the clipboard path does: the marker-sync effect above
@@ -222,7 +237,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     // preview window, where the menu then simply never opens — the honest outcome, not
     // a synthesized catalogue.
     mcp: typeof window === "undefined" ? undefined : window.lvis?.mcp,
-    resourceCount: liveAttachments.filter((a) => a.kind === "resource").length,
+    resourceCount,
     allocateN,
     onAttach: useCallback((
       attachment: ResourceAttachment,
@@ -307,7 +322,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       // and grow attachment state while the user cannot send.
       if (disabled) return;
       const outcome = await handleClipboardPaste(e.nativeEvent, {
-        count: liveAttachments.length,
+        count: chipStripCount,
         allocateN,
         saveClipboardImage,
         max: ATTACH_MAX_COUNT,
@@ -585,7 +600,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     ],
   );
 
-  const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
+  const isFull = chipStripCount >= ATTACH_MAX_COUNT;
   const ghostBest = suggestedReplies?.best ?? null;
   // Spec §3 line 42 + §8: ghost hidden when (a) user has typed any char, (b)
   // IME composition active (preedit), (c) no `best`, or (d) dismissed.

@@ -751,4 +751,58 @@ describe("Composer — @ resource mention", () => {
     // The mention token stays so the user can retry; no marker, no chip.
     expect(ta.value).not.toContain("[Resource #");
   });
+
+  it("shows a row the read would refuse, disabled and with the reason", async () => {
+    // Listed but not attachable: the spec reserves `https:` for content the CLIENT
+    // fetches, and the host refuses to fetch a server-chosen URL. Hiding the row would
+    // make a user whose resource vanished report the picker as broken; offering it
+    // normally spends a round-trip to fail with a message that blames the connection.
+    const { attachResource } = installMcpApi({
+      listResources: vi.fn(async () => ({
+        ok: true,
+        servers: [{
+          serverId: "web-mcp",
+          resources: [{ uri: "https://example.com/r.pdf", name: "report.pdf", hostFetchRefused: true }],
+        }],
+      })) as never,
+    });
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    await openMenu(ta, "@rep");
+    const row = screen.getByTestId("resource-mention-item-0");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.textContent).toContain(t("composer.resourceNotFetchable"));
+
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+    expect(attachResource).not.toHaveBeenCalled();
+    expect(onWarning).toHaveBeenCalledWith(t("composer.resourceNotFetchable"));
+    expect(ta.value).not.toContain("[Resource #");
+  });
+
+  it("does not spend the chip-strip limit on resources", async () => {
+    // Two caps, two lanes. `ATTACH_MAX_COUNT` bounds how many chips stay legible; the
+    // per-turn resource bound is about how much server text a turn carries. Five
+    // attached documents must not be what stops the user adding a screenshot.
+    installMcpApi();
+    const resources: Attachment[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `r${i}`,
+      n: i + 1,
+      kind: "resource" as const,
+      serverId: "hr-mcp",
+      uri: `doc:${i}`,
+      label: `doc-${i}.md`,
+      text: FENCE,
+      truncated: false,
+    }));
+    render(
+      <Harness
+        initialText={resources.map((r) => `[Resource #${r.n}]`).join(" ")}
+        initialAttachments={resources}
+      />,
+    );
+    expect(screen.queryByTestId("composer-limit-warning")).toBeNull();
+  });
 });

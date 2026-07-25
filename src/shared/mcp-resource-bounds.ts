@@ -119,6 +119,39 @@ const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
 const URI_EXCLUDED_CHARS_RE = /[\s"<>\\^`{}|]/;
 
 /**
+ * Invisible and text-reordering characters, refused in a URI for the same reason as
+ * the set above: this value is an IDENTIFIER, and these make one lie about itself.
+ *
+ * A bidi override renders `annual-<RLO>gnp.exe` as `annual-exe.png`. A zero-width
+ * space makes two different resources render identically, so a user cannot tell which
+ * row they clicked. Refusing them here rather than normalizing per consumer is the
+ * argument the RFC 3986 set already won, and it is stronger here because one consumer
+ * CANNOT normalize: the audit row is a forensic record, and rewriting it falsifies it.
+ *
+ * Rejection costs a legitimate server nothing. RFC 3986 defines a URI over US-ASCII,
+ * so a server that genuinely wants one of these writes the percent-encoded form, which
+ * round-trips byte-for-byte AND renders inertly. (Do not reach for RFC 3987 to justify
+ * this — its `ucschar` production INCLUDES these ranges and only warns about bidi.)
+ *
+ * Deliberately NOT the whole non-ASCII range: a filesystem server publishing a path
+ * with CJK or Hangul characters is honest and common, and refusing it would break real
+ * servers to stop a trick that needs one specific class.
+ *
+ * Display strings are the other half of this split, handled the other way round:
+ * `name`/`title` are prose, so every codepoint is legitimate in them, so they cannot
+ * be refused and are normalized at the render site instead (`displaySafeLabel`).
+ */
+const URI_INVISIBLE_CHARS_RE = new RegExp(
+  "["
+  + "\\u00ad\\u061c\\u180e" // soft hyphen, Arabic letter mark, Mongolian vowel sep
+  + "\\u200b-\\u200f" // zero-width space/joiners, LTR/RTL marks
+  + "\\u202a-\\u202e" // bidi embeddings and overrides
+  + "\\u2060-\\u2064\\u2066-\\u206f" // word joiner, invisible operators, isolates
+  + "\\ufeff\\ufff9-\\ufffb" // BOM, interlinear annotation marks
+  + "]",
+);
+
+/**
  * URI schemes the host will carry as an OPAQUE identifier.
  *
  * The host never resolves any of these itself — it hands the string back to the
@@ -165,6 +198,7 @@ export function isUsableResourceUri(value: unknown): value is string {
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (CONTROL_CHARS_RE.test(value)) return false;
   if (URI_EXCLUDED_CHARS_RE.test(value)) return false;
+  if (URI_INVISIBLE_CHARS_RE.test(value)) return false;
   const lowered = value.toLowerCase();
   if (RESERVED_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return false;
   if (ALLOWED_URI_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return true;
