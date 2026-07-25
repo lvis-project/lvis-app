@@ -1313,6 +1313,7 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.emptyPrompt": "このプロンプトは実行するテキストを返しませんでした。",
   "formatIpcError.emptyResource": "このリソースは添付できるテキストを返しませんでした。",
   "formatIpcError.resourceFailed": "MCP サーバーはこのリソースを返せませんでした。",
+  "formatIpcError.tooManyResourceAttachments": "1 つのメッセージに添付したリソースが多すぎます。いくつか外して送り直してください。",
   "formatIpcError.promptFailed": "MCP サーバーはこのプロンプトを返せませんでした。",
   "formatIpcError.missingPluginEnvelope": "プラグインのエンベロープ情報が欠落しています。",
   "formatIpcError.missingTokens": "トークン情報が欠落しています。",

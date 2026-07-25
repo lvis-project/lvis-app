@@ -181,12 +181,20 @@ export class TriggerConversationRateLimiter {
 export const triggerConversationRateLimiter = new TriggerConversationRateLimiter();
 
 /**
- * Separate bucket for round-trips the USER initiated (running a server-declared
- * MCP prompt from the picker). Sharing the actor bucket above let a chatty plugin
- * or app card spend the budget and block the user's own clicks on that server —
- * one throttle, two unrelated budgets. Same shape, its own counters; the cap is
- * higher because a person clicking a picker row is self-limiting, and it exists to
- * bound a stuck UI loop rather than an adversary.
+ * Separate bucket for round-trips the USER initiated against one MCP server: running
+ * a server-declared prompt from the picker, and attaching a declared resource.
+ *
+ * Sharing the actor bucket above let a chatty plugin or app card spend the budget and
+ * block the user's own clicks on that server — one throttle, two unrelated budgets.
+ * Same shape, its own counters.
+ *
+ * The two user surfaces share this budget on purpose: what it protects is the server
+ * (and the host's own event loop) from a renderer looping on the user's behalf, and
+ * that concern does not care which of the two calls is looping. The arithmetic is
+ * worth knowing, because it is no longer one click per call — a turn carrying the
+ * full 8 resource attachments spends 8 of the 20, so two such turns inside the window
+ * leave room for 4 more calls of either kind. That is deliberate headroom for a
+ * person, and still a hard stop for a loop.
 */
 const USER_PROMPT_RATE_LIMIT_MAX_CALLS = 20;
 export const userPromptRateLimiter = new TriggerConversationRateLimiter(

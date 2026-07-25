@@ -1308,6 +1308,7 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.emptyPrompt": "Ese prompt no devolvió texto que ejecutar.",
   "formatIpcError.emptyResource": "Ese recurso no devolvió texto que adjuntar.",
   "formatIpcError.resourceFailed": "El servidor MCP no pudo devolver ese recurso.",
+  "formatIpcError.tooManyResourceAttachments": "Demasiados recursos adjuntos en un mensaje. Quita algunos y envíalo de nuevo.",
   "formatIpcError.promptFailed": "El servidor MCP no pudo devolver ese prompt.",
   "formatIpcError.missingPluginEnvelope": "Falta la información del sobre del complemento.",
   "formatIpcError.missingTokens": "Falta información del token.",

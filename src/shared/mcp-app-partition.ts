@@ -66,10 +66,16 @@ export const MAX_SERVER_ID_LEN = 128;
  * provenance reason would have silently moved what a server id may be, on paths the
  * policy explicitly says are not staged origins.
  */
-const SERVER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const SERVER_ID_CHARS_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function isUsableMcpServerId(value: unknown): value is string {
-  return typeof value === "string" && SERVER_ID_RE.test(value);
+  // Length checked against the constant rather than baked into the pattern as
+  // `{0,127}`: a second spelling of the bound two lines under the constant that
+  // exists to hold it once is how the two drift. Checked BEFORE the pattern, so an
+  // unbounded string never reaches the regex at all.
+  return typeof value === "string"
+    && value.length <= MAX_SERVER_ID_LEN
+    && SERVER_ID_CHARS_RE.test(value);
 }
 
 /**

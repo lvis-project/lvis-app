@@ -40,3 +40,45 @@ export type FenceTag =
 export function neutralizeFenceClose(text: string, tag: FenceTag): string {
   return text.replace(new RegExp(`<\\s*/\\s*${tag}\\s*>`, "gi"), (match) => `<\\${match.slice(1)}`);
 }
+
+/**
+ * Neutralize any OPENING tag for `tag` inside `text`, the same way as the close.
+ *
+ * Needed wherever the NUMBER of host-built frames is load-bearing, not just their
+ * boundaries. The resource fence is counted at the turn-entry chokepoint to bound how
+ * much server text one turn carries; a body free to print `<mcp-resource …` would let
+ * a single hostile resource inflate that count past the budget and refuse every send
+ * the user attempts — a denial of service authored by the data.
+ *
+ * The other fences do not call this: an opening tag inside a body cannot END the
+ * region, so for them the close is the whole escape. Applied only where the extra
+ * property is actually relied on, so the cheaper rule stays the default.
+ */
+export function neutralizeFenceOpen(text: string, tag: FenceTag): string {
+  return text.replace(new RegExp(`<\\s*${tag}\\b`, "gi"), (match) => `<\\${match.slice(1)}`);
+}
+
+/**
+ * Make a non-literal value safe to print INSIDE a fence's OPEN tag, and bound it.
+ *
+ * The close tag is not the only way out of a fence: an attribute value carrying `">`
+ * ends the open tag on line 1 and puts everything after it OUTSIDE the fence, next
+ * to the user's own words, with the untrusted framing then applying to nothing. That
+ * escape shipped once here — through a server-chosen resource URI — which is why it
+ * lives beside {@link neutralizeFenceClose} instead of inside one builder: the next
+ * fence with an attribute finds it, rather than rediscovering the bug.
+ *
+ * Whitespace collapses as well as `"`, `<` and `>` are stripped. That does not keep
+ * prose out of the attribute — a value is still printed there — it keeps the open tag
+ * on ONE LINE, so a value carrying a newline cannot break the header apart and have
+ * the remainder read as framing.
+ *
+ * The host's other two attributed fences protect the same position differently, and
+ * both are stronger where they apply: `staged-origins.ts` throws unless the value
+ * matches the fence's own `sourcePattern` (fail-closed, no sanitizing), and
+ * `mcp-app-model-context.ts` interpolates nothing but host literals. Reach for this
+ * one only where the value genuinely comes from outside.
+ */
+export function fenceAttrValue(value: string, maxChars: number): string {
+  return value.slice(0, maxChars).replace(/["<>]/g, "").replace(/\s+/g, " ").trim();
+}
