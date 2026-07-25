@@ -2814,4 +2814,6 @@ export const jaMessages: Record<string, string> = {
   "composer.resourceAttachFailed": "このリソースを添付できませんでした。サーバーの接続が切れた可能性があります。",
   "attachmentChip.resourceFromServer": "MCP サーバー {server} 提供 · 非信頼コンテンツ",
   "attachmentChip.resourceClipped": "MCP サーバー {server} 提供 · 非信頼、一部省略",
+  "composer.resourceNotFetchable": "このリソースはクライアント直接取得用で、ホストは取得しません",
+  "composer.resourceRateLimited": "そのサーバーへの要求が多すぎます。しばらく待って再実行してください。",
 };

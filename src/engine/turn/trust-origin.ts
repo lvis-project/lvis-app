@@ -8,10 +8,29 @@
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
 import { stagedOriginForInput } from "../../shared/staged-origins.js";
+import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
 import type { RationaleEligibilityProvenance } from "../../tools/pipeline/rationale-control.js";
 import type { ToolResult, ToolUseBlock } from "../../tools/executor.js";
 
+/**
+ * Untrusted material the host itself folded into the TURN TEXT, which therefore has to
+ * be recognized from the text rather than from the content parts.
+ *
+ * Both entries exist for the same reason: a payload that arrived as an attachment can
+ * end up inside the message body, and the taint has to survive that move. A paste is
+ * inlined by the composer at send time; a resource fence is folded by
+ * `continueFromLastUserTurn`, which joins every text part into the prompt body when a
+ * turn is replayed by Retry or continue-last-user.
+ *
+ * Deriving taint from the MATERIAL rather than from the packaging is the same lesson the
+ * per-turn resource bound learned: a check that reads the shape a caller happened to
+ * choose answers a different question on the next caller. Missing it here is not a
+ * cosmetic slip — `llm-tool-arg` is the UNTAINTED bucket, so a replayed resource turn
+ * would tell the Layer-5 reviewer that server-authored text was ordinary
+ * model-generated input, write that verdict into the untainted cache partition, and
+ * label the approval dialog's trust badge with it.
+ */
 const INLINE_PASTED_TEXT_RE = /(^|\n)-{5} Pasted text #\d+ \(\d+ lines\) -{5}\n/;
 
 const FILE_CONTENT_RESULT_TOOLS = new Set([
@@ -20,7 +39,11 @@ const FILE_CONTENT_RESULT_TOOLS = new Set([
 ]);
 
 export function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: string): ToolTrustOrigin {
-  if (inputOrigin === "file-content" || INLINE_PASTED_TEXT_RE.test(turnInput)) {
+  if (
+    inputOrigin === "file-content"
+    || INLINE_PASTED_TEXT_RE.test(turnInput)
+    || turnInput.includes(MCP_RESOURCE_FENCE_OPEN)
+  ) {
     return "file-content";
   }
   if (inputOrigin === "agent-message") {

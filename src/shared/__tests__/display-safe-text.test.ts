@@ -6,20 +6,24 @@
  * name must not render in an order other than the one it is stored in. Both are how a
  * user picks the wrong resource while believing they picked the right one.
  *
- * Every hostile character is written as an ESCAPE, never as a literal. A literal one is
- * invisible in the diff and the review that are supposed to check this file, and the
- * build gate refuses it for that reason.
+ * Every hostile character is written as a `String.fromCodePoint` ESCAPE rather than as a
+ * literal, so a reader can see WHICH character each case is about. Note what does NOT
+ * enforce that: `check-source-text-safe.mjs` tests raw BYTES below 0x20, so U+200B
+ * (`E2 80 8B`) is structurally invisible to it. The discipline here is the author's, and
+ * an earlier version of this file claimed the gate as its enforcement while carrying six
+ * literal invisibles — which is exactly the unreviewable diff the discipline exists to
+ * prevent.
  */
 import { describe, expect, it } from "vitest";
 import { displaySafeLabel } from "../display-safe-text.js";
 
-const ZWSP = "​";
-const ZWNBSP = "﻿";
-const WORD_JOINER = "⁠";
-const RLO = "‮";
-const LRI = "⁦";
-const PDI = "⁩";
-
+const cp = (value: number) => String.fromCodePoint(value);
+const ZWSP = cp(0x200b);
+const ZWNBSP = cp(0xfeff);
+const WORD_JOINER = cp(0x2060);
+const RLO = cp(0x202e);
+const LRI = cp(0x2066);
+const PDI = cp(0x2069);
 describe("displaySafeLabel", () => {
   it("makes two names that render alike render differently", () => {
     // A zero-width space between characters is invisible in a picker row, so a hostile
@@ -53,5 +57,44 @@ describe("displaySafeLabel", () => {
     expect(displaySafeLabel(ZWSP.repeat(4), 128)).toBe("");
     expect(displaySafeLabel(42, 128)).toBe("");
     expect(displaySafeLabel(undefined, 128)).toBe("");
+  });
+
+  // The test that the hand-listed version passed while sixteen other invisibles walked
+  // through it. Enumerating cases here would repeat that mistake with a longer list, so
+  // this asserts over a SAMPLE OF THE CLASS instead — one representative per family a
+  // reviewer found, plus two astral ones that only match under the `u` flag.
+  it("removes the whole default-ignorable class, not a list of remembered characters", () => {
+    const invisibles = [
+      0x00ad, // soft hyphen
+      0x034f, // combining grapheme joiner
+      0x061c, // Arabic letter mark
+      0x115f, // Hangul choseong filler
+      0x1160, // Hangul jungseong filler
+      0x17b4, // Khmer vowel inherent aq
+      0x180b, // Mongolian free variation selector
+      0x2065, // unassigned but default-ignorable
+      0x3164, // Hangul filler
+      0xfe00, // variation selector 1
+      0xfe0f, // variation selector 16
+      0xffa0, // halfwidth Hangul filler
+      0xe0001, // language tag (astral)
+      0xe0041, // tag latin capital A (astral)
+    ];
+    for (const codePoint of invisibles) {
+      const spoof = `poli${String.fromCodePoint(codePoint)}cy.md`;
+      // The premise: it is a DIFFERENT string that renders the same. If this ever fails,
+      // the case is measuring nothing.
+      expect(spoof, codePoint.toString(16)).not.toBe("policy.md");
+      expect(displaySafeLabel(spoof, 128), codePoint.toString(16)).toBe("policy.md");
+    }
+  });
+
+  it("leaves legitimate non-ASCII names alone", () => {
+    // The counterweight: the rule must not become "strip anything unfamiliar". A server
+    // publishing Hangul or CJK names is honest and common, and a picker that mangles them
+    // is a worse outcome than the spoof it was defending against.
+    expect(displaySafeLabel("정상-보고서.md", 128)).toBe("정상-보고서.md");
+    expect(displaySafeLabel("年度報告.pdf", 128)).toBe("年度報告.pdf");
+    expect(displaySafeLabel("café-résumé.txt", 128)).toBe("café-résumé.txt");
   });
 });

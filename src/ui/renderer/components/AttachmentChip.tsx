@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { File as FileIcon, ClipboardPaste, Database } from "lucide-react";
+import { displaySafeLabel } from "../../../shared/display-safe-text.js";
+import { MCP_RESOURCE_URI_MAX_CHARS } from "../../../shared/mcp-resource-bounds.js";
 import {
   Popover,
   PopoverContent,
@@ -311,7 +313,7 @@ export function AttachmentOverlay({
                   : att.kind === "file"
                     ? collapsePath(att.path)
                     : att.kind === "resource"
-                      ? att.uri
+                      ? displaySafeLabel(att.uri, MCP_RESOURCE_URI_MAX_CHARS)
                       : `+${att.lines} lines · ${att.chars} chars`}
               </div>
               <div className="text-[10px] text-muted-foreground/(--opacity-stronger)">

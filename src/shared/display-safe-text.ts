@@ -27,20 +27,30 @@
 // Escaped spellings on purpose: a literal control byte in a source file is invisible
 // in every diff and review that would otherwise have to catch it, which is why the
 // build gate refuses them.
+//
+// Tab, newline and CR are deliberately NOT in this class. They are real whitespace, so
+// the collapse below turns them into a single space, which keeps the separation the eye
+// sees. Deleting them would make a name with a line break render identically to one
+// without it - re-creating the collision this function exists to prevent, one character
+// class further along. Found by a test, not by review.
+//
+// `Default_Ignorable_Code_Point` rather than hand-listed ranges, because the
+// hand-listed version passed its own tests while sixteen other invisibles walked
+// straight through it - soft hyphen, the Hangul fillers, variation selectors, the
+// astral tag characters. A property escape IS the class, so the next one nobody has
+// heard of is covered too; enumerating ranges is a promise to keep re-reading the
+// Unicode tables forever. The `u` flag is what makes the astral ones match as
+// codepoints instead of as lone surrogates.
+//
+// The bidi range is listed separately because those characters are NOT
+// default-ignorable: they reorder what is already visible rather than hiding.
 const CONTROL_AND_INVISIBLE_RE = new RegExp(
   "["
-  // Tab, newline and CR are deliberately NOT here. They are real whitespace, so the
-  // collapse below turns them into a single space, which keeps the separation the eye
-  // sees. Deleting them would make a name with a line break render identically to one
-  // without it - re-creating the collision this function exists to prevent, one
-  // character class further along. Found by the test, not by review.
-  + "\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f" // C0 / C1 controls
-  + "\u200b-\u200f" // zero-width space/joiners + LTR/RTL marks
-  + "\u202a-\u202e" // bidi embeddings and overrides
-  + "\u2060-\u2064\u2066-\u2069" // word joiner, invisible operators, isolates
-  + "\ufeff" // BOM / zero-width no-break space
-  + "]",
-  "g",
+  + "\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f" // C0 / C1 controls
+  + "\\u202a-\\u202e\\u2066-\\u2069" // bidi embeddings, overrides, isolates
+  + "]"
+  + "|\\p{Default_Ignorable_Code_Point}",
+  "gu",
 );
 
 /**

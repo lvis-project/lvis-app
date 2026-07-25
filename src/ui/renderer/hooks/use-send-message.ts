@@ -275,8 +275,21 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         //
         // Attachments are deliberately NOT cleared here (the success path clears them),
         // so a send refused for carrying too many resources still has them to remove.
-        if (mode === "default") dropUserEntry(trimmed);
-        setQuestion(q);
+        if (mode === "default") {
+          dropUserEntry(trimmed);
+          // Restored INSIDE the guard. For a staged mode `q` is the provenance
+          // ENVELOPE, not anything the user typed (`App.tsx` hands this function
+          // `outcome.envelope` for an MCP-server prompt), and putting that in the
+          // composer would hand the user server-authored text as their own draft —
+          // the laundering shape this whole feature exists to prevent, reintroduced by
+          // the repair for a UX complaint. The send gate does reject it
+          // (`origin-envelope-mismatch`), so nothing downstream would treat it as
+          // staged; it should never be offered in the first place.
+          //
+          // Functional form so a draft typed WHILE the send was in flight wins over the
+          // one being restored — the same race the composer's own `textRef` handles.
+          setQuestion((current) => (current.length > 0 ? current : q));
+        }
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
         if (debugStreamEnabled) {
