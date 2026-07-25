@@ -609,7 +609,7 @@ export const zhMessages: Record<string, string> = {
   "be_shellPathPolicy.guidanceWithAlt": "推荐的 LVIS 内置工具：{alt}。保持原始目标路径不变 - 不要缩小到子目录。",
   "be_shutdownRoutines.shutdownRoutineNotificationTitle": "关机例行通知",
   "be_skillList.toolDescription": "返回当前可用的 LVIS 技能列表。在调用 Skill_load 之前，使用它来查看存在哪些技能。",
-  "be_skillLoad.approvalReason": "仅将技能“{name}”主体注入到当前用户回合的后续回合中。批准记录永久存储并绑定到当前主体的 sha256 — 如果主体发生变化，则再次请求确认。",
+  "be_skillLoad.approvalReason": "仅在当前用户回合的后续轮次中注入技能 '{name}' 的正文。批准记录会永久保存，并绑定到当前正文及其捆绑文件列表——两者中任一发生变化时会再次请求确认。",
   "be_skillLoad.argsDescription": "要传递给技能的参数（当前版本将这些参数视为简单的元数据）。选修的。",
   "be_skillLoad.skillNameDescription": "要加载的技能名称（必须与文件/目录名称和 frontmatter 名称字段匹配）。",
   "be_skillRead.toolDescription": "读取当前用户回合中已加载技能的一个捆绑资源文件。已加载的技能会在其覆盖层中列出捆绑文件（references/、assets/ 等）；请调用本工具按需获取其中一个，而不是把整个包放进提示词。请先调用 skill_load —— 未加载的技能无法读取。返回 { skillName, path, content, bytes }。",

@@ -276,3 +276,62 @@ describe("skill_load — approval covers the bundled manifest", () => {
     }
   });
 });
+
+describe("skill_read — manifest fidelity", () => {
+  it("serves a filename containing '&' exactly as the overlay renders it", async () => {
+    // Regression: escaping the manifest line rewrote `Q&A.md` to `Q&amp;A.md`,
+    // so the model echoed a name the authorized set never contained.
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      const skillDir = userSkillDir(dir, "guide");
+      writeFileSync(join(skillDir, "references", "Q&A.md"), "QA DOC");
+      const store = new SkillStore({ userDir: dir });
+      const overlay = new SkillOverlay();
+      overlay.register("session-x", (await store.load("guide"))!);
+      const rendered = overlay.buildSection("session-x");
+      expect(rendered).toContain("references/Q&A.md");
+      expect(rendered).not.toContain("Q&amp;A.md");
+      const tool = createSkillReadTool({ store, overlay });
+      const r = await tool.execute({ skillName: "guide", resourcePath: "references/Q&A.md" }, ctx());
+      expect(r.isError).toBe(false);
+      expect(JSON.parse(r.output).content).toBe("QA DOC");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a resource-less skill's approval material byte-identical to its body", async () => {
+    const { createSkillLoadTool } = await import("../skill-load.js");
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      // Flat skill => no bundle => the hashed material must stay the bare body,
+      // so approvals recorded before stage-3 remain valid (no mass re-prompt).
+      writeFileSync(join(dir, "flat.md"), "---\nname: flat\ndescription: d\n---\nFLAT BODY");
+      const store = new SkillStore({ userDir: dir });
+      const seen: string[] = [];
+      let prompts = 0;
+      const tool = createSkillLoadTool({
+        store,
+        overlay: new SkillOverlay(),
+        approvals: {
+          // Pre-seeded with the PRE-stage-3 material (the bare body).
+          isApproved: async (_key: string, material: string) => {
+            seen.push(material);
+            return material === "FLAT BODY";
+          },
+          approve: async () => {},
+        } as never,
+        getApprovalGate: () => ({
+          requestAndWait: async () => { prompts += 1; return { choice: "allow" }; },
+        }) as never,
+        emit: () => {},
+      });
+      const r = await tool.execute({ skillName: "flat" }, ctx());
+      expect(r.isError).toBe(false);
+      expect(seen).toEqual(["FLAT BODY"]);
+      expect(prompts).toBe(0); // existing approval still honored
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

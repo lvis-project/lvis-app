@@ -96,9 +96,10 @@ export function createSkillReadTool(deps: SkillReadToolDeps): Tool {
       if (!entry) {
         return errorResult(`skill not loaded: call skill_load({ skillName: "${skillName}" }) first`);
       }
-      // The manifest captured at load time is the AUTHORIZED set: serving only
-      // what was listed keeps "what the model was told exists" and "what it can
-      // fetch" one set, and makes the discovery caps real access bounds.
+      // The manifest captured at load time is the AUTHORIZED set, so the
+      // discovery caps are real access bounds rather than display limits.
+      // (The rendered overlay list is byte-capped separately, so what the model
+      // is SHOWN can be a subset of this set — never a superset.)
       if (!entry.resources.some((resource) => resource.path === resourcePath)) {
         return errorResult(`resource not listed for ${skillName}: ${resourcePath}`);
       }
