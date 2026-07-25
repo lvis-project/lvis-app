@@ -51,6 +51,10 @@ vi.mock("../../main/uv-runtime.js", () => ({
 // Module imports must come AFTER the mocks above.
 import { McpClient } from "../mcp-client.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import {
+  MCP_RESOURCE_MAX_CHARS,
+  MCP_RESOURCE_MAX_PER_SERVER,
+} from "../../shared/mcp-resource-bounds.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import type {
   McpGovernancePolicy,
@@ -1809,6 +1813,250 @@ describe("MCP getPrompt gating", () => {
     );
     await client.connect();
     await expect(client.getPrompt("anything", {})).rejects.toThrow(/did not advertise prompts/);
+    await client.disconnect();
+  });
+});
+
+describe("MCP resources discovery and read", () => {
+  function connectWith(opts: {
+    advertiseResources: boolean;
+    approveCapabilities: string[];
+    resourcePages?: Array<{ resources: unknown[]; nextCursor?: string }>;
+    readResult?: unknown;
+  }): { client: McpClient; listCalls: unknown[]; readCalls: unknown[] } {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const listCalls: unknown[] = [];
+    const readCalls: unknown[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      const method = readRpcMethod(init);
+      const id = readRpcId(init) ?? 0;
+      switch (method) {
+        case "server/discover":
+          return jsonRpcResponse(id, {
+            ...RC_DISCOVER_RESULT,
+            capabilities: opts.advertiseResources
+              ? { tools: {}, resources: {} }
+              : { tools: {} },
+          });
+        case "notifications/initialized":
+          return new Response(null, { status: 202 });
+        case "tools/list":
+          return jsonRpcResponse(id, { tools: [] });
+        case "resources/list": {
+          const params = (JSON.parse(String(init?.body)).params ?? {}) as Record<string, unknown>;
+          listCalls.push(params);
+          const page = opts.resourcePages?.[listCalls.length - 1] ?? { resources: [] };
+          return jsonRpcResponse(id, page);
+        }
+        case "resources/read": {
+          const params = (JSON.parse(String(init?.body)).params ?? {}) as Record<string, unknown>;
+          readCalls.push(params);
+          return jsonRpcResponse(id, opts.readResult ?? { contents: [] });
+        }
+        default:
+          return new Response("unexpected", { status: 500 });
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const gov = governanceWithPolicy(
+      buildPolicy([
+        httpApproval("rsrv", "https://rsrv.example.com/mcp", {
+          allowedCapabilities:
+            opts.approveCapabilities as McpGovernancePolicy["servers"][number]["allowedCapabilities"],
+        }),
+      ]),
+    );
+    const client = new McpClient(
+      { id: "rsrv", transport: "http", url: "https://rsrv.example.com/mcp" },
+      gov,
+      new ToolRegistry(),
+    );
+    return { client, listCalls, readCalls };
+  }
+
+  it("discovers resources when advertised AND approved", async () => {
+    const { client, listCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [
+        {
+          resources: [
+            {
+              uri: "file:///project/README.md",
+              name: "README.md",
+              title: "Project Documentation",
+              mimeType: "text/markdown",
+              size: 1234,
+            },
+          ],
+        },
+      ],
+    });
+    await client.connect();
+    expect(listCalls).toHaveLength(1);
+    expect(client.getState().resources).toEqual([
+      {
+        uri: "file:///project/README.md",
+        name: "README.md",
+        title: "Project Documentation",
+        mimeType: "text/markdown",
+        size: 1234,
+      },
+    ]);
+    await client.disconnect();
+  });
+
+  // Two keys, same as prompts: a capability the server never advertised, or one the
+  // user never approved, means nothing leaves the host.
+  it("does NOT call resources/list when advertised but not approved", async () => {
+    const { client, listCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools"],
+    });
+    await client.connect();
+    expect(listCalls).toHaveLength(0);
+    expect(client.getState().resources).toBeUndefined();
+    await client.disconnect();
+  });
+
+  it("does NOT call resources/list when approved but not advertised", async () => {
+    const { client, listCalls } = connectWith({
+      advertiseResources: false,
+      approveCapabilities: ["tools", "resources"],
+    });
+    await client.connect();
+    expect(listCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  // Wire data is typed but not checked. Anything the host would later have to
+  // render, log, or hand back to the server is filtered at this boundary.
+  it("drops unusable entries and de-duplicates by URI", async () => {
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [
+        {
+          resources: [
+            { uri: 42, name: "numeric uri" },
+            { uri: "ui://widget/main.html", name: "app scheme" },
+            { uri: "javascript:alert(1)", name: "dangerous scheme" },
+            { uri: "no-scheme", name: "not a uri" },
+            { uri: "file:///dup", name: "first" },
+            { uri: "file:///dup", name: "second" },
+            { uri: "file:///ok", name: 42, title: "falls back to the uri" },
+          ],
+        },
+      ],
+    });
+    await client.connect();
+    const resources = client.getState().resources ?? [];
+    expect(resources.map((r) => r.uri)).toEqual(["file:///dup", "file:///ok"]);
+    expect(resources[0].name).toBe("first");
+    // A non-string name falls back to the URI rather than dropping the resource.
+    expect(resources[1].name).toBe("file:///ok");
+    await client.disconnect();
+  });
+
+  it("refuses to read a URI it never listed", async () => {
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [{ resources: [{ uri: "file:///listed", name: "listed" }] }],
+    });
+    await client.connect();
+    // The gate that stops `resources/read` becoming a general fetch primitive
+    // against the server URI space.
+    await expect(client.readDeclaredResource("file:///not-listed")).rejects.toThrow(
+      /did not declare/,
+    );
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  it("refuses to fetch an https resource, but still lists it", async () => {
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [
+        { resources: [{ uri: "https://example.com/doc", name: "web doc" }] },
+      ],
+    });
+    await client.connect();
+    expect(client.getState().resources?.[0]).toMatchObject({ hostFetchRefused: true });
+    // Host-side fetching of a server-chosen URL is an SSRF primitive, so the read
+    // is refused rather than proxied.
+    await expect(client.readDeclaredResource("https://example.com/doc")).rejects.toThrow(
+      /does not fetch/,
+    );
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  it("returns text blocks and placeholders for binary, bounded", async () => {
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [{ resources: [{ uri: "file:///doc", name: "doc" }] }],
+      readResult: {
+        contents: [
+          { uri: "file:///doc", mimeType: "text/plain", text: "hello" },
+          { uri: "file:///doc.png", mimeType: "image/png", blob: "AAAA" },
+          { uri: 42 },
+        ],
+      },
+    });
+    await client.connect();
+    const read = await client.readDeclaredResource("file:///doc");
+    expect(read.blocks[0]).toEqual({ uri: "file:///doc", mimeType: "text/plain", text: "hello" });
+    // Never decoded into the turn, never silently dropped.
+    expect(read.blocks[1]).toMatchObject({ omittedKind: "binary" });
+    expect(read.blocks[2]).toMatchObject({ omittedKind: "unknown" });
+    expect(read.droppedBlocks).toBe(0);
+    await client.disconnect();
+  });
+
+  // Spent ACROSS blocks: a server that splits one huge document into many blocks
+  // must not get a bigger budget than one that sends it whole.
+  it("spends one character budget across all blocks", async () => {
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [{ resources: [{ uri: "file:///big", name: "big" }] }],
+      readResult: {
+        contents: [
+          { text: "a".repeat(MCP_RESOURCE_MAX_CHARS - 10) },
+          { text: "b".repeat(1000) },
+          { text: "c".repeat(1000) },
+        ],
+      },
+    });
+    await client.connect();
+    const read = await client.readDeclaredResource("file:///big");
+    const total = read.blocks.reduce((sum, block) => sum + (block.text?.length ?? 0), 0);
+    expect(total).toBe(MCP_RESOURCE_MAX_CHARS);
+    expect(read.blocks[2].text).toBe("");
+    expect(read.truncated).toBe(true);
+    await client.disconnect();
+  });
+
+  it("bounds the page walk and the catalogue", async () => {
+    const page = {
+      resources: Array.from({ length: 300 }, (_, i) => ({
+        uri: `file:///f${i}`,
+        name: `f${i}`,
+      })),
+      nextCursor: "more",
+    };
+    const { client, listCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [page, page, page],
+    });
+    await client.connect();
+    // Stops at the per-server cap rather than following `nextCursor` forever.
+    expect(client.getState().resources).toHaveLength(MCP_RESOURCE_MAX_PER_SERVER);
+    expect(listCalls).toHaveLength(1);
     await client.disconnect();
   });
 });
