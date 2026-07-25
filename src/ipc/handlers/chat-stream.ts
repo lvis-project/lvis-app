@@ -116,9 +116,11 @@ export async function runStreamedTurn(
   }
   // How much server-authored resource text one turn may carry. Enforced HERE, not at
   // either send gate, because `chat send` and `sidechat send` parse their payloads
-  // separately — a bound in one of them simply would not exist for the other, and this
-  // is the one place both arrive. Counting fences rather than parts makes it
-  // independent of how the renderer packaged them.
+  // separately — a bound in one of them simply would not exist for the other. This is
+  // the one place ATTACHMENTS enter a turn (the other `runTurn` callers, the routine
+  // engine and the subagent runner, pass none), which is the precise claim the bound
+  // needs. Counting fences rather than parts makes it independent of how the renderer
+  // packaged them.
   //
   // Refused, not trimmed: dropping the extras silently would leave the model answering
   // from 8 of the 10 documents the user believes it read, with nothing in the

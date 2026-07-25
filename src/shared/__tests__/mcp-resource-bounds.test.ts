@@ -167,6 +167,10 @@ describe("isUsableMcpServerId", () => {
       "has space",
       "x".repeat(MAX_SERVER_ID_LEN + 1),
       "unicode✓",
+      // A trailing newline: both sides reject it today because `$` without the `m`
+      // flag does, which means adding `m` to either one is the divergence this corpus
+      // exists to catch, and it can only catch it if the shape is in here.
+      "a\n",
     ];
     for (const id of cases) {
       const usable = isUsableMcpServerId(id);
