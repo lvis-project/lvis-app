@@ -42,8 +42,11 @@
 // Unicode tables forever. The `u` flag is what makes the astral ones match as
 // codepoints instead of as lone surrogates.
 //
-// The bidi range is listed separately because those characters are NOT
-// default-ignorable: they reorder what is already visible rather than hiding.
+// The bidi range is listed explicitly as belt-and-braces. Note it is NOT because those
+// characters fall outside the property — U+202A-U+202E and U+2066-U+2069 are all
+// `Default_Ignorable`, verified. An earlier version of this comment claimed the
+// opposite, which is worse than saying nothing: a reader who believed it could delete
+// the property escape and keep the enumeration, which is exactly backwards.
 const CONTROL_AND_INVISIBLE_RE = new RegExp(
   "["
   + "\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f" // C0 / C1 controls
@@ -52,6 +55,27 @@ const CONTROL_AND_INVISIBLE_RE = new RegExp(
   + "|\\p{Default_Ignorable_Code_Point}",
   "gu",
 );
+
+/**
+ * Does `value` contain a character that makes a string lie about itself?
+ *
+ * Exported so a VALIDATION boundary can refuse such a value outright while this module
+ * keeps the one definition of the class. `isUsableResourceUri` uses it: a URI is an
+ * identifier, so a bidi override or a zero-width space in one has no legitimate use and
+ * the audit row that prints it cannot be display-normalized without falsifying a
+ * forensic record.
+ *
+ * The two consumers differ in what they DO, not in what they recognize, and that split
+ * is the point: prose (a resource's `name` or `title`) can legitimately contain any
+ * codepoint, so it is normalized for display; an identifier can be refused. A second
+ * enumeration for the boundary is what this replaces — it leaked 14 of 17 sampled
+ * members of the class, which is the failure this module's own comment predicts about
+ * hand-listed ranges.
+ */
+export function hasInvisibleOrReorderingChars(value: string): boolean {
+  CONTROL_AND_INVISIBLE_RE.lastIndex = 0;
+  return CONTROL_AND_INVISIBLE_RE.test(value);
+}
 
 /**
  * Collapse everything invisible or reordering out of `value`, bound it, and trim.

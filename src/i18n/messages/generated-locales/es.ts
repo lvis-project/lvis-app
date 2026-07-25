@@ -2816,5 +2816,4 @@ export const esMessages: Record<string, string> = {
   "attachmentChip.resourceFromServer": "Del servidor MCP {server} · contenido no confiable",
   "attachmentChip.resourceClipped": "Del servidor MCP {server} · no confiable, recortado",
   "composer.resourceNotFetchable": "El servidor lo publica para acceso directo del cliente: el host no lo obtiene",
-  "composer.resourceRateLimited": "Demasiadas solicitudes a ese servidor. Espera un momento e inténtalo de nuevo.",
 };
