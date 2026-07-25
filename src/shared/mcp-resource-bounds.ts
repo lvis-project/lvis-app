@@ -10,6 +10,7 @@
  * Its only import is `display-safe-text`, which is itself import-free, so this stays
  * importable from every process.
  */
+import { hasInvisibleOrReorderingChars } from "./display-safe-text.js";
 
 /** Catalogued resources per server — the picker is a list a person scans. */
 export const MCP_RESOURCE_MAX_PER_SERVER = 200;
@@ -102,8 +103,6 @@ function occurrences(text: string): number {
 /** Bounded page walk so a hostile `nextCursor` loop cannot hang the handshake. */
 export const MCP_RESOURCE_MAX_PAGES = 20;
 
-import { hasInvisibleOrReorderingChars } from "./display-safe-text.js";
-
 const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
 
 /**
@@ -120,36 +119,6 @@ const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
  * next consumer to rediscover that; a URI that cannot hold the character cannot.
  */
 const URI_EXCLUDED_CHARS_RE = /[\s"<>\\^`{}|]/;
-
-/**
- * Invisible and text-reordering characters, refused in a URI for the same reason as
- * the set above: this value is an IDENTIFIER, and these make one lie about itself.
- *
- * A bidi override renders `annual-<RLO>gnp.exe` as `annual-exe.png`. A zero-width
- * space makes two different resources render identically, so a user cannot tell which
- * row they clicked. Refusing them here rather than normalizing per consumer is the
- * argument the RFC 3986 set already won, and it is stronger here because one consumer
- * CANNOT normalize: the audit row is a forensic record, and rewriting it falsifies it.
- *
- * Rejection costs a legitimate server nothing. RFC 3986 defines a URI over US-ASCII,
- * so a server that genuinely wants one of these writes the percent-encoded form, which
- * round-trips byte-for-byte AND renders inertly. (Do not reach for RFC 3987 to justify
- * this — its `ucschar` production INCLUDES these ranges and only warns about bidi.)
- *
- * Deliberately NOT the whole non-ASCII range: a filesystem server publishing a path
- * with CJK or Hangul characters is honest and common, and refusing it would break real
- * servers to stop a trick that needs one specific class.
- *
- * ONE definition, shared with `displaySafeLabel` via `hasInvisibleOrReorderingChars`.
- * The first cut of this rule enumerated ranges here and leaked 14 of 17 sampled members
- * of the class — soft hyphen listed but not the Mongolian selectors, U+2065 skipped by an
- * off-by-one — which is precisely the drift the display module's own comment warns about.
- * The two consumers differ in what they DO with a match, not in what they recognize.
- *
- * Display strings are the other half of this split, handled the other way round:
- * `name`/`title` are prose, so every codepoint is legitimate in them, so they cannot
- * be refused and are normalized at the render site instead (`displaySafeLabel`).
- */
 
 /**
  * URI schemes the host will carry as an OPAQUE identifier.
@@ -198,6 +167,17 @@ export function isUsableResourceUri(value: unknown): value is string {
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (CONTROL_CHARS_RE.test(value)) return false;
   if (URI_EXCLUDED_CHARS_RE.test(value)) return false;
+  // Invisible and reordering characters, refused because this value is an IDENTIFIER:
+  // `annual-<RLO>gnp.exe` renders as `annual-exe.png`, and a zero-width space makes two
+  // different resources render identically. ONE definition, shared with
+  // `displaySafeLabel` — the two consumers differ in what they DO with a match (an
+  // identifier is refused, prose is normalized for display), not in what they recognize.
+  // The first cut enumerated ranges here and leaked 14 of 17 sampled members.
+  //
+  // Refusing costs a legitimate server nothing: RFC 3986 is US-ASCII, so the
+  // percent-encoded form round-trips byte-for-byte AND renders inertly. It is NOT the
+  // whole non-ASCII range — CJK and Hangul paths still catalogue — but it does refuse an
+  // emoji carrying a variation selector, which is the accepted cost of one class.
   if (hasInvisibleOrReorderingChars(value)) return false;
   const lowered = value.toLowerCase();
   if (RESERVED_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return false;
