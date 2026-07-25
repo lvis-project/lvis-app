@@ -200,3 +200,28 @@ describe("lvis:mcp:attach-resource — outcome", () => {
     expect(deps.mcpManager.getPrompt).not.toHaveBeenCalled();
   });
 });
+
+describe("lvis:mcp:list-resources — the picker's catalogue", () => {
+  it("returns the host's ONE projection, not a re-derived list", async () => {
+    const { deps } = await setup();
+    const catalogue = [
+      { serverId: "hr-mcp", resources: [{ uri: "file:///policy.md", name: "policy.md" }] },
+    ];
+    deps.mcpManager.listDeclaredResources.mockReturnValue(catalogue);
+
+    const result = await invoke("lvis:mcp:list-resources");
+
+    // Verbatim from `listDeclaredResources`, which is what stops the picker offering a
+    // URI the read path would then refuse as undeclared.
+    expect(result).toEqual({ ok: true, servers: catalogue });
+    expect(deps.mcpManager.listDeclaredResources).toHaveBeenCalled();
+  });
+
+  it("rejects an unauthorized sender frame", async () => {
+    const { deps } = await setup();
+    const handler = handlers.get("lvis:mcp:list-resources")!;
+    const result = await handler({ senderFrame: { url: "https://evil.example.com/x" } } as never);
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(deps.mcpManager.listDeclaredResources).not.toHaveBeenCalled();
+  });
+});

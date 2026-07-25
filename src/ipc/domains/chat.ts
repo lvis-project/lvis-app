@@ -400,6 +400,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     input: string,
     attachments?: import("../../engine/llm/types.js").UserContentPart[],
     rolePrompt?: ActiveRolePrompt,
+    displayText?: string,
   ) => {
     const win = getMainWindow();
     const sink = buildSink(win?.webContents);
@@ -414,6 +415,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
           ...STREAM_TURN_OPTIONS,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
           ...(rolePrompt ? { rolePrompt } : {}),
+          ...(displayText !== undefined ? { displayText } : {}),
         },
       );
       await markMainActiveAfterTurn(deps, input);
@@ -776,9 +778,27 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
     const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
     if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
+    // Carried forward for the same reason `personaPromptId` is: the replayed row has to
+    // look like the row it replaces. Without it a resource turn's fenced body — folded
+    // into `lastUserText` by the split above — renders inside the user's own bubble on
+    // reload, which is exactly what the seam in `run-turn.ts` exists to prevent, undone
+    // one click after it worked.
+    //
+    // DISPLAY only. The fold still puts the fence in the replayed turn's text, so the
+    // per-turn bound (which counts content PARTS) does not see it — unchanged by this
+    // and accepted by the resources policy §6. What the fold must NOT also lose is the
+    // turn's TAINT, and that is fixed where taint is derived: `initialToolTrustOrigin`
+    // recognizes the fence in body text, the same way it already recognizes an inlined
+    // paste.
+    const priorDisplayText = (lastUser.meta as { displayText?: unknown } | undefined)?.displayText;
     conversationLoop.getHistory().truncate(lastUserIdx);
     try {
-      const result = await streamTurn(lastUserText, lastUserAttachments, personaPrompt.rolePrompt);
+      const result = await streamTurn(
+        lastUserText,
+        lastUserAttachments,
+        personaPrompt.rolePrompt,
+        typeof priorDisplayText === "string" ? priorDisplayText : undefined,
+      );
       return { ok: true, result };
     } catch (err) {
       if (opts.restoreOnFailure) {

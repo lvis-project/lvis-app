@@ -28,7 +28,7 @@ export const PATH_COLLAPSE_THRESHOLD = 10;
  */
 export { DENY_EXTENSIONS } from "../../../shared/attachments-deny-list.js";
 
-export type AttachmentKind = "image" | "file" | "paste";
+export type AttachmentKind = "image" | "file" | "paste" | "resource";
 
 export interface ImageAttachment {
   id: string;
@@ -62,4 +62,41 @@ export interface PasteAttachment {
   chars: number;
 }
 
-export type Attachment = ImageAttachment | FileAttachment | PasteAttachment;
+/**
+ * An MCP server resource the user attached with an `@server:uri` mention.
+ *
+ * `text` is the fenced block the HOST built and handed back — server-authored content
+ * inside the host's own untrusted framing. The renderer never assembles or edits it,
+ * and never inspects it: it stores the string and passes it back verbatim.
+ *
+ * It follows the IMAGE model, not the paste model, and that is the load-bearing choice
+ * in this whole surface. A paste marker is replaced INLINE in the body at send time, so
+ * a resource built that way would ride inside the user's own message text — the one
+ * field the per-turn bound does not measure (see `mcp-resource-bounds.ts`). As an image
+ * does, the marker stays in the body and the payload leaves as its own content part.
+ */
+export interface ResourceAttachment {
+  id: string;
+  n: number;
+  kind: "resource";
+  serverId: string;
+  uri: string;
+  /** Display label — the server's `title` or `name`, already bounded by main. */
+  label: string;
+  /** The host-built fenced block. Opaque to the renderer. */
+  text: string;
+  /**
+   * The read clipped what the server returned, or dropped non-text blocks.
+   *
+   * The COUNT of omitted blocks is deliberately not carried: the fence body already
+   * admits each omission in a line the model reads, so a second copy in renderer state
+   * would be a number nothing renders and nothing checks.
+   */
+  truncated: boolean;
+}
+
+export type Attachment =
+  | ImageAttachment
+  | FileAttachment
+  | PasteAttachment
+  | ResourceAttachment;

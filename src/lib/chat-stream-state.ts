@@ -338,6 +338,25 @@ export function appendUserEntry(
 }
 
 /**
+ * Undo the optimistic user bubble when the send it was appended for was REFUSED.
+ *
+ * The bubble is appended before the IPC resolves so the turn feels immediate. When the
+ * send is rejected — a bound exceeded, a gate refusing the origin — main never recorded
+ * that turn, so leaving the bubble puts a message in the transcript that exists only in
+ * the renderer: it survives until reload, it is not in any session file, and the user
+ * has no way to tell it never went.
+ *
+ * Removes the LAST entry only if it is still the user bubble. Stream frames for a
+ * previous turn can land in between, and dropping whatever happens to be last would
+ * delete someone else's content.
+ */
+export function dropOptimisticUserEntry(entries: ChatEntry[], text: string): ChatEntry[] {
+  const last = entries[entries.length - 1];
+  if (!last || last.kind !== "user" || last.text !== text) return entries;
+  return entries.slice(0, -1);
+}
+
+/**
  * Append the consolidated card for an accepted overlay trigger. Idempotent
  * on `sessionId` so a re-emitted import event (renderer reload, IPC
  * retry) doesn't insert two cards for the same trigger.
