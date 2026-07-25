@@ -17,6 +17,8 @@ import {
   TriggerDenyAuditThrottle,
   TRIGGER_CONVERSATION_DEDUPE_TTL_MS,
 } from "../plugin-runtime.js";
+import { USER_PROMPT_RATE_LIMIT_MAX_CALLS } from "../plugin-runtime/trigger-gate.js";
+import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../../shared/mcp-resource-bounds.js";
 
 const NOW = Date.parse("2026-05-10T00:00:00.000Z");
 const OVERLAY_CAPS = ["host:overlay"];
@@ -152,5 +154,26 @@ describe("TriggerDenyAuditThrottle", () => {
     expect(throttle.shouldEmit("p", "reason-a", 0)).toBe(true);
     expect(throttle.shouldEmit("p", "reason-b", 0)).toBe(true);
     expect(throttle.shouldEmit("p", "reason-a", 0)).toBe(false);
+  });
+});
+
+describe("the user-initiated MCP bucket", () => {
+  // Two bounds that are easy to move independently and wrong to move independently:
+  // this bucket caps requests to somebody ELSE'S server, and the attachment bound is a
+  // budget for our own context window. They were briefly derived from one another, which
+  // meant raising the window budget silently raised how hard a server could be hit. The
+  // relationship is checked here instead, so changing either forces a look at both.
+  it("leaves room for several full-attachment turns inside one window", () => {
+    // One turn can spend up to the per-turn attachment bound in reads. A bucket that is
+    // only a couple of turns deep rate-limits a person mid-turn, which is the failure
+    // this number was raised to fix.
+    expect(USER_PROMPT_RATE_LIMIT_MAX_CALLS).toBeGreaterThanOrEqual(
+      MCP_RESOURCE_ATTACHMENTS_PER_TURN * 3,
+    );
+    // …and it is still a bound: a renderer loop must hit it, so it cannot grow to the
+    // point where the limiter stops being a stop.
+    expect(USER_PROMPT_RATE_LIMIT_MAX_CALLS).toBeLessThanOrEqual(
+      MCP_RESOURCE_ATTACHMENTS_PER_TURN * 12,
+    );
   });
 });

@@ -78,10 +78,27 @@ describe("neutralizeFenceOpen", () => {
     expect(out).not.toMatch(/(^|[^\\])<\s*mcp-resource\b/i);
     expect(out).toContain('server="evil"');
     expect(out).toContain("z");
+    // Escaped, NOT deleted — same contract as the close. Without this, an
+    // implementation that dropped the tag name and left `server="evil">` dangling
+    // passed every other assertion here, and the model would be reading attributes
+    // with no tag and no explanation.
+    expect(out.toLowerCase()).toContain("mcp-resource");
   });
 
   it("does not touch a longer tag name", () => {
     expect(neutralizeFenceOpen("<mcp-resources>", "mcp-resource")).toBe("<mcp-resources>");
+  });
+
+  // Chosen, not incidental: every fence tag in this repo is hyphenated, so a HYPHENATED
+  // sibling is the plausible collision — and `\b` does not stop it, because `-` is a
+  // non-word character. Over-escaping is the safe direction (the text stays readable and
+  // only a foreign tag picks up a backslash), but it should be a decision on the record
+  // rather than something a reader discovers.
+  it("also escapes a hyphenated sibling tag, which `\\b` does not exclude", () => {
+    expect(neutralizeFenceOpen("<mcp-resource-list>", "mcp-resource"))
+      .toBe("<\\mcp-resource-list>");
+    expect(neutralizeFenceClose("</mcp-resource-list>", "mcp-resource"))
+      .toBe("<\\/mcp-resource-list>");
   });
 });
 
@@ -97,7 +114,9 @@ describe("fenceAttrValue", () => {
   it("keeps the open tag on ONE line", () => {
     // The framing lines follow the header. A newline in an attribute would split the
     // header apart and let the remainder read as framing the host wrote.
-    const value = fenceAttrValue("doc:one\ntwo\r\n\tthree", 2_048);
+    // Padded on both ends so the trim is pinned too: without the padding, an
+    // implementation that dropped `.trim()` passed this assertion unchanged.
+    const value = fenceAttrValue("  doc:one\ntwo\r\n\tthree\n ", 2_048);
     expect(value).toBe("doc:one two three");
     expect(value).not.toMatch(/[\r\n\t]/);
   });

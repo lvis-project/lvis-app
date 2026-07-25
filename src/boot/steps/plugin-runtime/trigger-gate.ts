@@ -13,7 +13,6 @@ import type {
   ConversationTriggerSpec,
 } from "../../../plugins/types.js";
 import { OVERLAY_TRIGGER_SOURCE_PATTERN } from "../../../shared/overlay-trigger-source.js";
-import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../../shared/mcp-resource-bounds.js";
 import { CAPABILITY_HOST_OVERLAY } from "../../../plugins/capabilities.js";
 import { formatStagedEnvelope, stagedOriginFor } from "../../../shared/staged-origins.js";
 import { stripLeadingSlash } from "../../../shared/slash-sanitizer.js";
@@ -193,15 +192,21 @@ export const triggerConversationRateLimiter = new TriggerConversationRateLimiter
  * (and the host's own event loop) from a renderer looping on the user's behalf, and
  * that concern does not care which of the two calls is looping.
  *
- * The cap is DERIVED from the per-turn attachment bound because the two now collide:
- * attaching is no longer one click per call, so a flat 20 meant three
- * full-attachment turns in a minute hit `rate-limited` mid-turn — a person working
- * normally, told they are going too fast. Six turns' worth leaves room for prompt
- * runs alongside them, and a derived number cannot drift when the attachment bound
- * moves. Still a hard stop for a loop: an adversary is a renderer bug here, not a
- * person, and it exhausts this in well under a second.
+ * The number had to move once attaching stopped being one click per call: at a flat
+ * 20, three full-attachment turns in a minute hit `rate-limited` mid-turn — a person
+ * working normally, told they are going too fast. 48 is roughly six such turns at
+ * today's per-turn bound, with room for prompt runs alongside them, and still a hard
+ * stop for a loop (the adversary here is a renderer bug, which exhausts it in well
+ * under a second).
+ *
+ * NOT derived from `MCP_RESOURCE_ATTACHMENTS_PER_TURN`, though it was briefly: this is
+ * a ceiling on requests to somebody else's server, and that one is a budget for our own
+ * context window. Deriving it meant raising the window budget silently raised how hard
+ * a server can be hit — a change to one quietly re-deciding the other. The relationship
+ * is CHECKED instead (see the trigger-gate test), so moving either one forces a look at
+ * both rather than one following the other.
 */
-export const USER_PROMPT_RATE_LIMIT_MAX_CALLS = MCP_RESOURCE_ATTACHMENTS_PER_TURN * 6;
+export const USER_PROMPT_RATE_LIMIT_MAX_CALLS = 48;
 export const userPromptRateLimiter = new TriggerConversationRateLimiter(
   TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS,
   USER_PROMPT_RATE_LIMIT_MAX_CALLS,
