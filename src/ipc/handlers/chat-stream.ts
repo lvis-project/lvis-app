@@ -19,8 +19,7 @@ import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import type { UserContentPart } from "../../engine/llm/types.js";
-import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
-import { parseAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
+import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
 import {
   createStreamingFilter,
   stripSuggestedReplies,
@@ -39,6 +38,12 @@ export type ChatStreamSink = (channel: string, payload: unknown) => void;
  * Default per-turn options for host-originated (user-keyboard) chat turns.
  * `chat send` overrides `inputOrigin` with the parsed origin; the internal
  * edit-resend / continue-last-user / retry-effort paths keep this default.
+ *
+ * Those replay paths re-send TEXT THAT WAS ALREADY STORED, so this default is a
+ * claim about the click that triggered the replay — not about who authored the
+ * text. {@link runStreamedTurn} therefore re-derives the origin from the input's
+ * envelope, which is why replaying a staged turn cannot launder it into a
+ * user-keyboard turn.
  */
 export const STREAM_TURN_OPTIONS = { inputOrigin: "user-keyboard" as const };
 
@@ -82,12 +87,31 @@ export async function runStreamedTurn(
   // separate flag. `overlay:*` for a plugin trigger, `app:*` for an MCP App's confirmed
   // `ui/message`. It becomes the permission manager's staged-origin (write/shell/network
   // forced to ask) and the transcript's provenance marker.
-  const originSource =
-    options.inputOrigin === "plugin-emitted"
-      ? parseImportedTriggerEnvelope(input)
-      : options.inputOrigin === "app-emitted"
-        ? parseAppMessageEnvelope(input)
-        : null;
+  // Table-driven (shared/staged-origins.ts): a per-origin if/else chain here used
+  // to default to `null`, and a missing branch silently produced a turn with NO
+  // staged origin — which disables the permission force-ask entirely. Resolving
+  // the kind from the registry makes a newly registered origin work by default
+  // instead of failing open.
+  // Provenance travels with the TEXT, so it is derived FROM the text and not from
+  // the caller's claimed origin. `chat send` binds the two (its gate rejects
+  // either half alone), but the internal replay paths — edit-resend,
+  // continue-last-user, retry-effort — re-send a stored history message under the
+  // `user-keyboard` default above. A staged turn's stored message IS its envelope,
+  // so trusting the claim there would replay server/plugin-authored text with the
+  // force-ask gate off, no untrusted framing, and a genuine-user transcript row.
+  // Reading the envelope makes every replay inherit what it was staged with.
+  const envelope = parseStagedEnvelope(input);
+  const claimedKind = stagedOriginForInput(options.inputOrigin);
+  // Fail CLOSED when a staged origin arrives with an unreadable envelope. It is
+  // reachable without an attacker: DLP redaction (`sanitizeOutgoingInput`) runs
+  // between the send gate and here, and a serverId that trips a PII pattern is
+  // rewritten INSIDE the fence header. Returning `null` there would silently drop
+  // the turn's staged origin — the exact fail-open this table exists to remove.
+  if (claimedKind && !envelope) {
+    throw new Error(claimedKind.missingEnvelopeError);
+  }
+  const inputOrigin = envelope?.kind.inputOrigin ?? options.inputOrigin;
+  const originSource = envelope?.source ?? null;
   // Per-turn streaming filter for the <suggested_replies> block. Withholds
   // chunks that could be (or are) part of the trailing tag, surfaces the
   // parsed list when the turn ends. See
@@ -207,7 +231,7 @@ export async function runStreamedTurn(
       ...(options.attachments && options.attachments.length > 0
         ? { attachments: options.attachments }
         : {}),
-      inputOrigin: options.inputOrigin,
+      inputOrigin,
       ...(options.requestAnchorRawIntent !== undefined
         ? { requestAnchorRawIntent: options.requestAnchorRawIntent }
         : {}),

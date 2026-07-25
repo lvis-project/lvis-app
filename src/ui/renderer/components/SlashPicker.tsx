@@ -23,6 +23,8 @@ import { useTranslation } from "../../../i18n/react.js";
 
 export type { QuickAction } from "./command-actions.js";
 
+import type { McpPromptEntry } from "./slash-picker-data.js";
+
 const LazySlashPickerPanel = lazy(() => import("./SlashPickerPanel.js"));
 
 export interface SlashPickerProps {
@@ -34,6 +36,7 @@ export interface SlashPickerProps {
   onSelectPlugin: (viewKey: string) => void;
   /** Insert a slash command at the caret; receives the trailing space e.g. "/help ". */
   onInsert: (cmd: string) => void;
+  onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   /** Controlled open state — toggled externally (e.g. Cmd/Ctrl+K). */
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -44,6 +47,7 @@ export function SlashPicker({
   plugins,
   onSelectPlugin,
   onInsert,
+  onRunMcpPrompt,
   open,
   onOpenChange,
 }: SlashPickerProps) {
@@ -81,6 +85,7 @@ export function SlashPicker({
             plugins={plugins}
             onSelectPlugin={onSelectPlugin}
             onInsert={onInsert}
+            onRunMcpPrompt={onRunMcpPrompt}
             onClose={() => handleOpenChange(false)}
           />
         </Suspense>

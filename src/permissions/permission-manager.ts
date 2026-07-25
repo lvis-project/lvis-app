@@ -7,7 +7,7 @@ import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } 
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import type { ReviewerInteractiveAutoApprove } from "./permission-settings-store.js";
-import { isStagedTurnOrigin } from "../shared/mcp-app-message-source.js";
+import { isStagedTurnSource } from "../shared/staged-origins.js";
 import type { UserApprovalHitPayload, UserApprovalVerdict } from "../shared/permissions-events.js";
 import { getToolCategoryDescriptor } from "./category-registry.js";
 import {
@@ -1034,14 +1034,16 @@ export class PermissionManager {
    * Detailed decision with an audit-log reason.
    *
    * When `overlayTriggerOrigin` is a STAGED turn origin — a plugin overlay trigger
-   * (`"overlay:meeting-detection"`) or an MCP App's `ui/message` (`"app:<serverId>"`) —
-   * every foreground-authority call (write/shell/network plus meta with
+   * (`"overlay:meeting-detection"`), an MCP App's `ui/message` (`"app:<serverId>"`),
+   * or an MCP server prompt the user ran (`"mcp-prompt:<serverId>"`) — every
+   * foreground-authority call (write/shell/network plus meta with
    * `decisionOverride: "ask"`) is forced to `ask` regardless of user permanent
    * approval (`allow-always`), config allow rules, or auto mode.
    * This hard gate prevents staged, non-user-authored input from automatically running
    * authority-bearing work without user confirmation, pairing with the first-pass
-   * LLM review from `<overlay-trigger-origin-guidance>`. Other calls are unaffected.
-   * The set of staged origins has ONE definition — `isStagedTurnOrigin` — so a new one
+   * LLM review from that origin's own guidance block (one per staged kind — see the
+   * `guidance` field in the registry). Other calls are unaffected.
+   * The set of staged origins has ONE definition — `isStagedTurnSource` — so a new one
    * can never be added while quietly skipping this gate.
    *
    * Permission policy — 5-axis category model. Layer 3 decisionFor() replaces
@@ -1076,12 +1078,13 @@ export class PermissionManager {
       }
     }
     const trust = this.resolveTrust(toolName, source);
-    // Strict patterns (shared with the rest of the staged-origin flow — see
-    // shared/overlay-trigger-source.ts + shared/mcp-app-message-source.ts). Loose
-    // `startsWith` would accept malformed values like "overlay:Bad/Path" or "app:" that
-    // no upstream gate emits but a future hand-injected codepath might; fail-closed on
-    // malformed input.
-    const isOverlayTrigger = isStagedTurnOrigin(overlayTriggerOrigin ?? null);
+    // Strict patterns, owned by `shared/staged-origins.ts` — the same table the send
+    // gate, the stream derivation, and the model-facing guidance read. Loose
+    // `startsWith` would accept malformed values like "overlay:Bad/Path" or "app:"
+    // that no upstream gate emits but a future hand-injected codepath might;
+    // fail-closed on malformed input. THIS is the one enforcement site — grep
+    // `isStagedTurnSource` to find it.
+    const isOverlayTrigger = isStagedTurnSource(overlayTriggerOrigin ?? null);
     const resolvedCategory: ToolCategory = category;
     const isMutating =
       resolvedCategory === "write" ||

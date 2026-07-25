@@ -1685,6 +1685,19 @@ export type LvisMcpApi = {
    * round-boundary guidance, or a user-gated staging card. The outcome carries NO
    * conversation content back.
    */
+  /**
+   * MCP server prompt (`prompts/get`). Returns the server's messages ALREADY
+   * wrapped in their provenance envelope; the renderer sends that verbatim
+   * under the `mcp-prompt-emitted` origin and never assembles it itself.
+   */
+  getPrompt: (
+    serverId: string,
+    name: string,
+    args: Record<string, string>,
+  ) => Promise<
+    | { ok: true; envelope: string; truncated?: boolean; omittedBlocks?: number }
+    | { ok: false; error: string }
+  >;
   postUiMessage: (
     serverId: string,
     sessionId: string,

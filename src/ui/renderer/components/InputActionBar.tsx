@@ -33,6 +33,7 @@ import { ReasoningSlider } from "./ReasoningSlider.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../shared/assistant-context-menu.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import type { McpPromptEntry } from "./slash-picker-data.js";
 import type { InputStatusRow, PermissionModeVariant } from "../hooks/use-input-status-row.js";
 
 export interface InputActionBarProps {
@@ -42,6 +43,7 @@ export interface InputActionBarProps {
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
   onInsertSlashCommand: (cmd: string) => void;
+  onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
@@ -121,6 +123,7 @@ export function InputActionBar({
   plugins,
   onSelectPlugin,
   onInsertSlashCommand,
+  onRunMcpPrompt,
   commandActions,
   commandPopoverOpen,
   onCommandPopoverOpenChange,
@@ -199,6 +202,7 @@ export function InputActionBar({
             plugins={plugins}
             onSelectPlugin={onSelectPlugin}
             onInsert={onInsertSlashCommand}
+            onRunMcpPrompt={onRunMcpPrompt}
             open={commandPopoverOpen}
             onOpenChange={onCommandPopoverOpenChange}
           />

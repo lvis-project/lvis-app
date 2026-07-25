@@ -7,6 +7,7 @@
  */
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
+import { stagedOriginForInput } from "../../shared/staged-origins.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
 import type { RationaleEligibilityProvenance } from "../../tools/pipeline/rationale-control.js";
 import type { ToolResult, ToolUseBlock } from "../../tools/executor.js";
@@ -25,15 +26,14 @@ export function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: 
   if (inputOrigin === "agent-message") {
     return "agent-message";
   }
-  if (inputOrigin === "plugin-emitted") {
-    return "plugin-emitted";
-  }
-  // An MCP App's `ui/message` keeps its OWN provenance through the tool layer — it is
-  // neither the user's keyboard nor a plugin. Every consumer treats it as non-user
-  // (`isUserKeyboardOrigin` is false), and the turn additionally carries the `app:*`
-  // staged origin, which forces write/shell/network tools to ask.
-  if (inputOrigin === "app-emitted") {
-    return "app-emitted";
+  // Every STAGED origin (plugin overlay trigger, MCP App `ui/message`, MCP server
+  // prompt) keeps its OWN provenance through the tool layer — none is the user's
+  // keyboard. Resolved from the registry rather than an if/else chain: the chain's
+  // default was `llm-tool-arg`, the UNTAINTED bucket, so a newly registered origin
+  // that nobody remembered to branch on would have been laundered into "ordinary
+  // model-generated tool arg" with no taint at all.
+  if (stagedOriginForInput(inputOrigin)) {
+    return inputOrigin as ToolTrustOrigin;
   }
   return "llm-tool-arg";
 }

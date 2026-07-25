@@ -968,6 +968,27 @@ export class McpManager {
     return this.withBundledLease(serverId, () => client.callTool(toolName, args));
   }
 
+  /**
+   * Fetch one declared prompt. Mirrors {@link callTool}: the bundled-generation
+   * lease is held across the request so a plugin-backed server cannot be
+   * retired mid-flight.
+   */
+  async getPrompt(
+    serverId: string,
+    name: string,
+    args: Record<string, string>,
+  ): Promise<{
+    description?: string;
+    blocks: Array<{ role: string; type: string; text?: string }>;
+    droppedBlocks: number;
+  }> {
+    const client = this.clients.get(serverId);
+    if (!client) {
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.serverDoesNotExist", { serverId })}`);
+    }
+    return this.withBundledLease(serverId, () => client.getPrompt(name, args));
+  }
+
   /** 연결된 서버 수 */
   get connectedCount(): number {
     let count = 0;

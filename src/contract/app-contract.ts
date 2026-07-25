@@ -203,6 +203,16 @@ export const CHANNELS = {
     // validateHostRendererSender — it mutates conversation state (queues guidance /
     // stages a user-gated card) and fires OS notifications.
     uiMessage: "lvis:mcp:ui-message",
+    // MCP server prompt (`prompts/get`) — the USER picked a prompt the server
+    // declared, and the host fetches its messages and returns them wrapped in the
+    // `<mcp-prompt source="mcp-prompt:<serverId>">` provenance envelope. The
+    // renderer then sends that envelope through the ordinary `chat:send` path
+    // under the `mcp-prompt-emitted` origin, so nothing here starts a turn.
+    // INTERNAL, same posture as `callTool` / `uiMessage`: absent from
+    // PUBLIC_CHANNELS / EXTERNAL_MUTATION_CHANNELS / CHANNEL_GESTURE (fail-closed
+    // isPublicChannel). Registered in ipc/domains/plugins.ts and gated on
+    // validateHostRendererSender — it reaches out to a server on the user's behalf.
+    getPrompt: "lvis:mcp:get-prompt",
     // MCP Apps `ondownloadfile` (`ui/download-file`) — the app hands over INLINE bytes it
     // already possessed and asks the host to save them. The host never fetches an
     // app-supplied URI (a `resource_link` is rejected at parse time), so this channel
