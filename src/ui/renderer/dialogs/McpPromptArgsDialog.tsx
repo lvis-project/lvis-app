@@ -16,8 +16,9 @@
  *   - collected values live in a `Map`, never a plain object, so a name like
  *     `toString` cannot read off `Object.prototype` (`(…).trim is not a function`
  *     during render — and this dialog mounts outside the error boundary);
- *   - the bounds here MATCH main's. A field the user can fill that main then
- *     drops is worse than no field at all.
+ *   - the bounds here MATCH main's — they come from the one shared module
+ *     (`shared/mcp-prompt-bounds.ts`), because a field the user can fill that main
+ *     then drops is worse than no field at all.
  * Text is rendered as text (React escapes it) and truncated, under a notice
  * saying whose words these are, so a prompt cannot dress itself up as host UI.
  */
@@ -37,7 +38,7 @@ import {
   isUsablePromptName,
   MCP_PROMPT_ARG_NAME_MAX_CHARS,
   MCP_PROMPT_ARG_VALUE_MAX_CHARS,
-} from "../../../mcp/mcp-prompt-render.js";
+} from "../../../shared/mcp-prompt-bounds.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { McpPromptEntry } from "../components/slash-picker-data.js";
 

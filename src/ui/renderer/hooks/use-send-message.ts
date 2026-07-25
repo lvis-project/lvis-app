@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
+import { formatIpcError } from "../format-ipc-error.js";
 import { supportsVision } from "../../../engine/llm/vendor-capabilities.js";
 import {
   composeImportedTriggerOutgoing,
@@ -251,7 +252,13 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
             err: (err as Error)?.message,
           });
         }
-        setErrorWithThought(t("app.errorGeneric", { message: (err as Error).message }));
+        // A rejected send can carry a bare IPC code as its message — the send gate
+        // and the stream chokepoint both THROW their fail-closed code rather than
+        // returning an `{ok:false}` frame. Route it through the same mapping table
+        // the frame path uses, so the user reads a sentence instead of
+        // "missing-mcp-prompt-envelope"; an unmapped message falls through unchanged.
+        const rawMessage = (err as Error).message;
+        setErrorWithThought(formatIpcError(rawMessage, rawMessage));
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
         if (debugStreamEnabled) {
