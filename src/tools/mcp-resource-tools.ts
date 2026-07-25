@@ -16,6 +16,14 @@
  * permission decision for later tool calls still belongs to whoever authored the
  * turn.
  *
+ * NAMING HAZARD, recorded deliberately: MCP tools are namespaced
+ * `mcp_<prefix>_<tool>`, so a server approved with `toolNamePrefix: "resource"`
+ * publishing a tool named `list` would namespace to `mcp_resource_list` and collide
+ * with the builtin — the registry refuses the name and rolls back that server's
+ * whole tool set. The names are kept because they are the ones a model guesses,
+ * and the collision needs both halves to line up exactly; the durable fix is a
+ * reserved-name check in the registry, which is its own change.
+ *
  * Every gate lives one layer down, in the client, and that is deliberate: the
  * capability check (advertised AND approved), the listed-URI requirement that stops
  * `resources/read` becoming a general fetch primitive, the refusal to fetch
@@ -32,13 +40,21 @@ import type { McpResourceSummary } from "../mcp/types.js";
 const log = createLogger("lvis");
 
 /**
- * Bound on ONE list response, counted over the serialized payload across BOTH axes
- * per-server count. The per-server cap is already spent at discovery, so counting
- * again there would be an unreachable branch; what is genuinely unbounded here is
- * server_count x catalogue_size, and this is the axis that reaches the model's
- * context window. A clip is REPORTED, never silent.
+ * Bound on ONE list response, over the serialized payload.
+ *
+ * Sized to the host's own tool-result wire cap (`MAX_TOOL_RESULT_TOKENS` ≈ 2,000
+ * tokens ≈ 8 KB — see `shared/tool-result-trim.ts`), not to something larger: a
+ * result over that cap is stubbed before the provider send and the model has to
+ * page it back with `read_tool_result_chunk`. A list the model cannot read inline
+ * is a list that costs two round trips to learn what exists, so a budget above the
+ * wire cap would be a bound that satisfies itself and nobody else.
+ *
+ * Spent across BOTH axes, because either alone is unbounded: discovery caps
+ * resources per server at 200 but never their bytes, and a `serverId`-narrowed
+ * call always yields exactly one server. Every clip is REPORTED — a silent one
+ * reads as "that is all there is".
  */
-const MCP_RESOURCE_LIST_MAX_CHARS = 24 * 1024;
+export const MCP_RESOURCE_LIST_MAX_CHARS = 8 * 1024;
 
 /**
  * The slice of the MCP manager these tools need. Narrow on purpose: a tool that
@@ -77,7 +93,10 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
     description: t("be_mcpResourceTools.listDescription"),
     source: "builtin",
     // Surfaces MCP-server data, so the turn scope's `includeMcp` switch applies:
-    // headless loops (routines) run with MCP withheld on purpose.
+    // headless loops (routines) run with MCP withheld on purpose. Like that switch,
+    // this is an EXPOSURE control — the tool is not listed to the model — not an
+    // execution gate; a name that reaches the executor anyway is gated by
+    // permissions, exactly as for `source: "mcp"` tools.
     requiresMcpScope: true,
     category: "read",
     isReadOnly: () => true,
@@ -94,6 +113,12 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
       const access = getAccess();
       if (!access) return errorResult(t("be_mcpResourceTools.notReady"));
       const a = (rawInput ?? {}) as Record<string, unknown>;
+      // A serverId that is PRESENT but unusable is a request error, not a request
+      // for everything: silently widening the scope of a narrowed call is how a
+      // model ends up reading a catalogue it did not ask for.
+      if (a.serverId !== undefined && typeof a.serverId !== "string") {
+        return errorResult(t("be_mcpResourceTools.invalidRequest"));
+      }
       const wanted = typeof a.serverId === "string" ? a.serverId : undefined;
       const servers = access
         .listResources()
@@ -112,34 +137,41 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
             ...(resource.hostFetchRefused ? { hostFetchRefused: true } : {}),
           })),
         }));
-      // Spend the budget across BOTH axes, because either alone is unbounded:
-      // discovery caps resources per server at 200 but never their bytes, so one
-      // approved server can be ~600 KB, and a narrowed call always yields exactly one
-      // server — a whole-servers-only bound would never fire for it. Resources are
-      // trimmed from the tail of the last server that fits, and BOTH kinds of
-      // omission are reported: a silent clip reads as "that is all there is".
-      //
-      // Each server's serialized length is measured once. Re-serializing the whole
-      // payload per iteration is O(n^2) string work in the main process.
+      // Three tiers, cheapest loss first. Dropping a description keeps the resource
+      // discoverable (uri + name is what a read needs); dropping the resource does
+      // not; dropping the server hides even its id. Each server is measured once —
+      // re-serializing the whole payload per iteration is O(n^2) in the main process.
       const budget = MCP_RESOURCE_LIST_MAX_CHARS;
+      const serialize = (value: unknown): number => JSON.stringify(value).length;
+      let descriptionsOmitted = false;
+      if (serialize({ servers }) > budget) {
+        descriptionsOmitted = servers.some((server) =>
+          server.resources.some((resource) => "description" in resource));
+        for (const server of servers) {
+          server.resources = server.resources.map((resource) => {
+            const { description: _dropped, ...rest } = resource as typeof resource
+              & { description?: string };
+            return rest as typeof resource;
+          });
+        }
+      }
       const kept: typeof servers = [];
-      let used = 0;
-      let omittedServers = 0;
+      const omittedServerIds: string[] = [];
       let omittedResources = 0;
+      let used = 0;
       for (const server of servers) {
-        const whole = JSON.stringify(server).length;
+        const whole = serialize(server);
         if (used + whole <= budget) {
           kept.push(server);
           used += whole;
           continue;
         }
-        // Does not fit whole. Take as many of its resources as the remaining budget
-        // allows, so a single over-large server still returns something usable
-        // instead of nothing.
+        // Does not fit whole: take as many of its resources as the remaining budget
+        // allows, so an over-large server still returns something usable.
         const partial = { serverId: server.serverId, resources: [] as typeof server.resources };
-        let partialLen = JSON.stringify(partial).length;
+        let partialLen = serialize(partial);
         for (const resource of server.resources) {
-          const entryLen = JSON.stringify(resource).length + 1;
+          const entryLen = serialize(resource) + 1;
           if (used + partialLen + entryLen > budget) {
             omittedResources += 1;
             continue;
@@ -151,18 +183,30 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
           kept.push(partial);
           used += partialLen;
         } else {
-          omittedServers += 1;
+          // Named, not counted: `serverId` is the model's only narrowing lever, and it
+          // cannot narrow to a server it was never told about.
+          omittedServerIds.push(server.serverId);
         }
       }
-      omittedServers += servers.length - kept.length - omittedServers;
-      return {
-        output: JSON.stringify({
-          servers: kept,
-          ...(omittedServers > 0 ? { omittedServers } : {}),
-          ...(omittedResources > 0 ? { omittedResources } : {}),
-        }),
-        isError: false,
-      };
+      // Final guarantee, on the REAL payload. The per-server accounting above sums
+      // server objects; the envelope adds its own keys, the commas between them, and
+      // the omission lists — which grow as servers are dropped. Asserting the
+      // postcondition ("the output is within budget") here rather than inferring it
+      // from the parts is what makes the bound a bound; a test measuring the output
+      // caught this being 8,564 against an 8,192 budget.
+      const payload = () => ({
+        servers: kept,
+        ...(omittedServerIds.length > 0 ? { omittedServerIds } : {}),
+        ...(omittedResources > 0 ? { omittedResources } : {}),
+        ...(descriptionsOmitted ? { descriptionsOmitted: true } : {}),
+      });
+      // Terminates: each step removes one kept server, and the empty case is small.
+      while (kept.length > 0 && serialize(payload()) > budget) {
+        const dropped = kept.pop()!;
+        omittedResources += dropped.resources.length;
+        omittedServerIds.push(dropped.serverId);
+      }
+      return { output: JSON.stringify(payload()), isError: false };
     },
   });
 }
