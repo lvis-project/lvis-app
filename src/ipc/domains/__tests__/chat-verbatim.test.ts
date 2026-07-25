@@ -1874,3 +1874,90 @@ describe("sub-agent autonomous parent wake", () => {
   });
 
 });
+
+/**
+ * The REPLAY paths and an attached resource.
+ *
+ * `continueFromLastUserTurn` folds every text part of the stored turn into the prompt
+ * body. A resource turn has TWO text parts — the user's words and the host's fence — so
+ * after the fold nothing is left in `attachments`, and both things that keyed on that
+ * emptiness broke: the turn's tool trust origin fell to the untainted bucket, and the
+ * transcript row lost the `displayText` that keeps the server's body out of the user's
+ * own bubble.
+ *
+ * This is the CALLER half. The engine half (deriving taint from the material) and the
+ * transport half (forwarding the option) are pinned in their own suites; without this
+ * one, deleting the two lines in `chat.ts` that read the prior row leaves the whole
+ * suite green and the defect returns exactly as first reported.
+ */
+describe("lvis:chat:continue-last-user — a resource turn's row", () => {
+  const SESSION_ID = "session-replay-resource";
+  const FENCE = [
+    `${MCP_RESOURCE_FENCE_OPEN} server="hr-mcp" uri="file:///policy.md">`,
+    "SERVER BODY THE USER DID NOT WRITE",
+    "</mcp-resource>",
+  ].join("\n");
+
+  function resourceTurn(meta?: Record<string, unknown>) {
+    return {
+      role: "user",
+      content: [
+        { type: "text", text: "summarize [Resource #1]" },
+        { type: "text", text: FENCE },
+      ],
+      ...(meta ? { meta } : {}),
+    };
+  }
+
+  it("carries the prior row's displayText into the replayed turn", async () => {
+    // Terminal user message: the channel fails closed otherwise, which is the shape a
+    // Retry actually replays.
+    const loop = makeConversationLoop(SESSION_ID, [
+      { role: "assistant", content: "earlier" },
+      resourceTurn({ displayText: "summarize [Resource #1]" }),
+    ]);
+    await setupHandlers(loop);
+    // Stubbed AFTER `setupHandlers`, which calls `vi.clearAllMocks()` — stubbing before
+    // it puts the stub on the wrong side of that call.
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+
+    // PRECONDITION, asserted rather than assumed. This test guards a field the handler
+    // reads off the stored row, so a red here has two possible causes: the handler
+    // stopped forwarding it, or the fixture never had it. Checking the input first makes
+    // a future failure name which — the difference between a regression and a flake, on
+    // a test whose whole job is to be believed when it goes red.
+    const seeded = loop.getHistory().getMessages();
+    expect((seeded[seeded.length - 1] as { meta?: { displayText?: string } }).meta?.displayText)
+      .toBe("summarize [Resource #1]");
+
+    await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID });
+
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+    const options = loop.runTurn.mock.calls[0][3] as { displayText?: string };
+    // The row the user sees stays the row they wrote. Without this the persisted
+    // content — which now HAS the fence folded into it — is what renders in their
+    // bubble on reload.
+    expect(options.displayText).toBe("summarize [Resource #1]");
+    expect(options.displayText).not.toContain("SERVER BODY");
+    // The fold itself is unchanged and still documented: the fence is in the turn text,
+    // which is why the TAINT has to be derived from the material (pinned elsewhere).
+    expect(loop.runTurn.mock.calls[0][0]).toContain(MCP_RESOURCE_FENCE_OPEN);
+  });
+
+  it("forwards no displayText when the prior row had none", async () => {
+    // The counterweight: a version that always forwarded something would satisfy the
+    // case above while giving every ordinary replayed turn a second copy of its text.
+    const loop = makeConversationLoop(SESSION_ID, [
+      { role: "assistant", content: "earlier" },
+      { role: "user", content: "an ordinary question" },
+    ]);
+    await setupHandlers(loop);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+
+    await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID });
+
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+    const options = loop.runTurn.mock.calls[0][3] as Record<string, unknown>;
+    expect(options).not.toHaveProperty("displayText");
+  });
+});

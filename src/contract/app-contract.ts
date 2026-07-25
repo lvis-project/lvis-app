@@ -218,6 +218,22 @@ export const CHANNELS = {
     // turn. The host builds the fence, never the renderer — that is what keeps the
     // untrusted framing on server text that lands beside the user's words.
     attachResource: "lvis:mcp:attach-resource",
+    // The catalogue the composer's `@` mention picker offers, read from
+    // `McpManager.listDeclaredResources()`.
+    //
+    // Why a channel rather than deriving it in the renderer from `mcp:servers`: that
+    // payload carries configs, errors and transport state the picker has no business
+    // seeing, and a renderer-side filter would be a second place that decides which
+    // servers count. The narrow surface is the whole reason — this channel returns
+    // exactly `{serverId, resources[]}` and nothing else.
+    //
+    // It does NOT filter for attachability, and an earlier version of this comment
+    // claimed it did. `listDeclaredResources` answers "what did the host catalogue",
+    // which is what the model-facing tool wants; a row the host will refuse to fetch
+    // (`hostFetchRefused`, the spec's client-fetched `https:` case) is still listed and
+    // is disabled by the PICKER, which answers the different question "what can be
+    // attached right now".
+    listResources: "lvis:mcp:list-resources",
     // MCP Apps `ondownloadfile` (`ui/download-file`) — the app hands over INLINE bytes it
     // already possessed and asks the host to save them. The host never fetches an
     // app-supplied URI (a `resource_link` is rejected at parse time), so this channel

@@ -11,11 +11,12 @@
  * the default focus shift), and keyboard nav is driven by Composer.handleKeyDown
  * through the useInlineSlashMenu state. This component is purely presentational.
  */
-import { useLayoutEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { createPortal } from "react-dom";
 import type { RefObject } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { CATEGORY_ICON, catLabel } from "./slash-picker-data.js";
+import { useCaretAnchoredBox } from "../hooks/use-caret-anchored-box.js";
 import type { InlineSlashItem } from "../hooks/use-inline-slash-menu.js";
 import {
   useNativeContextMenu,
@@ -31,12 +32,6 @@ interface InlineSlashMenuProps {
   onSelect: (index?: number) => void;
 }
 
-interface Anchor {
-  left: number;
-  width: number;
-  bottom: number;
-}
-
 export function InlineSlashMenu({
   open,
   items,
@@ -46,28 +41,16 @@ export function InlineSlashMenu({
   onSelect,
 }: InlineSlashMenuProps) {
   const { t } = useTranslation();
-  const [anchor, setAnchor] = useState<Anchor | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const openNativeContextMenu = useNativeContextMenu();
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const ta = anchorRef.current;
-    if (!ta) return;
-    const rect = ta.getBoundingClientRect();
-    setAnchor({
-      left: rect.left,
-      width: rect.width,
-      // Grow upward: pin the menu's bottom just above the textarea top.
-      bottom: window.innerHeight - rect.top + 4,
-    });
-  }, [open, anchorRef, items.length, activeIndex]);
-
-  // Keep the active row in view.
-  useLayoutEffect(() => {
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-active="true"]`);
-    el?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, open]);
+  // Shared with the `@` mention menu — the box is the same, the rows are not.
+  const anchor = useCaretAnchoredBox({
+    open,
+    anchorRef,
+    listRef,
+    activeIndex,
+    itemCount: items.length,
+  });
 
   if (!open || !anchor || items.length === 0) return null;
 

@@ -2792,4 +2792,10 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.invalidToolName": "Le nom d'outil demandé par cette app est invalide.",
   "formatIpcError.toolCallFailed": "L'appel d'outil de cette app a été refusé ou a échoué.",
   "formatIpcError.notificationUnavailable": "Le service de notifications n'est pas actif, le message de l'app n'a donc pas pu être délivré.",
+  "composer.resourceMentionHint": "Entrée joint la ressource · Échap ferme",
+  "composer.resourceLimit": "{max} ressources au maximum par message — envoyez celui-ci, puis joignez-en d'autres.",
+  "composer.resourceAttachFailed": "Cette ressource n'a pas pu être jointe. Le serveur s'est peut-être déconnecté.",
+  "attachmentChip.resourceFromServer": "Du serveur MCP {server} · contenu non fiable",
+  "attachmentChip.resourceClipped": "Du serveur MCP {server} · non fiable, tronqué",
+  "composer.resourceNotFetchable": "Le serveur la publie pour un accès client direct — l'hôte ne la récupère pas",
 };

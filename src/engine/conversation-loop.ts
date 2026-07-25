@@ -804,6 +804,13 @@ export class ConversationLoop {
       /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
       requestAnchorRawIntent?: string;
       rolePrompt?: ActiveRolePrompt;
+      /**
+       * User-visible text for the transcript row, when the durable content carries more
+       * than the user wrote. Forwarded by the replay paths, which fold a turn's text
+       * parts into the body: without it, a replayed resource turn shows the server's
+       * fenced body inside the user's own bubble.
+       */
+      displayText?: string;
     },
   ): Promise<TurnResult> {
     return runTurn(this, input, callbacks, abortSignal, options);

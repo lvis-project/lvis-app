@@ -5,7 +5,7 @@ import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
-import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
+import type { McpResourceSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpAppDetachedPayload } from "../../shared/mcp-app-detached-payload.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
@@ -1712,6 +1712,15 @@ export type LvisMcpApi = {
       truncated?: boolean;
       omittedBlocks?: number;
     }
+    | { ok: false; error: string }
+  >;
+  /**
+   * The catalogue the `@` mention picker offers — `listDeclaredResources()`, the same
+   * projection the model-facing tools read, so the picker cannot offer a URI the read
+   * path would refuse as undeclared.
+   */
+  listResources: () => Promise<
+    | { ok: true; servers: Array<{ serverId: string; resources: McpResourceSummary[] }> }
     | { ok: false; error: string }
   >;
   postUiMessage: (

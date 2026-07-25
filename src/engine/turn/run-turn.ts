@@ -21,6 +21,7 @@ import { markStaleToolResults } from "../auto-compact.js";
 import { normalizeAiSdkUsageForCost } from "../llm/pricing.js";
 import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
+import { countResourceAttachmentFences } from "../../shared/mcp-resource-bounds.js";
 import {
   parseStagedEnvelopePayload,
   stagedOriginForInput,
@@ -82,6 +83,13 @@ export async function runTurn(
       /** Host-validated, DLP-before-send keyboard text used only for anchoring. */
       requestAnchorRawIntent?: string;
       rolePrompt?: ActiveRolePrompt;
+      /**
+       * User-visible text for the transcript row, when the durable content carries more
+       * than the user wrote. Forwarded by the replay paths, which fold a turn's text
+       * parts into the body: without it, a replayed resource turn shows the server's
+       * fenced body inside the user's own bubble.
+       */
+      displayText?: string;
     },
   ): Promise<TurnResult> {
     const effectiveSessionId = options?.sessionIdOverride ?? self.sessionId;
@@ -320,9 +328,23 @@ export async function runTurn(
     if (inputOrigin === "agent-message") {
       agentMessageInputId = randomUUID();
     }
+    // A resource attachment's body does NOT belong in the user's transcript bubble.
+    // Without this the bubble replays whatever the parts flatten to — up to a read's
+    // worth of server text per attachment, pasted under the user's name in their own
+    // message. The `[Resource #N]` marker they typed is already in `turnInput` and is
+    // what stands for it, exactly as an image's marker does.
+    //
+    // Reuses the fence counter rather than a second predicate, so "does this turn carry
+    // server-attached content" has one answer here and at the bound that enforces it.
+    const carriesResourceAttachment = countResourceAttachmentFences(attachmentParts) > 0;
     const userMeta: MessageMeta = {
       ...(agentMessageInputId ? { hostInjectionId: agentMessageInputId } : {}),
       ...(personaPromptMeta ? { activePersonaPrompt: personaPromptMeta } : {}),
+      ...(options.displayText !== undefined
+        ? { displayText: options.displayText }
+        : carriesResourceAttachment
+          ? { displayText: turnInput }
+          : {}),
       ...(importedTrigger
         ? {
             displayText: importedTrigger.body,

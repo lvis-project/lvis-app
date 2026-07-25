@@ -1614,6 +1614,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // The turn stays the user's — this is attached DATA, not a staged origin (see the
   // resources policy doc §2). Same guards as `getPrompt`: host-renderer sender only,
   // and the user-initiated rate bucket, because it reaches a server on their behalf.
+  // The catalogue for the mention picker. No rate bucket: it reaches no server, it
+  // reads state the host already holds, and the projection it returns is the same one
+  // the model-facing tools use — so the picker cannot offer a resource the read path
+  // would then refuse as undeclared.
+  ipcMain.handle(CHANNELS.mcp.listResources, (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.listResources, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    return { ok: true as const, servers: deps.mcpManager.listDeclaredResources() };
+  });
+
   ipcMain.handle(CHANNELS.mcp.attachResource, async (e, serverId: unknown, uri: unknown) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.mcp.attachResource, e);

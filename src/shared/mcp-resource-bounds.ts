@@ -7,8 +7,10 @@
  * drops is worse than no field, so they cannot be re-declared per layer.
  *
  * See `docs/development/mcp-resources-policy.md` for why each bound is what it is.
- * Pure: no imports, so it stays importable from every process.
+ * Its only import is `display-safe-text`, which is itself import-free, so this stays
+ * importable from every process.
  */
+import { hasInvisibleOrReorderingChars } from "./display-safe-text.js";
 
 /** Catalogued resources per server — the picker is a list a person scans. */
 export const MCP_RESOURCE_MAX_PER_SERVER = 200;
@@ -165,6 +167,18 @@ export function isUsableResourceUri(value: unknown): value is string {
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (CONTROL_CHARS_RE.test(value)) return false;
   if (URI_EXCLUDED_CHARS_RE.test(value)) return false;
+  // Invisible and reordering characters, refused because this value is an IDENTIFIER:
+  // `annual-<RLO>gnp.exe` renders as `annual-exe.png`, and a zero-width space makes two
+  // different resources render identically. ONE definition, shared with
+  // `displaySafeLabel` — the two consumers differ in what they DO with a match (an
+  // identifier is refused, prose is normalized for display), not in what they recognize.
+  // The first cut enumerated ranges here and leaked 14 of 17 sampled members.
+  //
+  // Refusing costs a legitimate server nothing: RFC 3986 is US-ASCII, so the
+  // percent-encoded form round-trips byte-for-byte AND renders inertly. It is NOT the
+  // whole non-ASCII range — CJK and Hangul paths still catalogue — but it does refuse an
+  // emoji carrying a variation selector, which is the accepted cost of one class.
+  if (hasInvisibleOrReorderingChars(value)) return false;
   const lowered = value.toLowerCase();
   if (RESERVED_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return false;
   if (ALLOWED_URI_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return true;

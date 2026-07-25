@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent, screen, act } from "@testing-library/react";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Composer, type ComposerHandle } from "../Composer.js";
 import { t } from "../../../../i18n/runtime.js";
 import type {
@@ -10,6 +10,18 @@ import type {
   ImageAttachment,
 } from "../../types/attachments.js";
 import type { SuggestedRepliesSnapshot } from "../../hooks/use-suggested-replies.js";
+import type { UserKeyboardIntentSnapshot } from "../../../../shared/chat-origin.js";
+import type { QuickAction } from "../command-actions.js";
+import type { PluginEntry } from "../PluginGridButton.js";
+
+// Stable across renders ON PURPOSE. Passing nothing let Composer's default parameter
+// mint a fresh `[]` every render, which rebuilt the memoized keydown handler every
+// render and made a missing dependency invisible — the fixture could not express a bug
+// that only appears when the handler is NOT rebuilt. Production passes memoized values,
+// so this is the faithful shape, not a convenience.
+const STABLE_COMMAND_ACTIONS: QuickAction[] = [];
+const STABLE_PLUGINS: PluginEntry[] = [];
+const STABLE_SELECT_PLUGIN = () => {};
 
 const mockSave = vi.fn(async () => ({
   ok: true,
@@ -25,17 +37,32 @@ function Harness({
   initialText = "",
   initialAttachments = [] as Attachment[],
   onSendCb = vi.fn(),
+  onWarningCb,
   suggestedReplies,
 }: {
   initialText?: string;
   initialAttachments?: Attachment[];
   onSendCb?: () => void;
+  onWarningCb?: (message: string) => void;
   suggestedReplies?: SuggestedRepliesSnapshot;
 }) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attachment[]>(initialAttachments);
   const counterRef = useRef(initialAttachments.length);
   const composerRef = useRef<ComposerHandle | null>(null);
+  // Stable identity, live target. `onSend` is a dependency of the memoized keydown
+  // handler, so a fresh spy per render rebuilds that handler every render and hides any
+  // missing dependency — which is exactly how a dead-keyboard bug survived this suite.
+  const sendRef = useRef(onSendCb);
+  sendRef.current = onSendCb;
+  const stableOnSend = useCallback((intent: UserKeyboardIntentSnapshot) => {
+    sendRef.current(intent);
+  }, []);
+  const warnRef = useRef(onWarningCb);
+  warnRef.current = onWarningCb;
+  const stableOnWarning = useCallback((message: string) => {
+    warnRef.current?.(message);
+  }, []);
 
   return (
     <Composer
@@ -46,7 +73,11 @@ function Harness({
       onAttachmentsChange={setAttachments}
       allocateN={() => ++counterRef.current}
       saveClipboardImage={mockSave}
-      onSend={onSendCb}
+      onSend={stableOnSend}
+      commandActions={STABLE_COMMAND_ACTIONS}
+      inlinePlugins={STABLE_PLUGINS}
+      onSelectPlugin={STABLE_SELECT_PLUGIN}
+      onWarning={stableOnWarning}
       suggestedReplies={suggestedReplies}
     />
   );
@@ -609,5 +640,294 @@ describe("Composer", () => {
     // an extra harness; the latch-clear is already covered by the
     // use-suggested-replies test.)
     expect(onSendCb).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The `@` mention, end to end through the real component.
+ *
+ * These are the cases that only exist once the picker is wired: the menu opening on a
+ * trigger, the attach landing as an attachment rather than as body text, and the two
+ * races the asynchronous read introduces.
+ */
+describe("Composer — @ resource mention", () => {
+  const FENCE = '<mcp-resource trust="untrusted-server-data" server="hr-mcp" uri="doc:1">\nBODY\n</mcp-resource>';
+
+  function installMcpApi(overrides?: {
+    attachResource?: ReturnType<typeof vi.fn>;
+    listResources?: ReturnType<typeof vi.fn>;
+  }) {
+    const attachResource = overrides?.attachResource ?? vi.fn(async () => ({
+      ok: true,
+      attachment: { type: "text" as const, text: FENCE },
+    }));
+    const listResources = overrides?.listResources ?? vi.fn(async () => ({
+      ok: true,
+      servers: [
+        { serverId: "hr-mcp", resources: [{ uri: "doc:1", name: "policy.md" }] },
+        { serverId: "eng-mcp", resources: [{ uri: "doc:2", name: "runbook.md" }] },
+      ],
+    }));
+    (window as unknown as { lvis?: unknown }).lvis = { mcp: { attachResource, listResources } };
+    return { attachResource, listResources };
+  }
+
+  /** Let every unrelated on-mount fetch settle, so later commits belong to the mention. */
+  async function settle() {
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  async function openMenu(ta: HTMLTextAreaElement, value = "@") {
+    fireEvent.change(ta, { target: { value } });
+    // The catalogue read is a promise; let it settle so the rows exist.
+    await act(async () => { await Promise.resolve(); });
+  }
+
+  it("opens on @, filters by query, and closes on Escape", async () => {
+    installMcpApi();
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta);
+    expect(screen.getByTestId("resource-mention-menu")).toBeTruthy();
+    expect(screen.getAllByTestId(/^resource-mention-item-/)).toHaveLength(2);
+
+    await openMenu(ta, "@run");
+    const rows = screen.getAllByTestId(/^resource-mention-item-/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("runbook.md");
+
+    await act(async () => { fireEvent.keyDown(ta, { key: "Escape" }); });
+    expect(screen.queryByTestId("resource-mention-menu")).toBeNull();
+  });
+
+  it("attaches the host's fence as an ATTACHMENT and puts only a marker in the body", async () => {
+    const { attachResource } = installMcpApi();
+    render(<Harness initialText="" />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "look at @pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(attachResource).toHaveBeenCalledWith("hr-mcp", "doc:1");
+    // The mention token is replaced by a marker; the fence is nowhere in the body.
+    expect(ta.value).toBe("look at [Resource #1] ");
+    expect(ta.value).not.toContain("mcp-resource");
+    expect(ta.value).not.toContain("BODY");
+    // …and the chip exists, which is what carries the payload to the send path.
+    // A chip exists, which is what carries the payload to the send path — the marker
+    // in the body and this chip are the pair the marker-sync effect keeps together.
+    expect(screen.getByTestId("attachment-chip")).toBeTruthy();
+  });
+
+  it("does not discard what the user typed while the read was in flight", async () => {
+    // The read is asynchronous. Splicing into the text as it was when Enter was pressed
+    // would silently throw away every keystroke since — the marker lands, and the
+    // sentence the user was in the middle of writing disappears.
+    let resolveRead: ((value: unknown) => void) | undefined;
+    const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
+    installMcpApi({ attachResource: attachResource as never });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    // The user keeps typing before the read comes back.
+    fireEvent.change(ta, { target: { value: "@pol and then some more words" } });
+    await act(async () => {
+      resolveRead?.({ ok: true, attachment: { type: "text", text: FENCE } });
+      await Promise.resolve();
+    });
+
+    expect(ta.value).toContain("and then some more words");
+    expect(ta.value).toContain("[Resource #1]");
+  });
+
+  it("keeps the marker and the attachment together when the trigger is gone", async () => {
+    // Same race, other branch: the user deleted the `@pol` token during the read. The
+    // attachment cannot be dropped (the read already happened) and it cannot be left
+    // markerless (the sync effect would clean it straight back up), so the marker is
+    // appended instead.
+    let resolveRead: ((value: unknown) => void) | undefined;
+    const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
+    installMcpApi({ attachResource: attachResource as never });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    fireEvent.change(ta, { target: { value: "different sentence entirely" } });
+    await act(async () => {
+      resolveRead?.({ ok: true, attachment: { type: "text", text: FENCE } });
+      await Promise.resolve();
+    });
+
+    expect(ta.value).toBe("different sentence entirely [Resource #1] ");
+    // A chip exists, which is what carries the payload to the send path — the marker
+    // in the body and this chip are the pair the marker-sync effect keeps together.
+    expect(screen.getByTestId("attachment-chip")).toBeTruthy();
+  });
+
+  it("surfaces a failed read without attaching anything", async () => {
+    const attachResource = vi.fn(async () => ({ ok: false, error: "resource-failed" }));
+    installMcpApi({ attachResource: attachResource as never });
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+
+    // The message comes from the SHARED code table, not a hand-written mapping in the
+    // hook: `resource-failed` has had an entry since stage 3a, and collapsing every code
+    // to one sentence told a rate-limited user their server had disconnected.
+    expect(onWarning).toHaveBeenCalledWith(t("formatIpcError.resourceFailed"));
+    // The mention token stays so the user can retry; no marker, no chip.
+    expect(ta.value).not.toContain("[Resource #");
+  });
+
+  it("shows a row the read would refuse, disabled and with the reason", async () => {
+    // Listed but not attachable: the spec reserves `https:` for content the CLIENT
+    // fetches, and the host refuses to fetch a server-chosen URL. Hiding the row would
+    // make a user whose resource vanished report the picker as broken; offering it
+    // normally spends a round-trip to fail with a message that blames the connection.
+    const { attachResource } = installMcpApi({
+      listResources: vi.fn(async () => ({
+        ok: true,
+        servers: [{
+          serverId: "web-mcp",
+          resources: [{ uri: "https://example.com/r.pdf", name: "report.pdf", hostFetchRefused: true }],
+        }],
+      })) as never,
+    });
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@rep");
+    const row = screen.getByTestId("resource-mention-item-0");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.textContent).toContain(t("composer.resourceNotFetchable"));
+
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+    expect(attachResource).not.toHaveBeenCalled();
+    expect(onWarning).toHaveBeenCalledWith(t("composer.resourceNotFetchable"));
+    expect(ta.value).not.toContain("[Resource #");
+  });
+
+  it("does not spend the chip-strip limit on resources", async () => {
+    // Two caps, two lanes. `ATTACH_MAX_COUNT` bounds how many chips stay legible; the
+    // per-turn resource bound is about how much server text a turn carries. Five
+    // attached documents must not be what stops the user adding a screenshot.
+    installMcpApi();
+    const resources: Attachment[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `r${i}`,
+      n: i + 1,
+      kind: "resource" as const,
+      serverId: "hr-mcp",
+      uri: `doc:${i}`,
+      label: `doc-${i}.md`,
+      text: FENCE,
+      truncated: false,
+    }));
+    render(
+      <Harness
+        initialText={resources.map((r) => `[Resource #${r.n}]`).join(" ")}
+        initialAttachments={resources}
+      />,
+    );
+    expect(screen.queryByTestId("composer-limit-warning")).toBeNull();
+  });
+
+  it("does not splice into a DIFFERENT mention typed during the read", async () => {
+    // The half the first range check missed. `startsWith("@")` was satisfied by any
+    // token beginning with the sigil, so retyping a different mention during the read
+    // let the splice overwrite its first characters — the same corruption the range
+    // check exists to prevent, one condition weaker. The token must be the SAME token.
+    let resolveRead: ((value: unknown) => void) | undefined;
+    const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
+    installMcpApi({ attachResource: attachResource as never });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    // Same start offset, still starts with `@`, different token.
+    fireEvent.change(ta, { target: { value: "@abcdefgh" } });
+    await act(async () => {
+      resolveRead?.({ ok: true, attachment: { type: "text", text: FENCE } });
+      await Promise.resolve();
+    });
+
+    // Nothing was eaten: the typed token survives intact and the marker is appended.
+    expect(ta.value).toContain("@abcdefgh");
+    expect(ta.value).toContain("[Resource #1]");
+  });
+
+  it("renders a spoofing name through the display sanitizer, at every surface", async () => {
+    // The sanitizer has its own unit tests; nothing asserted the PICKER uses it, so the
+    // security-relevant wiring was uncovered — deleting the call left the suite green.
+    // The chip is the second surface and the one that matters most: it is what the user
+    // reads to confirm what they attached, so a chip that disagrees with the row they
+    // clicked is the whole spoof.
+    const RLO = String.fromCodePoint(0x202e);
+    const ZWSP = String.fromCodePoint(0x200b);
+    installMcpApi({
+      listResources: vi.fn(async () => ({
+        ok: true,
+        servers: [{
+          serverId: "hr-mcp",
+          resources: [{ uri: "doc:1", name: `report-${RLO}gnp.exe`, title: `poli${ZWSP}cy.md` }],
+        }],
+      })) as never,
+    });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@pol");
+    const row = screen.getByTestId("resource-mention-item-0");
+    expect(row.textContent).toContain("policy.md");
+    expect(row.textContent).not.toContain(ZWSP);
+    expect(row.textContent).not.toContain(RLO);
+
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+    const chip = screen.getByTestId("attachment-chip");
+    expect(chip.textContent).not.toContain(ZWSP);
+    expect(chip.textContent).not.toContain(RLO);
+  });
+
+  it("still blocks a sixth IMAGE while five resources are attached", async () => {
+    // The half that proves a partition rather than a raised number: resources do not
+    // consume the chip-strip lane, and the chip-strip lane is still enforced.
+    installMcpApi();
+    const five: Attachment[] = Array.from({ length: 5 }, (_, i) => ({
+      ...img1, id: `i${i}`, n: i + 1,
+    }));
+    const resources: Attachment[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `r${i}`, n: 100 + i, kind: "resource" as const, serverId: "hr-mcp",
+      uri: `doc:${i}`, label: `doc-${i}.md`, text: FENCE, truncated: false,
+    }));
+    render(
+      <Harness
+        initialText={[...five, ...resources].map((a) => a.kind === "image"
+          ? `[Image #${a.n}]` : `[Resource #${a.n}]`).join(" ")}
+        initialAttachments={[...five, ...resources]}
+      />,
+    );
+    // Five images fill the chip-strip lane, so the warning is on — the resources did
+    // not consume it, and they did not suppress it either.
+    expect(screen.getByTestId("composer-limit-warning")).toBeTruthy();
   });
 });
