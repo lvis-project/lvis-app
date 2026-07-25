@@ -256,10 +256,17 @@ export function formatIpcError(
   opts: FormatIpcErrorOptions = {},
 ): string {
   if (error) {
-    const override = opts.codeMap?.[error];
+    // `Object.hasOwn` because callers may pass an arbitrary `Error.message` as the
+    // code (a rejected `invoke` carries its code in the message). A bare index would
+    // resolve `constructor`/`toString` to an inherited function and hand it to `t()`.
+    const override = opts.codeMap && Object.hasOwn(opts.codeMap, error)
+      ? opts.codeMap[error]
+      : undefined;
     if (override) return override;
-    const commonKey = COMMON_IPC_ERROR_MESSAGES[error];
-    if (commonKey) return t(commonKey);
+    if (Object.hasOwn(COMMON_IPC_ERROR_MESSAGES, error)) {
+      const commonKey = COMMON_IPC_ERROR_MESSAGES[error];
+      if (commonKey) return t(commonKey);
+    }
   }
   if (message && message.trim().length > 0) {
     return opts.fallbackContext ? `${opts.fallbackContext}: ${message}` : message;
