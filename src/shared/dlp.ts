@@ -21,6 +21,21 @@ interface DlpPattern {
  * redacting every high-entropy blob, because diagnostics often contain commit
  * SHAs and artifact hashes.
  */
+/**
+ * Short, scrubbed form for an error surface — a log line, a status string, a
+ * message handed to the model. Credential-scrubbed by {@link scrubSecretsForLLM}
+ * and hard-capped, because the text is usually authored by something the host does
+ * not control (an MCP server's JSON-RPC error, a transport failure) and neither
+ * its length nor its content is bounded at the source.
+ *
+ * Lives HERE, beside the scrubber it wraps, rather than in one consumer: a caller
+ * needing a bounded error string should not have to import a transport module to
+ * get one.
+ */
+export function scrubShortError(text: string): string {
+  return scrubSecretsForLLM(text).slice(0, 120);
+}
+
 export function scrubSecretsForLLM(text: string): string {
   return text
     .replace(
