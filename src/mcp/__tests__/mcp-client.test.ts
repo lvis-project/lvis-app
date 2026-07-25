@@ -2055,6 +2055,25 @@ describe("MCP resources discovery and read", () => {
     expect(client.getState().resources).toBeUndefined();
   });
 
+  // The CRASH path is the one that was actually broken: it cleared the tools and
+  // left prompts and resources behind, so a dead server kept advertising both.
+  it("clears the catalogue when the transport dies, not just on a clean disconnect", async () => {
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [{ resources: [{ uri: "file:///doc", name: "doc" }] }],
+    });
+    await client.connect();
+    expect(client.getState().resources).toHaveLength(1);
+    // Same entry point the stdio transport uses when the child exits.
+    (client as unknown as { handleTransportClose(reason: string): void })
+      .handleTransportClose("child exited");
+    expect(client.getState().status).toBe("error");
+    expect(client.getState().resources).toBeUndefined();
+    expect(client.getState().prompts).toBeUndefined();
+    await client.disconnect();
+  });
+
   it("bounds the page walk and the catalogue", async () => {
     const page = {
       resources: Array.from({ length: 300 }, (_, i) => ({

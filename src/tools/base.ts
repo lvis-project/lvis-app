@@ -248,8 +248,9 @@ export interface DynamicToolSpec {
   operationPolicy?: PluginToolOperationPolicy;
   /** MCP Apps app→server `tools/call` gate — see {@link Tool.appInvokable}. */
   appInvokable?: boolean;
-  /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
+  /** MCP-scoped builtin bit — see {@link Tool.requiresMcpScope}. */
   requiresMcpScope?: boolean;
+  /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
   modelVisible?: boolean;
   pathFields?: readonly string[];
   /** §6.4 — semver. Defaults to "1.0.0" when omitted. */

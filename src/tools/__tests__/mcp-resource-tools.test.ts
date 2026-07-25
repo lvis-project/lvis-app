@@ -34,7 +34,7 @@ function deps(over: Partial<McpResourceToolDeps> = {}): McpResourceToolDeps {
       },
       { serverId: "other-mcp", resources: [{ uri: "schema://users", name: "users" }] },
     ],
-    readResource: async () => ({
+    readDeclaredResource: async () => ({
       blocks: [{ uri: "file:///policy.md", mimeType: "text/markdown", text: "BODY" }],
       droppedBlocks: 0,
       truncated: false,
@@ -83,14 +83,14 @@ describe("mcp_resource_read", () => {
   });
 
   it("returns the blocks the client produced", async () => {
-    const readResource = vi.fn(async () => ({
+    const readDeclaredResource = vi.fn(async () => ({
       blocks: [{ text: "BODY" }, { omittedKind: "binary" }],
       droppedBlocks: 3,
       truncated: true,
     }));
-    const tool = createMcpResourceReadTool(() => deps({ readResource }));
+    const tool = createMcpResourceReadTool(() => deps({ readDeclaredResource }));
     const out = parse((await tool.execute({ serverId: "hr-mcp", uri: "file:///policy.md" }, ctx())).output);
-    expect(readResource).toHaveBeenCalledWith("hr-mcp", "file:///policy.md");
+    expect(readDeclaredResource).toHaveBeenCalledWith("hr-mcp", "file:///policy.md");
     expect(out.blocks).toEqual([{ text: "BODY" }, { omittedKind: "binary" }]);
     // Clipping is REPORTED. A silent clip reads as "this is the whole document".
     expect(out.truncated).toBe(true);
@@ -105,8 +105,8 @@ describe("mcp_resource_read", () => {
   });
 
   it("rejects a malformed or over-long request before calling the client", async () => {
-    const readResource = vi.fn();
-    const tool = createMcpResourceReadTool(() => deps({ readResource: readResource as never }));
+    const readDeclaredResource = vi.fn();
+    const tool = createMcpResourceReadTool(() => deps({ readDeclaredResource: readDeclaredResource as never }));
     for (const args of [
       {},
       { serverId: "hr-mcp" },
@@ -118,15 +118,15 @@ describe("mcp_resource_read", () => {
       const result = await tool.execute(args, ctx());
       expect(result.isError, JSON.stringify(args).slice(0, 40)).toBe(true);
     }
-    expect(readResource).not.toHaveBeenCalled();
+    expect(readDeclaredResource).not.toHaveBeenCalled();
   });
 
   it("never forwards the server's own failure text to the model", async () => {
-    // The client logs the real reason; a server message can carry host paths, and a
-    // detailed failure would also make a refused read a probe channel.
+    // The tool logs the real reason host-side; a server message can carry host paths,
+    // and a detailed failure would also make a refused read a probe channel.
     const tool = createMcpResourceReadTool(() =>
       deps({
-        readResource: async () => {
+        readDeclaredResource: async () => {
           throw new Error("ENOENT: C:/Users/secret/path leaked");
         },
       }),
@@ -155,7 +155,7 @@ describe("resource tools — wiring and bounds", () => {
     // …and it is distinguishable from a real read failure, which is the point: an
     // operator must not see "could not be read" for a host that was still starting.
     const failing = createMcpResourceReadTool(() =>
-      deps({ readResource: async () => { throw new Error("boom"); } }),
+      deps({ readDeclaredResource: async () => { throw new Error("boom"); } }),
     );
     const failed = await failing.execute({ serverId: "hr-mcp", uri: "file:///x" }, ctx());
     expect(parse(failed.output).error).not.toBe(parse(readOut.output).error);
@@ -189,6 +189,56 @@ describe("resource tools — wiring and bounds", () => {
     const out = parse((await tool.execute({}, ctx())).output);
     expect((out.servers as unknown[]).length).toBeLessThan(many.length);
     expect(out.omittedServers).toBe(many.length - (out.servers as unknown[]).length);
+  });
+
+  // The dominant axis is ONE server's catalogue: discovery caps resources at 200 but
+  // never their bytes, and a narrowed call always yields exactly one server — so a
+  // whole-servers-only bound would never fire for the biggest realistic payload.
+  it("trims within a single over-large server and reports it", async () => {
+    const one = [{
+      serverId: "srv",
+      resources: Array.from({ length: 200 }, (_, i) => ({
+        uri: `file:///f${i}`,
+        name: `f${i}`,
+        description: "d".repeat(2000),
+      })),
+    }];
+    const tool = createMcpResourceListTool(() => deps({ listResources: () => one }));
+    const raw = (await tool.execute({}, ctx())).output;
+    const out = parse(raw);
+    const servers = out.servers as Array<{ serverId: string; resources: unknown[] }>;
+    // Still returns something usable for that server rather than nothing…
+    expect(servers).toHaveLength(1);
+    expect(servers[0].resources.length).toBeGreaterThan(0);
+    expect(servers[0].resources.length).toBeLessThan(200);
+    // …and says how much it withheld.
+    expect(out.omittedResources).toBe(200 - servers[0].resources.length);
+    expect(raw.length).toBeLessThanOrEqual(30 * 1024);
+  });
+
+  // Both log inputs are attacker-influenced: a JSON-RPC error message is unbounded
+  // and may echo a credential the server was handed, and `serverId` comes from the
+  // model. Unbounded here lets a hostile server flush the log ring — destroying the
+  // forensic record this line exists to create — and persist secrets in cleartext.
+  it("scrubs and bounds what a failed read writes to the log", async () => {
+    const warn = vi.fn();
+    vi.doMock("../../lib/logger.js", () => ({ createLogger: () => ({ warn, info: vi.fn(), error: vi.fn() }) }));
+    vi.resetModules();
+    const { createMcpResourceReadTool: freshRead } = await import("../mcp-resource-tools.js");
+    const tool = freshRead(() =>
+      deps({
+        readDeclaredResource: async () => {
+          throw new Error(`Bearer sk-secret-token-value ${"x".repeat(50_000)}`);
+        },
+      }),
+    );
+    await tool.execute({ serverId: "s".repeat(500), uri: "file:///x" }, ctx());
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line.length).toBeLessThan(1_000);
+    expect(line).not.toContain("sk-secret-token-value");
+    vi.doUnmock("../../lib/logger.js");
+    vi.resetModules();
   });
 
   it("declares the MCP scope dependency on both tools", () => {

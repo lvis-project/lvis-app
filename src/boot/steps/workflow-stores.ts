@@ -123,7 +123,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
           .listServers()
           .filter((server) => (server.resources?.length ?? 0) > 0)
           .map((server) => ({ serverId: server.id, resources: server.resources ?? [] })),
-        readResource: (serverId, uri) => manager.readDeclaredResource(serverId, uri),
+        readDeclaredResource: (serverId, uri) => manager.readDeclaredResource(serverId, uri),
       };
       return access;
     },
