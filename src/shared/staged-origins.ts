@@ -31,8 +31,18 @@ export interface StagedOriginKind {
   readonly fenceTag: FenceTag;
   /** Strict, bounded shape of the provenance tag (e.g. `app:<serverId>`). */
   readonly sourcePattern: RegExp;
-  /** i18n key prefix for the model-facing origin guidance section. */
-  readonly guidanceKeyPrefix: string;
+  /**
+   * Model-facing origin guidance, emitted by ONE per-turn prompt source that
+   * resolves through this table. The hard gate (force-ask) and the soft gate
+   * (this text) then register together, so a staged origin cannot ship with a
+   * permission gate but no instruction telling the model the body is untrusted.
+   */
+  readonly guidance: {
+    /** Wrapper tag for the emitted block. */
+    readonly tag: string;
+    /** Ordered i18n keys; the FIRST one receives the `{source}` placeholder. */
+    readonly lineKeys: readonly string[];
+  };
   /**
    * IPC rejection code when a send claims this origin without its envelope.
    * Part of the renderer's error contract (`ui/renderer/format-ipc-error.ts`),
@@ -75,7 +85,19 @@ export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
     inputOrigin: "plugin-emitted",
     fenceTag: "imported-from-proactive",
     sourcePattern: new RegExp(`^${OVERLAY_SOURCE_BODY}$`),
-    guidanceKeyPrefix: "overlayTriggerOrigin",
+    guidance: {
+      tag: "overlay-trigger-origin-guidance",
+      lineKeys: [
+        "be_systemPromptBuilder.overlayTriggerOriginNotDirectInput",
+        "be_systemPromptBuilder.overlayTriggerOriginPluginSuggestion",
+        "be_systemPromptBuilder.overlayTriggerOriginValidateFirst",
+        "be_systemPromptBuilder.overlayTriggerOriginCheck1",
+        "be_systemPromptBuilder.overlayTriggerOriginCheck2",
+        "be_systemPromptBuilder.overlayTriggerOriginCheck3",
+        "be_systemPromptBuilder.overlayTriggerOriginPassIfInvalid",
+        "be_systemPromptBuilder.overlayTriggerOriginProceedIfValid",
+      ],
+    },
     missingEnvelopeError: "missing-plugin-envelope",
     envelopePrefixPattern: overlayEnvelope.prefix,
     envelopeFullPattern: overlayEnvelope.full,
@@ -84,7 +106,14 @@ export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
     inputOrigin: "app-emitted",
     fenceTag: "app-message",
     sourcePattern: new RegExp(`^${APP_SOURCE_BODY}$`),
-    guidanceKeyPrefix: "appMessageOrigin",
+    guidance: {
+      tag: "app-message-origin-guidance",
+      lineKeys: [
+        "be_systemPromptBuilder.appMessageOriginNotDirectInput",
+        "be_systemPromptBuilder.appMessageOriginUntrusted",
+        "be_systemPromptBuilder.appMessageOriginConfirmBeforeAction",
+      ],
+    },
     missingEnvelopeError: "missing-app-envelope",
     envelopePrefixPattern: appEnvelope.prefix,
     envelopeFullPattern: appEnvelope.full,
@@ -93,7 +122,14 @@ export const STAGED_ORIGIN_KINDS: readonly StagedOriginKind[] = Object.freeze([
     inputOrigin: "mcp-prompt-emitted",
     fenceTag: "mcp-prompt",
     sourcePattern: new RegExp(`^${MCP_PROMPT_SOURCE_BODY}$`),
-    guidanceKeyPrefix: "mcpPromptOrigin",
+    guidance: {
+      tag: "mcp-prompt-origin-guidance",
+      lineKeys: [
+        "be_systemPromptBuilder.mcpPromptOriginNotDirectInput",
+        "be_systemPromptBuilder.mcpPromptOriginServerAuthored",
+        "be_systemPromptBuilder.mcpPromptOriginConfirmBeforeAction",
+      ],
+    },
     missingEnvelopeError: "missing-mcp-prompt-envelope",
     envelopePrefixPattern: mcpPromptEnvelope.prefix,
     envelopeFullPattern: mcpPromptEnvelope.full,
@@ -106,6 +142,18 @@ export function stagedOriginForInput(
 ): StagedOriginKind | undefined {
   if (!inputOrigin) return undefined;
   return STAGED_ORIGIN_KINDS.find((kind) => kind.inputOrigin === inputOrigin);
+}
+
+/**
+ * Runtime membership test for the staged half of `ChatSendInputOrigin`.
+ *
+ * `chat:send`'s accept gate needs a RUNTIME check, and hand-writing one beside
+ * the type union is exactly how a registered origin gets silently rejected (the
+ * union widens, the hand-written guard does not, and tsc cannot see the gap).
+ * Deriving it from the table keeps the two in step.
+ */
+export function isStagedSendOrigin(value: unknown): boolean {
+  return STAGED_ORIGIN_KINDS.some((kind) => kind.inputOrigin === value);
 }
 
 /** The kind that owns a provenance source tag, or undefined when unrecognized. */

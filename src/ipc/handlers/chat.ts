@@ -21,7 +21,7 @@ import type { GenericMessage } from "../../engine/llm/types.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
-import { stagedOriginForInput } from "../../shared/staged-origins.js";
+import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -314,6 +314,17 @@ export function parseChatSendPayload(
     const enveloped = candidate.input.trimStart().match(stagedKind.envelopePrefixPattern);
     if (!enveloped) {
       return { ok: false, error: stagedKind.missingEnvelopeError };
+    }
+  } else {
+    // …and the binding holds in REVERSE: a send that carries SOME staged
+    // envelope may not claim a non-staged origin. Without this, `user-keyboard`
+    // plus a staged envelope is accepted, which would strip the force-ask gate,
+    // the untrusted framing, and the transcript marker from actor-authored text
+    // — the exact laundering the envelope exists to prevent. Enforced HERE so
+    // the guarantee does not rest on renderer discipline.
+    const foreign = parseStagedEnvelope(candidate.input);
+    if (foreign) {
+      return { ok: false, error: foreign.kind.missingEnvelopeError };
     }
   }
   const personaPrompt = normalizePersonaPromptId(candidate.inputOrigin, candidate.personaPromptId);
