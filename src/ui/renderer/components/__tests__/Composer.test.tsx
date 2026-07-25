@@ -652,10 +652,16 @@ describe("Composer", () => {
  */
 describe("Composer — @ resource mention", () => {
   const FENCE = '<mcp-resource trust="untrusted-server-data" server="hr-mcp" uri="doc:1">\nBODY\n</mcp-resource>';
+  // Keyed on the URI MAIN produced from the template — the renderer never composes one.
+  const TEMPLATE_FENCE =
+    '<mcp-resource trust="untrusted-server-data" server="hr-mcp" uri="file:///project/notes.md">'
+    + "\nNOTES\n</mcp-resource>";
 
   function installMcpApi(overrides?: {
     attachResource?: ReturnType<typeof vi.fn>;
     listResources?: ReturnType<typeof vi.fn>;
+    listResourceTemplates?: ReturnType<typeof vi.fn>;
+    attachResourceTemplate?: ReturnType<typeof vi.fn>;
   }) {
     const attachResource = overrides?.attachResource ?? vi.fn(async () => ({
       ok: true,
@@ -668,9 +674,34 @@ describe("Composer — @ resource mention", () => {
         { serverId: "eng-mcp", resources: [{ uri: "doc:2", name: "runbook.md" }] },
       ],
     }));
-    (window as unknown as { lvis?: unknown }).lvis = { mcp: { attachResource, listResources } };
-    return { attachResource, listResources };
+    // Empty by DEFAULT so the resource cases keep counting only resource rows: a fixture
+    // that quietly added a template row would change what "the menu has two rows" means
+    // in every test above without any of them mentioning templates.
+    const listResourceTemplates = overrides?.listResourceTemplates
+      ?? vi.fn(async () => ({ ok: true, servers: [] }));
+    const attachResourceTemplate = overrides?.attachResourceTemplate ?? vi.fn(async () => ({
+      ok: true,
+      attachment: { type: "text" as const, text: TEMPLATE_FENCE },
+      uri: "file:///project/notes.md",
+    }));
+    (window as unknown as { lvis?: unknown }).lvis = {
+      mcp: { attachResource, listResources, listResourceTemplates, attachResourceTemplate },
+    };
+    return { attachResource, listResources, listResourceTemplates, attachResourceTemplate };
   }
+
+  /** A catalogue with one template row, for the cases that are about templates. */
+  const TEMPLATE_CATALOGUE = vi.fn(async () => ({
+    ok: true,
+    servers: [{
+      serverId: "hr-mcp",
+      templates: [{
+        uriTemplate: "file:///project/{path}",
+        name: "Project file",
+        variables: ["path"],
+      }],
+    }],
+  }));
 
   /** Let every unrelated on-mount fetch settle, so later commits belong to the mention. */
   async function settle() {
@@ -822,6 +853,119 @@ describe("Composer — @ resource mention", () => {
     expect(attachResource).not.toHaveBeenCalled();
     expect(onWarning).toHaveBeenCalledWith(t("composer.resourceNotFetchable"));
     expect(ta.value).not.toContain("[Resource #");
+  });
+
+  // ── URI templates: the row that opens a form instead of attaching ───────────────
+  //
+  // The property worth testing at this level is that accepting a template row reads
+  // NOTHING until the user has filled the form — and that when they do, what leaves the
+  // renderer is the template plus values, never a URI.
+  it("opens the form instead of reading, and reads only on submit", async () => {
+    const { attachResourceTemplate, attachResource } = installMcpApi({
+      listResourceTemplates: TEMPLATE_CATALOGUE as never,
+    });
+    render(<Harness initialText="" />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "see @proj");
+    // The row says it is a template, because "Enter attaches the resource" is not what
+    // happens here.
+    expect(screen.getByTestId("resource-mention-template-badge-0")).toBeTruthy();
+
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+    // Nothing has been read: a template is an offer, not an identifier.
+    expect(attachResourceTemplate).not.toHaveBeenCalled();
+    expect(attachResource).not.toHaveBeenCalled();
+    expect(ta.value).toBe("see @proj");
+    const dialog = screen.getByTestId("mcp-resource-template-dialog");
+    expect(dialog).toBeTruthy();
+    // …and the menu is not left sitting open behind it.
+    expect(screen.queryByTestId("resource-mention-menu")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("mcp-resource-template-input-path"), {
+      target: { value: "notes.md" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mcp-resource-template-submit"));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    // The TEMPLATE and the values — never a URI. Main expands.
+    expect(attachResourceTemplate).toHaveBeenCalledWith(
+      "hr-mcp",
+      "file:///project/{path}",
+      { path: "notes.md" },
+    );
+    expect(ta.value).toBe("see [Resource #1] ");
+    expect(ta.value).not.toContain("mcp-resource");
+    expect(screen.getByTestId("attachment-chip")).toBeTruthy();
+    expect(screen.queryByTestId("mcp-resource-template-dialog")).toBeNull();
+  });
+
+  it("attaches nothing when the form is cancelled", async () => {
+    const { attachResourceTemplate } = installMcpApi({
+      listResourceTemplates: TEMPLATE_CATALOGUE as never,
+    });
+    render(<Harness initialText="" />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@proj");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mcp-resource-template-cancel"));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(attachResourceTemplate).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("mcp-resource-template-dialog")).toBeNull();
+    // The mention token survives, so the user can pick something else.
+    expect(ta.value).toBe("@proj");
+    expect(screen.queryByTestId("attachment-chip")).toBeNull();
+  });
+
+  it("surfaces a refused template read without attaching anything", async () => {
+    const attachResourceTemplate = vi.fn(async () => ({ ok: false, error: "resource-failed" }));
+    installMcpApi({
+      listResourceTemplates: TEMPLATE_CATALOGUE as never,
+      attachResourceTemplate: attachResourceTemplate as never,
+    });
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@proj");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    fireEvent.change(screen.getByTestId("mcp-resource-template-input-path"), {
+      target: { value: "../../etc/passwd" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mcp-resource-template-submit"));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    // Through the same shared code table as every other attach failure.
+    expect(onWarning).toHaveBeenCalledWith(t("formatIpcError.resourceFailed"));
+    expect(ta.value).not.toContain("[Resource #");
+    expect(screen.queryByTestId("attachment-chip")).toBeNull();
+  });
+
+  it("lists templates alongside resources in one menu", async () => {
+    // One list to the user. Both catalogues are fetched together for that reason — two
+    // effects would each set the catalogue and the later one would erase the other's
+    // rows, which reads as "my templates disappear sometimes".
+    installMcpApi({ listResourceTemplates: TEMPLATE_CATALOGUE as never });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta);
+    const rows = screen.getAllByTestId(/^resource-mention-item-/);
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.textContent).join(" ")).toContain("Project file");
   });
 
   it("does not spend the chip-strip limit on resources", async () => {
