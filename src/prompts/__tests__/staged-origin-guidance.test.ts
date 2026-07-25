@@ -1,5 +1,5 @@
 /**
- * Overlay Trigger Origin Guidance section (id 4.6).
+ * Staged Origin Guidance section (id 4.6).
  *
  * Emits a "second-guess this trigger before acting" instruction *only*
  * when the per-turn origin source starts with `overlay:`. Default
@@ -7,12 +7,17 @@
  *
  * Pairs with imported overlay trigger prompts, where ConversationLoop.runTurn
  * sets/clears the source so subsequent user turns are unaffected.
+ *
+ * ONE source builds the block for every staged origin by resolving the
+ * staged-origin table, so these cases also pin that a registered origin gets
+ * its own tag and text — a staged origin with a permission gate but no
+ * model-facing warning is the failure this guards.
  */
 import { describe, it, expect } from "vitest";
 
 import { makeSystemPromptBuilder } from "./test-helpers.js";
 
-describe("SystemPromptBuilder — Overlay Trigger Origin Guidance", () => {
+describe("SystemPromptBuilder — Staged Origin Guidance", () => {
   it("emits guidance when origin source is `overlay:*`", () => {
     const builder = makeSystemPromptBuilder();
     builder.setOriginSource("overlay:meeting-detection");
@@ -59,5 +64,35 @@ describe("SystemPromptBuilder — Overlay Trigger Origin Guidance", () => {
     const builder = makeSystemPromptBuilder();
     builder.setOriginSource("overlay:task-deadline");
     expect(builder.build()).toContain("overlay:task-deadline");
+  });
+
+  it("emits the app-message block for an `app:*` origin", () => {
+    const builder = makeSystemPromptBuilder();
+    builder.setOriginSource("app:hr-mcp");
+    const prompt = builder.build();
+    expect(prompt).toContain("<app-message-origin-guidance");
+    expect(prompt).toContain("app:hr-mcp");
+    expect(prompt).toContain("</app-message-origin-guidance>");
+    expect(prompt).not.toContain("overlay-trigger-origin-guidance");
+  });
+
+  it("emits the mcp-prompt block for an `mcp-prompt:*` origin", () => {
+    const builder = makeSystemPromptBuilder();
+    builder.setOriginSource("mcp-prompt:hr-mcp");
+    const prompt = builder.build();
+    expect(prompt).toContain("<mcp-prompt-origin-guidance");
+    expect(prompt).toContain("mcp-prompt:hr-mcp");
+    expect(prompt).toContain("</mcp-prompt-origin-guidance>");
+    // The body is server-authored: the guidance must name the fence it is
+    // talking about, in every locale, so the model can tell body from policy.
+    expect(prompt).toContain("<mcp-prompt>");
+    expect(prompt).not.toContain("app-message-origin-guidance");
+  });
+
+  it("emits nothing for an unregistered source namespace", () => {
+    const builder = makeSystemPromptBuilder();
+    builder.setOriginSource("mcp-prompt-bogus:hr");
+    const prompt = builder.build();
+    expect(prompt).not.toContain("origin-guidance");
   });
 });

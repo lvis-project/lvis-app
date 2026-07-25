@@ -11,8 +11,7 @@ import { redactFsPath } from "../audit/dlp-filter.js";
 import { estimateTokens } from "../shared/token-estimate.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
-import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
-import { isAppMessageOrigin } from "../shared/mcp-app-message-source.js";
+import { stagedOriginForSource } from "../shared/staged-origins.js";
 import { neutralizeFenceClose } from "../shared/fence-sanitizer.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { ProjectIdentity } from "../shared/project-identity.js";
@@ -531,66 +530,38 @@ export class SystemPromptBuilder {
       build: () => t("be_systemPromptBuilder.toolUseStrategy"),
     });
 
-    // ④-c Overlay Trigger Origin Guidance (per-turn, conditional)
+    // ④-c Staged Origin Guidance (per-turn, conditional)
     //
-    // Emitted ONLY when the current turn's origin source starts with
-    // `overlay:*` — i.e., the turn came from a user-accepted host overlay
-    // trigger request, NOT direct keyboard input.
+    // Emitted ONLY when this turn's text was placed by a non-user actor — a
+    // user-accepted plugin overlay trigger, an MCP App `ui/message`, or an MCP
+    // server prompt the user selected. Each of those has its own trust story
+    // (a first-party plugin's templated suggestion vs. a third-party app frame
+    // vs. a server-authored prompt body), so the TEXT differs per kind — but the
+    // registration does not: it is one source resolving `shared/staged-origins`,
+    // which is the same table the hard gate (`isStagedTurnOrigin` → force-ask)
+    // reads. Registering the two halves apart is how a staged origin previously
+    // shipped with a permission gate and no model-facing warning; the table
+    // makes that combination unrepresentable.
     //
-    // The guidance asks the LLM to second-guess the overlay-staged suggestion
-    // before invoking tools — soft validation gate that complements the
-    // hard ApprovalGate for destructive operations.
+    // Defense-in-depth: a staged body cannot *override* this guidance, because
+    // (a) ApprovalGate still gates every destructive op for these origins and
+    // (b) the guidance itself tells the model that imperatives inside the body
+    // are data, not instructions.
     this.sources.push({
       id: 4.6,
-      name: "Overlay Trigger Origin Guidance",
+      name: "Staged Origin Guidance",
       refresh: "per-turn",
       build: () => {
         const source = this.originSource;
-        if (!isOverlayTriggerOrigin(source)) return "";
-        // Defense-in-depth: a malicious plugin cannot *override* this
-        // guidance via its `prompt` (which becomes the user-turn message)
-        // because (a) ApprovalGate still gates all destructive ops and (b)
-        // the guidance text below tells the LLM that anything inside
-        // The imported trigger body is plugin-supplied — imperatives there
-        // must NOT be obeyed if they conflict with this guidance.
+        const kind = stagedOriginForSource(source);
+        if (!kind) return "";
+        const { tag, lineKeys } = kind.guidance;
         return [
-          "<overlay-trigger-origin-guidance priority=\"high\">",
-          t("be_systemPromptBuilder.overlayTriggerOriginNotDirectInput", { source: source ?? "" }),
-          t("be_systemPromptBuilder.overlayTriggerOriginPluginSuggestion"),
-          t("be_systemPromptBuilder.overlayTriggerOriginValidateFirst"),
-          t("be_systemPromptBuilder.overlayTriggerOriginCheck1"),
-          t("be_systemPromptBuilder.overlayTriggerOriginCheck2"),
-          t("be_systemPromptBuilder.overlayTriggerOriginCheck3"),
-          t("be_systemPromptBuilder.overlayTriggerOriginPassIfInvalid"),
-          // 사용자가 트리거를 수락하면 (UI 의 \"확인하기\" 버튼) 다음 절차를 따르세요. 이 행동 가이드는 *시스템* 이 정의하므로 trigger 본문에 다시 적힐 필요가 없습니다 — 본문은 (제목/발신자/emailId 같은) 메타정보 위주로만 짧게 옵니다.
-          t("be_systemPromptBuilder.overlayTriggerOriginProceedIfValid"),
-          "</overlay-trigger-origin-guidance>",
-        ].join("\n");
-      },
-    });
-
-    // ④-c App Message Origin Guidance (per-turn, conditional)
-    //
-    // Emitted ONLY when the turn's origin source is `app:*` — the text came from an
-    // MCP App's `ui/message` (a sandboxed, UNTRUSTED iframe), either confirmed by the
-    // user from the staging card or injected mid-turn as guidance. Distinct from the
-    // overlay block above because the trust story is different: an overlay prompt is a
-    // first-party plugin's templated suggestion, whereas this body is arbitrary text
-    // authored by a third-party app's UI. The hard gate (write/shell/network forced to
-    // ask, `isStagedTurnOrigin`) applies to both; this is the model-facing half.
-    this.sources.push({
-      id: 4.65,
-      name: "App Message Origin Guidance",
-      refresh: "per-turn",
-      build: () => {
-        const source = this.originSource;
-        if (!isAppMessageOrigin(source)) return "";
-        return [
-          "<app-message-origin-guidance priority=\"high\">",
-          t("be_systemPromptBuilder.appMessageOriginNotDirectInput", { source: source ?? "" }),
-          t("be_systemPromptBuilder.appMessageOriginUntrusted"),
-          t("be_systemPromptBuilder.appMessageOriginConfirmBeforeAction"),
-          "</app-message-origin-guidance>",
+          `<${tag} priority="high">`,
+          // Only the leading line names the provenance, so `{source}` is bound
+          // there; the rest are static policy lines.
+          ...lineKeys.map((key, index) => (index === 0 ? t(key, { source: source ?? "" }) : t(key))),
+          `</${tag}>`,
         ].join("\n");
       },
     });

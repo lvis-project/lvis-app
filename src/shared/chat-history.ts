@@ -1,7 +1,7 @@
 import type { GenericMessage, MessageMeta } from "../engine/llm/types.js";
 import { userContentText } from "../engine/llm/types.js";
 import { maskSensitiveData } from "./dlp.js";
-import { isOverlayTriggerOrigin } from "./overlay-trigger-source.js";
+import { isStagedTurnSource } from "./staged-origins.js";
 import {
   normalizeProviderToolAliasName,
   normalizeProviderToolAliasText,
@@ -134,7 +134,12 @@ function serializeImportedTrigger(
   importedTrigger: MessageMeta["importedTrigger"] | undefined,
 ): SerializedImportedTriggerMeta | undefined {
   if (!importedTrigger) return undefined;
-  if (!isOverlayTriggerOrigin(importedTrigger.source)) return undefined;
+  // Any REGISTERED staged origin is persisted, not just overlay triggers: the
+  // provenance row is what makes a reloaded transcript still show that the
+  // turn came from a plugin / app / MCP server rather than the keyboard.
+  // An unregistered tag is still dropped, so a hand-edited JSONL cannot
+  // invent provenance.
+  if (!isStagedTurnSource(importedTrigger.source)) return undefined;
   if (
     typeof importedTrigger.sessionId !== "string" ||
     typeof importedTrigger.prompt !== "string" ||

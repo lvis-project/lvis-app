@@ -1,3 +1,5 @@
+import { isStagedSendOrigin } from "./staged-origins.js";
+
 export type ChatInputOrigin =
   | "user-keyboard"
   | "plugin-emitted"
@@ -61,12 +63,11 @@ export function isUserKeyboardOrigin(origin: ChatInputOrigin): boolean {
 }
 
 export function isChatSendInputOrigin(value: unknown): value is ChatSendInputOrigin {
-  return (
-    value === "user-keyboard" ||
-    value === "plugin-emitted" ||
-    value === "app-emitted" ||
-    value === "queue-auto"
-  );
+  // The staged half is DERIVED from the staged-origin registry. Listing those
+  // literals here by hand is how a registered origin gets silently rejected at
+  // the send gate: the type union widens, the runtime guard does not, and tsc
+  // sees nothing because the guard is a hand-written predicate.
+  return value === "user-keyboard" || value === "queue-auto" || isStagedSendOrigin(value);
 }
 
 export function hasUserKeyboardIntent(value: unknown): value is UserKeyboardIntent {

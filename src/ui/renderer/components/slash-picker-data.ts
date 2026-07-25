@@ -28,19 +28,6 @@ export interface McpPromptEntry {
   arguments: Array<{ name: string; description?: string; required: boolean }>;
 }
 
-/**
- * A prompt a connected MCP server declared. Prompts are a USER-controlled
- * primitive: the user picks one here, the host fetches it, and the server's text
- * enters the turn with untrusted provenance. Never model-callable.
- */
-export interface McpPromptEntry {
-  name: string;
-  serverId: string;
-  title?: string;
-  description?: string;
-  arguments: Array<{ name: string; description?: string; required: boolean }>;
-}
-
 /** A single registered assistant skill. */
 export interface SkillEntry {
   name: string;
