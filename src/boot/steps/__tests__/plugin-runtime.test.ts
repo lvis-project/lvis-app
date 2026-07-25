@@ -272,8 +272,9 @@ describe("sanitizePluginPendingPrompt", () => {
   });
 
   it("rejects invalid overlay trigger source tags", () => {
+    // Shared builder ⇒ the message names the fence, not this call site.
     expect(() => formatPluginPendingPrompt("hi", "plugin:bad")).toThrow(
-      /invalid overlay trigger source/,
+      /invalid imported-from-proactive source/,
     );
   });
 

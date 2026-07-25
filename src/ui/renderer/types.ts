@@ -1694,7 +1694,10 @@ export type LvisMcpApi = {
     serverId: string,
     name: string,
     args: Record<string, string>,
-  ) => Promise<{ ok: true; envelope: string } | { ok: false; error: string }>;
+  ) => Promise<
+    | { ok: true; envelope: string; truncated?: boolean; omittedBlocks?: number }
+    | { ok: false; error: string }
+  >;
   postUiMessage: (
     serverId: string,
     sessionId: string,

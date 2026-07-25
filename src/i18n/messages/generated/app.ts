@@ -1,6 +1,7 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/App.tsx. Do not edit by hand.
 export const en = {
   "app.routineFailedTitle": "[Failed] Routine",
+  "app.mcpPromptArgsUnrunnable": "This prompt requires an argument this app cannot show, so it cannot be run from here.",
   "app.mcpPromptArgsTitle": "Run \"{name}\"",
   "app.mcpPromptArgsDescription": "This prompt is declared by the MCP server \"{serverId}\". Fill in its arguments; the text it returns enters the conversation as untrusted, server-authored content.",
   "app.mcpPromptArgsUntrusted": "The argument names and descriptions below were written by the server, not by LVIS.",
@@ -8,6 +9,7 @@ export const en = {
   "app.mcpPromptArgsOptional": "optional",
   "app.mcpPromptArgsSubmit": "Run prompt",
   "app.mcpPromptArgsCancel": "Cancel",
+  "app.mcpPromptClipped": "The MCP prompt \"{name}\" was clipped by the host — part of what the server returned is not included.",
   "app.mcpPromptFailed": "Could not run the MCP prompt \"{name}\".",
   "app.routineFailedSummary": "Routine execution failed: {error}",
   "app.errorCannotOpenPluginWindow": "Error: Cannot open plugin window.",
@@ -37,6 +39,7 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "app.routineFailedTitle": "[실패] 루틴",
+  "app.mcpPromptArgsUnrunnable": "이 프롬프트는 앱이 표시할 수 없는 인자를 요구하므로 여기서 실행할 수 없습니다.",
   "app.mcpPromptArgsTitle": "\"{name}\" 실행",
   "app.mcpPromptArgsDescription": "이 프롬프트는 MCP 서버 \"{serverId}\" 가 선언한 것입니다. 인자를 채우면, 서버가 돌려준 텍스트가 untrusted (서버 작성) 콘텐츠로 대화에 들어갑니다.",
   "app.mcpPromptArgsUntrusted": "아래 인자 이름과 설명은 LVIS 가 아니라 서버가 작성한 것입니다.",
@@ -44,6 +47,7 @@ export const ko: Record<keyof typeof en, string> = {
   "app.mcpPromptArgsOptional": "선택",
   "app.mcpPromptArgsSubmit": "프롬프트 실행",
   "app.mcpPromptArgsCancel": "취소",
+  "app.mcpPromptClipped": "MCP 프롬프트 \"{name}\" 가 호스트에서 잘렸습니다 — 서버가 돌려준 내용 일부는 포함되지 않았습니다.",
   "app.mcpPromptFailed": "MCP 프롬프트 \"{name}\" 를 실행하지 못했습니다.",
   "app.routineFailedSummary": "루틴 실행 실패: {error}",
   "app.errorCannotOpenPluginWindow": "오류: 플러그인 창을 열 수 없습니다.",

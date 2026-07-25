@@ -10,9 +10,16 @@
  * would enter as `user-keyboard` and launder the provenance).
  *
  * Every label on this form — argument names, descriptions — is a string the MCP
- * SERVER wrote. It is rendered as text only (React escapes it), truncated so a
- * long value cannot push the actual controls off-screen, and framed by a notice
- * that says where it came from, so a prompt cannot dress itself up as host UI.
+ * SERVER wrote. Three rules follow, and all three are load-bearing:
+ *   - names are VALIDATED, not just displayed: `prompts/list` output is a cast,
+ *     not a check, so a non-string name would throw when React renders it;
+ *   - collected values live in a `Map`, never a plain object, so a name like
+ *     `toString` cannot read off `Object.prototype` (`(…).trim is not a function`
+ *     during render — and this dialog mounts outside the error boundary);
+ *   - the bounds here MATCH main's. A field the user can fill that main then
+ *     drops is worse than no field at all.
+ * Text is rendered as text (React escapes it) and truncated, under a notice
+ * saying whose words these are, so a prompt cannot dress itself up as host UI.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
@@ -26,24 +33,69 @@ import {
 } from "../../../components/ui/dialog.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
+import {
+  isUsablePromptName,
+  MCP_PROMPT_ARG_NAME_MAX_CHARS,
+  MCP_PROMPT_ARG_VALUE_MAX_CHARS,
+} from "../../../mcp/mcp-prompt-render.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { McpPromptEntry } from "../components/slash-picker-data.js";
 
 /** Display caps for server-authored strings. Values are bounded again in main. */
 const MAX_LABEL_CHARS = 96;
 const MAX_DESCRIPTION_CHARS = 240;
-/** Matches the per-value slice the `mcp:get-prompt` handler applies. */
-const MAX_VALUE_CHARS = 4_096;
 /**
- * A prompt asking for more than this many arguments is not a form a user can
- * meaningfully fill; the rest are dropped and the prompt is still runnable with
- * whatever it declared first (missing optional args are simply absent).
+ * A prompt asking for more than this many arguments is not a form a person can
+ * meaningfully fill. Excess fields are dropped — and if any DROPPED field was
+ * required, the prompt is not runnable from here at all, which the dialog says
+ * out loud instead of letting the user fill a form that must fail server-side.
  */
 const MAX_FIELDS = 16;
 
-function clamp(value: string | undefined, max: number): string {
-  if (!value) return "";
+interface PromptField {
+  name: string;
+  description?: string;
+  required: boolean;
+}
+
+function clamp(value: unknown, max: number): string {
+  if (typeof value !== "string" || value.length === 0) return "";
   return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+/**
+ * Reduce the server's declared arguments to fields this form can honestly offer:
+ * usable names only, de-duplicated (two same-named args would share one input and
+ * one value), and capped. Returns what was dropped so the caller can refuse to run
+ * a prompt whose REQUIRED argument did not survive.
+ */
+function usableFields(prompt: McpPromptEntry): {
+  fields: PromptField[];
+  droppedRequired: boolean;
+} {
+  const seen = new Set<string>();
+  const kept: PromptField[] = [];
+  let droppedRequired = false;
+  const declared = Array.isArray(prompt.arguments) ? prompt.arguments : [];
+  for (const argument of declared) {
+    const required = argument?.required === true;
+    const name = argument?.name;
+    if (!isUsablePromptName(name, MCP_PROMPT_ARG_NAME_MAX_CHARS) || seen.has(name)) {
+      if (required) droppedRequired = true;
+      continue;
+    }
+    if (kept.length >= MAX_FIELDS) {
+      if (required) droppedRequired = true;
+      continue;
+    }
+    seen.add(name);
+    kept.push({
+      name,
+      ...(typeof argument.description === "string" ? { description: argument.description } : {}),
+      required,
+    });
+  }
+  return { fields: kept, droppedRequired };
 }
 
 export interface McpPromptArgsDialogProps {
@@ -55,35 +107,36 @@ export interface McpPromptArgsDialogProps {
 
 export function McpPromptArgsDialog({ prompt, onCancel, onSubmit }: McpPromptArgsDialogProps) {
   const { t } = useTranslation();
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<ReadonlyMap<string, string>>(() => new Map());
 
-  const fields = useMemo(
-    () => (prompt ? prompt.arguments.slice(0, MAX_FIELDS) : []),
+  const { fields, droppedRequired } = useMemo(
+    () => (prompt ? usableFields(prompt) : { fields: [], droppedRequired: false }),
     [prompt],
   );
 
   // A fresh prompt starts from an empty form — never inherit the previous
   // prompt's answers, which could send one server's input to another's.
   useEffect(() => {
-    setValues({});
+    setValues(new Map());
   }, [prompt]);
 
   const missingRequired = fields.some(
-    (field) => field.required && (values[field.name] ?? "").trim().length === 0,
+    (field) => field.required && (values.get(field.name) ?? "").trim().length === 0,
   );
+  const runnable = !missingRequired && !droppedRequired;
 
   const submit = useCallback(() => {
-    if (!prompt || missingRequired) return;
+    if (!prompt || !runnable) return;
     const args: Record<string, string> = {};
     for (const field of fields) {
-      const value = values[field.name] ?? "";
+      const value = values.get(field.name) ?? "";
       // Optional arguments left blank are omitted rather than sent as "" — an
       // empty string is a value, and servers may treat the two differently.
       if (value.length === 0) continue;
       args[field.name] = value;
     }
     onSubmit(prompt, args);
-  }, [fields, missingRequired, onSubmit, prompt, values]);
+  }, [fields, onSubmit, prompt, runnable, values]);
 
   if (!prompt) return null;
 
@@ -111,6 +164,12 @@ export function McpPromptArgsDialog({ prompt, onCancel, onSubmit }: McpPromptArg
         >
           <p className="text-xs text-muted-foreground">{t("app.mcpPromptArgsUntrusted")}</p>
 
+          {droppedRequired ? (
+            <p className="text-xs text-destructive" data-testid="mcp-prompt-args-unrunnable" role="alert">
+              {t("app.mcpPromptArgsUnrunnable")}
+            </p>
+          ) : null}
+
           {fields.map((field) => {
             const inputId = `mcp-prompt-arg-${field.name}`;
             return (
@@ -129,12 +188,14 @@ export function McpPromptArgsDialog({ prompt, onCancel, onSubmit }: McpPromptArg
                 <Input
                   autoComplete="off"
                   data-testid={`mcp-prompt-arg-input-${field.name}`}
+                  disabled={droppedRequired}
                   id={inputId}
-                  maxLength={MAX_VALUE_CHARS}
-                  onChange={(event) =>
-                    setValues((prev) => ({ ...prev, [field.name]: event.target.value }))
-                  }
-                  value={values[field.name] ?? ""}
+                  maxLength={MCP_PROMPT_ARG_VALUE_MAX_CHARS}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setValues((prev) => new Map(prev).set(field.name, next));
+                  }}
+                  value={values.get(field.name) ?? ""}
                 />
               </div>
             );
@@ -146,7 +207,7 @@ export function McpPromptArgsDialog({ prompt, onCancel, onSubmit }: McpPromptArg
             </Button>
             <Button
               data-testid="mcp-prompt-args-submit"
-              disabled={missingRequired}
+              disabled={!runnable}
               type="submit"
             >
               {t("app.mcpPromptArgsSubmit")}

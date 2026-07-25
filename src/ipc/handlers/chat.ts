@@ -322,9 +322,11 @@ export function parseChatSendPayload(
     // the untrusted framing, and the transcript marker from actor-authored text
     // — the exact laundering the envelope exists to prevent. Enforced HERE so
     // the guarantee does not rest on renderer discipline.
-    const foreign = parseStagedEnvelope(candidate.input);
-    if (foreign) {
-      return { ok: false, error: foreign.kind.missingEnvelopeError };
+    if (parseStagedEnvelope(candidate.input)) {
+      // Its OWN code: "missing envelope" would be the opposite of what happened,
+      // and this rejection also catches an ordinary user typing or pasting text
+      // that happens to start with a provenance header.
+      return { ok: false, error: "origin-envelope-mismatch" };
     }
   }
   const personaPrompt = normalizePersonaPromptId(candidate.inputOrigin, candidate.personaPromptId);

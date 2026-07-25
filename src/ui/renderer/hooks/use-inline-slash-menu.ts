@@ -131,6 +131,11 @@ export function useInlineSlashMenu({
     if (!trigger) return [];
     const q = trigger.query;
     const out: InlineSlashItem[] = [];
+    // NOTE: `mcp-prompts` has no branch here, and must not get one. Every item in
+    // this menu APPLIES DRAFT TEXT to the composer, and a draft the user then
+    // submits enters as `user-keyboard` — which would strip a server-authored
+    // prompt of its provenance. Running one goes through the picker panel
+    // (`onRunMcpPrompt` → `mcp:get-prompt` → staged send) instead.
     for (const cat of CATEGORY_ORDER) {
       if (cat === "command") {
         for (const c of filterSlashCommands(q)) {
