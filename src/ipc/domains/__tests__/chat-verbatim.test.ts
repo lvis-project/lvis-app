@@ -1916,8 +1916,19 @@ describe("lvis:chat:continue-last-user — a resource turn's row", () => {
       { role: "assistant", content: "earlier" },
       resourceTurn({ displayText: "summarize [Resource #1]" }),
     ]);
-    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
+    // Stubbed AFTER `setupHandlers`, which calls `vi.clearAllMocks()` — stubbing before
+    // it puts the stub on the wrong side of that call.
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+
+    // PRECONDITION, asserted rather than assumed. This test guards a field the handler
+    // reads off the stored row, so a red here has two possible causes: the handler
+    // stopped forwarding it, or the fixture never had it. Checking the input first makes
+    // a future failure name which — the difference between a regression and a flake, on
+    // a test whose whole job is to be believed when it goes red.
+    const seeded = loop.getHistory().getMessages();
+    expect((seeded[seeded.length - 1] as { meta?: { displayText?: string } }).meta?.displayText)
+      .toBe("summarize [Resource #1]");
 
     await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID });
 
@@ -1940,11 +1951,12 @@ describe("lvis:chat:continue-last-user — a resource turn's row", () => {
       { role: "assistant", content: "earlier" },
       { role: "user", content: "an ordinary question" },
     ]);
-    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
 
     await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID });
 
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
     const options = loop.runTurn.mock.calls[0][3] as Record<string, unknown>;
     expect(options).not.toHaveProperty("displayText");
   });
