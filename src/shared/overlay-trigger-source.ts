@@ -11,9 +11,9 @@
  * The envelope tag itself is still spelled `imported-from-proactive` because
  * plugins may already author that wrapper.
  */
-import { stagedOriginForInput } from "./staged-origins.js";
+import { stagedOriginFor } from "./staged-origins.js";
 
-const OVERLAY_KIND = stagedOriginForInput("plugin-emitted")!;
+const OVERLAY_KIND = stagedOriginFor("plugin-emitted");
 
 /**
  * Strict `overlay:<name>` shape — rejects "overlay:", "overlay:_x",

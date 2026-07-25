@@ -29,10 +29,20 @@ export type ChatInputOrigin =
 
   | "queue-auto";
 
-export type ChatSendInputOrigin = Extract<
+/**
+ * The origins whose text arrives inside a provenance envelope. Named so the
+ * staged-origin registry can be a TOTAL `Record` over them: every lookup by a
+ * literal member is then compile-checked and cannot be `undefined`, which removes
+ * the defensive `!`/throw at each module-level lookup.
+ */
+export type StagedChatInputOrigin = Extract<
   ChatInputOrigin,
-  "user-keyboard" | "plugin-emitted" | "app-emitted" | "mcp-prompt-emitted" | "queue-auto"
+  "plugin-emitted" | "app-emitted" | "mcp-prompt-emitted"
 >;
+
+export type ChatSendInputOrigin =
+  | StagedChatInputOrigin
+  | Extract<ChatInputOrigin, "user-keyboard" | "queue-auto">;
 export type TrustOriginWithUnknown = ChatInputOrigin | "unknown";
 
 export interface ChatSendPayload {

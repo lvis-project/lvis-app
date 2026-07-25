@@ -977,7 +977,11 @@ export class McpManager {
     serverId: string,
     name: string,
     args: Record<string, string>,
-  ): Promise<{ description?: string; blocks: Array<{ role: string; type: string; text?: string }> }> {
+  ): Promise<{
+    description?: string;
+    blocks: Array<{ role: string; type: string; text?: string }>;
+    droppedBlocks: number;
+  }> {
     const client = this.clients.get(serverId);
     if (!client) {
       throw new Error(`[mcp-manager] ${t("be_mcpManager.serverDoesNotExist", { serverId })}`);
