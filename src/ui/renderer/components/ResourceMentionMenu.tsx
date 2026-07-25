@@ -62,6 +62,7 @@ export function ResourceMentionMenu({
             key={item.key}
             role="option"
             aria-selected={active}
+            aria-disabled={item.unavailableReason !== undefined}
             data-active={active}
             data-testid={`resource-mention-item-${index}`}
             onMouseEnter={() => onHover(index)}
@@ -76,9 +77,11 @@ export function ResourceMentionMenu({
             }`}
           >
             <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate text-xs">{item.label}</span>
+            <span className={`truncate text-xs${item.unavailableReason ? " opacity-(--opacity-strong)" : ""}`}>
+              {item.label}
+            </span>
             <span className="ml-auto truncate pl-2 text-[11px] text-muted-foreground">
-              {item.hint}
+              {item.unavailableReason ?? item.hint}
             </span>
           </div>
         );

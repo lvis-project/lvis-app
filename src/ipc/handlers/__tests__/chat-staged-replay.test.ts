@@ -95,3 +95,35 @@ describe("staged provenance on the replay paths", () => {
     });
   });
 });
+
+describe("a resource turn's transcript row survives the replay paths", () => {
+  // Same family of defect as the staged-origin cases above, one field over. A resource
+  // turn's content is TWO text parts (the user's words, then the host's fence), and
+  // `continueFromLastUserTurn` folds every text part into the prompt body — so the
+  // replayed turn has no attachment parts, the seam that sets `displayText` never fires,
+  // and the persisted row renders the SERVER'S body inside the user's own bubble on
+  // reload. One click after the seam worked.
+  //
+  // The transport half is pinned here: `runStreamedTurn` must forward a caller-supplied
+  // `displayText` into the turn options. The caller half (the replay reading it off the
+  // prior row) is in the ipc domain; the engine half (setting it from the parts on a
+  // first send) is in the conversation-loop suite.
+  it("forwards a caller-supplied displayText into the turn", async () => {
+    const { loop, runTurn } = makeLoop();
+    await runStreamedTurn(loop, "summarize [Resource #1]", () => {}, 1, {
+      ...STREAM_TURN_OPTIONS,
+      displayText: "summarize [Resource #1]",
+    });
+    expect(turnOptions(runTurn).displayText).toBe("summarize [Resource #1]");
+  });
+
+  it("adds no displayText when the caller supplies none", async () => {
+    // Without this, a version that always set the field would satisfy the case above
+    // while quietly giving every ordinary turn a second copy of its own text.
+    const { loop, runTurn } = makeLoop();
+    await runStreamedTurn(loop, "an ordinary question", () => {}, 1, {
+      ...STREAM_TURN_OPTIONS,
+    });
+    expect(turnOptions(runTurn)).not.toHaveProperty("displayText");
+  });
+});

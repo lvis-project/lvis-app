@@ -2814,4 +2814,6 @@ export const zhMessages: Record<string, string> = {
   "composer.resourceAttachFailed": "无法附加该资源。服务器可能已断开连接。",
   "attachmentChip.resourceFromServer": "来自 MCP 服务器 {server} · 不可信内容",
   "attachmentChip.resourceClipped": "来自 MCP 服务器 {server} · 不可信，已截断",
+  "composer.resourceNotFetchable": "服务器将其发布供客户端直接访问 — 主机不会拉取",
+  "composer.resourceRateLimited": "向该服务器的请求过多。请稍等后重试。",
 };

@@ -85,9 +85,14 @@ export interface ResourceAttachment {
   label: string;
   /** The host-built fenced block. Opaque to the renderer. */
   text: string;
-  /** The read clipped what the server returned, or dropped non-text blocks. */
+  /**
+   * The read clipped what the server returned, or dropped non-text blocks.
+   *
+   * The COUNT of omitted blocks is deliberately not carried: the fence body already
+   * admits each omission in a line the model reads, so a second copy in renderer state
+   * would be a number nothing renders and nothing checks.
+   */
   truncated: boolean;
-  omittedBlocks: number;
 }
 
 export type Attachment =

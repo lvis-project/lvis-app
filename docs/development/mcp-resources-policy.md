@@ -88,7 +88,20 @@ At connect, after `tools/list` and `prompts/list`:
   picker, and one of those already let a `">` in a URI break out of the fence. A
   legitimate URI percent-encodes them, so nothing expressible is lost — but note the
   consequence for stage 3b: an RFC 6570 template (`file:///{path}`) is rejected by
-  this rule, so templates need their own predicate rather than a flag on this one.
+  this rule, so templates need their own predicate rather than a flag on this one — and
+  the same applies one level up: a template's identity field is `uriTemplate`, not `uri`,
+  so a picker item's `uri` would be a lie for one, and handing a brace-string to
+  `isUsableResourceUri` refuses it into the generic-failure bucket.
+- The same rule also refuses INVISIBLE and text-reordering characters (bidi overrides
+  and isolates, zero-width, the default-ignorable set). A URI is an identifier, and one
+  carrying `U+202E` renders `annual-<RLO>gnp.exe` as `annual-exe.png` while a zero-width
+  space makes two different resources render identically — a user cannot tell which row
+  they clicked. Refusing at the boundary rather than normalizing per consumer is forced
+  by one consumer that CANNOT normalize: the audit row is a forensic record, and
+  rewriting it would falsify it. Deliberately NOT the whole non-ASCII range — a
+  filesystem server publishing a CJK or Hangul path is honest and common. Display
+  strings (`name`, `title`) are prose and take the opposite treatment: every codepoint
+  is legitimate in them, so they are normalized at the render site instead.
 
 `resources/templates/list` is **not discovered yet** — it appears only in the
 governance capability map. A template is a URI pattern the user must fill, which is
@@ -131,6 +144,12 @@ Mirrors the prompt bounds, and shares the module where the numbers overlap:
 
 Every one of these is enforced in main, and the UI uses the same constants from a
 shared module so a field the user can fill is never one main drops.
+
+The composer's own `ATTACH_MAX_COUNT` (5) is a SEPARATE lane and resources do not count
+toward it: that number bounds how many chips stay legible side by side, while this one
+bounds how much server text a turn carries. Folding them would mean five attached
+documents stops the user adding a screenshot, and would make the bound above unreachable
+from the only surface that produces resource attachments.
 
 ## 6. Surfaces
 
@@ -228,6 +247,22 @@ A clip is admitted in a line the model reads rather than a flag the UI could ign
 
 Stages land as separate PRs. Stage 1 touches no cluster-sensitive path; stages 2
 and 3 do (`src/tools`, `src/ipc`), so they carry the 3-role attestation.
+
+### Open decision: PII redaction does not reach an attached resource
+
+`sanitizeOutgoingInput` (the `piiRedactEnabled` toggle) is applied to the turn's INPUT
+text only; content parts pass untouched. Before the mention UI existed no renderer path
+produced a text part, so nothing text-bearing escaped redaction — a resource read is the
+first, and it can carry up to a read's worth of the user's own documents per attachment.
+
+The inconsistency is what makes this worth deciding rather than assuming: the SAME bytes
+pasted into the composer ARE redacted, because a paste is inlined into the input.
+
+Not resolved here, deliberately. Redacting inside the fence means the host rewriting
+content the fence exists to attribute to the server, and the per-turn cost is real
+(8 attachments x 32 KB through the pattern set). Leaving it means a privacy toggle that
+silently stops applying when the user types `@`. That trade belongs to whoever owns the
+DLP surface, not to the composer PR that made it reachable.
 
 ## 7. Deliberately excluded
 

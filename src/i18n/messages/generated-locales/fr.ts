@@ -2797,4 +2797,6 @@ export const frMessages: Record<string, string> = {
   "composer.resourceAttachFailed": "Cette ressource n'a pas pu être jointe. Le serveur s'est peut-être déconnecté.",
   "attachmentChip.resourceFromServer": "Du serveur MCP {server} · contenu non fiable",
   "attachmentChip.resourceClipped": "Du serveur MCP {server} · non fiable, tronqué",
+  "composer.resourceNotFetchable": "Le serveur la publie pour un accès client direct — l'hôte ne la récupère pas",
+  "composer.resourceRateLimited": "Trop de requêtes vers ce serveur. Patientez un instant puis réessayez.",
 };
