@@ -17,8 +17,19 @@
  *     user typing `../../etc/passwd` produces `..%2F..%2Fetc%2Fpasswd` — one path
  *     segment, not a traversal. `{+var}` is defined as RESERVED expansion, which does
  *     NOT encode `/`, and would hand exactly that traversal to the server.
- *   - the literal part of the template is fixed by the server at discovery time, so the
- *     scheme and authority cannot be moved by anything the user types.
+ *   - a value can never introduce URI STRUCTURE. `/`, `?`, `#`, `:` and `@` all encode,
+ *     so whatever the user types stays inside the one component the server put the
+ *     variable in.
+ *
+ * What that does NOT buy, and an earlier version of this comment claimed it did: it does
+ * not fix the scheme. A server may publish `{scheme}://host/{path}`, whose skeleton
+ * `x://host/x` is a legal server-custom scheme — so the user picks the scheme, and
+ * percent-encoding is no help because `javascript` and `ui` are already unreserved. The
+ * thing that actually holds is the re-validation of the EXPANSION below: it runs the
+ * ordinary URI predicate over the finished string, which is where a reserved scheme dies.
+ * The client then re-derives the `https:` refusal from that same expansion. Both are
+ * pinned by tests, because "the literal part is fixed" reads like a guarantee and is not
+ * one.
  *
  * A server that needs the other operators is refused at discovery and appears nowhere,
  * which is the fail-closed direction: an un-offered template costs a feature, an
