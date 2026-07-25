@@ -6,20 +6,29 @@
  *
  * File: `~/.lvis/skill-approvals.json`
  *
- * v2 schema (R2-CR-3 hash-binding):
+ * v2 schema (hash-binding):
  * {
  *   "version": 2,
  *   "approvedSkills": [
- *     { "name": "report-writing", "sha256": "abc…", "approvedAt": "2026-…" }
+ *     { "name": "report-writing", "sha256": "abc…", "approvedAt": "2026-…" },
+ *     { "name": "field-guide#bundled", "sha256": "def…", "approvedAt": "2026-…" }
  *   ]
  * }
+ *
+ * `name` is a RECORD KEY, not necessarily a skill name, and `sha256` is a hash of
+ * approval MATERIAL, not necessarily a body. Both are chosen by the caller
+ * (`tools/skill-load.ts`): a skill carrying bundled resources is keyed
+ * `<key>#bundled` and its material covers the body AND the resource manifest, so
+ * adding or resizing a bundled file re-prompts. This store deliberately does not
+ * know that scheme — it stores opaque (key, hash) pairs, which is what lets the
+ * caller change what an approval covers without a schema migration.
  *
  * Why hash-bind? Pre-fix, approval was keyed by NAME ONLY. A user approves
  * `report-writing` once, the body is later swapped (file overwrite, sync
  * tool, malicious overwrite, etc.), and the next `skill_load` short-circuits
- * without re-prompting — body-content provenance changes silently. Post-fix,
- * `isApproved(name, body)` matches BOTH the name AND the sha256 of the
- * current body; hash mismatch forces re-approval.
+ * without re-prompting — provenance changes silently. Post-fix, `isApproved`
+ * matches BOTH the key AND the hash of the current material; any mismatch
+ * forces re-approval.
  *
  * Migration: any v1 (or pre-v2-without-hash) record is treated as
  * un-approved on read. A re-approval cycle is required after upgrade — this
@@ -37,7 +46,9 @@ import { createHash } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
 
 export interface SkillApprovalRecord {
+  /** Record key from the caller — a skill name, or `<name>#bundled`. */
   name: string;
+  /** Hash of the approval material bound to that key. */
   sha256: string;
   approvedAt: string;
 }
@@ -59,11 +70,18 @@ async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<
   return next;
 }
 
-/** R2-CR-3: hash skill bodies so approval records bind to the exact content
- *  the user said yes to. Trim is intentional — leading/trailing whitespace
- *  changes from a save/sync round-trip should not invalidate approval. */
-export function hashSkillBody(body: string): string {
-  return createHash("sha256").update(body, "utf-8").digest("hex");
+/**
+ * Hash the approval material so a record binds to exactly what the user said yes
+ * to. NOT trimmed, and that is the strict direction on purpose: a whitespace-only
+ * edit still re-prompts. (An earlier comment here claimed a trim that the code
+ * never did — the claim is removed rather than the behavior changed, because
+ * re-prompting on an unexpected byte change is the safe side of that trade.)
+ *
+ * Named for its original caller; it hashes whatever material the caller binds,
+ * which for a bundled skill is a digest pair rather than a body.
+ */
+export function hashSkillMaterial(material: string): string {
+  return createHash("sha256").update(material, "utf-8").digest("hex");
 }
 
 async function readFileOrEmpty(filePath: string): Promise<SkillApprovalsFile> {
@@ -108,7 +126,7 @@ async function writeAtomic(filePath: string, data: SkillApprovalsFile): Promise<
 }
 
 export class SkillApprovalsStore {
-  private cache: Map<string, string> | null = null; // name → sha256
+  private cache: Map<string, string> | null = null; // record key → material hash
   private readonly filePath: string;
 
   constructor(filePath: string = DEFAULT_PATH) {
@@ -121,33 +139,34 @@ export class SkillApprovalsStore {
   }
 
   /**
-   * R2-CR-3: a skill is approved iff (name, sha256(body)) matches a record.
-   * Body swaps invalidate the approval — `isApproved` returns false and the
-   * caller (skill-load) re-prompts via ApprovalGate.
+   * Approved iff (record key, hash of current material) matches a stored pair.
+   * Any change to the material invalidates the approval — this returns false and
+   * the caller (skill-load) re-prompts via ApprovalGate.
    */
-  async isApproved(skillName: string, currentBody: string): Promise<boolean> {
+  async isApproved(recordKey: string, currentMaterial: string): Promise<boolean> {
     if (this.cache === null) await this.load();
-    const recordedHash = this.cache!.get(skillName);
+    const recordedHash = this.cache!.get(recordKey);
     if (!recordedHash) return false;
-    return recordedHash === hashSkillBody(currentBody);
+    return recordedHash === hashSkillMaterial(currentMaterial);
   }
 
   /**
-   * Record (or refresh) an approval. The hash of the current body is bound
-   * to the record so the next `isApproved` call can detect post-approval
-   * mutations.
+   * Record (or refresh) an approval. The hash of the current material is bound to
+   * the record so the next `isApproved` call detects post-approval mutations.
+   * The key must be the SAME one `isApproved` will use — the caller owns that
+   * derivation, and a mismatch between the two would silently re-prompt forever.
    */
-  async approve(skillName: string, currentBody: string): Promise<void> {
+  async approve(recordKey: string, currentMaterial: string): Promise<void> {
     return withFileLock(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
-      const newHash = hashSkillBody(currentBody);
-      const existing = file.approvedSkills.find((r) => r.name === skillName);
+      const newHash = hashSkillMaterial(currentMaterial);
+      const existing = file.approvedSkills.find((r) => r.name === recordKey);
       if (existing) {
         existing.sha256 = newHash;
         existing.approvedAt = new Date().toISOString();
       } else {
         file.approvedSkills.push({
-          name: skillName,
+          name: recordKey,
           sha256: newHash,
           approvedAt: new Date().toISOString(),
         });
