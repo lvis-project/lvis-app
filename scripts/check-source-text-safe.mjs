@@ -101,7 +101,11 @@ export function scanSourceTextSafety(repoRoot, roots = ROOTS, grandfathered = GR
   return { offenders, stale };
 }
 
-if (import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// Same guard shape as `check-import-cycles.mjs`: without the `process.argv[1]`
+// check, importing this module from a process that has no script path (`node -e`,
+// a REPL, a future runner) throws inside `resolve()` before the comparison.
+const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : "";
+if (import.meta.url === invokedPath) {
   const { offenders, stale } = scanSourceTextSafety(resolve(import.meta.dirname, ".."));
 
   if (stale.length > 0) {
