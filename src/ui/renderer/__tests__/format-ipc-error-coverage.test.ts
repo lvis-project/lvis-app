@@ -22,7 +22,11 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COMMON_IPC_ERROR_MESSAGES, formatIpcError } from "../format-ipc-error.js";
+import {
+  COMMON_IPC_ERROR_MESSAGES,
+  formatIpcError,
+  resolveIpcErrorKey,
+} from "../format-ipc-error.js";
 
 const __dirname = resolve(fileURLToPath(import.meta.url), "..");
 const IPC_DOMAIN_DIR = resolve(__dirname, "../../../ipc/domains");
@@ -102,5 +106,27 @@ describe("formatIpcError — full IPC error code coverage", () => {
         `code "${code}" did not resolve to a Korean message: "${message}"`,
       ).toBe(true);
     }
+  });
+});
+
+describe("resolveIpcErrorKey — own-property lookup", () => {
+  // The table is a plain object literal, and callers now pass an arbitrary
+  // `Error.message` as the code (a rejected `invoke` carries its code there). A bare
+  // index resolved `toString` to `Object.prototype.toString` — truthy, and handed to
+  // `t()` as a FUNCTION. This guards the guard, not the symptom.
+  it("does not resolve prototype members as error codes", () => {
+    for (const name of ["toString", "constructor", "valueOf", "hasOwnProperty", "__proto__"]) {
+      expect(resolveIpcErrorKey(name)).toBeUndefined();
+      // …and the formatter falls through to its message/unknown handling instead of
+      // rendering whatever the prototype held.
+      expect(typeof formatIpcError(name, undefined)).toBe("string");
+    }
+  });
+
+  it("resolves a real code and ignores an empty one", () => {
+    expect(resolveIpcErrorKey("rate-limited")).toBe(COMMON_IPC_ERROR_MESSAGES["rate-limited"]);
+    expect(resolveIpcErrorKey("")).toBeUndefined();
+    expect(resolveIpcErrorKey(undefined)).toBeUndefined();
+    expect(resolveIpcErrorKey("no-such-code-here")).toBeUndefined();
   });
 });
