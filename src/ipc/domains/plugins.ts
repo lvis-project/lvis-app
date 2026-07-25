@@ -1734,23 +1734,36 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       if (!isUsableMcpServerId(serverId)) {
         return { ok: false, error: "invalid-server-id" };
       }
-      if (userPromptRateLimiter.isOverCap(serverId)) {
-        auditAttach("error", `[mcp-resource:${serverId}] template attach rate limited`);
-        return { ok: false, error: "rate-limited" };
-      }
-      userPromptRateLimiter.record(serverId);
       // A `Map`, not a `Record`, all the way from here to the expansion. That is what
       // makes a variable named `toString` or `__proto__` an ordinary key instead of an
       // inherited slot — the same rule the prompt-arguments dialog states, held on the
       // main side too, because this map is built from renderer input.
+      //
+      // Built BEFORE the rate bucket, unlike the prompt path's argument loop. The bucket
+      // protects the SERVER from round-trips made on the user's behalf, and a request
+      // refused here never reaches one — charging the user's per-server budget for it
+      // would let a renderer bug spend the budget the user needs.
       const templateValues = new Map<string, string>();
       if (values && typeof values === "object" && !Array.isArray(values)) {
         for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
           if (templateValues.size >= MCP_RESOURCE_TEMPLATE_MAX_VARIABLES) break;
           if (typeof value !== "string" || !isUsableTemplateVariableName(key)) continue;
-          templateValues.set(key, value.slice(0, MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS));
+          // REFUSED, not clipped — and this is the one place the prompt path's rule does
+          // not carry over. A clipped prompt argument is a shorter question; a clipped
+          // path segment is a DIFFERENT resource, read without anyone being told. The
+          // expansion already refuses an over-long value, and slicing here is precisely
+          // what would stop that refusal from ever firing.
+          if (value.length > MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS) {
+            return { ok: false, error: "invalid-request" };
+          }
+          templateValues.set(key, value);
         }
       }
+      if (userPromptRateLimiter.isOverCap(serverId)) {
+        auditAttach("error", `[mcp-resource:${serverId}] template attach rate limited`);
+        return { ok: false, error: "rate-limited" };
+      }
+      userPromptRateLimiter.record(serverId);
       try {
         const read = await deps.mcpManager.readDeclaredResourceTemplate(
           serverId,
