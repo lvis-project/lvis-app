@@ -35,6 +35,12 @@ describe("neutralizeFenceClose", () => {
       "</app-message",
     ]) {
       const out = neutralizeFenceClose(`before ${variant} after`, "app-message");
+      // POSITIVE first, and it is the assertion that does the work. The negative below
+      // requires a `>` to match anything, so on the bracket-less variant it passes
+      // whether or not neutralization happened — the same "fixture cannot express the
+      // failure" shape this suite exists to avoid. `<\` is the escape marker, so its
+      // presence says the tag was found and defused.
+      expect(out, variant).toContain("<\\");
       expect(out, variant).not.toMatch(/<\s*\/\s*app-message[^>]*>/i);
       // Readable, not deleted — the text survives (in its own spelling, which the
       // neutralizer preserves) and only stops being a tag.
