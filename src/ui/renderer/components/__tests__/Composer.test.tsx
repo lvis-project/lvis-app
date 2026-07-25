@@ -953,6 +953,21 @@ describe("Composer — @ resource mention", () => {
     expect(screen.queryByTestId("attachment-chip")).toBeNull();
   });
 
+  it("still offers resources when the template channel is absent", async () => {
+    // Both catalogues share one `Promise.all`, so a missing method would throw into the
+    // catch that empties the whole catalogue — and the user would lose their RESOURCES
+    // because TEMPLATES were unavailable. The guard degrades instead.
+    installMcpApi();
+    (window as unknown as { lvis: { mcp: Record<string, unknown> } })
+      .lvis.mcp.listResourceTemplates = undefined;
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta);
+    expect(screen.getAllByTestId(/^resource-mention-item-/)).toHaveLength(2);
+  });
+
   it("lists templates alongside resources in one menu", async () => {
     // One list to the user. Both catalogues are fetched together for that reason — two
     // effects would each set the catalogue and the later one would erase the other's
