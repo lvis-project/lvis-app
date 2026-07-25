@@ -2809,4 +2809,9 @@ export const zhMessages: Record<string, string> = {
   "workGroup.stepCount": "{count} 步骤",
   "workGroup.work": "工作",
   "workGroup.working": "在职的...",
+  "composer.resourceMentionHint": "Enter 附加资源 · Esc 关闭",
+  "composer.resourceLimit": "每条消息最多 {max} 个资源 — 请先发送，然后再附加。",
+  "composer.resourceAttachFailed": "无法附加该资源。服务器可能已断开连接。",
+  "attachmentChip.resourceFromServer": "来自 MCP 服务器 {server} · 不可信内容",
+  "attachmentChip.resourceClipped": "来自 MCP 服务器 {server} · 不可信，已截断",
 };

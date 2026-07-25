@@ -85,7 +85,7 @@ export function App() {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    clearForNewChat, appendUserEntry, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
+    clearForNewChat, appendUserEntry, dropUserEntry, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
     fallbackToast,
     insertImportedTriggerEntry,
   } = useChatState(api);
@@ -616,7 +616,7 @@ export function App() {
   // use-send-message.ts.
   const { handleAsk } = useSendMessage({
     api, t, streaming, checkApiKey, composeOutgoing,
-    appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
+    appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
     llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,

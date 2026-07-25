@@ -4,15 +4,22 @@ import {
 } from "../types/attachments.js";
 
 /**
- * Marker recognized inside textarea body. Three shapes share `#N`:
+ * Marker recognized inside textarea body. Four shapes share `#N`:
  *   [Image #1]
  *   [File #2]
  *   [Pasted text #3 +12 lines]
+ *   [Resource #4]
  *
  * The trailing chars after `#N` are loose to tolerate the paste suffix
  * but the regex requires a closing `]` and forbids embedded `[`.
+ *
+ * ONE spelling of the alternation, because there are three regexes over it (parse,
+ * find-at-caret, and the paste replacement in `compose.ts`): a kind added to one and
+ * missed in another parses as a marker but cannot be deleted as one, or vice versa.
  */
-const MARKER_RE = /\[(?:Image|File|Pasted text) #(\d+)(?:\s+\+\d+\s+lines)?\]/g;
+const MARKER_LABELS = "Image|File|Pasted text|Resource";
+const MARKER_BODY = `\\[(?:${MARKER_LABELS}) #(\\d+)(?:\\s+\\+\\d+\\s+lines)?\\]`;
+const MARKER_RE = new RegExp(MARKER_BODY, "g");
 
 /**
  * Parse all marker numbers present in the textarea body.
@@ -67,6 +74,8 @@ export function buildMarkerText(att: Attachment): string {
       return `[File #${att.n}]`;
     case "paste":
       return `[Pasted text #${att.n} +${att.lines} lines]`;
+    case "resource":
+      return `[Resource #${att.n}]`;
   }
 }
 
@@ -104,7 +113,7 @@ export function findMarkerAt(
   }
   if (openIdx === -1) return null;
   const slice = text.slice(openIdx);
-  const m = slice.match(/^\[(?:Image|File|Pasted text) #\d+(?:\s+\+\d+\s+lines)?\]/);
+  const m = slice.match(new RegExp(`^${MARKER_BODY}`));
   if (!m) return null;
   const end = openIdx + m[0].length;
   if (cursor > openIdx && cursor <= end) return { start: openIdx, end };

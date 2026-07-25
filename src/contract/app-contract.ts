@@ -218,6 +218,13 @@ export const CHANNELS = {
     // turn. The host builds the fence, never the renderer — that is what keeps the
     // untrusted framing on server text that lands beside the user's words.
     attachResource: "lvis:mcp:attach-resource",
+    // The catalogue the composer's `@` mention picker offers, read from
+    // `McpManager.listDeclaredResources()` — the ONE projection. A read-only channel
+    // for state the renderer could ALMOST derive from `mcp:servers`, and that "almost"
+    // is why it exists: the projection hides servers whose catalogue is stale or whose
+    // read can only fail, and a picker re-deriving that rule would be a second answer
+    // to "which resources can be attached" that nothing keeps in step.
+    listResources: "lvis:mcp:list-resources",
     // MCP Apps `ondownloadfile` (`ui/download-file`) — the app hands over INLINE bytes it
     // already possessed and asks the host to save them. The host never fetches an
     // app-supplied URI (a `resource_link` is rejected at parse time), so this channel
