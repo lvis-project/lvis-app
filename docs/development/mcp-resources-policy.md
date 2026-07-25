@@ -165,8 +165,10 @@ and 3 do (`src/tools`, `src/ipc`), so they carry the 3-role attestation.
   discovery AND approved by governance; unclassified methods fail closed.
 - `resources/read` accepts only a URI the host listed; the URI is an opaque
   identifier the host never resolves.
-- Resource text enters the turn only inside its untrusted fence, with the body's
-  own closing tag neutralized and the whole render bounded.
+- Resource text is bounded wherever it enters the host, and the shape it enters in
+  depends on the surface: a `tool_result` for the model path (stage 2 — the channel
+  every tool result uses), and an untrusted FENCE with the body's own closing tag
+  neutralized for the user path (stage 3), because that one becomes prompt context.
 - A resource can never carry tool authority: it is data in the turn, and the
   permission decision belongs to the turn's real origin.
 - Wire fields are validated at the client boundary, so one shape reaches main, the
