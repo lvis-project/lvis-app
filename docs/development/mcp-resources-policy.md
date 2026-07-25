@@ -204,15 +204,24 @@ are decisions rather than omissions:
     structural and retires the forgery and false-positive questions together. Written
     down here so the next person reaches for it instead of the input count.
 
-The bound also sizes the user-initiated MCP rate bucket, which prompts and attachments
-share: attaching is no longer one click per call, so the bucket is derived from this
-number rather than being a flat count that a few full turns would exhaust.
+The bound interacts with the user-initiated MCP rate bucket that prompts and attachments
+share, which had to grow once attaching stopped being one click per call — at a flat 20,
+three full-attachment turns in a minute hit `rate-limited` mid-turn. The bucket is NOT
+derived from this bound, though it was briefly: it is a ceiling on requests to somebody
+else's server, while this is a budget for our own context window, and deriving it meant a
+change to our window budget silently re-deciding how hard a server can be hit. The
+relationship is checked by a test instead, so moving either one forces a look at both.
 
 The fence is `<mcp-resource trust="untrusted-server-data">`, registered in the
 `FenceTag` union so its builder had to answer the escape question. Inside the fence
 the body's own closing tag is neutralized (it cannot end the region and continue
 outside it) and so is any opening tag (it cannot forge frames, which would let one
-hostile resource spend the whole per-turn budget and refuse the user's send).
+hostile resource spend the whole per-turn budget and refuse the user's send). Neither
+rule requires a well-formed tag: `</mcp-resource` alone is neutralized, because a rule
+that waited for the closing bracket was both quadratic on unterminated tags and — once
+the span between was bounded to fix that — escapable by padding the close tag past the
+bound. The consumer is a model reading prose, so "looks like a tag" is the standard, and
+that makes tag-name matching the whole rule.
 Attribute values printed into the open tag go through the same module's
 `fenceAttrValue`, because an attribute carrying `">` is the other way out of a fence.
 A clip is admitted in a line the model reads rather than a flag the UI could ignore.

@@ -31,33 +31,37 @@ export type FenceTag =
  * Neutralize any closing tag for `tag` inside app/plugin-authored `text`, so the body
  * cannot close the fence that frames it and continue outside.
  *
- * Case-insensitive, whitespace-tolerant on BOTH sides of the slash (`</APP-MESSAGE>`,
- * `</ app-message >`, `< /app-message>`), and tolerant of anything trailing the tag
- * name inside the angle brackets (`</app-message x>`): the consumer is a MODEL READING
- * PROSE, not a strict XML parser, so every near-miss close is as effective an escape as
- * an exact one, and each variant this failed to cover was a way out of the fence. The
- * `\b` keeps it from matching a longer ALPHANUMERIC name (`</app-messages>` is not this
- * fence) — but not a hyphenated one, since `-` is itself a non-word character, so
- * `</app-message-log>` is escaped too. Every tag here is hyphenated, so that is the
- * likely collision rather than the plural: over-escaping is the safe direction (a
- * foreign tag picks up a backslash, its text intact) and it is pinned as a choice.
+ * Case-insensitive and whitespace-tolerant on BOTH sides of the slash (`</APP-MESSAGE>`,
+ * `</ app-message >`, `< /app-message>`), because the consumer is a MODEL READING PROSE,
+ * not a strict XML parser: every near-miss close is as effective an escape as an exact
+ * one, and each variant this failed to cover was a way out of the fence.
  *
- * That trailing span is BOUNDED, and the bound is load-bearing rather than tidy. An
- * unbounded `[^>]*` is quadratic on a body of repeated UNTERMINATED close tags
- * (`</app-message` with no `>`): every start position matches the tag name, then scans
- * to end-of-string for a `>` that never comes. Measured at 8.9 s for one 512 KB body —
- * a main-process freeze an untrusted party can author, since one caller neutralizes
- * before it caps. A close tag a model reads as a tag carries tens of characters of
- * attributes, never thousands, so the bound gives up nothing real.
+ * It deliberately does NOT require the closing `>`. That is the same shape as
+ * {@link neutralizeFenceOpen}, and this rule arrived at it the long way round. Requiring
+ * `>` with an unbounded span between (`[^>]*`) is quadratic on repeated UNTERMINATED
+ * close tags — 8.9 s for one 512 KB body, a main-process freeze an untrusted party can
+ * author. Bounding that span to N characters fixed the cost and left something worse: a
+ * body escaped its fence by padding its close tag past N, so the bound was a BYPASS
+ * THRESHOLD dressed as a cost knob. Matching `</tag` and stopping is faster than either
+ * (3 ms per 512 KB), has no constant to tune and nothing to pad past, and gives the
+ * module one shape for both halves of a frame.
+ *
+ * What it gives up is that a bare `</app-message` with no `>` is escaped too. That is
+ * the trade the open side already makes, and over-escaping is the safe direction here:
+ * the text stays readable, only its tag-ness is removed.
+ *
+ * The `\b` keeps it from matching a longer name that continues with a WORD character
+ * (`</app-messages>` is not this fence) — but not a hyphenated one, since `-` is itself
+ * a non-word character, so `</app-message-log>` is escaped. Every tag here is
+ * hyphenated, so that is the likely collision rather than the plural, and it is pinned
+ * as a choice rather than left for a reader to discover.
  *
  * The original spelling is preserved, with the `<` escaped — the text stays readable
  * and the tag stops being a tag.
  */
-const FENCE_CLOSE_TRAILING_MAX = 120;
-
 export function neutralizeFenceClose(text: string, tag: FenceTag): string {
   return text.replace(
-    new RegExp(`<\\s*/\\s*${tag}\\b[^>]{0,${FENCE_CLOSE_TRAILING_MAX}}>`, "gi"),
+    new RegExp(`<\\s*/\\s*${tag}\\b`, "gi"),
     (match) => `<\\${match.slice(1)}`,
   );
 }
