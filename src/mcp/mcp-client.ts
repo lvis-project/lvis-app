@@ -618,9 +618,11 @@ export class McpClient {
     });
     // Sliced BEFORE mapping: `renderMcpPrompt`'s block cap applies to the mapped
     // array, so a server returning a huge `messages` array would already have paid
-    // for the allocation by then.
+    // for the allocation by then. ONE past the cap, deliberately: the renderer
+    // reports truncation by comparing against what it was given, so slicing exactly
+    // to the cap would hide the clip from the user while still clipping it.
     const messages = Array.isArray(result.messages)
-      ? result.messages.slice(0, MCP_PROMPT_MAX_BLOCKS)
+      ? result.messages.slice(0, MCP_PROMPT_MAX_BLOCKS + 1)
       : [];
     const blocks = messages.map((message) => ({
       role: typeof message.role === "string" ? message.role : "user",
