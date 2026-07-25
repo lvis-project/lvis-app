@@ -9,6 +9,8 @@ export const en = {
   "attachmentChip.pastedFromClipboard": "Pasted from clipboard",
   "attachmentChip.openExternalTitle": "Open with default app",
   "attachmentChip.openExternalButton": "Open",
+  "attachmentChip.resourceFromServer": "From MCP server {server} · untrusted content",
+  "attachmentChip.resourceClipped": "From MCP server {server} · untrusted, clipped",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "attachmentChip.chipAriaLabel": "첨부 {label} — 정보 보기 또는 파일 열기",
@@ -20,4 +22,6 @@ export const ko: Record<keyof typeof en, string> = {
   "attachmentChip.pastedFromClipboard": "클립보드에서 붙여넣음",
   "attachmentChip.openExternalTitle": "기본 앱으로 열기",
   "attachmentChip.openExternalButton": "열기",
+  "attachmentChip.resourceFromServer": "MCP 서버 {server} 제공 · 비신뢰 콘텐츠",
+  "attachmentChip.resourceClipped": "MCP 서버 {server} 제공 · 비신뢰, 일부 잘림",
 };

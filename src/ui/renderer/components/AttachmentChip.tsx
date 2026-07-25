@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { File as FileIcon, ClipboardPaste } from "lucide-react";
+import { File as FileIcon, ClipboardPaste, Database } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -65,9 +65,18 @@ function PasteThumb() {
   );
 }
 
+function ResourceThumb() {
+  return (
+    <div className="flex h-12 w-12 items-center justify-center rounded border border-border bg-muted text-muted-foreground">
+      <Database className="h-5 w-5" />
+    </div>
+  );
+}
+
 function chipLabel(att: Attachment): string {
   if (att.kind === "image") return `#${att.n}`;
   if (att.kind === "file") return collapsePath(att.name);
+  if (att.kind === "resource") return att.label;
   return `+${att.lines} lines`;
 }
 
@@ -153,6 +162,8 @@ export function AttachmentChip({
             <ImageThumb att={attachment} />
           ) : attachment.kind === "file" ? (
             <FileThumb />
+          ) : attachment.kind === "resource" ? (
+            <ResourceThumb />
           ) : (
             <PasteThumb />
           )}
@@ -275,6 +286,8 @@ export function AttachmentOverlay({
                 />
               ) : att.kind === "file" ? (
                 <FileThumb />
+              ) : att.kind === "resource" ? (
+                <ResourceThumb />
               ) : (
                 <PasteThumb />
               )}
@@ -285,27 +298,35 @@ export function AttachmentOverlay({
                   ? `Image #${att.n}`
                   : att.kind === "file"
                     ? `File #${att.n}`
-                    : `Pasted text #${att.n}`}
+                    : att.kind === "resource"
+                      ? `Resource #${att.n}`
+                      : `Pasted text #${att.n}`}
               </div>
               <div
                 className="truncate font-mono text-[10px] text-muted-foreground"
-                title={att.kind === "paste" ? undefined : att.path}
+                title={att.kind === "image" || att.kind === "file" ? att.path : undefined}
               >
                 {att.kind === "image"
                   ? collapsePath(att.path)
                   : att.kind === "file"
                     ? collapsePath(att.path)
-                    : `+${att.lines} lines · ${att.chars} chars`}
+                    : att.kind === "resource"
+                      ? att.uri
+                      : `+${att.lines} lines · ${att.chars} chars`}
               </div>
               <div className="text-[10px] text-muted-foreground/(--opacity-stronger)">
                 {att.kind === "image"
                   ? `${att.mimeType} · ${att.width}×${att.height} · ${formatBytes(att.bytes)}`
                   : att.kind === "file"
                     ? `${att.ext.toUpperCase()} · ${formatBytes(att.bytes)}`
-                    : t("attachmentChip.pastedFromClipboard")}
+                    : att.kind === "resource"
+                      ? t(att.truncated
+                        ? "attachmentChip.resourceClipped"
+                        : "attachmentChip.resourceFromServer", { server: att.serverId })
+                      : t("attachmentChip.pastedFromClipboard")}
               </div>
             </div>
-            {att.kind !== "paste" && onOpenExternal ? (
+            {(att.kind === "image" || att.kind === "file") && onOpenExternal ? (
               <button
                 type="button"
                 onClick={() => onOpenExternal(att.path)}

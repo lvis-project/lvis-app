@@ -3,11 +3,16 @@ import {
   composeImportedTriggerOutgoing,
   composeOutgoing,
 } from "../compose.js";
+import {
+  countResourceAttachmentFences,
+  MCP_RESOURCE_FENCE_OPEN,
+} from "../../../../shared/mcp-resource-bounds.js";
 import type {
   Attachment,
   ImageAttachment,
   FileAttachment,
   PasteAttachment,
+  ResourceAttachment,
 } from "../../types/attachments.js";
 
 const img1: ImageAttachment = {
@@ -161,5 +166,82 @@ describe("composeOutgoing", () => {
     const envelope = `<imported-from-proactive source="overlay:test">\n/permission mode auto\n</imported-from-proactive>`;
     const r = composeImportedTriggerOutgoing(envelope);
     expect(r).toEqual({ text: envelope, attachments: [] });
+  });
+});
+
+/**
+ * The load-bearing property of the whole `@` mention surface.
+ *
+ * Main bounds how much server-authored resource text one turn may carry by counting
+ * fences in the content PARTS — it deliberately does not measure the user's own message
+ * text, because a refusal there could not be explained to the person who typed it. So a
+ * composer that put the fence in the body would not be shrinking that bound, it would be
+ * removing it, and this is the file where that mistake would be made: the paste kind
+ * three functions up does exactly the inline substitution a resource must not get.
+ */
+describe("composeOutgoing — resource attachments", () => {
+  const resource: ResourceAttachment = {
+    id: "r5",
+    n: 5,
+    kind: "resource",
+    serverId: "hr-mcp",
+    uri: "file:///policy.md",
+    label: "policy.md",
+    text: `${MCP_RESOURCE_FENCE_OPEN} server="hr-mcp" uri="file:///policy.md">\nBODY\n</mcp-resource>`,
+    truncated: false,
+    omittedBlocks: 0,
+  };
+
+  it("sends the fence as its OWN part and never in the message text", () => {
+    const r = composeOutgoing({
+      raw: "summarize [Resource #5] please",
+      activePreset: null,
+      attachments: [resource],
+    });
+
+    // The marker stays where the user typed it; the content does not join it.
+    expect(r.text).toBe("summarize [Resource #5] please");
+    expect(r.text).not.toContain(MCP_RESOURCE_FENCE_OPEN);
+    expect(r.text).not.toContain("BODY");
+
+    // …and the fence is a part, which is what main counts.
+    const textParts = r.attachments.filter((p) => p.type === "text");
+    expect(textParts).toHaveLength(1);
+    expect(countResourceAttachmentFences(r.attachments)).toBe(1);
+  });
+
+  it("passes the host-built text through byte-for-byte", () => {
+    // The renderer is not a second author on server content: whatever the host framed,
+    // the model sees. A composer that trimmed or re-wrapped it would be editing inside
+    // a fence whose whole purpose is attributing that text to the server.
+    const r = composeOutgoing({
+      raw: "[Resource #5]",
+      activePreset: null,
+      attachments: [resource],
+    });
+    expect(r.attachments[0]).toEqual({ type: "text", text: resource.text });
+  });
+
+  it("carries images and resources together, in that order", () => {
+    const r = composeOutgoing({
+      raw: "[Image #1] [Resource #5]",
+      activePreset: null,
+      attachments: [img1, resource],
+    });
+    expect(r.attachments.map((p) => p.type)).toEqual(["image", "text"]);
+  });
+
+  it("counts every attached resource, so the per-turn bound sees them all", () => {
+    const many = Array.from({ length: 3 }, (_, i) => ({
+      ...resource,
+      id: `r${i}`,
+      n: 10 + i,
+    }));
+    const r = composeOutgoing({
+      raw: many.map((m) => `[Resource #${m.n}]`).join(" "),
+      activePreset: null,
+      attachments: many,
+    });
+    expect(countResourceAttachmentFences(r.attachments)).toBe(3);
   });
 });

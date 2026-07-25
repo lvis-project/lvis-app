@@ -153,3 +153,28 @@ describe("findMarkerAt", () => {
     expect(findMarkerAt("[Image #1]", 0)).toBeNull();
   });
 });
+
+describe("resource markers", () => {
+  it("parses and builds the [Resource #N] shape", () => {
+    expect(buildMarkerText({
+      id: "r1",
+      n: 4,
+      kind: "resource",
+      serverId: "hr-mcp",
+      uri: "file:///policy.md",
+      label: "policy.md",
+      text: "fence",
+      truncated: false,
+      omittedBlocks: 0,
+    })).toBe("[Resource #4]");
+    expect(parseMarkers("see [Resource #4] and [Image #1]")).toEqual([4, 1]);
+  });
+
+  it("deletes a resource marker in one keystroke like every other kind", () => {
+    // The three regexes over the marker alternation are built from one string, so a kind
+    // that parses must also be findable — a kind added to `parseMarkers` alone would
+    // leave a chip the user can create and then cannot remove.
+    const text = "before [Resource #4] after";
+    expect(findMarkerAt(text, 20)).toEqual({ start: 7, end: 20 });
+  });
+});
