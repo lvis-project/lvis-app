@@ -21,8 +21,10 @@ import { markStaleToolResults } from "../auto-compact.js";
 import { normalizeAiSdkUsageForCost } from "../llm/pricing.js";
 import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
-import { parseImportedTriggerEnvelopePayload } from "../../shared/overlay-trigger-source.js";
-import { parseAppMessageEnvelopePayload } from "../../shared/mcp-app-message-source.js";
+import {
+  parseStagedEnvelopePayload,
+  stagedOriginForInput,
+} from "../../shared/staged-origins.js";
 import { sessionContext } from "../session-context.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
@@ -301,12 +303,11 @@ export async function runTurn(
     // user bubble — for a plugin overlay trigger AND for an MCP App's confirmed
     // `ui/message`. Both read provenance from their own envelope; `source` is what the
     // transcript shows (`overlay:…` / `app:…`).
-    const importedTrigger =
-      inputOrigin === "plugin-emitted"
-        ? parseImportedTriggerEnvelopePayload(turnInput)
-        : inputOrigin === "app-emitted"
-          ? parseAppMessageEnvelopePayload(turnInput)
-          : null;
+    // Table-driven: a per-origin ternary here defaulted to `null`, and a missing
+    // branch made server/app-authored text render as a genuine USER bubble.
+    const importedTrigger = stagedOriginForInput(inputOrigin)
+      ? parseStagedEnvelopePayload(turnInput)
+      : null;
     if (inputOrigin === "agent-message") {
       agentMessageInputId = randomUUID();
     }

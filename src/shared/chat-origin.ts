@@ -11,6 +11,15 @@ export type ChatInputOrigin =
    * see `shared/mcp-app-message-source.ts`.
    */
   | "app-emitted"
+  /**
+   * MCP server prompt (`prompts/get`) — the USER explicitly selected a prompt the
+   * server declared, but the returned messages are SERVER-authored. Never
+   * `user-keyboard`: the user chose to run it, not what it says, so the text is
+   * staged with untrusted provenance and its tool calls are non-user provenance.
+   * Provenance travels in the `<mcp-prompt source="mcp-prompt:<serverId>">`
+   * envelope — see `shared/staged-origins.ts`.
+   */
+  | "mcp-prompt-emitted"
   | "llm-tool-arg"
   | "agent-message"
   | "file-content"
@@ -20,7 +29,7 @@ export type ChatInputOrigin =
 
 export type ChatSendInputOrigin = Extract<
   ChatInputOrigin,
-  "user-keyboard" | "plugin-emitted" | "app-emitted" | "queue-auto"
+  "user-keyboard" | "plugin-emitted" | "app-emitted" | "mcp-prompt-emitted" | "queue-auto"
 >;
 export type TrustOriginWithUnknown = ChatInputOrigin | "unknown";
 
