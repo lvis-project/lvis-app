@@ -31,6 +31,21 @@ import { t } from "../i18n/index.js";
 /** The fence tag every resource attachment carries. Recognizable by the send gate. */
 export const MCP_RESOURCE_FENCE_OPEN = '<mcp-resource trust="untrusted-server-data"';
 
+/**
+ * Make a server-chosen value safe to print INSIDE the fence's open tag.
+ *
+ * `neutralizeFenceClose` protects the body; the header needs its own guard, and
+ * this is the second half of the same rule. A value carrying `">` would close the
+ * fence on line 1 and put whatever followed OUTSIDE it, beside the user's own words
+ * — with the untrusted framing then applying to nothing. The catalogue boundary
+ * already rejects those characters in a URI (`isUsableResourceUri`), so this is
+ * belt to that suspenders: this module states that it owns escape prevention, and a
+ * builder that depends on its caller having validated the input does not.
+ */
+function fenceAttr(value: string, maxChars: number): string {
+  return value.slice(0, maxChars).replace(/["<>]/g, "");
+}
+
 export interface ResourceReadBlocks {
   blocks: Array<{ uri?: string; mimeType?: string; text?: string; omittedKind?: string }>;
   droppedBlocks: number;
@@ -90,8 +105,8 @@ export function renderResourceAttachment(
   }
 
   const header = [
-    `${MCP_RESOURCE_FENCE_OPEN} server="${serverId.slice(0, 128)}"`
-      + ` uri="${uri.slice(0, MCP_RESOURCE_URI_MAX_CHARS)}">`,
+    `${MCP_RESOURCE_FENCE_OPEN} server="${fenceAttr(serverId, 128)}"`
+      + ` uri="${fenceAttr(uri, MCP_RESOURCE_URI_MAX_CHARS)}">`,
     t("be_mcpResourceAttachment.untrusted"),
     t("be_mcpResourceAttachment.noInstructions"),
     ...(truncated ? [t("be_mcpResourceAttachment.truncated")] : []),
