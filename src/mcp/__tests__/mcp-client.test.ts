@@ -1949,12 +1949,22 @@ describe("MCP resources discovery and read", () => {
         },
       ],
     });
+    // `createLogger` proxies to console.log for info in test mode (lib/logger.ts).
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
     await client.connect();
     const resources = client.getState().resources ?? [];
     expect(resources.map((r) => r.uri)).toEqual(["file:///dup", "file:///ok"]);
     expect(resources[0].name).toBe("first");
     // A non-string name falls back to the URI rather than dropping the resource.
     expect(resources[1].name).toBe("file:///ok");
+    // The whole point of the count is that a user can ask where their resource went
+    // and read an answer that adds up. 7 published, 2 catalogued, so it must say 5 —
+    // counting only the malformed ones (4 here) would report a number that leaves the
+    // duplicate unexplained and reads as "everything else made it".
+    const line = info.mock.calls.map((c) => c.join(" ")).find((l) => l.includes("discovered"));
+    expect(line).toContain("discovered 2 resource(s)");
+    expect(line).toContain("5 of 7 published not catalogued");
+    info.mockRestore();
     await client.disconnect();
   });
 

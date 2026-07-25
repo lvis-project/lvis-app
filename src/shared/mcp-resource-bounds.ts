@@ -44,34 +44,38 @@ export const MCP_RESOURCE_ATTACHMENTS_PER_TURN = 8;
 export const MCP_RESOURCE_FENCE_OPEN = '<mcp-resource trust="untrusted-server-data"';
 
 /**
- * How many resource fences a turn's material carries, across the input text AND
- * every text part.
+ * How many resource fences a turn's ATTACHED parts carry.
  *
- * Counts OCCURRENCES, not parts. The first cut of this test asked whether a part
- * *starts with* the fence, which made the bound a property of the renderer's
- * packaging instead of the turn's content: a composer that joined twelve
- * attachments into one text part — the natural way to put a fence beside the
- * user's own words — counted as one, and ~384 KB of server-authored text entered a
- * turn whose bound was meant to be 8 reads. Counting the tag makes the answer the
- * same however the material is packaged.
+ * Counts OCCURRENCES, not parts. Asking whether a part *starts with* the fence made
+ * the bound a property of the renderer's packaging rather than of what it attached: a
+ * composer that joined twelve attachments into one text part — the natural way to put
+ * a fence beside the user's own words — counted as one, and ~384 KB of server-authored
+ * text entered a turn whose bound was meant to be 8 reads. Counting the tag makes the
+ * answer the same however the parts are packaged.
  *
- * `input` is included because the fenced blocks END UP there: `continue-last-user`
- * joins a turn's text parts into the prompt body, so any check that only sees
- * attachments stops applying after one replay. Same lesson as the turn's staged
- * origin, which is likewise derived from the text at the turn-entry chokepoint
- * rather than trusted from the send payload.
+ * Scoped to ATTACHMENTS on purpose; the user's own message text is not counted, even
+ * though a fence pasted there is indistinguishable from a host-built one. Counting it
+ * looked stricter and was worse: this bound governs what the HOST attaches, so a
+ * refusal is only ever explainable when the host built the material. A developer
+ * pasting an LVIS transcript excerpt — which contains these fences verbatim — would
+ * otherwise have their message rejected, told to remove resources they never attached,
+ * with no way to discover why. A bound on window budget must not make legitimate text
+ * unsendable.
  *
- * Deliberately blind to authorship: a user who pastes the tag into their own
- * message spends budget for it. The host cannot tell its own fence from a forged
- * one once both are text in the same field, and the fence is a trust DEMOTION
- * marker — so the conservative reading (count it) costs a forger nothing and
- * protects the window either way.
+ * Nothing is lost by that scope, in this order of doubt:
+ *   - a forged fence in the user's own words is the user demoting their OWN text (the
+ *     fence marks content as less trusted, never more), so it buys a forger nothing;
+ *   - the replay paths fold a turn's parts into the input text, so the count no longer
+ *     applies there — but a replay re-sends a turn that already passed the bound, and
+ *     folding cannot multiply it;
+ *   - which leaves one real constraint, on stage 3b: a mention must resolve to an
+ *     attachment PART. A composer that splices the fence into the user's message text
+ *     puts server content in the one field this does not measure.
  */
 export function countResourceAttachmentFences(
-  input: string,
   parts?: ReadonlyArray<{ type?: unknown; text?: unknown }>,
 ): number {
-  let count = occurrences(input);
+  let count = 0;
   for (const part of parts ?? []) {
     if (part?.type === "text" && typeof part.text === "string") count += occurrences(part.text);
   }

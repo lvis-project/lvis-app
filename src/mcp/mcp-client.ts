@@ -652,11 +652,14 @@ export class McpClient {
     try {
       const resources: McpResourceSummary[] = [];
       const seen = new Set<string>();
-      // Counted, because dropping is silent otherwise: a server publishing a URI with
-      // a raw space or backslash (`file:///C:/Program Files/x.md`) legitimately
-      // vanishes from the catalogue, and a user asking where their resource went has
-      // nothing to read. Fail-closed is right; unexplained is not.
-      let dropped = 0;
+      // Every entry the server published is counted, not just the malformed ones: a
+      // resource can also fail to appear by being a duplicate URI or by arriving past
+      // the per-server limit, and a log line that names only one of those reasons
+      // reads as "everything else made it". A user asking where their resource went
+      // (`file:///C:/Program Files/x.md`, dropped for the raw space) needs the total
+      // to be honest, or the number they can see does not add up. Fail-closed is
+      // right; unexplained is not.
+      let published = 0;
       let cursor: string | undefined;
       for (let page = 0; page < MCP_RESOURCE_MAX_PAGES; page++) {
         const result = await this.sendRequest<McpResourcesListResult>(
@@ -664,26 +667,21 @@ export class McpClient {
           cursor ? { cursor } : {},
           HANDSHAKE_TIMEOUT_MS,
         );
-        for (const entry of Array.isArray(result.resources) ? result.resources : []) {
+        const entries = Array.isArray(result.resources) ? result.resources : [];
+        // Counted per PAGE, not per entry, so reaching the per-server limit still
+        // stops the walk instead of iterating a server-sized array to keep score.
+        published += entries.length;
+        for (const entry of entries) {
           if (resources.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
-          if (!entry || typeof entry !== "object") {
-            dropped += 1;
-            continue;
-          }
-          if (!isUsableResourceUri(entry.uri)) {
-            dropped += 1;
-            continue;
-          }
+          if (!entry || typeof entry !== "object") continue;
+          if (!isUsableResourceUri(entry.uri)) continue;
           // De-duplicated by URI: the read path resolves a URI to at most one
           // catalogue entry, and two entries sharing a URI would make which one the
           // user picked unobservable.
           if (seen.has(entry.uri)) continue;
           const name = usableResourceText(entry.name, MCP_RESOURCE_NAME_MAX_CHARS)
             ?? usableResourceText(entry.uri, MCP_RESOURCE_NAME_MAX_CHARS);
-          if (!name) {
-            dropped += 1;
-            continue;
-          }
+          if (!name) continue;
           seen.add(entry.uri);
           const title = usableResourceText(entry.title, MCP_RESOURCE_NAME_MAX_CHARS);
           const description = usableResourceText(
@@ -710,9 +708,13 @@ export class McpClient {
         if (!cursor || resources.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
       }
       this.state.resources = resources;
+      const notCatalogued = published - resources.length;
       log.info(
         `${this.config.id} discovered ${resources.length} resource(s)`
-          + `${dropped > 0 ? ` (${dropped} unusable entr${dropped === 1 ? "y" : "ies"} dropped)` : ""}`,
+          + `${notCatalogued > 0
+            ? ` (${notCatalogued} of ${published} published not catalogued: unusable, duplicate,`
+              + ` or past the ${MCP_RESOURCE_MAX_PER_SERVER} per-server limit)`
+            : ""}`,
       );
     } catch (err) {
       log.warn(

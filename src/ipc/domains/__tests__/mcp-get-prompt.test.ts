@@ -13,6 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { makeAppIpcInvoker } from "./test-helpers.js";
+import { USER_PROMPT_RATE_LIMIT_MAX_CALLS } from "../../../boot/steps/plugin-runtime/trigger-gate.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -190,7 +191,10 @@ describe("lvis:mcp:get-prompt — outcome", () => {
   it("rate limits repeated prompt fetches for one server", async () => {
     const { serverId } = await setup();
     let limited: unknown = null;
-    for (let i = 0; i < 40 && !limited; i++) {
+    // Derived from the bucket, not a magic number: the cap is now a function of the
+    // per-turn attachment bound, and a hardcoded loop stops proving anything the
+    // moment that moves — this test failed exactly that way when it did.
+    for (let i = 0; i <= USER_PROMPT_RATE_LIMIT_MAX_CALLS && !limited; i++) {
       const out = (await invoke(CHANNEL, serverId, "p", {})) as { ok: boolean; error?: string };
       if (out.ok === false && out.error === "rate-limited") limited = out;
     }

@@ -114,22 +114,18 @@ export async function runStreamedTurn(
   if (claimedKind && !envelope) {
     throw new Error(claimedKind.missingEnvelopeError);
   }
-  // How much server-authored resource text one turn may carry, enforced HERE for the
-  // same reason the origin above is read from the text: this is the one place every
-  // turn passes through. The send gates cannot hold it — `chat send` and
-  // `sidechat send` parse their payloads separately, and the replay paths
-  // (edit-resend, continue-last-user, retry-effort) never reach either gate, which is
-  // exactly how the force-ask bypass happened before. Counting fences rather than
-  // parts makes the bound independent of how the renderer packaged them, and counting
-  // `input` too keeps it applying after `continue-last-user` folds the parts into the
-  // prompt body.
+  // How much server-authored resource text one turn may carry. Enforced HERE, not at
+  // either send gate, because `chat send` and `sidechat send` parse their payloads
+  // separately — a bound in one of them simply would not exist for the other, and this
+  // is the one place both arrive. Counting fences rather than parts makes it
+  // independent of how the renderer packaged them.
   //
-  // Refused, not trimmed: dropping the extras silently would leave the model
-  // answering from 8 of the 10 documents the user believes it read, with nothing in
-  // the transcript or the audit log saying so.
-  if (
-    countResourceAttachmentFences(input, options.attachments) > MCP_RESOURCE_ATTACHMENTS_PER_TURN
-  ) {
+  // Refused, not trimmed: dropping the extras silently would leave the model answering
+  // from 8 of the 10 documents the user believes it read, with nothing in the
+  // transcript or the audit log saying so. That is only a safe trade because the count
+  // is over ATTACHMENTS — material the host built — so the refusal always names
+  // something the user can see and remove.
+  if (countResourceAttachmentFences(options.attachments) > MCP_RESOURCE_ATTACHMENTS_PER_TURN) {
     throw new Error("too-many-resource-attachments");
   }
   const inputOrigin = envelope?.kind.inputOrigin ?? options.inputOrigin;

@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { makeAppIpcInvoker } from "./test-helpers.js";
+import { USER_PROMPT_RATE_LIMIT_MAX_CALLS } from "../../../boot/steps/plugin-runtime/trigger-gate.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -170,10 +171,17 @@ describe("lvis:mcp:attach-resource — outcome", () => {
     expect(result.omittedBlocks).toBe(1);
   });
 
-  it("rate limits per server", async () => {
-    const { serverId } = await setup();
+  // Two properties in one, because a single-key fixture proves only that SOME limit
+  // exists — not that it is keyed by server, which is the whole point of the bucket.
+  // The second half pins the deliberate sharing with `getPrompt`: both are round-trips
+  // the user asked for against one server, and what the budget protects is that server
+  // from a renderer looping on the user's behalf.
+  it("rate limits per server, and shares the budget with prompts/get", async () => {
+    const { deps, serverId } = await setup();
+    const other = `${serverId}-other`;
+
     let limited = false;
-    for (let i = 0; i < 40; i += 1) {
+    for (let i = 0; i <= USER_PROMPT_RATE_LIMIT_MAX_CALLS; i += 1) {
       const result = (await invoke(CHANNEL, serverId, "file:///x")) as { error?: string };
       if (result.error === "rate-limited") {
         limited = true;
@@ -181,5 +189,14 @@ describe("lvis:mcp:attach-resource — outcome", () => {
       }
     }
     expect(limited).toBe(true);
+
+    // A different server is untouched — one chatty surface cannot starve another.
+    expect(await invoke(CHANNEL, other, "file:///x")).toMatchObject({ ok: true });
+
+    // …and the prompt surface on the SPENT server is limited by the same bucket,
+    // without ever reaching the server.
+    const promptResult = await invoke("lvis:mcp:get-prompt", serverId, "summarize", {});
+    expect(promptResult).toMatchObject({ ok: false, error: "rate-limited" });
+    expect(deps.mcpManager.getPrompt).not.toHaveBeenCalled();
   });
 });
