@@ -133,6 +133,28 @@ describe("expandResourceUriTemplate", () => {
       .toBe("file:///project/javascript%3Aalert(1)");
   });
 
+  it("cannot be typed into a scheme the host reserves", () => {
+    // The sharpest case, and it is REACHABLE: a variable in scheme position catalogues,
+    // because the skeleton `x://host/x` is a legal server-custom scheme. Percent-encoding
+    // does not help here — `javascript` and `ui` are already unreserved characters — so
+    // the only thing standing between this and `javascript:alert(1)` is the final
+    // re-validation of the EXPANSION with the ordinary URI predicate. These pin that it
+    // is doing the work.
+    expect(isUsableResourceUriTemplate("{scheme}://example.com/{path}")).toBe(true);
+    expect(isUsableResourceUriTemplate("{scheme}:alert(1)")).toBe(true);
+
+    expect(expandResourceUriTemplate("{scheme}:alert(1)", values({ scheme: "javascript" })))
+      .toBeNull();
+    expect(expandResourceUriTemplate("{scheme}://widget/{id}", values({ scheme: "ui", id: "x" })))
+      .toBeNull();
+    expect(expandResourceUriTemplate("{scheme}:x", values({ scheme: "data" }))).toBeNull();
+    // `https:` is not reserved — it is LISTED and then refused at fetch time, by the
+    // client, from the expansion. So the expansion itself must succeed, or that refusal
+    // would never be the thing doing the work.
+    expect(expandResourceUriTemplate("{scheme}://example.com/{path}",
+      values({ scheme: "https", path: "r.pdf" }))).toBe("https://example.com/r.pdf");
+  });
+
   it("refuses rather than substituting nothing", () => {
     // An empty expansion silently points at the directory above — a different resource
     // than the user asked for, and one they cannot see they asked for.

@@ -121,8 +121,8 @@ a shortcut around the spec; it is the property the read path rests on:
     typing `../../etc/passwd` produces one segment, not a traversal. `{+var}` is defined
     as RESERVED expansion, which does NOT encode `/` — accepting it would hand the server
     exactly that traversal, chosen by whoever is typing.
-  - the literal part is fixed by the server at discovery, so nothing typed later can move
-    the scheme or the authority.
+  - a value can never introduce URI STRUCTURE: `/`, `?`, `#`, `:` and `@` all encode, so
+    what the user types stays inside the component the server put the variable in.
 
 A server publishing an operator is refused at discovery and appears nowhere, which is the
 fail-closed direction: an un-offered template costs a feature, an un-encoded one costs a
@@ -130,6 +130,16 @@ read outside what the server meant to publish. The predicate is written by REMOV
 well-formed expression and validating the literal skeleton with `isUsableResourceUri`, so
 the two rules cannot drift — a template cannot smuggle in a scheme or an invisible
 character that a plain URI could not.
+
+What Level 1 does **not** buy is a fixed scheme, and an earlier version of this section
+said otherwise. A server may publish `{scheme}://host/{path}`: its skeleton `x://host/x`
+is a legal server-custom scheme, so it catalogues, and the user picks the scheme —
+percent-encoding is no help, because `javascript` and `ui` are already unreserved. Two
+things hold instead, and both run on the EXPANSION rather than on the pattern: the
+ordinary URI predicate re-validates the finished string, which is where a reserved scheme
+dies, and the client re-derives the `https:` refusal from it. That is also why the
+discovery-time `hostFetchRefused` flag on a template is display-only — it answers the
+literal-scheme case for the picker, and the read never consults it.
 
 `notifications/resources/list_changed` is **not handled** — no listener exists for it in
 `src`, for resources or for templates. An earlier version of this line described a

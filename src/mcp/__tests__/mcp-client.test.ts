@@ -2077,6 +2077,30 @@ describe("MCP resources discovery and read", () => {
     await client.disconnect();
   });
 
+  it("refuses at READ time when the flag could not have known", async () => {
+    // The discovery flag is display-only, and this is what proves it: a variable in
+    // scheme position is honestly UNflagged (the literal scheme is not known until
+    // expansion), the picker therefore offers the row, and the read refuses anyway
+    // because it re-derives from the expansion rather than consulting the flag. If it
+    // ever started trusting the flag, this is the case that would leak.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [
+        { resourceTemplates: [{ uriTemplate: "{scheme}://example.com/{path}", name: "any" }] },
+      ],
+    });
+    await client.connect();
+
+    expect(client.getState().resourceTemplates?.[0]).not.toHaveProperty("hostFetchRefused");
+    await expect(client.readDeclaredResourceTemplate(
+      "{scheme}://example.com/{path}",
+      new Map([["scheme", "https"], ["path", "r.pdf"]]),
+    )).rejects.toThrow(/does not fetch/);
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
   it("expands a declared template host-side and reads the produced URI", async () => {
     const { client, readCalls } = connectWith({
       advertiseResources: true,
