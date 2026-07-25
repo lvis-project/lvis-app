@@ -310,12 +310,20 @@ export interface McpResourceSummary {
  * would hand a brace-string to a validator that can only refuse it.
  *
  * `variables` is derived here rather than re-parsed per consumer: the dialog renders one
- * field per entry in this order, and main expands using the same list, so a form and an
- * expansion cannot disagree about what the template asks for.
+ * field per entry, in this order. The expansion does not read this list — it re-scans the
+ * template — but both come from the one grammar in `shared/mcp-resource-template-bounds`,
+ * so a form and an expansion cannot disagree about what the template asks for.
  */
 export interface McpResourceTemplateSummary {
   uriTemplate: string;
   name: string;
+  /**
+   * The host will not fetch what this template produces, because its LITERAL scheme is
+   * one the host refuses. Absent when the scheme is itself a variable — that case is
+   * unknowable until expansion, which is why the read re-derives the refusal instead of
+   * trusting this.
+   */
+  hostFetchRefused?: boolean;
   title?: string;
   description?: string;
   mimeType?: string;

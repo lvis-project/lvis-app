@@ -800,10 +800,21 @@ export class McpClient {
             ...(title ? { title } : {}),
             ...(description ? { description } : {}),
             ...(mimeType ? { mimeType } : {}),
-            // Derived ONCE, here. The dialog renders a field per entry and main expands
-            // from the same list, so a form and an expansion cannot disagree about what
-            // the template asks for.
+            // Derived ONCE, here, so no consumer re-parses the template to build a form.
+            // The expansion re-scans instead of reading this list, but both go through
+            // the one grammar in the bounds module — a second parser is what would let a
+            // form and an expansion disagree about what the template asks for.
             variables: resourceTemplateVariables(entry.uriTemplate),
+            // Set from the TEMPLATE, and it is a fact rather than a guess: the literal
+            // part is fixed at discovery, so if the scheme is literally `https:` then
+            // every expansion of it is too, and the read will refuse. Without this the
+            // picker offers the row, the user fills a form, and the refusal arrives
+            // afterwards blaming the server for a host-side rule.
+            //
+            // A template whose SCHEME is itself a variable (`{s}://host/{p}`) is not
+            // flagged, because it genuinely is not known until expansion — which is why
+            // the read re-derives the refusal rather than trusting this flag.
+            ...(isHostFetchRefusedUri(entry.uriTemplate) ? { hostFetchRefused: true } : {}),
           });
         }
         cursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;

@@ -1753,6 +1753,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           // path segment is a DIFFERENT resource, read without anyone being told. The
           // expansion already refuses an over-long value, and slicing here is precisely
           // what would stop that refusal from ever firing.
+          //
+          // Measured RAW here and TRIMMED in the expansion, deliberately: this bound is
+          // about what main carries, that one is about what goes into a URI. Main is
+          // therefore the stricter of the two, which is the safe direction — the pair
+          // can only ever refuse more than the expansion would, never less.
           if (value.length > MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS) {
             return { ok: false, error: "invalid-request" };
           }
@@ -1771,9 +1776,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           templateValues,
         );
         // Everything from here is the plain attach's path, keyed on the URI MAIN
-        // produced. The renderer never learns a URI it could replay through the other
-        // channel — the fence header is the only place the expansion is shown, and that
-        // is host-built text.
+        // produced.
         const rendered = renderResourceAttachment(serverId, read.uri, read);
         if (rendered.bodyChars === 0) {
           auditAttach("error", `[mcp-resource:${serverId}] template read returned no text`);
@@ -1792,8 +1795,15 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           attachment: { type: "text", text: rendered.text },
           truncated: rendered.truncated,
           omittedBlocks: rendered.omittedBlocks,
-          // For the chip's label. Display text only — the renderer has no channel that
-          // accepts a URI, so this cannot be replayed as a read.
+          // For the chip's label.
+          //
+          // Handing a URI back to the renderer is safe because no channel accepts an
+          // UNLISTED one — not because no channel accepts a URI. `attachResource` takes
+          // one and is three lines from this channel in the preload; replaying an
+          // expansion through it reaches `readDeclaredResource`, which is gated on
+          // `state.resources` (`mcp-client.ts`), and a template expansion was never
+          // listed there. Stating it the other way round — as an earlier version of this
+          // comment did — is how the check that actually holds gets dropped later.
           uri: read.uri,
         };
       } catch (err) {

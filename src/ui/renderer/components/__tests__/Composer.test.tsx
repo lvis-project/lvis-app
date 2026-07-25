@@ -968,6 +968,76 @@ describe("Composer — @ resource mention", () => {
     expect(screen.getAllByTestId(/^resource-mention-item-/)).toHaveLength(2);
   });
 
+  it("still offers resources when the template fetch REJECTS", async () => {
+    // The sibling of the case above, and the one a bare `Promise.all` would fail: a
+    // rejecting half takes the whole join down into the catch that empties the catalogue.
+    // Each half absorbs its own failure instead.
+    installMcpApi({
+      listResourceTemplates: vi.fn(async () => {
+        throw new Error("template channel exploded");
+      }) as never,
+    });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta);
+    expect(screen.getAllByTestId(/^resource-mention-item-/)).toHaveLength(2);
+  });
+
+  it("disables a template the host will not fetch, and says why", async () => {
+    // Listed but not fillable: every expansion of a literal `https:` template is one the
+    // host refuses. Offering it normally spends a dialog AND a round-trip to fail with a
+    // message that blames the server for a host-side rule.
+    const { attachResourceTemplate } = installMcpApi({
+      listResourceTemplates: vi.fn(async () => ({
+        ok: true,
+        servers: [{
+          serverId: "web-mcp",
+          templates: [{
+            uriTemplate: "https://example.com/{doc}",
+            name: "web doc",
+            variables: ["doc"],
+            hostFetchRefused: true,
+          }],
+        }],
+      })) as never,
+    });
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@web");
+    const row = screen.getByTestId("resource-mention-item-0");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.textContent).toContain(t("composer.resourceNotFetchable"));
+
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+    // No form, and no round trip.
+    expect(screen.queryByTestId("mcp-resource-template-dialog")).toBeNull();
+    expect(attachResourceTemplate).not.toHaveBeenCalled();
+    expect(onWarning).toHaveBeenCalledWith(t("composer.resourceNotFetchable"));
+  });
+
+  it("tells the user what Enter does on the row they are actually on", async () => {
+    // The footer is one sentence for a menu holding two kinds of row. Fixed text makes it
+    // false half the time, and an icon on the row does not change what the sentence says.
+    installMcpApi({ listResourceTemplates: TEMPLATE_CATALOGUE as never });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@pol");
+    expect(screen.getByTestId("resource-mention-hint").textContent)
+      .toBe(t("composer.resourceMentionHint"));
+
+    await openMenu(ta, "@proj");
+    expect(screen.getByTestId("resource-mention-hint").textContent)
+      .toBe(t("composer.resourceMentionTemplateHint"));
+  });
+
   it("lists templates alongside resources in one menu", async () => {
     // One list to the user. Both catalogues are fetched together for that reason — two
     // effects would each set the catalogue and the later one would erase the other's
