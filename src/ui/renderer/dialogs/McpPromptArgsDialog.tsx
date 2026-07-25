@@ -127,14 +127,16 @@ export function McpPromptArgsDialog({ prompt, onCancel, onSubmit }: McpPromptArg
 
   const submit = useCallback(() => {
     if (!prompt || !runnable) return;
-    const args: Record<string, string> = {};
-    for (const field of fields) {
-      const value = values.get(field.name) ?? "";
-      // Optional arguments left blank are omitted rather than sent as "" — an
-      // empty string is a value, and servers may treat the two differently.
-      if (value.length === 0) continue;
-      args[field.name] = value;
-    }
+    // `Object.fromEntries` DEFINES own properties; plain assignment would hand
+    // `__proto__` to the prototype setter and silently swallow that one field —
+    // a name the form happily renders and the user can fill.
+    const args = Object.fromEntries(
+      fields
+        .map((field) => [field.name, values.get(field.name) ?? ""] as const)
+        // Optional arguments left blank are omitted rather than sent as "" — an
+        // empty string is a value, and servers may treat the two differently.
+        .filter(([, value]) => value.length > 0),
+    );
     onSubmit(prompt, args);
   }, [fields, onSubmit, prompt, runnable, values]);
 

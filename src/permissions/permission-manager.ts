@@ -1034,14 +1034,16 @@ export class PermissionManager {
    * Detailed decision with an audit-log reason.
    *
    * When `overlayTriggerOrigin` is a STAGED turn origin — a plugin overlay trigger
-   * (`"overlay:meeting-detection"`) or an MCP App's `ui/message` (`"app:<serverId>"`) —
-   * every foreground-authority call (write/shell/network plus meta with
+   * (`"overlay:meeting-detection"`), an MCP App's `ui/message` (`"app:<serverId>"`),
+   * or an MCP server prompt the user ran (`"mcp-prompt:<serverId>"`) — every
+   * foreground-authority call (write/shell/network plus meta with
    * `decisionOverride: "ask"`) is forced to `ask` regardless of user permanent
    * approval (`allow-always`), config allow rules, or auto mode.
    * This hard gate prevents staged, non-user-authored input from automatically running
    * authority-bearing work without user confirmation, pairing with the first-pass
-   * LLM review from `<overlay-trigger-origin-guidance>`. Other calls are unaffected.
-   * The set of staged origins has ONE definition — `isStagedTurnOrigin` — so a new one
+   * LLM review from that origin's own guidance block (one per staged kind — see the
+   * `guidance` field in the registry). Other calls are unaffected.
+   * The set of staged origins has ONE definition — `isStagedTurnSource` — so a new one
    * can never be added while quietly skipping this gate.
    *
    * Permission policy — 5-axis category model. Layer 3 decisionFor() replaces
