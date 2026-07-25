@@ -21,10 +21,102 @@ export const MCP_RESOURCE_URI_MAX_CHARS = 2_048;
 /** Display-string bounds for host chrome. */
 export const MCP_RESOURCE_NAME_MAX_CHARS = 128;
 export const MCP_RESOURCE_DESCRIPTION_MAX_CHARS = 512;
+/**
+ * Resource attachments one turn may carry.
+ *
+ * A mention is cheap to type and each attachment is up to the per-read bound, so
+ * without this a handful of them fills the window before the model reads a word
+ * of the user's own message. Enforced in main, not in the composer: the renderer
+ * decides what to offer, main decides what a turn carries — see
+ * {@link countResourceAttachmentFences} for why the count is over FENCES rather
+ * than over content parts.
+ */
+export const MCP_RESOURCE_ATTACHMENTS_PER_TURN = 8;
+
+/**
+ * The open tag every resource attachment carries.
+ *
+ * Lives here, with the bounds, rather than with the builder: it is the same kind of
+ * cross-layer contract as the numbers above — the builder writes it, the turn-entry
+ * chokepoint counts it, and a renderer that displays or strips the frame reads it.
+ * A second spelling of this string anywhere is a silently-uncounted attachment.
+ */
+export const MCP_RESOURCE_FENCE_OPEN = '<mcp-resource trust="untrusted-server-data"';
+
+/**
+ * How many resource fences a turn's ATTACHED parts carry.
+ *
+ * Counts OCCURRENCES, not parts. Asking whether a part *starts with* the fence made
+ * the bound a property of the renderer's packaging rather than of what it attached: a
+ * composer that joined twelve attachments into one text part — the natural way to put
+ * a fence beside the user's own words — counted as one, and ~384 KB of server-authored
+ * text entered a turn whose bound was meant to be 8 reads. Counting the tag makes the
+ * answer the same however the parts are packaged.
+ *
+ * Scoped to ATTACHMENTS on purpose; the user's own message text is not counted, even
+ * though a fence pasted there is indistinguishable from a host-built one. Counting it
+ * looked stricter and was worse: this bound governs what the HOST attaches, so a
+ * refusal is only ever explainable when the host built the material. A developer
+ * pasting an LVIS transcript excerpt — which contains these fences verbatim — would
+ * otherwise have their message rejected, told to remove resources they never attached,
+ * with no way to discover why. A bound on window budget must not make legitimate text
+ * unsendable.
+ *
+ * What that scope gives up, in ascending order of how much it matters:
+ *   - a forged fence in the user's own words is the user demoting their OWN text (the
+ *     fence marks content as less trusted, never more), so it buys a forger nothing;
+ *   - the replay paths fold a turn's parts into the input text, so the count no longer
+ *     applies there. For history this host built that is harmless — a replay re-sends
+ *     a turn that already passed, and folding cannot multiply it — but an IMPORTED
+ *     session's user message can carry any number of fenced blocks, and replaying that
+ *     row is unbounded. The material is already in the transcript and reaches the model
+ *     as context either way, so this bounds nothing it was not already past;
+ *   - and one real constraint on stage 3b: a mention must resolve to an attachment
+ *     PART. A composer that splices the fence into the user's message text puts server
+ *     content in the one field this does not measure.
+ */
+export function countResourceAttachmentFences(
+  parts?: ReadonlyArray<{ type?: unknown; text?: unknown }>,
+): number {
+  let count = 0;
+  for (const part of parts ?? []) {
+    if (part?.type === "text" && typeof part.text === "string") count += occurrences(part.text);
+  }
+  return count;
+}
+
+/** Scanned rather than split: the parts are up to a read's worth of text each. */
+function occurrences(text: string): number {
+  let count = 0;
+  for (
+    let at = text.indexOf(MCP_RESOURCE_FENCE_OPEN);
+    at !== -1;
+    at = text.indexOf(MCP_RESOURCE_FENCE_OPEN, at + MCP_RESOURCE_FENCE_OPEN.length)
+  ) {
+    count += 1;
+  }
+  return count;
+}
+
 /** Bounded page walk so a hostile `nextCursor` loop cannot hang the handshake. */
 export const MCP_RESOURCE_MAX_PAGES = 20;
 
 const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Characters RFC 3986 excludes from a URI, which therefore cannot appear unencoded
+ * in a legitimate one: space, double quote, `<`, `>`, backslash, backtick, `^`,
+ * `{`, `}`, `|`.
+ *
+ * Rejected HERE rather than escaped at each consumer, because the same string is
+ * later printed into a provenance fence's attributes, serialized into a tool
+ * result, interpolated into an audit line, and (soon) rendered in a picker. A URI
+ * containing `">` let a listed resource close the untrusted fence on its first line
+ * and place server-authored prose OUTSIDE it, beside the user's own words — the one
+ * position the fence exists to prevent. Escaping per consumer would have left the
+ * next consumer to rediscover that; a URI that cannot hold the character cannot.
+ */
+const URI_EXCLUDED_CHARS_RE = /[\s"<>\\^`{}|]/;
 
 /**
  * URI schemes the host will carry as an OPAQUE identifier.
@@ -72,6 +164,7 @@ export function isUsableResourceUri(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (CONTROL_CHARS_RE.test(value)) return false;
+  if (URI_EXCLUDED_CHARS_RE.test(value)) return false;
   const lowered = value.toLowerCase();
   if (RESERVED_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return false;
   if (ALLOWED_URI_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return true;

@@ -78,15 +78,24 @@ At connect, after `tools/list` and `prompts/list`:
   `size` only when they are the right type and within bounds; anything else is
   dropped there, so one shape reaches every consumer. This is the lesson from the
   prompt work, where a non-string `name` would have thrown when React rendered it.
-- URI validation is a host-side allowlist of schemes, not a regex over the whole
-  string: `file:`, `git:`, `https:`, and server-custom schemes are permitted as
-  OPAQUE identifiers — the host never resolves them itself. `ui:` is reserved for
-  the MCP-Apps extension path and is excluded here so the two never cross.
+- URI validation is a host-side allowlist of schemes PLUS a character exclusion over
+  the whole string. `file:`, `git:`, `https:`, and server-custom schemes are permitted
+  as OPAQUE identifiers — the host never resolves them itself. `ui:` is reserved for
+  the MCP-Apps extension path and is excluded here so the two never cross. The
+  characters RFC 3986 excludes from a URI (space, `"`, `<`, `>`, `\`, backtick, `^`,
+  `{`, `}`, `|`) are refused outright, so no consumer has to escape them: the same
+  string is printed into a fence attribute, a tool result, an audit line, and soon a
+  picker, and one of those already let a `">` in a URI break out of the fence. A
+  legitimate URI percent-encodes them, so nothing expressible is lost — but note the
+  consequence for stage 3b: an RFC 6570 template (`file:///{path}`) is rejected by
+  this rule, so templates need their own predicate rather than a flag on this one.
 
-`resources/templates/list` is discovered the same way but is **display-only** in
-stage 1: a template is a URI pattern the user must fill, which is the argument-form
-problem the prompt dialog already solved, and it belongs in the same stage as the
-mention UI rather than the plumbing.
+`resources/templates/list` is **not discovered yet** — it appears only in the
+governance capability map. A template is a URI pattern the user must fill, which is
+the argument-form problem the prompt dialog already solved, so it lands with the
+mention UI in stage 3b rather than with the plumbing. Discovering it earlier would
+have meant carrying a catalogue nothing could render, under a URI rule that rejects
+the very braces a template is made of.
 
 `notifications/resources/list_changed` re-runs discovery, debounced, and only for a
 server that declared `listChanged`.
@@ -142,8 +151,80 @@ Because these builtins hand the model untrusted server content, they declare
 does to MCP tools. Without it a builtin badge would be a way around the decision
 that headless (routine) loops run with no MCP surface.
 
-Stage 3 — the user path: composer mention (`@server:uri`) resolving through the
-same read, attached to the turn as a fenced untrusted block, plus templates.
+Stage 3 — the user path, split at the process boundary the way stages 1 and 2 were:
+
+  - **3a (landed):** `lvis:mcp:attach-resource` reads a declared resource and
+    returns the fenced block to attach. The HOST builds the fence — never the
+    renderer — because this text lands beside the user's own words, which is the one
+    place the model has the most reason to read it as the user speaking. The
+    per-turn cap is enforced in main, not in the composer: the renderer decides what
+    to offer, main decides what a turn carries. `McpManager.listDeclaredResources`
+    is the one projection for callers that need the catalogue as a list (the model
+    tools today); the attach path deliberately does not use it, so the listed-URI
+    check stays in one place inside the client instead of being copied into the
+    handler.
+  - **3b:** the composer mention (`@server:uri`) with autocomplete, and templates.
+
+The per-turn cap lives at the turn-entry chokepoint (`runStreamedTurn`) because
+`chat send` and `sidechat send` parse their payloads separately, so a bound in one
+would not exist for the other, and that is the one place attachments enter a turn. It
+counts fence OCCURRENCES in the attached parts, so the bound is a property of what was
+attached rather than of how the renderer packaged it — a composer that joins several
+attachments into one part cannot spend more than the budget — and it REFUSES the turn
+rather than trimming, because dropping the extras would leave the model answering from
+fewer documents than the user believes it read.
+
+Two things follow from counting ATTACHMENTS rather than all of a turn's text, and both
+are decisions rather than omissions:
+
+  - The user's own message text is never counted, even though a fence pasted there is
+    indistinguishable from a host-built one. Counting it looked stricter and was worse:
+    a refusal is only ever explainable when the host built the material, and a
+    developer pasting an LVIS transcript excerpt — which contains these fences verbatim
+    — would otherwise be told to remove resources they never attached, with no way to
+    discover why. A fence a user types frames their OWN words as less trusted, so it
+    buys a forger nothing. It also kept the refusal off the replay paths, which matters
+    more than it looks: `retryEffort` truncates history BEFORE streaming, so a throw
+    there would leave a conversation permanently shortened.
+  - Stage 3b therefore carries a hard constraint: **a mention must resolve to an
+    attachment part**, never to text spliced into the user's message. That is the one
+    field this bound does not measure, so 3b lands with a test that fails if the
+    composer inlines a fence — a comment will not hold it.
+
+    This constrains the WIRE shape, not the UI. The reference-host precedent in §1 is an
+    inline `@server:uri` mention, and that stays available: the composer may render an
+    inline chip while the material it sends rides as its own part, which is how
+    attachment chips already work. Only conflating the two creates a conflict.
+
+    And if 3b finds the part-only rule genuinely fighting the UX, the answer is NOT to
+    widen the count back over the message text — that reintroduces both the false
+    refusal and the history-truncating replay. It is to stop pattern-matching provenance
+    altogether: have `attach-resource` return a handle, let the renderer pass it back,
+    and have main resolve and count what IT built at send time. That makes the bound
+    structural and retires the forgery and false-positive questions together. Written
+    down here so the next person reaches for it instead of the input count.
+
+The bound interacts with the user-initiated MCP rate bucket that prompts and attachments
+share, which had to grow once attaching stopped being one click per call — at a flat 20,
+three full-attachment turns in a minute hit `rate-limited` mid-turn. The bucket is NOT
+derived from this bound, though it was briefly: it is a ceiling on requests to somebody
+else's server, while this is a budget for our own context window, and deriving it meant a
+change to our window budget silently re-deciding how hard a server can be hit. The
+relationship is checked by a test instead, so moving either one forces a look at both.
+
+The fence is `<mcp-resource trust="untrusted-server-data">`, registered in the
+`FenceTag` union so its builder had to answer the escape question. Inside the fence
+the body's own closing tag is neutralized (it cannot end the region and continue
+outside it) and so is any opening tag (it cannot forge frames, which would let one
+hostile resource spend the whole per-turn budget and refuse the user's send). Neither
+rule requires a well-formed tag: `</mcp-resource` alone is neutralized, because a rule
+that waited for the closing bracket was both quadratic on unterminated tags and — once
+the span between was bounded to fix that — escapable by padding the close tag past the
+bound. The consumer is a model reading prose, so "looks like a tag" is the standard, and
+that makes tag-name matching the whole rule.
+Attribute values printed into the open tag go through the same module's
+`fenceAttrValue`, because an attribute carrying `">` is the other way out of a fence.
+A clip is admitted in a line the model reads rather than a flag the UI could ignore.
 
 Stages land as separate PRs. Stage 1 touches no cluster-sensitive path; stages 2
 and 3 do (`src/tools`, `src/ipc`), so they carry the 3-role attestation.

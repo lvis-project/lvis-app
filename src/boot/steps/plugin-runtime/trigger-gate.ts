@@ -181,14 +181,32 @@ export class TriggerConversationRateLimiter {
 export const triggerConversationRateLimiter = new TriggerConversationRateLimiter();
 
 /**
- * Separate bucket for round-trips the USER initiated (running a server-declared
- * MCP prompt from the picker). Sharing the actor bucket above let a chatty plugin
- * or app card spend the budget and block the user's own clicks on that server —
- * one throttle, two unrelated budgets. Same shape, its own counters; the cap is
- * higher because a person clicking a picker row is self-limiting, and it exists to
- * bound a stuck UI loop rather than an adversary.
+ * Separate bucket for round-trips the USER initiated against one MCP server: running
+ * a server-declared prompt from the picker, and attaching a declared resource.
+ *
+ * Sharing the actor bucket above let a chatty plugin or app card spend the budget and
+ * block the user's own clicks on that server — one throttle, two unrelated budgets.
+ * Same shape, its own counters.
+ *
+ * The two user surfaces share this budget on purpose: what it protects is the server
+ * (and the host's own event loop) from a renderer looping on the user's behalf, and
+ * that concern does not care which of the two calls is looping.
+ *
+ * The number had to move once attaching stopped being one click per call: at a flat
+ * 20, three full-attachment turns in a minute hit `rate-limited` mid-turn — a person
+ * working normally, told they are going too fast. 48 is roughly six such turns at
+ * today's per-turn bound, with room for prompt runs alongside them, and still a hard
+ * stop for a loop (the adversary here is a renderer bug, which exhausts it in well
+ * under a second).
+ *
+ * NOT derived from `MCP_RESOURCE_ATTACHMENTS_PER_TURN`, though it was briefly: this is
+ * a ceiling on requests to somebody else's server, and that one is a budget for our own
+ * context window. Deriving it meant raising the window budget silently raised how hard
+ * a server can be hit — a change to one quietly re-deciding the other. The relationship
+ * is CHECKED instead (see the trigger-gate test), so moving either one forces a look at
+ * both rather than one following the other.
 */
-const USER_PROMPT_RATE_LIMIT_MAX_CALLS = 20;
+export const USER_PROMPT_RATE_LIMIT_MAX_CALLS = 48;
 export const userPromptRateLimiter = new TriggerConversationRateLimiter(
   TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS,
   USER_PROMPT_RATE_LIMIT_MAX_CALLS,
