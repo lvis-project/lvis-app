@@ -188,6 +188,30 @@ describe("lvis:mcp:get-prompt — outcome", () => {
     expect(JSON.stringify(failed)).not.toContain("secret");
   });
 
+  // The audit row is the ONLY consumer that ever sees a server's error text — the
+  // renderer gets a bare code — so if it is not asserted here, it is not asserted
+  // anywhere. Two properties: a credential the server echoed back does not persist in
+  // the row, and the row cannot be padded until it buries its neighbours.
+  it("scrubs and bounds the server error it writes to the audit log", async () => {
+    const leak = `Authorization: Bearer sk-live-abcdef0123456789 ${"x".repeat(400)}`;
+    const boom = await setup(vi.fn(async () => { throw new Error(leak); }));
+
+    expect(await invoke(CHANNEL, boom.serverId, "p", {})).toEqual({
+      ok: false,
+      error: "prompt-failed",
+    });
+
+    const row = boom.deps.auditLogger.log.mock.calls
+      .map((c) => (c[0] as { input?: string }).input ?? "")
+      .find((input) => input.includes("prompts/get"));
+    expect(row).toBeDefined();
+    expect(row).not.toContain("sk-live-abcdef0123456789");
+    expect(row).toContain("[REDACTED:TOKEN]");
+    // Bounded — the failure survives, a 400-character tail does not.
+    expect(row).toContain("failed");
+    expect(row!.length).toBeLessThan(300);
+  });
+
   it("rate limits repeated prompt fetches for one server", async () => {
     const { serverId } = await setup();
     let limited: unknown = null;
