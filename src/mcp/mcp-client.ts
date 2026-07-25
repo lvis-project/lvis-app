@@ -652,6 +652,11 @@ export class McpClient {
     try {
       const resources: McpResourceSummary[] = [];
       const seen = new Set<string>();
+      // Counted, because dropping is silent otherwise: a server publishing a URI with
+      // a raw space or backslash (`file:///C:/Program Files/x.md`) legitimately
+      // vanishes from the catalogue, and a user asking where their resource went has
+      // nothing to read. Fail-closed is right; unexplained is not.
+      let dropped = 0;
       let cursor: string | undefined;
       for (let page = 0; page < MCP_RESOURCE_MAX_PAGES; page++) {
         const result = await this.sendRequest<McpResourcesListResult>(
@@ -661,15 +666,24 @@ export class McpClient {
         );
         for (const entry of Array.isArray(result.resources) ? result.resources : []) {
           if (resources.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
-          if (!entry || typeof entry !== "object") continue;
-          if (!isUsableResourceUri(entry.uri)) continue;
+          if (!entry || typeof entry !== "object") {
+            dropped += 1;
+            continue;
+          }
+          if (!isUsableResourceUri(entry.uri)) {
+            dropped += 1;
+            continue;
+          }
           // De-duplicated by URI: the read path resolves a URI to at most one
           // catalogue entry, and two entries sharing a URI would make which one the
           // user picked unobservable.
           if (seen.has(entry.uri)) continue;
           const name = usableResourceText(entry.name, MCP_RESOURCE_NAME_MAX_CHARS)
             ?? usableResourceText(entry.uri, MCP_RESOURCE_NAME_MAX_CHARS);
-          if (!name) continue;
+          if (!name) {
+            dropped += 1;
+            continue;
+          }
           seen.add(entry.uri);
           const title = usableResourceText(entry.title, MCP_RESOURCE_NAME_MAX_CHARS);
           const description = usableResourceText(
@@ -696,7 +710,10 @@ export class McpClient {
         if (!cursor || resources.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
       }
       this.state.resources = resources;
-      log.info(`${this.config.id} discovered ${resources.length} resource(s)`);
+      log.info(
+        `${this.config.id} discovered ${resources.length} resource(s)`
+          + `${dropped > 0 ? ` (${dropped} unusable entr${dropped === 1 ? "y" : "ies"} dropped)` : ""}`,
+      );
     } catch (err) {
       log.warn(
         `${this.config.id} resources/list discovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
