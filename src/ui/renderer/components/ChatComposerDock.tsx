@@ -22,6 +22,7 @@ import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import { ComposerProjectSelector } from "./ComposerProjectSelector.js";
 import { ComposerApiKeyChip } from "./ComposerApiKeyChip.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
+import type { McpPromptEntry } from "./slash-picker-data.js";
 
 type InputStatusRow = React.ComponentProps<typeof InputActionBar>["statusRow"];
 
@@ -52,6 +53,7 @@ export interface ChatComposerDockProps {
   viewMode: ViewModeState | null;
   streaming: boolean;
   onInsertSlashCommand: (cmd: string) => void;
+  onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
   ringSlot: React.ReactNode;
@@ -118,6 +120,7 @@ export function ChatComposerDock({
   viewMode,
   streaming,
   onInsertSlashCommand,
+  onRunMcpPrompt,
   commandPopoverOpen,
   onCommandPopoverOpenChange,
   ringSlot,
@@ -280,6 +283,7 @@ export function ChatComposerDock({
           plugins={plugins}
           onSelectPlugin={onSelectPlugin}
           onInsertSlashCommand={onInsertSlashCommand}
+          onRunMcpPrompt={onRunMcpPrompt}
           commandActions={commandActions}
           commandPopoverOpen={commandPopoverOpen}
           onCommandPopoverOpenChange={onCommandPopoverOpenChange}

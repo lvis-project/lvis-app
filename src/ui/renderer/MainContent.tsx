@@ -58,6 +58,7 @@ export interface MainContentProps {
   onJumpToSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
   // chat
   chatContextValue: ChatContextValue;
+  onRunMcpPrompt: (prompt: import("./components/slash-picker-data.js").McpPromptEntry) => void;
   onAsk: (
     q: string,
     intent?: UserKeyboardIntentSnapshot,
@@ -138,6 +139,7 @@ function HomeChatPane(props: MainContentProps) {
       <ChatView
         api={props.api}
         onAsk={props.onAsk}
+        onRunMcpPrompt={props.onRunMcpPrompt}
         onEditSave={props.onEditSave}
         onFork={props.onFork}
         onToggleStar={props.onToggleStar}
