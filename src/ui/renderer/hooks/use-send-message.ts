@@ -6,7 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
-import { formatIpcError } from "../format-ipc-error.js";
+import { COMMON_IPC_ERROR_MESSAGES } from "../format-ipc-error.js";
 import { supportsVision } from "../../../engine/llm/vendor-capabilities.js";
 import {
   composeImportedTriggerOutgoing,
@@ -252,13 +252,21 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
             err: (err as Error)?.message,
           });
         }
-        // A rejected send can carry a bare IPC code as its message — the send gate
-        // and the stream chokepoint both THROW their fail-closed code rather than
-        // returning an `{ok:false}` frame. Route it through the same mapping table
-        // the frame path uses, so the user reads a sentence instead of
-        // "missing-mcp-prompt-envelope"; an unmapped message falls through unchanged.
+        // A rejected send carries an IPC code as its message — the send gate and the
+        // stream chokepoint both THROW their fail-closed code rather than returning
+        // an `{ok:false}` frame, so it never passes the code→sentence table. Electron
+        // wraps a rejection as `Error invoking remote method '<ch>': Error: <code>`,
+        // hence recovering the code from the tail. Anything unmapped keeps the
+        // previous localized framing — an unmapped failure must not lose it just
+        // because this path learned to map the mapped ones.
         const rawMessage = (err as Error).message;
-        setErrorWithThought(formatIpcError(rawMessage, rawMessage));
+        const code = rawMessage.match(/(?:^|Error:\s*)([a-z][a-z0-9-]*)\s*$/)?.[1];
+        const mappedKey = code && Object.hasOwn(COMMON_IPC_ERROR_MESSAGES, code)
+          ? COMMON_IPC_ERROR_MESSAGES[code]
+          : undefined;
+        setErrorWithThought(
+          mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage }),
+        );
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
         if (debugStreamEnabled) {

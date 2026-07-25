@@ -1578,7 +1578,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return {
         ok: true,
         envelope: formatStagedEnvelope(kind, rendered.text, source),
-        truncated: rendered.truncated,
+        truncated,
         omittedBlocks: rendered.omittedBlocks,
       };
     } catch (err) {

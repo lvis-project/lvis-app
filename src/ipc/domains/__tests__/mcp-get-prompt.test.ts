@@ -40,6 +40,7 @@ async function setup(getPrompt?: ReturnType<typeof vi.fn>) {
     vi.fn(async () => ({
       description: "Code review",
       blocks: [{ role: "user", type: "text", text: "REVIEW THIS" }],
+      droppedBlocks: 0,
     }));
 
   const deps = {
@@ -120,6 +121,35 @@ describe("lvis:mcp:get-prompt — outcome", () => {
     // prefixes a line with `prompt: ` or `[role] `, so no server input can make the
     // body start with `/` at this layer — an assertion here could not fail. The rule
     // is pinned where it lives, on the builder (`shared/__tests__/staged-origins`).
+  });
+
+  // The clip the CLIENT applied is invisible to the renderer unless the handler
+  // forwards it: the render only knows about blocks it was handed, so a server
+  // returning 500 blocks would otherwise be silently reduced to 64 with the user
+  // told nothing.
+  it("reports blocks the client dropped before the render saw them", async () => {
+    const { serverId } = await setup(
+      vi.fn(async () => ({
+        blocks: [{ role: "user", type: "text", text: "kept" }],
+        droppedBlocks: 436,
+      })),
+    );
+    const result = (await invoke(CHANNEL, serverId, "big", {})) as {
+      ok: boolean;
+      truncated: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("does not claim truncation when nothing was clipped", async () => {
+    const { serverId } = await setup();
+    const result = (await invoke(CHANNEL, serverId, "small", {})) as {
+      ok: boolean;
+      truncated: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.truncated).toBe(false);
   });
 
   it("keeps only bounded string arguments from the caller", async () => {
