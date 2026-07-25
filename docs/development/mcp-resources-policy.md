@@ -191,6 +191,19 @@ are decisions rather than omissions:
     field this bound does not measure, so 3b lands with a test that fails if the
     composer inlines a fence — a comment will not hold it.
 
+    This constrains the WIRE shape, not the UI. The reference-host precedent in §1 is an
+    inline `@server:uri` mention, and that stays available: the composer may render an
+    inline chip while the material it sends rides as its own part, which is how
+    attachment chips already work. Only conflating the two creates a conflict.
+
+    And if 3b finds the part-only rule genuinely fighting the UX, the answer is NOT to
+    widen the count back over the message text — that reintroduces both the false
+    refusal and the history-truncating replay. It is to stop pattern-matching provenance
+    altogether: have `attach-resource` return a handle, let the renderer pass it back,
+    and have main resolve and count what IT built at send time. That makes the bound
+    structural and retires the forgery and false-positive questions together. Written
+    down here so the next person reaches for it instead of the input count.
+
 The bound also sizes the user-initiated MCP rate bucket, which prompts and attachments
 share: attaching is no longer one click per call, so the bucket is derived from this
 number rather than being a flat count that a few full turns would exhaust.
