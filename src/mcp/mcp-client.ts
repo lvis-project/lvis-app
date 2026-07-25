@@ -652,6 +652,14 @@ export class McpClient {
     try {
       const resources: McpResourceSummary[] = [];
       const seen = new Set<string>();
+      // Every entry the server published is counted, not just the malformed ones: a
+      // resource can also fail to appear by being a duplicate URI or by arriving past
+      // the per-server limit, and a log line that names only one of those reasons
+      // reads as "everything else made it". A user asking where their resource went
+      // (`file:///C:/Program Files/x.md`, dropped for the raw space) needs the total
+      // to be honest, or the number they can see does not add up. Fail-closed is
+      // right; unexplained is not.
+      let published = 0;
       let cursor: string | undefined;
       for (let page = 0; page < MCP_RESOURCE_MAX_PAGES; page++) {
         const result = await this.sendRequest<McpResourcesListResult>(
@@ -659,7 +667,11 @@ export class McpClient {
           cursor ? { cursor } : {},
           HANDSHAKE_TIMEOUT_MS,
         );
-        for (const entry of Array.isArray(result.resources) ? result.resources : []) {
+        const entries = Array.isArray(result.resources) ? result.resources : [];
+        // Counted per PAGE, not per entry, so reaching the per-server limit still
+        // stops the walk instead of iterating a server-sized array to keep score.
+        published += entries.length;
+        for (const entry of entries) {
           if (resources.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
           if (!entry || typeof entry !== "object") continue;
           if (!isUsableResourceUri(entry.uri)) continue;
@@ -696,7 +708,14 @@ export class McpClient {
         if (!cursor || resources.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
       }
       this.state.resources = resources;
-      log.info(`${this.config.id} discovered ${resources.length} resource(s)`);
+      const notCatalogued = published - resources.length;
+      log.info(
+        `${this.config.id} discovered ${resources.length} resource(s)`
+          + `${notCatalogued > 0
+            ? ` (${notCatalogued} of ${published} published not catalogued: unusable, duplicate,`
+              + ` or past the ${MCP_RESOURCE_MAX_PER_SERVER} per-server limit)`
+            : ""}`,
+      );
     } catch (err) {
       log.warn(
         `${this.config.id} resources/list discovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,

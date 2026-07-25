@@ -876,6 +876,8 @@ export function buildInternalApiSurface() {
     // and the renderer never assembles the envelope itself.
     getPrompt: async (serverId: string, name: string, args: Record<string, string>) =>
       ipcRenderer.invoke(CHANNELS.mcp.getPrompt, serverId, name, args) as Promise<unknown>,
+    attachResource: async (serverId: string, uri: string) =>
+      ipcRenderer.invoke(CHANNELS.mcp.attachResource, serverId, uri) as Promise<unknown>,
     // MCP Apps `ondownloadfile` — the app hands over inline bytes; main decodes, bounds,
     // and shows a save dialog. `serverId` is bound by the TRUSTED renderer (for the audit
     // trail; the app names no server). Main NEVER fetches an app-supplied URI, so nothing

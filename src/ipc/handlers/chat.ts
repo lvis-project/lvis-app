@@ -256,7 +256,8 @@ export function validateUserContentParts(
     const t = (item as { type?: unknown }).type;
     if (t === "text") {
       const text = (item as { text?: unknown }).text;
-      if (typeof text === "string") out.push({ type: "text", text });
+      if (typeof text !== "string") continue;
+      out.push({ type: "text", text });
       continue;
     }
     if (t === "image") {

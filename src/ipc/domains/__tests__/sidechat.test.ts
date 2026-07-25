@@ -11,6 +11,10 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
+import {
+  MCP_RESOURCE_ATTACHMENTS_PER_TURN,
+  MCP_RESOURCE_FENCE_OPEN,
+} from "../../../shared/mcp-resource-bounds.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -96,6 +100,29 @@ describe("side-chat IPC domain", () => {
       expect(frame.channel).toBe(CHANNELS.sidechat.stream);
       expect(frame.channel).not.toBe(CHANNELS.chat.stream);
     }
+  });
+
+  // Side chat parses its own payload — it never passes through `parseChatSendPayload`
+  // — so a per-turn bound enforced at either send gate would simply not exist here.
+  // It holds because the bound lives at the turn-entry chokepoint both paths share.
+  it("enforces the resource-attachment bound on the side loop too", async () => {
+    const side = makeSideLoop();
+    const main = makeMainLoop();
+    register(side, main);
+    const handler = handlers.get(CHANNELS.sidechat.send)!;
+    const fence = (i: number) =>
+      `${MCP_RESOURCE_FENCE_OPEN} server="s" uri="file:///f${i}">\nB${i}\n</mcp-resource>`;
+
+    const result = await handler(ev("file:///index.html"), {
+      input: "compare these",
+      attachments: Array.from({ length: MCP_RESOURCE_ATTACHMENTS_PER_TURN + 1 }, (_, i) => ({
+        type: "text",
+        text: fence(i),
+      })),
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "too-many-resource-attachments" });
+    expect(side.runTurn).not.toHaveBeenCalled();
   });
 
   it("abort aborts the side loop only", async () => {

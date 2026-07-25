@@ -56,6 +56,29 @@ export const MCP_APP_SCHEME = "lvis-mcp-app";
 export const MAX_SERVER_ID_LEN = 128;
 
 /**
+ * Shape of an MCP server id, for callers that must validate one before using it as
+ * a map key, an audit field, or an interpolated value.
+ *
+ * Lives beside {@link MAX_SERVER_ID_LEN} because that is where the id's bounds
+ * already live. The alternative in use before this — borrowing the `mcp-prompt`
+ * staged-origin row's `sourcePattern` — worked, but it tied resource and prompt
+ * validation to a pattern that exists for ENVELOPE parsing: tightening it for a
+ * provenance reason would have silently moved what a server id may be, on paths the
+ * policy explicitly says are not staged origins.
+ */
+const SERVER_ID_CHARS_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function isUsableMcpServerId(value: unknown): value is string {
+  // Length checked against the constant rather than baked into the pattern as
+  // `{0,127}`: a second spelling of the bound two lines under the constant that
+  // exists to hold it once is how the two drift. Checked BEFORE the pattern, so an
+  // unbounded string never reaches the regex at all.
+  return typeof value === "string"
+    && value.length <= MAX_SERVER_ID_LEN
+    && SERVER_ID_CHARS_RE.test(value);
+}
+
+/**
  * Injective encoding of a serverId to a `[0-9a-f]` token: the lowercase hex of
  * its UTF-8 bytes. Distinct serverIds always yield distinct tokens. Fail-closed
  * on an empty or over-length id (No-Fallback).
