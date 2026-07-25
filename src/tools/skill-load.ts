@@ -21,7 +21,7 @@
  *     by {@link SkillStore} — see `skill-store.ts` for the file-side
  *     defenses.
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SkillStore } from "../main/skill-store.js";
@@ -35,6 +35,54 @@ const log = createLogger("lvis");
 export interface SkillLoadEvent {
   name: string;
   description: string;
+}
+
+/**
+ * What the approval record is hash-bound to.
+ *
+ * The body alone stopped being sufficient once a skill can ship bundled files:
+ * their NAMES render inside the trusted `<lvis-skill>` fence, so a bundle that
+ * gains files while SKILL.md is unchanged would reach the system prompt without
+ * re-prompting — the exact TOCTOU the body-hash binding exists to prevent.
+ *
+ * Scope: the body plus each bundled file's NAME and SIZE — i.e. exactly what the
+ * trusted fence renders. Resource CONTENT is deliberately not covered; it never
+ * enters the system prompt, arriving only as `skill_read` tool_result data.
+ *
+ * Two encodings live here — the bare body (no bundle) and a digest pair (bundle)
+ * — so they are kept in SEPARATE key spaces by {@link approvalRecordKey}. Within
+ * the bundle space the pair is unambiguous (fixed-width hex either side of `|`),
+ * and across spaces a crafted body can no longer impersonate a pair because the
+ * two never share a record key. Skills with no resources still hash the bare
+ * body under the unchanged key, so existing approvals (all seeded built-ins,
+ * which are flat files, included) stay valid.
+ */
+function approvalMaterial(skill: { body: string; resources: readonly { path: string; bytes: number }[] }): string {
+  if (skill.resources.length === 0) return skill.body;
+  const manifest = skill.resources
+    .map((resource) => `${resource.path}:${resource.bytes}`)
+    .sort()
+    .join("\n");
+  const digest = (value: string): string => createHash("sha256").update(value, "utf-8").digest("hex");
+  return `${digest(skill.body)}|${digest(manifest)}`;
+}
+
+/**
+ * Which approval record {@link approvalMaterial} is stored under.
+ *
+ * Bundle-bearing approvals get their own namespace so the two material
+ * encodings never share a key space (see `approvalMaterial`). Resource-bearing
+ * skills are new, so no legacy record exists under the namespaced key and the
+ * separation costs nothing; resource-less skills keep the original key and
+ * their existing approvals.
+ */
+function approvalRecordKey(skill: {
+  name: string;
+  approvalKey?: string;
+  resources: readonly { path: string; bytes: number }[];
+}): string {
+  const base = skill.approvalKey ?? skill.name;
+  return skill.resources.length === 0 ? base : `${base}#bundled`;
 }
 
 export interface SkillLoadToolDeps {
@@ -135,14 +183,14 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
 
       // C2(d): every skill body is user-editable on disk — seeded built-in
       // files included — so the approval gate runs uniformly. R2-CR-3:
-      // hash-bind approval to the current body. If the user approved an
-      // earlier body and the file has since been swapped, `isApproved`
-      // returns false and we re-prompt — closing the TOCTOU window where
-      // post-approval body mutations would silently inherit the previous
-      // "yes."
+      // hash-bind approval to the current body AND its bundled manifest (see
+      // `approvalMaterial`). If the user approved an earlier body, or the
+      // bundle has since gained/resized a file, `isApproved` returns false and
+      // we re-prompt — closing the TOCTOU window where post-approval mutations
+      // would silently inherit the previous "yes."
       const alreadyApproved = await deps.approvals.isApproved(
-        skill.approvalKey ?? skill.name,
-        skill.body,
+        approvalRecordKey(skill),
+        approvalMaterial(skill),
       );
       if (!alreadyApproved) {
         const gate = deps.getApprovalGate();
@@ -172,9 +220,10 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
             isError: true,
           };
         }
-        // R2-CR-3: persist approval BOUND TO the current body's sha256.
-        // A subsequent body swap will invalidate this record.
-        await deps.approvals.approve(skill.approvalKey ?? skill.name, skill.body).catch((err) => {
+        // R2-CR-3: persist approval BOUND TO the current body + bundled
+        // manifest. A later body swap, or a bundle file added/resized,
+        // invalidates this record.
+        await deps.approvals.approve(approvalRecordKey(skill), approvalMaterial(skill)).catch((err) => {
           log.warn(
             "skill_load: approval persistence failed (non-fatal): %s",
             (err as Error).message,

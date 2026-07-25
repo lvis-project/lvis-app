@@ -12,12 +12,17 @@ import { describe, it, expect } from "vitest";
 import { SkillOverlay } from "../skill-overlay.js";
 import type { LoadedSkill } from "../skill-store.js";
 
-function makeSkill(name: string, body: string): LoadedSkill {
+function makeSkill(
+  name: string,
+  body: string,
+  resources: LoadedSkill["resources"] = [],
+): LoadedSkill {
   return {
     name,
     description: "",
     body,
     filePath: `/tmp/${name}.md`,
+    resources,
   };
 }
 
@@ -93,5 +98,36 @@ describe("SkillOverlay — R2-SEC-LOW-2 body fence neutralization", () => {
     ov.register("session", makeSkill("user-skill", "user"));
     ov.clearPluginGeneration("plugin-one", "g1");
     expect(ov.list("session")).toEqual([expect.objectContaining({ name: "user-skill" })]);
+  });
+});
+
+describe("SkillOverlay — bundled-resource manifest", () => {
+  it("renders the manifest inside the fence and omits it when empty", () => {
+    const overlay = new SkillOverlay();
+    overlay.register("s1", makeSkill("with-res", "body", [
+      { path: "references/api.md", bytes: 120 },
+    ]));
+    const section = overlay.buildSection("s1");
+    expect(section).toContain("bundled resources (fetch with skill_read):");
+    expect(section).toContain("- references/api.md (120 bytes)");
+    // The manifest lives INSIDE the skill fence, not after it.
+    expect(section.indexOf("references/api.md")).toBeLessThan(section.indexOf("</lvis-skill>"));
+
+    const bare = new SkillOverlay();
+    bare.register("s2", makeSkill("no-res", "body"));
+    expect(bare.buildSection("s2")).not.toContain("bundled resources");
+  });
+
+  it("bounds the manifest so a long filename list cannot outgrow the body budget", () => {
+    const overlay = new SkillOverlay();
+    const many = Array.from({ length: 64 }, (_, i) => ({
+      path: `references/${String(i).padStart(2, "0")}-${"n".repeat(200)}.md`,
+      bytes: 10,
+    }));
+    overlay.register("s3", makeSkill("many", "body", many));
+    const section = overlay.buildSection("s3");
+    expect(section).toContain("more (not listed)");
+    // Well under the raw 64 × ~220 chars the unbounded list would have added.
+    expect(section.length).toBeLessThan(6000);
   });
 });

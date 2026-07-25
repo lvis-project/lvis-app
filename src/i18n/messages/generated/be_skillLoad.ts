@@ -10,7 +10,7 @@ export const en = {
   "be_skillLoad.argsDescription":
     "Parameters to pass to the skill (current version treats these as simple metadata). Optional.",
   "be_skillLoad.approvalReason":
-    "Injects skill '{name}' body only into subsequent rounds of the current user turn. The approval record is stored permanently and bound to the current body's sha256 — if the body changes, confirmation is requested again.",
+    "Injects skill '{name}' body only into subsequent rounds of the current user turn. The approval record is stored permanently and bound to the current body and its bundled file list — if either changes, confirmation is requested again.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_skillLoad.toolDescription":
@@ -23,5 +23,5 @@ export const ko: Record<keyof typeof en, string> = {
   "be_skillLoad.argsDescription":
     "skill 에 전달할 파라미터 (현재 버전은 단순 메타데이터). 선택.",
   "be_skillLoad.approvalReason":
-    "skill '{name}' body 를 현재 사용자 턴의 후속 라운드에만 주입합니다. 승인 기록은 영구 저장되며 현재 본문 sha256 에 바인딩됩니다 — 본문이 변경되면 다시 확인합니다.",
+    "skill '{name}' body 를 현재 사용자 턴의 후속 라운드에만 주입합니다. 승인 기록은 영구 저장되며 현재 본문과 번들 파일 목록에 바인딩됩니다 — 둘 중 하나라도 변경되면 다시 확인합니다.",
 };
