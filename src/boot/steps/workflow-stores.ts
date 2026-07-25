@@ -110,6 +110,20 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
       return lifecycle.acquire(owner.pluginId);
     },
     networkFetch,
+    // Resolved lazily: `ctx.mcpManager` is assigned by the MCP boot step, which
+    // runs after this one. Returning undefined until then is what keeps the tools
+    // honest rather than half-wired.
+    getMcpResourceAccess: () => {
+      const manager = ctx.mcpManager;
+      if (!manager) return undefined;
+      return {
+        listResources: () => manager
+          .listServers()
+          .filter((server) => (server.resources?.length ?? 0) > 0)
+          .map((server) => ({ serverId: server.id, resources: server.resources ?? [] })),
+        readResource: (serverId, uri) => manager.readDeclaredResource(serverId, uri),
+      };
+    },
   };
 
   // §4.2 Step 4: builtin tools + request_plugin / tool_search meta tools.
