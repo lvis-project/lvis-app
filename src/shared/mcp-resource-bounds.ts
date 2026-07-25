@@ -62,15 +62,18 @@ export const MCP_RESOURCE_FENCE_OPEN = '<mcp-resource trust="untrusted-server-da
  * with no way to discover why. A bound on window budget must not make legitimate text
  * unsendable.
  *
- * Nothing is lost by that scope, in this order of doubt:
+ * What that scope gives up, in ascending order of how much it matters:
  *   - a forged fence in the user's own words is the user demoting their OWN text (the
  *     fence marks content as less trusted, never more), so it buys a forger nothing;
  *   - the replay paths fold a turn's parts into the input text, so the count no longer
- *     applies there — but a replay re-sends a turn that already passed the bound, and
- *     folding cannot multiply it;
- *   - which leaves one real constraint, on stage 3b: a mention must resolve to an
- *     attachment PART. A composer that splices the fence into the user's message text
- *     puts server content in the one field this does not measure.
+ *     applies there. For history this host built that is harmless — a replay re-sends
+ *     a turn that already passed, and folding cannot multiply it — but an IMPORTED
+ *     session's user message can carry any number of fenced blocks, and replaying that
+ *     row is unbounded. The material is already in the transcript and reaches the model
+ *     as context either way, so this bounds nothing it was not already past;
+ *   - and one real constraint on stage 3b: a mention must resolve to an attachment
+ *     PART. A composer that splices the fence into the user's message text puts server
+ *     content in the one field this does not measure.
  */
 export function countResourceAttachmentFences(
   parts?: ReadonlyArray<{ type?: unknown; text?: unknown }>,
@@ -82,8 +85,17 @@ export function countResourceAttachmentFences(
   return count;
 }
 
+/** Scanned rather than split: the parts are up to a read's worth of text each. */
 function occurrences(text: string): number {
-  return text.split(MCP_RESOURCE_FENCE_OPEN).length - 1;
+  let count = 0;
+  for (
+    let at = text.indexOf(MCP_RESOURCE_FENCE_OPEN);
+    at !== -1;
+    at = text.indexOf(MCP_RESOURCE_FENCE_OPEN, at + MCP_RESOURCE_FENCE_OPEN.length)
+  ) {
+    count += 1;
+  }
+  return count;
 }
 
 /** Bounded page walk so a hostile `nextCursor` loop cannot hang the handshake. */
