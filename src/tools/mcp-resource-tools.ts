@@ -32,29 +32,58 @@
  */
 import { createDynamicTool, type Tool } from "./base.js";
 import { createLogger } from "../lib/logger.js";
-import { scrubSecrets } from "../mcp/mcp-client.js";
+import { scrubShortError } from "../shared/dlp.js";
 import { t } from "../i18n/index.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../shared/mcp-resource-bounds.js";
+import { MAX_TOOL_RESULT_TOKENS } from "../shared/tool-result-trim.js";
+import { estimateTokens } from "../shared/token-estimate.js";
 import type { McpResourceSummary } from "../mcp/types.js";
 
 const log = createLogger("lvis");
 
 /**
+ * The same 4-chars-per-token reading `estimateTokens` uses. Explicit here so the
+ * derivation below is a calculation rather than a coincidence.
+ */
+const APPROX_CHARS_PER_TOKEN = 4;
+
+/**
+ * How many dropped servers are named before the rest become a count. Server ids are
+ * bounded to 128 chars, so naming without a cap is ~131 chars each — enough to
+ * overflow the whole budget on its own at a few dozen servers, which is the one
+ * place the bound was still an assumption.
+ */
+const MAX_NAMED_OMITTED_SERVERS = 20;
+
+/**
  * Bound on ONE list response, over the serialized payload.
  *
- * Sized to the host's own tool-result wire cap (`MAX_TOOL_RESULT_TOKENS` ≈ 2,000
- * tokens ≈ 8 KB — see `shared/tool-result-trim.ts`), not to something larger: a
- * result over that cap is stubbed before the provider send and the model has to
- * page it back with `read_tool_result_chunk`. A list the model cannot read inline
- * is a list that costs two round trips to learn what exists, so a budget above the
- * wire cap would be a bound that satisfies itself and nobody else.
+ * DERIVED from the host's own tool-result wire cap rather than hand-copied, so the
+ * two cannot drift: a result over `MAX_TOOL_RESULT_TOKENS` is stubbed before the
+ * provider send and the model has to page it back with `read_tool_result_chunk`, so
+ * a list the model cannot read inline costs two round trips just to learn what
+ * exists. A budget above the wire cap would be a bound that satisfies itself and
+ * nobody else.
+ *
+ * This is the CHAR budget, used as a fast pre-filter while tiering. The wire cap is
+ * counted in TOKENS, and dense JSON runs close enough to 4 chars/token that a
+ * char-only bound landed ~4% over the real ceiling — a list that filled the budget
+ * was still stubbed, which is the outcome the sizing exists to avoid. The final
+ * postcondition is therefore asserted with `estimateTokens`, in the unit the host
+ * actually gates on; a 10% headroom keeps the two from disagreeing on the edge.
+ *
+ * Deliberately SMALLER than the 32 KB per-read bound, and the asymmetry is the
+ * point: a resource read IS the payload the user asked for, while a list is
+ * navigation — it only has to be big enough to choose from.
  *
  * Spent across BOTH axes, because either alone is unbounded: discovery caps
  * resources per server at 200 but never their bytes, and a `serverId`-narrowed
  * call always yields exactly one server. Every clip is REPORTED — a silent one
  * reads as "that is all there is".
  */
-export const MCP_RESOURCE_LIST_MAX_CHARS = 8 * 1024;
+export const MCP_RESOURCE_LIST_MAX_CHARS = Math.floor(
+  MAX_TOOL_RESULT_TOKENS * APPROX_CHARS_PER_TOKEN * 0.9,
+);
 
 /**
  * The slice of the MCP manager these tools need. Narrow on purpose: a tool that
@@ -107,6 +136,10 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
           type: "string",
           description: t("be_mcpResourceTools.serverIdDescription"),
         },
+        offset: {
+          type: "number",
+          description: t("be_mcpResourceTools.offsetDescription"),
+        },
       },
     },
     execute: async (rawInput) => {
@@ -115,17 +148,32 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
       const a = (rawInput ?? {}) as Record<string, unknown>;
       // A serverId that is PRESENT but unusable is a request error, not a request
       // for everything: silently widening the scope of a narrowed call is how a
-      // model ends up reading a catalogue it did not ask for.
+      // model ends up reading a catalogue it did not ask for. Its own message, not
+      // the read tool's — that one names a `uri` parameter this tool does not have.
       if (a.serverId !== undefined && typeof a.serverId !== "string") {
-        return errorResult(t("be_mcpResourceTools.invalidRequest"));
+        return errorResult(t("be_mcpResourceTools.invalidServerId"));
       }
+      // Trimming at the source means the tail is not on the wire at all, so unlike a
+      // stubbed result it cannot be paged back with `read_tool_result_chunk`. Without
+      // an offset that made the head a permanent ceiling on what the model could ever
+      // see — 3 of 200 resources for a verbose server, in every turn.
+      const offsetRaw = a.offset;
+      if (
+        offsetRaw !== undefined
+        && (typeof offsetRaw !== "number"
+          || !Number.isSafeInteger(offsetRaw)
+          || offsetRaw < 0)
+      ) {
+        return errorResult(t("be_mcpResourceTools.invalidOffset"));
+      }
+      const offset = typeof offsetRaw === "number" ? offsetRaw : 0;
       const wanted = typeof a.serverId === "string" ? a.serverId : undefined;
       const servers = access
         .listResources()
         .filter((entry) => (wanted ? entry.serverId === wanted : true))
         .map((entry) => ({
           serverId: entry.serverId,
-          resources: entry.resources.map((resource) => ({
+          resources: entry.resources.slice(offset).map((resource) => ({
             uri: resource.uri,
             name: resource.name,
             ...(resource.title ? { title: resource.title } : {}),
@@ -157,6 +205,7 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
       }
       const kept: typeof servers = [];
       const omittedServerIds: string[] = [];
+      let unnamedOmittedServers = 0;
       let omittedResources = 0;
       let used = 0;
       for (const server of servers) {
@@ -184,8 +233,16 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
           used += partialLen;
         } else {
           // Named, not counted: `serverId` is the model's only narrowing lever, and it
-          // cannot narrow to a server it was never told about.
-          omittedServerIds.push(server.serverId);
+          // cannot narrow to a server it was never told about. The list is itself
+          // CHARGED against the budget and capped — otherwise, once `used` reaches the
+          // budget every remaining server takes this branch, and a payload of nothing
+          // but ids could leave over budget with no tier left to trim.
+          if (omittedServerIds.length < MAX_NAMED_OMITTED_SERVERS) {
+            omittedServerIds.push(server.serverId);
+            used += server.serverId.length + 3;
+          } else {
+            unnamedOmittedServers += 1;
+          }
         }
       }
       // Final guarantee, on the REAL payload. The per-server accounting above sums
@@ -194,17 +251,53 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
       // postcondition ("the output is within budget") here rather than inferring it
       // from the parts is what makes the bound a bound; a test measuring the output
       // caught this being 8,564 against an 8,192 budget.
+      // Where to resume. Emitted whenever anything was withheld, so the model does
+      // not have to infer that a next page exists from a count.
+      const nextOffset = () => {
+        const shown = kept.reduce((sum, server) => sum + server.resources.length, 0);
+        return offset + shown;
+      };
       const payload = () => ({
         servers: kept,
         ...(omittedServerIds.length > 0 ? { omittedServerIds } : {}),
+        ...(unnamedOmittedServers > 0 ? { unnamedOmittedServers } : {}),
         ...(omittedResources > 0 ? { omittedResources } : {}),
         ...(descriptionsOmitted ? { descriptionsOmitted: true } : {}),
+        ...(omittedResources > 0 || unnamedOmittedServers > 0 || omittedServerIds.length > 0
+          ? { nextOffset: nextOffset() }
+          : {}),
       });
-      // Terminates: each step removes one kept server, and the empty case is small.
-      while (kept.length > 0 && serialize(payload()) > budget) {
-        const dropped = kept.pop()!;
-        omittedResources += dropped.resources.length;
-        omittedServerIds.push(dropped.serverId);
+      // Holds UNCONDITIONALLY, in BOTH units: the char budget is the fast filter and
+      // the token count is what the host actually gates on. Terminates because each
+      // step removes a kept server while the id list it feeds is capped, and it also
+      // breaks if a step ever fails to shrink the payload — a pop that adds more id
+      // than it removes body would otherwise grind `kept` to empty and still return
+      // over budget, which is how the previous version's "the empty case is small"
+      // reasoning failed.
+      const overBudget = (): boolean => {
+        const text = JSON.stringify(payload());
+        return text.length > budget || estimateTokens(text) > MAX_TOOL_RESULT_TOKENS;
+      };
+      while (kept.length > 0 && overBudget()) {
+        const before = serialize(payload());
+        const last = kept[kept.length - 1];
+        // Trim the tail RESOURCE first and drop the server only when it has none left:
+        // popping a whole server for a marginal overshoot returned an empty catalogue
+        // for the ordinary "one server, slightly too big" shape, which is the shape this
+        // whole bound exists to serve.
+        if (last.resources.length > 1) {
+          last.resources = last.resources.slice(0, -1);
+          omittedResources += 1;
+        } else {
+          kept.pop();
+          omittedResources += last.resources.length;
+          if (omittedServerIds.length < MAX_NAMED_OMITTED_SERVERS) {
+            omittedServerIds.push(last.serverId);
+          } else {
+            unnamedOmittedServers += 1;
+          }
+        }
+        if (serialize(payload()) >= before) break;
       }
       return { output: JSON.stringify(payload()), isError: false };
     },
@@ -275,7 +368,7 @@ export function createMcpResourceReadTool(getAccess: McpResourceAccessResolver):
         log.warn(
           `mcp_resource_read failed server=${serverId.slice(0, 64)} `
             + `uri=${uri.slice(0, 256)}: `
-            + scrubSecrets(err instanceof Error ? err.message : String(err)),
+            + scrubShortError(err instanceof Error ? err.message : String(err)),
         );
         return errorResult(t("be_mcpResourceTools.readFailed"));
       }
