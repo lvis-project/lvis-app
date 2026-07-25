@@ -335,3 +335,33 @@ describe("skill_read — manifest fidelity", () => {
     }
   });
 });
+
+describe("skill_load — approval key domains", () => {
+  it("stores a bundled skill's approval under a separate key from a flat one", async () => {
+    const { createSkillLoadTool } = await import("../skill-load.js");
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      userSkillDir(dir, "guide"); // directory skill WITH a bundled file
+      writeFileSync(join(dir, "flat.md"), "---\nname: flat\ndescription: d\n---\nFLAT BODY");
+      const store = new SkillStore({ userDir: dir });
+      const keys: string[] = [];
+      const tool = createSkillLoadTool({
+        store,
+        overlay: new SkillOverlay(),
+        approvals: {
+          isApproved: async (key: string) => { keys.push(key); return false; },
+          approve: async () => {},
+        } as never,
+        getApprovalGate: () => ({ requestAndWait: async () => ({ choice: "allow" }) }) as never,
+        emit: () => {},
+      });
+      await tool.execute({ skillName: "flat" }, ctx());
+      await tool.execute({ skillName: "guide" }, ctx());
+      // Flat keeps the legacy key; the bundle-bearing skill is namespaced, so
+      // the two material encodings can never share a record.
+      expect(keys).toEqual(["flat", "guide#bundled"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

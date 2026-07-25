@@ -49,10 +49,13 @@ export interface SkillLoadEvent {
  * trusted fence renders. Resource CONTENT is deliberately not covered; it never
  * enters the system prompt, arriving only as `skill_read` tool_result data.
  *
- * Encoding is injective: digesting the two parts separately means a body cannot
- * impersonate a body+manifest pair by embedding the separator. Skills with no
- * resources hash the bare body exactly as before, so existing approvals (all
- * seeded built-ins, which are flat files, included) stay valid.
+ * Two encodings live here — the bare body (no bundle) and a digest pair (bundle)
+ * — so they are kept in SEPARATE key spaces by {@link approvalRecordKey}. Within
+ * the bundle space the pair is unambiguous (fixed-width hex either side of `|`),
+ * and across spaces a crafted body can no longer impersonate a pair because the
+ * two never share a record key. Skills with no resources still hash the bare
+ * body under the unchanged key, so existing approvals (all seeded built-ins,
+ * which are flat files, included) stay valid.
  */
 function approvalMaterial(skill: { body: string; resources: readonly { path: string; bytes: number }[] }): string {
   if (skill.resources.length === 0) return skill.body;
@@ -62,6 +65,24 @@ function approvalMaterial(skill: { body: string; resources: readonly { path: str
     .join("\n");
   const digest = (value: string): string => createHash("sha256").update(value, "utf-8").digest("hex");
   return `${digest(skill.body)}|${digest(manifest)}`;
+}
+
+/**
+ * Which approval record {@link approvalMaterial} is stored under.
+ *
+ * Bundle-bearing approvals get their own namespace so the two material
+ * encodings never share a key space (see `approvalMaterial`). Resource-bearing
+ * skills are new, so no legacy record exists under the namespaced key and the
+ * separation costs nothing; resource-less skills keep the original key and
+ * their existing approvals.
+ */
+function approvalRecordKey(skill: {
+  name: string;
+  approvalKey?: string;
+  resources: readonly { path: string; bytes: number }[];
+}): string {
+  const base = skill.approvalKey ?? skill.name;
+  return skill.resources.length === 0 ? base : `${base}#bundled`;
 }
 
 export interface SkillLoadToolDeps {
@@ -168,7 +189,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // we re-prompt — closing the TOCTOU window where post-approval mutations
       // would silently inherit the previous "yes."
       const alreadyApproved = await deps.approvals.isApproved(
-        skill.approvalKey ?? skill.name,
+        approvalRecordKey(skill),
         approvalMaterial(skill),
       );
       if (!alreadyApproved) {
@@ -202,7 +223,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         // R2-CR-3: persist approval BOUND TO the current body + bundled
         // manifest. A later body swap, or a bundle file added/resized,
         // invalidates this record.
-        await deps.approvals.approve(skill.approvalKey ?? skill.name, approvalMaterial(skill)).catch((err) => {
+        await deps.approvals.approve(approvalRecordKey(skill), approvalMaterial(skill)).catch((err) => {
           log.warn(
             "skill_load: approval persistence failed (non-fatal): %s",
             (err as Error).message,
