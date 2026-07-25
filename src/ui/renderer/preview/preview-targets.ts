@@ -426,6 +426,21 @@ export function collectChatPreviewModel({
         previewTargetId: targetId,
         canOpenExternal: true,
       }, fileIds);
+    } else if (attachment.kind === "resource") {
+      // Preview shows the fence VERBATIM, framing included. This panel exists to show
+      // what the model will actually receive, and the untrusted framing is part of that
+      // — stripping it here would preview a message the host never sends.
+      addUnique(targets, {
+        id: `attachment:resource:${attachment.id}`,
+        kind: "paste",
+        title: `Resource #${attachment.n}`,
+        subtitle: `${attachment.serverId} · ${attachment.uri}`,
+        sourceLabel: "attachment",
+        createdOrder: order++,
+        text: trimPreviewText(attachment.text),
+        lines: attachment.text.split("\n").length,
+        chars: attachment.text.length,
+      }, targetIds);
     } else {
       addUnique(targets, {
         id: `attachment:paste:${attachment.id}`,

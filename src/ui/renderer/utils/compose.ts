@@ -31,6 +31,9 @@ export interface ComposedOutgoing {
  *     in `----- Pasted text #N (M lines) -----` delimiters so the model sees
  *     the full content (no extra round-trip). Plain delimiter rather than a
  *     fenced code block so the inner content cannot accidentally close it.
+ *   • Resource markers stay in the body like an image's, and the host-built fenced
+ *     block becomes its own text part. NOT the paste treatment: that text is the
+ *     server's, and main's per-turn bound counts fences in the parts.
  */
 export function composeOutgoing(params: {
   raw: string;
@@ -85,9 +88,26 @@ export function composeOutgoing(params: {
       bytes: img.bytes,
     }));
 
+  // 4. Resource attachments become their OWN text parts, and the marker stays in the
+  //    body — the image rule, deliberately not the paste rule above.
+  //
+  //    A paste is the user's own words, so inlining it into the body is right. A
+  //    resource is SERVER-authored text inside the host's untrusted fence, and main
+  //    bounds how much of it one turn may carry by counting fences in the content
+  //    PARTS. Splicing it into `body` would put it in the one field that bound cannot
+  //    see, which would not be a smaller bound — it would be no bound, and the
+  //    composer is the exact place the reviewers predicted that would happen.
+  //
+  //    The text is passed through untouched. The host built the fence and the framing;
+  //    anything this function did to that string would be a second author on content
+  //    the fence exists to attribute to the first.
+  const resourceParts: UserContentPart[] = attachments
+    .filter((a): a is Extract<Attachment, { kind: "resource" }> => a.kind === "resource")
+    .map((res) => ({ type: "text", text: res.text }));
+
   return {
     text: body,
-    attachments: imageParts,
+    attachments: [...imageParts, ...resourceParts],
     personaPromptId: buildActivePersonaPromptId(activePreset) ?? undefined,
   };
 }

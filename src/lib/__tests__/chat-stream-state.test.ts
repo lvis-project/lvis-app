@@ -5,6 +5,7 @@ import {
   appendUserEntry,
   applyToolEnd,
   applyToolStart,
+  dropOptimisticUserEntry,
   dropPermissionReviewEntries,
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
@@ -538,5 +539,38 @@ describe("setAssistantError — Issue #911 systemNotice option", () => {
     const out = setAssistantError([{ kind: "user", text: "hi" }], "일반 오류");
     const last = out[out.length - 1] as Extract<ChatEntry, { kind: "assistant" }>;
     expect(last.systemNotice).toBeUndefined();
+  });
+});
+
+/**
+ * The optimistic user bubble exists so a send feels immediate. When the send is
+ * REFUSED, main recorded no turn — so leaving the bubble shows the user a message that
+ * exists only in this renderer: absent from the session file, gone on reload, and
+ * indistinguishable from one that was actually sent.
+ */
+describe("dropOptimisticUserEntry", () => {
+  it("removes the bubble the refused send appended", () => {
+    const entries: ChatEntry[] = [
+      { kind: "user", text: "earlier" },
+      { kind: "assistant", text: "reply" },
+      { kind: "user", text: "refused turn" },
+    ];
+    expect(dropOptimisticUserEntry(entries, "refused turn")).toEqual(entries.slice(0, 2));
+  });
+
+  it("leaves the transcript alone when the last entry is not that bubble", () => {
+    // A stream frame for a PREVIOUS turn can land between the append and the rejection.
+    // Dropping whatever is last would delete an assistant's answer instead.
+    const withAssistant: ChatEntry[] = [
+      { kind: "user", text: "refused turn" },
+      { kind: "assistant", text: "still streaming" },
+    ];
+    expect(dropOptimisticUserEntry(withAssistant, "refused turn")).toEqual(withAssistant);
+
+    // And a different user bubble is somebody else's content, not ours to remove.
+    const otherUser: ChatEntry[] = [{ kind: "user", text: "a different message" }];
+    expect(dropOptimisticUserEntry(otherUser, "refused turn")).toEqual(otherUser);
+
+    expect(dropOptimisticUserEntry([], "refused turn")).toEqual([]);
   });
 });

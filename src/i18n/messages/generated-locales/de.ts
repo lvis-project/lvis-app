@@ -2788,4 +2788,9 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.invalidToolName": "Der von dieser App angeforderte Tool-Name ist ungültig.",
   "formatIpcError.toolCallFailed": "Der Tool-Aufruf dieser App wurde abgelehnt oder ist fehlgeschlagen.",
   "formatIpcError.notificationUnavailable": "Der Benachrichtigungsdienst läuft nicht, daher konnte die Nachricht der App nicht zugestellt werden.",
+  "composer.resourceMentionHint": "Enter fügt die Ressource an · Esc schließt",
+  "composer.resourceLimit": "Höchstens {max} Ressourcen pro Nachricht — senden Sie diese und fügen Sie dann weitere an.",
+  "composer.resourceAttachFailed": "Diese Ressource konnte nicht angefügt werden. Der Server ist möglicherweise getrennt.",
+  "attachmentChip.resourceFromServer": "Von MCP-Server {server} · nicht vertrauenswürdiger Inhalt",
+  "attachmentChip.resourceClipped": "Von MCP-Server {server} · nicht vertrauenswürdig, gekürzt",
 };

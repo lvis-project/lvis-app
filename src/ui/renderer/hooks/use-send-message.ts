@@ -38,6 +38,7 @@ export interface UseSendMessageDeps {
   checkApiKey: () => Promise<boolean>;
   composeOutgoing: ComposeOutgoingFn;
   appendUserEntry: ChatState["appendUserEntry"];
+  dropUserEntry: ChatState["dropUserEntry"];
   resetStreamAccumulators: ChatState["resetStreamAccumulators"];
   beginStreamingRequest: ChatState["beginStreamingRequest"];
   finishStreamingRequest: ChatState["finishStreamingRequest"];
@@ -110,7 +111,7 @@ export interface UseSendMessageResult {
 export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
   const {
     api, t, streaming, checkApiKey, composeOutgoing,
-    appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
+    appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
     llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,
@@ -265,6 +266,17 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         setErrorWithThought(
           mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage }),
         );
+        // Put the turn back the way it was. The bubble was appended optimistically and
+        // the composer was cleared before the IPC resolved; a REFUSED send means main
+        // recorded nothing, so leaving either would show the user a message that was
+        // never sent and lose the text they typed. The vision-capability guard above
+        // already restores the draft for its own refusal — this is the same repair for
+        // every other one, which until now only the guard had.
+        //
+        // Attachments are deliberately NOT cleared here (the success path clears them),
+        // so a send refused for carrying too many resources still has them to remove.
+        if (mode === "default") dropUserEntry(trimmed);
+        setQuestion(q);
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
         if (debugStreamEnabled) {
@@ -284,6 +296,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       checkApiKey,
       composeOutgoing,
       appendUserEntry,
+      dropUserEntry,
       resetStreamAccumulators,
       beginStreamingRequest,
       finishStreamingRequest,

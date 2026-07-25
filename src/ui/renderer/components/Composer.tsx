@@ -19,11 +19,14 @@ import {
 import {
   ATTACH_MAX_COUNT,
   type Attachment,
+  type ResourceAttachment,
 } from "../types/attachments.js";
 import { findMarkerAt, parseMarkers } from "../utils/attachment-markers.js";
 import { handleClipboardPaste } from "../utils/clipboard-paste.js";
 import { InlineSlashMenu } from "./InlineSlashMenu.js";
+import { ResourceMentionMenu } from "./ResourceMentionMenu.js";
 import { useInlineSlashMenu } from "../hooks/use-inline-slash-menu.js";
+import { useResourceMention } from "../hooks/use-resource-mention.js";
 import { useSlashPickerRuntime } from "../hooks/use-slash-picker-runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
@@ -180,6 +183,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     close: inlineClose,
   } = inlineSlash;
 
+
   const captureUserKeyboardIntent = useCallback((): UserKeyboardIntentSnapshot => {
     const api = (globalThis as typeof globalThis & {
       window?: { lvisApi?: { captureUserKeyboardIntent?: () => UserKeyboardIntentSnapshot } };
@@ -199,6 +203,50 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       onAttachmentsChange(liveAttachments);
     }
   }, [liveAttachments, attachments, onAttachmentsChange]);
+
+  // Inline "@" resource mention. Its accept path is asynchronous (it reads the resource
+  // through the host) and it commits the marker and the attachment TOGETHER here, in one
+  // flushSync, for the same reason the clipboard path does: the marker-sync effect above
+  // treats an attachment whose marker is missing from the body as deleted, and would
+  // clean this one up before the text caught up.
+  const resourceMention = useResourceMention({
+    text,
+    caret,
+    enabled: !disabled,
+    isComposing,
+    // Read the same way the slash-picker runtime reads its tools. Absent in a detached
+    // preview window, where the menu then simply never opens — the honest outcome, not
+    // a synthesized catalogue.
+    mcp: typeof window === "undefined" ? undefined : window.lvis?.mcp,
+    resourceCount: liveAttachments.filter((a) => a.kind === "resource").length,
+    allocateN,
+    onAttach: useCallback((
+      attachment: ResourceAttachment,
+      marker: string,
+      range: { start: number; end: number },
+    ) => {
+      flushSync(() => {
+        onAttachmentsChange((prev) => [...prev, attachment]);
+        const ta = taRef.current;
+        const next = text.slice(0, range.start) + marker + text.slice(range.end);
+        onTextChange(next);
+        const pos = range.start + marker.length;
+        requestAnimationFrame(() => {
+          if (ta) {
+            ta.setSelectionRange(pos, pos);
+            ta.focus();
+          }
+        });
+      });
+    }, [onAttachmentsChange, onTextChange, text]),
+    onError: useCallback((message: string) => onWarning?.(message), [onWarning]),
+  });
+  const {
+    open: mentionOpen,
+    move: mentionMove,
+    accept: mentionAccept,
+    close: mentionClose,
+  } = resourceMention;
 
   const insertAtCursor = useCallback(
     (insertion: string) => {
@@ -328,6 +376,40 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         if (e.key === "Escape") {
           e.preventDefault();
           inlineClose();
+          return;
+        }
+      }
+
+      // The "@" mention menu owns navigation on the same terms, and for the same
+      // reason: Enter must attach the highlighted resource rather than send the turn.
+      // The two triggers are mutually exclusive by construction — each sigil has to
+      // start the token, so one token cannot be both — but this branch is second so
+      // that a "/" menu already open keeps its keys either way.
+      if (mentionOpen) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          mentionMove(1);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          mentionMove(-1);
+          return;
+        }
+        if (
+          (e.key === "Enter" || e.key === "Tab") &&
+          !e.shiftKey &&
+          !e.altKey &&
+          !e.ctrlKey &&
+          !e.metaKey
+        ) {
+          e.preventDefault();
+          mentionAccept();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          mentionClose();
           return;
         }
       }
@@ -628,6 +710,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         anchorRef={taRef}
         onHover={inlineSlash.setActiveIndex}
         onSelect={inlineSlash.accept}
+      />
+      <ResourceMentionMenu
+        open={mentionOpen}
+        items={resourceMention.items}
+        activeIndex={resourceMention.activeIndex}
+        anchorRef={taRef}
+        onHover={() => {}}
+        onSelect={resourceMention.accept}
       />
     </div>
   );
