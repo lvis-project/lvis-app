@@ -25,11 +25,13 @@ function Harness({
   initialText = "",
   initialAttachments = [] as Attachment[],
   onSendCb = vi.fn(),
+  onWarningCb,
   suggestedReplies,
 }: {
   initialText?: string;
   initialAttachments?: Attachment[];
   onSendCb?: () => void;
+  onWarningCb?: (message: string) => void;
   suggestedReplies?: SuggestedRepliesSnapshot;
 }) {
   const [text, setText] = useState(initialText);
@@ -47,6 +49,7 @@ function Harness({
       allocateN={() => ++counterRef.current}
       saveClipboardImage={mockSave}
       onSend={onSendCb}
+      {...(onWarningCb ? { onWarning: onWarningCb } : {})}
       suggestedReplies={suggestedReplies}
     />
   );
@@ -609,5 +612,143 @@ describe("Composer", () => {
     // an extra harness; the latch-clear is already covered by the
     // use-suggested-replies test.)
     expect(onSendCb).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The `@` mention, end to end through the real component.
+ *
+ * These are the cases that only exist once the picker is wired: the menu opening on a
+ * trigger, the attach landing as an attachment rather than as body text, and the two
+ * races the asynchronous read introduces.
+ */
+describe("Composer — @ resource mention", () => {
+  const FENCE = '<mcp-resource trust="untrusted-server-data" server="hr-mcp" uri="doc:1">\nBODY\n</mcp-resource>';
+
+  function installMcpApi(overrides?: {
+    attachResource?: ReturnType<typeof vi.fn>;
+    listResources?: ReturnType<typeof vi.fn>;
+  }) {
+    const attachResource = overrides?.attachResource ?? vi.fn(async () => ({
+      ok: true,
+      attachment: { type: "text" as const, text: FENCE },
+    }));
+    const listResources = overrides?.listResources ?? vi.fn(async () => ({
+      ok: true,
+      servers: [
+        { serverId: "hr-mcp", resources: [{ uri: "doc:1", name: "policy.md" }] },
+        { serverId: "eng-mcp", resources: [{ uri: "doc:2", name: "runbook.md" }] },
+      ],
+    }));
+    (window as unknown as { lvis?: unknown }).lvis = { mcp: { attachResource, listResources } };
+    return { attachResource, listResources };
+  }
+
+  async function openMenu(ta: HTMLTextAreaElement, value = "@") {
+    fireEvent.change(ta, { target: { value } });
+    // The catalogue read is a promise; let it settle so the rows exist.
+    await act(async () => { await Promise.resolve(); });
+  }
+
+  it("opens on @, filters by query, and closes on Escape", async () => {
+    installMcpApi();
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    await openMenu(ta);
+    expect(screen.getByTestId("resource-mention-menu")).toBeTruthy();
+    expect(screen.getAllByTestId(/^resource-mention-item-/)).toHaveLength(2);
+
+    await openMenu(ta, "@run");
+    const rows = screen.getAllByTestId(/^resource-mention-item-/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("runbook.md");
+
+    await act(async () => { fireEvent.keyDown(ta, { key: "Escape" }); });
+    expect(screen.queryByTestId("resource-mention-menu")).toBeNull();
+  });
+
+  it("attaches the host's fence as an ATTACHMENT and puts only a marker in the body", async () => {
+    const { attachResource } = installMcpApi();
+    render(<Harness initialText="" />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    await openMenu(ta, "look at @pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(attachResource).toHaveBeenCalledWith("hr-mcp", "doc:1");
+    // The mention token is replaced by a marker; the fence is nowhere in the body.
+    expect(ta.value).toBe("look at [Resource #1] ");
+    expect(ta.value).not.toContain("mcp-resource");
+    expect(ta.value).not.toContain("BODY");
+    // …and the chip exists, which is what carries the payload to the send path.
+    // A chip exists, which is what carries the payload to the send path — the marker
+    // in the body and this chip are the pair the marker-sync effect keeps together.
+    expect(screen.getByTestId("attachment-chip")).toBeTruthy();
+  });
+
+  it("does not discard what the user typed while the read was in flight", async () => {
+    // The read is asynchronous. Splicing into the text as it was when Enter was pressed
+    // would silently throw away every keystroke since — the marker lands, and the
+    // sentence the user was in the middle of writing disappears.
+    let resolveRead: ((value: unknown) => void) | undefined;
+    const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
+    installMcpApi({ attachResource: attachResource as never });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    // The user keeps typing before the read comes back.
+    fireEvent.change(ta, { target: { value: "@pol and then some more words" } });
+    await act(async () => {
+      resolveRead?.({ ok: true, attachment: { type: "text", text: FENCE } });
+      await Promise.resolve();
+    });
+
+    expect(ta.value).toContain("and then some more words");
+    expect(ta.value).toContain("[Resource #1]");
+  });
+
+  it("keeps the marker and the attachment together when the trigger is gone", async () => {
+    // Same race, other branch: the user deleted the `@pol` token during the read. The
+    // attachment cannot be dropped (the read already happened) and it cannot be left
+    // markerless (the sync effect would clean it straight back up), so the marker is
+    // appended instead.
+    let resolveRead: ((value: unknown) => void) | undefined;
+    const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
+    installMcpApi({ attachResource: attachResource as never });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    fireEvent.change(ta, { target: { value: "different sentence entirely" } });
+    await act(async () => {
+      resolveRead?.({ ok: true, attachment: { type: "text", text: FENCE } });
+      await Promise.resolve();
+    });
+
+    expect(ta.value).toBe("different sentence entirely [Resource #1] ");
+    // A chip exists, which is what carries the payload to the send path — the marker
+    // in the body and this chip are the pair the marker-sync effect keeps together.
+    expect(screen.getByTestId("attachment-chip")).toBeTruthy();
+  });
+
+  it("surfaces a failed read without attaching anything", async () => {
+    const attachResource = vi.fn(async () => ({ ok: false, error: "resource-failed" }));
+    installMcpApi({ attachResource: attachResource as never });
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onWarning).toHaveBeenCalledWith(t("composer.resourceAttachFailed"));
+    // The mention token stays so the user can retry; no marker, no chip.
+    expect(ta.value).not.toContain("[Resource #");
   });
 });
