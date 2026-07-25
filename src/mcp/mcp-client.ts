@@ -8,6 +8,7 @@ import type {
   McpServerConfig,
   McpServerState,
   McpPromptSummary,
+  McpResourceSummary,
   McpStdioServerConfig,
   McpToolSchema,
   McpUiPayload,
@@ -24,6 +25,18 @@ import {
   fetchPublicHttpResponse,
   validateHttpUrl,
 } from "../core/network-guard.js";
+import {
+  isHostFetchRefusedUri,
+  isUsableResourceUri,
+  MCP_RESOURCE_DESCRIPTION_MAX_CHARS,
+  MCP_RESOURCE_MAX_BLOCKS,
+  MCP_RESOURCE_MAX_CHARS,
+  MCP_RESOURCE_MAX_PAGES,
+  MCP_RESOURCE_MAX_PER_SERVER,
+  MCP_RESOURCE_NAME_MAX_CHARS,
+  MCP_RESOURCE_URI_MAX_CHARS,
+  usableResourceText,
+} from "../shared/mcp-resource-bounds.js";
 import {
   isUsablePromptName,
   MCP_PROMPT_ARG_NAME_MAX_CHARS,
@@ -183,6 +196,27 @@ interface McpPromptsListResult {
     arguments?: Array<{ name: string; description?: string; required?: boolean }>;
   }>;
   nextCursor?: string;
+}
+
+interface McpResourcesListResult {
+  resources?: Array<{
+    uri?: unknown;
+    name?: unknown;
+    title?: unknown;
+    description?: unknown;
+    mimeType?: unknown;
+    size?: unknown;
+  }>;
+  nextCursor?: string;
+}
+
+interface McpResourcesReadResult {
+  contents?: Array<{
+    uri?: unknown;
+    mimeType?: unknown;
+    text?: unknown;
+    blob?: unknown;
+  }>;
 }
 
 interface McpToolCallResult {
@@ -360,6 +394,8 @@ export class McpClient {
   private appsUiAdvertised = false;
   /** The server DECLARED the `prompts` capability at discovery (gate for prompts/list). */
   private promptsAdvertised = false;
+  /** The server DECLARED the core `resources` capability (gate for resources/list). */
+  private resourcesAdvertised = false;
 
   readonly state: McpServerState;
 
@@ -448,6 +484,9 @@ export class McpClient {
         this.appsUiAdvertised =
           discover.capabilities?.extensions?.[MCP_APPS_UI_EXTENSION] !== undefined;
         this.promptsAdvertised = discover.capabilities?.prompts !== undefined;
+        // The CORE `resources` capability, not the MCP-Apps `ui://` extension —
+        // those are different surfaces with different containment rules.
+        this.resourcesAdvertised = discover.capabilities?.resources !== undefined;
         // Server-level usage guidance (read-only surface; never auto-injected here).
         // `discover` is untrusted wire data cast without runtime validation, so
         // coerce a non-string `instructions` to undefined here at the boundary —
@@ -516,6 +555,8 @@ export class McpClient {
 
       // Discover user-controlled prompts (non-fatal; gated advertised + approved).
       await this.discoverPrompts();
+      // Same for application-driven resources.
+      await this.discoverResources();
 
       this.state.status = "connected";
       this.state.connectedAt = new Date().toISOString();
@@ -591,6 +632,142 @@ export class McpClient {
     }
   }
 
+  /**
+   * Discover the resources a server declares (`resources/list`).
+   *
+   * Gated on the server having ADVERTISED the core `resources` capability AND
+   * governance approving it — two keys, same as prompts, so nothing leaves the host
+   * for a capability the user never approved. Non-fatal: resources are an optional
+   * surface and a failure must not break the tool connection.
+   *
+   * Every field is validated HERE. `resources/list` output arrives as a cast, not a
+   * check, so a non-string uri or a control character in a name would otherwise reach
+   * host chrome and the audit log. One shape leaves this boundary.
+   */
+  private async discoverResources(): Promise<void> {
+    if (!this.resourcesAdvertised) return;
+    if (!this.governance.validateRequestCapability(this.config.id, "resources/list", {}).valid) {
+      return;
+    }
+    try {
+      const resources: McpResourceSummary[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      for (let page = 0; page < MCP_RESOURCE_MAX_PAGES; page++) {
+        const result = await this.sendRequest<McpResourcesListResult>(
+          "resources/list",
+          cursor ? { cursor } : {},
+          HANDSHAKE_TIMEOUT_MS,
+        );
+        for (const entry of Array.isArray(result.resources) ? result.resources : []) {
+          if (resources.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
+          if (!entry || typeof entry !== "object") continue;
+          if (!isUsableResourceUri(entry.uri)) continue;
+          // De-duplicated by URI: the read path resolves a URI to at most one
+          // catalogue entry, and two entries sharing a URI would make which one the
+          // user picked unobservable.
+          if (seen.has(entry.uri)) continue;
+          const name = usableResourceText(entry.name, MCP_RESOURCE_NAME_MAX_CHARS)
+            ?? usableResourceText(entry.uri, MCP_RESOURCE_NAME_MAX_CHARS);
+          if (!name) continue;
+          seen.add(entry.uri);
+          const title = usableResourceText(entry.title, MCP_RESOURCE_NAME_MAX_CHARS);
+          const description = usableResourceText(
+            entry.description,
+            MCP_RESOURCE_DESCRIPTION_MAX_CHARS,
+          );
+          const mimeType = usableResourceText(entry.mimeType, MCP_RESOURCE_NAME_MAX_CHARS);
+          const size = typeof entry.size === "number"
+            && Number.isSafeInteger(entry.size)
+            && entry.size >= 0
+            ? entry.size
+            : undefined;
+          resources.push({
+            uri: entry.uri,
+            name,
+            ...(title ? { title } : {}),
+            ...(description ? { description } : {}),
+            ...(mimeType ? { mimeType } : {}),
+            ...(size !== undefined ? { size } : {}),
+            ...(isHostFetchRefusedUri(entry.uri) ? { hostFetchRefused: true } : {}),
+          });
+        }
+        cursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+        if (!cursor || resources.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
+      }
+      this.state.resources = resources;
+      log.info(`${this.config.id} discovered ${resources.length} resource(s)`);
+    } catch (err) {
+      log.warn(
+        `${this.config.id} resources/list discovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Read one declared resource (`resources/read`).
+   *
+   * Named apart from {@link readResource}, which serves the MCP-Apps `ui://`
+   * extension: same JSON-RPC method, different surface, different containment
+   * rules. Collapsing them would let an app-scheme URI be read through the
+   * core-capability gate or vice versa.
+   *
+   * Three gates before anything leaves the host: the capability was advertised, the
+   * URI is one this client actually LISTED (so this cannot be used as a general fetch
+   * primitive against the server URI space), and the URI is not one the host refuses
+   * to fetch. Governance checks the capability again inside `sendRequest`, which is
+   * the single enforcement point for every method.
+   *
+   * Returns text blocks only. A binary blob becomes an explicit placeholder: a server
+   * must not be able to make the host quietly omit part of what it returned, and
+   * undecoded bytes must never reach the model as if they were text.
+   */
+  async readDeclaredResource(uri: string): Promise<{
+    blocks: Array<{ uri?: string; mimeType?: string; text?: string; omittedKind?: string }>;
+    droppedBlocks: number;
+    /** True when the block cap or the character budget clipped the read. */
+    truncated: boolean;
+  }> {
+    if (!this.resourcesAdvertised) {
+      throw new Error("[mcp-client] server did not advertise resources");
+    }
+    const declared = this.state.resources?.find((resource) => resource.uri === uri);
+    if (!declared) {
+      throw new Error("[mcp-client] server did not declare this resource");
+    }
+    if (declared.hostFetchRefused) {
+      throw new Error("[mcp-client] host does not fetch this resource scheme");
+    }
+    const result = await this.sendRequest<McpResourcesReadResult>("resources/read", { uri });
+    const returned = Array.isArray(result.contents) ? result.contents : [];
+    const kept = returned.slice(0, MCP_RESOURCE_MAX_BLOCKS);
+    // The character budget is spent HERE, at the boundary, not by a later
+    // renderer: an unbounded text block should never be carried across the host in
+    // the first place. Spent across blocks rather than per block, so a server
+    // cannot multiply the budget by splitting one document into many.
+    let charBudget = MCP_RESOURCE_MAX_CHARS;
+    let truncated = returned.length > kept.length;
+    const blocks = kept.map((content) => {
+      const blockUri = usableResourceText(content.uri, MCP_RESOURCE_URI_MAX_CHARS);
+      const mimeType = usableResourceText(content.mimeType, MCP_RESOURCE_NAME_MAX_CHARS);
+      if (typeof content.text === "string") {
+        const text = content.text.slice(0, Math.max(0, charBudget));
+        if (text.length < content.text.length) truncated = true;
+        charBudget -= text.length;
+        return {
+          ...(blockUri ? { uri: blockUri } : {}),
+          ...(mimeType ? { mimeType } : {}),
+          text,
+        };
+      }
+      return {
+        ...(blockUri ? { uri: blockUri } : {}),
+        ...(mimeType ? { mimeType } : {}),
+        omittedKind: typeof content.blob === "string" ? "binary" : "unknown",
+      };
+    });
+    return { blocks, droppedBlocks: returned.length - kept.length, truncated };
+  }
   /**
    * Fetch one server-declared prompt (`prompts/get`).
    *
