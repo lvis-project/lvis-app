@@ -10,8 +10,11 @@
  */
 import { describe, it, expect } from "vitest";
 
+import { isChatSendInputOrigin } from "../chat-origin.js";
+import { generatedEn } from "../../i18n/messages/generated/index.js";
 import {
   STAGED_ORIGIN_KINDS,
+  isStagedSendOrigin,
   formatStagedEnvelope,
   isStagedTurnSource,
   parseStagedEnvelope,
@@ -91,6 +94,41 @@ describe("staged-origin registry", () => {
     expect(isStagedTurnSource("app:")).toBe(false); // empty id — bounded pattern
     expect(isStagedTurnSource(null)).toBe(false);
     expect(isStagedTurnSource(undefined)).toBe(false);
+  });
+
+  // The send gate narrows with a hand-written predicate, so a registered origin
+  // that the predicate does not list is rejected as `missing-input-origin` — the
+  // whole feature dies silently and tsc cannot see it. Pin both directions.
+  it("accepts every registered origin at the send gate", () => {
+    for (const kind of STAGED_ORIGIN_KINDS) {
+      expect(isStagedSendOrigin(kind.inputOrigin)).toBe(true);
+      expect(isChatSendInputOrigin(kind.inputOrigin)).toBe(true);
+    }
+    expect(isStagedSendOrigin("user-keyboard")).toBe(false);
+    expect(isStagedSendOrigin("llm-tool-arg")).toBe(false);
+    expect(isStagedSendOrigin(undefined)).toBe(false);
+    // Non-staged send origins must still pass the gate.
+    expect(isChatSendInputOrigin("user-keyboard")).toBe(true);
+    expect(isChatSendInputOrigin("queue-auto")).toBe(true);
+    expect(isChatSendInputOrigin("llm-tool-arg")).toBe(false);
+  });
+
+  // A staged origin ships a HARD gate (force-ask). Without the matching
+  // model-facing guidance the model is never told the body is untrusted, so the
+  // guidance descriptor is part of registration and its keys must actually
+  // resolve — a typo would render as the raw key inside the system prompt.
+  it("gives every registered origin resolvable guidance", () => {
+    const catalog = generatedEn as Record<string, string>;
+    for (const kind of STAGED_ORIGIN_KINDS) {
+      expect(kind.guidance.tag).toMatch(/^[a-z][a-z0-9-]*$/);
+      expect(kind.guidance.lineKeys.length).toBeGreaterThan(0);
+      for (const key of kind.guidance.lineKeys) {
+        expect(catalog[key], `missing i18n key ${key}`).toBeTypeOf("string");
+      }
+      // Only the first line names the provenance, so it is the one that must
+      // carry the {source} placeholder.
+      expect(catalog[kind.guidance.lineKeys[0]]).toContain("{source}");
+    }
   });
 
   it("does not parse a foreign or malformed envelope", () => {

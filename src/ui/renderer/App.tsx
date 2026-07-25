@@ -4,6 +4,7 @@ import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { AppProviders } from "./AppProviders.js";
 import { AppDialogs } from "./AppDialogs.js";
+import { McpPromptArgsDialog } from "./dialogs/McpPromptArgsDialog.js";
 import { AppShell } from "./AppShell.js";
 
 // ─── Imports: types / constants / helpers / components / tabs ────────
@@ -627,29 +628,48 @@ export function App() {
   // staged `mcp-prompt` mode. It deliberately does NOT go through the composer
   // draft: a draft the user then submits would enter as `user-keyboard`, which
   // would launder server-authored text into a fully trusted turn.
-  const handleRunMcpPrompt = useCallback((prompt: McpPromptEntry) => {
-    void (async () => {
-      const args: Record<string, string> = {};
-      for (const argument of prompt.arguments) {
-        if (!argument.required) continue;
-        const value = window.prompt(
-          argument.description ? `${argument.name} — ${argument.description}` : argument.name,
-          "",
-        );
-        if (value === null) return; // user cancelled
-        args[argument.name] = value;
-      }
-      const outcome = (await window.lvis?.mcp?.getPrompt?.(prompt.serverId, prompt.name, args)) as
-        | { ok: true; envelope: string }
-        | { ok: false; error: string }
-        | undefined;
-      if (!outcome || outcome.ok !== true) {
+  // Arguments are collected by HOST chrome (McpPromptArgsDialog) — the renderer
+  // has no `window.prompt`, and a composer draft would re-enter as
+  // `user-keyboard`. An argument-less prompt skips the form entirely.
+  const [mcpPromptAwaitingArgs, setMcpPromptAwaitingArgs] = useState<McpPromptEntry | null>(null);
+
+  const runMcpPrompt = useCallback(
+    async (prompt: McpPromptEntry, args: Record<string, string>) => {
+      // One catch for the whole path: an IPC rejection, a missing bridge, or a
+      // send-gate refusal all surface as the same toast rather than an unhandled
+      // rejection the user never sees.
+      try {
+        const outcome = (await window.lvis?.mcp?.getPrompt?.(prompt.serverId, prompt.name, args)) as
+          | { ok: true; envelope: string }
+          | { ok: false; error: string }
+          | undefined;
+        if (!outcome || outcome.ok !== true) {
+          statusPushToast({ severity: "error", message: t("app.mcpPromptFailed", { name: prompt.name }), ttlMs: 10000 });
+          return;
+        }
+        await handleAskRef.current?.(outcome.envelope, "mcp-prompt");
+      } catch {
         statusPushToast({ severity: "error", message: t("app.mcpPromptFailed", { name: prompt.name }), ttlMs: 10000 });
-        return;
       }
-      await handleAskRef.current?.(outcome.envelope, "mcp-prompt");
-    })();
-  }, [handleAskRef, statusPushToast, t]);
+    },
+    [handleAskRef, statusPushToast, t],
+  );
+
+  const handleRunMcpPrompt = useCallback((prompt: McpPromptEntry) => {
+    if (prompt.arguments.length > 0) {
+      setMcpPromptAwaitingArgs(prompt);
+      return;
+    }
+    void runMcpPrompt(prompt, {});
+  }, [runMcpPrompt]);
+
+  const handleMcpPromptArgsSubmit = useCallback(
+    (prompt: McpPromptEntry, args: Record<string, string>) => {
+      setMcpPromptAwaitingArgs(null);
+      void runMcpPrompt(prompt, args);
+    },
+    [runMcpPrompt],
+  );
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
@@ -941,6 +961,11 @@ export function App() {
           </ErrorBoundary>
       </AppShell>
 
+      <McpPromptArgsDialog
+        onCancel={() => setMcpPromptAwaitingArgs(null)}
+        onSubmit={handleMcpPromptArgsSubmit}
+        prompt={mcpPromptAwaitingArgs}
+      />
       <AppDialogs
         api={api}
         deferredQueueOpen={deferredQueueOpen}

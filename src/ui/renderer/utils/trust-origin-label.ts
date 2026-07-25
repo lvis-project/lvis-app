@@ -8,6 +8,8 @@ export function trustOriginLabel(origin: string | undefined): string {
       return t("trustOriginLabel.pluginEmitted");
     case "app-emitted":
       return t("trustOriginLabel.appEmitted");
+    case "mcp-prompt-emitted":
+      return t("trustOriginLabel.mcpPromptEmitted");
     case "llm-tool-arg":
       return t("trustOriginLabel.llmToolArg");
     case "file-content":
