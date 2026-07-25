@@ -113,6 +113,17 @@ export interface ComposerProps {
  * deletes a marker, the matching attachment disappears automatically;
  * there is no separate ⓧ button on chips.
  */
+/**
+ * Stable fallback for the optional plugin-select prop.
+ *
+ * An inline `?? (() => {})` mints a new function every render, which propagates into
+ * the inline menu's memoized item list and from there into the memoized keydown
+ * handler — so the handler is rebuilt on every render and a missing dependency in it
+ * cannot be observed. It stayed invisible in production only because the real caller
+ * always passes a memoized handler; the component should not depend on that.
+ */
+const NOOP_SELECT_PLUGIN = () => {};
+
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
   {
     text,
@@ -176,7 +187,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     plugins: inlinePlugins,
     mcpTools,
     skills,
-    onSelectPlugin: onSelectPlugin ?? (() => {}),
+    onSelectPlugin: onSelectPlugin ?? NOOP_SELECT_PLUGIN,
     taRef,
     onTextChange,
   });
@@ -243,6 +254,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       attachment: ResourceAttachment,
       marker: string,
       range: { start: number; end: number },
+      mentionToken: string,
     ) => {
       // Read the LIVE text, not the value this callback closed over. The read is
       // asynchronous, so the user can keep typing while it is in flight; splicing into
@@ -252,7 +264,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       // mention token. Either way the marker and the attachment land together, which is
       // the invariant the marker-sync effect above depends on.
       const current = textRef.current;
-      const stillTheMention = current.slice(range.start, range.end).startsWith("@");
+      // The range must still hold THE SAME token, not merely something starting with a
+      // sigil. `startsWith("@")` let a retyped mention pass: select-all, type
+      // `@abcdefgh`, and the splice would eat `abc` — the same class of bug the range
+      // check was added to fix, one condition weaker.
+      const stillTheMention = current.slice(range.start, range.end) === mentionToken;
       const insertAt = stillTheMention ? range.start : current.length;
       const removeTo = stillTheMention ? range.end : current.length;
       const needsSpace = !stillTheMention && current.length > 0 && !current.endsWith(" ");
@@ -597,6 +613,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       inlineMove,
       inlineAccept,
       inlineClose,
+      // The mention values are as load-bearing here as the inline ones, and omitting
+      // them was not a stylistic slip: `mentionOpen` flips when the CATALOGUE lands,
+      // in a commit where nothing else in this array moves. The handler kept a stale
+      // `false`, so the FIRST `@` of a composer's lifetime rendered a visible menu
+      // whose Enter fell through to the send branch — the turn went out containing a
+      // bare `@` and nothing was attached. Clicking a row worked, because JSX reads
+      // fresh values, which is what made it look like a working feature.
+      mentionOpen,
+      mentionMove,
+      mentionAccept,
+      mentionClose,
     ],
   );
 

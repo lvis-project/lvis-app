@@ -13,9 +13,12 @@ import {
  * The trailing chars after `#N` are loose to tolerate the paste suffix
  * but the regex requires a closing `]` and forbids embedded `[`.
  *
- * ONE spelling of the alternation, because there are three regexes over it (parse,
- * find-at-caret, and the paste replacement in `compose.ts`): a kind added to one and
- * missed in another parses as a marker but cannot be deleted as one, or vice versa.
+ * ONE spelling of the alternation, shared by the two regexes in THIS file (parse and
+ * find-at-caret): a kind added to one and missed in the other parses as a marker but
+ * cannot be deleted as one, or vice versa. `compose.ts` has a third regex for the
+ * paste marker specifically and deliberately does not share this one — it matches a
+ * LOOSER line-count suffix so a user who hand-edited the number still gets their text
+ * substituted. An earlier version of this comment claimed all three shared it.
  */
 const MARKER_LABELS = "Image|File|Pasted text|Resource";
 const MARKER_BODY = `\\[(?:${MARKER_LABELS}) #(\\d+)(?:\\s+\\+\\d+\\s+lines)?\\]`;

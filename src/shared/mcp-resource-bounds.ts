@@ -7,7 +7,8 @@
  * drops is worse than no field, so they cannot be re-declared per layer.
  *
  * See `docs/development/mcp-resources-policy.md` for why each bound is what it is.
- * Pure: no imports, so it stays importable from every process.
+ * Its only import is `display-safe-text`, which is itself import-free, so this stays
+ * importable from every process.
  */
 
 /** Catalogued resources per server — the picker is a list a person scans. */
@@ -101,6 +102,8 @@ function occurrences(text: string): number {
 /** Bounded page walk so a hostile `nextCursor` loop cannot hang the handshake. */
 export const MCP_RESOURCE_MAX_PAGES = 20;
 
+import { hasInvisibleOrReorderingChars } from "./display-safe-text.js";
+
 const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
 
 /**
@@ -137,19 +140,16 @@ const URI_EXCLUDED_CHARS_RE = /[\s"<>\\^`{}|]/;
  * with CJK or Hangul characters is honest and common, and refusing it would break real
  * servers to stop a trick that needs one specific class.
  *
+ * ONE definition, shared with `displaySafeLabel` via `hasInvisibleOrReorderingChars`.
+ * The first cut of this rule enumerated ranges here and leaked 14 of 17 sampled members
+ * of the class — soft hyphen listed but not the Mongolian selectors, U+2065 skipped by an
+ * off-by-one — which is precisely the drift the display module's own comment warns about.
+ * The two consumers differ in what they DO with a match, not in what they recognize.
+ *
  * Display strings are the other half of this split, handled the other way round:
  * `name`/`title` are prose, so every codepoint is legitimate in them, so they cannot
  * be refused and are normalized at the render site instead (`displaySafeLabel`).
  */
-const URI_INVISIBLE_CHARS_RE = new RegExp(
-  "["
-  + "\\u00ad\\u061c\\u180e" // soft hyphen, Arabic letter mark, Mongolian vowel sep
-  + "\\u200b-\\u200f" // zero-width space/joiners, LTR/RTL marks
-  + "\\u202a-\\u202e" // bidi embeddings and overrides
-  + "\\u2060-\\u2064\\u2066-\\u206f" // word joiner, invisible operators, isolates
-  + "\\ufeff\\ufff9-\\ufffb" // BOM, interlinear annotation marks
-  + "]",
-);
 
 /**
  * URI schemes the host will carry as an OPAQUE identifier.
@@ -198,7 +198,7 @@ export function isUsableResourceUri(value: unknown): value is string {
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (CONTROL_CHARS_RE.test(value)) return false;
   if (URI_EXCLUDED_CHARS_RE.test(value)) return false;
-  if (URI_INVISIBLE_CHARS_RE.test(value)) return false;
+  if (hasInvisibleOrReorderingChars(value)) return false;
   const lowered = value.toLowerCase();
   if (RESERVED_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return false;
   if (ALLOWED_URI_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return true;

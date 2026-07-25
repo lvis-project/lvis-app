@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { estimateTokens } from "../../shared/token-estimate.js";
 import { useTranslation } from "../../i18n/react.js";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -398,15 +399,28 @@ export function App() {
     [effectiveHasApiKey, llmReadyWithoutApiKey],
   );
   const draftAttachmentTokens = useMemo(
-    () => estimateMultimodalTokenOverhead(attachments
-      .filter((attachment) => attachment.kind === "image")
-      .map((attachment) => ({
-        type: "image",
-        mimeType: attachment.mimeType,
-        width: attachment.width,
-        height: attachment.height,
-        bytes: attachment.bytes,
-      }))),
+    () => {
+      const imageOverhead = estimateMultimodalTokenOverhead(attachments
+        .filter((attachment) => attachment.kind === "image")
+        .map((attachment) => ({
+          type: "image",
+          mimeType: attachment.mimeType,
+          width: attachment.width,
+          height: attachment.height,
+          bytes: attachment.bytes,
+        })));
+      // A resource attachment is TEXT the turn will carry, and it is the only draft
+      // attachment whose size the composer does not otherwise show. Counting only
+      // images left the overflow indicator green on a turn up to eight reads heavier
+      // than it displayed — the number exists to tell a user the request is about to be
+      // large, and this is the largest thing they can add.
+      const resourceTokens = attachments.reduce(
+        (total, attachment) =>
+          attachment.kind === "resource" ? total + estimateTokens(attachment.text) : total,
+        0,
+      );
+      return imageOverhead + resourceTokens;
+    },
     [attachments],
   );
 
