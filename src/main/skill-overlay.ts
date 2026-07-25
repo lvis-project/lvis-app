@@ -23,6 +23,20 @@ export interface SkillOverlayEntry {
   name: string;
   body: string;
   pluginOwner?: LoadedSkill["pluginOwner"];
+  /**
+   * Bundled resources declared by the loaded skill (stage-3). Rendered as an
+   * inert manifest so the model knows what it may fetch with `skill_read`;
+   * contents never live here. This list is also the AUTHORIZED set: `skill_read`
+   * serves only what was listed at load time.
+   */
+  resources: LoadedSkill["resources"];
+  /**
+   * Canonical SKILL.md path resolved when the skill was approved and loaded.
+   * `skill_read` resolves user-skill resources against THIS identity instead of
+   * re-resolving the name from disk, so a mid-turn file swap cannot redirect a
+   * read that the user authorized against a different file.
+   */
+  filePath: string;
 }
 
 interface StoredSkillOverlayEntry extends SkillOverlayEntry {
@@ -42,6 +56,8 @@ export class SkillOverlay {
       name: skill.name,
       body: skill.body,
       pluginOwner: skill.pluginOwner,
+      resources: skill.resources,
+      filePath: skill.filePath,
       ...(generationLease ? { releaseGeneration: () => generationLease.release() } : {}),
     });
     this.bySession.set(sessionId, bySkill);
@@ -95,6 +111,40 @@ export class SkillOverlay {
     for (const e of entries) {
       lines.push(`<lvis-skill name="${escapeAttr(e.name)}">`);
       lines.push(neutralizeSkillFence(e.body));
+      if (e.resources.length > 0) {
+        // Inert manifest: names only, so the model knows what it can fetch with
+        // `skill_read`. Fence integrity rests on the DISCOVERY-side validator
+        // (`isSafeResourcePath` rejects control chars, `<`, `>`, `\`, `:`), which
+        // is the single chokepoint — paths are deliberately NOT re-escaped here,
+        // because escaping would rewrite legitimate names into ones the
+        // authorized set does not contain. The manifest shares the fence with an
+        // 8 KB-capped body, so bound it too — an
+        // attacker-chosen filename list must not become a bigger injection
+        // budget than the body it accompanies.
+        const manifest: string[] = [];
+        let manifestChars = 0;
+        let omitted = 0;
+        for (const resource of e.resources) {
+          // NOT escapeAttr: this is fence body text, not an attribute, and
+          // escaping would rewrite a legitimate `Q&A.md` into `Q&amp;A.md` —
+          // which `skill_read` then refuses as "not listed", leaving the model
+          // with a name it can never fetch. `<`/`>`/control chars are already
+          // rejected at discovery (`isSafeResourcePath`), so listed == fetchable.
+          const line = `- ${resource.path} (${resource.bytes} bytes)`;
+          if (manifestChars + line.length > MAX_MANIFEST_CHARS) {
+            omitted += 1;
+            continue;
+          }
+          manifestChars += line.length;
+          manifest.push(line);
+        }
+        if (manifest.length > 0) {
+          lines.push("");
+          lines.push("bundled resources (fetch with skill_read):");
+          lines.push(...manifest);
+          if (omitted > 0) lines.push(`- …and ${omitted} more (not listed)`);
+        }
+      }
       lines.push(`</lvis-skill>`);
     }
     lines.push(`</lvis-active-skills>`);
@@ -124,6 +174,9 @@ function escapeAttr(value: string): string {
  * a parser looking for the fence tags. Whitespace tolerance is applied so
  * `< /lvis-skill >` and similar variants are also caught.
  */
+/** Total characters the bundled-resource manifest may add inside one fence. */
+const MAX_MANIFEST_CHARS = 2048;
+
 const SKILL_FENCE_PATTERN = /<(\s*\/?\s*lvis-skill[^>]*)>/gi;
 const ZWSP = "​";
 function neutralizeSkillFence(body: string): string {
