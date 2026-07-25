@@ -2794,5 +2794,4 @@ export const deMessages: Record<string, string> = {
   "attachmentChip.resourceFromServer": "Von MCP-Server {server} · nicht vertrauenswürdiger Inhalt",
   "attachmentChip.resourceClipped": "Von MCP-Server {server} · nicht vertrauenswürdig, gekürzt",
   "composer.resourceNotFetchable": "Der Server veröffentlicht dies für den direkten Client-Zugriff — der Host ruft es nicht ab",
-  "composer.resourceRateLimited": "Zu viele Anfragen an diesen Server. Warten Sie einen Moment und versuchen Sie es erneut.",
 };

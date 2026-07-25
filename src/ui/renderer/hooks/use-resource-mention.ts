@@ -33,6 +33,7 @@ import {
 const MENTION_MAX_ROWS = 50;
 import { displaySafeLabel } from "../../../shared/display-safe-text.js";
 import { detectMentionQuery } from "../utils/slash-trigger.js";
+import { resolveIpcErrorKey } from "../format-ipc-error.js";
 import type { LvisApi } from "../types.js";
 import type { ResourceAttachment } from "../types/attachments.js";
 
@@ -76,6 +77,8 @@ export interface UseResourceMentionArgs {
     attachment: ResourceAttachment,
     marker: string,
     range: { start: number; end: number },
+    /** The exact token the range held when the read started, for a stale check. */
+    mentionToken: string,
   ) => void;
   onError: (message: string) => void;
 }
@@ -223,18 +226,20 @@ export function useResourceMention({
     if (attachingRef.current) return;
     attachingRef.current = true;
     const range = { start: trigger.start, end: trigger.end };
+    const mentionToken = text.slice(trigger.start, trigger.end);
     void (async () => {
       try {
         const result = await mcp.attachResource(item.serverId, item.uri);
         if (!result.ok) {
-          // Distinct message per code where the user can act on the difference. The
-          // shared bucket told someone who had simply gone too fast that their server
-          // may have disconnected, which is a wrong answer, not a vague one.
-          onError(t(
-            result.error === "rate-limited"
-              ? "composer.resourceRateLimited"
-              : "composer.resourceAttachFailed",
-          ));
+          // Through the SAME code table the rest of the app uses, rather than a second
+          // hand-written mapping here. Stage 3a already registered every code this
+          // handler can return (`empty-resource`, `resource-failed`, `invalid-request`,
+          // `rate-limited`, `invalid-server-id`); collapsing them to one sentence told
+          // a user who had simply gone too fast that their server may have
+          // disconnected — a wrong answer, not a vague one. `rate-limited` keeps its own
+          // string because that is the one a person can act on.
+          const mapped = resolveIpcErrorKey(result.error);
+          onError(t(mapped ?? "composer.resourceAttachFailed"));
           return;
         }
         const n = allocateN();
@@ -251,6 +256,7 @@ export function useResourceMention({
           },
           `[Resource #${n}] `,
           range,
+          mentionToken,
         );
       } catch {
         onError(t("composer.resourceAttachFailed"));

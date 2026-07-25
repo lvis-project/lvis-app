@@ -189,6 +189,13 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       const requestId = ++turnRequestRef.current;
       const streamingRequestId = beginStreamingRequest();
       if (debugStreamEnabled) debugLog("handleAsk", "begin", { requestId, streamingRequestId });
+      // Snapshot BEFORE clearing. `setQuestion("")` commits, and the composer's
+      // marker-sync effect reads that empty body, finds no `[...#N]` markers, and drops
+      // every attachment — so by the time an awaited send is refused there is nothing
+      // left to put back. Restoring only the text would leave the draft carrying
+      // `[Resource #1]` with no attachment behind it: a dangling reference that resends
+      // as a marker the model cannot resolve, silently.
+      const draftAttachments = attachments;
       setQuestion("");
       // Staged modes send the enveloped text VERBATIM — composeOutgoing's composer
       // affordances (attachment markers, persona prompt) belong to typed input only.
@@ -273,10 +280,15 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         // already restores the draft for its own refusal — this is the same repair for
         // every other one, which until now only the guard had.
         //
-        // Attachments are deliberately NOT cleared here (the success path clears them),
-        // so a send refused for carrying too many resources still has them to remove.
         if (mode === "default") {
           dropUserEntry(trimmed);
+          // Text AND attachments, together. They are one thing: the composer derives its
+          // chips from the markers in the body, so a body restored without its
+          // attachments is a draft with dangling references. Restored only when the
+          // composer is still empty, so a draft started during the send wins.
+          if (draftAttachments.length > 0) {
+            setAttachments((current) => (current.length > 0 ? current : draftAttachments));
+          }
           // Restored INSIDE the guard. For a staged mode `q` is the provenance
           // ENVELOPE, not anything the user typed (`App.tsx` hands this function
           // `outcome.envelope` for an MCP-server prompt), and putting that in the
