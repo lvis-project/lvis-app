@@ -42,6 +42,16 @@
 // Unicode tables forever. The `u` flag is what makes the astral ones match as
 // codepoints instead of as lone surrogates.
 //
+// ACCEPTED COST, stated rather than discovered: the class includes variation selectors,
+// so a server-published `<warning emoji>+VS16 alert.md` renders with the monochrome
+// glyph instead of the emoji one. That is a legitimate prose codepoint being removed by
+// the half of the split that is supposed to leave prose alone, and it is kept anyway
+// because the same character is a spoof vector in the OTHER consumer: after a
+// non-emoji character a variation selector renders as nothing, so `file:///a<VS>b.md`
+// and `file:///ab.md` are indistinguishable identifiers. One class, two consumers, and
+// the identifier's need wins — a label losing an emoji's colour is a cosmetic loss, a
+// URI that can impersonate another URI is not.
+//
 // The bidi range is listed explicitly as belt-and-braces. Note it is NOT because those
 // characters fall outside the property — U+202A-U+202E and U+2066-U+2069 are all
 // `Default_Ignorable`, verified. An earlier version of this comment claimed the

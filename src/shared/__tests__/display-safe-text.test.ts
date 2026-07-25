@@ -97,4 +97,12 @@ describe("displaySafeLabel", () => {
     expect(displaySafeLabel("年度報告.pdf", 128)).toBe("年度報告.pdf");
     expect(displaySafeLabel("café-résumé.txt", 128)).toBe("café-résumé.txt");
   });
+
+  it("strips a variation selector, which is a deliberate cost", () => {
+    // Pinned so it reads as a decision. The emoji loses its colour presentation in a
+    // label; the same character after a non-emoji character is invisible, which is why
+    // the shared class refuses it for identifiers. See the module comment.
+    const VS16 = String.fromCodePoint(0xfe0f);
+    expect(displaySafeLabel(`⚠${VS16} alert.md`, 128)).toBe("⚠ alert.md");
+  });
 });
