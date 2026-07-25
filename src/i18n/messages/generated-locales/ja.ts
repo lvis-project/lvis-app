@@ -2821,6 +2821,7 @@ export const jaMessages: Record<string, string> = {
   "composer.resourceMentionTemplateBadge": "テンプレート",
   "composer.resourceLimit": "1 メッセージあたりリソースは最大 {max} 件です — これを送信してから追加してください。",
   "composer.resourceAttachFailed": "このリソースを添付できませんでした。サーバーの接続が切れた可能性があります。",
+  "composer.resourceAttachBusy": "前のリソースをまだ添付中です — 少し待って再試行してください。",
   "attachmentChip.resourceFromServer": "MCP サーバー {server} 提供 · 非信頼コンテンツ",
   "attachmentChip.resourceClipped": "MCP サーバー {server} 提供 · 非信頼、一部省略",
   "composer.resourceNotFetchable": "このリソースはクライアント直接取得用で、ホストは取得しません",

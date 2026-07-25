@@ -8,6 +8,7 @@ export const en = {
   "composer.resourceMentionTemplateBadge": "template",
   "composer.resourceLimit": "At most {max} resources per message — send this one, then attach more.",
   "composer.resourceAttachFailed": "That resource could not be attached. The server may have disconnected.",
+  "composer.resourceAttachBusy": "Still attaching the previous resource — try again in a moment.",
   "composer.resourceNotFetchable": "The server publishes this for direct client access — the host does not fetch it",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
@@ -19,5 +20,6 @@ export const ko: Record<keyof typeof en, string> = {
   "composer.resourceMentionTemplateBadge": "템플릿",
   "composer.resourceLimit": "메시지당 리소스는 최대 {max}개입니다 — 이 메시지를 보내고 더 첨부하세요.",
   "composer.resourceAttachFailed": "이 리소스를 첨부할 수 없습니다. 서버 연결이 끊겼을 수 있습니다.",
+  "composer.resourceAttachBusy": "이전 리소스를 첨부하는 중입니다 — 잠시 후 다시 시도하세요.",
   "composer.resourceNotFetchable": "이 리소스는 클라이언트 직접 조회용으로 공개되어 호스트가 가져오지 않음",
 };

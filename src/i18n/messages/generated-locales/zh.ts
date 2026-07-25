@@ -2821,6 +2821,7 @@ export const zhMessages: Record<string, string> = {
   "composer.resourceMentionTemplateBadge": "模板",
   "composer.resourceLimit": "每条消息最多 {max} 个资源 — 请先发送，然后再附加。",
   "composer.resourceAttachFailed": "无法附加该资源。服务器可能已断开连接。",
+  "composer.resourceAttachBusy": "上一个资源仍在附加中 — 请稍后重试。",
   "attachmentChip.resourceFromServer": "来自 MCP 服务器 {server} · 不可信内容",
   "attachmentChip.resourceClipped": "来自 MCP 服务器 {server} · 不可信，已截断",
   "composer.resourceNotFetchable": "服务器将其发布供客户端直接访问 — 主机不会拉取",

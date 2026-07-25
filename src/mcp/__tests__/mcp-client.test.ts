@@ -1918,23 +1918,34 @@ describe("MCP resources discovery and read", () => {
   // Two keys, same as prompts: a capability the server never advertised, or one the
   // user never approved, means nothing leaves the host.
   it("does NOT call resources/list when advertised but not approved", async () => {
-    const { client, listCalls } = connectWith({
+    const { client, listCalls, templateListCalls } = connectWith({
       advertiseResources: true,
       approveCapabilities: ["tools"],
     });
     await client.connect();
     expect(listCalls).toHaveLength(0);
+    // TEMPLATES ride the same key, and asserting it here is the point: the gate is
+    // one capability, so a template discovery that quietly used a different rule
+    // would be a second answer to a question the user already answered once.
+    expect(templateListCalls).toHaveLength(0);
     expect(client.getState().resources).toBeUndefined();
+    expect(client.getState().resourceTemplates).toBeUndefined();
     await client.disconnect();
   });
 
   it("does NOT call resources/list when approved but not advertised", async () => {
-    const { client, listCalls } = connectWith({
+    const { client, listCalls, templateListCalls } = connectWith({
       advertiseResources: false,
       approveCapabilities: ["tools", "resources"],
     });
     await client.connect();
     expect(listCalls).toHaveLength(0);
+    // The half of the two-key gate that `sendRequest` does NOT back up: governance
+    // re-checks the capability on every request, but nothing re-checks that the
+    // server advertised it. If this line goes, so does the only thing asserting it
+    // for templates.
+    expect(templateListCalls).toHaveLength(0);
+    expect(client.getState().resourceTemplates).toBeUndefined();
     await client.disconnect();
   });
 
@@ -2181,9 +2192,12 @@ describe("MCP resources discovery and read", () => {
     await client.disconnect();
   });
 
-  it("refuses to fetch when the EXPANSION lands on a refused scheme", async () => {
-    // Re-derived from the expansion, not inherited from the template: the literal
-    // scheme of a template is not necessarily the scheme of what it produces.
+  it("refuses to fetch a template whose LITERAL scheme is refused", async () => {
+    // Deliberately the easy half, and labelled as such after a review pointed out that
+    // its old title ("when the EXPANSION lands on a refused scheme") was a claim this
+    // fixture cannot make: `https://…/{doc}` is refused identically whether the check
+    // reads the template or the expansion. The re-derivation is pinned by "refuses at
+    // READ time when the flag could not have known", which uses a variable scheme.
     const { client, readCalls } = connectWith({
       advertiseResources: true,
       approveCapabilities: ["tools", "resources"],

@@ -13,6 +13,7 @@ import type { SuggestedRepliesSnapshot } from "../../hooks/use-suggested-replies
 import type { UserKeyboardIntentSnapshot } from "../../../../shared/chat-origin.js";
 import type { QuickAction } from "../command-actions.js";
 import type { PluginEntry } from "../PluginGridButton.js";
+import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../../../shared/mcp-resource-bounds.js";
 
 // Stable across renders ON PURPOSE. Passing nothing let Composer's default parameter
 // mint a fresh `[]` every render, which rebuilt the memoized keydown handler every
@@ -39,12 +40,22 @@ function Harness({
   onSendCb = vi.fn(),
   onWarningCb,
   suggestedReplies,
+  exposeSetAttachments,
 }: {
   initialText?: string;
   initialAttachments?: Attachment[];
   onSendCb?: () => void;
   onWarningCb?: (message: string) => void;
   suggestedReplies?: SuggestedRepliesSnapshot;
+  /**
+   * Hands the attachment setter to the test.
+   *
+   * `initialAttachments` seeds `useState` and is therefore ignored on re-render, so a
+   * test that needs the attachment list to CHANGE after mount — the composer staying
+   * live while a modal is open — cannot express that by re-rendering with a new prop.
+   * It would silently assert against the mount-time value instead.
+   */
+  exposeSetAttachments?: (set: (next: Attachment[]) => void) => void;
 }) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attachment[]>(initialAttachments);
@@ -63,6 +74,7 @@ function Harness({
   const stableOnWarning = useCallback((message: string) => {
     warnRef.current?.(message);
   }, []);
+  exposeSetAttachments?.(setAttachments);
 
   return (
     <Composer
@@ -690,8 +702,14 @@ describe("Composer — @ resource mention", () => {
     return { attachResource, listResources, listResourceTemplates, attachResourceTemplate };
   }
 
-  /** A catalogue with one template row, for the cases that are about templates. */
-  const TEMPLATE_CATALOGUE = vi.fn(async () => ({
+  /**
+   * A catalogue with one template row, for the cases that are about templates.
+   *
+   * A FACTORY, not a shared module-level `vi.fn`: a shared spy accumulates `mock.calls`
+   * across every test that uses it, which is fine until the day someone asserts on a
+   * call count and gets a number from four other tests.
+   */
+  const templateCatalogue = () => vi.fn(async () => ({
     ok: true,
     servers: [{
       serverId: "hr-mcp",
@@ -862,7 +880,7 @@ describe("Composer — @ resource mention", () => {
   // renderer is the template plus values, never a URI.
   it("opens the form instead of reading, and reads only on submit", async () => {
     const { attachResourceTemplate, attachResource } = installMcpApi({
-      listResourceTemplates: TEMPLATE_CATALOGUE as never,
+      listResourceTemplates: templateCatalogue() as never,
     });
     render(<Harness initialText="" />);
     const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
@@ -904,9 +922,95 @@ describe("Composer — @ resource mention", () => {
     expect(screen.queryByTestId("mcp-resource-template-dialog")).toBeNull();
   });
 
+  it("re-checks the per-turn cap when the form is submitted, not only when it opens", async () => {
+    // The form can sit open for a minute while the rest of the composer stays live, so
+    // the answer at accept time is not the answer at submit time. Main refuses the turn
+    // either way; the point of checking here is that the user is told by a message naming
+    // the limit instead of by a refused send at the end of the turn.
+    const { attachResourceTemplate } = installMcpApi({
+      listResourceTemplates: templateCatalogue() as never,
+    });
+    const onWarning = vi.fn();
+    const full: Attachment[] = Array.from({ length: MCP_RESOURCE_ATTACHMENTS_PER_TURN }, (_, i) => ({
+      id: `r${i}`,
+      n: i + 1,
+      kind: "resource" as const,
+      serverId: "hr-mcp",
+      uri: `doc:${i}`,
+      label: `doc-${i}.md`,
+      text: FENCE,
+      truncated: false,
+    }));
+    // Mounted UNDER the cap so the accept-time check passes, then filled to the cap while
+    // the dialog is open — the setter is used rather than a re-render, because
+    // `initialAttachments` seeds `useState` and a re-render would leave the count at 1,
+    // making this assert against the accept-time check it is supposed to bypass.
+    let setAttachments: ((next: Attachment[]) => void) | undefined;
+    render(
+      <Harness
+        initialAttachments={[full[0]]}
+        initialText="[Resource #1] "
+        onWarningCb={onWarning}
+        exposeSetAttachments={(set) => { setAttachments = set; }}
+      />,
+    );
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "[Resource #1] @proj");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    expect(screen.getByTestId("mcp-resource-template-dialog")).toBeTruthy();
+
+    await act(async () => {
+      setAttachments?.(full);
+      // The markers have to arrive too, or the marker-sync effect removes what was added.
+      fireEvent.change(ta, { target: { value: full.map((a) => `[Resource #${a.n}] `).join("") } });
+    });
+    await settle();
+
+    fireEvent.change(screen.getByTestId("mcp-resource-template-input-path"), {
+      target: { value: "notes.md" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mcp-resource-template-submit"));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(attachResourceTemplate).not.toHaveBeenCalled();
+    expect(onWarning).toHaveBeenCalledWith(
+      t("composer.resourceLimit", { max: MCP_RESOURCE_ATTACHMENTS_PER_TURN }),
+    );
+  });
+
+  it("keeps a template attachment and its marker together when the trigger is gone", async () => {
+    // The stale-range path, on the side with the LONG window: the user can sit in the
+    // dialog for a minute, and the range captured at accept time may no longer hold the
+    // mention. The attachment cannot be dropped and cannot be left markerless, so the
+    // marker is appended — same rule as the resource path, exercised where it matters.
+    installMcpApi({ listResourceTemplates: templateCatalogue() as never });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@proj");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    // The user wipes the composer while the form is open.
+    fireEvent.change(ta, { target: { value: "different sentence entirely" } });
+    fireEvent.change(screen.getByTestId("mcp-resource-template-input-path"), {
+      target: { value: "notes.md" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mcp-resource-template-submit"));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(ta.value).toBe("different sentence entirely [Resource #1] ");
+    expect(screen.getByTestId("attachment-chip")).toBeTruthy();
+  });
+
   it("attaches nothing when the form is cancelled", async () => {
     const { attachResourceTemplate } = installMcpApi({
-      listResourceTemplates: TEMPLATE_CATALOGUE as never,
+      listResourceTemplates: templateCatalogue() as never,
     });
     render(<Harness initialText="" />);
     const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
@@ -929,7 +1033,7 @@ describe("Composer — @ resource mention", () => {
   it("surfaces a refused template read without attaching anything", async () => {
     const attachResourceTemplate = vi.fn(async () => ({ ok: false, error: "resource-failed" }));
     installMcpApi({
-      listResourceTemplates: TEMPLATE_CATALOGUE as never,
+      listResourceTemplates: templateCatalogue() as never,
       attachResourceTemplate: attachResourceTemplate as never,
     });
     const onWarning = vi.fn();
@@ -1024,25 +1128,93 @@ describe("Composer — @ resource mention", () => {
   it("tells the user what Enter does on the row they are actually on", async () => {
     // The footer is one sentence for a menu holding two kinds of row. Fixed text makes it
     // false half the time, and an icon on the row does not change what the sentence says.
-    installMcpApi({ listResourceTemplates: TEMPLATE_CATALOGUE as never });
+    //
+    // Driven by ARROW KEYS through ONE mixed menu, not by filtering to a single-kind menu
+    // — a review pointed out that the filtered version passes identically with `items[0]`
+    // in place of `items[activeIndex]`, so it pinned "the hint varies by kind" rather
+    // than the title's claim. Here the list never changes; only the active row does.
+    installMcpApi({ listResourceTemplates: templateCatalogue() as never });
     render(<Harness />);
     const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
     await settle();
 
-    await openMenu(ta, "@pol");
+    await openMenu(ta);
+    const rows = screen.getAllByTestId(/^resource-mention-item-/);
+    expect(rows).toHaveLength(3);
+    const templateIndex = rows.findIndex((row) => row.textContent?.includes("Project file"));
+    expect(templateIndex).toBeGreaterThan(0);
+
     expect(screen.getByTestId("resource-mention-hint").textContent)
       .toBe(t("composer.resourceMentionHint"));
-
-    await openMenu(ta, "@proj");
+    for (let i = 0; i < templateIndex; i += 1) {
+      await act(async () => { fireEvent.keyDown(ta, { key: "ArrowDown" }); });
+    }
     expect(screen.getByTestId("resource-mention-hint").textContent)
       .toBe(t("composer.resourceMentionTemplateHint"));
+    // …and back off it again, so the test cannot pass by latching once.
+    await act(async () => { fireEvent.keyDown(ta, { key: "ArrowUp" }); });
+    expect(screen.getByTestId("resource-mention-hint").textContent)
+      .toBe(t("composer.resourceMentionHint"));
+  });
+
+  it("still offers templates when the RESOURCE fetch rejects", async () => {
+    // The mirror of the two template-side cases. Each half absorbs its own failure, so
+    // this direction has to hold too — and before the per-half catch it did not.
+    installMcpApi({
+      listResources: vi.fn(async () => { throw new Error("resource channel exploded"); }) as never,
+      listResourceTemplates: templateCatalogue() as never,
+    });
+    render(<Harness />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta);
+    const rows = screen.getAllByTestId(/^resource-mention-item-/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("Project file");
+  });
+
+  it("says so rather than swallowing a submit while another read is in flight", async () => {
+    // The form has already taken the user's values and closed. A silent return loses
+    // typed work with no explanation — survivable for a picker row, not for a form.
+    let resolveRead: ((value: unknown) => void) | undefined;
+    const attachResource = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
+    const { attachResourceTemplate } = installMcpApi({
+      attachResource: attachResource as never,
+      listResourceTemplates: templateCatalogue() as never,
+    });
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    // A plain resource attach is left in flight…
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    expect(attachResource).toHaveBeenCalled();
+
+    // …then a template is accepted, filled, and submitted underneath it.
+    fireEvent.change(ta, { target: { value: "@proj" } });
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    fireEvent.change(screen.getByTestId("mcp-resource-template-input-path"), {
+      target: { value: "notes.md" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mcp-resource-template-submit"));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(attachResourceTemplate).not.toHaveBeenCalled();
+    expect(onWarning).toHaveBeenCalledWith(t("composer.resourceAttachBusy"));
+    resolveRead?.({ ok: true, attachment: { type: "text", text: FENCE } });
   });
 
   it("lists templates alongside resources in one menu", async () => {
     // One list to the user. Both catalogues are fetched together for that reason — two
     // effects would each set the catalogue and the later one would erase the other's
     // rows, which reads as "my templates disappear sometimes".
-    installMcpApi({ listResourceTemplates: TEMPLATE_CATALOGUE as never });
+    installMcpApi({ listResourceTemplates: templateCatalogue() as never });
     render(<Harness />);
     const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
     await settle();
