@@ -124,6 +124,18 @@ describe("lvis:mcp:attach-resource — outcome", () => {
     expect(readMock).not.toHaveBeenCalled();
   });
 
+  // Shape-checked BEFORE the rate bucket and the audit line, as `getPrompt` does: an
+  // unbounded serverId becomes a permanent key in a shared limiter map and lands
+  // un-sliced in audit rows.
+  it("refuses a serverId that cannot be a server id", async () => {
+    const { readMock } = await setup();
+    for (const bad of ["bad id with spaces", "s".repeat(500), "-leading-dash", ""]) {
+      const result = await invoke(CHANNEL, bad, "file:///policy.md");
+      expect(result, bad.slice(0, 24)).toEqual({ ok: false, error: "invalid-server-id" });
+    }
+    expect(readMock).not.toHaveBeenCalled();
+  });
+
   it("fails closed on an empty render and on a server error", async () => {
     const empty = await setup(vi.fn(async () => ({ blocks: [], droppedBlocks: 0, truncated: false })));
     expect(await invoke(CHANNEL, empty.serverId, "file:///x")).toEqual({
