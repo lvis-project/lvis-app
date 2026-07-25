@@ -107,7 +107,19 @@ export function serializeAppContext(update: Pick<McpAppModelContextUpdate, "cont
   // The ONE fence-safety site for THIS fence: the body is app-authored, so it must not be
   // able to close the block that frames it as data and continue outside it. Neutralized
   // here, at the single place a body is ever built — not re-checked downstream.
-  return neutralizeFenceClose(parts.join("\n\n"), "mcp-app-context");
+  //
+  // Bounded FIRST. The app controls this string's length, `ui/update-model-context` has
+  // no rate limiter, and the caller refuses anything past the cap anyway — so walking a
+  // multi-megabyte body with a regex is work done on an untrusted party's behalf for a
+  // result that is thrown away. One char past the cap is kept so the caller's own
+  // over-cap check still sees an over-cap body and reports it unchanged.
+  const joined = parts.join("\n\n");
+  return neutralizeFenceClose(
+    joined.length > MCP_APP_MODEL_CONTEXT_MAX_CHARS
+      ? joined.slice(0, MCP_APP_MODEL_CONTEXT_MAX_CHARS + 1)
+      : joined,
+    "mcp-app-context",
+  );
 }
 
 /**

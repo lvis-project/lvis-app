@@ -21,6 +21,10 @@ import type { ConversationLoop, TurnResult } from "../../engine/conversation-loo
 import type { UserContentPart } from "../../engine/llm/types.js";
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
 import {
+  countResourceAttachmentFences,
+  MCP_RESOURCE_ATTACHMENTS_PER_TURN,
+} from "../../shared/mcp-resource-bounds.js";
+import {
   createStreamingFilter,
   stripSuggestedReplies,
 } from "../../engine/suggested-replies.js";
@@ -109,6 +113,22 @@ export async function runStreamedTurn(
   // the turn's staged origin — the exact fail-open this table exists to remove.
   if (claimedKind && !envelope) {
     throw new Error(claimedKind.missingEnvelopeError);
+  }
+  // How much server-authored resource text one turn may carry. Enforced HERE, not at
+  // either send gate, because `chat send` and `sidechat send` parse their payloads
+  // separately — a bound in one of them simply would not exist for the other. This is
+  // the one place ATTACHMENTS enter a turn (the other `runTurn` callers, the routine
+  // engine and the subagent runner, pass none), which is the precise claim the bound
+  // needs. Counting fences rather than parts makes it independent of how the renderer
+  // packaged them.
+  //
+  // Refused, not trimmed: dropping the extras silently would leave the model answering
+  // from 8 of the 10 documents the user believes it read, with nothing in the
+  // transcript or the audit log saying so. That is only a safe trade because the count
+  // is over ATTACHMENTS — material the host built — so the refusal always names
+  // something the user can see and remove.
+  if (countResourceAttachmentFences(options.attachments) > MCP_RESOURCE_ATTACHMENTS_PER_TURN) {
+    throw new Error("too-many-resource-attachments");
   }
   const inputOrigin = envelope?.kind.inputOrigin ?? options.inputOrigin;
   const originSource = envelope?.source ?? null;

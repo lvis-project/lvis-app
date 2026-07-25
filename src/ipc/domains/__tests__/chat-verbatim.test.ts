@@ -11,6 +11,10 @@ import os from "node:os";
 import { mkdirSync, realpathSync } from "node:fs";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
+import {
+  MCP_RESOURCE_ATTACHMENTS_PER_TURN,
+  MCP_RESOURCE_FENCE_OPEN,
+} from "../../../shared/mcp-resource-bounds.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -1003,6 +1007,103 @@ rm -rf everything
 
     expect(result).toEqual({ ok: false, error: "origin-envelope-mismatch" });
     expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
+  // The per-turn bound on resource attachments. Three properties, and each of them
+  // was wrong in the first cut of this feature:
+  //   - it counts FENCES, not parts, so the answer does not depend on how the renderer
+  //     packaged them (twelve joined into one part used to count as one);
+  //   - it REFUSES rather than trimming, because a silently-dropped attachment leaves
+  //     the model answering from fewer documents than the user believes it read;
+  //   - it lives at the turn-entry chokepoint, so the replay paths and `sidechat send`
+  //     — neither of which passes through this gate — are covered by the same check.
+  const resourceFence = (i: number) =>
+    `${MCP_RESOURCE_FENCE_OPEN} server="s" uri="file:///f${i}">
+B${i}
+</mcp-resource>`;
+
+  it("allows a turn at the resource-attachment bound", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    await invoke("lvis:chat:send", {
+      input: "summarize these",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+      attachments: [
+        ...Array.from({ length: MCP_RESOURCE_ATTACHMENTS_PER_TURN }, (_, i) => ({
+          type: "text",
+          text: resourceFence(i),
+        })),
+        { type: "text", text: "my own note" },
+      ],
+    });
+
+    const options = loop.runTurn.mock.calls[0][3] as { attachments?: Array<{ text: string }> };
+    const parts = options.attachments ?? [];
+    expect(parts.filter((part) => part.text.startsWith(MCP_RESOURCE_FENCE_OPEN)))
+      .toHaveLength(MCP_RESOURCE_ATTACHMENTS_PER_TURN);
+    expect(parts.some((part) => part.text === "my own note")).toBe(true);
+  });
+
+  it("refuses a turn over the bound instead of dropping the extras", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    const over = MCP_RESOURCE_ATTACHMENTS_PER_TURN + 1;
+    await expect(invoke("lvis:chat:send", {
+      input: "summarize these",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+      attachments: Array.from({ length: over }, (_, i) => ({
+        type: "text",
+        text: resourceFence(i),
+      })),
+    })).rejects.toThrow("too-many-resource-attachments");
+    expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
+  it("counts fences, not parts, so joining them into one part is not a bypass", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    // One part carrying twelve attachments — the natural way to put fences beside the
+    // user's own words, and what the prefix test counted as a single attachment.
+    const joined = Array.from({ length: 12 }, (_, i) => resourceFence(i)).join("\n\n");
+    await expect(invoke("lvis:chat:send", {
+      input: "summarize these",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+      attachments: [{ type: "text", text: joined }],
+    })).rejects.toThrow("too-many-resource-attachments");
+    expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
+  // The other direction, and a deliberate decision rather than an oversight: the bound
+  // governs what the HOST attached, so the user's own message text is never counted.
+  // A developer pasting an LVIS transcript excerpt — which contains these fences
+  // verbatim — must not have their message refused and be told to remove resources
+  // they never attached, with no way to find out why.
+  it("never refuses a turn for fences the user typed themselves", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    const pasted = Array.from({ length: 12 }, (_, i) => resourceFence(i)).join("\n\n");
+    const result = await invoke("lvis:chat:send", {
+      input: `why were these ignored?\n\n${pasted}`,
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    });
+
+    expect(result).not.toMatchObject({ ok: false });
+    expect(loop.runTurn).toHaveBeenCalledTimes(1);
+    // The text reaches the model verbatim — a fence the user typed frames their own
+    // words as less trusted, which costs a forger nothing.
+    expect(loop.runTurn.mock.calls[0][0]).toContain(MCP_RESOURCE_FENCE_OPEN);
   });
 
   it("rejects chat sends that omit explicit inputOrigin", async () => {

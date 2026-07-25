@@ -206,6 +206,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-request": "formatIpcError.invalidRequest",
   "empty-prompt": "formatIpcError.emptyPrompt",
   "prompt-failed": "formatIpcError.promptFailed",
+  // ── MCP resource attachment (mcp.attachResource) ──
+  "empty-resource": "formatIpcError.emptyResource",
+  "resource-failed": "formatIpcError.resourceFailed",
+  // Raised by `runStreamedTurn`, so it arrives as a rejected `invoke` message rather
+  // than an `{ ok: false }` result — which `resolveIpcErrorKey` handles, and which is
+  // why the turn refuses instead of trimming: the user has to be told.
+  "too-many-resource-attachments": "formatIpcError.tooManyResourceAttachments",
   // `onupdatemodelcontext` — the renderer binds serverId + session + cardId; a malformed
   // binding is a host bug, and the card cannot be identified.
   "invalid-binding": "formatIpcError.invalidBinding",

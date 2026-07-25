@@ -45,6 +45,7 @@ import {
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
+import { formatIpcError } from "../format-ipc-error.js";
 import { historyToEntries } from "../utils/history.js";
 import { isTurnStartEntry } from "../utils/classify-turn-entries.js";
 import type { TurnSummary } from "../components/TranscriptRenderer.js";
@@ -339,13 +340,25 @@ export function useSideChat(api: LvisApi): UseSideChat {
       try {
         const result = await api.sideChat.send(trimmed);
         if (!result.ok) {
+          // Localized, not the raw code: this hook used to put the kebab-case string
+          // straight in the transcript, so a Korean user tripping a bound read
+          // `too-many-resource-attachments`. Main chat already resolves codes through
+          // the same map; side chat is the same transcript to the person reading it.
           setEntries((p) =>
-            setAssistantError(dropPermissionReviewEntries(p), result.error, thoughtRef.current, "stream-error"),
+            setAssistantError(
+              dropPermissionReviewEntries(p),
+              formatIpcError(result.error, undefined),
+              thoughtRef.current,
+              "stream-error",
+            ),
           );
           setIsStreaming(false);
           resetStreamState();
         }
       } catch (err) {
+        // Left raw on purpose: this branch is a transport failure, not a handler code
+        // (the handler returns `{ ok: false, error }` above for those), so there is
+        // nothing to look up and the message is the only diagnostic.
         setEntries((p) =>
           setAssistantError(
             dropPermissionReviewEntries(p),
