@@ -1698,6 +1698,22 @@ export type LvisMcpApi = {
     | { ok: true; envelope: string; truncated?: boolean; omittedBlocks?: number }
     | { ok: false; error: string }
   >;
+  /**
+   * Reads a DECLARED resource and returns the fenced block to attach to the user's own
+   * turn. The host builds the fence; the renderer attaches it verbatim.
+   */
+  attachResource: (
+    serverId: string,
+    uri: string,
+  ) => Promise<
+    | {
+      ok: true;
+      attachment: { type: "text"; text: string };
+      truncated?: boolean;
+      omittedBlocks?: number;
+    }
+    | { ok: false; error: string }
+  >;
   postUiMessage: (
     serverId: string,
     sessionId: string,

@@ -206,6 +206,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-request": "formatIpcError.invalidRequest",
   "empty-prompt": "formatIpcError.emptyPrompt",
   "prompt-failed": "formatIpcError.promptFailed",
+  // ── MCP resource attachment (mcp.attachResource) ──
+  "empty-resource": "formatIpcError.emptyResource",
+  "resource-failed": "formatIpcError.resourceFailed",
   // `onupdatemodelcontext` — the renderer binds serverId + session + cardId; a malformed
   // binding is a host bug, and the card cannot be identified.
   "invalid-binding": "formatIpcError.invalidBinding",
