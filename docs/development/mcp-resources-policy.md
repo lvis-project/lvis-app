@@ -78,7 +78,7 @@ At connect, after `tools/list` and `prompts/list`:
   `size` only when they are the right type and within bounds; anything else is
   dropped there, so one shape reaches every consumer. This is the lesson from the
   prompt work, where a non-string `name` would have thrown when React rendered it.
-- URI validation is a host-side allowlist of schemes, not a regex over the whole
+- URI validation is a host-side allowlist of schemes PLUS a character exclusion over
   string: `file:`, `git:`, `https:`, and server-custom schemes are permitted as
   OPAQUE identifiers — the host never resolves them itself. `ui:` is reserved for
   the MCP-Apps extension path and is excluded here so the two never cross.

@@ -43,7 +43,10 @@ export const MCP_RESOURCE_FENCE_OPEN = '<mcp-resource trust="untrusted-server-da
  * builder that depends on its caller having validated the input does not.
  */
 function fenceAttr(value: string, maxChars: number): string {
-  return value.slice(0, maxChars).replace(/["<>]/g, "");
+  // Whitespace collapses too, so the guarantee holds on its own rather than because
+  // the boundary happens to reject spaces: without it, a bypassed value could put
+  // prose inside the open tag, ahead of the framing lines.
+  return value.slice(0, maxChars).replace(/["<>]/g, "").replace(/\s+/g, " ").trim();
 }
 
 export interface ResourceReadBlocks {

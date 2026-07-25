@@ -57,6 +57,7 @@ import { formatStagedEnvelope, stagedOriginFor } from "../../shared/staged-origi
 import { renderMcpPrompt } from "../../mcp/mcp-prompt-render.js";
 import { renderResourceAttachment } from "../../mcp/mcp-resource-attachment.js";
 import { isUsableResourceUri } from "../../shared/mcp-resource-bounds.js";
+import { isUsableMcpServerId } from "../../shared/mcp-app-partition.js";
 import { scrubShortError } from "../../shared/dlp.js";
 import {
   isUsablePromptName,
@@ -1536,10 +1537,19 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (typeof serverId !== "string" || !isUsablePromptName(name, MCP_PROMPT_NAME_MAX_CHARS)) {
       return { ok: false, error: "invalid-request" };
     }
+    // `isUsableMcpServerId` is the authority on the id itself; the staged row below
+    // owns the ENVELOPE. Keeping them apart matters because a prompt IS a staged
+    // origin while a resource is not, and both handlers need the same id rule —
+    // tightening the envelope pattern for a provenance reason must not silently move
+    // what a server id may be.
+    if (!isUsableMcpServerId(serverId)) {
+      return { ok: false, error: "invalid-server-id" };
+    }
     const kind = stagedOriginFor("mcp-prompt-emitted");
-    // The registry owns the tag shape; a serverId that cannot produce a valid tag
-    // is refused before any request leaves the host.
     const source = `mcp-prompt:${serverId}`;
+    // Belt: an id that passes the rule above always forms a valid tag, so this can
+    // only fire if the two ever disagree — which is exactly when a silent mismatch
+    // would matter.
     if (!kind.sourcePattern.test(source)) {
       return { ok: false, error: "invalid-server-id" };
     }
@@ -1617,12 +1627,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (typeof serverId !== "string" || !isUsableResourceUri(uri)) {
       return { ok: false, error: "invalid-request" };
     }
-    // Shape-checked BEFORE the rate bucket and the audit line, as `getPrompt` does:
-    // an unbounded serverId becomes a permanent key in a shared limiter map and is
-    // interpolated into audit rows. The registry's own tag pattern is the authority
-    // on what a server id may look like.
-    const resourceKind = stagedOriginFor("mcp-prompt-emitted");
-    if (!resourceKind.sourcePattern.test(`mcp-prompt:${serverId}`)) {
+    // Shape-checked BEFORE the rate bucket and the audit line: an unbounded serverId
+    // becomes a permanent key in a shared limiter map and is interpolated into audit
+    // rows. `isUsableMcpServerId` is the authority — not the staged-origin row's
+    // envelope pattern, which exists for a different reason on a path the policy says
+    // is not a staged origin.
+    if (!isUsableMcpServerId(serverId)) {
       return { ok: false, error: "invalid-server-id" };
     }
     if (userPromptRateLimiter.isOverCap(serverId)) {

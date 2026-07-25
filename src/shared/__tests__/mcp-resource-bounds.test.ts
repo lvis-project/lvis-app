@@ -9,6 +9,7 @@
  * a link or an iframe by mistake.
  */
 import { describe, expect, it } from "vitest";
+import { isUsableMcpServerId } from "../mcp-app-partition.js";
 import {
   isHostFetchRefusedUri,
   isUsableResourceUri,
@@ -132,3 +133,19 @@ describe("usableResourceText", () => {
     );
   });
 });
+
+describe("isUsableMcpServerId", () => {
+  it("is the ONE rule for a server id, independent of the envelope pattern", () => {
+    // Both the prompt and the resource handler validate ids with this. Before, they
+    // borrowed the `mcp-prompt` staged-origin row's pattern — which exists for envelope
+    // parsing, so tightening it for a provenance reason would have silently moved what
+    // a server id may be, on a path the policy says is not a staged origin.
+    for (const ok of ["hr-mcp", "com.example.thing", "a", "A0._-", "x".repeat(128)]) {
+      expect(isUsableMcpServerId(ok), ok.slice(0, 24)).toBe(true);
+    }
+    for (const bad of ["", "-leading", ".leading", "has space", "x".repeat(129), "unicode✓", 42, null]) {
+      expect(isUsableMcpServerId(bad as unknown), String(bad).slice(0, 24)).toBe(false);
+    }
+  });
+});
+
