@@ -122,7 +122,12 @@ export class SkillOverlay {
         let manifestChars = 0;
         let omitted = 0;
         for (const resource of e.resources) {
-          const line = `- ${escapeAttr(resource.path)} (${resource.bytes} bytes)`;
+          // NOT escapeAttr: this is fence body text, not an attribute, and
+          // escaping would rewrite a legitimate `Q&A.md` into `Q&amp;A.md` —
+          // which `skill_read` then refuses as "not listed", leaving the model
+          // with a name it can never fetch. `<`/`>`/control chars are already
+          // rejected at discovery (`isSafeResourcePath`), so listed == fetchable.
+          const line = `- ${resource.path} (${resource.bytes} bytes)`;
           if (manifestChars + line.length > MAX_MANIFEST_CHARS) {
             omitted += 1;
             continue;

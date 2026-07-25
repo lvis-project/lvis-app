@@ -390,8 +390,11 @@ export class SkillStore {
     let canonicalDir: string;
     try {
       canonicalDir = await realpath(skillDir);
-    } catch {
-      throw new Error(`resource not found: ${resourcePath}`);
+    } catch (err) {
+      // Log the true cause locally (EACCES vs ENOENT vs ELOOP); the model only
+      // ever sees the sanitized text.
+      log.warn(`skill resources: skill directory unresolvable: %s`, (err as Error).message);
+      throw new Error(`skill directory unavailable for resource: ${resourcePath}`);
     }
     if (!(await this.isBundleRoot(canonicalDir, basename(skill.filePath)))) {
       throw new Error("flat skills have no bundled resources");
@@ -399,7 +402,8 @@ export class SkillStore {
     let canonicalFile: string;
     try {
       canonicalFile = await realpath(join(skillDir, resourcePath));
-    } catch {
+    } catch (err) {
+      log.warn("skill resources: resolve failed: %s", (err as Error).message);
       throw new Error(`resource not found: ${resourcePath}`);
     }
     const rel = relative(canonicalDir, canonicalFile);
@@ -415,7 +419,8 @@ export class SkillStore {
     let handle: Awaited<ReturnType<typeof open>>;
     try {
       handle = await open(canonicalFile, "r");
-    } catch {
+    } catch (err) {
+      log.warn("skill resources: open failed: %s", (err as Error).message);
       throw new Error(`resource not found: ${resourcePath}`);
     }
     try {
@@ -456,7 +461,7 @@ export class SkillStore {
       canonicalRoot = resolve(this.userDir);
     }
     const rootRel = relative(canonicalRoot, canonicalDir);
-    if (rootRel === "" || rootRel.startsWith("..") || isAbsolute(rootRel)) return false;
+    if (rootRel === "" || escapesRoot(rootRel)) return false;
     return rootRel.split(sep).length === 1;
   }
 

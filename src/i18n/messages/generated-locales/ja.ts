@@ -609,7 +609,7 @@ export const jaMessages: Record<string, string> = {
   "be_shellPathPolicy.guidanceWithAlt": "推奨される LVIS 組み込みツール: {alt}。元のターゲット パスをそのままにしておきます。サブディレクトリに絞り込まないでください。",
   "be_shutdownRoutines.shutdownRoutineNotificationTitle": "シャットダウンルーチンの通知",
   "be_skillList.toolDescription": "Returns the list of currently available LVIS skills. skill_load を呼び出す前に、これを使用してどのスキルが存在するかを確認します。",
-  "be_skillLoad.approvalReason": "スキル「{name}」本体を現在のユーザーターンの後続ラウンドにのみ挿入します。承認レコードは永続的に保存され、現在の機関の sha256 にバインドされます。機関が変更された場合は、再度確認が要求されます。",
+  "be_skillLoad.approvalReason": "スキル '{name}' の本文を、現在のユーザーターンの後続ラウンドにのみ注入します。承認記録は永続的に保存され、現在の本文とそのバンドルファイル一覧に紐づけられます — どちらかが変わると再度確認します。",
   "be_skillLoad.argsDescription": "スキルに渡すパラメーター (現在のバージョンではこれらを単純なメタデータとして扱います)。オプション。",
   "be_skillLoad.skillNameDescription": "ロードするスキル名 (ファイル/ディレクトリ名およびフロントマター名フィールドと一致する必要があります)。",
   "be_skillRead.toolDescription": "現在のユーザーターンで既に読み込まれているスキルのバンドルリソースファイルを1つ読み取ります。読み込まれたスキルはオーバーレイにバンドルファイル（references/、assets/ など）を列挙します。バンドル全体をプロンプトに載せる代わりに、必要なときにこのツールで1つずつ取得してください。先に skill_load を呼び出してください — 読み込まれていないスキルは読み取れません。{ skillName, path, content, bytes } を返します。",
