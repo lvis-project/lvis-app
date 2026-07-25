@@ -6,7 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
-import { COMMON_IPC_ERROR_MESSAGES } from "../format-ipc-error.js";
+import { resolveIpcErrorKey } from "../format-ipc-error.js";
 import { supportsVision } from "../../../engine/llm/vendor-capabilities.js";
 import {
   composeImportedTriggerOutgoing,
@@ -261,9 +261,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         // because this path learned to map the mapped ones.
         const rawMessage = (err as Error).message;
         const code = rawMessage.match(/(?:^|Error:\s*)([a-z][a-z0-9-]*)\s*$/)?.[1];
-        const mappedKey = code && Object.hasOwn(COMMON_IPC_ERROR_MESSAGES, code)
-          ? COMMON_IPC_ERROR_MESSAGES[code]
-          : undefined;
+        const mappedKey = resolveIpcErrorKey(code);
         setErrorWithThought(
           mappedKey ? t(mappedKey) : t("app.errorGeneric", { message: rawMessage }),
         );

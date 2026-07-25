@@ -250,23 +250,37 @@ export interface FormatIpcErrorOptions {
   fallbackContext?: string;
 }
 
+/**
+ * Resolve a code to its i18n key, or `undefined` when the table does not know it.
+ *
+ * Split out of {@link formatIpcError} because that function always returns a
+ * string: a caller that wants its OWN fallback phrasing (the send path keeps a
+ * localized wrapper for unmapped errors) otherwise has to re-implement the lookup,
+ * and then this table has two guarded readers instead of one.
+ *
+ * `Object.hasOwn` because callers may pass an arbitrary `Error.message` as the code
+ * (a rejected `invoke` carries its code in the message). A bare index would resolve
+ * `constructor`/`toString` to an inherited function and hand it to `t()`.
+ */
+export function resolveIpcErrorKey(code: string | undefined): string | undefined {
+  if (!code) return undefined;
+  return Object.hasOwn(COMMON_IPC_ERROR_MESSAGES, code)
+    ? COMMON_IPC_ERROR_MESSAGES[code]
+    : undefined;
+}
+
 export function formatIpcError(
   error: string | undefined,
   message: string | undefined,
   opts: FormatIpcErrorOptions = {},
 ): string {
   if (error) {
-    // `Object.hasOwn` because callers may pass an arbitrary `Error.message` as the
-    // code (a rejected `invoke` carries its code in the message). A bare index would
-    // resolve `constructor`/`toString` to an inherited function and hand it to `t()`.
     const override = opts.codeMap && Object.hasOwn(opts.codeMap, error)
       ? opts.codeMap[error]
       : undefined;
     if (override) return override;
-    if (Object.hasOwn(COMMON_IPC_ERROR_MESSAGES, error)) {
-      const commonKey = COMMON_IPC_ERROR_MESSAGES[error];
-      if (commonKey) return t(commonKey);
-    }
+    const commonKey = resolveIpcErrorKey(error);
+    if (commonKey) return t(commonKey);
   }
   if (message && message.trim().length > 0) {
     return opts.fallbackContext ? `${opts.fallbackContext}: ${message}` : message;
