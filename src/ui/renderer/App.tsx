@@ -49,6 +49,7 @@ import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
+import type { McpPromptEntry } from "./components/slash-picker-data.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
 import {
@@ -127,7 +128,7 @@ export function App() {
   // cycle) is what lets the two hooks reference each other safely.
   const handleAskRef = useRef<(
     q: string,
-    mode?: "default" | "trigger-import" | "app-message",
+    mode?: "default" | "trigger-import" | "app-message" | "mcp-prompt",
     userIntent?: UserKeyboardIntentSnapshot,
   ) => Promise<void>>(
     async () => { /* populated below */ },
@@ -621,6 +622,35 @@ export function App() {
     llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,
   });
 
+  // Run a server-declared MCP prompt. The host fetches it and returns the text
+  // ALREADY wrapped in its provenance envelope; we send that verbatim under the
+  // staged `mcp-prompt` mode. It deliberately does NOT go through the composer
+  // draft: a draft the user then submits would enter as `user-keyboard`, which
+  // would launder server-authored text into a fully trusted turn.
+  const handleRunMcpPrompt = useCallback((prompt: McpPromptEntry) => {
+    void (async () => {
+      const args: Record<string, string> = {};
+      for (const argument of prompt.arguments) {
+        if (!argument.required) continue;
+        const value = window.prompt(
+          argument.description ? `${argument.name} — ${argument.description}` : argument.name,
+          "",
+        );
+        if (value === null) return; // user cancelled
+        args[argument.name] = value;
+      }
+      const outcome = (await window.lvis?.mcp?.getPrompt?.(prompt.serverId, prompt.name, args)) as
+        | { ok: true; envelope: string }
+        | { ok: false; error: string }
+        | undefined;
+      if (!outcome || outcome.ok !== true) {
+        statusPushToast({ severity: "error", message: t("app.mcpPromptFailed", { name: prompt.name }), ttlMs: 10000 });
+        return;
+      }
+      await handleAskRef.current?.(outcome.envelope, "mcp-prompt");
+    })();
+  }, [handleAskRef, statusPushToast, t]);
+
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
   // Strict variant — `undefined` means "model not in catalog" so the cost
@@ -848,6 +878,7 @@ export function App() {
             }}
           >
           <MainContent
+          onRunMcpPrompt={handleRunMcpPrompt}
             activeView={activeView}
             api={api}
             appMode={appMode}

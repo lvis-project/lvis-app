@@ -1,6 +1,7 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/App.tsx. Do not edit by hand.
 export const en = {
   "app.routineFailedTitle": "[Failed] Routine",
+  "app.mcpPromptFailed": "Could not run the MCP prompt \"{name}\".",
   "app.routineFailedSummary": "Routine execution failed: {error}",
   "app.errorCannotOpenPluginWindow": "Error: Cannot open plugin window.",
   "app.errorCannotOpenPluginWindowDetail": "Error: Cannot open plugin window. {error}",
@@ -29,6 +30,7 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "app.routineFailedTitle": "[실패] 루틴",
+  "app.mcpPromptFailed": "MCP 프롬프트 \"{name}\" 를 실행하지 못했습니다.",
   "app.routineFailedSummary": "루틴 실행 실패: {error}",
   "app.errorCannotOpenPluginWindow": "오류: 플러그인 창을 열 수 없습니다.",
   "app.errorCannotOpenPluginWindowDetail": "오류: 플러그인 창을 열 수 없습니다. {error}",
