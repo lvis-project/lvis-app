@@ -24,6 +24,7 @@
  */
 import { createDynamicTool, type Tool } from "./base.js";
 import { createLogger } from "../lib/logger.js";
+import { scrubSecrets } from "../mcp/mcp-client.js";
 import { t } from "../i18n/index.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../shared/mcp-resource-bounds.js";
 import type { McpResourceSummary } from "../mcp/types.js";
@@ -31,7 +32,7 @@ import type { McpResourceSummary } from "../mcp/types.js";
 const log = createLogger("lvis");
 
 /**
- * Bound on ONE list response, counted over the serialized payload rather than a
+ * Bound on ONE list response, counted over the serialized payload across BOTH axes
  * per-server count. The per-server cap is already spent at discovery, so counting
  * again there would be an unreachable branch; what is genuinely unbounded here is
  * server_count x catalogue_size, and this is the axis that reaches the model's
@@ -45,7 +46,13 @@ const MCP_RESOURCE_LIST_MAX_CHARS = 24 * 1024;
  */
 export interface McpResourceToolDeps {
   listResources(): Array<{ serverId: string; resources: readonly McpResourceSummary[] }>;
-  readResource(serverId: string, uri: string): Promise<{
+  /**
+   * Named for the CORE-capability read (`readDeclaredResource`), never the
+   * MCP-Apps `ui://` read that shares the JSON-RPC method but skips the
+   * listed-URI gate and is exempt from the `resources` capability. The client
+   * keeps those two apart by name; this surface must not put them back.
+   */
+  readDeclaredResource(serverId: string, uri: string): Promise<{
     blocks: Array<{ uri?: string; mimeType?: string; text?: string; omittedKind?: string }>;
     droppedBlocks: number;
     truncated: boolean;
@@ -105,21 +112,54 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
             ...(resource.hostFetchRefused ? { hostFetchRefused: true } : {}),
           })),
         }));
-      // Bounded on the axis that is actually unbounded — server count times
-      // catalogue size — by dropping whole servers from the tail until the payload
-      // fits, and saying how many were dropped.
+      // Spend the budget across BOTH axes, because either alone is unbounded:
+      // discovery caps resources per server at 200 but never their bytes, so one
+      // approved server can be ~600 KB, and a narrowed call always yields exactly one
+      // server — a whole-servers-only bound would never fire for it. Resources are
+      // trimmed from the tail of the last server that fits, and BOTH kinds of
+      // omission are reported: a silent clip reads as "that is all there is".
+      //
+      // Each server's serialized length is measured once. Re-serializing the whole
+      // payload per iteration is O(n^2) string work in the main process.
+      const budget = MCP_RESOURCE_LIST_MAX_CHARS;
+      const kept: typeof servers = [];
+      let used = 0;
       let omittedServers = 0;
-      while (
-        servers.length > 1
-        && JSON.stringify({ servers }).length > MCP_RESOURCE_LIST_MAX_CHARS
-      ) {
-        servers.pop();
-        omittedServers += 1;
+      let omittedResources = 0;
+      for (const server of servers) {
+        const whole = JSON.stringify(server).length;
+        if (used + whole <= budget) {
+          kept.push(server);
+          used += whole;
+          continue;
+        }
+        // Does not fit whole. Take as many of its resources as the remaining budget
+        // allows, so a single over-large server still returns something usable
+        // instead of nothing.
+        const partial = { serverId: server.serverId, resources: [] as typeof server.resources };
+        let partialLen = JSON.stringify(partial).length;
+        for (const resource of server.resources) {
+          const entryLen = JSON.stringify(resource).length + 1;
+          if (used + partialLen + entryLen > budget) {
+            omittedResources += 1;
+            continue;
+          }
+          partial.resources.push(resource);
+          partialLen += entryLen;
+        }
+        if (partial.resources.length > 0) {
+          kept.push(partial);
+          used += partialLen;
+        } else {
+          omittedServers += 1;
+        }
       }
+      omittedServers += servers.length - kept.length - omittedServers;
       return {
         output: JSON.stringify({
-          servers,
+          servers: kept,
           ...(omittedServers > 0 ? { omittedServers } : {}),
+          ...(omittedResources > 0 ? { omittedResources } : {}),
         }),
         isError: false,
       };
@@ -164,7 +204,7 @@ export function createMcpResourceReadTool(getAccess: McpResourceAccessResolver):
         return errorResult(t("be_mcpResourceTools.invalidRequest"));
       }
       try {
-        const read = await access.readResource(serverId, uri);
+        const read = await access.readDeclaredResource(serverId, uri);
         return {
           output: JSON.stringify({
             uri,
@@ -181,9 +221,17 @@ export function createMcpResourceReadTool(getAccess: McpResourceAccessResolver):
         // operator still needs the real cause, so it is logged HERE: nothing on the
         // client read path logs, so discarding it left the failure observable to
         // no one.
+        // The reason is SCRUBBED and BOUNDED before it reaches the log. Both inputs
+        // are attacker-influenced: a server's JSON-RPC error message is unbounded and
+        // may echo a credential it was handed, and `serverId` comes from the model.
+        // Unbounded here would let a hostile server flush the log ring and destroy
+        // the forensic record this line exists to create, and persist cleartext
+        // secrets to disk (field redaction does not touch free text in a message).
+        // `scrubSecrets` is the host's existing short-error SoT.
         log.warn(
-          `mcp_resource_read failed server=${serverId} uri=${uri}: `
-            + `${err instanceof Error ? err.message : String(err)}`,
+          `mcp_resource_read failed server=${serverId.slice(0, 64)} `
+            + `uri=${uri.slice(0, 256)}: `
+            + scrubSecrets(err instanceof Error ? err.message : String(err)),
         );
         return errorResult(t("be_mcpResourceTools.readFailed"));
       }

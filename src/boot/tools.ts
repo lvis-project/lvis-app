@@ -28,7 +28,7 @@ import { createSkillReadTool } from "../tools/skill-read.js";
 import {
   createMcpResourceListTool,
   createMcpResourceReadTool,
-  type McpResourceToolDeps,
+  type McpResourceAccessResolver,
 } from "../tools/mcp-resource-tools.js";
 import { createAgentListTool } from "../tools/agent-list.js";
 import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.js";
@@ -194,7 +194,7 @@ export interface WorkflowToolDeps {
    * LATER boot step than the builtin tools, and narrow (list + read only) so this
    * surface cannot reach `callTool`.
    */
-  getMcpResourceAccess?: () => McpResourceToolDeps | undefined;
+  getMcpResourceAccess?: McpResourceAccessResolver;
 }
 
 export function registerBuiltinTools(
