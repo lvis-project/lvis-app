@@ -59,7 +59,7 @@ import {
   unmarkMcpServerWrapped,
 } from "../permissions/sandbox-capability.js";
 import { shellQuote } from "../lib/shell-resolver.js";
-import { scrubSecretsForLLM } from "../audit/dlp-filter.js";
+import { scrubShortError } from "../shared/dlp.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("mcp-client");
 
@@ -825,11 +825,8 @@ export class McpClient {
     this.rejectAllPending(t("be_mcpClient.serverDisconnected"));
     this.clearRegisteredToolOverrides();
 
-    // ToolRegistry에서 도구 제거
-    this.toolRegistry.unregisterByMcp(this.config.id);
-    this.state.registeredTools = [];
-    this.state.prompts = undefined;
-    this.state.instructions = undefined;
+    // ToolRegistry에서 도구 제거 + 디스커버리 산출물 정리
+    this.clearDiscoveredSurfaces();
 
     // transport 종료
     await this.closeTransport();
@@ -1210,6 +1207,21 @@ export class McpClient {
     }
   }
 
+  /**
+   * Drop everything discovery produced. Called by BOTH teardown paths, because a
+   * catalogue that outlives its connection is worse than an empty one: every
+   * consumer keeps offering names and URIs whose call can only fail, and the
+   * failure surfaces far from the cause. `handleTransportClose` used to clear the
+   * tools and leave prompts and resources behind.
+   */
+  private clearDiscoveredSurfaces(): void {
+    this.toolRegistry.unregisterByMcp(this.config.id);
+    this.state.registeredTools = [];
+    this.state.prompts = undefined;
+    this.state.resources = undefined;
+    this.state.instructions = undefined;
+  }
+
   private handleTransportClose(reason: string): void {
     if (this.state.status === "disconnected") return; // normal shutdown
 
@@ -1217,8 +1229,7 @@ export class McpClient {
     this.state.lastError = reason;
     this.rejectAllPending(reason);
     this.clearRegisteredToolOverrides();
-    this.toolRegistry.unregisterByMcp(this.config.id);
-    this.state.registeredTools = [];
+    this.clearDiscoveredSurfaces();
     this.stopHealthCheck();
   }
 
@@ -2055,16 +2066,16 @@ function hasAuthorization(headers: Record<string, string>): boolean {
 }
 
 /**
- * Strip likely secret material from error bodies before surfacing them in logs
- * or UI. Delegates the credential-class patterns to the shared SOT
- * {@link scrubSecretsForLLM} (bearer tokens, `sk-…` keys, JWTs, auth headers,
- * `?token=` params) — a single point that the diagnostics bundle also applies —
- * then slices to 120 chars because this variant is for a short UI/error surface,
- * not a full log line. The whole-line (slice-free) form lives in dlp-filter.
+ * Strip likely secret material from error bodies before surfacing them in logs or
+ * UI, then bound the length — this variant is for a short UI/error surface, not a
+ * full log line.
+ *
+ * Re-exported from `shared/dlp.ts` rather than implemented here: a caller wanting a
+ * bounded error string should not have to import a transport module to get one, and
+ * two copies of "scrub then slice" would drift on the slice. The name is kept
+ * because every existing MCP call site uses it.
  */
-export function scrubSecrets(text: string): string {
-  return scrubSecretsForLLM(text).slice(0, 120);
-}
+export const scrubSecrets = scrubShortError;
 
 function indexOfAny(haystack: string, needles: string[]): number {
   let earliest = -1;

@@ -40,6 +40,7 @@ import { en as en_be_main } from "./be_main.js";
 import { en as en_be_mcpClient } from "./be_mcpClient.js";
 import { en as en_be_mcpGovernance } from "./be_mcpGovernance.js";
 import { en as en_be_mcpManager } from "./be_mcpManager.js";
+import { en as en_be_mcpResourceTools } from "./be_mcpResourceTools.js";
 import { en as en_be_memoryManager } from "./be_memoryManager.js";
 import { en as en_be_permissionManager } from "./be_permissionManager.js";
 import { en as en_be_permissionModeApply } from "./be_permissionModeApply.js";
@@ -221,6 +222,7 @@ export const generatedEn: Record<string, string> = {
   ...en_be_mcpClient,
   ...en_be_mcpGovernance,
   ...en_be_mcpManager,
+  ...en_be_mcpResourceTools,
   ...en_be_memoryManager,
   ...en_be_permissionManager,
   ...en_be_permissionModeApply,

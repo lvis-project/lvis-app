@@ -561,6 +561,11 @@ export class ToolRegistry {
           // Builtins/meta-tools are always eager — never deferred, never
           // counted toward the exposure ceiling.
           if (!scope.includeBuiltins) return false;
+          // …with one declared exception: a builtin that surfaces MCP-server
+          // data honors the same `includeMcp` switch as an MCP tool. Headless
+          // loops run with MCP withheld on purpose, and a builtin badge must not
+          // be a way around that decision.
+          if (tool.requiresMcpScope && !scope.includeMcp) return false;
           return true;
         }
         if (tool.source === "mcp") {

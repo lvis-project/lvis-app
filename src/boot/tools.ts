@@ -25,6 +25,11 @@ import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import { createSkillLoadTool, type SkillLoadEvent, type SkillLoadToolDeps } from "../tools/skill-load.js";
 import { createSkillListTool } from "../tools/skill-list.js";
 import { createSkillReadTool } from "../tools/skill-read.js";
+import {
+  createMcpResourceListTool,
+  createMcpResourceReadTool,
+  type McpResourceAccessResolver,
+} from "../tools/mcp-resource-tools.js";
 import { createAgentListTool } from "../tools/agent-list.js";
 import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
@@ -184,6 +189,12 @@ export interface WorkflowToolDeps {
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
   acquirePluginSkillGeneration?: NonNullable<SkillLoadToolDeps["acquirePluginGeneration"]>;
+  /**
+   * Lazy-resolved MCP resource access. Lazy because the MCP manager is built in a
+   * LATER boot step than the builtin tools, and narrow (list + read only) so this
+   * surface cannot reach `callTool`.
+   */
+  getMcpResourceAccess?: McpResourceAccessResolver;
 }
 
 export function registerBuiltinTools(
@@ -267,6 +278,21 @@ export function registerBuiltinTools(
         acquirePluginGeneration: workflowDeps.acquirePluginSkillGeneration,
       }),
     );
+  }
+
+  // MCP resources — the MODEL's path to server-declared documents/schemas. The
+  // user's path (a composer mention) is a separate surface; reference hosts expose
+  // both.
+  //
+  // The resolver is passed through, not called: `ctx.mcpManager` is assigned by a
+  // LATER boot step, so anything captured here would be the registration-time
+  // `undefined` forever. Callers that supply no resolver at all (the minimal test
+  // registry) get no tools; production always supplies one, and the tools report
+  // "not ready" themselves during the window before MCP setup runs.
+  const mcpResourceAccess = workflowDeps?.getMcpResourceAccess;
+  if (mcpResourceAccess) {
+    builtins.push(createMcpResourceListTool(mcpResourceAccess));
+    builtins.push(createMcpResourceReadTool(mcpResourceAccess));
   }
 
   toolRegistry.registerBatch(builtins);
