@@ -135,6 +135,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 ) {
   const { t } = useTranslation();
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // Mirror of the controlled value for callbacks that outlive the render they were
+  // created in — the asynchronous resource attach is the one that needs it.
+  const textRef = useRef(text);
+  textRef.current = text;
 
 
   // because `e.nativeEvent.isComposing` is only available inside keydown — the
@@ -225,12 +229,24 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       marker: string,
       range: { start: number; end: number },
     ) => {
+      // Read the LIVE text, not the value this callback closed over. The read is
+      // asynchronous, so the user can keep typing while it is in flight; splicing into
+      // the text as it was when they pressed Enter would silently discard everything
+      // they typed since. The range can also have gone stale for the same reason, so it
+      // is verified before use and the marker is appended when it no longer holds the
+      // mention token. Either way the marker and the attachment land together, which is
+      // the invariant the marker-sync effect above depends on.
+      const current = textRef.current;
+      const stillTheMention = current.slice(range.start, range.end).startsWith("@");
+      const insertAt = stillTheMention ? range.start : current.length;
+      const removeTo = stillTheMention ? range.end : current.length;
+      const needsSpace = !stillTheMention && current.length > 0 && !current.endsWith(" ");
+      const insertion = needsSpace ? ` ${marker}` : marker;
       flushSync(() => {
         onAttachmentsChange((prev) => [...prev, attachment]);
         const ta = taRef.current;
-        const next = text.slice(0, range.start) + marker + text.slice(range.end);
-        onTextChange(next);
-        const pos = range.start + marker.length;
+        onTextChange(current.slice(0, insertAt) + insertion + current.slice(removeTo));
+        const pos = insertAt + insertion.length;
         requestAnimationFrame(() => {
           if (ta) {
             ta.setSelectionRange(pos, pos);
@@ -238,7 +254,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           }
         });
       });
-    }, [onAttachmentsChange, onTextChange, text]),
+    }, [onAttachmentsChange, onTextChange]),
     onError: useCallback((message: string) => onWarning?.(message), [onWarning]),
   });
   const {
@@ -716,7 +732,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         items={resourceMention.items}
         activeIndex={resourceMention.activeIndex}
         anchorRef={taRef}
-        onHover={() => {}}
+        onHover={resourceMention.setActiveIndex}
         onSelect={resourceMention.accept}
       />
     </div>
