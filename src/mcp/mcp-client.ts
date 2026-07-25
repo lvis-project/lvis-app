@@ -24,6 +24,12 @@ import {
   fetchPublicHttpResponse,
   validateHttpUrl,
 } from "../core/network-guard.js";
+import {
+  isUsablePromptName,
+  MCP_PROMPT_ARG_NAME_MAX_CHARS,
+  MCP_PROMPT_MAX_BLOCKS,
+  MCP_PROMPT_NAME_MAX_CHARS,
+} from "../shared/mcp-prompt-bounds.js";
 import { createLogger } from "../lib/logger.js";
 import { resolveStdioSpawnCommand } from "./uvx-command.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -150,6 +156,23 @@ export type McpClientCapabilityProvider = () => McpClientCapabilities;
 
 interface McpToolsListResult {
   tools: McpToolSchema[];
+}
+
+/**
+ * `prompts/get` result. Content blocks mirror tool-result blocks: `text` is the
+ * only kind LVIS renders inline; image/audio/resource are surfaced as explicit
+ * placeholders so a server cannot smuggle unrendered bytes into the turn.
+ */
+interface McpPromptGetResult {
+  description?: string;
+  messages: Array<{
+    role?: string;
+    content?: {
+      type?: string;
+      text?: string;
+      [key: string]: unknown;
+    };
+  }>;
 }
 
 interface McpPromptsListResult {
@@ -536,15 +559,24 @@ export class McpClient {
           HANDSHAKE_TIMEOUT_MS,
         );
         for (const p of result.prompts ?? []) {
+          // Everything here is WIRE data — the declared TS types are casts, not
+          // checks. A non-string name reaches the renderer and is rendered as a
+          // React child (throws); a name main will later reject for length would
+          // render a field the user can fill but the host silently drops. Both are
+          // filtered at this boundary so one shape reaches every consumer.
+          if (!isUsablePromptName(p.name, MCP_PROMPT_NAME_MAX_CHARS)) continue;
+          const args = (Array.isArray(p.arguments) ? p.arguments : [])
+            .filter((a) => a && isUsablePromptName(a.name, MCP_PROMPT_ARG_NAME_MAX_CHARS))
+            .map((a) => ({
+              name: a.name,
+              ...(typeof a.description === "string" ? { description: a.description } : {}),
+              required: a.required === true,
+            }));
           prompts.push({
             name: p.name,
-            title: p.title,
-            description: p.description,
-            arguments: p.arguments?.map((a) => ({
-              name: a.name,
-              description: a.description,
-              required: a.required,
-            })),
+            ...(typeof p.title === "string" ? { title: p.title } : {}),
+            ...(typeof p.description === "string" ? { description: p.description } : {}),
+            ...(args.length > 0 ? { arguments: args } : {}),
           });
         }
         cursor = result.nextCursor;
@@ -557,6 +589,57 @@ export class McpClient {
         `${this.config.id} prompts/list discovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  /**
+   * Fetch one server-declared prompt (`prompts/get`).
+   *
+   * Prompts are a USER-controlled primitive: this runs only from an explicit
+   * user selection, never from the model. The request is gated by the same
+   * per-request capability check as every other call (`prompts` must be both
+   * advertised and approved), and the prompt must be one the server actually
+   * declared at discovery — a name the host never saw is refused rather than
+   * forwarded.
+   */
+  async getPrompt(
+    name: string,
+    args: Record<string, string>,
+  ): Promise<{
+    description?: string;
+    blocks: Array<{ role: string; type: string; text?: string }>;
+    /** Message blocks the host refused to carry past its cap. */
+    droppedBlocks: number;
+  }> {
+    if (!this.promptsAdvertised) {
+      throw new Error(`[mcp-client] server '${this.config.id}' did not advertise prompts`);
+    }
+    const declared = this.state.prompts?.some((prompt) => prompt.name === name);
+    if (!declared) {
+      throw new Error(`[mcp-client] server '${this.config.id}' did not declare prompt '${name}'`);
+    }
+    const result = await this.sendRequest<McpPromptGetResult>("prompts/get", {
+      name,
+      ...(Object.keys(args).length > 0 ? { arguments: args } : {}),
+    });
+    // Sliced BEFORE mapping: `renderMcpPrompt`'s block cap applies to the mapped
+    // array, so a server returning a huge `messages` array would already have paid
+    // for the allocation by then. The clip is reported EXPLICITLY rather than left
+    // for the renderer to infer from the array length — inferring it made the count
+    // depend on this slice over-reading by exactly one, which is the kind of
+    // arithmetic a later simplification silently breaks.
+    const returnedBlocks = Array.isArray(result.messages) ? result.messages : [];
+    const messages = returnedBlocks.slice(0, MCP_PROMPT_MAX_BLOCKS);
+    const droppedBlocks = returnedBlocks.length - messages.length;
+    const blocks = messages.map((message) => ({
+      role: typeof message.role === "string" ? message.role : "user",
+      type: typeof message.content?.type === "string" ? message.content.type : "text",
+      ...(typeof message.content?.text === "string" ? { text: message.content.text } : {}),
+    }));
+    return {
+      ...(typeof result.description === "string" ? { description: result.description } : {}),
+      blocks,
+      droppedBlocks,
+    };
   }
 
   /** 서버 연결 해제 + 도구 제거 */

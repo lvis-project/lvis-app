@@ -53,11 +53,20 @@ import { parseUiMessageIntent, type McpUiMessageOutcome } from "../../mcp/mcp-ui
 import { parseMcpAppDownload, type McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
 import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
 import { appMessageSource, formatAppMessageEnvelope, isAppMessageOrigin } from "../../shared/mcp-app-message-source.js";
+import { formatStagedEnvelope, stagedOriginFor } from "../../shared/staged-origins.js";
+import { renderMcpPrompt } from "../../mcp/mcp-prompt-render.js";
+import {
+  isUsablePromptName,
+  MCP_PROMPT_ARG_NAME_MAX_CHARS,
+  MCP_PROMPT_ARG_VALUE_MAX_CHARS,
+  MCP_PROMPT_NAME_MAX_CHARS,
+} from "../../shared/mcp-prompt-bounds.js";
 // The MCP-app `ui/message` staging path reuses the plugin overlay gate's rate limiter
 // (one mechanism for "staged conversation proposals") and the same overlay push channel.
 import {
   deriveOverlaySummaryForDisplay,
   triggerConversationRateLimiter,
+  userPromptRateLimiter,
 } from "../../boot/steps/plugin-runtime/trigger-gate.js";
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import {
@@ -1494,6 +1503,89 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     sendToWindow(win, OVERLAY_V1.show, overlayItem, log);
     auditMcpApp("info", `[mcp-app:${serverId}] ui/message → staged for user confirmation (no active turn)`);
     return { ok: true, disposition: "staged" } satisfies McpUiMessageOutcome;
+  });
+
+  // ─── MCP server prompt (`prompts/get`) — the user ran a declared prompt ─────────
+  //
+  // Returns the server's messages already wrapped in their provenance envelope.
+  // This handler does NOT start a turn: the renderer sends the returned envelope
+  // through the ordinary `chat:send` path under `mcp-prompt-emitted`, where the
+  // send gate re-checks that the envelope is present. Same guards as the
+  // neighbouring MCP-App channels — host-renderer sender only, and the shared
+  // per-server rate limiter, because this reaches out to a server on the user's
+  // behalf.
+  ipcMain.handle(CHANNELS.mcp.getPrompt, async (e, serverId: unknown, name: unknown, args: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.getPrompt, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const auditPrompt = (type: "info" | "error", input: string) => {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-prompt",
+        type,
+        input,
+      });
+    };
+    // `name` is bounded and control-char-free by the same predicate the client's
+    // discovery boundary and the argument form use, so one shape reaches the audit
+    // line below, the server, and the dialog.
+    if (typeof serverId !== "string" || !isUsablePromptName(name, MCP_PROMPT_NAME_MAX_CHARS)) {
+      return { ok: false, error: "invalid-request" };
+    }
+    const kind = stagedOriginFor("mcp-prompt-emitted");
+    // The registry owns the tag shape; a serverId that cannot produce a valid tag
+    // is refused before any request leaves the host.
+    const source = `mcp-prompt:${serverId}`;
+    if (!kind.sourcePattern.test(source)) {
+      return { ok: false, error: "invalid-server-id" };
+    }
+    // Throttled on its OWN bucket, not the plugin/app actor bucket: this round-trip
+    // is one the user clicked for, and sharing a budget with `triggerConversation()`
+    // and `ui/message` let a chatty card starve the user's own prompt runs.
+    if (userPromptRateLimiter.isOverCap(serverId)) {
+      auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get rate limited`);
+      return { ok: false, error: "rate-limited" };
+    }
+    userPromptRateLimiter.record(serverId);
+    // Arguments come from the user's form; keep only string values, and accept only
+    // keys the dialog could legitimately have rendered — `Object.create(null)` so a
+    // key like `__proto__` or `toString` cannot reach an inherited slot.
+    const promptArgs: Record<string, string> = Object.create(null) as Record<string, string>;
+    if (args && typeof args === "object" && !Array.isArray(args)) {
+      for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+        if (typeof value === "string" && isUsablePromptName(key, MCP_PROMPT_ARG_NAME_MAX_CHARS)) {
+          promptArgs[key] = value.slice(0, MCP_PROMPT_ARG_VALUE_MAX_CHARS);
+        }
+      }
+    }
+    try {
+      const result = await deps.mcpManager.getPrompt(serverId, name, promptArgs);
+      const rendered = renderMcpPrompt(result.blocks, result.description);
+      // Two independent clips: blocks the CLIENT refused to carry past its cap, and
+      // whatever the render itself bounded. The user is told if either happened.
+      const truncated = rendered.truncated || result.droppedBlocks > 0;
+      if (rendered.text.length === 0) {
+        auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get '${name}' returned no text`);
+        return { ok: false, error: "empty-prompt" };
+      }
+      auditPrompt(
+        "info",
+        `[mcp-prompt:${serverId}] prompts/get '${name}' → ${rendered.text.length} chars`
+          + `${truncated ? " (truncated)" : ""}`
+          + `${rendered.omittedBlocks > 0 ? ` (${rendered.omittedBlocks} non-text block(s))` : ""}`,
+      );
+      return {
+        ok: true,
+        envelope: formatStagedEnvelope(kind, rendered.text, source),
+        truncated,
+        omittedBlocks: rendered.omittedBlocks,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get '${name}' failed: ${message}`);
+      return { ok: false, error: "prompt-failed" };
+    }
   });
 
   // ─── MCP Apps `ondownloadfile` (`ui/download-file`) — the app saves a file ──────

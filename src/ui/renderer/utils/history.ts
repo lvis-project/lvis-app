@@ -11,9 +11,9 @@ import {
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import type { SerializedHistoryMessage } from "../../../shared/chat-history.js";
 import {
-  isOverlayTriggerOrigin,
-  parseImportedTriggerEnvelopePayload,
-} from "../../../shared/overlay-trigger-source.js";
+  isStagedTurnSource,
+  parseStagedEnvelopePayload,
+} from "../../../shared/staged-origins.js";
 
 export type PersistedHistoryMessage = SerializedHistoryMessage;
 
@@ -232,31 +232,43 @@ function visibleUserText(message: PersistedHistoryMessage): string {
   return textContent(message.content);
 }
 
+/**
+ * Bound on the replayed provenance summary. The persisted transcript is a file the
+ * user (or a conversation IMPORT) can write, and this string is rendered as
+ * markdown in host chrome — the live path caps it at staging time, so replay caps
+ * it too rather than trusting the row.
+ */
+const REPLAYED_SUMMARY_CAP = 2_000;
+
 function importedTriggerFromMessage(
   message: PersistedHistoryMessage,
 ): Extract<ChatEntry, { kind: "imported_trigger" }> | null {
   if (message.importedTrigger) {
-    if (!isOverlayTriggerOrigin(message.importedTrigger.source)) return null;
+    if (!isStagedTurnSource(message.importedTrigger.source)) return null;
     return {
       kind: "imported_trigger",
       sessionId: message.importedTrigger.sessionId,
       source: message.importedTrigger.source,
       prompt: message.importedTrigger.prompt,
-      summary: message.importedTrigger.summary,
+      summary: message.importedTrigger.summary.slice(0, REPLAYED_SUMMARY_CAP),
       toolCallCount: message.importedTrigger.toolCallCount,
       importedAt: message.importedTrigger.importedAt,
     };
   }
+  // Older rows carry no `importedTrigger` meta, so provenance is recovered
+  // from the envelope still present in the content — for whichever staged
+  // kind wrote it. A CLOSED envelope is required: a truncated one is text
+  // the user can see, not a provenance claim worth rendering as a card.
   const content = textContent(message.content);
-  if (!content.trim().endsWith("</imported-from-proactive>")) return null;
-  const parsed = parseImportedTriggerEnvelopePayload(content);
+  const parsed = parseStagedEnvelopePayload(content);
   if (!parsed) return null;
+  if (!content.trim().endsWith(`</${parsed.kind.fenceTag}>`)) return null;
   return {
     kind: "imported_trigger",
     sessionId: `history-imported-${message.index}`,
     source: parsed.source,
     prompt: textContent(message.content),
-    summary: parsed.body,
+    summary: parsed.body.slice(0, REPLAYED_SUMMARY_CAP),
     toolCallCount: 0,
     importedAt:
       message.createdAt !== undefined
