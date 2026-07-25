@@ -9,6 +9,7 @@ import type {
   McpServerState,
   McpPromptSummary,
   McpResourceSummary,
+  McpResourceTemplateSummary,
   McpStdioServerConfig,
   McpToolSchema,
   McpUiPayload,
@@ -37,6 +38,11 @@ import {
   MCP_RESOURCE_URI_MAX_CHARS,
   usableResourceText,
 } from "../shared/mcp-resource-bounds.js";
+import {
+  expandResourceUriTemplate,
+  isUsableResourceUriTemplate,
+  resourceTemplateVariables,
+} from "../shared/mcp-resource-template-bounds.js";
 import {
   isUsablePromptName,
   MCP_PROMPT_ARG_NAME_MAX_CHARS,
@@ -194,6 +200,17 @@ interface McpPromptsListResult {
     title?: string;
     description?: string;
     arguments?: Array<{ name: string; description?: string; required?: boolean }>;
+  }>;
+  nextCursor?: string;
+}
+
+interface McpResourceTemplatesListResult {
+  resourceTemplates?: Array<{
+    uriTemplate?: unknown;
+    name?: unknown;
+    title?: unknown;
+    description?: unknown;
+    mimeType?: unknown;
   }>;
   nextCursor?: string;
 }
@@ -557,6 +574,7 @@ export class McpClient {
       await this.discoverPrompts();
       // Same for application-driven resources.
       await this.discoverResources();
+      await this.discoverResourceTemplates();
 
       this.state.status = "connected";
       this.state.connectedAt = new Date().toISOString();
@@ -724,6 +742,140 @@ export class McpClient {
   }
 
   /**
+   * Discover the URI TEMPLATES a server declares (`resources/templates/list`).
+   *
+   * Same two-key gate as `resources/list` — advertised AND governance-approved — and
+   * gated on the same `resources` capability, because that is the capability the user
+   * actually approved. A separate capability for templates would ask them a question
+   * they have already answered.
+   *
+   * Every field validated here, same as resources. The one that is NOT like resources:
+   * `uriTemplate` is checked with the TEMPLATE predicate, which refuses every RFC 6570
+   * operator beyond plain `{var}`. A server publishing `{+path}` gets its template
+   * dropped rather than offered, because reserved expansion would not percent-encode
+   * what the user types into it.
+   */
+  private async discoverResourceTemplates(): Promise<void> {
+    if (!this.resourcesAdvertised) return;
+    if (
+      !this.governance.validateRequestCapability(
+        this.config.id,
+        "resources/templates/list",
+        {},
+      ).valid
+    ) {
+      return;
+    }
+    try {
+      const templates: McpResourceTemplateSummary[] = [];
+      const seen = new Set<string>();
+      let published = 0;
+      let cursor: string | undefined;
+      for (let page = 0; page < MCP_RESOURCE_MAX_PAGES; page++) {
+        const result = await this.sendRequest<McpResourceTemplatesListResult>(
+          "resources/templates/list",
+          cursor ? { cursor } : {},
+          HANDSHAKE_TIMEOUT_MS,
+        );
+        const entries = Array.isArray(result.resourceTemplates) ? result.resourceTemplates : [];
+        published += entries.length;
+        for (const entry of entries) {
+          if (templates.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
+          if (!entry || typeof entry !== "object") continue;
+          if (!isUsableResourceUriTemplate(entry.uriTemplate)) continue;
+          if (seen.has(entry.uriTemplate)) continue;
+          const name = usableResourceText(entry.name, MCP_RESOURCE_NAME_MAX_CHARS)
+            ?? usableResourceText(entry.uriTemplate, MCP_RESOURCE_NAME_MAX_CHARS);
+          if (!name) continue;
+          seen.add(entry.uriTemplate);
+          const title = usableResourceText(entry.title, MCP_RESOURCE_NAME_MAX_CHARS);
+          const description = usableResourceText(
+            entry.description,
+            MCP_RESOURCE_DESCRIPTION_MAX_CHARS,
+          );
+          const mimeType = usableResourceText(entry.mimeType, MCP_RESOURCE_NAME_MAX_CHARS);
+          templates.push({
+            uriTemplate: entry.uriTemplate,
+            name,
+            ...(title ? { title } : {}),
+            ...(description ? { description } : {}),
+            ...(mimeType ? { mimeType } : {}),
+            // Derived ONCE, here. The dialog renders a field per entry and main expands
+            // from the same list, so a form and an expansion cannot disagree about what
+            // the template asks for.
+            variables: resourceTemplateVariables(entry.uriTemplate),
+          });
+        }
+        cursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+        if (!cursor || templates.length >= MCP_RESOURCE_MAX_PER_SERVER) break;
+      }
+      this.state.resourceTemplates = templates;
+      const notCatalogued = published - templates.length;
+      log.info(
+        `${this.config.id} discovered ${templates.length} resource template(s)`
+          + `${notCatalogued > 0
+            ? ` (${notCatalogued} of ${published} published not catalogued: unusable,`
+              + ` duplicate, or past the ${MCP_RESOURCE_MAX_PER_SERVER} per-server limit)`
+            : ""}`,
+      );
+    } catch (err) {
+      // Non-fatal and SEPARATE from `resources/list`: a server may support one and not
+      // the other, and a template failure must not cost the user their plain resources.
+      log.warn(
+        `${this.config.id} resources/templates/list discovery failed (non-fatal): `
+          + `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Expand a declared URI TEMPLATE with user-supplied values and read the result.
+   *
+   * The gate is on the TEMPLATE, matched exactly against what this client listed — not
+   * on the expanded URI. That is the whole reason this method exists instead of the
+   * renderer expanding and calling `readDeclaredResource`: an expanded URI was never in
+   * the listed set, so accepting one would mean pattern-matching an arbitrary URI back
+   * against a template, and a matcher for `file:///{path}` accepts
+   * `file:///../../etc/passwd`. Exact-matching the pattern and expanding here is the
+   * version of that check that cannot be got wrong.
+   *
+   * `expandResourceUriTemplate` percent-encodes every value and re-validates the result
+   * with the ordinary URI predicate, so by the time the read happens the URI is
+   * indistinguishable from a listed one — including for the `https:` refusal, which is
+   * re-derived here rather than inherited, because the template's literal scheme is not
+   * necessarily the expansion's.
+   */
+  async readDeclaredResourceTemplate(
+    uriTemplate: string,
+    values: ReadonlyMap<string, string>,
+  ): Promise<{
+    blocks: Array<{ uri?: string; mimeType?: string; text?: string; omittedKind?: string }>;
+    droppedBlocks: number;
+    truncated: boolean;
+    /** The URI the host produced, for the audit row and the attachment header. */
+    uri: string;
+  }> {
+    if (!this.resourcesAdvertised) {
+      throw new Error("[mcp-client] server did not advertise resources");
+    }
+    const declared = this.state.resourceTemplates?.find(
+      (template) => template.uriTemplate === uriTemplate,
+    );
+    if (!declared) {
+      throw new Error("[mcp-client] server did not declare this resource template");
+    }
+    const uri = expandResourceUriTemplate(uriTemplate, values);
+    if (!uri) {
+      throw new Error("[mcp-client] template expansion produced no usable uri");
+    }
+    if (isHostFetchRefusedUri(uri)) {
+      throw new Error("[mcp-client] host does not fetch this resource scheme");
+    }
+    const read = await this.readResourceUri(uri);
+    return { ...read, uri };
+  }
+
+  /**
    * Read one declared resource (`resources/read`).
    *
    * Named apart from {@link readResource}, which serves the MCP-Apps `ui://`
@@ -757,6 +909,23 @@ export class McpClient {
     if (declared.hostFetchRefused) {
       throw new Error("[mcp-client] host does not fetch this resource scheme");
     }
+    return this.readResourceUri(uri);
+  }
+
+  /**
+   * The `resources/read` round trip and its bounds, shared by both declared paths.
+   *
+   * Extracted so the block cap, the character budget and the blob placeholder have ONE
+   * implementation: a template read that carried its own copy would be the place a
+   * bound silently stops applying, and this is the boundary where an unbounded server
+   * response is supposed to stop. The GATES stay with each caller, because they differ —
+   * one matches a listed URI, the other matches a listed template and expands it.
+   */
+  private async readResourceUri(uri: string): Promise<{
+    blocks: Array<{ uri?: string; mimeType?: string; text?: string; omittedKind?: string }>;
+    droppedBlocks: number;
+    truncated: boolean;
+  }> {
     const result = await this.sendRequest<McpResourcesReadResult>("resources/read", { uri });
     const returned = Array.isArray(result.contents) ? result.contents : [];
     const kept = returned.slice(0, MCP_RESOURCE_MAX_BLOCKS);
@@ -787,6 +956,7 @@ export class McpClient {
     });
     return { blocks, droppedBlocks: returned.length - kept.length, truncated };
   }
+
   /**
    * Fetch one server-declared prompt (`prompts/get`).
    *
@@ -1238,6 +1408,7 @@ export class McpClient {
     this.state.registeredTools = [];
     this.state.prompts = undefined;
     this.state.resources = undefined;
+    this.state.resourceTemplates = undefined;
     this.state.instructions = undefined;
   }
 

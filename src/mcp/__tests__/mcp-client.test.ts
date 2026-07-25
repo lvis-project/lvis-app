@@ -1822,10 +1822,12 @@ describe("MCP resources discovery and read", () => {
     advertiseResources: boolean;
     approveCapabilities: string[];
     resourcePages?: Array<{ resources: unknown[]; nextCursor?: string }>;
+    templatePages?: Array<{ resourceTemplates: unknown[]; nextCursor?: string }>;
     readResult?: unknown;
-  }): { client: McpClient; listCalls: unknown[]; readCalls: unknown[] } {
+  }): { client: McpClient; listCalls: unknown[]; readCalls: unknown[]; templateListCalls: unknown[] } {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const listCalls: unknown[] = [];
+    const templateListCalls: unknown[] = [];
     const readCalls: unknown[] = [];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
       const method = readRpcMethod(init);
@@ -1842,6 +1844,13 @@ describe("MCP resources discovery and read", () => {
           return new Response(null, { status: 202 });
         case "tools/list":
           return jsonRpcResponse(id, { tools: [] });
+        case "resources/templates/list": {
+          const params = (JSON.parse(String(init?.body)).params ?? {}) as Record<string, unknown>;
+          templateListCalls.push(params);
+          const page = opts.templatePages?.[templateListCalls.length - 1]
+            ?? { resourceTemplates: [] };
+          return jsonRpcResponse(id, page);
+        }
         case "resources/list": {
           const params = (JSON.parse(String(init?.body)).params ?? {}) as Record<string, unknown>;
           listCalls.push(params);
@@ -1871,7 +1880,7 @@ describe("MCP resources discovery and read", () => {
       gov,
       new ToolRegistry(),
     );
-    return { client, listCalls, readCalls };
+    return { client, listCalls, readCalls, templateListCalls };
   }
 
   it("discovers resources when advertised AND approved", async () => {
@@ -1968,6 +1977,177 @@ describe("MCP resources discovery and read", () => {
     await client.disconnect();
   });
 
+  it("discovers URI templates and derives their variables once", async () => {
+    const { client, templateListCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [
+        {
+          resourceTemplates: [
+            {
+              uriTemplate: "file:///project/{path}",
+              name: "Project file",
+              title: "Any file in the project",
+              mimeType: "text/plain",
+            },
+            { uriTemplate: "github://repos/{owner}/{repo}/issues/{number}", name: "Issue" },
+          ],
+        },
+      ],
+    });
+    await client.connect();
+
+    expect(templateListCalls).toHaveLength(1);
+    expect(client.getState().resourceTemplates).toEqual([
+      {
+        uriTemplate: "file:///project/{path}",
+        name: "Project file",
+        title: "Any file in the project",
+        mimeType: "text/plain",
+        variables: ["path"],
+      },
+      {
+        uriTemplate: "github://repos/{owner}/{repo}/issues/{number}",
+        name: "Issue",
+        variables: ["owner", "repo", "number"],
+      },
+    ]);
+    await client.disconnect();
+  });
+
+  // The operator cases matter more here than in the predicate's own suite: this is
+  // where a `{+path}` template would become an offer to the user, and reserved
+  // expansion does not percent-encode what they type into it.
+  it("drops templates the host will not expand, and says how many", async () => {
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [
+        {
+          resourceTemplates: [
+            { uriTemplate: "file:///project/{+path}", name: "reserved expansion" },
+            { uriTemplate: "file:///project/{path*}", name: "explode" },
+            { uriTemplate: "ui://widget/{id}", name: "reserved scheme" },
+            { uriTemplate: "file:///project/README.md", name: "not a template" },
+            { uriTemplate: 42, name: "not a string" },
+            { uriTemplate: "file:///ok/{path}", name: "first" },
+            { uriTemplate: "file:///ok/{path}", name: "duplicate" },
+          ],
+        },
+      ],
+    });
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    await client.connect();
+
+    const templates = client.getState().resourceTemplates ?? [];
+    expect(templates.map((template) => template.uriTemplate)).toEqual(["file:///ok/{path}"]);
+    expect(templates[0].name).toBe("first");
+    // 7 published, 1 catalogued — the line has to say 6, not just the malformed ones.
+    const line = info.mock.calls.map((c) => c.join(" "))
+      .find((l) => l.includes("resource template(s)"));
+    expect(line).toContain("discovered 1 resource template(s)");
+    expect(line).toContain("6 of 7 published not catalogued");
+    info.mockRestore();
+    await client.disconnect();
+  });
+
+  it("expands a declared template host-side and reads the produced URI", async () => {
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "file:///project/{path}", name: "f" }] }],
+      readResult: { contents: [{ uri: "file:///project/a.md", text: "BODY" }] },
+    });
+    await client.connect();
+
+    const read = await client.readDeclaredResourceTemplate(
+      "file:///project/{path}",
+      new Map([["path", "a.md"]]),
+    );
+
+    expect(read.uri).toBe("file:///project/a.md");
+    // The wire request carries the host's expansion — `toMatchObject` because every
+    // request also carries the handshake `_meta` envelope.
+    expect(readCalls).toMatchObject([{ uri: "file:///project/a.md" }]);
+    expect(read.blocks[0].text).toBe("BODY");
+    await client.disconnect();
+  });
+
+  it("cannot be walked out of the published path by what the user types", async () => {
+    // The reason expansion is host-side at all. The value is percent-encoded, so the
+    // server receives one segment — not a traversal — and the URI on the wire is the
+    // one the host produced rather than one the renderer chose.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "file:///project/{path}", name: "f" }] }],
+    });
+    await client.connect();
+
+    const read = await client.readDeclaredResourceTemplate(
+      "file:///project/{path}",
+      new Map([["path", "../../etc/passwd"]]),
+    );
+
+    expect(read.uri).toBe("file:///project/..%2F..%2Fetc%2Fpasswd");
+    expect(readCalls).toMatchObject([{ uri: "file:///project/..%2F..%2Fetc%2Fpasswd" }]);
+    await client.disconnect();
+  });
+
+  it("refuses a template it never listed, before any request", async () => {
+    // Same gate as the plain read, on the pattern rather than the URI: matching an
+    // expanded URI back against a template would need a matcher, and a matcher for
+    // `file:///{path}` accepts `file:///../../etc/passwd`.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "file:///listed/{path}", name: "f" }] }],
+    });
+    await client.connect();
+
+    await expect(client.readDeclaredResourceTemplate(
+      "file:///other/{path}",
+      new Map([["path", "a.md"]]),
+    )).rejects.toThrow(/did not declare/);
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  it("refuses when a value is missing rather than expanding it away", async () => {
+    // An empty substitution points at the directory above — a different resource than
+    // the user asked for, and one they cannot see they asked for.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "file:///project/{path}", name: "f" }] }],
+    });
+    await client.connect();
+
+    await expect(client.readDeclaredResourceTemplate(
+      "file:///project/{path}",
+      new Map(),
+    )).rejects.toThrow(/no usable uri/);
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  it("refuses to fetch when the EXPANSION lands on a refused scheme", async () => {
+    // Re-derived from the expansion, not inherited from the template: the literal
+    // scheme of a template is not necessarily the scheme of what it produces.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "https://example.com/{doc}", name: "web" }] }],
+    });
+    await client.connect();
+
+    await expect(client.readDeclaredResourceTemplate(
+      "https://example.com/{doc}",
+      new Map([["doc", "r.pdf"]]),
+    )).rejects.toThrow(/does not fetch/);
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
   it("refuses to read a URI it never listed", async () => {
     const { client, readCalls } = connectWith({
       advertiseResources: true,

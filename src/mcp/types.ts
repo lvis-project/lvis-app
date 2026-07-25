@@ -301,6 +301,28 @@ export interface McpResourceSummary {
   hostFetchRefused?: boolean;
 }
 
+/**
+ * A URI TEMPLATE the server declared (`resources/templates/list`).
+ *
+ * Its identity is `uriTemplate`, NOT `uri` — the distinction is load-bearing rather than
+ * pedantic. A template is a pattern the host completes, so it fails the URI predicate by
+ * design (braces are refused there), and a consumer that stored one in a `uri` field
+ * would hand a brace-string to a validator that can only refuse it.
+ *
+ * `variables` is derived here rather than re-parsed per consumer: the dialog renders one
+ * field per entry in this order, and main expands using the same list, so a form and an
+ * expansion cannot disagree about what the template asks for.
+ */
+export interface McpResourceTemplateSummary {
+  uriTemplate: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+  /** Variable names in declaration order, first occurrence only. */
+  variables: string[];
+}
+
 export interface McpServerState {
   id: string;
   status: "disconnected" | "connecting" | "connected" | "error";
@@ -313,6 +335,8 @@ export interface McpServerState {
   instructions?: string;
   /** Resources declared by the server (advertised + approved for `resources`). */
   resources?: McpResourceSummary[];
+  /** URI templates declared by the server (advertised + approved for `resources`). */
+  resourceTemplates?: McpResourceTemplateSummary[];
 }
 
 // ─── Validation Results ────────────────────────────
