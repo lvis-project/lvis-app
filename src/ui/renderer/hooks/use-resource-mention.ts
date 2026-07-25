@@ -191,8 +191,11 @@ export function useResourceMention({
       try {
         const [resources, templates] = await Promise.all([
           mcp.listResources(),
-          // Optional so a preload that predates this channel degrades to resources only
-          // rather than throwing away the whole catalogue.
+          // Guarded the same way the line above guards `listResources`, and for a
+          // consequence rather than a version story: a missing method inside
+          // `Promise.all` throws, the catch below empties the catalogue, and the user
+          // loses their RESOURCES because templates were unavailable. Degrading to
+          // resources-only is the honest failure.
           mcp.listResourceTemplates?.() ?? Promise.resolve({ ok: false as const, error: "" }),
         ]);
         if (cancelled) return;
