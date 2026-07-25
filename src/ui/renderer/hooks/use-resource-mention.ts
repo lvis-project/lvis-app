@@ -22,6 +22,12 @@ import {
   MCP_RESOURCE_NAME_MAX_CHARS,
 } from "../../../shared/mcp-resource-bounds.js";
 
+import { displaySafeLabel } from "../../../shared/display-safe-text.js";
+import { detectMentionQuery } from "../utils/slash-trigger.js";
+import { resolveIpcErrorKey } from "../format-ipc-error.js";
+import type { LvisApi } from "../types.js";
+import type { ResourceAttachment } from "../types/attachments.js";
+
 /**
  * Rows the menu will render at once.
  *
@@ -31,11 +37,6 @@ import {
  * the rest, which is what an autocomplete is for.
  */
 const MENTION_MAX_ROWS = 50;
-import { displaySafeLabel } from "../../../shared/display-safe-text.js";
-import { detectMentionQuery } from "../utils/slash-trigger.js";
-import { resolveIpcErrorKey } from "../format-ipc-error.js";
-import type { LvisApi } from "../types.js";
-import type { ResourceAttachment } from "../types/attachments.js";
 
 /** One offered resource, already display-normalized. */
 export interface ResourceMentionItem {
