@@ -31,6 +31,7 @@ import { ko as ko_be_main } from "../generated/be_main.js";
 import { ko as ko_be_mcpClient } from "../generated/be_mcpClient.js";
 import { ko as ko_be_mcpGovernance } from "../generated/be_mcpGovernance.js";
 import { ko as ko_be_mcpManager } from "../generated/be_mcpManager.js";
+import { ko as ko_be_mcpResourceAttachment } from "../generated/be_mcpResourceAttachment.js";
 import { ko as ko_be_mcpResourceTools } from "../generated/be_mcpResourceTools.js";
 import { ko as ko_be_memoryManager } from "../generated/be_memoryManager.js";
 import { ko as ko_be_permissionManager } from "../generated/be_permissionManager.js";
@@ -213,6 +214,7 @@ export const koMessages: Record<string, string> = {
   ...ko_be_mcpClient,
   ...ko_be_mcpGovernance,
   ...ko_be_mcpManager,
+  ...ko_be_mcpResourceAttachment,
   ...ko_be_mcpResourceTools,
   ...ko_be_memoryManager,
   ...ko_be_permissionManager,

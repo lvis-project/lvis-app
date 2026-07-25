@@ -213,6 +213,11 @@ export const CHANNELS = {
     // isPublicChannel). Registered in ipc/domains/plugins.ts and gated on
     // validateHostRendererSender — it reaches out to a server on the user's behalf.
     getPrompt: "lvis:mcp:get-prompt",
+    // INTERNAL, same posture as `getPrompt`: the renderer asks the host to read a
+    // DECLARED resource and hand back the fenced block the user attaches to their own
+    // turn. The host builds the fence, never the renderer — that is what keeps the
+    // untrusted framing on server text that lands beside the user's words.
+    attachResource: "lvis:mcp:attach-resource",
     // MCP Apps `ondownloadfile` (`ui/download-file`) — the app hands over INLINE bytes it
     // already possessed and asks the host to save them. The host never fetches an
     // app-supplied URI (a `resource_link` is rejected at parse time), so this channel

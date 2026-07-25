@@ -245,6 +245,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:llm:ping",
         "lvis:logs:tail",
         "lvis:marketplace:ping",
+        "lvis:mcp:attach-resource",
         "lvis:mcp:call-tool",
         "lvis:mcp:catalog:list",
         "lvis:mcp:config:add",

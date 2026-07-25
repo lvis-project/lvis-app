@@ -142,8 +142,22 @@ Because these builtins hand the model untrusted server content, they declare
 does to MCP tools. Without it a builtin badge would be a way around the decision
 that headless (routine) loops run with no MCP surface.
 
-Stage 3 — the user path: composer mention (`@server:uri`) resolving through the
-same read, attached to the turn as a fenced untrusted block, plus templates.
+Stage 3 — the user path, split at the process boundary the way stages 1 and 2 were:
+
+  - **3a (landed):** `lvis:mcp:attach-resource` reads a declared resource and
+    returns the fenced block to attach. The HOST builds the fence — never the
+    renderer — because this text lands beside the user's own words, which is the one
+    place the model has the most reason to read it as the user speaking. The
+    per-turn attachment cap is enforced at the send gate, not in the composer: the
+    renderer decides what to offer, main decides what a turn carries. One projection
+    (`McpManager.listDeclaredResources`) now serves the model tools, this path, and
+    the coming picker, and it lists only CONNECTED servers.
+  - **3b:** the composer mention (`@server:uri`) with autocomplete, and templates.
+
+The fence is `<mcp-resource trust="untrusted-server-data">`, registered in the
+`FenceTag` union so its builder had to answer the escape question, with the body's
+own closing tag neutralized and a clip admitted in a line the model reads rather
+than a flag the UI could ignore.
 
 Stages land as separate PRs. Stage 1 touches no cluster-sensitive path; stages 2
 and 3 do (`src/tools`, `src/ipc`), so they carry the 3-role attestation.

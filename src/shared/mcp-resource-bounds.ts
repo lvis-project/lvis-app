@@ -21,6 +21,16 @@ export const MCP_RESOURCE_URI_MAX_CHARS = 2_048;
 /** Display-string bounds for host chrome. */
 export const MCP_RESOURCE_NAME_MAX_CHARS = 128;
 export const MCP_RESOURCE_DESCRIPTION_MAX_CHARS = 512;
+/**
+ * Resource attachments one turn may carry.
+ *
+ * A mention is cheap to type and each attachment is up to the per-read bound, so
+ * without this a handful of them fills the window before the model reads a word
+ * of the user's own message. Enforced in main at the send gate, not in the
+ * composer: the renderer decides what to offer, main decides what a turn carries.
+ */
+export const MCP_RESOURCE_ATTACHMENTS_PER_TURN = 8;
+
 /** Bounded page walk so a hostile `nextCursor` loop cannot hang the handshake. */
 export const MCP_RESOURCE_MAX_PAGES = 20;
 

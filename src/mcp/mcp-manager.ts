@@ -6,7 +6,14 @@ import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceRead } from "./types.js";
+import type {
+  McpResourceSummary,
+  McpServerConfig,
+  McpServerConfigDto,
+  McpServerState,
+  McpUiPayload,
+  McpUiResourceRead,
+} from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
 import { McpClient, scrubSecrets } from "./mcp-client.js";
 import { ToolRegistry, type PreparedMcpRegistryReplacement } from "../tools/registry.js";
@@ -989,6 +996,20 @@ export class McpManager {
     return this.withBundledLease(serverId, () => client.getPrompt(name, args));
   }
 
+  /**
+   * Servers that currently declare resources, with their catalogues.
+   *
+   * The ONE projection: the model-facing tools, the attach path, and any UI read it,
+   * so they cannot disagree about which servers have resources or what a catalogue
+   * holds. Only CONNECTED servers are listed — a disconnected client has already had
+   * its catalogue cleared, and listing one whose read can only fail is how a caller
+   * ends up offering a dead URI.
+   */
+  listDeclaredResources(): Array<{ serverId: string; resources: readonly McpResourceSummary[] }> {
+    return this.listServers()
+      .filter((server) => server.status === "connected" && (server.resources?.length ?? 0) > 0)
+      .map((server) => ({ serverId: server.id, resources: server.resources ?? [] }));
+  }
   /**
    * Read one resource the server declared (`resources/read`, core capability).
    *
