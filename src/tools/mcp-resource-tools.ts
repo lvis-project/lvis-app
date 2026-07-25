@@ -168,6 +168,14 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
       }
       const offset = typeof offsetRaw === "number" ? offsetRaw : 0;
       const wanted = typeof a.serverId === "string" ? a.serverId : undefined;
+      // Paging is only well-defined for a NARROWED call. The index applies per server,
+      // so a single cursor across several of them advances every server by the others'
+      // shown counts and makes the entries in between unreachable by any offset a
+      // caller would try. Requiring `serverId` keeps `nextOffset` meaning exactly one
+      // thing instead of silently skipping the middle of a catalogue.
+      if (offset > 0 && wanted === undefined) {
+        return errorResult(t("be_mcpResourceTools.offsetNeedsServerId"));
+      }
       const servers = access
         .listResources()
         .filter((entry) => (wanted ? entry.serverId === wanted : true))
@@ -251,9 +259,11 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
       // postcondition ("the output is within budget") here rather than inferring it
       // from the parts is what makes the bound a bound; a test measuring the output
       // caught this being 8,564 against an 8,192 budget.
-      // Where to resume. Emitted whenever anything was withheld, so the model does
-      // not have to infer that a next page exists from a count.
+      // Where to resume, for the narrowed call that is the only shape paging is defined
+      // for. Emitted whenever something was withheld, so the model does not have to
+      // infer that a next page exists from a count.
       const nextOffset = () => {
+        if (wanted === undefined) return undefined;
         const shown = kept.reduce((sum, server) => sum + server.resources.length, 0);
         return offset + shown;
       };
@@ -263,7 +273,8 @@ export function createMcpResourceListTool(getAccess: McpResourceAccessResolver):
         ...(unnamedOmittedServers > 0 ? { unnamedOmittedServers } : {}),
         ...(omittedResources > 0 ? { omittedResources } : {}),
         ...(descriptionsOmitted ? { descriptionsOmitted: true } : {}),
-        ...(omittedResources > 0 || unnamedOmittedServers > 0 || omittedServerIds.length > 0
+        ...((omittedResources > 0 || unnamedOmittedServers > 0 || omittedServerIds.length > 0)
+          && nextOffset() !== undefined
           ? { nextOffset: nextOffset() }
           : {}),
       });
