@@ -23,8 +23,10 @@ applies to schemas, applied to instruction bytes:
    hidden. This is the always-present fixed cost, so it MUST be bounded (see
    Policy §1–§3).
 4. **Loaded on demand** — the model calls `skill_load({skillName})`. First load
-   is approval-gated with a sha256 body hash binding (TOCTOU-safe,
-   `src/tools/skill-load.ts`); the body then renders inside a fenced
+   is approval-gated with a sha256 binding over the skill's approval **material**
+   (TOCTOU-safe, `src/tools/skill-load.ts`) — the body for a flat skill, and the
+   body plus the resource manifest for a skill carrying bundled files, so adding
+   or resizing a bundled file re-prompts; the body then renders inside a fenced
    `<lvis-skill>` overlay for the next round and is **cleared at the turn
    boundary** (`src/engine/turn/run-turn.ts`) so it never becomes ambient
    context.
@@ -132,7 +134,10 @@ catalog. This is shared future work with the tool side, not a gap in this policy
 
 Unchanged and load-bearing:
 
-- First `skill_load` of a body is approval-gated with a sha256 hash binding.
+- First `skill_load` is approval-gated with a sha256 hash binding over the
+  approval material (body, plus the resource manifest for a bundled skill).
+  Bundled approvals live in their own record-key namespace (`<name>#bundled`),
+  so the two material encodings can never be confused for one another.
 - Bodies render only inside the fenced `<lvis-skill>` overlay and are cleared at
   the turn boundary; they never persist as ambient context.
 - A plugin skill is loadable only while its plugin generation is active
@@ -148,8 +153,12 @@ on auto-compact; compaction does not shrink the active catalog.
 ## Security invariants
 
 - Catalog scoping never invokes a Tool and never loads a body.
-- A skill body loads only via `skill_load` with a matching sha256 hash and, for
-  plugin skills, an active generation lease.
+- A skill body loads only via `skill_load` with a matching sha256 hash over its
+  approval material and, for plugin skills, an active generation lease.
+- A bundled resource is readable only via `skill_read`, only for a path the
+  manifest listed, and only under the same bundle root the catalog resolved — the
+  containment check is a single chokepoint (`isBundleRoot` + `isSafeResourcePath`),
+  not a per-caller convention.
 - Ranking/selection operate on metadata only; they cannot promote a body.
 - Skill metadata is injected as `trust="untrusted-metadata"` and bodies inside a
   fenced overlay — a skill cannot escalate its own trust or scope.

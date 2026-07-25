@@ -345,12 +345,22 @@ describe("skill_load — approval key domains", () => {
       writeFileSync(join(dir, "flat.md"), "---\nname: flat\ndescription: d\n---\nFLAT BODY");
       const store = new SkillStore({ userDir: dir });
       const keys: string[] = [];
+      // BOTH sides are recorded. An earlier round of this feature applied the
+      // namespacing to `approve` but not `isApproved`, which stores an approval
+      // under one key and looks it up under another — the user re-approves every
+      // single load and nothing looks broken. Asserting only the read side would
+      // not have caught it.
+      const approvedKeys: string[] = [];
+      const approvedMaterial: string[] = [];
       const tool = createSkillLoadTool({
         store,
         overlay: new SkillOverlay(),
         approvals: {
           isApproved: async (key: string) => { keys.push(key); return false; },
-          approve: async () => {},
+          approve: async (key: string, material: string) => {
+            approvedKeys.push(key);
+            approvedMaterial.push(material);
+          },
         } as never,
         getApprovalGate: () => ({ requestAndWait: async () => ({ choice: "allow" }) }) as never,
         emit: () => {},
@@ -360,6 +370,12 @@ describe("skill_load — approval key domains", () => {
       // Flat keeps the legacy key; the bundle-bearing skill is namespaced, so
       // the two material encodings can never share a record.
       expect(keys).toEqual(["flat", "guide#bundled"]);
+      // …and the write side uses the SAME keys, in the same order.
+      expect(approvedKeys).toEqual(keys);
+      // The material differs in kind, which is why the namespaces exist: a flat
+      // skill binds its body verbatim, a bundled one binds a digest pair.
+      expect(approvedMaterial[0]).toContain("FLAT BODY");
+      expect(approvedMaterial[1]).toMatch(/^[0-9a-f]{64}\|[0-9a-f]{64}$/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
