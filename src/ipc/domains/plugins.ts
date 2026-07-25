@@ -57,6 +57,12 @@ import { formatStagedEnvelope, stagedOriginFor } from "../../shared/staged-origi
 import { renderMcpPrompt } from "../../mcp/mcp-prompt-render.js";
 import { renderResourceAttachment } from "../../mcp/mcp-resource-attachment.js";
 import { isUsableResourceUri } from "../../shared/mcp-resource-bounds.js";
+import {
+  isUsableResourceUriTemplate,
+  isUsableTemplateVariableName,
+  MCP_RESOURCE_TEMPLATE_MAX_VARIABLES,
+  MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS,
+} from "../../shared/mcp-resource-template-bounds.js";
 import { isUsableMcpServerId } from "../../shared/mcp-app-partition.js";
 import { scrubShortError } from "../../shared/dlp.js";
 import {
@@ -1690,6 +1696,103 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: false, error: "resource-failed" };
     }
   });
+
+  // The templates half of the picker's catalogue. Same posture as `listResources`: no
+  // rate bucket, reaches no server, returns exactly `{serverId, templates[]}`.
+  ipcMain.handle(CHANNELS.mcp.listResourceTemplates, (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.listResourceTemplates, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    return { ok: true as const, servers: deps.mcpManager.listDeclaredResourceTemplates() };
+  });
+
+  // The template read. The renderer sends the TEMPLATE and the user's values; main
+  // produces the URI. That split is the point — see the channel comment in the contract.
+  ipcMain.handle(
+    CHANNELS.mcp.attachResourceTemplate,
+    async (e, serverId: unknown, uriTemplate: unknown, values: unknown) => {
+      if (!validateHostRendererSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.mcp.attachResourceTemplate, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      const auditAttach = (type: "info" | "error", input: string) => {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "mcp-resource",
+          type,
+          input,
+        });
+      };
+      // Shape-checked with the TEMPLATE predicate, not the URI one: a template legally
+      // contains the braces a URI may not. Both refusals happen before the rate bucket
+      // and the audit line, for the reason the plain attach documents — an unbounded
+      // serverId becomes a permanent key in a shared limiter map.
+      if (typeof serverId !== "string" || !isUsableResourceUriTemplate(uriTemplate)) {
+        return { ok: false, error: "invalid-request" };
+      }
+      if (!isUsableMcpServerId(serverId)) {
+        return { ok: false, error: "invalid-server-id" };
+      }
+      if (userPromptRateLimiter.isOverCap(serverId)) {
+        auditAttach("error", `[mcp-resource:${serverId}] template attach rate limited`);
+        return { ok: false, error: "rate-limited" };
+      }
+      userPromptRateLimiter.record(serverId);
+      // A `Map`, not a `Record`, all the way from here to the expansion. That is what
+      // makes a variable named `toString` or `__proto__` an ordinary key instead of an
+      // inherited slot — the same rule the prompt-arguments dialog states, held on the
+      // main side too, because this map is built from renderer input.
+      const templateValues = new Map<string, string>();
+      if (values && typeof values === "object" && !Array.isArray(values)) {
+        for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
+          if (templateValues.size >= MCP_RESOURCE_TEMPLATE_MAX_VARIABLES) break;
+          if (typeof value !== "string" || !isUsableTemplateVariableName(key)) continue;
+          templateValues.set(key, value.slice(0, MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS));
+        }
+      }
+      try {
+        const read = await deps.mcpManager.readDeclaredResourceTemplate(
+          serverId,
+          uriTemplate,
+          templateValues,
+        );
+        // Everything from here is the plain attach's path, keyed on the URI MAIN
+        // produced. The renderer never learns a URI it could replay through the other
+        // channel — the fence header is the only place the expansion is shown, and that
+        // is host-built text.
+        const rendered = renderResourceAttachment(serverId, read.uri, read);
+        if (rendered.bodyChars === 0) {
+          auditAttach("error", `[mcp-resource:${serverId}] template read returned no text`);
+          return { ok: false, error: "empty-resource" };
+        }
+        auditAttach(
+          "info",
+          `[mcp-resource:${serverId}] attached ${read.uri.slice(0, 256)}`
+            + ` (from template ${uriTemplate.slice(0, 256)})`
+            + ` → ${rendered.text.length} chars`
+            + `${rendered.truncated ? " (truncated)" : ""}`
+            + `${rendered.omittedBlocks > 0 ? ` (${rendered.omittedBlocks} non-text block(s))` : ""}`,
+        );
+        return {
+          ok: true,
+          attachment: { type: "text", text: rendered.text },
+          truncated: rendered.truncated,
+          omittedBlocks: rendered.omittedBlocks,
+          // For the chip's label. Display text only — the renderer has no channel that
+          // accepts a URI, so this cannot be replayed as a read.
+          uri: read.uri,
+        };
+      } catch (err) {
+        auditAttach(
+          "error",
+          `[mcp-resource:${serverId}] template attach ${uriTemplate.slice(0, 256)} failed: `
+            + scrubShortError(err instanceof Error ? err.message : String(err)),
+        );
+        return { ok: false, error: "resource-failed" };
+      }
+    },
+  );
 
   // ─── MCP Apps `ondownloadfile` (`ui/download-file`) — the app saves a file ──────
   //
