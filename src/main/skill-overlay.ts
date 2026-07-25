@@ -113,9 +113,12 @@ export class SkillOverlay {
       lines.push(neutralizeSkillFence(e.body));
       if (e.resources.length > 0) {
         // Inert manifest: names only, so the model knows what it can fetch with
-        // `skill_read`. Paths are character-validated at discovery (no control
-        // chars / fence metacharacters), and escaped again here. The manifest
-        // shares the fence with an 8 KB-capped body, so bound it too — an
+        // `skill_read`. Fence integrity rests on the DISCOVERY-side validator
+        // (`isSafeResourcePath` rejects control chars, `<`, `>`, `\`, `:`), which
+        // is the single chokepoint — paths are deliberately NOT re-escaped here,
+        // because escaping would rewrite legitimate names into ones the
+        // authorized set does not contain. The manifest shares the fence with an
+        // 8 KB-capped body, so bound it too — an
         // attacker-chosen filename list must not become a bigger injection
         // budget than the body it accompanies.
         const manifest: string[] = [];
