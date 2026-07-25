@@ -12,16 +12,6 @@ interface DlpPattern {
 }
 
 /**
- * Slice-free credential scrubber shared by diagnostics bundles, log-tail IPC,
- * audit/display masking, and MCP error surfacing.
- *
- * This covers credential-shaped spans that the PII patterns below intentionally
- * do not model: bearer tokens, API-key fields, JWTs, vendor-prefixed tokens,
- * and context-labeled cloud secrets. It stays prefix/context driven rather than
- * redacting every high-entropy blob, because diagnostics often contain commit
- * SHAs and artifact hashes.
- */
-/**
  * Short, scrubbed form for an error surface — a log line, a status string, a
  * message handed to the model. Credential-scrubbed by {@link scrubSecretsForLLM}
  * and hard-capped, because the text is usually authored by something the host does
@@ -36,6 +26,16 @@ export function scrubShortError(text: string): string {
   return scrubSecretsForLLM(text).slice(0, 120);
 }
 
+/**
+ * Slice-free credential scrubber shared by diagnostics bundles, log-tail IPC,
+ * audit/display masking, and MCP error surfacing.
+ *
+ * This covers credential-shaped spans that the PII patterns below intentionally
+ * do not model: bearer tokens, API-key fields, JWTs, vendor-prefixed tokens,
+ * and context-labeled cloud secrets. It stays prefix/context driven rather than
+ * redacting every high-entropy blob, because diagnostics often contain commit
+ * SHAs and artifact hashes.
+ */
 export function scrubSecretsForLLM(text: string): string {
   return text
     .replace(

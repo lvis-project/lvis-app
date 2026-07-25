@@ -234,7 +234,8 @@ describe("resource tools — wiring and bounds", () => {
       })),
     }];
     const tool = createMcpResourceListTool(() => deps({ listResources: () => one }));
-    const rawOut = (await tool.execute({}, ctx())).output;
+    // Narrowed, because a resume cursor is only defined for one server's catalogue.
+    const rawOut = (await tool.execute({ serverId: "srv" }, ctx())).output;
     const out = parse(rawOut);
     const servers = out.servers as Array<{ serverId: string; resources: unknown[] }>;
     expect(rawOut.length).toBeLessThanOrEqual(MCP_RESOURCE_LIST_MAX_CHARS);
@@ -306,11 +307,13 @@ describe("resource tools — wiring and bounds", () => {
       })),
     }];
     const tool = createMcpResourceListTool(() => deps({ listResources: () => one }));
-    const first = parse((await tool.execute({}, ctx())).output);
+    const first = parse((await tool.execute({ serverId: "srv" }, ctx())).output);
     const firstServers = first.servers as Array<{ resources: Array<{ uri: string }> }>;
     expect(first.nextOffset).toBe(firstServers[0].resources.length);
 
-    const second = parse((await tool.execute({ offset: first.nextOffset }, ctx())).output);
+    const second = parse(
+      (await tool.execute({ serverId: "srv", offset: first.nextOffset }, ctx())).output,
+    );
     const secondServers = second.servers as Array<{ resources: Array<{ uri: string }> }>;
     // The second page starts exactly where the first stopped, and reaches the tail.
     expect(secondServers[0].resources[0].uri)
@@ -319,6 +322,38 @@ describe("resource tools — wiring and bounds", () => {
     expect(lastUri).toBe("file:///f199");
     // Nothing withheld on the last page ⇒ no resume marker.
     expect(second.nextOffset).toBeUndefined();
+  });
+
+  // The shape nothing pinned, and it is where a shared cursor goes wrong: `offset`
+  // indexes ONE server's resources, while a total `nextOffset` would advance every
+  // server by the others' shown counts — silently skipping the head of any server that
+  // was omitted from the previous page. Requiring `serverId` makes the cursor mean one
+  // thing; a cross-server page is refused rather than answered wrongly.
+  it("refuses to page a multi-server response with one cursor", async () => {
+    const two = [0, 1].map((s) => ({
+      serverId: `srv-${s}`,
+      resources: Array.from({ length: 60 }, (_, i) => ({
+        uri: `file:///s${s}/f${i}`,
+        name: `f${i}`,
+        description: "d".repeat(200),
+      })),
+    }));
+    const tool = createMcpResourceListTool(() => deps({ listResources: () => two }));
+    const first = parse((await tool.execute({}, ctx())).output);
+    // An un-narrowed response never advertises a cursor it cannot honor…
+    expect(first.nextOffset).toBeUndefined();
+    // …and following one anyway is an error, not a wrong answer.
+    const paged = await tool.execute({ offset: 40 }, ctx());
+    expect(paged.isError).toBe(true);
+    expect(String(parse(paged.output).error)).toContain("serverId");
+
+    // Narrowed, the same catalogue answers without a cursor at all, because dropping
+    // the prose is enough to fit it — nothing withheld means nothing to resume.
+    const narrowed = parse((await tool.execute({ serverId: "srv-1" }, ctx())).output);
+    const shown = (narrowed.servers as Array<{ resources: unknown[] }>)[0].resources.length;
+    expect(shown).toBe(60);
+    expect(narrowed.nextOffset).toBeUndefined();
+    expect(narrowed.descriptionsOmitted).toBe(true);
   });
 
   it("rejects a malformed offset instead of guessing", async () => {

@@ -16,10 +16,12 @@ export const en = {
     "serverId and uri are both required, and uri must be within the host's length bound.",
   "be_mcpResourceTools.invalidServerId":
     "serverId must be a string, exactly as reported by mcp_resource_list.",
+  "be_mcpResourceTools.offsetNeedsServerId":
+    "offset requires serverId: paging applies to one server's resources, so a cursor across several would skip entries.",
   "be_mcpResourceTools.invalidOffset":
     "offset must be a non-negative whole number.",
   "be_mcpResourceTools.offsetDescription":
-    "Skip this many resources before listing, to page past a response the host trimmed. Use the nextOffset value from the previous call.",
+    "Skip this many of THAT SERVER'S resources before listing, to page past a response the host trimmed. Requires serverId, and takes the nextOffset value from the previous call.",
   "be_mcpResourceTools.notReady":
     "MCP resource access is not ready yet; the server connections are still starting. Try again shortly.",
   "be_mcpResourceTools.readFailed":
@@ -42,10 +44,12 @@ export const ko: Record<keyof typeof en, string> = {
     "serverId 와 uri 는 모두 필수이며, uri 는 호스트의 길이 제한 안이어야 합니다.",
   "be_mcpResourceTools.invalidServerId":
     "serverId 는 문자열이어야 하며, mcp_resource_list 가 보고한 값을 그대로 사용해야 합니다.",
+  "be_mcpResourceTools.offsetNeedsServerId":
+    "offset 은 serverId 와 함께 써야 합니다. 페이징은 한 서버의 리소스에 적용되므로, 여러 서버를 한 커서로 넘기면 항목이 건너뛰어집니다.",
   "be_mcpResourceTools.invalidOffset":
     "offset 은 0 이상의 정수여야 합니다.",
   "be_mcpResourceTools.offsetDescription":
-    "목록을 만들기 전에 건너뛸 리소스 개수. 호스트가 잘라낸 응답의 다음 페이지를 볼 때 이전 호출의 nextOffset 값을 사용하세요.",
+    "해당 서버의 리소스를 이만큼 건너뛰고 목록을 만듭니다. 호스트가 잘라낸 응답의 다음 페이지를 볼 때 사용하며, serverId 가 필요하고 이전 호출의 nextOffset 값을 넣으세요.",
   "be_mcpResourceTools.notReady":
     "MCP 리소스 접근이 아직 준비되지 않았습니다. 서버 연결이 시작 중입니다. 잠시 후 다시 시도하세요.",
   "be_mcpResourceTools.readFailed":
