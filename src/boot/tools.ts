@@ -24,6 +24,7 @@ import {
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import { createSkillLoadTool, type SkillLoadEvent, type SkillLoadToolDeps } from "../tools/skill-load.js";
 import { createSkillListTool } from "../tools/skill-list.js";
+import { createSkillReadTool } from "../tools/skill-read.js";
 import { createAgentListTool } from "../tools/agent-list.js";
 import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
@@ -256,6 +257,16 @@ export function registerBuiltinTools(
       }),
     );
     builtins.push(createSkillListTool(workflowDeps.skillStore));
+    // Stage-3 companion: reads one bundled resource of an ALREADY-LOADED skill.
+    // Registered beside skill_load because it reuses the same overlay as its
+    // access-control surface (loaded ⇒ approved) and the same generation lease.
+    builtins.push(
+      createSkillReadTool({
+        store: workflowDeps.skillStore,
+        overlay: workflowDeps.skillOverlay,
+        acquirePluginGeneration: workflowDeps.acquirePluginSkillGeneration,
+      }),
+    );
   }
 
   toolRegistry.registerBatch(builtins);
