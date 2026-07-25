@@ -53,6 +53,8 @@ import { parseUiMessageIntent, type McpUiMessageOutcome } from "../../mcp/mcp-ui
 import { parseMcpAppDownload, type McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
 import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
 import { appMessageSource, formatAppMessageEnvelope, isAppMessageOrigin } from "../../shared/mcp-app-message-source.js";
+import { formatStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
+import { renderMcpPrompt } from "../../mcp/mcp-prompt-render.js";
 // The MCP-app `ui/message` staging path reuses the plugin overlay gate's rate limiter
 // (one mechanism for "staged conversation proposals") and the same overlay push channel.
 import {
@@ -1494,6 +1496,78 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     sendToWindow(win, OVERLAY_V1.show, overlayItem, log);
     auditMcpApp("info", `[mcp-app:${serverId}] ui/message → staged for user confirmation (no active turn)`);
     return { ok: true, disposition: "staged" } satisfies McpUiMessageOutcome;
+  });
+
+  // ─── MCP server prompt (`prompts/get`) — the user ran a declared prompt ─────────
+  //
+  // Returns the server's messages already wrapped in their provenance envelope.
+  // This handler does NOT start a turn: the renderer sends the returned envelope
+  // through the ordinary `chat:send` path under `mcp-prompt-emitted`, where the
+  // send gate re-checks that the envelope is present. Same guards as the
+  // neighbouring MCP-App channels — host-renderer sender only, and the shared
+  // per-server rate limiter, because this reaches out to a server on the user's
+  // behalf.
+  ipcMain.handle(CHANNELS.mcp.getPrompt, async (e, serverId: unknown, name: unknown, args: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.mcp.getPrompt, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const auditPrompt = (type: "info" | "error", input: string) => {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-prompt",
+        type,
+        input,
+      });
+    };
+    if (typeof serverId !== "string" || typeof name !== "string" || name.length === 0) {
+      return { ok: false, error: "invalid-request" };
+    }
+    const kind = stagedOriginForInput("mcp-prompt-emitted");
+    // The registry owns the tag shape; a serverId that cannot produce a valid tag
+    // is refused before any request leaves the host.
+    const source = `mcp-prompt:${serverId}`;
+    if (!kind || !kind.sourcePattern.test(source)) {
+      return { ok: false, error: "invalid-server-id" };
+    }
+    if (triggerConversationRateLimiter.isOverCap(serverId)) {
+      auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get rate limited`);
+      return { ok: false, error: "rate-limited" };
+    }
+    triggerConversationRateLimiter.record(serverId);
+    // Arguments come from the user's form; keep only string values and bound them.
+    const promptArgs: Record<string, string> = {};
+    if (args && typeof args === "object" && !Array.isArray(args)) {
+      for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+        if (typeof value === "string" && key.length <= 64) {
+          promptArgs[key] = value.slice(0, 4096);
+        }
+      }
+    }
+    try {
+      const result = await deps.mcpManager.getPrompt(serverId, name, promptArgs);
+      const rendered = renderMcpPrompt(result.blocks, result.description);
+      if (rendered.text.length === 0) {
+        auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get '${name}' returned no text`);
+        return { ok: false, error: "empty-prompt" };
+      }
+      auditPrompt(
+        "info",
+        `[mcp-prompt:${serverId}] prompts/get '${name}' → ${rendered.text.length} chars`
+          + `${rendered.truncated ? " (truncated)" : ""}`
+          + `${rendered.omittedBlocks > 0 ? ` (${rendered.omittedBlocks} non-text block(s))` : ""}`,
+      );
+      return {
+        ok: true,
+        envelope: formatStagedEnvelope(kind, rendered.text, source),
+        truncated: rendered.truncated,
+        omittedBlocks: rendered.omittedBlocks,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get '${name}' failed: ${message}`);
+      return { ok: false, error: "prompt-failed" };
+    }
   });
 
   // ─── MCP Apps `ondownloadfile` (`ui/download-file`) — the app saves a file ──────
