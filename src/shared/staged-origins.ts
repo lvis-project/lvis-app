@@ -195,9 +195,16 @@ export function stagedOriginFor(inputOrigin: StagedChatInputOrigin): StagedOrigi
   return STAGED_ORIGINS[inputOrigin];
 }
 
-/** The kind that owns a turn-entry origin, or undefined for non-staged origins. */
+/**
+ * The kind that owns a turn-entry origin, or undefined for non-staged origins.
+ *
+ * Accepts a bare `string` as well as a `ChatInputOrigin`: display code carries the
+ * origin as an unvalidated string off a persisted row, and the lookup is a runtime
+ * match that returns `undefined` for anything unregistered either way. Without this,
+ * such callers hand-write the same `.find` and the table gains a shadow copy.
+ */
 export function stagedOriginForInput(
-  inputOrigin: ChatInputOrigin | null | undefined,
+  inputOrigin: ChatInputOrigin | string | null | undefined,
 ): StagedOriginKind | undefined {
   if (!inputOrigin) return undefined;
   return STAGED_ORIGIN_KINDS.find((kind) => kind.inputOrigin === inputOrigin);

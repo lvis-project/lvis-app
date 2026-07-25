@@ -1,5 +1,5 @@
 import { t } from "../../../i18n/runtime.js";
-import { STAGED_ORIGIN_KINDS } from "../../../shared/staged-origins.js";
+import { stagedOriginForInput } from "../../../shared/staged-origins.js";
 
 /**
  * Human label for a turn/tool provenance origin.
@@ -10,7 +10,7 @@ import { STAGED_ORIGIN_KINDS } from "../../../shared/staged-origins.js";
  * the UI unlabeled should be visible, not silently blank.
  */
 export function trustOriginLabel(origin: string | undefined): string {
-  const staged = STAGED_ORIGIN_KINDS.find((kind) => kind.inputOrigin === origin);
+  const staged = stagedOriginForInput(origin);
   if (staged) return t(staged.labelKey);
   switch (origin) {
     case "user-keyboard":
