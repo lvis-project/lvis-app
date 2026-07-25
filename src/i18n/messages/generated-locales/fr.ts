@@ -1297,6 +1297,7 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.emptyPrompt": "Ce prompt n'a renvoyé aucun texte à exécuter.",
   "formatIpcError.emptyResource": "Cette ressource n'a renvoyé aucun texte à joindre.",
   "formatIpcError.resourceFailed": "Le serveur MCP n'a pas pu renvoyer cette ressource.",
+  "formatIpcError.tooManyResourceAttachments": "Trop de ressources jointes à un seul message. Retirez-en quelques-unes et renvoyez.",
   "formatIpcError.promptFailed": "Le serveur MCP n'a pas pu renvoyer ce prompt.",
   "formatIpcError.missingPluginEnvelope": "Les informations sur l’enveloppe du plugin sont manquantes.",
   "formatIpcError.missingTokens": "Les informations sur le jeton sont manquantes.",

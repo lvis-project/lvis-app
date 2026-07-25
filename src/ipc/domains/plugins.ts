@@ -1595,7 +1595,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         omittedBlocks: rendered.omittedBlocks,
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // Scrubbed and bounded, like the resource path below: this is a SERVER's error
+      // text going into an audit row, so it can carry host paths, a token the server
+      // echoed back, or enough length to bury the rows around it.
+      const message = scrubShortError(err instanceof Error ? err.message : String(err));
       auditPrompt("error", `[mcp-prompt:${serverId}] prompts/get '${name}' failed: ${message}`);
       return { ok: false, error: "prompt-failed" };
     }

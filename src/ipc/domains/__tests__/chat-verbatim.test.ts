@@ -11,6 +11,10 @@ import os from "node:os";
 import { mkdirSync, realpathSync } from "node:fs";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
+import {
+  MCP_RESOURCE_ATTACHMENTS_PER_TURN,
+  MCP_RESOURCE_FENCE_OPEN,
+} from "../../../shared/mcp-resource-bounds.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -1005,36 +1009,76 @@ rm -rf everything
     expect(loop.runTurn).not.toHaveBeenCalled();
   });
 
-  // The per-turn cap on resource attachments lives HERE, at the gate: the renderer
-  // decides what to offer, main decides what a turn carries. A mention is cheap to
-  // type and each attachment runs to the per-read bound, so without this a handful
-  // fills the window before the model reads a word of the user's own message.
-  it("caps resource attachments per turn without dropping other content", async () => {
+  // The per-turn bound on resource attachments. Three properties, and each of them
+  // was wrong in the first cut of this feature:
+  //   - it counts FENCES, not parts, so the answer does not depend on how the renderer
+  //     packaged them (twelve joined into one part used to count as one);
+  //   - it REFUSES rather than trimming, because a silently-dropped attachment leaves
+  //     the model answering from fewer documents than the user believes it read;
+  //   - it lives at the turn-entry chokepoint, so the replay paths and `sidechat send`
+  //     — neither of which passes through this gate — are covered by the same check.
+  const resourceFence = (i: number) =>
+    `${MCP_RESOURCE_FENCE_OPEN} server="s" uri="file:///f${i}">
+B${i}
+</mcp-resource>`;
+
+  it("allows a turn at the resource-attachment bound", async () => {
     const loop = makeConversationLoop("session-provenance", []);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
     await setupHandlers(loop);
 
-    const fence = (i: number) =>
-      `<mcp-resource trust="untrusted-server-data" server="s" uri="file:///f${i}">
-B${i}
-</mcp-resource>`;
     await invoke("lvis:chat:send", {
       input: "summarize these",
       inputOrigin: "user-keyboard",
       userActivation: true,
       attachments: [
-        ...Array.from({ length: 12 }, (_, i) => ({ type: "text", text: fence(i) })),
+        ...Array.from({ length: MCP_RESOURCE_ATTACHMENTS_PER_TURN }, (_, i) => ({
+          type: "text",
+          text: resourceFence(i),
+        })),
         { type: "text", text: "my own note" },
       ],
     });
 
     const options = loop.runTurn.mock.calls[0][3] as { attachments?: Array<{ text: string }> };
     const parts = options.attachments ?? [];
-    const fenced = parts.filter((part) => part.text.startsWith('<mcp-resource trust='));
-    expect(fenced).toHaveLength(8);
-    // The user's own text part is NOT collateral — the cap counts only what the host
-    // fenced itself.
+    expect(parts.filter((part) => part.text.startsWith(MCP_RESOURCE_FENCE_OPEN)))
+      .toHaveLength(MCP_RESOURCE_ATTACHMENTS_PER_TURN);
     expect(parts.some((part) => part.text === "my own note")).toBe(true);
+  });
+
+  it("refuses a turn over the bound instead of dropping the extras", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    const over = MCP_RESOURCE_ATTACHMENTS_PER_TURN + 1;
+    await expect(invoke("lvis:chat:send", {
+      input: "summarize these",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+      attachments: Array.from({ length: over }, (_, i) => ({
+        type: "text",
+        text: resourceFence(i),
+      })),
+    })).rejects.toThrow("too-many-resource-attachments");
+    expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
+  it("counts fences, not parts, so joining them into one part is not a bypass", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    await setupHandlers(loop);
+
+    // The natural composer implementation — splice every fence into the text the user
+    // typed — and the one the prefix test counted as a single attachment.
+    const joined = Array.from({ length: 12 }, (_, i) => resourceFence(i)).join("\n\n");
+    await expect(invoke("lvis:chat:send", {
+      input: `summarize these\n\n${joined}`,
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    })).rejects.toThrow("too-many-resource-attachments");
+    expect(loop.runTurn).not.toHaveBeenCalled();
   });
 
   it("rejects chat sends that omit explicit inputOrigin", async () => {

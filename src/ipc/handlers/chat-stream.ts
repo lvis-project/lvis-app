@@ -21,6 +21,10 @@ import type { ConversationLoop, TurnResult } from "../../engine/conversation-loo
 import type { UserContentPart } from "../../engine/llm/types.js";
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
 import {
+  countResourceAttachmentFences,
+  MCP_RESOURCE_ATTACHMENTS_PER_TURN,
+} from "../../shared/mcp-resource-bounds.js";
+import {
   createStreamingFilter,
   stripSuggestedReplies,
 } from "../../engine/suggested-replies.js";
@@ -109,6 +113,24 @@ export async function runStreamedTurn(
   // the turn's staged origin — the exact fail-open this table exists to remove.
   if (claimedKind && !envelope) {
     throw new Error(claimedKind.missingEnvelopeError);
+  }
+  // How much server-authored resource text one turn may carry, enforced HERE for the
+  // same reason the origin above is read from the text: this is the one place every
+  // turn passes through. The send gates cannot hold it — `chat send` and
+  // `sidechat send` parse their payloads separately, and the replay paths
+  // (edit-resend, continue-last-user, retry-effort) never reach either gate, which is
+  // exactly how the force-ask bypass happened before. Counting fences rather than
+  // parts makes the bound independent of how the renderer packaged them, and counting
+  // `input` too keeps it applying after `continue-last-user` folds the parts into the
+  // prompt body.
+  //
+  // Refused, not trimmed: dropping the extras silently would leave the model
+  // answering from 8 of the 10 documents the user believes it read, with nothing in
+  // the transcript or the audit log saying so.
+  if (
+    countResourceAttachmentFences(input, options.attachments) > MCP_RESOURCE_ATTACHMENTS_PER_TURN
+  ) {
+    throw new Error("too-many-resource-attachments");
   }
   const inputOrigin = envelope?.kind.inputOrigin ?? options.inputOrigin;
   const originSource = envelope?.source ?? null;

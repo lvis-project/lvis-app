@@ -22,8 +22,6 @@ import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
-import { isResourceAttachmentText } from "../../mcp/mcp-resource-attachment.js";
-import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../shared/mcp-resource-bounds.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -253,22 +251,12 @@ export function validateUserContentParts(
   if (raw === undefined || raw === null) return undefined;
   if (!Array.isArray(raw)) return undefined;
   const out: import("../../engine/llm/types.js").UserContentPart[] = [];
-  let resourceAttachments = 0;
   for (const item of raw) {
     if (typeof item !== "object" || item === null) continue;
     const t = (item as { type?: unknown }).type;
     if (t === "text") {
       const text = (item as { text?: unknown }).text;
       if (typeof text !== "string") continue;
-      // Resource attachments are capped PER TURN here, at the gate, rather than in the
-      // composer: the renderer decides what to offer, main decides what a turn carries.
-      // A mention is cheap to type and each attachment runs to the per-read bound, so
-      // without this a handful of them fills the window before the model reads a word
-      // of the user's own message. Recognized by the fence the host itself built.
-      if (isResourceAttachmentText(text)) {
-        if (resourceAttachments >= MCP_RESOURCE_ATTACHMENTS_PER_TURN) continue;
-        resourceAttachments += 1;
-      }
       out.push({ type: "text", text });
       continue;
     }

@@ -1294,6 +1294,7 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.emptyPrompt": "Dieser Prompt hat keinen ausführbaren Text zurückgegeben.",
   "formatIpcError.emptyResource": "Diese Ressource hat keinen anfügbaren Text zurückgegeben.",
   "formatIpcError.resourceFailed": "Der MCP-Server konnte diese Ressource nicht zurückgeben.",
+  "formatIpcError.tooManyResourceAttachments": "Zu viele angefügte Ressourcen in einer Nachricht. Entfernen Sie einige und senden Sie erneut.",
   "formatIpcError.promptFailed": "Der MCP-Server konnte diesen Prompt nicht zurückgeben.",
   "formatIpcError.missingPluginEnvelope": "Informationen zum Plugin-Umschlag fehlen.",
   "formatIpcError.missingTokens": "Token-Informationen fehlen.",
