@@ -67,6 +67,17 @@ export interface Tool {
    * concurrently. The default is strict ordered execution.
    */
   readonly parallelSafe?: boolean;
+  /**
+   * Declares that this BUILTIN surfaces MCP-server data, so the turn scope's
+   * `includeMcp` switch applies to it as it does to `source: "mcp"` tools.
+   *
+   * Builtins are otherwise always eager and never scope-filtered, which is right
+   * for host-owned capabilities — but a builtin that hands the model untrusted
+   * server content is an MCP surface wearing a builtin's badge. Headless loops
+   * (routines) deliberately run with no MCP tools; without this flag such a tool
+   * would route around that decision.
+   */
+  readonly requiresMcpScope?: boolean;
   readonly pluginId?: string;
   /** Exact immutable plugin generation that produced this registry entry. */
   readonly pluginGeneration?: PluginToolGenerationOwner;
@@ -237,6 +248,8 @@ export interface DynamicToolSpec {
   operationPolicy?: PluginToolOperationPolicy;
   /** MCP Apps app→server `tools/call` gate — see {@link Tool.appInvokable}. */
   appInvokable?: boolean;
+  /** MCP-scoped builtin bit — see {@link Tool.requiresMcpScope}. */
+  requiresMcpScope?: boolean;
   /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
   modelVisible?: boolean;
   pathFields?: readonly string[];
@@ -275,6 +288,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     mcpServerId: spec.mcpServerId,
     operationPolicy: spec.operationPolicy,
     appInvokable: spec.appInvokable,
+    ...(spec.requiresMcpScope ? { requiresMcpScope: true } : {}),
     modelVisible: spec.modelVisible,
     pathFields: spec.pathFields,
     version: spec.version ?? "1.0.0",
