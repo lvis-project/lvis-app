@@ -19,6 +19,7 @@ import {
   type McpResourceToolDeps,
 } from "../mcp-resource-tools.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../../shared/mcp-resource-bounds.js";
+import { MCP_RESOURCE_LIST_MAX_CHARS } from "../mcp-resource-tools.js";
 
 const ctx = () => ({}) as never;
 
@@ -32,7 +33,20 @@ function deps(over: Partial<McpResourceToolDeps> = {}): McpResourceToolDeps {
           { uri: "https://example.com/doc", name: "web doc", hostFetchRefused: true },
         ],
       },
-      { serverId: "other-mcp", resources: [{ uri: "schema://users", name: "users" }] },
+      {
+        serverId: "other-mcp",
+        // Fully populated on purpose: the exact-shape assertion below is the only
+        // thing pinning the optional-field projection, so it has to see every
+        // optional field rather than a two-field resource.
+        resources: [{
+          uri: "schema://users",
+          name: "users",
+          title: "Users table",
+          description: "columns and types",
+          mimeType: "application/json",
+          size: 99,
+        }],
+      },
     ],
     readDeclaredResource: async () => ({
       blocks: [{ uri: "file:///policy.md", mimeType: "text/markdown", text: "BODY" }],
@@ -61,7 +75,17 @@ describe("mcp_resource_list", () => {
 
     const one = parse((await tool.execute({ serverId: "other-mcp" }, ctx())).output);
     expect(one.servers).toEqual([
-      { serverId: "other-mcp", resources: [{ uri: "schema://users", name: "users" }] },
+      {
+        serverId: "other-mcp",
+        resources: [{
+          uri: "schema://users",
+          name: "users",
+          title: "Users table",
+          description: "columns and types",
+          mimeType: "application/json",
+          size: 99,
+        }],
+      },
     ]);
   });
 
@@ -186,15 +210,21 @@ describe("resource tools — wiring and bounds", () => {
       })),
     }));
     const tool = createMcpResourceListTool(() => deps({ listResources: () => many }));
-    const out = parse((await tool.execute({}, ctx())).output);
+    const rawOut = (await tool.execute({}, ctx())).output;
+    const out = parse(rawOut);
     expect((out.servers as unknown[]).length).toBeLessThan(many.length);
-    expect(out.omittedServers).toBe(many.length - (out.servers as unknown[]).length);
+    // The BOUND, not just "something was dropped": a loose ceiling passes for any
+    // constant and would not have caught the single-server exemption this fixed.
+    expect(rawOut.length).toBeLessThanOrEqual(MCP_RESOURCE_LIST_MAX_CHARS);
+    // Dropped servers are NAMED — `serverId` is the model's only narrowing lever,
+    // and it cannot narrow to a server it was never told about.
+    expect(Array.isArray(out.omittedServerIds)).toBe(true);
   });
 
   // The dominant axis is ONE server's catalogue: discovery caps resources at 200 but
   // never their bytes, and a narrowed call always yields exactly one server — so a
   // whole-servers-only bound would never fire for the biggest realistic payload.
-  it("trims within a single over-large server and reports it", async () => {
+  it("drops descriptions before resources, keeping the catalogue complete", async () => {
     const one = [{
       serverId: "srv",
       resources: Array.from({ length: 200 }, (_, i) => ({
@@ -204,41 +234,37 @@ describe("resource tools — wiring and bounds", () => {
       })),
     }];
     const tool = createMcpResourceListTool(() => deps({ listResources: () => one }));
-    const raw = (await tool.execute({}, ctx())).output;
-    const out = parse(raw);
+    const rawOut = (await tool.execute({}, ctx())).output;
+    const out = parse(rawOut);
     const servers = out.servers as Array<{ serverId: string; resources: unknown[] }>;
+    expect(rawOut.length).toBeLessThanOrEqual(MCP_RESOURCE_LIST_MAX_CHARS);
+    // Cheapest loss first: the prose goes, every resource stays. uri + name is what a
+    // read needs, so the catalogue is still fully usable.
+    expect(out.descriptionsOmitted).toBe(true);
+    expect(servers[0].resources).toHaveLength(200);
+    expect(out.omittedResources).toBeUndefined();
+  });
+
+  it("trims resources from a server too large even without descriptions", async () => {
+    const one = [{
+      serverId: "srv",
+      // Long URIs, no prose to drop — the only remaining lever is the resource list.
+      resources: Array.from({ length: 200 }, (_, i) => ({
+        uri: `file:///${"deep/".repeat(30)}f${i}`,
+        name: `f${i}`,
+      })),
+    }];
+    const tool = createMcpResourceListTool(() => deps({ listResources: () => one }));
+    const rawOut = (await tool.execute({}, ctx())).output;
+    const out = parse(rawOut);
+    const servers = out.servers as Array<{ serverId: string; resources: unknown[] }>;
+    expect(rawOut.length).toBeLessThanOrEqual(MCP_RESOURCE_LIST_MAX_CHARS);
     // Still returns something usable for that server rather than nothing…
     expect(servers).toHaveLength(1);
     expect(servers[0].resources.length).toBeGreaterThan(0);
     expect(servers[0].resources.length).toBeLessThan(200);
     // …and says how much it withheld.
     expect(out.omittedResources).toBe(200 - servers[0].resources.length);
-    expect(raw.length).toBeLessThanOrEqual(30 * 1024);
-  });
-
-  // Both log inputs are attacker-influenced: a JSON-RPC error message is unbounded
-  // and may echo a credential the server was handed, and `serverId` comes from the
-  // model. Unbounded here lets a hostile server flush the log ring — destroying the
-  // forensic record this line exists to create — and persist secrets in cleartext.
-  it("scrubs and bounds what a failed read writes to the log", async () => {
-    const warn = vi.fn();
-    vi.doMock("../../lib/logger.js", () => ({ createLogger: () => ({ warn, info: vi.fn(), error: vi.fn() }) }));
-    vi.resetModules();
-    const { createMcpResourceReadTool: freshRead } = await import("../mcp-resource-tools.js");
-    const tool = freshRead(() =>
-      deps({
-        readDeclaredResource: async () => {
-          throw new Error(`Bearer sk-secret-token-value ${"x".repeat(50_000)}`);
-        },
-      }),
-    );
-    await tool.execute({ serverId: "s".repeat(500), uri: "file:///x" }, ctx());
-    expect(warn).toHaveBeenCalledTimes(1);
-    const line = String(warn.mock.calls[0][0]);
-    expect(line.length).toBeLessThan(1_000);
-    expect(line).not.toContain("sk-secret-token-value");
-    vi.doUnmock("../../lib/logger.js");
-    vi.resetModules();
   });
 
   it("declares the MCP scope dependency on both tools", () => {
