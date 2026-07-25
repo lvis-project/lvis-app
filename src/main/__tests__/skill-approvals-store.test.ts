@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SkillApprovalsStore, hashSkillBody } from "../skill-approvals-store.js";
+import { SkillApprovalsStore, hashSkillMaterial } from "../skill-approvals-store.js";
 
 function tmpFile(): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-skill-approvals-"));
@@ -91,7 +91,7 @@ describe("SkillApprovalsStore — R2-CR-3 hash-binding", () => {
     expect(onDisk.version).toBe(2);
     expect(onDisk.approvedSkills).toHaveLength(1);
     expect(onDisk.approvedSkills[0].name).toBe("report-writing");
-    expect(onDisk.approvedSkills[0].sha256).toBe(hashSkillBody("hello body"));
+    expect(onDisk.approvedSkills[0].sha256).toBe(hashSkillMaterial("hello body"));
     expect(typeof onDisk.approvedSkills[0].approvedAt).toBe("string");
   });
 });
