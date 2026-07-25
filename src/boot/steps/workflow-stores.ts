@@ -19,6 +19,7 @@ import type { SubAgentRunner } from "../../engine/subagent-runner.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import type { SkillLoadEvent } from "../../tools/skill-load.js";
 import type { AgentSendRuntime } from "../../tools/agent-send.js";
+import type { McpResourceToolDeps } from "../../tools/mcp-resource-tools.js";
 import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
@@ -110,19 +111,21 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
       return lifecycle.acquire(owner.pluginId);
     },
     networkFetch,
-    // Resolved lazily: `ctx.mcpManager` is assigned by the MCP boot step, which
-    // runs after this one. Returning undefined until then is what keeps the tools
-    // honest rather than half-wired.
+    // Resolved lazily: `ctx.mcpManager` is assigned by the MCP boot step, which runs
+    // AFTER this one. Between the two, this returns undefined and the tools say so
+    // rather than reporting a generic failure — the tools are registered either way,
+    // because registration happens once and the window is short.
     getMcpResourceAccess: () => {
       const manager = ctx.mcpManager;
       if (!manager) return undefined;
-      return {
+      const access: McpResourceToolDeps = {
         listResources: () => manager
           .listServers()
           .filter((server) => (server.resources?.length ?? 0) > 0)
           .map((server) => ({ serverId: server.id, resources: server.resources ?? [] })),
         readResource: (serverId, uri) => manager.readDeclaredResource(serverId, uri),
       };
+      return access;
     },
   };
 

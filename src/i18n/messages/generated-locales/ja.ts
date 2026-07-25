@@ -498,6 +498,7 @@ export const jaMessages: Record<string, string> = {
   "be_mcpResourceTools.serverIdDescription": "接続済み MCP サーバーの id。mcp_resource_list が報告した値をそのまま使ってください。",
   "be_mcpResourceTools.uriDescription": "リソースの URI。mcp_resource_list に出たものをそのまま使ってください。一覧にない URI は拒否されます。",
   "be_mcpResourceTools.invalidRequest": "serverId と uri はどちらも必須で、uri はホストの長さ上限内である必要があります。",
+  "be_mcpResourceTools.notReady": "MCP リソースへのアクセスはまだ準備できていません。サーバー接続の起動中です。少し後で再試行してください。",
   "be_mcpResourceTools.readFailed": "リソースを読み取れませんでした。そのサーバーが宣言していない、ホストが取得しないスキームである、あるいはサーバー側が失敗した可能性があります。",
   "be_mcpManager.apiKeyControlChars": "APIキーには制御文字(CR/LF等)が含まれています。",
   "be_mcpManager.apiKeyEmpty": "API キーが空です。",

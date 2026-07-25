@@ -282,20 +282,17 @@ export function registerBuiltinTools(
 
   // MCP resources — the MODEL's path to server-declared documents/schemas. The
   // user's path (a composer mention) is a separate surface; reference hosts expose
-  // both. Registered only when resource access is wired, so a host build without
-  // the MCP manager does not advertise tools that cannot work.
+  // both.
+  //
+  // The resolver is passed through, not called: `ctx.mcpManager` is assigned by a
+  // LATER boot step, so anything captured here would be the registration-time
+  // `undefined` forever. Callers that supply no resolver at all (the minimal test
+  // registry) get no tools; production always supplies one, and the tools report
+  // "not ready" themselves during the window before MCP setup runs.
   const mcpResourceAccess = workflowDeps?.getMcpResourceAccess;
   if (mcpResourceAccess) {
-    const access: McpResourceToolDeps = {
-      listResources: () => mcpResourceAccess()?.listResources() ?? [],
-      readResource: async (serverId, uri) => {
-        const live = mcpResourceAccess();
-        if (!live) throw new Error("mcp resource access is not ready");
-        return live.readResource(serverId, uri);
-      },
-    };
-    builtins.push(createMcpResourceListTool(access));
-    builtins.push(createMcpResourceReadTool(access));
+    builtins.push(createMcpResourceListTool(mcpResourceAccess));
+    builtins.push(createMcpResourceReadTool(mcpResourceAccess));
   }
 
   toolRegistry.registerBatch(builtins);

@@ -2040,6 +2040,21 @@ describe("MCP resources discovery and read", () => {
     await client.disconnect();
   });
 
+  // A catalogue that outlives its connection is worse than an empty one: the model
+  // keeps being offered URIs whose read can only fail, and the failure surfaces far
+  // from the cause. Both teardown paths clear it.
+  it("stops advertising resources once the server is gone", async () => {
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      resourcePages: [{ resources: [{ uri: "file:///doc", name: "doc" }] }],
+    });
+    await client.connect();
+    expect(client.getState().resources).toHaveLength(1);
+    await client.disconnect();
+    expect(client.getState().resources).toBeUndefined();
+  });
+
   it("bounds the page walk and the catalogue", async () => {
     const page = {
       resources: Array.from({ length: 300 }, (_, i) => ({

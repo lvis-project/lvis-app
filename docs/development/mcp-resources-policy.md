@@ -130,8 +130,17 @@ gating, audit. Exposed to the renderer through the existing `mcp:servers` state 
 the picker work has data to build on.
 
 Stage 2 — the model path: `mcp_resource_list` / `mcp_resource_read` builtin tools,
-categorized `read` (never `write`), subject to the ordinary permission gate, with
-their output fenced as untrusted.
+categorized `read` (never `write`), subject to the ordinary permission gate. Their
+output is a `tool_result`, NOT a fenced block: that is the channel every tool
+result already uses, the model reads it as data it fetched rather than as context
+the host injected, and adding a second framing for one tool would make the fence
+mean less everywhere else. The fence belongs to stage 3, where resource text is
+attached to a USER turn and therefore does enter the prompt as context.
+
+Because these builtins hand the model untrusted server content, they declare
+`requiresMcpScope`, so the turn scope's `includeMcp` switch applies to them as it
+does to MCP tools. Without it a builtin badge would be a way around the decision
+that headless (routine) loops run with no MCP surface.
 
 Stage 3 — the user path: composer mention (`@server:uri`) resolving through the
 same read, attached to the turn as a fenced untrusted block, plus templates.

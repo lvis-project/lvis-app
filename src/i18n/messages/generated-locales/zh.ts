@@ -498,6 +498,7 @@ export const zhMessages: Record<string, string> = {
   "be_mcpResourceTools.serverIdDescription": "已连接 MCP 服务器的 id，与 mcp_resource_list 报告的完全一致。",
   "be_mcpResourceTools.uriDescription": "资源 URI，与 mcp_resource_list 列出的完全一致。未列出的 URI 会被拒绝。",
   "be_mcpResourceTools.invalidRequest": "serverId 与 uri 均为必填，且 uri 必须在宿主的长度上限内。",
+  "be_mcpResourceTools.notReady": "MCP 资源访问尚未就绪，服务器连接仍在启动。请稍后重试。",
   "be_mcpResourceTools.readFailed": "无法读取该资源。可能是该服务器未声明它、其协议是宿主不抓取的，或者服务器出错。",
   "be_mcpManager.apiKeyControlChars": "API 密钥包含控制字符（CR/LF 等）。",
   "be_mcpManager.apiKeyEmpty": "API 密钥为空。",
