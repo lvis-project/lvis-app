@@ -350,7 +350,7 @@ check("the gate's program is not incremental", effectiveIncremental("tsconfig.te
 
 // ── `readBaselineFilesOrEmpty`: ONLY a missing file may be tolerated.
 //
-// These four cases were written once, verified, and then DELETED by a later splice of mine
+// These cases were written once, verified, and then DELETED by a later splice of mine
 // that replaced everything between two anchors — after which I reported them as landed. A
 // critic reviewer caught it: the symbol appeared only in the import list, 35 `check()` calls
 // referenced none of it, and three mutations survived, including the one that re-opens the
@@ -383,6 +383,26 @@ check(
     try { readBaselineFilesOrEmpty(scratch); return false; } catch { return true; }
   })(),
 );
+const invalidBaselines = [
+  ["a non-object baseline", []],
+  ["a baseline with a stale schema", { schemaVersion: 0, files: {} }],
+  ["a baseline missing files", { schemaVersion: 1 }],
+  ["a baseline with null files", { schemaVersion: 1, files: null }],
+  ["a baseline with array files", { schemaVersion: 1, files: [] }],
+  ["a baseline with a negative count", { schemaVersion: 1, files: { "a.test.ts": -1 } }],
+  ["a baseline with a fractional count", { schemaVersion: 1, files: { "a.test.ts": 1.5 } }],
+  ["a baseline with a string count", { schemaVersion: 1, files: { "a.test.ts": "1" } }],
+];
+for (const [name, payload] of invalidBaselines) {
+  const invalidPath = join(scratch, `${name.replaceAll(" ", "-")}.json`);
+  writeFileSync(invalidPath, JSON.stringify(payload), "utf8");
+  check(
+    `${name} throws rather than reading as empty`,
+    (() => {
+      try { readBaselineFilesOrEmpty(invalidPath); return false; } catch { return true; }
+    })(),
+  );
+}
 
 if (failures.length > 0) {
   process.stderr.write(
