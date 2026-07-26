@@ -45,8 +45,18 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (existsSync(testHome)) rmSync(testHome, { recursive: true, force: true });
+  // Un-mock BEFORE removing, not after. `AuditLogger`'s constructor `mkdirSync`s its
+  // audit dir, and while `homedir()` still points at `testHome` any construction racing
+  // this teardown re-creates the tree underneath it — which surfaces as ENOTEMPTY from
+  // `rmSync`, in whichever test runs next. Restoring first means a late construction
+  // targets the real home instead of the directory being deleted.
   vi.restoreAllMocks();
+  // `maxRetries` is MITIGATION, not the fix, and is here only because this file cannot
+  // await what it does not own: the loggers are constructed inside individual tests.
+  // Where the writer IS ours, await it — see `__drainPersistentWritesForTest`.
+  if (existsSync(testHome)) {
+    rmSync(testHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
 });
 
 describe("AuditLogger.search()", () => {
