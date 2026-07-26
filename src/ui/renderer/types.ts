@@ -1702,7 +1702,10 @@ export type LvisMcpApi = {
    * Reads a DECLARED resource and returns the fenced block to attach to the user's own
    * turn. The host builds the fence; the renderer attaches it verbatim.
    */
-  attachResource: (
+  // OPTIONAL for the same reason `listResourceTemplates` is: the picker guards each
+  // channel per row KIND, and a required type makes that guard unreachable — dead code
+  // by the type, on a surface tests and detached windows really do build partially.
+  attachResource?: (
     serverId: string,
     uri: string,
   ) => Promise<
@@ -1744,7 +1747,7 @@ export type LvisMcpApi = {
    * on the listed set inside the client, which a template expansion was never in. (See
    * the handler in `ipc/domains/plugins.ts` for why this is stated so narrowly.)
    */
-  attachResourceTemplate: (
+  attachResourceTemplate?: (
     serverId: string,
     uriTemplate: string,
     values: Record<string, string>,
