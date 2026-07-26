@@ -131,13 +131,23 @@ export function resourceTemplateVariables(uriTemplate: string): string[] {
  * one: `file:///project/.{x}` with `x="."` is a dot segment neither half contains. Query
  * and fragment are dropped first — a `..` after `?` is not a path segment, and the only
  * way one gets there is from a literal the server itself wrote.
+ *
+ * `%2e` is decoded before comparing, because WHATWG's definition of a double-dot segment
+ * is `..`, `.%2e`, `%2e.` or `%2e%2e`, ASCII case-insensitive — all four resolve, and a
+ * literal-only comparison sees none of them. A VALUE cannot produce these on its own
+ * (`encodeURIComponent` emits `.` as `.`, never as `%2e`, and turns a typed `%` into
+ * `%25`), so reaching them needs a server literal `%` next to the variable — the same
+ * literal-plus-value composition this function already exists to catch, one encoding down.
  */
 function hasDotSegment(uri: string): boolean {
   const scheme = uri.indexOf(":");
   const afterScheme = scheme === -1 ? uri : uri.slice(scheme + 1);
   const pathEnd = afterScheme.search(/[?#]/);
   const path = pathEnd === -1 ? afterScheme : afterScheme.slice(0, pathEnd);
-  return path.split("/").some((segment) => segment === "." || segment === "..");
+  return path.split("/").some((raw) => {
+    const segment = raw.replace(/%2e/gi, ".");
+    return segment === "." || segment === "..";
+  });
 }
 
 /**

@@ -190,6 +190,25 @@ describe("expandResourceUriTemplate", () => {
     // compose one either — neither half is a dot segment on its own.
     expect(expandResourceUriTemplate("file:///project/.{x}/y", values({ x: "." }))).toBeNull();
 
+    // WHATWG counts `.%2e`, `%2e.` and `%2e%2e` as double-dot segments too, case-
+    // insensitively, and all of them resolve. A value cannot produce one alone — a typed
+    // `%` becomes `%25` — so each needs a server LITERAL `%` beside the variable, which
+    // is the same literal-plus-value composition as the case above, one encoding down.
+    expect(expandResourceUriTemplate("file:///project/%{x}/id_rsa", values({ x: "2e." })))
+      .toBeNull();
+    expect(expandResourceUriTemplate("file:///project/%{x}/id_rsa", values({ x: "2E." })))
+      .toBeNull();
+    expect(expandResourceUriTemplate("file:///project/.%2{x}/id_rsa", values({ x: "e" })))
+      .toBeNull();
+    // …including when the whole segment is a server literal, which the discovery-time
+    // check below also refuses — belt and braces on different sides of the same rule.
+    expect(expandResourceUriTemplate("file:///project/%2e%2e/{name}", values({ name: "x" })))
+      .toBeNull();
+    // A SINGLE `%2e` is a plain `.` segment, which resolves to nothing at all — refused
+    // with the bare `.` case for the same reason, not treated as traversal.
+    expect(expandResourceUriTemplate("file:///project/%2{x}/id_rsa", values({ x: "e" })))
+      .toBeNull();
+
     // …and a name that merely CONTAINS dots is still perfectly ordinary.
     expect(expandResourceUriTemplate("file:///project/{path}", values({ path: "..hidden" })))
       .toBe("file:///project/..hidden");
