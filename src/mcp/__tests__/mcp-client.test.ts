@@ -1578,10 +1578,20 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     //
     // Net effect before the fix: a compromised renderer could read ANY URI from ANY
     // connected external server.
+    // The fixture server holds `resources`, deliberately. `rcHttpClient` approves only
+    // `tools`, and on such a server governance already denied `file:`/`https:`/`doc:`
+    // for lacking the capability — so a tools-only fixture would have "passed" against
+    // the pre-fix code for a reason that has nothing to do with this gate. The
+    // exploitable class was a server approved for `resources`, which is most of them.
     let reads = 0;
-    const { client } = rcHttpClient("apps-scheme", (method, id) => {
+    const url = "https://api.example.com/apps-scheme/mcp";
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      const method = readRpcMethod(init);
+      const id = readRpcId(init) ?? 0;
       if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
       if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "resources/list") return jsonRpcResponse(id, { resources: [] });
       if (method === "resources/read") {
         reads += 1;
         return jsonRpcResponse(id, {
@@ -1589,7 +1599,14 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
         });
       }
       return new Response("unexpected", { status: 500 });
-    });
+    }));
+    const client = new McpClient(
+      { id: "apps-scheme", transport: "http", url },
+      governanceWithPolicy(buildPolicy([httpApproval("apps-scheme", url, {
+        allowedCapabilities: ["tools", "resources"] as McpGovernancePolicy["servers"][number]["allowedCapabilities"],
+      })])),
+      new ToolRegistry(),
+    );
     await client.connect();
 
     for (const uri of [
@@ -1602,7 +1619,8 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     ]) {
       await expect(client.readResource(uri), uri).rejects.toThrow(/ui:\/\/ resources only/);
     }
-    // Not one request left the host for any of them.
+    // Not one request left the host for any of them — and on THIS server governance
+    // would have let every one of them through.
     expect(reads).toBe(0);
 
     // …and the path it exists to serve still works.

@@ -121,6 +121,27 @@ const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
 const URI_EXCLUDED_CHARS_RE = /[\s"<>\\^`{}|]/;
 
 /**
+ * Every character rule a URI-shaped identifier must pass, as ONE function.
+ *
+ * Extracted because a second identifier kind needed the same rule and got a
+ * hand-enumerated copy instead: `isMcpAppUiUri` originally listed its own ranges and
+ * leaked ten of eleven sampled members — including U+061C, a bidi control its own comment
+ * claimed to cover. Two reviewers found it independently. That is the third time in this
+ * module's history that spelling this class by hand has leaked (see the note in
+ * `display-safe-text.ts`), so the composition now lives here and callers ask for it.
+ *
+ * The pairing is load-bearing and is why `hasInvisibleOrReorderingChars` alone is not
+ * enough: it deliberately excludes TAB/LF/CR/space, because prose may legitimately
+ * contain them. An identifier may not, so the control and excluded-character checks stay
+ * beside it.
+ */
+export function hasUnsafeUriChars(value: string): boolean {
+  return CONTROL_CHARS_RE.test(value)
+    || URI_EXCLUDED_CHARS_RE.test(value)
+    || hasInvisibleOrReorderingChars(value);
+}
+
+/**
  * URI schemes the host will carry as an OPAQUE identifier.
  *
  * The host never resolves any of these itself — it hands the string back to the
@@ -165,20 +186,13 @@ const RESERVED_SCHEMES = Object.freeze([
 export function isUsableResourceUri(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
-  if (CONTROL_CHARS_RE.test(value)) return false;
-  if (URI_EXCLUDED_CHARS_RE.test(value)) return false;
-  // Invisible and reordering characters, refused because this value is an IDENTIFIER:
-  // `annual-<RLO>gnp.exe` renders as `annual-exe.png`, and a zero-width space makes two
-  // different resources render identically. ONE definition, shared with
-  // `displaySafeLabel` — the two consumers differ in what they DO with a match (an
-  // identifier is refused, prose is normalized for display), not in what they recognize.
-  // The first cut enumerated ranges here and leaked 14 of 17 sampled members.
-  //
-  // Refusing costs a legitimate server nothing: RFC 3986 is US-ASCII, so the
-  // percent-encoded form round-trips byte-for-byte AND renders inertly. It is NOT the
-  // whole non-ASCII range — CJK and Hangul paths still catalogue — but it does refuse an
-  // emoji carrying a variation selector, which is the accepted cost of one class.
-  if (hasInvisibleOrReorderingChars(value)) return false;
+  // Every character rule, through the one function that spells them — see
+  // `hasUnsafeUriChars`. Refusing costs a legitimate server nothing: RFC 3986 is
+  // US-ASCII, so the percent-encoded form round-trips byte-for-byte AND renders
+  // inertly. It is NOT the whole non-ASCII range — CJK and Hangul paths still
+  // catalogue — but it does refuse an emoji carrying a variation selector, which is
+  // the accepted cost of one class.
+  if (hasUnsafeUriChars(value)) return false;
   const lowered = value.toLowerCase();
   if (RESERVED_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return false;
   if (ALLOWED_URI_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return true;

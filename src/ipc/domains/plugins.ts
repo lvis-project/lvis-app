@@ -1811,9 +1811,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           // NOT "no channel accepts a URI" — `attachResource` does. And note the careful
           // word CORE: `CHANNELS.mcp.uiResource` also routes a renderer URI to a
           // `resources/read`, but on the MCP-Apps path, which carries no listed-set check
-          // and never did. That path is now restricted by SCHEME instead — main refuses
-          // anything but `ui://` (`isMcpAppUiUri`, enforced in `McpClient.readResource`) —
-          // so it cannot be used to replay an expansion either.
+          // and never did. That path is now restricted by SCHEME — main refuses anything
+          // but `ui://` (`isMcpAppUiUri`, enforced in `McpClient.readResource`).
+          //
+          // Which does NOT mean an expansion can never be replayed through it: a server
+          // may declare the template `ui://cards/{id}`, and the expansion of that IS in
+          // the `ui://` namespace. The echo still grants nothing, for the reason that
+          // survives the case — the renderer received the attachment TEXT in this same
+          // response, and can name any `ui://` URI on this server with or without it.
           //
           // Said this way because an earlier version argued the echo was safe on the
           // grounds that a renderer calling `uiResource` "already has strictly more reach

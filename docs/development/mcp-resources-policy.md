@@ -383,7 +383,9 @@ on the TEMPLATE rather than on the URI it produces.
   exemption is the MCP-Apps read: a `ui://` URI does not require `resources`, because
   a tools-only server may legitimately publish a card (§0). That exemption is keyed on
   the URI namespace, which is all governance can see — it is handed a method, not a
-  caller — and it is bounded by the scheme gate in `McpClient.readResource`.
+  caller — and it is bounded PER CALLER: by the scheme gate on the Apps path
+  (`McpClient.readResource`), and by the listed-set / listed-template gates on the
+  declared paths, which is where a `ui://` URI would have to have come from.
 - `readDeclaredResource` accepts only a URI the host listed, and
   `readDeclaredResourceTemplate` only a TEMPLATE the host listed, expanding it itself;
   the URI is an opaque identifier the host never resolves. `readResource`, the MCP-Apps

@@ -1274,6 +1274,20 @@ export class WindowManager {
         return UNAUTHORIZED_FRAME;
       }
       const payload = (arg as { payload?: unknown } | undefined)?.payload as McpUiPayload | undefined;
+      // Scheme-only, and deliberately NOT `isMcpAppUiUri` — which sits one import away and
+      // is stricter. Detach must not be stricter than the read it guards, and the read has
+      // TWO arms with different rules: the external one enforces that predicate, but the
+      // plugin/loopback one goes through `plugin-ui-resource-provider`, whose gate is
+      // declared-set membership plus the manifest pattern — which admits characters the
+      // predicate refuses. Tightening here alone would open a window for an external card
+      // it then serves, while refusing a plugin card that still renders inline.
+      //
+      // Nothing here resolves or interpolates the URI: it is stored under a host-minted
+      // viewKey and handed to the detached renderer, which reads through the same gated
+      // IPC. The worst this admits is an empty window whose card then fails its read.
+      // Switching to `MCP_APP_UI_SCHEME` was considered and rejected — importing the
+      // shared constant while applying a weaker rule than the predicate beside it reads
+      // as adoption of the SoT and would mislead more than the bare literal does.
       if (
         !payload ||
         typeof payload.serverId !== "string" ||
