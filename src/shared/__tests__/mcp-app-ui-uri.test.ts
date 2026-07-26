@@ -13,7 +13,7 @@
  * tools-only server. The tests below hold both edges, not just the refusals.
  */
 import { describe, expect, it } from "vitest";
-import { isMcpAppUiUri, MCP_APP_UI_SCHEME } from "../mcp-app-partition.js";
+import { isMcpAppUiUri } from "../mcp-app-partition.js";
 
 describe("isMcpAppUiUri", () => {
   it("accepts the card URIs MCP Apps actually publishes", () => {
@@ -59,9 +59,16 @@ describe("isMcpAppUiUri", () => {
     // `ui://` names nothing and `ui:///x` has an empty authority — the plugin arm's own
     // authority parse already refuses both, so accepting them here would exempt a URI
     // that cannot be served.
-    expect(isMcpAppUiUri(MCP_APP_UI_SCHEME)).toBe(false);
+    expect(isMcpAppUiUri("ui://")).toBe(false);
     expect(isMcpAppUiUri("ui:///panel.html")).toBe(false);
     expect(isMcpAppUiUri("ui:////panel.html")).toBe(false);
+    // `?` and `#` give an empty hostname just as `/` does — verified against `new URL()`.
+    // Missing these was the gap: the predicate claimed to require an authority and did
+    // not, so it would have exempted a URI no arm could serve.
+    expect(isMcpAppUiUri("ui://?q=1")).toBe(false);
+    expect(isMcpAppUiUri("ui://#frag")).toBe(false);
+    // …and a real authority carrying a query or fragment is still fine.
+    expect(isMcpAppUiUri("ui://app/panel.html?q=1#top")).toBe(true);
   });
 
   it("refuses a scheme that only starts like the Apps one", () => {
