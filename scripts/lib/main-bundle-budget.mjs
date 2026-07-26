@@ -2,10 +2,22 @@ import { isAbsolute, normalize, posix, relative } from "node:path";
 
 const LEGACY_SINGLE_MAIN_BUNDLE_BYTES = 10_828_547;
 
+/**
+ * A growth ratchet, not a target. `entryBytes` and `initialBytes` are the ones that cost
+ * the user startup time; `totalBytes` bounds how much the main process can grow overall.
+ *
+ * Last measured on `main`: entry 1_464_068, initial 5_049_267, total 10_984_203 — i.e.
+ * `totalBytes` had 15_797 bytes of headroom, which the MCP resource-template work then
+ * spent (+20_980 total, of which only +8_474 is initial). Raised once here rather than
+ * trimming, because the growth is functionality reaching main, not weight: the startup
+ * numbers still sit ~200 KB and ~240 KB under their own ceilings. Record the new
+ * measurement here whenever this line moves, so the next bump argues against a number
+ * instead of against a feeling.
+ */
 export const MAIN_BUNDLE_BUDGETS = Object.freeze({
   entryBytes: 1_700_000,
   initialBytes: 5_250_000,
-  totalBytes: 11_000_000,
+  totalBytes: 11_050_000,
 });
 
 function normalizedPath(path) {

@@ -107,15 +107,46 @@ At connect, after `tools/list` and `prompts/list`:
   strings (`name`, `title`) are prose and take the opposite treatment: every codepoint
   is legitimate in them, so they are normalized at the render site instead.
 
-`resources/templates/list` is **not discovered yet** — it appears only in the
-governance capability map. A template is a URI pattern the user must fill, which is
-the argument-form problem the prompt dialog already solved, so it lands with the
-mention UI in stage 3b rather than with the plumbing. Discovering it earlier would
-have meant carrying a catalogue nothing could render, under a URI rule that rejects
-the very braces a template is made of.
+`resources/templates/list` is discovered under the SAME two keys and the same
+`resources` capability — a separate capability would ask the user a question they have
+already answered. It landed with the mention UI rather than with the plumbing, because
+a template is a URI pattern the user must fill and a catalogue nothing can render is
+just a liability.
 
-`notifications/resources/list_changed` re-runs discovery, debounced, and only for a
-server that declared `listChanged`.
+Templates get their own predicate (`shared/mcp-resource-template-bounds.ts`), and it is
+**RFC 6570 Level 1 only** — `{var}`, no operators, no modifiers, no explode. That is not
+a shortcut around the spec; it is the property the read path rests on:
+
+  - Level 1 expansion percent-encodes everything outside the unreserved set, so a user
+    typing `../../etc/passwd` produces one segment, not a traversal. `{+var}` is defined
+    as RESERVED expansion, which does NOT encode `/` — accepting it would hand the server
+    exactly that traversal, chosen by whoever is typing.
+  - a value can never introduce URI STRUCTURE: `/`, `?`, `#`, `:` and `@` all encode, so
+    what the user types stays inside the component the server put the variable in.
+
+A server publishing an operator is refused at discovery and appears nowhere, which is the
+fail-closed direction: an un-offered template costs a feature, an un-encoded one costs a
+read outside what the server meant to publish. The predicate is written by REMOVING every
+well-formed expression and validating the literal skeleton with `isUsableResourceUri`, so
+the two rules cannot drift — a template cannot smuggle in a scheme or an invisible
+character that a plain URI could not.
+
+What Level 1 does **not** buy is a fixed scheme, and an earlier version of this section
+said otherwise. A server may publish `{scheme}://host/{path}`: its skeleton `x://host/x`
+is a legal server-custom scheme, so it catalogues, and the user picks the scheme —
+percent-encoding is no help, because `javascript` and `ui` are already unreserved. Two
+things hold instead, and both run on the EXPANSION rather than on the pattern: the
+ordinary URI predicate re-validates the finished string, which is where a reserved scheme
+dies, and the client re-derives the `https:` refusal from it. That is also why the
+discovery-time `hostFetchRefused` flag on a template is display-only — it answers the
+literal-scheme case for the picker, and the read never consults it.
+
+`notifications/resources/list_changed` is **not handled** — no listener exists for it in
+`src`, for resources or for templates. An earlier version of this line described a
+debounced re-discovery as if it were implemented; it never was. Until it is, a catalogue
+is what the server declared at connect, and a server that adds a resource mid-session
+does not appear until the next connection. Corrected rather than deleted, because "we
+consume the notification" is the kind of claim someone plans against.
 
 ## 4. Reading
 
@@ -124,10 +155,19 @@ server that declared `listChanged`.
 - **text only.** A `blob` becomes an explicit placeholder naming its mimeType and
   byte count, never silently dropped and never decoded into the turn — same rule
   the prompt renderer follows for image/audio blocks.
-- the read is gated on the URI having been **listed** (or matching a listed
-  template, once templates land). A URI the host never saw is refused before the
-  request, so a model cannot use `resources/read` as a general fetch primitive
-  against the server's URI space.
+- the read is gated on the URI having been **listed**. A URI the host never saw is
+  refused before the request, so a model cannot use `resources/read` as a general fetch
+  primitive against the server's URI space.
+- a TEMPLATE read is gated on the **template**, exact-matched against what the client
+  listed, and the host produces the URI itself. This is deliberately not "expand in the
+  renderer, then check the URI against a pattern": that check needs a matcher, and a
+  matcher for `file:///{path}` accepts `file:///../../etc/passwd`. Exact-matching the
+  pattern and expanding host-side is the version that cannot be got wrong. The `https:`
+  refusal is re-derived from the EXPANSION rather than inherited from the template,
+  because a template's literal scheme is not necessarily its expansion's.
+- a missing or blank value is a refusal, not an empty substitution: expanding `{path}` to
+  nothing points at the directory above — a different resource than the user asked for,
+  and one they cannot see they asked for.
 - `https:` resources are NOT fetched by the host. The spec says servers should use
   that scheme only when the client can fetch it directly; LVIS does not, because
   host-side fetching of a server-chosen URL is an SSRF primitive. Such a resource
@@ -145,6 +185,8 @@ Mirrors the prompt bounds, and shares the module where the numbers overlap:
 | attachments per turn | 8 | keeps a mention storm from filling the window |
 | URI length | 2048 | audit rows and labels interpolate it |
 | name / title / description | 128 / 128 / 512 | host chrome renders them |
+| template variables | 8 | a form a person fills, not a payload |
+| template value length | 512 | bounded before it becomes part of a URI |
 
 Every one of these is enforced in main, and the UI uses the same constants from a
 shared module so a field the user can fill is never one main drops.
@@ -174,6 +216,14 @@ Because these builtins hand the model untrusted server content, they declare
 does to MCP tools. Without it a builtin badge would be a way around the decision
 that headless (routine) loops run with no MCP surface.
 
+**Templates are deliberately NOT on the model path.** The expansion would still be
+host-side and still percent-encoded, so this is not a containment gap — it is a reach
+decision. A listed resource is a finite set the server chose to publish; a template is a
+FAMILY, and handing the model one turns "read what this server published" into "read
+anything matching this shape", with the model choosing the values. That is a wider reach
+than stage 2 was argued for, and it should be argued for on its own rather than arriving
+as a side effect of the picker work. Recorded here as a non-goal, not an omission.
+
 Stage 3 — the user path, split at the process boundary the way stages 1 and 2 were:
 
   - **3a (landed):** `lvis:mcp:attach-resource` reads a declared resource and
@@ -186,7 +236,23 @@ Stage 3 — the user path, split at the process boundary the way stages 1 and 2 
     tools today); the attach path deliberately does not use it, so the listed-URI
     check stays in one place inside the client instead of being copied into the
     handler.
-  - **3b:** the composer mention (`@server:uri`) with autocomplete, and templates.
+  - **3b (landed):** the composer `@` mention with autocomplete, and templates. The
+    picker offers both kinds of row from one catalogue (`lvis:mcp:list-resources` and
+    `lvis:mcp:list-resource-templates`, fetched together — two effects would each set the
+    catalogue and the later one would erase the other's rows). A resource row attaches; a
+    TEMPLATE row opens a host dialog, because a template is an offer rather than an
+    identifier. The dialog collects values only; it never composes a URI.
+    `lvis:mcp:attach-resource-template` takes the template plus the values, and main
+    expands, reads, and fences — keyed on the URI IT produced, which it hands back for the
+    chip's label. That echo grants nothing: `attach-resource` is the only channel routing a
+    renderer-supplied URI into the **core-capability** read, and that read is gated on the
+    listed set, which an expansion was never in. Stated that narrowly on purpose — "no
+    channel accepts a URI" is false (`attach-resource` does) and so is "no channel accepts
+    an unlisted URI" (`mcp:ui-resource` does, on its external arm; see §7).
+    Values cross the boundary as a plain object and become a `Map` immediately,
+    so a variable named `__proto__` or `toString` is an ordinary key rather than an
+    inherited slot. Both attach channels share the user-initiated rate bucket with
+    `prompts/get`: one server, one budget for round-trips the user asked for.
 
 The per-turn cap lives at the turn-entry chokepoint (`runStreamedTurn`) because
 `chat send` and `sidechat send` parse their payloads separately, so a bound in one
@@ -279,12 +345,39 @@ DLP surface, not to the composer PR that made it reachable.
 - **Host-side `https:` fetching.** Per §4, SSRF.
 - **Resource-derived tool provenance.** Per §2, the turn stays the user's.
 
+### Known gap, out of scope here: `mcp:ui-resource`
+
+Found while reviewing the template work, pre-existing and **not introduced or widened by
+it**, recorded so the invariants below are not read as covering more than they do.
+
+`CHANNELS.mcp.uiResource` takes a renderer-supplied `serverId` + `uri`. On the LOOPBACK
+arm it is properly gated — `plugin-ui-resource-provider.ts` refuses anything that is not a
+declared `ui:` URI. On the EXTERNAL arm it reaches `client.readResource(uri)` and issues
+`resources/read` with **no scheme check and no listed-set check in main**; the `ui://`
+restriction lives only in the renderer (`mcp-app-bridge/handlers/on-read-resource.ts`),
+which is the side the threat model assumes can be compromised. Governance permits it: the
+`ui://` short-circuit aside, it falls through to requiring `resources`, which any
+resource-publishing server has.
+
+Consequence: a compromised renderer can already read any URI from any connected external
+server. That is strictly more reach than replaying a template expansion, which is why the
+templates work does not change this posture — but it does mean the listed-set gate is a
+property of `readDeclaredResource`, not of the host as a whole. Fixing it belongs with the
+MCP-Apps path, not here.
+
 ## Security invariants
 
 - No `resources/*` request leaves the host unless the capability was advertised at
   discovery AND approved by governance; unclassified methods fail closed.
-- `resources/read` accepts only a URI the host listed; the URI is an opaque
-  identifier the host never resolves.
+- `readDeclaredResource` accepts only a URI the host listed, and
+  `readDeclaredResourceTemplate` only a TEMPLATE the host listed, expanding it itself;
+  the URI is an opaque identifier the host never resolves. This is a property of those
+  two methods — `readResource`, the MCP-Apps path, does not share it (see §7).
+- Nothing a user types into a template can move the read off the component the server put
+  the variable in: values are percent-encoded, so they cannot span components, and cannot
+  BE a dot segment either — `.` is unreserved, so that one needs its own refusal. The
+  expansion is then re-validated with the ordinary URI predicate, which is what stops a
+  variable in scheme position from producing a reserved scheme.
 - Resource text is bounded wherever it enters the host, and the shape it enters in
   depends on the surface: a `tool_result` for the model path (stage 2 — the channel
   every tool result uses), and an untrusted FENCE with the body's own closing tag

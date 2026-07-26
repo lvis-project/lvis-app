@@ -124,6 +124,7 @@ describe("preload contextBridge world shape lock", () => {
           "mcp": [
             "addConfig",
             "attachResource",
+            "attachResourceTemplate",
             "callTool",
             "closeDetached",
             "disposeUiSession",
@@ -133,6 +134,7 @@ describe("preload contextBridge world shape lock", () => {
             "getDetachedPayload",
             "getPrompt",
             "kill",
+            "listResourceTemplates",
             "listResources",
             "onDetachedClosed",
             "onServerDisconnected",
@@ -308,6 +310,7 @@ describe("preload contextBridge world shape lock", () => {
           "mcp": [
             "addConfig",
             "attachResource",
+            "attachResourceTemplate",
             "callTool",
             "closeDetached",
             "disposeUiSession",
@@ -317,6 +320,7 @@ describe("preload contextBridge world shape lock", () => {
             "getDetachedPayload",
             "getPrompt",
             "kill",
+            "listResourceTemplates",
             "listResources",
             "onDetachedClosed",
             "onServerDisconnected",
