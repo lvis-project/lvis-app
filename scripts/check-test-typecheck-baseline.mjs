@@ -140,6 +140,26 @@ export function nonSourceMeasurements(counts) {
   return [...counts.keys()].filter((f) => !/\.tsx?$/.test(f));
 }
 
+/**
+ * Diagnostics tsc attributed to no file at all.
+ *
+ * ASK THE SHAPE, DO NOT LIST THE CODES. This replaced a `TS5\d{3}|TS18003` test after a
+ * reviewer asked what happens to config codes outside that set. A diagnostic with no
+ * `file(line,col)` span is not about a file, it is about the program — and the per-file
+ * parser drops it silently, so without this the gate measures nothing and says so in the
+ * language of success. Verified against real output: `error TS6059: File '…' is not under
+ * 'rootDir'` begins at column zero with no span, while genuine per-file diagnostics always
+ * carry one.
+ *
+ * Pure and exported for one reason: the rule previously lived inline in `runTsc`, where the
+ * self-test could not reach it without spawning a compiler, so it was verified only by hand
+ * with throwaway configs. An unpinned rule is an untested rule. Here it is the same function
+ * the runner calls, pinned against real tsc text.
+ */
+export function unattributedDiagnostics(tscStdout) {
+  return tscStdout.split(/\r?\n/).filter((line) => /^error TS\d+:/.test(line));
+}
+
 function runTsc() {
   const result = spawnSync(
     process.execPath,
@@ -157,19 +177,10 @@ function runTsc() {
     throw new Error(`tsc exited ${result.status}\n${result.stdout}${result.stderr}`);
   }
   const stdout = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-  // ASK THE SHAPE, DO NOT LIST THE CODES. This used to test for `TS5\d{3}|TS18003`, and a
-  // reviewer asked what happens to config codes outside that set — TS6059, for one.
-  // Enumerating codes has leaked in this repo three times running, so the check is now
-  // structural: a diagnostic tsc attributes to NO file is not about a file, it is about the
-  // program, and the per-file parser below silently drops it. Verified against real output —
-  // `error TS6059: File '…' is not under 'rootDir'` begins at column zero with no
-  // `file(line,col)` span, while genuine per-file diagnostics always carry one.
-  //
-  // This catches config errors that are EMITTED AND UNATTRIBUTED — not "every config code",
+  // Catches config errors that are EMITTED AND UNATTRIBUTED — not "every config code",
   // which is what an earlier draft of this comment claimed. The other shapes are covered by
-  // the other two checks, and the split is deliberate rather than defence in depth; see the
-  // matrix in the module docstring.
-  const unattributed = stdout.split(/\r?\n/).filter((l) => /^error TS\d+:/.test(l));
+  // the other two checks; see the matrix in the module docstring for which catches what.
+  const unattributed = unattributedDiagnostics(stdout);
   if (unattributed.length > 0) {
     throw new Error(
       "tsc reported program-level errors, so the per-file measurement is not trustworthy:\n"
