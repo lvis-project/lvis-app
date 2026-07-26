@@ -45,7 +45,41 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (existsSync(testHome)) rmSync(testHome, { recursive: true, force: true });
+  // `maxRetries` is MITIGATION for an unexplained flake, and saying so matters, because the
+  // obvious fix does not apply here.
+  //
+  // Every logger in this file is constructed synchronously in a test body and only ever has
+  // `search()` called on it, and `search()` enqueues nothing — it only reads. So
+  // `AuditLogger.flush()`, which does exist, would have nothing to drain, and the only
+  // writers are the constructor's `mkdirSync` and this file's synchronous `writeJsonl`. Do
+  // not "improve" this into a flush call; it would be a no-op dressed as a fix.
+  //
+  // An earlier version of this comment contrasted the above with the executor teardown,
+  // describing that one as a real un-awaited `recordApproval` whose write outlived the test.
+  // That contrast was built on a false premise and is gone: `mutatePersistentApprovals`
+  // RETURNS the promise covering `readApprovalsFile → mutator → atomicWrite`, and
+  // `recordApproval` awaits it, so an awaited call has already landed. The writer that
+  // actually raced there was an unflushed `AuditLogger` the executor constructs implicitly —
+  // which makes it the same KIND of writer as this file's, just one that is actually written
+  // to. See that file's `beforeEach`.
+  //
+  // So this file's occasional ENOTEMPTY has no demonstrated cause, and retries are the honest
+  // response to that. One concrete aggravator IS evidenced though, and naming it is better
+  // than the earlier "below that, at the filesystem", which pointed nowhere: `beforeEach` uses
+  // `mkdtempSync(join(process.cwd(), ...))`, so these trees are created in the REPO ROOT rather
+  // than the OS temp dir, under a multi-worker vitest pool. That is a shared directory with
+  // concurrent creators and deleters. It is an aggravator rather than the mechanism — the
+  // failure is on `testHome` itself, not its parent — which is why this stays `maxRetries`
+  // instead of a claim.
+  //
+  // Restoring the mock AFTER removal, not before: an earlier version did the reverse and
+  // claimed it aimed a late construction at the real home rather than the tree being
+  // deleted. Both halves were wrong — the constructor captures `this.auditDir`, so a bound
+  // write cannot be redirected, and pointing a hypothetical late writer at the user's real
+  // `~/.lvis` is the failure mode to avoid, not the fix.
+  if (existsSync(testHome)) {
+    rmSync(testHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
   vi.restoreAllMocks();
 });
 

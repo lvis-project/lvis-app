@@ -571,7 +571,24 @@ export async function migrateCanonicalization(): Promise<void> {
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
-/** @internal Test only — clears the session cache between test cases. */
+/**
+ * @internal Test only — clears the session cache between test cases.
+ *
+ * Resetting `persistentWriteQueue` does not cancel an in-flight write — nothing can — it
+ * only stops the NEXT write from chaining behind it, which is the isolation this reset is
+ * for.
+ *
+ * There is deliberately NO drain helper beside this, and adding one would be dead code.
+ * `mutatePersistentApprovals` RETURNS the promise covering
+ * `readApprovalsFile → mutator → atomicWrite`, and every public caller
+ * (`recordApproval`, `revokeApproval`, `revokeApprovalByKey`) awaits it — so an awaited
+ * write has already landed and there is nothing left to wait for. An earlier version of
+ * this file added `__drainPersistentWritesForTest` on the premise that `recordApproval`
+ * resolves when the write is merely QUEUED. A reviewer demonstrated that premise is false;
+ * the helper was a no-op in all three suites that called it, and the CI teardown failure it
+ * was credited with fixing was actually an unflushed `AuditLogger` — see the note in
+ * `src/tools/__tests__/executor-approval-memory-skip-integration.test.ts`.
+ */
 export function __resetSessionStoreForTest(): void {
   if (sessionStore.size > 0) approvalGeneration += 1;
   sessionStore.clear();
