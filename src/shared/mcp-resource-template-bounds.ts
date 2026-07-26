@@ -196,6 +196,13 @@ export function isUsableResourceUriTemplate(value: unknown): value is string {
   // resource and that is its own business — but for a template it would catalogue a row
   // whose every read the expansion then refuses. That is the dead-row shape: a picker
   // entry that exists only to fail, blaming the server for a rule the host applied.
+  //
+  // THIS CHECK IS NOT THE GATE, and must never be read as making the expansion's one
+  // redundant. It sees only the skeleton, so `{path}` filled with `..` is invisible to
+  // it — the expansion strictly subsumes it, not the other way round. Deleting this line
+  // costs dead rows; deleting the one in `expandResourceUriTemplate` reintroduces the
+  // traversal. Same split as `hostFetchRefused`: derived at discovery for the picker,
+  // re-derived at read for enforcement (policy §3).
   return !hasDotSegment(skeleton);
 }
 
