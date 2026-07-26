@@ -31,24 +31,48 @@
  * being measured, and the output is plain text, so there is no parse step to throw on
  * emptiness. Silence is indistinguishable from success unless something says otherwise.
  *
- * Each row below was reproduced against this gate, not reasoned about. The first was found
- * by a security reviewer; the rest came from asking what else could produce a measurement
- * that looks like mass improvement.
+ * Every row below was reproduced against this gate. The first was found by a security
+ * reviewer, who then independently re-derived the whole table and corrected three of my
+ * claims about it — the corrections are folded in, including the config shapes, because a
+ * scenario described too loosely for someone else to reproduce is not evidence.
  *
- *   scenario                            tsc  output shape                which check fires
- *   ----------------------------------  ---  --------------------------  -----------------
- *   `tsc.js` missing or moved             1  node module-resolution err  empty measurement
- *   `include`/`files` both empty          0  NOTHING AT ALL              empty measurement
- *   rootDir violation (TS6059)            1  unattributed, column zero   unattributed
- *   unknown compiler option (TS5023)      1  attributed to tsconfig      non-source path
+ *   scenario                                    tsc  output shape              fires
+ *   ------------------------------------------  ---  ------------------------  --------------
+ *   `tsc.js` missing or moved                     1  node module-resolution    EMPTY (sole)
+ *   EXTENDING config, `files:[]`+`include:[]`     0  NOTHING AT ALL            EMPTY (sole)
+ *   STANDALONE config, `files:[]`                 2  attributed TS18002        NON-SOURCE (sole)
+ *   unknown compiler option (TS5023)              1  attributed + REAL errors  NON-SOURCE (sole)
+ *   rootDir violation (TS6059)                    1  unattributed, column 0    UNATTRIBUTED+EMPTY
+ *   no inputs / missing -p / missing @types     1-2  unattributed, column 0    UNATTRIBUTED+EMPTY
  *
- * Note the second row: a config that silently checks nothing exits ZERO with no output, so
- * neither the status nor the text can betray it. And note that a config error makes tsc
- * report the config INSTEAD of the program — none of the genuine type errors appear — which
- * is what turns any of these into "every file fully fixed" rather than a visible failure.
+ * Row 2 is the reason emptiness must be checked at all: a config that silently checks
+ * nothing exits ZERO with no output, so neither the status nor the text can betray it. Note
+ * it needs an EXTENDING config — a standalone `files:[]` gives row 3 instead, exit 2 with an
+ * attributed TS18002. Both are real; naming only "files and include are empty" left the
+ * reviewer unable to reproduce row 2 and reasonably concluding I had mis-derived it.
  *
- * So none of the three is redundant with the others, and none is redundant with the exit
- * status. Removing one silently re-opens exactly one row.
+ * Config errors split into two classes, and the split matters:
+ *   - UNATTRIBUTED (TS6059, TS18003, TS5058, TS2688) SUPPRESSES the program. tsc aborts
+ *     before semantic checking, so none of the genuine type errors are reported and the
+ *     measurement is empty.
+ *   - ATTRIBUTED (TS5023, TS18002) does NOT suppress it. TS5023 arrives ALONGSIDE the real
+ *     per-file diagnostics — verified. So "a config error makes tsc report the config
+ *     instead of the program" is true only of the first class. An earlier version of this
+ *     comment stated it absolutely, which contradicted `nonSourceMeasurements`' own
+ *     (correct) account of the same row.
+ *
+ * Consequently, and contrary to what this comment used to claim, the three checks do NOT
+ * each own exactly one row. EMPTY and NON-SOURCE each have sole custody of two rows. But
+ * UNATTRIBUTED has sole custody of NOTHING: because its whole class suppresses the program,
+ * EMPTY fires on every row it fires on. Neither the reviewer nor I could construct an
+ * unattributed diagnostic co-occurring with real ones.
+ *
+ * It is kept anyway, for two reasons that are not coverage: it produces a far better
+ * diagnosis (it prints the program-level diagnostics, where EMPTY can only say "the compiler
+ * did not run" — useless for a rootDir violation), and the attributed class proves
+ * co-occurrence is real in the sibling class, so an unattributed shape that co-occurs is
+ * plausible rather than impossible. That is insurance against an unobserved shape, and this
+ * comment says so rather than implying custody it does not have.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -132,12 +156,18 @@ export function isEmptyMeasurementAgainstBaseline(counts, baselineFiles) {
  * baseline. Refusing outright keeps the diagnosis honest and the baseline clean.
  *
  * Verified against real output rather than assumed: with a deliberately broken config, tsc
- * emitted TS6059 unattributed AND TS5023 attributed to the tsconfig, and reported none of
- * the program's genuine type errors — so a config error yields a measurement that looks
- * like mass improvement. Every baselined path is `.ts` or `.tsx` (268 + 44).
+ * emitted TS6059 unattributed AND TS5023 attributed to the tsconfig.
+ *
+ * The extension set is `.ts`/`.tsx`/`.mts`/`.cts`, NOT just `.ts`/`.tsx`. A reviewer caught
+ * that `/\.tsx?$/` rejects `.mts`, and `scripts/electron-flags.d.mts` and
+ * `scripts/uv-targets.d.mts` are committed and inside this project's `scripts` include
+ * (confirmed with `tsc --listFilesOnly`). A diagnostic in either would have failed the gate
+ * with the exact misleading message this function exists to avoid — "was diagnosing the
+ * configuration" — about a real source file. Nothing was masked, because neither file
+ * currently has diagnostics, which is precisely why only a reviewer would find it.
  */
 export function nonSourceMeasurements(counts) {
-  return [...counts.keys()].filter((f) => !/\.tsx?$/.test(f));
+  return [...counts.keys()].filter((f) => !/\.[cm]?tsx?$/.test(f));
 }
 
 /**
@@ -173,6 +203,12 @@ function runTsc() {
   // exactly when it succeeds at finding the errors this gate measures. 0/1/2 are all
   // legitimate; anything else is a broken invocation. The real signals are the two content
   // checks below plus the empty-measurement refusal in `main()`.
+  //
+  // Measured across the docstring's scenarios, so this is not an assumption: the HEALTHY
+  // control exits 1, four broken configs also exit 1, two exit 2, and the silent-no-op
+  // config exits 0. Status cannot discriminate in either direction — a reviewer proposed
+  // tightening the accepted set and then withdrew it on the same evidence. Do NOT tighten;
+  // rejecting 2 would not catch the dangerous row (exit 0) and would add false failures.
   if (result.status !== 0 && result.status !== 1 && result.status !== 2) {
     throw new Error(`tsc exited ${result.status}\n${result.stdout}${result.stderr}`);
   }
@@ -212,6 +248,25 @@ export function nonTestEntries(files) {
   return Object.keys(files).filter((f) => !TEST_FILE_RE.test(f));
 }
 
+/**
+ * The committed baseline's `files`, or `{}` when there is no baseline yet.
+ *
+ * ENOENT is the first-ever run — there is nothing to protect, so the guard must not block
+ * bootstrapping. Anything else (including unparseable JSON) throws: if the file exists but
+ * cannot be read, we cannot tell whether a real baseline is about to be destroyed, and
+ * guessing is what fail-open looks like. Delete the file deliberately to bootstrap.
+ */
+function readBaselineFilesOrEmpty() {
+  let raw;
+  try {
+    raw = readFileSync(BASELINE, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return {};
+    throw error;
+  }
+  return JSON.parse(raw)?.files ?? {};
+}
+
 function main() {
   const update = process.argv.includes("--update-baseline");
   const counts = countErrorsByFile(runTsc());
@@ -223,6 +278,24 @@ function main() {
     throw new Error(
       `tsc attributed errors to non-source files (${nonSource.join(", ")}), which means it`
       + " was diagnosing the configuration. Refusing to compare or write a baseline.",
+    );
+  }
+
+  // The empty-measurement refusal has to happen BEFORE the write, not only before the
+  // compare. Leaving it after was a fail-open on the sibling path, found by a security
+  // reviewer and reproduced end-to-end: with `tsc.js` unresolvable,
+  // `--update-baseline` rewrote the baseline from 312 entries to `files: {}` at rc=0, after
+  // which the compare path's own empty-baseline carve-out reported "baseline held" green
+  // indefinitely. Reachable by running the update script mid-dependency-bump with
+  // typescript half-installed.
+  //
+  // Same predicate as the compare path deliberately — one authority for "this measurement
+  // is not real", asked twice, rather than two spellings that can drift apart.
+  const onDiskFiles = readBaselineFilesOrEmpty();
+  if (isEmptyMeasurementAgainstBaseline(counts, onDiskFiles)) {
+    throw new Error(
+      "tsc produced no diagnostics while the committed baseline expects them — the compiler"
+      + " did not run. Refusing to overwrite a real baseline with an empty measurement.",
     );
   }
 
@@ -259,24 +332,7 @@ function main() {
       `baseline schemaVersion ${parsed?.schemaVersion} != ${SCHEMA_VERSION}; re-run with --update-baseline`,
     );
   }
-  // FAIL CLOSED on an empty measurement. A run that parsed no diagnostics at all, while
-  // the baseline expects some, means the compiler did not run — not that every file was
-  // fixed at once. The project-load check in `runTsc` does NOT cover every such case: a
-  // missing or moved `tsc.js` exits 1 with a node module-resolution error that matches
-  // neither TS5xxx nor TS18003, which a security reviewer demonstrated. Without this the
-  // gate printed "baseline held: 0 files, 0 errors" and exited 0 — a gate that reports
-  // green forever, which is worse than no gate.
-  //
-  // An earlier comment in the self-test claimed the runner's own check covered this. It
-  // did not. `check-knip-baseline.mjs` is the fail-closed precedent in this repo.
-  const baselineFiles = parsed.files ?? {};
-  if (isEmptyMeasurementAgainstBaseline(counts, baselineFiles)) {
-    throw new Error(
-      "tsc produced no diagnostics while the baseline expects them — the compiler did not"
-      + " run. Refusing to report this as an improvement.",
-    );
-  }
-  const { regressed, improved, fixed } = compareToBaseline(counts, baselineFiles);
+  const { regressed, improved, fixed } = compareToBaseline(counts, parsed.files ?? {});
 
   if (regressed.length > 0) {
     process.stderr.write("[test-typecheck] new type errors in files the baseline covers\n");
