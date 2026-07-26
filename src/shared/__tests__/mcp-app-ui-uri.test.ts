@@ -55,20 +55,33 @@ describe("isMcpAppUiUri", () => {
     expect(isMcpAppUiUri("Ui://app/panel.html")).toBe(false);
   });
 
-  it("requires an authority", () => {
-    // `ui://` names nothing and `ui:///x` has an empty authority — the plugin arm's own
-    // authority parse already refuses both, so accepting them here would exempt a URI
-    // that cannot be served.
-    expect(isMcpAppUiUri("ui://")).toBe(false);
-    expect(isMcpAppUiUri("ui:///panel.html")).toBe(false);
-    expect(isMcpAppUiUri("ui:////panel.html")).toBe(false);
-    // `?` and `#` give an empty hostname just as `/` does — verified against `new URL()`.
-    // Missing these was the gap: the predicate claimed to require an authority and did
-    // not, so it would have exempted a URI no arm could serve.
-    expect(isMcpAppUiUri("ui://?q=1")).toBe(false);
-    expect(isMcpAppUiUri("ui://#frag")).toBe(false);
-    // …and a real authority carrying a query or fragment is still fine.
-    expect(isMcpAppUiUri("ui://app/panel.html?q=1#top")).toBe(true);
+  it("requires an authority the URL parser can actually name", () => {
+    // This test grew by two rounds of the same mistake, which is why the implementation
+    // no longer enumerates: first it checked only `/`, then a reviewer found `?` and `#`
+    // reach the same empty authority, then another found `:` `[` `]` make the parser
+    // throw outright. The cases below are kept as a record of what guessing missed.
+    for (const uri of [
+      "ui://", // nothing after the scheme
+      "ui:///panel.html", // empty authority
+      "ui:////panel.html",
+      "ui://?q=1", // round two
+      "ui://#frag",
+      "ui://:80/x", // round three — `new URL` throws on these
+      "ui://[/x",
+      "ui://]/x",
+    ]) {
+      expect(isMcpAppUiUri(uri), uri).toBe(false);
+    }
+    // …and the shapes with a real authority still pass, including a query, a fragment,
+    // userinfo, and a non-ASCII host the parser punycodes (the value forwarded to the
+    // server is still the original string — the parse is only used to ask the question).
+    for (const uri of [
+      "ui://app/panel.html?q=1#top",
+      "ui://user@host/x",
+      "ui://앱/카드.html",
+    ]) {
+      expect(isMcpAppUiUri(uri), uri).toBe(true);
+    }
   });
 
   it("refuses a scheme that only starts like the Apps one", () => {
