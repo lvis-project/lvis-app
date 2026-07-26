@@ -130,10 +130,17 @@ const URI_EXCLUDED_CHARS_RE = /[\s"<>\\^`{}|]/;
  * module's history that spelling this class by hand has leaked (see the note in
  * `display-safe-text.ts`), so the composition now lives here and callers ask for it.
  *
- * The pairing is load-bearing and is why `hasInvisibleOrReorderingChars` alone is not
- * enough: it deliberately excludes TAB/LF/CR/space, because prose may legitimately
- * contain them. An identifier may not, so the control and excluded-character checks stay
- * beside it.
+ * `hasInvisibleOrReorderingChars` alone is not enough: it deliberately admits TAB/LF/CR
+ * and space, because prose may legitimately contain them and an identifier may not. The
+ * arm that catches those is the RFC 3986 one, via `\s` — not the control one.
+ *
+ * The control arm's unique contribution is measurably zero: a reviewer swept the codepoint
+ * space and found nothing it catches that the other two miss. It stays as belt and braces
+ * ACROSS A MODULE BOUNDARY — `\s` semantics and `Default_Ignorable_Code_Point` membership
+ * can both move under a future edit or an engine update, and this is the one arm whose
+ * coverage is unambiguous by inspection. Stated this way because an earlier version of
+ * this sentence credited the control arm with stopping TAB/LF/CR, which it does only
+ * redundantly, and a claim like that is how the wrong arm survives a cleanup.
  */
 export function hasUnsafeUriChars(value: string): boolean {
   return CONTROL_CHARS_RE.test(value)
