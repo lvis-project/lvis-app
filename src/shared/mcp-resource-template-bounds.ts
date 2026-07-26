@@ -118,6 +118,29 @@ export function resourceTemplateVariables(uriTemplate: string): string[] {
 }
 
 /**
+ * Does any path segment of this URI mean "here" or "up one"?
+ *
+ * `encodeURIComponent` leaves `.` alone — it is unreserved — so a value of `..` reaches
+ * the server verbatim AS A DOT SEGMENT. `file:///project/{dir}/{name}` filled with `..`
+ * and `id_rsa` produces `file:///project/../id_rsa`, which resolves to `file:///id_rsa`.
+ * Percent-encoding stops a value spanning segments; it does nothing about a value that
+ * IS one. RFC 3986 dot-segment removal is not a "badly written server" hazard either: it
+ * is what `new URL()` and `fileURLToPath` do, for non-special schemes too.
+ *
+ * Checked on the FINISHED string rather than on each value, because a literal can compose
+ * one: `file:///project/.{x}` with `x="."` is a dot segment neither half contains. Query
+ * and fragment are dropped first — a `..` after `?` is not a path segment, and the only
+ * way one gets there is from a literal the server itself wrote.
+ */
+function hasDotSegment(uri: string): boolean {
+  const scheme = uri.indexOf(":");
+  const afterScheme = scheme === -1 ? uri : uri.slice(scheme + 1);
+  const pathEnd = afterScheme.search(/[?#]/);
+  const path = pathEnd === -1 ? afterScheme : afterScheme.slice(0, pathEnd);
+  return path.split("/").some((segment) => segment === "." || segment === "..");
+}
+
+/**
  * Is this a template the host will catalogue and later expand?
  *
  * Checked by REMOVING every well-formed Level 1 expression and requiring what is left to
@@ -156,30 +179,14 @@ export function isUsableResourceUriTemplate(value: unknown): value is string {
   // unreserved, so a skeleton that fails here fails for a reason that has nothing to do
   // with the substitution.
   const skeleton = value.replace(TEMPLATE_EXPRESSION_RE, "x");
-  return isUsableResourceUri(skeleton);
-}
+  if (!isUsableResourceUri(skeleton)) return false;
 
-/**
- * Does any path segment of this URI mean "here" or "up one"?
- *
- * `encodeURIComponent` leaves `.` alone — it is unreserved — so a value of `..` reaches
- * the server verbatim AS A DOT SEGMENT. `file:///project/{dir}/{name}` filled with `..`
- * and `id_rsa` produces `file:///project/../id_rsa`, which resolves to `file:///id_rsa`.
- * Percent-encoding stops a value spanning segments; it does nothing about a value that
- * IS one. RFC 3986 dot-segment removal is not a "badly written server" hazard either: it
- * is what `new URL()` and `fileURLToPath` do, for non-special schemes too.
- *
- * Checked on the FINISHED string rather than on each value, because a literal can compose
- * one: `file:///project/.{x}` with `x="."` is a dot segment neither half contains. Query
- * and fragment are dropped first — a `..` after `?` is not a path segment, and the only
- * way one gets there is from a literal the server itself wrote.
- */
-function hasDotSegment(uri: string): boolean {
-  const scheme = uri.indexOf(":");
-  const afterScheme = scheme === -1 ? uri : uri.slice(scheme + 1);
-  const pathEnd = afterScheme.search(/[?#]/);
-  const path = pathEnd === -1 ? afterScheme : afterScheme.slice(0, pathEnd);
-  return path.split("/").some((segment) => segment === "." || segment === "..");
+  // A dot segment in the LITERAL part is refused here rather than left to the expansion.
+  // `isUsableResourceUri` permits one — a server may publish `file:///a/../b` as a plain
+  // resource and that is its own business — but for a template it would catalogue a row
+  // whose every read the expansion then refuses. That is the dead-row shape: a picker
+  // entry that exists only to fail, blaming the server for a rule the host applied.
+  return !hasDotSegment(skeleton);
 }
 
 /**
