@@ -1814,17 +1814,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           // and never did. That path is now restricted by SCHEME — main refuses anything
           // but `ui://` (`isMcpAppUiUri`, enforced in `McpClient.readResource`).
           //
-          // Which does NOT mean an expansion can never be replayed through it: a server
-          // may declare the template `ui://cards/{id}`, and the expansion of that IS in
-          // the `ui://` namespace. The echo still grants nothing, for the reason that
-          // survives the case — the renderer received the attachment TEXT in this same
-          // response, and can name any `ui://` URI on this server with or without it.
+          // …and it cannot be used to replay an expansion either, for a reason that does
+          // not depend on the scheme gate at all: `ui:` is in RESERVED_SCHEMES, so
+          // `isUsableResourceUri` refuses it and `isUsableResourceUriTemplate` refuses any
+          // template whose skeleton carries it. A `ui://` entry can therefore never reach
+          // `state.resources` or `state.resourceTemplates`, so `read.uri` is never in that
+          // namespace to begin with.
           //
-          // Said this way because an earlier version argued the echo was safe on the
-          // grounds that a renderer calling `uiResource` "already has strictly more reach
-          // anyway". That was true when written and is not true now, which is exactly why
-          // it was the wrong argument to lean on: it was a fact about a hole rather than
-          // about this channel, and it decayed the moment the hole closed.
+          // A reviewer argued a server could declare `ui://cards/{id}` and make the
+          // expansion replayable, and I wrote that in. It is false — the discovery filter
+          // stops it — and they retracted it. Recorded because this comment has now been
+          // rewritten five times and the failure mode is always the same: reasoning about
+          // one gate while the deciding gate is somewhere else.
           uri: read.uri,
         };
       } catch (err) {
