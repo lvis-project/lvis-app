@@ -1,0 +1,22 @@
+{
+  // Typechecks what `tsconfig.json` deliberately leaves out.
+  //
+  // The root config excludes `src/**/__tests__/**`, `src/**/__probes__/**`, the preload
+  // tree and `renderer.tsx`; `tsconfig.build.json` re-declares the same exclusions rather
+  // than relaxing them. So before this file, NO configuration in the repo typechecked a
+  // test — a test could reference an unimported symbol, pass `bun run typecheck`, and
+  // reach CI green, failing only if a test happened to execute that line.
+  //
+  // This config does not replace the root one. `typecheck` stays the gate for production
+  // sources and must stay clean; this is the wider net, held at a baseline
+  // (`check:typecheck-tests`) because the existing debt is 1600+ errors across 320 files
+  // and fixing it in one change would be unreviewable.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Tests legitimately construct partial fixtures and mock shapes.
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["src", "scripts", "test"],
+  "exclude": ["src/**/__probes__/**", "src/preload.cjs.ts"]
+}
