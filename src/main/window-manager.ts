@@ -1274,6 +1274,25 @@ export class WindowManager {
         return UNAUTHORIZED_FRAME;
       }
       const payload = (arg as { payload?: unknown } | undefined)?.payload as McpUiPayload | undefined;
+      // Scheme-only, and deliberately NOT `isMcpAppUiUri` — which sits one import away and
+      // is stricter. Detach must not be stricter than the read it guards, and the read has
+      // TWO arms with different rules: the external one enforces that predicate, but the
+      // plugin/loopback one goes through `plugin-ui-resource-provider`, whose gate is
+      // declared-set membership plus the manifest pattern `^ui://[a-z0-9][a-z0-9.-]*/.+`.
+      // That pattern is narrower in the ways that matter (lowercase authority required,
+      // path required) and far LOOSER in others: it has no `$` anchor, so `.+` need match
+      // only one character and everything after it is unconstrained. A reviewer measured
+      // it admitting all eighteen characters this predicate refuses, LF and CR included.
+      // So tightening detach alone would refuse plugin cards the serve path still renders
+      // inline — the worse direction of harm. (Two earlier versions of this sentence each
+      // mis-sized that gap, in opposite directions.)
+      //
+      // Nothing here resolves or interpolates the URI: it is stored under a host-minted
+      // viewKey and handed to the detached renderer, which reads through the same gated
+      // IPC. The worst this admits is an empty window whose card then fails its read.
+      // Switching to `MCP_APP_UI_SCHEME` was considered and rejected — importing the
+      // shared constant while applying a weaker rule than the predicate beside it reads
+      // as adoption of the SoT and would mislead more than the bare literal does.
       if (
         !payload ||
         typeof payload.serverId !== "string" ||

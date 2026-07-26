@@ -1808,13 +1808,24 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           // `readDeclaredResource` — a template expansion was never listed there, so
           // replaying one fails.
           //
-          // NOT "no channel accepts a URI" (`attachResource` does) and NOT "no channel
-          // accepts an unlisted URI" (`CHANNELS.mcp.uiResource` does, on its external
-          // arm, with no listed-set check in main). That last one is a pre-existing hole
-          // this feature neither opens nor widens: a renderer able to call it already has
-          // strictly more reach than replaying an expansion, and has it without this
-          // channel. Named here rather than contradicted, because the previous two
-          // versions of this comment were each refuted by a reviewer reading the code.
+          // NOT "no channel accepts a URI" — `attachResource` does. And note the careful
+          // word CORE: `CHANNELS.mcp.uiResource` also routes a renderer URI to a
+          // `resources/read`, but on the MCP-Apps path, which carries no listed-set check
+          // and never did. That path is now restricted by SCHEME — main refuses anything
+          // but `ui://` (`isMcpAppUiUri`, enforced in `McpClient.readResource`).
+          //
+          // …and it cannot be used to replay an expansion either, for a reason that does
+          // not depend on the scheme gate at all: `ui:` is in RESERVED_SCHEMES, so
+          // `isUsableResourceUri` refuses it and `isUsableResourceUriTemplate` refuses any
+          // template whose skeleton carries it. A `ui://` entry can therefore never reach
+          // `state.resources` or `state.resourceTemplates`, so `read.uri` is never in that
+          // namespace to begin with.
+          //
+          // A reviewer argued a server could declare `ui://cards/{id}` and make the
+          // expansion replayable, and I wrote that in. It is false — the discovery filter
+          // stops it — and they retracted it. Recorded because this comment has now been
+          // rewritten five times and the failure mode is always the same: reasoning about
+          // one gate while the deciding gate is somewhere else.
           uri: read.uri,
         };
       } catch (err) {
