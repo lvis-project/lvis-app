@@ -2,8 +2,11 @@
  * MCP-app identity rules — shared between main and renderer (#885 axis b).
  *
  * Partition naming is the original concern and most of this file; it also holds the two
- * other things every MCP-app surface must agree on: what a server id may be
+ * other things the READ PATH must agree on: what a server id may be
  * ({@link isUsableMcpServerId}) and what a card URI may be ({@link isMcpAppUiUri}).
+ * Deliberately not every surface — `window-manager`'s detach check and the renderer's
+ * bridge handler each keep their own weaker literal, for reasons recorded at those
+ * sites.
  *
  * Every MCP server's UI card (`ui://` resource) runs in a dedicated,
  * per-server Electron session partition for storage isolation. Main registers
@@ -33,6 +36,10 @@
  * simultaneously.
  */
 
+import {
+  hasUnsafeUriChars,
+  MCP_RESOURCE_URI_MAX_CHARS,
+} from "./mcp-resource-bounds.js";
 export const MCP_APP_PARTITION_PREFIX = "lvis-mcp-app:";
 
 /**
@@ -87,7 +94,7 @@ export function isUsableMcpServerId(value: unknown): value is string {
  * decides it.
  *
  * Before this existed the rule was three separate spellings and a hole. `git grep '"ui://"'
- * on the parent commit finds `main/window-manager.ts` (a bare `startsWith` on a detach
+ * at e20fea2a (the merge base) finds `main/window-manager.ts` (a bare `startsWith` on a detach
  * payload), `mcp-governance.ts` (a local const), and the renderer's bridge handler (a local
  * const) — and NOT `McpClient.readResource`, which is the one place that issues the
  * request. A cluster review found the consequence. `resources/read` is ONE wire method
@@ -106,15 +113,7 @@ export function isUsableMcpServerId(value: unknown): value is string {
  */
 export const MCP_APP_UI_SCHEME = "ui://";
 
-/** Same bound as a resource URI: these are interpolated into the same audit rows. */
-const MCP_APP_UI_URI_MAX_CHARS = 2048;
 
-// Control characters, whitespace and the invisible/reordering class are refused for the
-// reason the resource URI rule refuses them: this string is an identifier that reaches a
-// log line and a card's provenance, and a right-to-left override inside one renders it as
-// something it is not. Same class as `display-safe-text`, spelled escaped because a raw
-// control byte in source is itself refused by `check-source-text-safe`.
-const UI_URI_FORBIDDEN_RE = /[\u0000-\u0020\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
 
 /**
  * Is this a URI the MCP-Apps read path will serve?
@@ -124,14 +123,19 @@ const UI_URI_FORBIDDEN_RE = /[\u0000-\u0020\u007F-\u009F\u200B-\u200F\u202A-\u20
  */
 export function isMcpAppUiUri(value: unknown): value is string {
   if (typeof value !== "string") return false;
-  if (value.length === 0 || value.length > MCP_APP_UI_URI_MAX_CHARS) return false;
+  if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (!value.startsWith(MCP_APP_UI_SCHEME)) return false;
   // An authority must be present: `ui://` alone names nothing, and `ui:///x` has an
   // empty one, which the plugin arm's authority parse already refuses on its own side.
   if (value.length === MCP_APP_UI_SCHEME.length || value[MCP_APP_UI_SCHEME.length] === "/") {
     return false;
   }
-  return !UI_URI_FORBIDDEN_RE.test(value);
+  // The SAME character rule a resource URI must pass, asked of the one function that
+  // spells it. The first version of this predicate enumerated its own ranges and leaked
+  // ten of eleven sampled members — including U+061C, a bidi control the comment above it
+  // claimed to cover. Two reviewers found that independently, which is the argument for
+  // never spelling this class twice.
+  return !hasUnsafeUriChars(value);
 }
 
 /**

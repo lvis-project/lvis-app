@@ -343,7 +343,8 @@ export class McpGovernance {
     // Decided by the SHARED predicate, not a local `startsWith`. Precisely, the question
     // asked here is "is this URI in the Apps namespace?" — NOT "is this the Apps caller",
     // which governance cannot see: it is handed a method, so a `resources/read` issued by
-    // `readDeclaredResource` for a listed `ui://` URI is exempted too. That residual is
+    // `readDeclaredResource` (or its template sibling) for a listed `ui://` URI is
+    // exempted too. That residual is
     // unreachable rather than tolerated — `state.resources` is only ever populated by
     // `discoverResources`, which returns early unless `resources` was approved, so a
     // server without the capability has no listed URI to name.

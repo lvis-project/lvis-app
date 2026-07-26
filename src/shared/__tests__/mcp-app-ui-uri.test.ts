@@ -73,12 +73,47 @@ describe("isMcpAppUiUri", () => {
   });
 
   it("refuses control, whitespace and reordering characters", () => {
-    // Same class the resource URI rule refuses, and for the same reason: this string
-    // reaches an audit line and a card's provenance.
+    // The SAME class `isUsableResourceUri` refuses, because both ask one function for it.
+    // Control and whitespace first — these are why `hasInvisibleOrReorderingChars` alone
+    // is not enough: it deliberately admits TAB/LF/CR/space, which prose may hold and an
+    // identifier may not.
     expect(isMcpAppUiUri("ui://app/pa nel.html")).toBe(false);
     expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x0a)}.html`)).toBe(false);
-    expect(isMcpAppUiUri(`ui://app/${String.fromCodePoint(0x202e)}lmth.exe`)).toBe(false);
-    expect(isMcpAppUiUri(`ui://app/pa${String.fromCodePoint(0x200b)}nel.html`)).toBe(false);
+    expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x09)}.html`)).toBe(false);
+    expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x00)}.html`)).toBe(false);
+    // …and the RFC 3986 excluded set, which is what stops a URI closing a fence it is
+    // interpolated into.
+    for (const ch of ['"', "<", ">", "\\", "^", "`", "{", "}", "|"]) {
+      expect(isMcpAppUiUri(`ui://app/pa${ch}nel.html`), ch).toBe(false);
+    }
+  });
+
+  it("refuses the invisible class WITHOUT enumerating it here", () => {
+    // The first version of this predicate hand-listed its ranges and leaked ten of the
+    // eleven members below — including U+061C, a bidi control the comment above it
+    // claimed to cover. Two reviewers found that independently.
+    //
+    // So these probes are deliberately drawn from OUTSIDE any list this module holds: if
+    // someone re-inlines an enumeration here, this test is what notices. A fixture built
+    // from the implementation's own ranges could not — that is the whole reason the leak
+    // survived its first test.
+    for (const code of [
+      0x00ad, // SOFT HYPHEN
+      0x034f, // COMBINING GRAPHEME JOINER
+      0x061c, // ARABIC LETTER MARK — a bidi control
+      0x115f, // HANGUL CHOSEONG FILLER
+      0x180e, // MONGOLIAN VOWEL SEPARATOR
+      0x2060, // WORD JOINER
+      0x2064, // INVISIBLE PLUS
+      0x200b, // ZERO WIDTH SPACE
+      0x202e, // RIGHT-TO-LEFT OVERRIDE
+      0xfe0f, // VARIATION SELECTOR-16
+      0xfeff, // ZERO WIDTH NO-BREAK SPACE
+    ]) {
+      const uri = `ui://app/pa${String.fromCodePoint(code)}nel.html`;
+      expect(isMcpAppUiUri(uri), `U+${code.toString(16).toUpperCase().padStart(4, "0")}`)
+        .toBe(false);
+    }
   });
 
   it("bounds the length", () => {
