@@ -1,0 +1,68 @@
+{
+  // Typechecks what `tsconfig.json` deliberately leaves out.
+  //
+  // The root config excludes `src/**/__tests__/**`, `src/**/__probes__/**`, the preload
+  // tree and `renderer.tsx`; `tsconfig.build.json` re-declares the same exclusions rather
+  // than relaxing them. So before this file, NO configuration in the repo typechecked a
+  // test — a test could reference an unimported symbol, pass `bun run typecheck`, and
+  // reach CI green, failing only if a test happened to execute that line.
+  //
+  // This config does not replace the root one. `typecheck` stays the gate for production
+  // sources and must stay clean; this is the wider net, held at a baseline
+  // (`check:typecheck-tests`) because the existing debt is 1,626 errors across 312 files
+  // and fixing it in one change would be unreviewable.
+  //
+  // Deliberately adds NO compilerOptions. An earlier version relaxed `noUnusedLocals` and
+  // `noUnusedParameters` on the reasoning that tests legitimately build partial fixtures and
+  // mock shapes. That was wrong twice over:
+  //
+  //   1. It manufactured a phantom error in PRODUCTION code. `src/main/window-manager.ts`
+  //      carries `@ts-expect-error TS6133` over a deliberately test-only private method.
+  //      With `noUnusedLocals` off the suppressed error never fires, so the directive reads
+  //      as unused and tsc reports TS2578 — an error that exists only because of this file.
+  //      Worse, it landed in the baseline, inviting someone to "fix" it by deleting the
+  //      directive, which would then break `check:typecheck` under the root config.
+  //   2. Relaxing it was not needed. `noUnusedParameters` already exempts `_`-prefixed
+  //      parameters, which is the idiom this repo's mocks already use, and an unused local
+  //      or import in a test is a real smell rather than a fixture necessity.
+  //
+  // Cost of not relaxing: 22 more files and 52 more errors in the baseline. That is the
+  // right trade — the debt is recorded once, whereas a divergence from the root config
+  // keeps producing diagnostics that mean nothing outside this file.
+  //
+  // The ONE option below is a different matter: it is required, not a preference, and it must
+  // not be "cleaned up" to match the root config.
+  //
+  // A RATCHET CANNOT USE AN INCREMENTAL COMPILER. `tsconfig.json` sets `incremental: true`,
+  // and inheriting it made this gate's error count depend on compiler cache state rather than
+  // on the source.
+  //
+  // MEASURED, with the precondition stated precisely, because a reviewer could not reproduce
+  // the looser version of this claim and was right to push back. Warm runs with CONSISTENT
+  // options are stable — we both measured that. What diverges is a buildinfo written by a run
+  // with DIFFERENT options and then read by the gate:
+  //
+  //   dedicated buildinfo, cold                        → 1,626  (internal-api-surface: 3)
+  //   same buildinfo, warm, same options               → 1,626  (3)
+  //   same buildinfo, after one run with a different `lib`  → 1,625  (2)
+  //
+  // and the same divergence appeared when the tests config inherited the ROOT's
+  // `tsBuildInfoFile`, i.e. two genuinely different programs writing one cache file. The
+  // diagnostic that goes missing warm is the unused-import one (TS6192), which is consistent
+  // with tsc caching per-file diagnostics and not re-emitting them for a file it considers
+  // unchanged — but that explanation is inference from the observation, not something this
+  // repo has instrumented, and it should not be read as settled compiler behaviour.
+  //
+  // Giving this project its own `tsBuildInfoFile` was an earlier, INSUFFICIENT fix: it removed
+  // only the two-programs-one-file case, and the different-options case above still diverged.
+  // `incremental: false` removes the class by construction — no buildinfo is read or written,
+  // so cache state is not an input at all. Verified across cold, repeat, after-different-lib,
+  // and after-root-typecheck: 1,626 every time. A full run costs ~3 s and CI checks out cold,
+  // so incremental bought this gate nothing while costing it determinism.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": ["src", "scripts", "test"],
+  "exclude": ["src/**/__probes__/**", "src/preload.cjs.ts"]
+}
