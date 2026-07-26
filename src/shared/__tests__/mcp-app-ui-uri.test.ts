@@ -73,8 +73,14 @@ describe("isMcpAppUiUri", () => {
       expect(isMcpAppUiUri(uri), uri).toBe(false);
     }
     // …and the shapes with a real authority still pass, including a query, a fragment,
-    // userinfo, and a non-ASCII host the parser punycodes (the value forwarded to the
-    // server is still the original string — the parse is only used to ask the question).
+    // userinfo, and a non-ASCII host. `ui:` is a NON-SPECIAL scheme, so WHATWG parses an
+    // OPAQUE host and percent-encodes it (`%EC%95%B1`) — punycode is what a special
+    // scheme like `https:` would do (`xn--rf5b`). Named precisely because a later reader
+    // reasoning about host comparison would be misled by the wrong mechanism, and the
+    // assertion passes either way so nothing would catch it.
+    //
+    // Either way the value forwarded to the server is the original string — the parse is
+    // only ever used to ask the question.
     for (const uri of [
       "ui://app/panel.html?q=1#top",
       "ui://user@host/x",
@@ -101,6 +107,12 @@ describe("isMcpAppUiUri", () => {
     expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x0a)}.html`)).toBe(false);
     expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x09)}.html`)).toBe(false);
     expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x00)}.html`)).toBe(false);
+    // These two are the ones that prove the char rule sees the RAW value. WHATWG strips
+    // tab/LF/CR from its input before parsing, so both parse to the hostname `app` and
+    // satisfy the authority check on their own — only the pre-parse check refuses them.
+    // A future edit validating the parsed form instead would turn these green.
+    expect(isMcpAppUiUri(`ui://ap${String.fromCodePoint(0x09)}p/x`)).toBe(false);
+    expect(isMcpAppUiUri(`ui://app/pa${String.fromCodePoint(0x0d)}nel.html`)).toBe(false);
     // …and the RFC 3986 excluded set, which is what stops a URI closing a fence it is
     // interpolated into.
     for (const ch of ['"', "<", ">", "\\", "^", "`", "{", "}", "|"]) {
