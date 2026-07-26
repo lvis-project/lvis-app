@@ -259,40 +259,40 @@ check("never reports a __tests__ file", !nonTestEntries(ENTRIES).some((f) => f.i
 check("never reports a __probes__ file", !nonTestEntries(ENTRIES).some((f) => f.includes("__probes__")));
 check("never reports a test/ file", !nonTestEntries(ENTRIES).some((f) => f.startsWith("test/")));
 
-// ── The two configs must not share an incremental cache.
+// ── The gate must not use an incremental compiler.
 //
-// `tsconfig.tests.json` inherits from `tsconfig.json`, which sets
-// `tsBuildInfoFile: "./.cache/tsc/typecheck.tsbuildinfo"`. Inheriting it made two DIFFERENT
-// programs — production sources, and this much wider set — share one cache, and the
-// measurement then depended on which config ran last: root-then-gate reported 1,626 errors,
-// gate-then-gate reported 1,625. Stable under each ordering, so it did not look like a race;
-// it looked like a real change in the code.
+// `tsconfig.tests.json` inherits from `tsconfig.json`, which sets `incremental: true`. That
+// made this gate's error count depend on compiler cache state rather than on the source:
+// tsc caches per-file diagnostics and does not re-emit unused-import diagnostics
+// (TS6192/TS6196) for a file it considers unchanged, so `internal-api-surface.ts` reported 3
+// errors cold and 2 warm — 1,626 vs 1,625 overall.
 //
-// The override is documented in that file as required-not-preferred, but a comment cannot
-// fail. This can. It exists because the override sits one commit after every other
-// compilerOption was deliberately removed from that config, so "finish the cleanup" is the
-// natural next edit and would silently restore an order-dependent ratchet.
+// An earlier attempt gave this project its own `tsBuildInfoFile` and claimed the problem
+// solved. It was not: separating the cache files fixed only the shared-file case, and a run
+// with different `lib` settings over the same files still produced 1,625. The claim had been
+// verified against three orderings, none of which covered that. Hence the assertion below is
+// on `incremental` itself, which removes the class rather than one instance of it.
+//
+// This lives in the self-test rather than the gate because it protects the gate's own
+// correctness, not its failure taxonomy — and it exists at all because the override sits
+// among comments explaining why this config should diverge from the root as little as
+// possible, so "finish the cleanup" is the natural next edit. A comment cannot fail; this can.
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-function buildInfoPathOf(configName) {
+function compilerOptionsOf(configName) {
   const text = readFileSync(resolve(ROOT_DIR, configName), "utf8");
-  // These two files use only whole-line `//` comments (45 of them in the tests config, none
-  // trailing). Stripping those is enough, and if it ever is not, extraction yields undefined
-  // and the checks below go RED rather than silently passing.
+  // Both files use only whole-line `//` comments — checked, not assumed (45 in the tests
+  // config, none trailing). If that ever stops being true, JSON.parse throws and this goes
+  // RED rather than silently passing. That direction is deliberate.
   const stripped = text
     .split(/\r?\n/)
     .filter((line) => !/^\s*\/\//.test(line))
     .join("\n");
-  return JSON.parse(stripped)?.compilerOptions?.tsBuildInfoFile;
+  return JSON.parse(stripped)?.compilerOptions ?? {};
 }
-const rootBuildInfo = buildInfoPathOf("tsconfig.json");
-const testsBuildInfo = buildInfoPathOf("tsconfig.tests.json");
-check("the root config declares a tsBuildInfoFile", typeof rootBuildInfo === "string");
-check("the tests config overrides tsBuildInfoFile", typeof testsBuildInfo === "string");
-check(
-  "the two configs do not share an incremental cache",
-  Boolean(rootBuildInfo) && Boolean(testsBuildInfo) && rootBuildInfo !== testsBuildInfo,
-);
-
+const rootOptions = compilerOptionsOf("tsconfig.json");
+const testsOptions = compilerOptionsOf("tsconfig.tests.json");
+check("the root config is incremental (the thing being overridden)", rootOptions.incremental === true);
+check("the tests config disables incremental", testsOptions.incremental === false);
 if (failures.length > 0) {
   process.stderr.write(
     `[test-typecheck-self-test] the gate is not detecting what it claims:\n  ${failures.join("\n  ")}\n`,
