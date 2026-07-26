@@ -60,9 +60,11 @@ build/tray-iconTemplate.png
 build/tray-iconTemplate@2x.png
 main.js
 
-# Test-run residue: teardown races can leave these behind (see
-# __drainPersistentWritesForTest). Ignored so a leaked directory does not read as an
-# untracked source change.
+# Test-run residue: teardown races can leave these behind. Written by
+# src/audit/__tests__/dlp-stats.test.ts and
+# src/plugins/__tests__/artifact-store-test-helpers.ts, which create them under
+# `process.cwd()` rather than the OS temp dir. Ignored so a leaked directory does not read as
+# an untracked source change.
 /.artifact-store-*/
 /.lvis-audit-test-*/
 /.lvis-dlp-stats-*/

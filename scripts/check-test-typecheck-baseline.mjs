@@ -23,56 +23,52 @@
  * has already been bitten by `grep "error TS"` silently matching nothing because of the
  * escape codes. The flag gives one plain `file(line,col): error TSxxxx: msg` per line.
  *
- * FAILING CLOSED IS THE HARD PART HERE, and it is why this gate carries three checks that
- * the repo's other two baseline gates do not need. `check-knip-baseline.mjs` parses JSON, so
- * an unrunnable tool yields empty stdout and `JSON.parse` throws; `check-cluster-scope.mjs`
- * treats any nonzero exit as failure. Both get fail-closed behaviour for free. This gate can
- * use NEITHER mechanism: `tsc` exits nonzero precisely when it succeeds at finding the errors
- * being measured, and the output is plain text, so there is no parse step to throw on
- * emptiness. Silence is indistinguishable from success unless something says otherwise.
+ * FAILING CLOSED IS THE HARD PART HERE, and it is why this gate carries two refusals that the
+ * repo's other two baseline gates do not need. `check-knip-baseline.mjs` parses JSON, so an
+ * unrunnable tool yields empty stdout and `JSON.parse` throws; `check-cluster-scope.mjs` treats
+ * any nonzero exit as failure. Both get fail-closed behaviour for free. This gate can use
+ * NEITHER mechanism: `tsc` exits nonzero precisely when it succeeds at finding the errors being
+ * measured, and the output is plain text, so there is no parse step to throw on emptiness.
+ * Silence is indistinguishable from success unless something says otherwise.
  *
- * Every row below was reproduced against this gate. The first was found by a security
- * reviewer, who then independently re-derived the whole table and corrected three of my
- * claims about it — the corrections are folded in, including the config shapes, because a
- * scenario described too loosely for someone else to reproduce is not evidence.
+ * Every row below was reproduced against this gate, by me and independently by two reviewers
+ * who between them corrected the config shapes, the co-occurrence claim, and the custody claim.
  *
- *   scenario                                    tsc  output shape              fires
- *   ------------------------------------------  ---  ------------------------  --------------
- *   `tsc.js` missing or moved                     1  node module-resolution    EMPTY (sole)
- *   EXTENDING config, `files:[]`+`include:[]`     0  NOTHING AT ALL            EMPTY (sole)
- *   STANDALONE config, `files:[]`                 2  attributed TS18002        NON-SOURCE (sole)
- *   unknown compiler option (TS5023)              1  attributed + REAL errors  NON-SOURCE (sole)
- *   rootDir violation (TS6059)                    1  unattributed, column 0    UNATTRIBUTED+EMPTY
- *   no inputs / missing -p / missing @types     1-2  unattributed, column 0    UNATTRIBUTED+EMPTY
+ *   scenario                                    tsc  output shape              refused by
+ *   ------------------------------------------  ---  ------------------------  ------------
+ *   `tsc.js` missing or moved                     1  node module-resolution    EMPTY
+ *   EXTENDING config, `files:[]`+`include:[]`     0  NOTHING AT ALL            EMPTY
+ *   rootDir violation (TS6059)                    1  unattributed, column 0    EMPTY
+ *   no inputs / bad lib / absent file / @types  1-2  unattributed, column 0    EMPTY
+ *   STANDALONE config, `files:[]`                 2  attributed TS18002        NON-SOURCE
+ *   unknown option (TS5023), bad target (TS6046)  1  attributed + REAL errors  NON-SOURCE
  *
- * Row 2 is the reason emptiness must be checked at all: a config that silently checks
- * nothing exits ZERO with no output, so neither the status nor the text can betray it. Note
- * it needs an EXTENDING config — a standalone `files:[]` gives row 3 instead, exit 2 with an
- * attributed TS18002. Both are real; naming only "files and include are empty" left the
- * reviewer unable to reproduce row 2 and reasonably concluding I had mis-derived it.
+ * Row 2 is the reason emptiness must be checked at all: a config that silently checks nothing
+ * exits ZERO with no output, so neither the status nor the text can betray it. It needs an
+ * EXTENDING config — a standalone `files:[]` gives the attributed row instead.
  *
- * Config errors split into two classes, and the split matters:
- *   - UNATTRIBUTED (TS6059, TS18003, TS5058, TS2688) SUPPRESSES the program. tsc aborts
- *     before semantic checking, so none of the genuine type errors are reported and the
- *     measurement is empty.
- *   - ATTRIBUTED (TS5023, TS18002) does NOT suppress it. TS5023 arrives ALONGSIDE the real
- *     per-file diagnostics — verified. So "a config error makes tsc report the config
- *     instead of the program" is true only of the first class. An earlier version of this
- *     comment stated it absolutely, which contradicted `nonSourceMeasurements`' own
- *     (correct) account of the same row.
+ * WHY TWO REFUSALS AND NOT THREE. Config errors split into two classes, and the split is
+ * mechanical rather than incidental:
+ *   - UNATTRIBUTED diagnostics mean PROGRAM CONSTRUCTION failed — an unresolvable root file, a
+ *     missing type root, a rootDir violation, no inputs. tsc aborts before the semantic pass,
+ *     so the measurement is NECESSARILY empty and EMPTY necessarily catches it. Measured across
+ *     six shapes: every unattributed one reported zero real per-file diagnostics.
+ *   - ATTRIBUTED config diagnostics are option VALIDATION failures. They do not stop program
+ *     construction, so checking proceeds and real per-file errors arrive alongside them —
+ *     verified for TS5023 and TS6046. NON-SOURCE is what catches those, via the `tsconfig.json`
+ *     path appearing in the measurement.
  *
- * Consequently, and contrary to what this comment used to claim, the three checks do NOT
- * each own exactly one row. EMPTY and NON-SOURCE each have sole custody of two rows. But
- * UNATTRIBUTED has sole custody of NOTHING: because its whole class suppresses the program,
- * EMPTY fires on every row it fires on. Neither the reviewer nor I could construct an
- * unattributed diagnostic co-occurring with real ones.
+ * So an earlier third refusal on unattributedness owned no row: it could only fire where EMPTY
+ * already did. Because the classes are asymmetric, "the sibling class co-occurs, so this one
+ * plausibly can" does not transfer, which left only insurance — the layered-defence argument
+ * this repo rejects. `unattributedDiagnostics` survives as a MESSAGE ENRICHER inside the EMPTY
+ * refusal: "the compiler did not run" is useless for a rootDir violation, and printing the
+ * program-level lines was the one real benefit the third check had.
  *
- * It is kept anyway, for two reasons that are not coverage: it produces a far better
- * diagnosis (it prints the program-level diagnostics, where EMPTY can only say "the compiler
- * did not run" — useless for a rootDir violation), and the attributed class proves
- * co-occurrence is real in the sibling class, so an unattributed shape that co-occurs is
- * plausible rather than impossible. That is insurance against an unobserved shape, and this
- * comment says so rather than implying custody it does not have.
+ * KNOWN HOLE, not covered by either refusal: a config that NARROWS the program still passes.
+ * Measure one file out of a baselined 312 and the comparison reports 311 "fixed" at exit 0.
+ * The fix is a coverage check — every baselined file measured, or provably gone from disk —
+ * which subsumes both refusals; see the follow-up.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -197,18 +193,20 @@ export function nonSourceMeasurements(counts) {
 /**
  * Diagnostics tsc attributed to no file at all.
  *
- * ASK THE SHAPE, DO NOT LIST THE CODES. This replaced a `TS5\d{3}|TS18003` test after a
- * reviewer asked what happens to config codes outside that set. A diagnostic with no
- * `file(line,col)` span is not about a file, it is about the program — and the per-file
- * parser drops it silently, so without this the gate measures nothing and says so in the
- * language of success. Verified against real output: `error TS6059: File '…' is not under
- * 'rootDir'` begins at column zero with no span, while genuine per-file diagnostics always
- * carry one.
+ * NOT a refusal — a MESSAGE ENRICHER for the empty-measurement refusal in `main()`. It was a
+ * third refusal until an architect reviewer showed it owned no failure shape: unattributedness
+ * means program construction failed, tsc aborts before the semantic pass, and the measurement
+ * is therefore always empty, so EMPTY always fires too. Measured across six config shapes.
  *
- * Pure and exported for one reason: the rule previously lived inline in `runTsc`, where the
- * self-test could not reach it without spawning a compiler, so it was verified only by hand
- * with throwaway configs. An unpinned rule is an untested rule. Here it is the same function
- * the runner calls, pinned against real tsc text.
+ * ASK THE SHAPE, DO NOT LIST THE CODES. This replaced a `TS5\d{3}|TS18003` test after a
+ * reviewer asked what happens to codes outside that set. A diagnostic with no
+ * `file(line,col)` span is not about a file, it is about the program — verified: `error
+ * TS6059: File '…' is not under 'rootDir'` begins at column zero with no span, while genuine
+ * per-file diagnostics always carry one. Covers present and future config codes without
+ * naming any.
+ *
+ * Pure and exported so the self-test pins the same function the runner calls; it previously
+ * lived inline in `runTsc`, where the self-test could not reach it.
  */
 export function unattributedDiagnostics(tscStdout) {
   return tscStdout.split(/\r?\n/).filter((line) => /^error TS\d+:/.test(line));
@@ -237,16 +235,17 @@ function runTsc() {
     throw new Error(`tsc exited ${result.status}\n${result.stdout}${result.stderr}`);
   }
   const stdout = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-  // Catches config errors that are EMITTED AND UNATTRIBUTED — not "every config code",
-  // which is what an earlier draft of this comment claimed. The other shapes are covered by
-  // the other two checks; see the matrix in the module docstring for which catches what.
-  const unattributed = unattributedDiagnostics(stdout);
-  if (unattributed.length > 0) {
-    throw new Error(
-      "tsc reported program-level errors, so the per-file measurement is not trustworthy:\n"
-      + `${unattributed.join("\n")}\n\nFull output:\n${stdout}`,
-    );
-  }
+  // NO refusal here. `unattributedDiagnostics` is still used — but to ENRICH the
+  // empty-measurement refusal's message in `main()`, not as a gate of its own. An architect
+  // reviewer showed why, with six config shapes measured against real tsc and reproduced
+  // here: unattributedness IS program-construction failure (an unresolvable root file, a
+  // missing type root, a rootDir violation, no inputs), so tsc aborts before the semantic
+  // pass and the measurement is NECESSARILY empty — EMPTY always co-fires. Attributed config
+  // diagnostics are option-VALIDATION failures, which do not stop program construction, so
+  // checking proceeds and NON-SOURCE catches them. The classes are asymmetric, so "the
+  // sibling class co-occurs, therefore this one plausibly can" does not transfer, and the
+  // only remaining argument for a third refusal was insurance — which is the layered-defence
+  // argument this repo rejects.
   return stdout;
 }
 
@@ -300,7 +299,8 @@ export function readBaselineFilesOrEmpty(path = BASELINE) {
 
 function main() {
   const update = process.argv.includes("--update-baseline");
-  const counts = countErrorsByFile(runTsc());
+  const tscStdout = runTsc();
+  const counts = countErrorsByFile(tscStdout);
 
   // Before comparing OR writing: a measurement attributed to something that is not a
   // TypeScript source means the compiler was diagnosing the configuration, not the code.
@@ -330,10 +330,19 @@ function main() {
   if (isEmptyMeasurementAgainstBaseline(counts, onDiskFiles)) {
     // Wording covers both callers: `update` is about to overwrite, `compare` is about to
     // report. Saying only "refusing to overwrite" misdescribes half the runs.
+    //
+    // Program-level diagnostics are appended rather than checked separately. "The compiler did
+    // not run" is useless for a rootDir violation, and these lines say exactly what went wrong
+    // — which was the one real argument for having a third refusal. Folding it into the
+    // message keeps the diagnosis and drops the speculative layer.
+    const programLevel = unattributedDiagnostics(tscStdout);
     throw new Error(
       "tsc produced no diagnostics while the committed baseline expects them — the compiler"
       + " did not run. Refusing to treat that as an improvement or to write it to the"
-      + " baseline.",
+      + " baseline."
+      + (programLevel.length > 0
+        ? `\n\ntsc reported these program-level errors:\n${programLevel.join("\n")}`
+        : `\n\ntsc produced no program-level errors either. Full output:\n${tscStdout}`),
     );
   }
 
