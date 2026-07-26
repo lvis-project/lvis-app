@@ -1567,6 +1567,69 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await noApps.client.disconnect();
   });
 
+  it("readResource: refuses any URI that is not the Apps path, before the request", async () => {
+    // The hole a cluster review found, closed here. `resources/read` is ONE wire method
+    // serving two host paths: `readDeclaredResource`, gated on the listed set, and this
+    // one. The renderer picks the URI on this path, and nothing in MAIN checked it — the
+    // `ui://` restriction lived only in the renderer's bridge handler, which is the side
+    // the threat model assumes is compromised. Governance could not close it either: it
+    // sees one method and cannot tell the callers apart, so a non-`ui:` URI fell through
+    // to requiring `resources`, which any resource-publishing server holds.
+    //
+    // Net effect before the fix: a compromised renderer could read ANY URI from ANY
+    // connected external server.
+    // The fixture server holds `resources`, deliberately. `rcHttpClient` approves only
+    // `tools`, and on such a server governance already denied `file:`/`https:`/`doc:`
+    // for lacking the capability — so a tools-only fixture would have "passed" against
+    // the pre-fix code for a reason that has nothing to do with this gate. The
+    // exploitable class was a server approved for `resources`, which is most of them.
+    let reads = 0;
+    const url = "https://api.example.com/apps-scheme/mcp";
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      const method = readRpcMethod(init);
+      const id = readRpcId(init) ?? 0;
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "resources/list") return jsonRpcResponse(id, { resources: [] });
+      if (method === "resources/read") {
+        reads += 1;
+        return jsonRpcResponse(id, {
+          contents: [{ uri: "ui://app/p.html", text: "<h1>app</h1>" }],
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    }));
+    const client = new McpClient(
+      { id: "apps-scheme", transport: "http", url },
+      governanceWithPolicy(buildPolicy([httpApproval("apps-scheme", url, {
+        allowedCapabilities: ["tools", "resources"] as McpGovernancePolicy["servers"][number]["allowedCapabilities"],
+      })])),
+      new ToolRegistry(),
+    );
+    await client.connect();
+
+    for (const uri of [
+      "file:///etc/passwd",
+      "file:///C:/Users/me/.ssh/id_rsa",
+      "https://internal.example.com/admin",
+      "doc:1",
+      "UI://app/p.html",
+      "ui:///p.html",
+    ]) {
+      await expect(client.readResource(uri), uri).rejects.toThrow(/ui:\/\/ resources only/);
+    }
+    // Not one request left the host for any of them — and on THIS server governance
+    // would have let every one of them through.
+    expect(reads).toBe(0);
+
+    // …and the path it exists to serve still works.
+    const ok = await client.readResource("ui://app/p.html");
+    expect(ok.html).toBe("<h1>app</h1>");
+    expect(reads).toBe(1);
+    await client.disconnect();
+  });
+
   it("MRTR runaway guard: a server stuck on input_required fails after the round bound", async () => {
     const resolver = vi.fn(async () => ({ action: "accept" }));
     const { client } = rcHttpClient(

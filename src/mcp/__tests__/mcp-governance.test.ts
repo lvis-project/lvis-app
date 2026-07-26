@@ -577,6 +577,28 @@ describe("McpGovernance — per-request capability gate (governance-per-request)
     ).toBe(false);
   });
 
+  it("decides the ui:// exemption with the SAME predicate the client enforces", () => {
+    // This exemption is what lets a read skip the `resources` capability, and
+    // `McpClient.readResource` is what refuses a read that is not the Apps path. They
+    // answer one question, so they share one predicate — a URI exempted here that the
+    // client then refuses is a dead request, and one the client would serve but this
+    // refuses breaks MCP Apps on a tools-only server.
+    const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools"] }));
+    const exempt = (uri: unknown) =>
+      gov.validateRequestCapability("browser-use", "resources/read", { uri }).valid;
+
+    // Malformed Apps URIs no longer buy the exemption. They fall through to needing
+    // `resources`, which this tools-only server does not have — the safe direction, and
+    // the client refuses them too, so nothing that used to work stops working.
+    expect(exempt("ui://")).toBe(false);
+    expect(exempt("ui:///panel.html")).toBe(false);
+    expect(exempt("UI://app/panel.html")).toBe(false);
+    expect(exempt("ui:panel.html")).toBe(false);
+    expect(exempt(42)).toBe(false);
+    // …and the real thing still is exempt.
+    expect(exempt("ui://app/panel.html")).toBe(true);
+  });
+
   it("tasks methods ride the tools capability", () => {
     const denied = governanceWithPolicy(basePolicy({ allowedCapabilities: ["resources"] }));
     expect(denied.validateRequestCapability("browser-use", "tasks/get").valid).toBe(false);
