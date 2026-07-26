@@ -79,6 +79,58 @@ export function isUsableMcpServerId(value: unknown): value is string {
 }
 
 /**
+ * The ONLY scheme reachable through the MCP-Apps read path, and the one rule that
+ * decides it.
+ *
+ * Before this existed the string `"ui://"` appeared as a bare `startsWith` in four
+ * places — the renderer's bridge handler, `window-manager`'s detach validation,
+ * governance's capability short-circuit, and nowhere at all in the one place that
+ * mattered: `McpClient.readResource`, which issues the request. A cluster review found
+ * the consequence. `resources/read` is ONE wire method serving two host paths with
+ * different gates — `readDeclaredResource` (listed-set) and `readResource` (Apps) — so a
+ * renderer that named a non-`ui:` URI on the Apps path reached a read that neither gate
+ * covered: the listed-set check belongs to the other method, and governance, unable to
+ * tell the two callers apart, fell through to requiring `resources`, which any
+ * resource-publishing server has.
+ *
+ * Kept case-SENSITIVE and authority-REQUIRING on purpose. Governance grants the Apps
+ * path WITHOUT the `resources` capability, so this predicate decides what skips a
+ * capability check; anything it rejects merely falls back to the ordinary rule, which is
+ * the safe direction. Matching case-insensitively would have widened that exemption, and
+ * every other consumer (`mcpAppViewKey`, the proxy, the partition policy) compares the
+ * literal lowercase form anyway.
+ */
+export const MCP_APP_UI_SCHEME = "ui://";
+
+/** Same bound as a resource URI: these are interpolated into the same audit rows. */
+const MCP_APP_UI_URI_MAX_CHARS = 2048;
+
+// Control characters, whitespace and the invisible/reordering class are refused for the
+// reason the resource URI rule refuses them: this string is an identifier that reaches a
+// log line and a card's provenance, and a right-to-left override inside one renders it as
+// something it is not. Same class as `display-safe-text`, spelled escaped because a raw
+// control byte in source is itself refused by `check-source-text-safe`.
+const UI_URI_FORBIDDEN_RE = /[\u0000-\u0020\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
+
+/**
+ * Is this a URI the MCP-Apps read path will serve?
+ *
+ * Fail-closed: a caller that cannot answer yes has no business on this path, and the
+ * ordinary declared-resource read (with its listed-set gate) is where it belongs.
+ */
+export function isMcpAppUiUri(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  if (value.length === 0 || value.length > MCP_APP_UI_URI_MAX_CHARS) return false;
+  if (!value.startsWith(MCP_APP_UI_SCHEME)) return false;
+  // An authority must be present: `ui://` alone names nothing, and `ui:///x` has an
+  // empty one, which the plugin arm's authority parse already refuses on its own side.
+  if (value.length === MCP_APP_UI_SCHEME.length || value[MCP_APP_UI_SCHEME.length] === "/") {
+    return false;
+  }
+  return !UI_URI_FORBIDDEN_RE.test(value);
+}
+
+/**
  * Injective encoding of a serverId to a `[0-9a-f]` token: the lowercase hex of
  * its UTF-8 bytes. Distinct serverIds always yield distinct tokens. Fail-closed
  * on an empty or over-length id (No-Fallback).
