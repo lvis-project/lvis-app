@@ -384,15 +384,6 @@ export function useResourceMention({
     if (!trigger || !mcp) return;
     const item = items[index ?? activeIndex];
     if (!item) return;
-    // Both channels are optional in the type, so this narrowing is what the calls below
-    // are made through — the guard proves the capability rather than restating a promise
-    // the type already made. That is the difference between it and dead code.
-    const attachResource = mcp.attachResource;
-    const attachTemplate = mcp.attachResourceTemplate;
-    if (item.target.kind === "template" ? !attachTemplate : !attachResource) {
-      onError(t("composer.resourceAttachFailed"));
-      return;
-    }
     // A row the read would refuse says so instead of spending a round-trip to fail.
     if (item.unavailableReason) {
       onError(item.unavailableReason);
@@ -409,6 +400,16 @@ export function useResourceMention({
     const range = { start: trigger.start, end: trigger.end };
     const mentionToken = text.slice(trigger.start, trigger.end);
     if (item.target.kind === "template") {
+      // Resolved INSIDE the branch, so the narrowing the call needs is the same
+      // expression that decided the capability is there. Hoisting it above the branch
+      // needed a second unreachable `if` further down, purely because a ternary does not
+      // narrow across statements — and an unreachable silent `return` three lines from a
+      // silent-drop bug is how the next reader gets confused about which one is real.
+      const attachTemplate = mcp.attachResourceTemplate;
+      if (!attachTemplate) {
+        onError(t("composer.resourceAttachFailed"));
+        return;
+      }
       // No read yet — a template is an offer. The menu is dismissed here so it is not
       // sitting open behind the dialog, and the position is captured now because the
       // user is about to spend time in a form.
@@ -424,7 +425,11 @@ export function useResourceMention({
       return;
     }
     const uri = item.target.uri;
-    if (!attachResource) return;
+    const attachResource = mcp.attachResource;
+    if (!attachResource) {
+      onError(t("composer.resourceAttachFailed"));
+      return;
+    }
     runAttach(
       { serverId: item.serverId, label: item.label, uri, range, mentionToken },
       () => attachResource(item.serverId, uri),

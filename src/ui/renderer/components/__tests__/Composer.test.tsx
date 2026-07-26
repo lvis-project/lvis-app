@@ -1011,11 +1011,35 @@ describe("Composer — @ resource mention", () => {
     expect(screen.getByTestId("attachment-chip")).toBeTruthy();
   });
 
+  it("still opens the form when the RESOURCE channel is the missing one", async () => {
+    // THE direction the old code got wrong, and the one my first version of this test
+    // did not exercise. Before the per-kind guard, `accept` opened with
+    // `if (!trigger || !mcp?.attachResource) return` — so with `attachResource` absent, a
+    // TEMPLATE row hit that outer guard and returned silently: no dialog, no message,
+    // nothing. Deleting the OTHER channel (below) cannot catch it, because that pairing
+    // was already handled by an inner check.
+    installMcpApi({ listResourceTemplates: templateCatalogue() as never });
+    (window as unknown as { lvis: { mcp: Record<string, unknown> } })
+      .lvis.mcp.attachResource = undefined;
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@proj");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+
+    // Old code: silent return, no dialog. Current: the template row does not need the
+    // resource channel at all.
+    expect(screen.getByTestId("mcp-resource-template-dialog")).toBeTruthy();
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
   it("reports rather than silently doing nothing when a channel is absent", async () => {
-    // The guard is per KIND, and both channels are optional in the type so it is
-    // reachable rather than dead code. Without it the menu accepts the keypress and
-    // nothing happens at all, which reads as a broken app instead of an absent
-    // capability.
+    // The other pairing. Kept alongside the one above because it is what catches a
+    // "guard both kinds on both channels" mutation: that would block the resource row
+    // too, turning the positive assertion at the end red.
     const { attachResource } = installMcpApi({ listResourceTemplates: templateCatalogue() as never });
     (window as unknown as { lvis: { mcp: Record<string, unknown> } })
       .lvis.mcp.attachResourceTemplate = undefined;
