@@ -45,21 +45,26 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // `maxRetries` is MITIGATION for an unexplained flake, and saying so matters, because
-  // this file does NOT share the root cause that the executor teardown fixes.
+  // `maxRetries` is MITIGATION for an unexplained flake, and saying so matters, because the
+  // obvious fix does not apply here.
   //
-  // There it was a real un-awaited writer: `recordApproval` resolves when the write is
-  // queued, so the write outlived the test and `rmSync` deleted the tree under it. The fix
-  // is to await the queue (`__drainPersistentWritesForTest`), and awaiting is possible
-  // because the writer is ours.
+  // Every logger in this file is constructed synchronously in a test body and only ever has
+  // `search()` called on it, and `search()` enqueues nothing — it only reads. So
+  // `AuditLogger.flush()`, which does exist, would have nothing to drain, and the only
+  // writers are the constructor's `mkdirSync` and this file's synchronous `writeJsonl`. Do
+  // not "improve" this into a flush call; it would be a no-op dressed as a fix.
   //
-  // Here there is no queued write to await at all. Every logger in this file is constructed
-  // synchronously in a test body and only ever has `search()` called on it, and `search()`
-  // enqueues nothing — so `AuditLogger.flush()`, which does exist, would have nothing to
-  // drain. The only writers are the constructor's `mkdirSync` and this file's synchronous
-  // `writeJsonl`. Whatever produces the occasional ENOTEMPTY is below that, at the
-  // filesystem, and retries are the honest response to it. Do not "improve" this into a
-  // drain call; it would be a no-op dressed as a fix.
+  // An earlier version of this comment contrasted the above with the executor teardown,
+  // describing that one as a real un-awaited `recordApproval` whose write outlived the test.
+  // That contrast was built on a false premise and is gone: `mutatePersistentApprovals`
+  // RETURNS the promise covering `readApprovalsFile → mutator → atomicWrite`, and
+  // `recordApproval` awaits it, so an awaited call has already landed. The writer that
+  // actually raced there was an unflushed `AuditLogger` the executor constructs implicitly —
+  // which makes it the same KIND of writer as this file's, just one that is actually written
+  // to. See that file's `beforeEach`.
+  //
+  // What remains unexplained is only this file's occasional ENOTEMPTY, and retries are the
+  // honest response to something not yet demonstrated.
   //
   // Restoring the mock AFTER removal, not before: an earlier version did the reverse and
   // claimed it aimed a late construction at the real home rather than the tree being
