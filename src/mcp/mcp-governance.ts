@@ -340,12 +340,18 @@ export class McpGovernance {
     // tool result and have the host fetch the `ui://` resource, so this read must
     // NOT require `resources` (would break MCP Apps for every tools-only server).
     //
-    // Decided by the SHARED predicate, not a local `startsWith`. This exemption and the
-    // scheme check in `McpClient.readResource` are the same question — "is this the Apps
-    // path?" — and they must not be able to answer it differently. A URI this accepts but
-    // the client refuses is a dead request; one the client accepts but this refuses falls
-    // through to needing `resources`, which would break Apps on a tools-only server. One
-    // definition, so neither can happen.
+    // Decided by the SHARED predicate, not a local `startsWith`. Precisely, the question
+    // asked here is "is this URI in the Apps namespace?" — NOT "is this the Apps caller",
+    // which governance cannot see: it is handed a method, so a `resources/read` issued by
+    // `readDeclaredResource` for a listed `ui://` URI is exempted too. That residual is
+    // unreachable rather than tolerated — `state.resources` is only ever populated by
+    // `discoverResources`, which returns early unless `resources` was approved, so a
+    // server without the capability has no listed URI to name.
+    //
+    // The predicate is shared with the scheme check in `McpClient.readResource` because
+    // both turn on that same namespace answer and must not differ: a URI this exempts but
+    // the client refuses is a dead request; one the client would serve but this refuses
+    // falls through to needing `resources`, which breaks Apps on a tools-only server.
     if (method === "resources/read" && isMcpAppUiUri(params?.uri)) {
       return { valid: true };
     }
