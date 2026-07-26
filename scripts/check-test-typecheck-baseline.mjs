@@ -151,6 +151,16 @@ export function compareToBaseline(counts, baseline) {
  *
  * Exported so the self-test pins THIS function rather than a restatement of it — a
  * re-spelled condition in the test is how a guard and its test drift apart.
+ *
+ * KNOWN LIMIT, stated because both reviewers reached for it independently and neither could
+ * make it reachable: this is a BOUNDARY check, not a coverage check. A PARTIAL measurement —
+ * one file parsed, the other 311 silently absent — passes it, and the comparison then reports
+ * 311 files "fixed" at exit 0. Nobody has produced a tsc invocation that truncates that way:
+ * config errors suppress the program entirely (empty, caught here), and the one realistic
+ * truncation route, output exceeding `maxBuffer`, sets `result.error`, which `runTsc` throws
+ * on. So it is theoretical rather than a defect — but it is a real hole in what this function
+ * can promise, and the next person should not read `counts.size === 0` as "the measurement is
+ * complete".
  */
 export function isEmptyMeasurementAgainstBaseline(counts, baselineFiles) {
   return counts.size === 0 && Object.keys(baselineFiles).length > 0;
