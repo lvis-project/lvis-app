@@ -107,10 +107,17 @@ describe("isMcpAppUiUri", () => {
     expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x0a)}.html`)).toBe(false);
     expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x09)}.html`)).toBe(false);
     expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x00)}.html`)).toBe(false);
-    // These two are the ones that prove the char rule sees the RAW value. WHATWG strips
-    // tab/LF/CR from its input before parsing, so both parse to the hostname `app` and
-    // satisfy the authority check on their own — only the pre-parse check refuses them.
-    // A future edit validating the parsed form instead would turn these green.
+    // The char rule must see the RAW value, and these two probe it most directly. WHATWG
+    // strips tab/LF/CR from its input before parsing, so both parse to the hostname `app`
+    // and satisfy the authority check on their own — only the pre-parse check refuses
+    // them. A future edit validating the parsed form instead would turn these RED, which
+    // is the point: they are what stands between that edit and the regression.
+    //
+    // Not the only ones — space, LF and NUL above detect it too. Said that way because an
+    // earlier version claimed these two carried it alone, which would invite deleting the
+    // others, and because it first said "green" for what makes them fail. A comment that
+    // misstates which way a test moves is worse than none: it reports an invariant as
+    // unprotected when it is protected.
     expect(isMcpAppUiUri(`ui://ap${String.fromCodePoint(0x09)}p/x`)).toBe(false);
     expect(isMcpAppUiUri(`ui://app/pa${String.fromCodePoint(0x0d)}nel.html`)).toBe(false);
     // …and the RFC 3986 excluded set, which is what stops a URI closing a fence it is
