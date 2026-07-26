@@ -1279,11 +1279,13 @@ export class WindowManager {
       // TWO arms with different rules: the external one enforces that predicate, but the
       // plugin/loopback one goes through `plugin-ui-resource-provider`, whose gate is
       // declared-set membership plus the manifest pattern `^ui://[a-z0-9][a-z0-9.-]*/.+`.
-      // That pattern is NARROWER than the predicate in most respects — the gap is only
-      // that regex `.` admits control characters — so tightening here would break very
-      // little in practice. It is still the wrong direction: detach would refuse a
-      // plugin card that the serve path then renders inline, which is worse than the
-      // reverse. (Two reviewers checked this; the earlier wording overstated the gap.)
+      // That pattern is narrower in the ways that matter (lowercase authority required,
+      // path required) and far LOOSER in others: it has no `$` anchor, so `.+` need match
+      // only one character and everything after it is unconstrained. A reviewer measured
+      // it admitting all eighteen characters this predicate refuses, LF and CR included.
+      // So tightening detach alone would refuse plugin cards the serve path still renders
+      // inline — the worse direction of harm. (Two earlier versions of this sentence each
+      // mis-sized that gap, in opposite directions.)
       //
       // Nothing here resolves or interpolates the URI: it is stored under a host-minted
       // viewKey and handed to the detached renderer, which reads through the same gated

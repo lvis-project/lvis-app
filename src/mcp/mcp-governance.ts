@@ -355,7 +355,8 @@ export class McpGovernance {
     // server's capabilities without disconnecting it, and the catalogue is cleared only
     // on teardown — so previously-listed URIs would outlive the approval. A reviewer
     // found that hole in the reasoning; the scheme argument is immune to it.
-    //    // The predicate is shared with the scheme check in `McpClient.readResource` because
+    //
+    // The predicate is shared with the scheme check in `McpClient.readResource` because
     // both turn on that same namespace answer and must not differ: a URI this exempts but
     // the client refuses is a dead request; one the client would serve but this refuses
     // falls through to needing `resources`, which breaks Apps on a tools-only server.
