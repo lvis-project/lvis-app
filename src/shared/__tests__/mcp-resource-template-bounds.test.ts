@@ -66,7 +66,9 @@ describe("isUsableResourceUriTemplate", () => {
     }
     // Nested braces are the case where the COUNTS agree (one loose run, one strict match)
     // — the skeleton is what refuses it, because a leftover brace is not a legal URI
-    // character. Both halves of the predicate earn their keep on different inputs.
+    // character. Every fixture above dies at the skeleton too; this one isolates it, and
+    // nothing here isolates the count check, which the module comment says outright is
+    // redundant in practice and kept for the reason stated there.
     expect(isUsableResourceUriTemplate("file:///{a{b}")).toBe(false);
   });
 
