@@ -1,5 +1,9 @@
 /**
- * MCP-app partition naming — shared between main and renderer (#885 axis b).
+ * MCP-app identity rules — shared between main and renderer (#885 axis b).
+ *
+ * Partition naming is the original concern and most of this file; it also holds the two
+ * other things every MCP-app surface must agree on: what a server id may be
+ * ({@link isUsableMcpServerId}) and what a card URI may be ({@link isMcpAppUiUri}).
  *
  * Every MCP server's UI card (`ui://` resource) runs in a dedicated,
  * per-server Electron session partition for storage isolation. Main registers
@@ -82,23 +86,23 @@ export function isUsableMcpServerId(value: unknown): value is string {
  * The ONLY scheme reachable through the MCP-Apps read path, and the one rule that
  * decides it.
  *
- * Before this existed the string `"ui://"` appeared as a bare `startsWith` in four
- * places — the renderer's bridge handler, `window-manager`'s detach validation,
- * governance's capability short-circuit, and nowhere at all in the one place that
- * mattered: `McpClient.readResource`, which issues the request. A cluster review found
- * the consequence. `resources/read` is ONE wire method serving two host paths with
- * different gates — `readDeclaredResource` (listed-set) and `readResource` (Apps) — so a
- * renderer that named a non-`ui:` URI on the Apps path reached a read that neither gate
- * covered: the listed-set check belongs to the other method, and governance, unable to
- * tell the two callers apart, fell through to requiring `resources`, which any
- * resource-publishing server has.
+ * Before this existed the rule was three separate spellings and a hole. `git grep '"ui://"'
+ * on the parent commit finds `main/window-manager.ts` (a bare `startsWith` on a detach
+ * payload), `mcp-governance.ts` (a local const), and the renderer's bridge handler (a local
+ * const) — and NOT `McpClient.readResource`, which is the one place that issues the
+ * request. A cluster review found the consequence. `resources/read` is ONE wire method
+ * serving two host paths with different gates — `readDeclaredResource` (listed-set) and
+ * `readResource` (Apps) — so a renderer that named a non-`ui:` URI on the Apps path reached
+ * a read that neither gate covered: the listed-set check belongs to the other method, and
+ * governance, which sees a method and not a caller, fell through to requiring `resources`,
+ * which any resource-publishing server has.
  *
- * Kept case-SENSITIVE and authority-REQUIRING on purpose. Governance grants the Apps
- * path WITHOUT the `resources` capability, so this predicate decides what skips a
- * capability check; anything it rejects merely falls back to the ordinary rule, which is
- * the safe direction. Matching case-insensitively would have widened that exemption, and
- * every other consumer (`mcpAppViewKey`, the proxy, the partition policy) compares the
- * literal lowercase form anyway.
+ * Kept case-SENSITIVE and authority-REQUIRING on purpose, and the reason is the exemption
+ * rather than any downstream comparison. Governance grants the Apps path WITHOUT the
+ * `resources` capability, so this predicate decides what SKIPS a capability check;
+ * anything it rejects merely falls back to the ordinary rule, which is the safe direction.
+ * The URI is also passed verbatim to the server, so the host has no business normalizing
+ * a scheme the server will compare literally.
  */
 export const MCP_APP_UI_SCHEME = "ui://";
 

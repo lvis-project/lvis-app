@@ -1808,13 +1808,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
           // `readDeclaredResource` — a template expansion was never listed there, so
           // replaying one fails.
           //
-          // NOT "no channel accepts a URI" (`attachResource` does) and NOT "no channel
-          // accepts an unlisted URI" (`CHANNELS.mcp.uiResource` does, on its external
-          // arm, with no listed-set check in main). That last one is a pre-existing hole
-          // this feature neither opens nor widens: a renderer able to call it already has
-          // strictly more reach than replaying an expansion, and has it without this
-          // channel. Named here rather than contradicted, because the previous two
-          // versions of this comment were each refuted by a reviewer reading the code.
+          // NOT "no channel accepts a URI" — `attachResource` does. And note the careful
+          // word CORE: `CHANNELS.mcp.uiResource` also routes a renderer URI to a
+          // `resources/read`, but on the MCP-Apps path, which carries no listed-set check
+          // and never did. That path is now restricted by SCHEME instead — main refuses
+          // anything but `ui://` (`isMcpAppUiUri`, enforced in `McpClient.readResource`) —
+          // so it cannot be used to replay an expansion either.
+          //
+          // Said this way because an earlier version argued the echo was safe on the
+          // grounds that a renderer calling `uiResource` "already has strictly more reach
+          // anyway". That was true when written and is not true now, which is exactly why
+          // it was the wrong argument to lean on: it was a fact about a hole rather than
+          // about this channel, and it decayed the moment the hole closed.
           uri: read.uri,
         };
       } catch (err) {

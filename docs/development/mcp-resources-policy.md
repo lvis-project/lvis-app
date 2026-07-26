@@ -375,10 +375,15 @@ The general lesson, which outlives this bug: **when two host paths share a wire 
 neither the method name nor the capability gate can tell them apart.** The gate has to sit
 with the caller whose contract it is. That is the same reason the template read is gated
 on the TEMPLATE rather than on the URI it produces.
+
 ## Security invariants
 
 - No `resources/*` request leaves the host unless the capability was advertised at
-  discovery AND approved by governance; unclassified methods fail closed.
+  discovery AND approved by governance; unclassified methods fail closed. The ONE
+  exemption is the MCP-Apps read: a `ui://` URI does not require `resources`, because
+  a tools-only server may legitimately publish a card (§0). That exemption is keyed on
+  the URI namespace, which is all governance can see — it is handed a method, not a
+  caller — and it is bounded by the scheme gate in `McpClient.readResource`.
 - `readDeclaredResource` accepts only a URI the host listed, and
   `readDeclaredResourceTemplate` only a TEMPLATE the host listed, expanding it itself;
   the URI is an opaque identifier the host never resolves. `readResource`, the MCP-Apps
