@@ -90,11 +90,25 @@ export const SCHEMA_VERSION = 1;
  * The file must start at column 0 with a NON-SPACE character. That is what separates a
  * real diagnostic from a continuation line: tsc indents those, and a 'related' one can
  * itself carry a full `file(line,col): error TSxxxx:` span, which an anchor alone does
- * not exclude — `[^(]+` from position 0 happily swallows the leading spaces. Found by
+ * not exclude — a leading `.*` from position 0 happily swallows the leading spaces. Found by
  * mutating the pattern and watching the self-test stay green, which is the same fixture
  * failure this gate exists to catch, one level up.
+ *
+ * The path is `.*?` — LAZY, and deliberately not `[^(]*`. The earlier `[^(]*` could not
+ * cross a `(`, so a path containing one (`odd(name).test.ts`) matched nothing at all and the
+ * file vanished from the measurement entirely: a new test file with type errors would have
+ * reached CI green, which is the exact hole this gate exists to close. Found by a mutation
+ * sweep — weakening that character class left the self-test green, and writing the fixture
+ * to prove the fix revealed the pattern had never handled it.
+ *
+ * Lazy rather than greedy matters for the opposite case. Greedy `.*` would backtrack to the
+ * LAST span on the line, so a diagnostic whose MESSAGE quotes another span
+ * (`a.ts(1,2): error TS2322: see other(9,9): error TS1: x`) would be attributed to a file
+ * name containing most of the message. Lazy takes the first span, which is the real one.
+ * Both directions are pinned in the self-test; the ten shapes were checked against the old
+ * and new patterns side by side before this changed.
  */
-const DIAGNOSTIC_RE = /^(?<file>[^\s(][^(]*)\((?<line>\d+),(?<col>\d+)\): error (?<code>TS\d+):/;
+const DIAGNOSTIC_RE = /^(?<file>[^\s].*?)\((?<line>\d+),(?<col>\d+)\): error (?<code>TS\d+):/;
 
 /** Per-file error counts, keyed by repo-relative POSIX path. */
 export function countErrorsByFile(tscStdout) {
