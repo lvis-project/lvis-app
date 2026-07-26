@@ -29,7 +29,25 @@
   // Cost of not relaxing: 22 more files and 52 more errors in the baseline. That is the
   // right trade — the debt is recorded once, whereas a divergence from the root config
   // keeps producing diagnostics that mean nothing outside this file.
+  //
+  // The ONE option below is a different matter: it is required, not a preference, and it must
+  // not be "cleaned up" to match the root config. `tsconfig.json` sets
+  // `tsBuildInfoFile: "./.cache/tsc/typecheck.tsbuildinfo"`, and inheriting it made TWO
+  // different programs — production sources, and this much wider set — share a single
+  // incremental cache. That made the measurement depend on WHICH CONFIG RAN LAST:
+  //
+  //   npx tsc -p tsconfig.json && gate   → 1,626 errors
+  //   gate && gate                       → 1,625 errors
+  //
+  // Reproduced repeatedly, stable under each ordering. CI happens to run `Typecheck` before
+  // `Typecheck tests`, which is why it matched the committed baseline — but a developer
+  // running only the gate got a different number, and a drift in the other direction would
+  // have been a spurious CI failure with no source change behind it. A ratchet whose count
+  // depends on run order cannot be trusted, which defeats the point of having it.
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./.cache/tsc/typecheck-tests.tsbuildinfo"
+  },
   "include": ["src", "scripts", "test"],
   "exclude": ["src/**/__probes__/**", "src/preload.cjs.ts"]
 }
