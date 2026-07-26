@@ -15,7 +15,7 @@ import {
   MCP_RESOURCE_TEMPLATE_VALUE_MAX_CHARS,
   resourceTemplateVariables,
 } from "../mcp-resource-template-bounds.js";
-import { MCP_RESOURCE_URI_MAX_CHARS } from "../mcp-resource-bounds.js";
+import { isUsableResourceUri, MCP_RESOURCE_URI_MAX_CHARS } from "../mcp-resource-bounds.js";
 
 describe("isUsableResourceUriTemplate", () => {
   it("accepts Level 1 templates over schemes a resource may use", () => {
@@ -68,6 +68,18 @@ describe("isUsableResourceUriTemplate", () => {
     // — the skeleton is what refuses it, because a leftover brace is not a legal URI
     // character. Both halves of the predicate earn their keep on different inputs.
     expect(isUsableResourceUriTemplate("file:///{a{b}")).toBe(false);
+  });
+
+  it("refuses a template whose LITERAL part already contains a dot segment", () => {
+    // Not a security rule — the expansion refuses these anyway — but a dead-row one. A
+    // plain resource may legitimately be published as `file:///a/../b` and
+    // `isUsableResourceUri` allows it; a TEMPLATE shaped that way would catalogue and
+    // then have every read refused, which is a picker entry that exists only to fail.
+    expect(isUsableResourceUriTemplate("file:///project/../{path}")).toBe(false);
+    expect(isUsableResourceUriTemplate("file:///project/./{path}")).toBe(false);
+    // The ordinary URI predicate does NOT share this rule, and should not: that one
+    // answers a question about a URI the SERVER chose in full.
+    expect(isUsableResourceUri("file:///project/../secret")).toBe(true);
   });
 
   it("refuses a template with no variable at all", () => {
