@@ -47,9 +47,10 @@ describe("isMcpAppUiUri", () => {
   });
 
   it("is case-SENSITIVE, because it decides what skips a capability check", () => {
-    // Every other consumer — the partition name, the proxy, the viewKey — compares the
-    // literal lowercase form, so accepting `UI://` here would exempt a URI that no other
-    // part of the Apps path recognizes.
+    // Widening this widens the governance exemption, and the URI is passed verbatim to
+    // the server besides — the host has no business normalizing a scheme the server will
+    // compare literally. A rejection here costs nothing: it falls back to the ordinary
+    // `resources` rule rather than opening anything.
     expect(isMcpAppUiUri("UI://app/panel.html")).toBe(false);
     expect(isMcpAppUiUri("Ui://app/panel.html")).toBe(false);
   });
