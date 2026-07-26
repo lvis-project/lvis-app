@@ -188,12 +188,16 @@ check(
 // tells the reader the compare path carries its own guard, which invites pushing the single
 // check down into the update branch and restoring the original bug.
 //
-// PLACEMENT still cannot be asserted here, because doing so would mean spawning a compiler,
-// which this file deliberately does not do. It was verified end-to-end instead, four
-// directions: broken compiler + real baseline refuses and leaves the 312 entries intact; no
-// baseline file still bootstraps; a corrupt baseline refuses; an intentionally emptied
-// baseline with a working compiler writes. If the call site moves, re-run those four by hand
-// — a green self-test does not cover you.
+// PLACEMENT is still NOT asserted here, and "cannot" would now be false twice over: this file
+// does spawn the compiler (for `--showConfig`), and pinning placement would not need a
+// typecheck anyway — an injectable spawn, or the `decide()` seam agreed as a follow-up, would
+// do it. It is a deferral, not an impossibility, and a reviewer was right to say the earlier
+// wording claimed otherwise.
+//
+// Verified by hand instead, four directions: broken compiler + real baseline refuses and leaves
+// the 312 entries intact; no baseline file still bootstraps; a corrupt baseline refuses; an
+// intentionally emptied baseline with a working compiler writes. If the call site moves, re-run
+// those four — a green self-test does not cover you.
 // ── Config errors. A reviewer asked what happens to config codes outside the TS5xxx set
 // the runner used to look for, e.g. TS6059. Running tsc against a deliberately broken
 // config answered it, and the answer was worse than the question: a config error makes tsc
@@ -287,10 +291,12 @@ check("never reports a test/ file", !nonTestEntries(ENTRIES).some((f) => f.start
 // ── The gate must not use an incremental compiler.
 //
 // `tsconfig.tests.json` inherits from `tsconfig.json`, which sets `incremental: true`. That
-// made this gate's error count depend on compiler cache state rather than on the source: tsc
-// caches per-file diagnostics and does not re-emit unused-import diagnostics
-// (TS6192/TS6196) for a file it considers unchanged, so `internal-api-surface.ts` reported 3
-// errors cold and 2 warm — 1,626 vs 1,625 overall.
+// made this gate's error count depend on compiler cache state rather than on the source. The
+// precondition is specific and worth stating, since a reviewer could not reproduce the loose
+// version: warm runs with the SAME options are stable, but a buildinfo written by a run with
+// DIFFERENT options and then read by the gate gives 1,625 instead of 1,626 —
+// `internal-api-surface.ts` reporting 2 rather than 3. `incremental: false` removes the class
+// by construction rather than patching an instance; see `tsconfig.tests.json` for the numbers.
 //
 // Asserted on the EFFECTIVE option after `extends` resolution, not on the literal text of the
 // config. Three earlier attempts got this wrong in instructive ways:
@@ -333,7 +339,52 @@ function effectiveIncremental(configName) {
 // Only the property that matters. Deliberately NOT paired with an assertion about the root
 // config: whether the root is incremental is its own business, and asserting it would turn a
 // legitimate change there into a failure here.
-check("the gate's program is not incremental", effectiveIncremental("tsconfig.tests.json") === false);if (failures.length > 0) {
+//
+// `!== true`, not `=== false`. A reviewer measured that `--showConfig` reports `undefined`
+// when nothing sets `incremental` anywhere — off is the default — so `=== false` asserts
+// "explicitly set to false" rather than "not incremental", and would redden on a state that
+// satisfies the property (drop `incremental: true` from the root, then drop the now-redundant
+// override here). That is the same pin-the-mechanism mistake this assertion has already been
+// rewritten twice to avoid.
+check("the gate's program is not incremental", effectiveIncremental("tsconfig.tests.json") !== true);
+
+// ── `readBaselineFilesOrEmpty`: ONLY a missing file may be tolerated.
+//
+// These four cases were written once, verified, and then DELETED by a later splice of mine
+// that replaced everything between two anchors — after which I reported them as landed. A
+// critic reviewer caught it: the symbol appeared only in the import list, 35 `check()` calls
+// referenced none of it, and three mutations survived, including the one that re-opens the
+// write-path fail-open (unreadable or corrupt baseline + broken compiler → `{}` → the
+// empty-measurement guard passes → a real baseline is overwritten with an empty measurement).
+// The three unused imports left behind were the fingerprint, and nothing caught them because
+// `.mjs` is outside what `tsc` checks here.
+const scratch = mkdtempSync(join(tmpdir(), "typecheck-gate-selftest-"));
+const goodPath = join(scratch, "good.json");
+writeFileSync(goodPath, JSON.stringify({ schemaVersion: 1, files: { "a.test.ts": 2 } }), "utf8");
+const badPath = join(scratch, "bad.json");
+writeFileSync(badPath, "not json at all", "utf8");
+check(
+  "a MISSING baseline reads as empty, so bootstrapping is possible",
+  Object.keys(readBaselineFilesOrEmpty(join(scratch, "absent.json"))).length === 0,
+);
+check("a valid baseline returns its files", readBaselineFilesOrEmpty(goodPath)["a.test.ts"] === 2);
+check(
+  "a MALFORMED baseline throws rather than reading as empty",
+  (() => {
+    try { readBaselineFilesOrEmpty(badPath); return false; } catch { return true; }
+  })(),
+);
+// A non-ENOENT read error must also throw. A directory is the portable way to produce one
+// (EISDIR on Linux, EPERM/EISDIR on Windows); an unreadable-permissions fixture is not
+// portable, and the point is that the carve-out is ENOENT-ONLY, not the specific errno.
+check(
+  "a non-ENOENT read error throws rather than reading as empty",
+  (() => {
+    try { readBaselineFilesOrEmpty(scratch); return false; } catch { return true; }
+  })(),
+);
+
+if (failures.length > 0) {
   process.stderr.write(
     `[test-typecheck-self-test] the gate is not detecting what it claims:\n  ${failures.join("\n  ")}\n`,
   );

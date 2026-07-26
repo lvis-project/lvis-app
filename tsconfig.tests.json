@@ -34,25 +34,31 @@
   // not be "cleaned up" to match the root config.
   //
   // A RATCHET CANNOT USE AN INCREMENTAL COMPILER. `tsconfig.json` sets `incremental: true`,
-  // and inheriting it made this gate's error count depend on compiler cache state rather
-  // than on the source:
+  // and inheriting it made this gate's error count depend on compiler cache state rather than
+  // on the source.
   //
-  //   npx tsc -p tsconfig.json && gate      → 1,626   (shared buildinfo with the root config)
-  //   gate && gate                          → 1,625
-  //   …and after separating the buildinfo files, a run with different `lib` settings against
-  //   the same files still produced 1,625 — `src/preload/internal-api-surface.ts` reported 3
-  //   errors cold and 2 warm.
+  // MEASURED, with the precondition stated precisely, because a reviewer could not reproduce
+  // the looser version of this claim and was right to push back. Warm runs with CONSISTENT
+  // options are stable — we both measured that. What diverges is a buildinfo written by a run
+  // with DIFFERENT options and then read by the gate:
   //
-  // The mechanism: tsc caches per-file diagnostics, and unused-import diagnostics
-  // (TS6192/TS6196) are not re-emitted for a file it considers unchanged. So the count
-  // depends on what the cache last saw. Giving this project its own `tsBuildInfoFile` fixed
-  // only the shared-file case and was verified against too few orderings — it did NOT remove
-  // the class, which is why the option below is `incremental` rather than a cache path.
+  //   dedicated buildinfo, cold                        → 1,626  (internal-api-surface: 3)
+  //   same buildinfo, warm, same options               → 1,626  (3)
+  //   same buildinfo, after one run with a different `lib`  → 1,625  (2)
   //
-  // Disabling it makes the measurement a pure function of the sources. Verified: 1,626 under
-  // a cold cache, an immediate repeat, a different-`lib` run over the same files, and after
-  // the root typecheck. A full non-incremental run costs about 3 seconds, and CI checks out
-  // cold anyway, so incremental bought this gate nothing while costing it determinism.
+  // and the same divergence appeared when the tests config inherited the ROOT's
+  // `tsBuildInfoFile`, i.e. two genuinely different programs writing one cache file. The
+  // diagnostic that goes missing warm is the unused-import one (TS6192), which is consistent
+  // with tsc caching per-file diagnostics and not re-emitting them for a file it considers
+  // unchanged — but that explanation is inference from the observation, not something this
+  // repo has instrumented, and it should not be read as settled compiler behaviour.
+  //
+  // Giving this project its own `tsBuildInfoFile` was an earlier, INSUFFICIENT fix: it removed
+  // only the two-programs-one-file case, and the different-options case above still diverged.
+  // `incremental: false` removes the class by construction — no buildinfo is read or written,
+  // so cache state is not an input at all. Verified across cold, repeat, after-different-lib,
+  // and after-root-typecheck: 1,626 every time. A full run costs ~3 s and CI checks out cold,
+  // so incremental bought this gate nothing while costing it determinism.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "incremental": false

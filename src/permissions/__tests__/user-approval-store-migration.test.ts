@@ -53,9 +53,12 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  // Drain BEFORE removing. `recordApproval` resolves when the write is QUEUED, so a
-  // pending one would re-create files inside the directory this is deleting — an
-  // ENOTEMPTY that surfaces in whichever test runs next.
+  // No drain needed. `mutatePersistentApprovals` RETURNS the promise covering
+  // `readApprovalsFile → mutator → atomicWrite` and every public caller awaits it, so an
+  // awaited `recordApproval` has already landed by the time this runs. A comment here used to
+  // claim the opposite — that it "resolves when the write is QUEUED" — and instructed a drain
+  // on that basis; the claim was false and the helper it called was removed, but the comment
+  // outlived it and sat here with no code under it. Do not add one back.
   await rm(TEST_HOME, { recursive: true, force: true });
   __resetSessionStoreForTest();
 });
