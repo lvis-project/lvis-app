@@ -275,9 +275,10 @@ export function nonTestEntries(files) {
  * The committed baseline's `files`, or `{}` when there is no baseline yet.
  *
  * ENOENT is the first-ever run — there is nothing to protect, so the guard must not block
- * bootstrapping. Anything else (including unparseable JSON) throws: if the file exists but
- * cannot be read, we cannot tell whether a real baseline is about to be destroyed, and
- * guessing is what fail-open looks like. Delete the file deliberately to bootstrap.
+ * bootstrapping. Anything else (including unparseable or structurally invalid JSON) throws:
+ * if the file exists but cannot be trusted, we cannot tell whether a real baseline is about
+ * to be destroyed, and guessing is what fail-open looks like. Delete the file deliberately to
+ * bootstrap.
  *
  * Exported for the same reason as the three refusals: a mutation sweep showed that replacing
  * the ENOENT check with an unconditional `return {}` left the self-test GREEN, and that
@@ -286,15 +287,46 @@ export function nonTestEntries(files) {
  * only guard-adjacent function in the file that was not exported, i.e. the only one the
  * self-test could not pin.
  */
-export function readBaselineFilesOrEmpty(path = BASELINE) {
+function isPlainObject(value) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function validateBaselineFiles(baseline, path) {
+  if (!isPlainObject(baseline)) {
+    throw new Error(`baseline ${path} must be a JSON object`);
+  }
+  if (baseline.schemaVersion !== SCHEMA_VERSION) {
+    throw new Error(
+      `baseline schemaVersion ${baseline.schemaVersion} != ${SCHEMA_VERSION}; repair or remove it deliberately before updating`,
+    );
+  }
+  if (!isPlainObject(baseline.files)) {
+    throw new Error(`baseline ${path} must contain a non-array files object`);
+  }
+  for (const [file, count] of Object.entries(baseline.files)) {
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new Error(`baseline ${path} has an invalid error count for ${file}`);
+    }
+  }
+  return baseline.files;
+}
+
+function readBaseline(path = BASELINE) {
   let raw;
   try {
     raw = readFileSync(path, "utf8");
   } catch (error) {
-    if (error?.code === "ENOENT") return {};
+    if (error?.code === "ENOENT") return { exists: false, files: {} };
     throw error;
   }
-  return JSON.parse(raw)?.files ?? {};
+  return { exists: true, files: validateBaselineFiles(JSON.parse(raw), path) };
+}
+
+export function readBaselineFilesOrEmpty(path = BASELINE) {
+  return readBaseline(path).files;
 }
 
 function main() {
@@ -326,7 +358,8 @@ function main() {
   // asked twice" — describing the two-call-site shape this replaced. A reviewer flagged the
   // wording precisely because it licenses moving the check back down into the update branch,
   // which would restore the original bug.
-  const onDiskFiles = readBaselineFilesOrEmpty();
+  const baseline = readBaseline();
+  const onDiskFiles = baseline.files;
   if (isEmptyMeasurementAgainstBaseline(counts, onDiskFiles)) {
     // Wording covers both callers: `update` is about to overwrite, `compare` is about to
     // report. Saying only "refusing to overwrite" misdescribes half the runs.
@@ -373,13 +406,12 @@ function main() {
     return;
   }
 
-  const parsed = JSON.parse(readFileSync(BASELINE, "utf8"));
-  if (parsed?.schemaVersion !== SCHEMA_VERSION) {
+  if (!baseline.exists) {
     throw new Error(
-      `baseline schemaVersion ${parsed?.schemaVersion} != ${SCHEMA_VERSION}; re-run with --update-baseline`,
+      `baseline ${BASELINE} does not exist; run check:typecheck-tests:update to create it`,
     );
   }
-  const { regressed, improved, fixed } = compareToBaseline(counts, parsed.files ?? {});
+  const { regressed, improved, fixed } = compareToBaseline(counts, onDiskFiles);
 
   if (regressed.length > 0) {
     process.stderr.write("[test-typecheck] new type errors in files the baseline covers\n");
