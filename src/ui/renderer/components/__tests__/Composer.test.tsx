@@ -1036,6 +1036,28 @@ describe("Composer — @ resource mention", () => {
     expect(onWarning).not.toHaveBeenCalled();
   });
 
+  it("reports when the RESOURCE channel is absent on a resource row", async () => {
+    // The mirror of the template case, and the one arm that had no coverage: a reviewer
+    // pointed out that `accept()`'s resource branch reports through `onError` and
+    // nothing held it, so mutating that back to a bare `return` would have restored
+    // silent inertness for the OTHER row kind while every test stayed green.
+    installMcpApi();
+    (window as unknown as { lvis: { mcp: Record<string, unknown> } })
+      .lvis.mcp.attachResource = undefined;
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onWarning).toHaveBeenCalledWith(t("composer.resourceAttachFailed"));
+    expect(ta.value).not.toContain("[Resource #");
+    expect(screen.queryByTestId("attachment-chip")).toBeNull();
+  });
+
   it("reports rather than silently doing nothing when a channel is absent", async () => {
     // The other pairing. Kept alongside the one above because it is what catches a
     // "guard both kinds on both channels" mutation: that would block the resource row
