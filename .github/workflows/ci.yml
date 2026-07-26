@@ -52,6 +52,14 @@ jobs:
       - name: Typecheck
         working-directory: lvis-app
         run: bun run typecheck
+      # `typecheck` covers production sources only — both tsconfigs exclude
+      # `src/**/__tests__/**`, so before this step a test could reference an unimported
+      # symbol and reach CI green. This is the ratchet for the rest: new test files are
+      # fully checked, existing ones may only improve. The self-test runs beside it
+      # because a ratchet that silently stops comparing reports green forever.
+      - name: Typecheck tests (baseline ratchet)
+        working-directory: lvis-app
+        run: bun run check:typecheck-tests:self-test && bun run check:typecheck-tests
       # Postinstall leaves native modules on Electron's ABI. The shared Vitest
       # runner uses ELECTRON_RUN_AS_NODE, so tests and the desktop runtime consume
       # that same binary without an in-place Node-ABI rebuild.
