@@ -574,33 +574,23 @@ export async function migrateCanonicalization(): Promise<void> {
 /**
  * @internal Test only — clears the session cache between test cases.
  *
- * Does NOT drain the persistent write queue; see
- * {@link __drainPersistentWritesForTest}. Resetting the queue reference here does not
- * cancel an in-flight write — nothing can — it only stops the NEXT write chaining behind
- * it, which is the isolation this reset is for.
+ * Resetting `persistentWriteQueue` does not cancel an in-flight write — nothing can — it
+ * only stops the NEXT write from chaining behind it, which is the isolation this reset is
+ * for.
+ *
+ * There is deliberately NO drain helper beside this, and adding one would be dead code.
+ * `mutatePersistentApprovals` RETURNS the promise covering
+ * `readApprovalsFile → mutator → atomicWrite`, and every public caller
+ * (`recordApproval`, `revokeApproval`, `revokeApprovalByKey`) awaits it — so an awaited
+ * write has already landed and there is nothing left to wait for. An earlier version of
+ * this file added `__drainPersistentWritesForTest` on the premise that `recordApproval`
+ * resolves when the write is merely QUEUED. A reviewer demonstrated that premise is false;
+ * the helper was a no-op in all three suites that called it, and the CI teardown failure it
+ * was credited with fixing was actually an unflushed `AuditLogger` — see the note in
+ * `src/tools/__tests__/executor-approval-memory-skip-integration.test.ts`.
  */
 export function __resetSessionStoreForTest(): void {
   if (sessionStore.size > 0) approvalGeneration += 1;
   sessionStore.clear();
   persistentWriteQueue = Promise.resolve();
-}
-
-/**
- * @internal Test only — wait for every queued persistent write to finish.
- *
- * A test that wrote an approval and then removes its temp directory MUST await this
- * first. `recordApproval` resolves when the write is QUEUED, not when it has landed:
- * `mutatePersistentApprovals` chains onto a module-level queue and the caller's promise
- * covers only its own link. Reassigning that queue — which
- * {@link __resetSessionStoreForTest} does — abandons the reference without cancelling the
- * work, so the write continues and re-creates files inside a directory teardown is
- * deleting. That surfaces as `ENOTEMPTY` from `rmSync`, in a DIFFERENT test than the one
- * that queued the write, on any platform.
- *
- * That failure was diagnosed as a Windows quirk for a long time and it is not: it
- * reproduced on Linux CI. The fix is to await the writer, not to retry the removal —
- * `maxRetries` only widens the window the race has to resolve itself in.
- */
-export async function __drainPersistentWritesForTest(): Promise<void> {
-  await persistentWriteQueue.catch(() => {});
 }

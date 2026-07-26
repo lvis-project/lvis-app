@@ -269,11 +269,18 @@ export function nonTestEntries(files) {
  * bootstrapping. Anything else (including unparseable JSON) throws: if the file exists but
  * cannot be read, we cannot tell whether a real baseline is about to be destroyed, and
  * guessing is what fail-open looks like. Delete the file deliberately to bootstrap.
+ *
+ * Exported for the same reason as the three refusals: a mutation sweep showed that replacing
+ * the ENOENT check with an unconditional `return {}` left the self-test GREEN, and that
+ * mutation re-opens the write-path fail-open (unreadable baseline + broken compiler → `{}` →
+ * the guard passes → a real baseline is overwritten with an empty measurement). This was the
+ * only guard-adjacent function in the file that was not exported, i.e. the only one the
+ * self-test could not pin.
  */
-function readBaselineFilesOrEmpty() {
+export function readBaselineFilesOrEmpty(path = BASELINE) {
   let raw;
   try {
-    raw = readFileSync(BASELINE, "utf8");
+    raw = readFileSync(path, "utf8");
   } catch (error) {
     if (error?.code === "ENOENT") return {};
     throw error;
@@ -295,21 +302,28 @@ function main() {
     );
   }
 
-  // The empty-measurement refusal has to happen BEFORE the write, not only before the
-  // compare. Leaving it after was a fail-open on the sibling path, found by a security
-  // reviewer and reproduced end-to-end: with `tsc.js` unresolvable,
-  // `--update-baseline` rewrote the baseline from 312 entries to `files: {}` at rc=0, after
-  // which the compare path's own empty-baseline carve-out reported "baseline held" green
-  // indefinitely. Reachable by running the update script mid-dependency-bump with
-  // typescript half-installed.
+  // THE empty-measurement refusal — ONE call site, hoisted above both branches, guarding
+  // the write and the compare together. Do not push it into `if (update)`.
   //
-  // Same predicate as the compare path deliberately — one authority for "this measurement
-  // is not real", asked twice, rather than two spellings that can drift apart.
+  // It used to sit inside the compare path only, which left `--update-baseline` fail-open: a
+  // security reviewer reproduced it end-to-end with `tsc.js` unresolvable — the baseline was
+  // rewritten from 312 entries to `files: {}` at rc=0, after which the compare path's own
+  // empty-baseline carve-out reported "baseline held" green indefinitely. Reachable by
+  // running the update script mid-dependency-bump with typescript half-installed.
+  //
+  // Hoisting it here is what fixed that, and it is why there is exactly one call site rather
+  // than two. An earlier version of this comment said "same predicate as the compare path,
+  // asked twice" — describing the two-call-site shape this replaced. A reviewer flagged the
+  // wording precisely because it licenses moving the check back down into the update branch,
+  // which would restore the original bug.
   const onDiskFiles = readBaselineFilesOrEmpty();
   if (isEmptyMeasurementAgainstBaseline(counts, onDiskFiles)) {
+    // Wording covers both callers: `update` is about to overwrite, `compare` is about to
+    // report. Saying only "refusing to overwrite" misdescribes half the runs.
     throw new Error(
       "tsc produced no diagnostics while the committed baseline expects them — the compiler"
-      + " did not run. Refusing to overwrite a real baseline with an empty measurement.",
+      + " did not run. Refusing to treat that as an improvement or to write it to the"
+      + " baseline.",
     );
   }
 

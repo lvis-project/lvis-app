@@ -21,7 +21,6 @@ import {
   lookupApproval,
   readApprovals,
   canonicalStringify,
-  __drainPersistentWritesForTest,
   __resetSessionStoreForTest,
 } from "../user-approval-store.js";
 
@@ -57,7 +56,6 @@ afterEach(async () => {
   // Drain BEFORE removing. `recordApproval` resolves when the write is QUEUED, so a
   // pending one would re-create files inside the directory this is deleting — an
   // ENOTEMPTY that surfaces in whichever test runs next.
-  await __drainPersistentWritesForTest();
   await rm(TEST_HOME, { recursive: true, force: true });
   __resetSessionStoreForTest();
 });

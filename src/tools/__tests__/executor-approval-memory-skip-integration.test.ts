@@ -27,9 +27,9 @@ import { join } from "node:path";
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
+import { AuditLogger } from "../../audit/audit-logger.js";
 import {
   recordApproval,
-  __drainPersistentWritesForTest,
   __resetSessionStoreForTest,
 } from "../../permissions/user-approval-store.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
@@ -45,6 +45,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
   let dir: string;
   let lvisHomeDir: string;
   let prevLvisHome: string | undefined;
+  let auditLogger: AuditLogger;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "lvis-memory-skip-e2e-"));
@@ -52,18 +53,32 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
     prevLvisHome = process.env.LVIS_HOME;
     process.env.LVIS_HOME = lvisHomeDir;
     __resetSessionStoreForTest();
+    // OWN the audit logger rather than letting `ToolExecutor` construct one.
+    //
+    // `auditLogger` is the SEVENTH constructor parameter and these tests pass five, so
+    // without this every executor built its own `new AuditLogger()` rooted at
+    // `join(lvisHome(), "audit")` — i.e. inside `lvisHomeDir`. `AuditLogger.log()` returns
+    // `void` and only enqueues (`audit-logger.ts:567` → `enqueuePlainWrite`), the tail is
+    // awaited by nothing but `flush()`, and the permission path logs on EVERY invocation
+    // including denials. That is the writer that actually raced `rmSync(lvisHomeDir)`.
+    auditLogger = new AuditLogger(join(lvisHomeDir, "audit"));
   });
 
   afterEach(async () => {
-    // Drain FIRST. This is the teardown that failed on Linux CI with ENOTEMPTY on
-    // `lvisHomeDir`: `recordApproval` resolves when the write is QUEUED, so an approval
-    // written by a test was still landing while this removed the directory under it.
-    // `__resetSessionStoreForTest` does not help — reassigning the queue abandons the
-    // reference without cancelling the work.
-    await __drainPersistentWritesForTest();
-    // The env restore is safe HERE only because the drain above already ran: with the
-    // queue empty, nothing is left to be misdirected by `LVIS_HOME` reverting to the real
-    // home. Restoring before the drain would point an in-flight write at it.
+    // Flush the audit writer FIRST — it is the only thing here that outlives its caller.
+    //
+    // An earlier version of this teardown drained the approval store instead and claimed
+    // `recordApproval` "resolves when the write is QUEUED". That is FALSE, and a reviewer
+    // demonstrated it: `mutatePersistentApprovals` RETURNS the promise covering
+    // `readApprovalsFile → mutator → atomicWrite` (`user-approval-store.ts:214-224`) and
+    // `recordApproval` awaits it, so an awaited `recordApproval` has already landed. All
+    // five calls in this file are awaited. The approval queue was never the racer, and the
+    // drain that "fixed" CI here did so only by inserting an `await` before the removal —
+    // a timing yield that let the AUDIT writer finish. Same green, wrong reason, and the
+    // reason is what the next person acts on.
+    await auditLogger.close();
+    // Safe only because the flush above has completed: with nothing in flight, reverting
+    // `LVIS_HOME` cannot redirect a pending write at the real home.
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
     __resetSessionStoreForTest();
@@ -94,6 +109,10 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       permMgr,
       undefined,
       { requestAndWait } as never,
+      undefined,
+      // 7th parameter. Without it the executor builds its own logger under the real
+      // `lvisHome()`; see the note in `beforeEach`.
+      auditLogger,
     );
 
     const result = await executor.executeAll(
@@ -134,6 +153,10 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       permMgr,
       undefined,
       { requestAndWait } as never,
+      undefined,
+      // 7th parameter. Without it the executor builds its own logger under the real
+      // `lvisHome()`; see the note in `beforeEach`.
+      auditLogger,
     );
 
     const result = await executor.executeAll(
@@ -177,6 +200,10 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       permMgr,
       undefined,
       { requestAndWait } as never,
+      undefined,
+      // 7th parameter. Without it the executor builds its own logger under the real
+      // `lvisHome()`; see the note in `beforeEach`.
+      auditLogger,
     );
 
     const result = await executor.executeAll(
@@ -216,6 +243,10 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       permMgr,
       undefined,
       { requestAndWait } as never,
+      undefined,
+      // 7th parameter. Without it the executor builds its own logger under the real
+      // `lvisHome()`; see the note in `beforeEach`.
+      auditLogger,
     );
 
     const result = await executor.executeAll(
@@ -265,6 +296,10 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
       permMgr,
       undefined,
       { requestAndWait } as never,
+      undefined,
+      // 7th parameter. Without it the executor builds its own logger under the real
+      // `lvisHome()`; see the note in `beforeEach`.
+      auditLogger,
     );
 
     const result = await executor.executeAll(
