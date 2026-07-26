@@ -21,6 +21,7 @@ import {
   countErrorsByFile,
   isEmptyMeasurementAgainstBaseline,
   nonSourceMeasurements,
+  nonTestEntries,
   unattributedDiagnostics,
 } from "./check-test-typecheck-baseline.mjs";
 
@@ -59,6 +60,36 @@ check("counts files under test/", counts.get("test/scripts/z.test.ts") === 1);
 check("ignores an indented continuation line", !counts.has("related.test.ts"));
 check("never captures a file name with leading space", ![...counts.keys()].some((f) => /^\s/.test(f)));
 check("ignores the trailing summary line", !counts.has("Found 4 errors in 3 files."));
+
+// ── Parser cases added after a mutation sweep: these four mutations of `DIAGNOSTIC_RE`
+// left the self-test GREEN, which means the pattern's constraints were unpinned. Each
+// fixture below is the one that reddens for a specific constraint.
+const EDGE_OUTPUT = [
+  // A path containing `(`. The file group excludes `(` so the `\(` that follows can only
+  // match the span's own paren; with `[^\s]*` instead, this parses to a different file.
+  `src/__tests__/odd(name).test.ts(3,1): error TS2304: Cannot find name 'Q'.`,
+  // A path containing a SPACE. tsc emits these unquoted, so the leading-char class is the
+  // only thing keeping the group from starting mid-path.
+  `src/__tests__/two words.test.ts(4,2): error TS2304: Cannot find name 'R'.`,
+  // Shapes that must NOT count: a span with no error code, and a non-error severity.
+  `src/__tests__/nope.test.ts(5,3): error : missing code`,
+  `src/__tests__/nope.test.ts(6,4): warning TS6133: 'x' is declared but never used.`,
+].join("\n");
+const edge = countErrorsByFile(EDGE_OUTPUT);
+check("parses a path containing parentheses", edge.get("src/__tests__/odd(name).test.ts") === 1);
+check("parses a path containing a space", edge.get("src/__tests__/two words.test.ts") === 1);
+check("ignores a span with no error code", !edge.has("src/__tests__/nope.test.ts"));
+check("ignores a non-error severity", edge.get("src/__tests__/nope.test.ts") === undefined);
+check("counts exactly the two real diagnostics", edge.size === 2);
+// The opposite direction, and the reason the path is matched LAZILY rather than greedily: a
+// message that quotes another span must not steal the attribution. Greedy `.*` backtracks to
+// the LAST span, producing a "file" made of the real path plus most of the message.
+check(
+  "a span quoted inside a message does not steal attribution",
+  countErrorsByFile(
+    `src/__tests__/q.test.ts(1,2): error TS2322: see other(9,9): error TS1: x`,
+  ).get("src/__tests__/q.test.ts") === 1,
+);
 
 // ── The comparison. Both directions, because a gate that fails on everything is not a
 // gate — the `holds` and `improved` cases are what stop that.
@@ -205,6 +236,26 @@ check(
     ]),
   ).length === 0,
 );
+// ── `nonTestEntries` drives the generated `_note`'s production-file list. A mutation sweep
+// found it completely unpinned in BOTH directions: matching nothing silently drops the
+// sentence, matching everything wrongly reports test files as production code. It is
+// documentation rather than enforcement, which is exactly why nobody would notice.
+const ENTRIES = {
+  "src/a/__tests__/x.test.ts": 1,
+  "src/__probes__/p.ts": 1,
+  "test/renderer/helpers.ts": 1,
+  "src/preload/internal-surface.ts": 4,
+  "src/main/window-manager.ts": 1,
+};
+check(
+  "reports production files as non-test",
+  nonTestEntries(ENTRIES).join(",")
+    === "src/preload/internal-surface.ts,src/main/window-manager.ts",
+);
+check("never reports a __tests__ file", !nonTestEntries(ENTRIES).some((f) => f.includes("__tests__")));
+check("never reports a __probes__ file", !nonTestEntries(ENTRIES).some((f) => f.includes("__probes__")));
+check("never reports a test/ file", !nonTestEntries(ENTRIES).some((f) => f.startsWith("test/")));
+
 if (failures.length > 0) {
   process.stderr.write(
     `[test-typecheck-self-test] the gate is not detecting what it claims:\n  ${failures.join("\n  ")}\n`,
