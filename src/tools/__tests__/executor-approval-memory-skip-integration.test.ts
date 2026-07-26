@@ -61,6 +61,9 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
     // `__resetSessionStoreForTest` does not help — reassigning the queue abandons the
     // reference without cancelling the work.
     await __drainPersistentWritesForTest();
+    // The env restore is safe HERE only because the drain above already ran: with the
+    // queue empty, nothing is left to be misdirected by `LVIS_HOME` reverting to the real
+    // home. Restoring before the drain would point an in-flight write at it.
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
     __resetSessionStoreForTest();
