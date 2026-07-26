@@ -8,7 +8,7 @@
  * symbol, pass `bun run typecheck`, and reach CI green — failing only if a test happened
  * to execute that line.
  *
- * The debt is real (1600+ errors across 320 files), so this is a RATCHET, not a
+ * The debt is real (1,626 errors across 312 files), so this is a RATCHET, not a
  * pass/fail: a per-file error count is committed as a baseline, and the gate fails when
  * any file gains errors or when a file with no baseline entry has any. New test files are
  * therefore fully typechecked from the day they are written, and existing ones can only
@@ -45,7 +45,7 @@
  * Note the second row: a config that silently checks nothing exits ZERO with no output, so
  * neither the status nor the text can betray it. And note that a config error makes tsc
  * report the config INSTEAD of the program — none of the genuine type errors appear — which
- * is what turns any of these into "290 files fully fixed" rather than a visible failure.
+ * is what turns any of these into "every file fully fixed" rather than a visible failure.
  *
  * So none of the three is redundant with the others, and none is redundant with the exit
  * status. Removing one silently re-opens exactly one row.
@@ -134,7 +134,7 @@ export function isEmptyMeasurementAgainstBaseline(counts, baselineFiles) {
  * Verified against real output rather than assumed: with a deliberately broken config, tsc
  * emitted TS6059 unattributed AND TS5023 attributed to the tsconfig, and reported none of
  * the program's genuine type errors — so a config error yields a measurement that looks
- * like mass improvement. Every baselined path is `.ts` or `.tsx` (252 + 38).
+ * like mass improvement. Every baselined path is `.ts` or `.tsx` (268 + 44).
  */
 export function nonSourceMeasurements(counts) {
   return [...counts.keys()].filter((f) => !/\.tsx?$/.test(f));
@@ -194,9 +194,14 @@ function runTsc() {
  * Baseline entries that are NOT test files.
  *
  * `tsconfig.tests.json` pulls in whatever the tests import, so a few production files land
- * in the baseline too. They are legitimately covered rather than duplicated: the root
- * `tsconfig.json` excludes `src/preload*` and the probe dirs, so for those files this gate
- * is the only typecheck they get.
+ * in the baseline too. For the `src/preload` ones that is genuine coverage rather than
+ * duplication — the root `tsconfig.json` excludes `src/preload`, and webpack compiles it
+ * with esbuild-loader transpile-only, so nothing else typechecks it at all.
+ *
+ * Do NOT generalise that to every production entry. The root config excludes `src/preload`
+ * and the probe/test dirs, and nothing else — `src/main`, for instance, is fully covered by
+ * `check:typecheck`. A note claiming exclusivity for all of them was false for exactly one
+ * file, which is why the generated text names the directory rather than asserting the rule.
  *
  * Emitted INTO the written baseline rather than hand-written into it — a static header note
  * would be silently dropped by `--update-baseline`, and a note that vanishes on
@@ -234,9 +239,9 @@ function main() {
         + " must have zero errors."
         + (nonTest.length > 0
           ? ` Not every entry is a test file: ${nonTest.length} production file(s) are`
-            + ` reached through test imports (${nonTest.join(", ")}). The root tsconfig`
-            + " excludes those, so this gate is the only typecheck they get — not a"
-            + " duplicate of check:typecheck."
+            + ` reached through test imports (${nonTest.join(", ")}). Those under`
+            + " src/preload are excluded by the root tsconfig, so for them this gate is the"
+            + " only typecheck rather than a duplicate of check:typecheck."
           : ""),
       files: sorted,
     };
@@ -255,7 +260,7 @@ function main() {
     );
   }
   // FAIL CLOSED on an empty measurement. A run that parsed no diagnostics at all, while
-  // the baseline expects some, means the compiler did not run — not that 290 files were
+  // the baseline expects some, means the compiler did not run — not that every file was
   // fixed at once. The project-load check in `runTsc` does NOT cover every such case: a
   // missing or moved `tsc.js` exits 1 with a node module-resolution error that matches
   // neither TS5xxx nor TS18003, which a security reviewer demonstrated. Without this the

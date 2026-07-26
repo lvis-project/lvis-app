@@ -9,14 +9,27 @@
   //
   // This config does not replace the root one. `typecheck` stays the gate for production
   // sources and must stay clean; this is the wider net, held at a baseline
-  // (`check:typecheck-tests`) because the existing debt is 1600+ errors across 320 files
+  // (`check:typecheck-tests`) because the existing debt is 1,626 errors across 312 files
   // and fixing it in one change would be unreviewable.
+  //
+  // Deliberately adds NO compilerOptions. An earlier version relaxed `noUnusedLocals` and
+  // `noUnusedParameters` on the reasoning that tests legitimately build partial fixtures and
+  // mock shapes. That was wrong twice over:
+  //
+  //   1. It manufactured a phantom error in PRODUCTION code. `src/main/window-manager.ts`
+  //      carries `@ts-expect-error TS6133` over a deliberately test-only private method.
+  //      With `noUnusedLocals` off the suppressed error never fires, so the directive reads
+  //      as unused and tsc reports TS2578 — an error that exists only because of this file.
+  //      Worse, it landed in the baseline, inviting someone to "fix" it by deleting the
+  //      directive, which would then break `check:typecheck` under the root config.
+  //   2. Relaxing it was not needed. `noUnusedParameters` already exempts `_`-prefixed
+  //      parameters, which is the idiom this repo's mocks already use, and an unused local
+  //      or import in a test is a real smell rather than a fixture necessity.
+  //
+  // Cost of not relaxing: 22 more files and 52 more errors in the baseline. That is the
+  // right trade — the debt is recorded once, whereas a divergence from the root config
+  // keeps producing diagnostics that mean nothing outside this file.
   "extends": "./tsconfig.json",
-  "compilerOptions": {
-    // Tests legitimately construct partial fixtures and mock shapes.
-    "noUnusedLocals": false,
-    "noUnusedParameters": false
-  },
   "include": ["src", "scripts", "test"],
   "exclude": ["src/**/__probes__/**", "src/preload.cjs.ts"]
 }
