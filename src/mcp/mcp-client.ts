@@ -49,6 +49,7 @@ import {
   MCP_PROMPT_MAX_BLOCKS,
   MCP_PROMPT_NAME_MAX_CHARS,
 } from "../shared/mcp-prompt-bounds.js";
+import { isMcpAppUiUri } from "../shared/mcp-app-partition.js";
 import { createLogger } from "../lib/logger.js";
 import { resolveStdioSpawnCommand } from "./uvx-command.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -1227,8 +1228,25 @@ export class McpClient {
   /**
    * Fetch a `ui://` resource from the MCP server via `resources/read`.
    * Returns the text content of the first text blob in the response.
+   *
+   * The scheme is ENFORCED here, and this is the gate that was missing. `resources/read`
+   * is one wire method serving two host paths: {@link readDeclaredResource}, gated on the
+   * listed set, and this one, which serves the MCP-Apps extension. The renderer chooses
+   * the URI on this path, and until a cluster review found it, nothing in MAIN checked it
+   * — the `ui://` restriction lived only in the renderer's bridge handler, which is the
+   * side the threat model assumes can be compromised. Governance could not close it
+   * either: it sees one method and cannot tell the two callers apart, so a non-`ui:` URI
+   * fell through to requiring `resources`, which any resource-publishing server has.
+   *
+   * So a compromised renderer could read ANY URI from ANY connected external server by
+   * naming it here. Refusing before the request is the whole fix, and it belongs in this
+   * method because this method's contract — stated in the line above since it was
+   * written — is that it fetches a `ui://` resource.
    */
   async readResource(uri: string): Promise<McpUiResourceRead> {
+    if (!isMcpAppUiUri(uri)) {
+      throw new Error("[mcp-client] the MCP-Apps read path serves ui:// resources only");
+    }
     if (this.state.status !== "connected" || !this.transport?.isAlive()) {
       throw new Error(`[mcp-client] ${t("be_mcpClient.serverNotConnected", { id: this.config.id })}`);
     }

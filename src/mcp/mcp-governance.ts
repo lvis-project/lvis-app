@@ -12,6 +12,7 @@ import type {
   McpToolSchema,
   ValidationResult,
 } from "./types.js";
+import { isMcpAppUiUri } from "../shared/mcp-app-partition.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
@@ -66,9 +67,6 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   "notifications/cancelled",
   "notifications/progress",
 ]);
-
-/** MCP Apps (`io.modelcontextprotocol/ui`) resource scheme — an EXTENSION, not the core `resources` capability. */
-const MCP_APPS_UI_SCHEME = "ui://";
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
   version: "1.0",
@@ -341,11 +339,15 @@ export class McpGovernance {
     // capability. A tools-only server may legitimately return `_meta.ui` on a
     // tool result and have the host fetch the `ui://` resource, so this read must
     // NOT require `resources` (would break MCP Apps for every tools-only server).
-    if (method === "resources/read") {
-      const uri = params?.uri;
-      if (typeof uri === "string" && uri.startsWith(MCP_APPS_UI_SCHEME)) {
-        return { valid: true };
-      }
+    //
+    // Decided by the SHARED predicate, not a local `startsWith`. This exemption and the
+    // scheme check in `McpClient.readResource` are the same question — "is this the Apps
+    // path?" — and they must not be able to answer it differently. A URI this accepts but
+    // the client refuses is a dead request; one the client accepts but this refuses falls
+    // through to needing `resources`, which would break Apps on a tools-only server. One
+    // definition, so neither can happen.
+    if (method === "resources/read" && isMcpAppUiUri(params?.uri)) {
+      return { valid: true };
     }
 
     const required = REQUEST_METHOD_CAPABILITY[method];

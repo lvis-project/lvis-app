@@ -345,34 +345,45 @@ DLP surface, not to the composer PR that made it reachable.
 - **Host-side `https:` fetching.** Per §4, SSRF.
 - **Resource-derived tool provenance.** Per §2, the turn stays the user's.
 
-### Known gap, out of scope here: `mcp:ui-resource`
+### `mcp:ui-resource` — the second `resources/read` caller (CLOSED)
 
-Found while reviewing the template work, pre-existing and **not introduced or widened by
-it**, recorded so the invariants below are not read as covering more than they do.
+Found while reviewing the template work, fixed straight after it. Recorded because the
+shape is the point, not the incident.
 
-`CHANNELS.mcp.uiResource` takes a renderer-supplied `serverId` + `uri`. On the LOOPBACK
-arm it is properly gated — `plugin-ui-resource-provider.ts` refuses anything that is not a
-declared `ui:` URI. On the EXTERNAL arm it reaches `client.readResource(uri)` and issues
-`resources/read` with **no scheme check and no listed-set check in main**; the `ui://`
-restriction lives only in the renderer (`mcp-app-bridge/handlers/on-read-resource.ts`),
-which is the side the threat model assumes can be compromised. Governance permits it: the
-`ui://` short-circuit aside, it falls through to requiring `resources`, which any
-resource-publishing server has.
+`resources/read` is ONE wire method serving TWO host paths with different gates:
+`readDeclaredResource` (gated on the listed set) and `readResource` (the MCP-Apps
+extension). `CHANNELS.mcp.uiResource` takes a renderer-supplied `serverId` + `uri` and
+reaches the second one. On the LOOPBACK arm that was already gated —
+`plugin-ui-resource-provider.ts` refuses anything that is not a declared `ui:` URI. On the
+EXTERNAL arm nothing in MAIN checked the scheme at all: the `ui://` restriction lived only
+in the renderer's bridge handler, which is the side the threat model assumes is
+compromised. Governance could not close it either — it sees one method and cannot tell the
+two callers apart, so a non-`ui:` URI fell through to requiring `resources`, which any
+resource-publishing server holds.
 
-Consequence: a compromised renderer can already read any URI from any connected external
-server. That is strictly more reach than replaying a template expansion, which is why the
-templates work does not change this posture — but it does mean the listed-set gate is a
-property of `readDeclaredResource`, not of the host as a whole. Fixing it belongs with the
-MCP-Apps path, not here.
+Net effect: a compromised renderer could read ANY URI from ANY connected external server.
 
+The fix is one predicate, `isMcpAppUiUri` in `shared/mcp-app-partition.ts`, enforced in
+`McpClient.readResource` — the method whose stated contract, since the day it was written,
+was that it fetches a `ui://` resource. Governance's capability exemption now asks the
+same predicate rather than its own `startsWith`, because the two decide one question ("is
+this the Apps path?") and must not answer it differently: a URI governance exempts but the
+client refuses is a dead request, and one the client would serve but governance refuses
+breaks MCP Apps on a tools-only server.
+
+The general lesson, which outlives this bug: **when two host paths share a wire method,
+neither the method name nor the capability gate can tell them apart.** The gate has to sit
+with the caller whose contract it is. That is the same reason the template read is gated
+on the TEMPLATE rather than on the URI it produces.
 ## Security invariants
 
 - No `resources/*` request leaves the host unless the capability was advertised at
   discovery AND approved by governance; unclassified methods fail closed.
 - `readDeclaredResource` accepts only a URI the host listed, and
   `readDeclaredResourceTemplate` only a TEMPLATE the host listed, expanding it itself;
-  the URI is an opaque identifier the host never resolves. This is a property of those
-  two methods — `readResource`, the MCP-Apps path, does not share it (see §7).
+  the URI is an opaque identifier the host never resolves. `readResource`, the MCP-Apps
+  path, does not share the listed-set gate — it is restricted by SCHEME instead, to
+  `ui://` only, enforced in main (see §7).
 - Nothing a user types into a template can move the read off the component the server put
   the variable in: values are percent-encoded, so they cannot span components, and cannot
   BE a dot segment either — `.` is unreserved, so that one needs its own refusal. The
