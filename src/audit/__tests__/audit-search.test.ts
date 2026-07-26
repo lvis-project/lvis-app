@@ -45,18 +45,26 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Un-mock BEFORE removing, not after. `AuditLogger`'s constructor `mkdirSync`s its
-  // audit dir, and while `homedir()` still points at `testHome` any construction racing
-  // this teardown re-creates the tree underneath it — which surfaces as ENOTEMPTY from
-  // `rmSync`, in whichever test runs next. Restoring first means a late construction
-  // targets the real home instead of the directory being deleted.
-  vi.restoreAllMocks();
-  // `maxRetries` is MITIGATION, not the fix, and is here only because this file cannot
-  // await what it does not own: the loggers are constructed inside individual tests.
-  // Where the writer IS ours, await it — see `__drainPersistentWritesForTest`.
+  // `maxRetries` is the whole fix here, and this file cannot do better: `AuditLogger`
+  // captures `this.auditDir`/`this.logFile` in its CONSTRUCTOR, so a queued write is
+  // already bound to a path — un-mocking `homedir()` cannot redirect it. Every logger in
+  // this file is also constructed synchronously inside a test body, so there is no
+  // post-teardown construction to redirect in the first place.
+  //
+  // An earlier version of this teardown restored the mock BEFORE removing and claimed that
+  // aimed a late construction at the real home instead of the tree being deleted. Both
+  // halves were wrong: it cannot redirect a bound write, and aiming a hypothetical writer
+  // at the user's real `~/.lvis` is the failure mode to avoid, not the fix. So restore
+  // AFTER — if a late writer ever appears it stays inside the temp tree, where
+  // `maxRetries` absorbs it.
+  //
+  // Where the writer IS ours, none of this is needed — await it instead; see
+  // `__drainPersistentWritesForTest` in `user-approval-store.ts`, which is why the
+  // executor teardown drains before it touches anything.
   if (existsSync(testHome)) {
     rmSync(testHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
+  vi.restoreAllMocks();
 });
 
 describe("AuditLogger.search()", () => {

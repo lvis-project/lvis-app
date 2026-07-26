@@ -16,7 +16,11 @@
  * "does it fail" test while being useless, so every failing case is paired with a passing
  * one that must stay green.
  */
-import { compareToBaseline, countErrorsByFile } from "./check-test-typecheck-baseline.mjs";
+import {
+  compareToBaseline,
+  countErrorsByFile,
+  isEmptyMeasurementAgainstBaseline,
+} from "./check-test-typecheck-baseline.mjs";
 
 const failures = [];
 function check(name, condition) {
@@ -86,15 +90,35 @@ check(
     return r.regressed.length === 0 && r.fixed.includes("b.test.ts");
   })(),
 );
-// An empty result means tsc produced nothing — which is what a broken invocation looks
-// like. It must not read as "everything was fixed" and pass silently; the runner's own
-// project-load check covers the cause, this pins that the comparison reports it as fixed
-// rather than as regressed, so the runner is the only thing that can be wrong.
+// An empty result means tsc produced nothing, which is what a broken invocation looks
+// like. The COMPARISON still reports it as "everything fixed" — that is correct at this
+// layer, since a file with zero errors genuinely is fixed — so the refusal has to live in
+// the runner, and it does: `main()` throws when the measurement is empty while the
+// baseline is not.
+//
+// An earlier version of this comment claimed the runner's project-load check already
+// covered that. It did not: a missing or moved `tsc.js` exits 1 with a node
+// module-resolution error matching neither TS5xxx nor TS18003, so the gate printed
+// "baseline held: 0 files, 0 errors" and exited 0. A security reviewer demonstrated it.
+// The claim is corrected here and the behaviour is pinned below.
 check(
   "an empty run reports every baselined file as fixed",
   compareToBaseline(new Map(), baseline).fixed.length === 2,
 );
-
+// …and the runner must REFUSE that rather than print it. Asserted against the exported
+// predicate the runner uses, so this cannot drift from the guard it describes.
+check(
+  "an empty measurement against a non-empty baseline is refused",
+  isEmptyMeasurementAgainstBaseline(new Map(), baseline) === true,
+);
+check(
+  "an empty measurement against an EMPTY baseline is allowed",
+  isEmptyMeasurementAgainstBaseline(new Map(), {}) === false,
+);
+check(
+  "a non-empty measurement is never treated as empty",
+  isEmptyMeasurementAgainstBaseline(new Map([["a.test.ts", 1]]), baseline) === false,
+);
 if (failures.length > 0) {
   process.stderr.write(
     `[test-typecheck-self-test] the gate is not detecting what it claims:\n  ${failures.join("\n  ")}\n`,

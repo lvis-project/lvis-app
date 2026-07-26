@@ -63,6 +63,6 @@ main.js
 # Test-run residue: teardown races can leave these behind (see
 # __drainPersistentWritesForTest). Ignored so a leaked directory does not read as an
 # untracked source change.
-.artifact-store-*/
-.lvis-audit-test-*/
-.lvis-dlp-stats-*/
+/.artifact-store-*/
+/.lvis-audit-test-*/
+/.lvis-dlp-stats-*/
