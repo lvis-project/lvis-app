@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type {
   McpResourceSummary,
+  McpResourceTemplateSummary,
   McpServerConfig,
   McpServerConfigDto,
   McpServerState,
@@ -1017,6 +1018,24 @@ export class McpManager {
   }
 
   /**
+   * Servers that currently declare URI TEMPLATES, with their catalogues.
+   *
+   * A sibling projection rather than a field on the one above, for the reason the type
+   * exists at all: a template's identity is `uriTemplate` and a resource's is `uri`, so
+   * one list carrying both would need every consumer to discriminate before it could
+   * even validate an entry.
+   */
+  listDeclaredResourceTemplates(): Array<{
+    serverId: string;
+    templates: readonly McpResourceTemplateSummary[];
+  }> {
+    return this.listServers()
+      .filter((server) =>
+        server.status === "connected" && (server.resourceTemplates?.length ?? 0) > 0)
+      .map((server) => ({ serverId: server.id, templates: server.resourceTemplates ?? [] }));
+  }
+
+  /**
    * Read one resource the server declared (`resources/read`, core capability).
    *
    * Leased like every other bundled-server round trip, so a plugin-backed server
@@ -1033,6 +1052,34 @@ export class McpManager {
       throw new Error(`[mcp-manager] ${t("be_mcpManager.serverDoesNotExist", { serverId })}`);
     }
     return this.withBundledLease(serverId, () => client.readDeclaredResource(uri));
+  }
+
+  /**
+   * Expand a declared URI template with the user's values and read the result.
+   *
+   * Leased like the plain read. Separate from it rather than a flag on it because the
+   * two are gated differently — one matches a listed URI, this one matches a listed
+   * TEMPLATE and produces the URI itself — and collapsing them would put a branch
+   * inside the gate, which is the shape that lets one side inherit the other's check.
+   */
+  async readDeclaredResourceTemplate(
+    serverId: string,
+    uriTemplate: string,
+    values: ReadonlyMap<string, string>,
+  ): Promise<{
+    blocks: Array<{ uri?: string; mimeType?: string; text?: string; omittedKind?: string }>;
+    droppedBlocks: number;
+    truncated: boolean;
+    uri: string;
+  }> {
+    const client = this.clients.get(serverId);
+    if (!client) {
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.serverDoesNotExist", { serverId })}`);
+    }
+    return this.withBundledLease(
+      serverId,
+      () => client.readDeclaredResourceTemplate(uriTemplate, values),
+    );
   }
 
   /** 연결된 서버 수 */

@@ -5,7 +5,7 @@ import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
-import type { McpResourceSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
+import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpAppDetachedPayload } from "../../shared/mcp-app-detached-payload.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
@@ -1702,7 +1702,10 @@ export type LvisMcpApi = {
    * Reads a DECLARED resource and returns the fenced block to attach to the user's own
    * turn. The host builds the fence; the renderer attaches it verbatim.
    */
-  attachResource: (
+  // OPTIONAL for the same reason `listResourceTemplates` is: the picker guards each
+  // channel per row KIND, and a required type makes that guard unreachable — dead code
+  // by the type, on a surface tests and detached windows really do build partially.
+  attachResource?: (
     serverId: string,
     uri: string,
   ) => Promise<
@@ -1721,6 +1724,41 @@ export type LvisMcpApi = {
    */
   listResources: () => Promise<
     | { ok: true; servers: Array<{ serverId: string; resources: McpResourceSummary[] }> }
+    | { ok: false; error: string }
+  >;
+  /**
+   * The URI TEMPLATES half of that catalogue. A template is an OFFER, not a resource:
+   * the picker renders it as a row that opens a form rather than one that attaches.
+   *
+   * OPTIONAL because the picker treats it as optional: a surface without it degrades to
+   * resources-only rather than losing the whole catalogue. Declaring it required would
+   * make that guard look like dead code and force the test that pins it to cast around
+   * the type it is supposed to be checking.
+   */
+  listResourceTemplates?: () => Promise<
+    | { ok: true; servers: Array<{ serverId: string; templates: McpResourceTemplateSummary[] }> }
+    | { ok: false; error: string }
+  >;
+  /**
+   * Fill a declared template and attach what it reads. The renderer sends the TEMPLATE
+   * and the user's values; main expands and reads. `uri` comes back for the chip's
+   * label. Handing it back grants nothing: `attachResource` is the only channel that
+   * routes a renderer-supplied URI into the CORE-capability read, and that read is gated
+   * on the listed set inside the client, which a template expansion was never in. (See
+   * the handler in `ipc/domains/plugins.ts` for why this is stated so narrowly.)
+   */
+  attachResourceTemplate?: (
+    serverId: string,
+    uriTemplate: string,
+    values: Record<string, string>,
+  ) => Promise<
+    | {
+      ok: true;
+      attachment: { type: "text"; text: string };
+      uri: string;
+      truncated?: boolean;
+      omittedBlocks?: number;
+    }
     | { ok: false; error: string }
   >;
   postUiMessage: (

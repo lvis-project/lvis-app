@@ -206,7 +206,10 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-request": "formatIpcError.invalidRequest",
   "empty-prompt": "formatIpcError.emptyPrompt",
   "prompt-failed": "formatIpcError.promptFailed",
-  // ── MCP resource attachment (mcp.attachResource) ──
+  // ── MCP resource attachment (mcp.attachResource, mcp.attachResourceTemplate) ──
+  // Both channels return the same codes on purpose: to the user, filling a template in
+  // and picking a listed resource are the same act with the same failure modes, and a
+  // second vocabulary for one of them would be a second table to keep in sync.
   "empty-resource": "formatIpcError.emptyResource",
   "resource-failed": "formatIpcError.resourceFailed",
   // Raised by `runStreamedTurn`, so it arrives as a rejected `invoke` message rather

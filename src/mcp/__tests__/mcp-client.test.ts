@@ -1822,10 +1822,12 @@ describe("MCP resources discovery and read", () => {
     advertiseResources: boolean;
     approveCapabilities: string[];
     resourcePages?: Array<{ resources: unknown[]; nextCursor?: string }>;
+    templatePages?: Array<{ resourceTemplates: unknown[]; nextCursor?: string }>;
     readResult?: unknown;
-  }): { client: McpClient; listCalls: unknown[]; readCalls: unknown[] } {
+  }): { client: McpClient; listCalls: unknown[]; readCalls: unknown[]; templateListCalls: unknown[] } {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const listCalls: unknown[] = [];
+    const templateListCalls: unknown[] = [];
     const readCalls: unknown[] = [];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
       const method = readRpcMethod(init);
@@ -1842,6 +1844,13 @@ describe("MCP resources discovery and read", () => {
           return new Response(null, { status: 202 });
         case "tools/list":
           return jsonRpcResponse(id, { tools: [] });
+        case "resources/templates/list": {
+          const params = (JSON.parse(String(init?.body)).params ?? {}) as Record<string, unknown>;
+          templateListCalls.push(params);
+          const page = opts.templatePages?.[templateListCalls.length - 1]
+            ?? { resourceTemplates: [] };
+          return jsonRpcResponse(id, page);
+        }
         case "resources/list": {
           const params = (JSON.parse(String(init?.body)).params ?? {}) as Record<string, unknown>;
           listCalls.push(params);
@@ -1871,7 +1880,7 @@ describe("MCP resources discovery and read", () => {
       gov,
       new ToolRegistry(),
     );
-    return { client, listCalls, readCalls };
+    return { client, listCalls, readCalls, templateListCalls };
   }
 
   it("discovers resources when advertised AND approved", async () => {
@@ -1909,23 +1918,34 @@ describe("MCP resources discovery and read", () => {
   // Two keys, same as prompts: a capability the server never advertised, or one the
   // user never approved, means nothing leaves the host.
   it("does NOT call resources/list when advertised but not approved", async () => {
-    const { client, listCalls } = connectWith({
+    const { client, listCalls, templateListCalls } = connectWith({
       advertiseResources: true,
       approveCapabilities: ["tools"],
     });
     await client.connect();
     expect(listCalls).toHaveLength(0);
+    // TEMPLATES ride the same key, and asserting it here is the point: the gate is
+    // one capability, so a template discovery that quietly used a different rule
+    // would be a second answer to a question the user already answered once.
+    expect(templateListCalls).toHaveLength(0);
     expect(client.getState().resources).toBeUndefined();
+    expect(client.getState().resourceTemplates).toBeUndefined();
     await client.disconnect();
   });
 
   it("does NOT call resources/list when approved but not advertised", async () => {
-    const { client, listCalls } = connectWith({
+    const { client, listCalls, templateListCalls } = connectWith({
       advertiseResources: false,
       approveCapabilities: ["tools", "resources"],
     });
     await client.connect();
     expect(listCalls).toHaveLength(0);
+    // The half of the two-key gate that `sendRequest` does NOT back up: governance
+    // re-checks the capability on every request, but nothing re-checks that the
+    // server advertised it. If this line goes, so does the only thing asserting it
+    // for templates.
+    expect(templateListCalls).toHaveLength(0);
+    expect(client.getState().resourceTemplates).toBeUndefined();
     await client.disconnect();
   });
 
@@ -1968,6 +1988,230 @@ describe("MCP resources discovery and read", () => {
     await client.disconnect();
   });
 
+  it("discovers URI templates and derives their variables once", async () => {
+    const { client, templateListCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [
+        {
+          resourceTemplates: [
+            {
+              uriTemplate: "file:///project/{path}",
+              name: "Project file",
+              title: "Any file in the project",
+              mimeType: "text/plain",
+            },
+            { uriTemplate: "github://repos/{owner}/{repo}/issues/{number}", name: "Issue" },
+          ],
+        },
+      ],
+    });
+    await client.connect();
+
+    expect(templateListCalls).toHaveLength(1);
+    expect(client.getState().resourceTemplates).toEqual([
+      {
+        uriTemplate: "file:///project/{path}",
+        name: "Project file",
+        title: "Any file in the project",
+        mimeType: "text/plain",
+        variables: ["path"],
+      },
+      {
+        uriTemplate: "github://repos/{owner}/{repo}/issues/{number}",
+        name: "Issue",
+        variables: ["owner", "repo", "number"],
+      },
+    ]);
+    await client.disconnect();
+  });
+
+  // The operator cases matter more here than in the predicate's own suite: this is
+  // where a `{+path}` template would become an offer to the user, and reserved
+  // expansion does not percent-encode what they type into it.
+  it("drops templates the host will not expand, and says how many", async () => {
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [
+        {
+          resourceTemplates: [
+            { uriTemplate: "file:///project/{+path}", name: "reserved expansion" },
+            { uriTemplate: "file:///project/{path*}", name: "explode" },
+            { uriTemplate: "ui://widget/{id}", name: "reserved scheme" },
+            { uriTemplate: "file:///project/README.md", name: "not a template" },
+            { uriTemplate: 42, name: "not a string" },
+            { uriTemplate: "file:///ok/{path}", name: "first" },
+            { uriTemplate: "file:///ok/{path}", name: "duplicate" },
+          ],
+        },
+      ],
+    });
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    await client.connect();
+
+    const templates = client.getState().resourceTemplates ?? [];
+    expect(templates.map((template) => template.uriTemplate)).toEqual(["file:///ok/{path}"]);
+    expect(templates[0].name).toBe("first");
+    // 7 published, 1 catalogued — the line has to say 6, not just the malformed ones.
+    const line = info.mock.calls.map((c) => c.join(" "))
+      .find((l) => l.includes("resource template(s)"));
+    expect(line).toContain("discovered 1 resource template(s)");
+    expect(line).toContain("6 of 7 published not catalogued");
+    info.mockRestore();
+    await client.disconnect();
+  });
+
+  it("flags a template whose LITERAL scheme the host will not fetch", async () => {
+    // Not a guess: the literal part is fixed at discovery, so if the scheme is literally
+    // `https:` then every expansion of it is too. The picker disables the row on this,
+    // which is what stops a user filling a form whose only outcome is a refusal.
+    const { client } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [
+        {
+          resourceTemplates: [
+            { uriTemplate: "https://example.com/{doc}", name: "web" },
+            { uriTemplate: "file:///project/{path}", name: "local" },
+          ],
+        },
+      ],
+    });
+    await client.connect();
+
+    const templates = client.getState().resourceTemplates ?? [];
+    expect(templates[0]).toMatchObject({ uriTemplate: "https://example.com/{doc}", hostFetchRefused: true });
+    // …and the flag is ABSENT rather than false on a template the host will fetch, so a
+    // consumer cannot read "we checked and it is fine" off a missing property.
+    expect(templates[1]).not.toHaveProperty("hostFetchRefused");
+    await client.disconnect();
+  });
+
+  it("refuses at READ time when the flag could not have known", async () => {
+    // The discovery flag is display-only, and this is what proves it: a variable in
+    // scheme position is honestly UNflagged (the literal scheme is not known until
+    // expansion), the picker therefore offers the row, and the read refuses anyway
+    // because it re-derives from the expansion rather than consulting the flag. If it
+    // ever started trusting the flag, this is the case that would leak.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [
+        { resourceTemplates: [{ uriTemplate: "{scheme}://example.com/{path}", name: "any" }] },
+      ],
+    });
+    await client.connect();
+
+    expect(client.getState().resourceTemplates?.[0]).not.toHaveProperty("hostFetchRefused");
+    await expect(client.readDeclaredResourceTemplate(
+      "{scheme}://example.com/{path}",
+      new Map([["scheme", "https"], ["path", "r.pdf"]]),
+    )).rejects.toThrow(/does not fetch/);
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  it("expands a declared template host-side and reads the produced URI", async () => {
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "file:///project/{path}", name: "f" }] }],
+      readResult: { contents: [{ uri: "file:///project/a.md", text: "BODY" }] },
+    });
+    await client.connect();
+
+    const read = await client.readDeclaredResourceTemplate(
+      "file:///project/{path}",
+      new Map([["path", "a.md"]]),
+    );
+
+    expect(read.uri).toBe("file:///project/a.md");
+    // The wire request carries the host's expansion — `toMatchObject` because every
+    // request also carries the handshake `_meta` envelope.
+    expect(readCalls).toMatchObject([{ uri: "file:///project/a.md" }]);
+    expect(read.blocks[0].text).toBe("BODY");
+    await client.disconnect();
+  });
+
+  it("cannot be walked out of the published path by what the user types", async () => {
+    // The reason expansion is host-side at all. The value is percent-encoded, so the
+    // server receives one segment — not a traversal — and the URI on the wire is the
+    // one the host produced rather than one the renderer chose.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "file:///project/{path}", name: "f" }] }],
+    });
+    await client.connect();
+
+    const read = await client.readDeclaredResourceTemplate(
+      "file:///project/{path}",
+      new Map([["path", "../../etc/passwd"]]),
+    );
+
+    expect(read.uri).toBe("file:///project/..%2F..%2Fetc%2Fpasswd");
+    expect(readCalls).toMatchObject([{ uri: "file:///project/..%2F..%2Fetc%2Fpasswd" }]);
+    await client.disconnect();
+  });
+
+  it("refuses a template it never listed, before any request", async () => {
+    // Same gate as the plain read, on the pattern rather than the URI: matching an
+    // expanded URI back against a template would need a matcher, and a matcher for
+    // `file:///{path}` accepts `file:///../../etc/passwd`.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "file:///listed/{path}", name: "f" }] }],
+    });
+    await client.connect();
+
+    await expect(client.readDeclaredResourceTemplate(
+      "file:///other/{path}",
+      new Map([["path", "a.md"]]),
+    )).rejects.toThrow(/did not declare/);
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  it("refuses when a value is missing rather than expanding it away", async () => {
+    // An empty substitution points at the directory above — a different resource than
+    // the user asked for, and one they cannot see they asked for.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "file:///project/{path}", name: "f" }] }],
+    });
+    await client.connect();
+
+    await expect(client.readDeclaredResourceTemplate(
+      "file:///project/{path}",
+      new Map(),
+    )).rejects.toThrow(/no usable uri/);
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
+
+  it("refuses to fetch a template whose LITERAL scheme is refused", async () => {
+    // Deliberately the easy half, and labelled as such after a review pointed out that
+    // its old title ("when the EXPANSION lands on a refused scheme") was a claim this
+    // fixture cannot make: `https://…/{doc}` is refused identically whether the check
+    // reads the template or the expansion. The re-derivation is pinned by "refuses at
+    // READ time when the flag could not have known", which uses a variable scheme.
+    const { client, readCalls } = connectWith({
+      advertiseResources: true,
+      approveCapabilities: ["tools", "resources"],
+      templatePages: [{ resourceTemplates: [{ uriTemplate: "https://example.com/{doc}", name: "web" }] }],
+    });
+    await client.connect();
+
+    await expect(client.readDeclaredResourceTemplate(
+      "https://example.com/{doc}",
+      new Map([["doc", "r.pdf"]]),
+    )).rejects.toThrow(/does not fetch/);
+    expect(readCalls).toHaveLength(0);
+    await client.disconnect();
+  });
   it("refuses to read a URI it never listed", async () => {
     const { client, readCalls } = connectWith({
       advertiseResources: true,
