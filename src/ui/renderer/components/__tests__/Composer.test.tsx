@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent, screen, act } from "@testing-library/react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Composer, type ComposerHandle } from "../Composer.js";
 import { t } from "../../../../i18n/runtime.js";
 import type {
@@ -74,7 +74,10 @@ function Harness({
   const stableOnWarning = useCallback((message: string) => {
     warnRef.current?.(message);
   }, []);
-  exposeSetAttachments?.(setAttachments);
+  // In an effect, not during render: a render-phase call fires on discarded renders too.
+  // Benign here (stable setter, assignment only), but the tests read it after `settle()`
+  // so an effect costs nothing.
+  useEffect(() => { exposeSetAttachments?.(setAttachments); }, [exposeSetAttachments]);
 
   return (
     <Composer
@@ -1006,6 +1009,32 @@ describe("Composer — @ resource mention", () => {
 
     expect(ta.value).toBe("different sentence entirely [Resource #1] ");
     expect(screen.getByTestId("attachment-chip")).toBeTruthy();
+  });
+
+  it("reports rather than silently doing nothing when a channel is absent", async () => {
+    // The guard is per KIND, and both channels are optional in the type so it is
+    // reachable rather than dead code. Without it the menu accepts the keypress and
+    // nothing happens at all, which reads as a broken app instead of an absent
+    // capability.
+    const { attachResource } = installMcpApi({ listResourceTemplates: templateCatalogue() as never });
+    (window as unknown as { lvis: { mcp: Record<string, unknown> } })
+      .lvis.mcp.attachResourceTemplate = undefined;
+    const onWarning = vi.fn();
+    render(<Harness onWarningCb={onWarning} />);
+    const ta = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    await settle();
+
+    await openMenu(ta, "@proj");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onWarning).toHaveBeenCalledWith(t("composer.resourceAttachFailed"));
+    expect(screen.queryByTestId("mcp-resource-template-dialog")).toBeNull();
+    // …and the RESOURCE rows still work, which is the whole reason the guard is per kind.
+    await openMenu(ta, "@pol");
+    await act(async () => { fireEvent.keyDown(ta, { key: "Enter" }); });
+    await act(async () => { await Promise.resolve(); });
+    expect(attachResource).toHaveBeenCalledWith("hr-mcp", "doc:1");
   });
 
   it("attaches nothing when the form is cancelled", async () => {

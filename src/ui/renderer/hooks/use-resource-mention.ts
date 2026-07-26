@@ -384,8 +384,12 @@ export function useResourceMention({
     if (!trigger || !mcp) return;
     const item = items[index ?? activeIndex];
     if (!item) return;
-    const channel = item.target.kind === "template" ? mcp.attachResourceTemplate : mcp.attachResource;
-    if (!channel) {
+    // Both channels are optional in the type, so this narrowing is what the calls below
+    // are made through — the guard proves the capability rather than restating a promise
+    // the type already made. That is the difference between it and dead code.
+    const attachResource = mcp.attachResource;
+    const attachTemplate = mcp.attachResourceTemplate;
+    if (item.target.kind === "template" ? !attachTemplate : !attachResource) {
       onError(t("composer.resourceAttachFailed"));
       return;
     }
@@ -420,9 +424,10 @@ export function useResourceMention({
       return;
     }
     const uri = item.target.uri;
+    if (!attachResource) return;
     runAttach(
       { serverId: item.serverId, label: item.label, uri, range, mentionToken },
-      () => mcp.attachResource(item.serverId, uri),
+      () => attachResource(item.serverId, uri),
     );
   }, [trigger, triggerKey, items, activeIndex, mcp, resourceCount, onError, runAttach, t, text]);
 
@@ -430,7 +435,8 @@ export function useResourceMention({
 
   const submitTemplate = useCallback((values: Record<string, string>) => {
     const pending = pendingTemplate;
-    if (!pending || !mcp?.attachResourceTemplate) return;
+    const attachTemplate = mcp?.attachResourceTemplate;
+    if (!pending || !attachTemplate) return;
     setPendingTemplate(null);
     // Re-checked, not inherited from the accept: the form was open while the rest of the
     // composer stayed live, and a user can add attachments from another surface in that
@@ -449,7 +455,7 @@ export function useResourceMention({
         range: pending.range,
         mentionToken: pending.mentionToken,
       },
-      () => mcp.attachResourceTemplate(pending.serverId, pending.uriTemplate, values),
+      () => attachTemplate(pending.serverId, pending.uriTemplate, values),
     );
   }, [mcp, onError, pendingTemplate, resourceCount, runAttach, t]);
 
