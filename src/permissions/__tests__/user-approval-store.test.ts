@@ -22,6 +22,7 @@ import {
   listApprovals,
   readApprovals,
   canonicalStringify,
+  __drainPersistentWritesForTest,
   __resetSessionStoreForTest,
 } from "../user-approval-store.js";
 
@@ -31,6 +32,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // Drain BEFORE removing — see the note in `__drainPersistentWritesForTest`.
+  await __drainPersistentWritesForTest();
   await rm(TEST_HOME, { recursive: true, force: true });
   __resetSessionStoreForTest();
 });

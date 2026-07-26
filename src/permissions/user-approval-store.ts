@@ -571,9 +571,36 @@ export async function migrateCanonicalization(): Promise<void> {
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
-/** @internal Test only — clears the session cache between test cases. */
+/**
+ * @internal Test only — clears the session cache between test cases.
+ *
+ * Does NOT drain the persistent write queue; see
+ * {@link __drainPersistentWritesForTest}. Resetting the queue reference here does not
+ * cancel an in-flight write — nothing can — it only stops the NEXT write chaining behind
+ * it, which is the isolation this reset is for.
+ */
 export function __resetSessionStoreForTest(): void {
   if (sessionStore.size > 0) approvalGeneration += 1;
   sessionStore.clear();
   persistentWriteQueue = Promise.resolve();
+}
+
+/**
+ * @internal Test only — wait for every queued persistent write to finish.
+ *
+ * A test that wrote an approval and then removes its temp directory MUST await this
+ * first. `recordApproval` resolves when the write is QUEUED, not when it has landed:
+ * `mutatePersistentApprovals` chains onto a module-level queue and the caller's promise
+ * covers only its own link. Reassigning that queue — which
+ * {@link __resetSessionStoreForTest} does — abandons the reference without cancelling the
+ * work, so the write continues and re-creates files inside a directory teardown is
+ * deleting. That surfaces as `ENOTEMPTY` from `rmSync`, in a DIFFERENT test than the one
+ * that queued the write, on any platform.
+ *
+ * That failure was diagnosed as a Windows quirk for a long time and it is not: it
+ * reproduced on Linux CI. The fix is to await the writer, not to retry the removal —
+ * `maxRetries` only widens the window the race has to resolve itself in.
+ */
+export async function __drainPersistentWritesForTest(): Promise<void> {
+  await persistentWriteQueue.catch(() => {});
 }

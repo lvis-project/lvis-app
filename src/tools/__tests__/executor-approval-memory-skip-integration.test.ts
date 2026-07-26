@@ -29,6 +29,7 @@ import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import {
   recordApproval,
+  __drainPersistentWritesForTest,
   __resetSessionStoreForTest,
 } from "../../permissions/user-approval-store.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
@@ -53,7 +54,13 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
     __resetSessionStoreForTest();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Drain FIRST. This is the teardown that failed on Linux CI with ENOTEMPTY on
+    // `lvisHomeDir`: `recordApproval` resolves when the write is QUEUED, so an approval
+    // written by a test was still landing while this removed the directory under it.
+    // `__resetSessionStoreForTest` does not help — reassigning the queue abandons the
+    // reference without cancelling the work.
+    await __drainPersistentWritesForTest();
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
     __resetSessionStoreForTest();
