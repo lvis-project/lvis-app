@@ -1215,6 +1215,25 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configRemove, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.removeConfig(serverId);
   });
+  // Deliberately NOT rate-limited, and this is a decision rather than an omission.
+  //
+  // Two reviewers raised it: the channel is unbounded, and each successful read mints a
+  // proxy session from a capped LRU, so a renderer looping valid `ui://` reads could evict
+  // a live card's token. Both halves are true. Rate-limiting is still the wrong fix here:
+  //
+  //   - This is the RENDER path. Every card, inline and detached, passes through it, and a
+  //     conversation may legitimately mount many at once. It must not share the
+  //     user-initiated bucket with `prompts/get` and the attach channels, and a bucket
+  //     sized for user actions would starve ordinary rendering.
+  //   - The eviction concern is already bounded where it belongs. `MAX_PROXY_SESSIONS` is
+  //     4096 with dispose-on-unmount as the authoritative reclaim, and its own comment
+  //     records the bug from tightening it: a 64 cap silently revoked still-mounted cards.
+  //     Adding pressure on this path risks re-creating exactly that.
+  //   - The actor is a compromised renderer, which already holds strictly more reach than
+  //     looping this channel gives it.
+  //
+  // If this ever needs bounding, it needs its OWN budget sized for rendering plus a way to
+  // tell a mint for a live card from a mint for one already gone — not this bucket.
   ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string, generationId?: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
     // b1 — install the per-server network gate BEFORE the resource is read. (It is

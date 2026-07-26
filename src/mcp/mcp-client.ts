@@ -1135,7 +1135,19 @@ export class McpClient {
     // advertised the ui extension at discovery.
     const uiMeta = this.appsUiAdvertised ? result._meta?.ui : undefined;
     let uiPayload: McpUiPayload | undefined;
-    if (uiMeta?.resourceUri) {
+    // Fail-closed at EXTRACTION, mirroring the plugin arm (`plugin-runtime-delegate`),
+    // which drops a malformed `_meta.ui` here rather than carrying it forward.
+    //
+    // The external arm used to carry any non-empty string through. The card then mounted,
+    // installed its partition policy, minted nothing, and failed at `readResource` with a
+    // message about schemes that a user reading it has no way to connect to the server's
+    // declaration. Checking the same predicate the read will apply anyway turns that into
+    // no card at all — which is what a server publishing an unusable `resourceUri` should
+    // get, and matches what the plugin arm has always done.
+    //
+    // Only the CARD is dropped: `text` is returned regardless, so a tool result is never
+    // withheld from the model because its optional UI declaration was malformed.
+    if (isMcpAppUiUri(uiMeta?.resourceUri)) {
       uiPayload = {
         serverId: this.config.id,
         resourceUri: uiMeta.resourceUri,
@@ -1143,6 +1155,11 @@ export class McpClient {
         height: uiMeta.height,
         title: uiMeta.title,
       };
+    } else if (uiMeta?.resourceUri) {
+      log.warn(
+        `${this.config.id} dropped a tool result's ui card: `
+          + `resourceUri is not a usable ui:// resource`,
+      );
     }
     return { text, uiPayload };
   }
