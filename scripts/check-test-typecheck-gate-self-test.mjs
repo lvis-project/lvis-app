@@ -16,6 +16,9 @@
  * "does it fail" test while being useless, so every failing case is paired with a passing
  * one that must stay green.
  */
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   compareToBaseline,
   countErrorsByFile,
@@ -255,6 +258,40 @@ check(
 check("never reports a __tests__ file", !nonTestEntries(ENTRIES).some((f) => f.includes("__tests__")));
 check("never reports a __probes__ file", !nonTestEntries(ENTRIES).some((f) => f.includes("__probes__")));
 check("never reports a test/ file", !nonTestEntries(ENTRIES).some((f) => f.startsWith("test/")));
+
+// ── The two configs must not share an incremental cache.
+//
+// `tsconfig.tests.json` inherits from `tsconfig.json`, which sets
+// `tsBuildInfoFile: "./.cache/tsc/typecheck.tsbuildinfo"`. Inheriting it made two DIFFERENT
+// programs — production sources, and this much wider set — share one cache, and the
+// measurement then depended on which config ran last: root-then-gate reported 1,626 errors,
+// gate-then-gate reported 1,625. Stable under each ordering, so it did not look like a race;
+// it looked like a real change in the code.
+//
+// The override is documented in that file as required-not-preferred, but a comment cannot
+// fail. This can. It exists because the override sits one commit after every other
+// compilerOption was deliberately removed from that config, so "finish the cleanup" is the
+// natural next edit and would silently restore an order-dependent ratchet.
+const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+function buildInfoPathOf(configName) {
+  const text = readFileSync(resolve(ROOT_DIR, configName), "utf8");
+  // These two files use only whole-line `//` comments (45 of them in the tests config, none
+  // trailing). Stripping those is enough, and if it ever is not, extraction yields undefined
+  // and the checks below go RED rather than silently passing.
+  const stripped = text
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+  return JSON.parse(stripped)?.compilerOptions?.tsBuildInfoFile;
+}
+const rootBuildInfo = buildInfoPathOf("tsconfig.json");
+const testsBuildInfo = buildInfoPathOf("tsconfig.tests.json");
+check("the root config declares a tsBuildInfoFile", typeof rootBuildInfo === "string");
+check("the tests config overrides tsBuildInfoFile", typeof testsBuildInfo === "string");
+check(
+  "the two configs do not share an incremental cache",
+  Boolean(rootBuildInfo) && Boolean(testsBuildInfo) && rootBuildInfo !== testsBuildInfo,
+);
 
 if (failures.length > 0) {
   process.stderr.write(
