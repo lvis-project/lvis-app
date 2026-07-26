@@ -20,6 +20,7 @@ import {
   compareToBaseline,
   countErrorsByFile,
   isEmptyMeasurementAgainstBaseline,
+  nonSourceMeasurements,
 } from "./check-test-typecheck-baseline.mjs";
 
 const failures = [];
@@ -118,6 +119,49 @@ check(
 check(
   "a non-empty measurement is never treated as empty",
   isEmptyMeasurementAgainstBaseline(new Map([["a.test.ts", 1]]), baseline) === false,
+);
+
+// ── Config errors. A reviewer asked what happens to config codes outside the TS5xxx set
+// the runner used to look for, e.g. TS6059. Running tsc against a deliberately broken
+// config answered it, and the answer was worse than the question: a config error makes tsc
+// report the CONFIG and none of the program's genuine type errors, so the measurement looks
+// like every baselined file was fixed at once. Both real shapes are pinned below, taken
+// verbatim from that run rather than invented.
+//
+// Shape 1: unattributed — no `file(line,col)` span at all, so the parser drops it silently.
+const CONFIG_UNATTRIBUTED = [
+  `error TS6059: File 'C:/x/outside.ts' is not under 'rootDir' 'C:/x/src'. 'rootDir' is expected to contain all source files.`,
+  `  The file is in the program because:`,
+  `    Matched by include pattern '../outside.ts' in 'C:/x/tsconfig.json'`,
+].join("\n");
+check(
+  "an unattributed config diagnostic yields no per-file counts",
+  countErrorsByFile(CONFIG_UNATTRIBUTED).size === 0,
+);
+// …which is why the runner refuses on emptiness. Asserted here so the two halves are
+// visibly connected: the parser CANNOT see this, therefore something else must.
+check(
+  "and is therefore caught by the empty-measurement refusal",
+  isEmptyMeasurementAgainstBaseline(countErrorsByFile(CONFIG_UNATTRIBUTED), baseline) === true,
+);
+
+// Shape 2: attributed, but to the tsconfig rather than a source file. This one DOES parse,
+// so emptiness cannot catch it — hence the separate non-source rule.
+const CONFIG_ATTRIBUTED = countErrorsByFile(
+  `../../tmp/cfg/tsconfig.json(1,76): error TS5023: Unknown compiler option 'typo'.`,
+);
+check("a config diagnostic attributed to tsconfig does parse", CONFIG_ATTRIBUTED.size === 1);
+check(
+  "a measurement naming a non-source file is refused",
+  nonSourceMeasurements(CONFIG_ATTRIBUTED).length === 1,
+);
+// The direction that stops the rule from rejecting everything: real sources must pass, both
+// extensions, and a path containing a dot in a directory name must not be mistaken for one.
+check(
+  "real .ts/.tsx sources are never flagged as non-source",
+  nonSourceMeasurements(
+    new Map([["src/a.test.ts", 1], ["src/b.test.tsx", 1], ["src/v1.2/c.test.ts", 1]]),
+  ).length === 0,
 );
 if (failures.length > 0) {
   process.stderr.write(
