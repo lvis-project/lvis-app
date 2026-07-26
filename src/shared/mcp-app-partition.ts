@@ -40,6 +40,7 @@ import {
   hasUnsafeUriChars,
   MCP_RESOURCE_URI_MAX_CHARS,
 } from "./mcp-resource-bounds.js";
+
 export const MCP_APP_PARTITION_PREFIX = "lvis-mcp-app:";
 
 /**
@@ -125,20 +126,29 @@ export function isMcpAppUiUri(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (!value.startsWith(MCP_APP_UI_SCHEME)) return false;
-  // An authority must be present. `ui://` alone names nothing; `ui:///x`, `ui://?q=1` and
-  // `ui://#f` all parse to an EMPTY hostname, which the plugin arm's authority parse
-  // refuses on its own side — so admitting them here would exempt a URI from the
-  // capability check that no arm could ever serve.
+  // An authority must be present, and that question is ASKED rather than enumerated.
   //
-  // The length equality is load-bearing rather than redundant with the index test:
-  // `value[5]` is `undefined` for `ui://` exactly, so the character comparison alone
-  // would accept it. A reviewer proved the `?`/`#` half by running `new URL()` — the
-  // first version of this check only knew about `/`.
-  const afterScheme = value[MCP_APP_UI_SCHEME.length];
-  if (value.length === MCP_APP_UI_SCHEME.length
-    || afterScheme === "/" || afterScheme === "?" || afterScheme === "#") {
+  // The first version tested `value[5] === "/"`. A reviewer found `?` and `#` reach the
+  // same empty authority; enumerating those, a second reviewer found `:`, `[` and `]`
+  // make `new URL()` throw. That is three rounds of the same mistake — the one this
+  // module already made with the invisible-character class — so it now asks the parser
+  // instead of guessing what the terminators are.
+  //
+  // This ALIGNS with the plugin arm, which parses the authority the same way
+  // (`plugin-ui-resource-provider`) and refuses what it cannot read. That is the honest
+  // reason: not "no arm could serve this" — the external arm never parses the URI and a
+  // server may well answer `ui://?q=1` — but that the host should not exempt from a
+  // capability check a URI whose authority it cannot name.
+  //
+  // `new URL` is used ONLY to ask that question. The value forwarded to the server stays
+  // the caller's original string, so no normalization reaches the wire.
+  let authority: string;
+  try {
+    authority = new URL(value).hostname;
+  } catch {
     return false;
   }
+  if (authority.length === 0) return false;
   // The SAME character rule a resource URI must pass, asked of the one function that
   // spells it. The first version of this predicate enumerated its own ranges and leaked
   // ten of eleven sampled members — including U+061C, a bidi control the comment above it
