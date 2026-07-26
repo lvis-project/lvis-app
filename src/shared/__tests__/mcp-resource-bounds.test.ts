@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { isUsableMcpServerId, MAX_SERVER_ID_LEN } from "../mcp-app-partition.js";
 import { stagedOriginFor } from "../staged-origins.js";
 import {
+  hasUnsafeUriChars,
   isHostFetchRefusedUri,
   isUsableResourceUri,
   MCP_RESOURCE_DESCRIPTION_MAX_CHARS,
@@ -224,3 +225,60 @@ describe("isUsableMcpServerId", () => {
   });
 });
 
+/** `U+XXXX` for an assertion label, so a failure names the codepoint not the glyph. */
+function label(cp: number): string {
+  return `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+describe("hasUnsafeUriChars — the composition, arm by arm", () => {
+  // Written to the guidance a reviewer gave after the `isMcpAppUiUri` class leak: probe
+  // each arm's UNIQUE contribution, never the union. A fixture drawn from the union
+  // passes against any single arm and therefore pins nothing — which is exactly how the
+  // leak survived its first test.
+  //
+  // The sets below were measured by sweeping U+0000..U+10FFFF against the three arms as
+  // the module actually composes them, not against a transcription of them. That
+  // distinction is not pedantry: a hand-copied mirror of the invisible class omitted its
+  // C0/C1 range and reported the control arm as contributing 28 unique codepoints, which
+  // is wrong.
+
+  it("refuses what ONLY the RFC 3986 arm catches", () => {
+    // 28 codepoints. If `hasUnsafeUriChars` ever drops that arm, these are what stops
+    // being refused — and `\s` is the reason TAB/LF/CR/space are covered at all, since
+    // the invisible class deliberately admits them.
+    for (const cp of [
+      0x0020, 0x0022, 0x003c, 0x003e, 0x005c, 0x005e, 0x0060, 0x007b, 0x007c, 0x007d,
+      0x00a0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+      0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+    ]) {
+      expect(hasUnsafeUriChars(`a${String.fromCodePoint(cp)}b`), label(cp)).toBe(true);
+    }
+  });
+
+  it("refuses what ONLY the invisible/reordering arm catches", () => {
+    // ~4205 codepoints; a sample spanning C1, the format class, the variation selectors
+    // and a plane-14 tag. None of these is whitespace or an RFC-excluded character, so
+    // dropping that arm silently admits every one.
+    for (const cp of [
+      0x0080, 0x00ad, 0x034f, 0x061c, 0x115f, 0x180e, 0x2060, 0x2064,
+      0x200b, 0x202e, 0xfe0f, 0xfeff, 0xe0001, 0xe0041,
+    ]) {
+      expect(hasUnsafeUriChars(`a${String.fromCodePoint(cp)}b`), label(cp)).toBe(true);
+    }
+  });
+
+  // The control arm has NO unique contribution — measured zero across the whole codepoint
+  // space, because the invisible class already carries C0 and C1. There is deliberately no
+  // test for it: nothing can distinguish it, and a test drawn from the union would pass
+  // against its removal while looking like coverage. It stays in the composition as
+  // cross-module belt and braces, and that reasoning lives in its docstring where a
+  // measurement cannot contradict it.
+
+  it("accepts what none of the arms catches", () => {
+    // The direction that stops an over-broad "refuse anything unusual" rewrite: ordinary
+    // identifiers, including non-ASCII scripts the host explicitly still allows.
+    for (const value of ["plain", "a-b_c.d~e", "%E1%84%92", "카드", "日本語", "v1.2.3"]) {
+      expect(hasUnsafeUriChars(value), value).toBe(false);
+    }
+  });
+});
