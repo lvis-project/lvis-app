@@ -45,22 +45,27 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // `maxRetries` is the whole fix here, and this file cannot do better: `AuditLogger`
-  // captures `this.auditDir`/`this.logFile` in its CONSTRUCTOR, so a queued write is
-  // already bound to a path — un-mocking `homedir()` cannot redirect it. Every logger in
-  // this file is also constructed synchronously inside a test body, so there is no
-  // post-teardown construction to redirect in the first place.
+  // `maxRetries` is MITIGATION for an unexplained flake, and saying so matters, because
+  // this file does NOT share the root cause that the executor teardown fixes.
   //
-  // An earlier version of this teardown restored the mock BEFORE removing and claimed that
-  // aimed a late construction at the real home instead of the tree being deleted. Both
-  // halves were wrong: it cannot redirect a bound write, and aiming a hypothetical writer
-  // at the user's real `~/.lvis` is the failure mode to avoid, not the fix. So restore
-  // AFTER — if a late writer ever appears it stays inside the temp tree, where
-  // `maxRetries` absorbs it.
+  // There it was a real un-awaited writer: `recordApproval` resolves when the write is
+  // queued, so the write outlived the test and `rmSync` deleted the tree under it. The fix
+  // is to await the queue (`__drainPersistentWritesForTest`), and awaiting is possible
+  // because the writer is ours.
   //
-  // Where the writer IS ours, none of this is needed — await it instead; see
-  // `__drainPersistentWritesForTest` in `user-approval-store.ts`, which is why the
-  // executor teardown drains before it touches anything.
+  // Here there is no queued write to await at all. Every logger in this file is constructed
+  // synchronously in a test body and only ever has `search()` called on it, and `search()`
+  // enqueues nothing — so `AuditLogger.flush()`, which does exist, would have nothing to
+  // drain. The only writers are the constructor's `mkdirSync` and this file's synchronous
+  // `writeJsonl`. Whatever produces the occasional ENOTEMPTY is below that, at the
+  // filesystem, and retries are the honest response to it. Do not "improve" this into a
+  // drain call; it would be a no-op dressed as a fix.
+  //
+  // Restoring the mock AFTER removal, not before: an earlier version did the reverse and
+  // claimed it aimed a late construction at the real home rather than the tree being
+  // deleted. Both halves were wrong — the constructor captures `this.auditDir`, so a bound
+  // write cannot be redirected, and pointing a hypothetical late writer at the user's real
+  // `~/.lvis` is the failure mode to avoid, not the fix.
   if (existsSync(testHome)) {
     rmSync(testHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
