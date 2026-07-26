@@ -7,7 +7,9 @@
  * the one that would otherwise be trusted blind.
  *
  * Deliberately tests the COMPARISON in-process against synthetic inputs rather than
- * running `tsc`, so it costs milliseconds and can sit in the same CI step as the gate. The
+ * typechecking with `tsc`, so it costs milliseconds and can sit in the same CI step as the
+ * gate. One documented exception at the bottom of the file spawns `tsc --showConfig` (~117 ms)
+ * to read an effective compiler option — config resolution only, never a typecheck. The
  * expensive half — that `tsc --pretty false` output actually parses into per-file counts —
  * is covered by the parser cases below, using real diagnostic lines rather than invented
  * ones.
@@ -16,8 +18,10 @@
  * "does it fail" test while being useless, so every failing case is paired with a passing
  * one that must stay green.
  */
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   compareToBaseline,
@@ -25,6 +29,7 @@ import {
   isEmptyMeasurementAgainstBaseline,
   nonSourceMeasurements,
   nonTestEntries,
+  readBaselineFilesOrEmpty,
   unattributedDiagnostics,
 } from "./check-test-typecheck-baseline.mjs";
 
@@ -68,11 +73,18 @@ check("ignores the trailing summary line", !counts.has("Found 4 errors in 3 file
 // left the self-test GREEN, which means the pattern's constraints were unpinned. Each
 // fixture below is the one that reddens for a specific constraint.
 const EDGE_OUTPUT = [
-  // A path containing `(`. The file group excludes `(` so the `\(` that follows can only
-  // match the span's own paren; with `[^\s]*` instead, this parses to a different file.
+  // A path containing `(`. This is the fixture that exists because the pattern once could
+  // NOT parse such a path: the old file group was `[^(]*`, which cannot cross a paren, so
+  // this line matched nothing and the file vanished from the measurement entirely. It reddens
+  // under a `[^(]*` file group and nothing else.
+  //
+  // An earlier version of this comment said the file group "excludes `(`" — it no longer does,
+  // that describes the defect — and named `[^\s]*` as the mutation it catches, which is the
+  // mutation the SPACE fixture below catches. A reviewer measured the crossing:
+  //   `[^\s].*?` (current) → both pass · `[^(]*` (old) → paren reddens · `[^\s]*` → space reddens
   `src/__tests__/odd(name).test.ts(3,1): error TS2304: Cannot find name 'Q'.`,
-  // A path containing a SPACE. tsc emits these unquoted, so the leading-char class is the
-  // only thing keeping the group from starting mid-path.
+  // A path containing a SPACE. tsc emits these unquoted, so a file group of `[^\s]*` stops at
+  // the space and misparses; this is the fixture that reddens for that one.
   `src/__tests__/two words.test.ts(4,2): error TS2304: Cannot find name 'R'.`,
   // Shapes that must NOT count: a span with no error code, and a non-error severity.
   `src/__tests__/nope.test.ts(5,3): error : missing code`,
@@ -155,20 +167,24 @@ check(
   "a non-empty measurement is never treated as empty",
   isEmptyMeasurementAgainstBaseline(new Map([["a.test.ts", 1]]), baseline) === false,
 );
-// WHAT THIS FILE CANNOT PIN, stated rather than left implicit. The predicate above is
-// applied at two points in `main()` — before the `--update-baseline` write and before the
-// compare — and the second placement was missing until a security reviewer reproduced the
-// consequence: with `tsc.js` unresolvable, `--update-baseline` rewrote the baseline from
-// 312 entries to `files: {}` at rc=0, after which the compare path's own empty-baseline
-// carve-out reported green indefinitely.
+// WHAT THIS FILE CANNOT PIN, stated rather than left implicit. The predicate above guards
+// BOTH the `--update-baseline` write and the compare, from a SINGLE call site hoisted above
+// both branches in `main()`. It previously sat inside the compare path only, which left the
+// write fail-open: with `tsc.js` unresolvable, `--update-baseline` rewrote the baseline from
+// 312 entries to `files: {}` at rc=0, and the compare path's empty-baseline carve-out then
+// reported green indefinitely.
 //
-// PLACEMENT cannot be asserted here, because doing so would mean spawning a compiler, which
-// this file deliberately does not do. It was verified end-to-end instead, all four
-// directions: broken compiler + real baseline refuses and leaves the 312 entries intact;
-// no baseline file at all still bootstraps; a corrupt baseline refuses; an intentionally
-// emptied baseline with a working compiler writes. If you move either call site, re-run
-// those four by hand — a green self-test does not cover you.
-
+// An earlier version of this block said the predicate is "applied at two points" and warned
+// about moving "either call site". There is one. A reviewer flagged it because that wording
+// tells the reader the compare path carries its own guard, which invites pushing the single
+// check down into the update branch and restoring the original bug.
+//
+// PLACEMENT still cannot be asserted here, because doing so would mean spawning a compiler,
+// which this file deliberately does not do. It was verified end-to-end instead, four
+// directions: broken compiler + real baseline refuses and leaves the 312 entries intact; no
+// baseline file still bootstraps; a corrupt baseline refuses; an intentionally emptied
+// baseline with a working compiler writes. If the call site moves, re-run those four by hand
+// — a green self-test does not cover you.
 // ── Config errors. A reviewer asked what happens to config codes outside the TS5xxx set
 // the runner used to look for, e.g. TS6059. Running tsc against a deliberately broken
 // config answered it, and the answer was worse than the question: a config error makes tsc
@@ -262,38 +278,53 @@ check("never reports a test/ file", !nonTestEntries(ENTRIES).some((f) => f.start
 // ── The gate must not use an incremental compiler.
 //
 // `tsconfig.tests.json` inherits from `tsconfig.json`, which sets `incremental: true`. That
-// made this gate's error count depend on compiler cache state rather than on the source:
-// tsc caches per-file diagnostics and does not re-emit unused-import diagnostics
+// made this gate's error count depend on compiler cache state rather than on the source: tsc
+// caches per-file diagnostics and does not re-emit unused-import diagnostics
 // (TS6192/TS6196) for a file it considers unchanged, so `internal-api-surface.ts` reported 3
 // errors cold and 2 warm — 1,626 vs 1,625 overall.
 //
-// An earlier attempt gave this project its own `tsBuildInfoFile` and claimed the problem
-// solved. It was not: separating the cache files fixed only the shared-file case, and a run
-// with different `lib` settings over the same files still produced 1,625. The claim had been
-// verified against three orderings, none of which covered that. Hence the assertion below is
-// on `incremental` itself, which removes the class rather than one instance of it.
+// Asserted on the EFFECTIVE option after `extends` resolution, not on the literal text of the
+// config. Three earlier attempts got this wrong in instructive ways:
+//   1. Giving the tests config its own `tsBuildInfoFile` and asserting the two paths differ.
+//      True, but the property was irrelevant — separating the cache files fixed only the
+//      shared-file case, so the assertion would have kept passing while the bug remained.
+//   2. Asserting the literal `compilerOptions.incremental` in each file via a hand-rolled
+//      `//`-comment stripper. That pins the MECHANISM, not the property: it would have
+//      reddened on a legitimate alternative fix (dropping `incremental` from the root config),
+//      and the stripper had its own failure class — a legal trailing comment or trailing comma
+//      raised a `JSON.parse` SyntaxError instead of a named check failure.
+//   3. `ts.getParsedCommandLineOfConfigFile`, suggested by a reviewer. Not available: this
+//      repo is on the NATIVE typescript package (7.0.2), whose JS API surface is gone —
+//      `readConfigFile`, `parseJsonConfigFileContent` and `ts.sys` are all undefined. The same
+//      removal is why `webpack.config.cjs` moved off ts-loader.
 //
-// This lives in the self-test rather than the gate because it protects the gate's own
-// correctness, not its failure taxonomy — and it exists at all because the override sits
-// among comments explaining why this config should diverge from the root as little as
-// possible, so "finish the cleanup" is the natural next edit. A comment cannot fail; this can.
+// So ask the binary. `tsc --showConfig` resolves `extends` and reports the options the PROGRAM
+// runs with — and it is the very binary the gate spawns, so it cannot disagree with the gate.
+// Measured at ~117 ms, which is why this file's "does not run tsc" rule has one documented
+// exception: config resolution, never typechecking.
+//
+// It lives in the self-test rather than the gate because it protects the gate's own
+// correctness, not its failure taxonomy, and it exists at all because the override sits among
+// comments arguing this config should diverge from the root as little as possible — so
+// "finish the cleanup" is the natural next edit. A comment cannot fail; this can.
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-function compilerOptionsOf(configName) {
-  const text = readFileSync(resolve(ROOT_DIR, configName), "utf8");
-  // Both files use only whole-line `//` comments — checked, not assumed (45 in the tests
-  // config, none trailing). If that ever stops being true, JSON.parse throws and this goes
-  // RED rather than silently passing. That direction is deliberate.
-  const stripped = text
-    .split(/\r?\n/)
-    .filter((line) => !/^\s*\/\//.test(line))
-    .join("\n");
-  return JSON.parse(stripped)?.compilerOptions ?? {};
+function effectiveIncremental(configName) {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(ROOT_DIR, "node_modules", "typescript", "lib", "tsc.js"),
+      "-p", resolve(ROOT_DIR, configName), "--showConfig",
+    ],
+    { cwd: ROOT_DIR, encoding: "utf8" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`tsc --showConfig failed: ${result.stderr}`);
+  return JSON.parse(result.stdout)?.compilerOptions?.incremental;
 }
-const rootOptions = compilerOptionsOf("tsconfig.json");
-const testsOptions = compilerOptionsOf("tsconfig.tests.json");
-check("the root config is incremental (the thing being overridden)", rootOptions.incremental === true);
-check("the tests config disables incremental", testsOptions.incremental === false);
-if (failures.length > 0) {
+// Only the property that matters. Deliberately NOT paired with an assertion about the root
+// config: whether the root is incremental is its own business, and asserting it would turn a
+// legitimate change there into a failure here.
+check("the gate's program is not incremental", effectiveIncremental("tsconfig.tests.json") === false);if (failures.length > 0) {
   process.stderr.write(
     `[test-typecheck-self-test] the gate is not detecting what it claims:\n  ${failures.join("\n  ")}\n`,
   );
