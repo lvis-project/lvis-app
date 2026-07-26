@@ -22,6 +22,33 @@
  * `--pretty false` is not cosmetic. `tsc`'s default output is ANSI-coloured, and this repo
  * has already been bitten by `grep "error TS"` silently matching nothing because of the
  * escape codes. The flag gives one plain `file(line,col): error TSxxxx: msg` per line.
+ *
+ * FAILING CLOSED IS THE HARD PART HERE, and it is why this gate carries three checks that
+ * the repo's other two baseline gates do not need. `check-knip-baseline.mjs` parses JSON, so
+ * an unrunnable tool yields empty stdout and `JSON.parse` throws; `check-cluster-scope.mjs`
+ * treats any nonzero exit as failure. Both get fail-closed behaviour for free. This gate can
+ * use NEITHER mechanism: `tsc` exits nonzero precisely when it succeeds at finding the errors
+ * being measured, and the output is plain text, so there is no parse step to throw on
+ * emptiness. Silence is indistinguishable from success unless something says otherwise.
+ *
+ * Each row below was reproduced against this gate, not reasoned about. The first was found
+ * by a security reviewer; the rest came from asking what else could produce a measurement
+ * that looks like mass improvement.
+ *
+ *   scenario                            tsc  output shape                which check fires
+ *   ----------------------------------  ---  --------------------------  -----------------
+ *   `tsc.js` missing or moved             1  node module-resolution err  empty measurement
+ *   `include`/`files` both empty          0  NOTHING AT ALL              empty measurement
+ *   rootDir violation (TS6059)            1  unattributed, column zero   unattributed
+ *   unknown compiler option (TS5023)      1  attributed to tsconfig      non-source path
+ *
+ * Note the second row: a config that silently checks nothing exits ZERO with no output, so
+ * neither the status nor the text can betray it. And note that a config error makes tsc
+ * report the config INSTEAD of the program — none of the genuine type errors appear — which
+ * is what turns any of these into "290 files fully fixed" rather than a visible failure.
+ *
+ * So none of the three is redundant with the others, and none is redundant with the exit
+ * status. Removing one silently re-opens exactly one row.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -91,6 +118,28 @@ export function isEmptyMeasurementAgainstBaseline(counts, baselineFiles) {
   return counts.size === 0 && Object.keys(baselineFiles).length > 0;
 }
 
+/**
+ * Measured paths that are not TypeScript sources.
+ *
+ * The other half of the unattributed-diagnostic check, and the case a reviewer's TS6059
+ * question uncovered: some config errors ARE attributed, just not to a source file.
+ * `error TS5023: Unknown compiler option` arrives as `…/tsconfig.json(1,76): error TS5023:`,
+ * which the per-file parser happily counts as a file named `tsconfig.json`.
+ *
+ * That alone would still fail the gate — an unbaselined path with errors is a regression —
+ * but it would fail as "tsconfig.json gained 1 error", sending the reader after a source
+ * bug that does not exist. Worse, under `--update-baseline` it would be written INTO the
+ * baseline. Refusing outright keeps the diagnosis honest and the baseline clean.
+ *
+ * Verified against real output rather than assumed: with a deliberately broken config, tsc
+ * emitted TS6059 unattributed AND TS5023 attributed to the tsconfig, and reported none of
+ * the program's genuine type errors — so a config error yields a measurement that looks
+ * like mass improvement. Every baselined path is `.ts` or `.tsx` (252 + 38).
+ */
+export function nonSourceMeasurements(counts) {
+  return [...counts.keys()].filter((f) => !/\.tsx?$/.test(f));
+}
+
 function runTsc() {
   const result = spawnSync(
     process.execPath,
@@ -99,15 +148,33 @@ function runTsc() {
     { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   if (result.error) throw result.error;
-  // tsc exits 1 when it emits diagnostics and 2 on a config/crash failure. Only the
-  // former is expected here; anything else means the gate itself is broken and must not
-  // be read as "no errors".
+  if (result.signal) throw new Error(`tsc terminated by signal ${result.signal}`);
+  // Statuses are NOT the failure signal here, which is the whole difficulty: `tsc` exits 1
+  // exactly when it succeeds at finding the errors this gate measures. 0/1/2 are all
+  // legitimate; anything else is a broken invocation. The real signals are the two content
+  // checks below plus the empty-measurement refusal in `main()`.
   if (result.status !== 0 && result.status !== 1 && result.status !== 2) {
     throw new Error(`tsc exited ${result.status}\n${result.stdout}${result.stderr}`);
   }
   const stdout = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-  if (/error TS(5\d{3}|18003)/.test(stdout)) {
-    throw new Error(`tsc could not load the project — the gate is not measuring anything:\n${stdout}`);
+  // ASK THE SHAPE, DO NOT LIST THE CODES. This used to test for `TS5\d{3}|TS18003`, and a
+  // reviewer asked what happens to config codes outside that set — TS6059, for one.
+  // Enumerating codes has leaked in this repo three times running, so the check is now
+  // structural: a diagnostic tsc attributes to NO file is not about a file, it is about the
+  // program, and the per-file parser below silently drops it. Verified against real output —
+  // `error TS6059: File '…' is not under 'rootDir'` begins at column zero with no
+  // `file(line,col)` span, while genuine per-file diagnostics always carry one.
+  //
+  // This catches config errors that are EMITTED AND UNATTRIBUTED — not "every config code",
+  // which is what an earlier draft of this comment claimed. The other shapes are covered by
+  // the other two checks, and the split is deliberate rather than defence in depth; see the
+  // matrix in the module docstring.
+  const unattributed = stdout.split(/\r?\n/).filter((l) => /^error TS\d+:/.test(l));
+  if (unattributed.length > 0) {
+    throw new Error(
+      "tsc reported program-level errors, so the per-file measurement is not trustworthy:\n"
+      + `${unattributed.join("\n")}\n\nFull output:\n${stdout}`,
+    );
   }
   return stdout;
 }
@@ -132,6 +199,16 @@ export function nonTestEntries(files) {
 function main() {
   const update = process.argv.includes("--update-baseline");
   const counts = countErrorsByFile(runTsc());
+
+  // Before comparing OR writing: a measurement attributed to something that is not a
+  // TypeScript source means the compiler was diagnosing the configuration, not the code.
+  const nonSource = nonSourceMeasurements(counts);
+  if (nonSource.length > 0) {
+    throw new Error(
+      `tsc attributed errors to non-source files (${nonSource.join(", ")}), which means it`
+      + " was diagnosing the configuration. Refusing to compare or write a baseline.",
+    );
+  }
 
   if (update) {
     const sorted = Object.fromEntries(
