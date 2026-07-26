@@ -1567,6 +1567,41 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await noApps.client.disconnect();
   });
 
+  it("drops a tool result's ui card when its resourceUri is unusable, keeping the text", async () => {
+    // Fail-closed at extraction, mirroring the plugin arm. Before this the card mounted,
+    // installed a partition policy, and failed later at `readResource` with a message a
+    // user cannot connect to the server's declaration. The TEXT must still come through —
+    // a tool result is never withheld because its optional UI declaration was malformed.
+    const discoverWithApps = {
+      ...RC_DISCOVER_RESULT,
+      capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
+    };
+    for (const [resourceUri, shouldRender] of [
+      ["ui://app/card.html", true],
+      ["file:///etc/passwd", false],
+      ["UI://app/card.html", false],
+      ["ui:///card.html", false],
+      ["ui://", false],
+    ] as const) {
+      const { client } = rcHttpClient(`uimeta-${shouldRender}-${resourceUri.length}`, (method, id) => {
+        if (method === "server/discover") return jsonRpcResponse(id, discoverWithApps);
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        if (method === "tools/call") {
+          return jsonRpcResponse(id, {
+            content: [{ type: "text", text: "TOOL TEXT" }],
+            _meta: { ui: { resourceUri, slot: "chat" } },
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      });
+      await client.connect();
+      const out = await client.callTool("t", {});
+      expect(out.text, resourceUri).toBe("TOOL TEXT");
+      expect(Boolean(out.uiPayload), resourceUri).toBe(shouldRender);
+      await client.disconnect();
+    }
+  });
+
   it("readResource: refuses any URI that is not the Apps path, before the request", async () => {
     // The hole a cluster review found, closed here. `resources/read` is ONE wire method
     // serving two host paths: `readDeclaredResource`, gated on the listed set, and this
