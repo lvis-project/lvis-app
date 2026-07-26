@@ -21,6 +21,7 @@ import {
   countErrorsByFile,
   isEmptyMeasurementAgainstBaseline,
   nonSourceMeasurements,
+  unattributedDiagnostics,
 } from "./check-test-typecheck-baseline.mjs";
 
 const failures = [];
@@ -137,6 +138,20 @@ const CONFIG_UNATTRIBUTED = [
 check(
   "an unattributed config diagnostic yields no per-file counts",
   countErrorsByFile(CONFIG_UNATTRIBUTED).size === 0,
+);
+// …so something other than the parser has to see it. This is that something, and it is the
+// same function the runner calls — the rule used to be inline in `runTsc`, unreachable from
+// here without spawning a compiler, and therefore verified only by hand.
+check(
+  "an unattributed diagnostic is detected as program-level",
+  unattributedDiagnostics(CONFIG_UNATTRIBUTED).length === 1,
+);
+// The negative direction, which is the one that matters: a per-file diagnostic carries a
+// `file(line,col)` span and must NOT be mistaken for a program-level one, or the gate would
+// refuse to run every time a test file has an error — i.e. always.
+check(
+  "a real per-file diagnostic is not program-level",
+  unattributedDiagnostics(TSC_OUTPUT).length === 0,
 );
 // …which is why the runner refuses on emptiness. Asserted here so the two halves are
 // visibly connected: the parser CANNOT see this, therefore something else must.
