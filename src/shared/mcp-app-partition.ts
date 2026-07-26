@@ -125,6 +125,11 @@ const MCP_APP_UI_SCHEME = "ui://";
 export function isMcpAppUiUri(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
+  // Load-bearing for CASE, and NOT redundant with the parse below. `new URL("UI://a/x")`
+  // reports `protocol === "ui:"` and a valid hostname, so replacing this with a check on
+  // the parsed protocol — which reads as the obvious tidy-up once a parser sits three
+  // lines down — would silently admit `UI://` and widen the governance exemption the
+  // docstring above calls deliberate. The test holds it; this says why.
   if (!value.startsWith(MCP_APP_UI_SCHEME)) return false;
   // An authority must be present, and that question is ASKED rather than enumerated.
   //
@@ -149,6 +154,13 @@ export function isMcpAppUiUri(value: unknown): value is string {
     return false;
   }
   if (authority.length === 0) return false;
+  // On the RAW value, deliberately, and this ordering is load-bearing. The WHATWG parser
+  // STRIPS tab, LF and CR from its input before parsing, so `ui://ap	p/x` yields the
+  // hostname `app` and clears the authority check on its own. What refuses it is this
+  // line seeing the pre-parse string. A future edit that validates the parsed or
+  // normalized form, or drops this as "the parser already checked it", reopens exactly
+  // that — the mirror of the rule two lines up about what reaches the wire.
+  //
   // The SAME character rule a resource URI must pass, asked of the one function that
   // spells it. The first version of this predicate enumerated its own ranges and leaked
   // ten of eleven sampled members — including U+061C, a bidi control the comment above it
