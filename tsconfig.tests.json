@@ -31,22 +31,31 @@
   // keeps producing diagnostics that mean nothing outside this file.
   //
   // The ONE option below is a different matter: it is required, not a preference, and it must
-  // not be "cleaned up" to match the root config. `tsconfig.json` sets
-  // `tsBuildInfoFile: "./.cache/tsc/typecheck.tsbuildinfo"`, and inheriting it made TWO
-  // different programs — production sources, and this much wider set — share a single
-  // incremental cache. That made the measurement depend on WHICH CONFIG RAN LAST:
+  // not be "cleaned up" to match the root config.
   //
-  //   npx tsc -p tsconfig.json && gate   → 1,626 errors
-  //   gate && gate                       → 1,625 errors
+  // A RATCHET CANNOT USE AN INCREMENTAL COMPILER. `tsconfig.json` sets `incremental: true`,
+  // and inheriting it made this gate's error count depend on compiler cache state rather
+  // than on the source:
   //
-  // Reproduced repeatedly, stable under each ordering. CI happens to run `Typecheck` before
-  // `Typecheck tests`, which is why it matched the committed baseline — but a developer
-  // running only the gate got a different number, and a drift in the other direction would
-  // have been a spurious CI failure with no source change behind it. A ratchet whose count
-  // depends on run order cannot be trusted, which defeats the point of having it.
+  //   npx tsc -p tsconfig.json && gate      → 1,626   (shared buildinfo with the root config)
+  //   gate && gate                          → 1,625
+  //   …and after separating the buildinfo files, a run with different `lib` settings against
+  //   the same files still produced 1,625 — `src/preload/internal-api-surface.ts` reported 3
+  //   errors cold and 2 warm.
+  //
+  // The mechanism: tsc caches per-file diagnostics, and unused-import diagnostics
+  // (TS6192/TS6196) are not re-emitted for a file it considers unchanged. So the count
+  // depends on what the cache last saw. Giving this project its own `tsBuildInfoFile` fixed
+  // only the shared-file case and was verified against too few orderings — it did NOT remove
+  // the class, which is why the option below is `incremental` rather than a cache path.
+  //
+  // Disabling it makes the measurement a pure function of the sources. Verified: 1,626 under
+  // a cold cache, an immediate repeat, a different-`lib` run over the same files, and after
+  // the root typecheck. A full non-incremental run costs about 3 seconds, and CI checks out
+  // cold anyway, so incremental bought this gate nothing while costing it determinism.
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "tsBuildInfoFile": "./.cache/tsc/typecheck-tests.tsbuildinfo"
+    "incremental": false
   },
   "include": ["src", "scripts", "test"],
   "exclude": ["src/**/__probes__/**", "src/preload.cjs.ts"]
