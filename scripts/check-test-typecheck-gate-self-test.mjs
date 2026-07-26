@@ -121,6 +121,19 @@ check(
   "a non-empty measurement is never treated as empty",
   isEmptyMeasurementAgainstBaseline(new Map([["a.test.ts", 1]]), baseline) === false,
 );
+// WHAT THIS FILE CANNOT PIN, stated rather than left implicit. The predicate above is
+// applied at two points in `main()` — before the `--update-baseline` write and before the
+// compare — and the second placement was missing until a security reviewer reproduced the
+// consequence: with `tsc.js` unresolvable, `--update-baseline` rewrote the baseline from
+// 312 entries to `files: {}` at rc=0, after which the compare path's own empty-baseline
+// carve-out reported green indefinitely.
+//
+// PLACEMENT cannot be asserted here, because doing so would mean spawning a compiler, which
+// this file deliberately does not do. It was verified end-to-end instead, all four
+// directions: broken compiler + real baseline refuses and leaves the 312 entries intact;
+// no baseline file at all still bootstraps; a corrupt baseline refuses; an intentionally
+// emptied baseline with a working compiler writes. If you move either call site, re-run
+// those four by hand — a green self-test does not cover you.
 
 // ── Config errors. A reviewer asked what happens to config codes outside the TS5xxx set
 // the runner used to look for, e.g. TS6059. Running tsc against a deliberately broken
@@ -173,9 +186,23 @@ check(
 // The direction that stops the rule from rejecting everything: real sources must pass, both
 // extensions, and a path containing a dot in a directory name must not be mistaken for one.
 check(
-  "real .ts/.tsx sources are never flagged as non-source",
+  "real TypeScript sources are never flagged as non-source",
   nonSourceMeasurements(
-    new Map([["src/a.test.ts", 1], ["src/b.test.tsx", 1], ["src/v1.2/c.test.ts", 1]]),
+    new Map([
+      ["src/a.test.ts", 1],
+      ["src/b.test.tsx", 1],
+      // A dot in a DIRECTORY name must not be read as an extension.
+      ["src/v1.2/c.test.ts", 1],
+      // `.mts`/`.cts` are real sources here, not config. A reviewer found that `/\.tsx?$/`
+      // rejected them while `scripts/electron-flags.d.mts` and `scripts/uv-targets.d.mts`
+      // are committed inside this project's `scripts` include — so a diagnostic in either
+      // would have been refused as "tsc was diagnosing the configuration", the exact
+      // misdiagnosis the non-source rule exists to prevent. Nothing was masked only
+      // because neither file currently has diagnostics.
+      ["scripts/electron-flags.d.mts", 1],
+      ["scripts/uv-targets.d.mts", 1],
+      ["scripts/legacy.cts", 1],
+    ]),
   ).length === 0,
 );
 if (failures.length > 0) {
