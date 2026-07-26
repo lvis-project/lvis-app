@@ -63,8 +63,14 @@ afterEach(() => {
   // which makes it the same KIND of writer as this file's, just one that is actually written
   // to. See that file's `beforeEach`.
   //
-  // What remains unexplained is only this file's occasional ENOTEMPTY, and retries are the
-  // honest response to something not yet demonstrated.
+  // So this file's occasional ENOTEMPTY has no demonstrated cause, and retries are the honest
+  // response to that. One concrete aggravator IS evidenced though, and naming it is better
+  // than the earlier "below that, at the filesystem", which pointed nowhere: `beforeEach` uses
+  // `mkdtempSync(join(process.cwd(), ...))`, so these trees are created in the REPO ROOT rather
+  // than the OS temp dir, under a multi-worker vitest pool. That is a shared directory with
+  // concurrent creators and deleters. It is an aggravator rather than the mechanism — the
+  // failure is on `testHome` itself, not its parent — which is why this stays `maxRetries`
+  // instead of a claim.
   //
   // Restoring the mock AFTER removal, not before: an earlier version did the reverse and
   // claimed it aimed a late construction at the real home rather than the tree being

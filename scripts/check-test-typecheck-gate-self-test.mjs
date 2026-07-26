@@ -96,6 +96,15 @@ check("parses a path containing a space", edge.get("src/__tests__/two words.test
 check("ignores a span with no error code", !edge.has("src/__tests__/nope.test.ts"));
 check("ignores a non-error severity", edge.get("src/__tests__/nope.test.ts") === undefined);
 check("counts exactly the two real diagnostics", edge.size === 2);
+// The `(line,col)` SPAN is what separates a per-file diagnostic from a program-level one, and
+// `unattributedDiagnostics` leans on exactly that invariant. A mutation making the span
+// optional survived the sweep, so it was unpinned: with an optional span this line parses as a
+// "file" named `tsconfig.json`, which is how a config error would be laundered into the
+// baseline. Inert against tsc output today — that is why only a mutation found it.
+check(
+  "a diagnostic with no (line,col) span is not a per-file diagnostic",
+  countErrorsByFile(`tsconfig.json: error TS5023: Unknown compiler option 'x'.`).size === 0,
+);
 // The opposite direction, and the reason the path is matched LAZILY rather than greedily: a
 // message that quotes another span must not steal the attribution. Greedy `.*` backtracks to
 // the LAST span, producing a "file" made of the real path plus most of the message.
