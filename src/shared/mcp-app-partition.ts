@@ -111,7 +111,7 @@ export function isUsableMcpServerId(value: unknown): value is string {
  * The URI is also passed verbatim to the server, so the host has no business normalizing
  * a scheme the server will compare literally.
  */
-export const MCP_APP_UI_SCHEME = "ui://";
+const MCP_APP_UI_SCHEME = "ui://";
 
 
 
@@ -125,9 +125,18 @@ export function isMcpAppUiUri(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
   if (!value.startsWith(MCP_APP_UI_SCHEME)) return false;
-  // An authority must be present: `ui://` alone names nothing, and `ui:///x` has an
-  // empty one, which the plugin arm's authority parse already refuses on its own side.
-  if (value.length === MCP_APP_UI_SCHEME.length || value[MCP_APP_UI_SCHEME.length] === "/") {
+  // An authority must be present. `ui://` alone names nothing; `ui:///x`, `ui://?q=1` and
+  // `ui://#f` all parse to an EMPTY hostname, which the plugin arm's authority parse
+  // refuses on its own side — so admitting them here would exempt a URI from the
+  // capability check that no arm could ever serve.
+  //
+  // The length equality is load-bearing rather than redundant with the index test:
+  // `value[5]` is `undefined` for `ui://` exactly, so the character comparison alone
+  // would accept it. A reviewer proved the `?`/`#` half by running `new URL()` — the
+  // first version of this check only knew about `/`.
+  const afterScheme = value[MCP_APP_UI_SCHEME.length];
+  if (value.length === MCP_APP_UI_SCHEME.length
+    || afterScheme === "/" || afterScheme === "?" || afterScheme === "#") {
     return false;
   }
   // The SAME character rule a resource URI must pass, asked of the one function that

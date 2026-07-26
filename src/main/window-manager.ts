@@ -1278,9 +1278,12 @@ export class WindowManager {
       // is stricter. Detach must not be stricter than the read it guards, and the read has
       // TWO arms with different rules: the external one enforces that predicate, but the
       // plugin/loopback one goes through `plugin-ui-resource-provider`, whose gate is
-      // declared-set membership plus the manifest pattern — which admits characters the
-      // predicate refuses. Tightening here alone would open a window for an external card
-      // it then serves, while refusing a plugin card that still renders inline.
+      // declared-set membership plus the manifest pattern `^ui://[a-z0-9][a-z0-9.-]*/.+`.
+      // That pattern is NARROWER than the predicate in most respects — the gap is only
+      // that regex `.` admits control characters — so tightening here would break very
+      // little in practice. It is still the wrong direction: detach would refuse a
+      // plugin card that the serve path then renders inline, which is worse than the
+      // reverse. (Two reviewers checked this; the earlier wording overstated the gap.)
       //
       // Nothing here resolves or interpolates the URI: it is stored under a host-minted
       // viewKey and handed to the detached renderer, which reads through the same gated

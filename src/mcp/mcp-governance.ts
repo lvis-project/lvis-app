@@ -344,12 +344,18 @@ export class McpGovernance {
     // asked here is "is this URI in the Apps namespace?" — NOT "is this the Apps caller",
     // which governance cannot see: it is handed a method, so a `resources/read` issued by
     // `readDeclaredResource` (or its template sibling) for a listed `ui://` URI is
-    // exempted too. That residual is
-    // unreachable rather than tolerated — `state.resources` is only ever populated by
-    // `discoverResources`, which returns early unless `resources` was approved, so a
-    // server without the capability has no listed URI to name.
+    // exempted too. That residual is unreachable, and for a STRUCTURAL reason rather
+    // than a contingent one: `isUsableResourceUri` lists `ui:` in RESERVED_SCHEMES, so a
+    // `ui://` URI can never enter `state.resources` or `state.resourceTemplates` in the
+    // first place — no listed entry can ever have that scheme, whatever the capability
+    // state.
     //
-    // The predicate is shared with the scheme check in `McpClient.readResource` because
+    // An earlier version argued this from `discoverResources` returning early without
+    // the capability. True, but contingent: `startPolicyRefresh` can NARROW a live
+    // server's capabilities without disconnecting it, and the catalogue is cleared only
+    // on teardown — so previously-listed URIs would outlive the approval. A reviewer
+    // found that hole in the reasoning; the scheme argument is immune to it.
+    //    // The predicate is shared with the scheme check in `McpClient.readResource` because
     // both turn on that same namespace answer and must not differ: a URI this exempts but
     // the client refuses is a dead request; one the client would serve but this refuses
     // falls through to needing `resources`, which breaks Apps on a tools-only server.
