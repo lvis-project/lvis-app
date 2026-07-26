@@ -1,0 +1,168 @@
+/**
+ * `isMcpAppUiUri` — the one rule deciding what the MCP-Apps read path will serve.
+ *
+ * Two consumers, and they pull in opposite directions, which is why this is one function
+ * rather than two `startsWith` calls:
+ *
+ *   - `McpClient.readResource` REFUSES what this rejects, so a rejection here closes a
+ *     read a compromised renderer would otherwise reach.
+ *   - governance EXEMPTS what this accepts from the `resources` capability, so an
+ *     acceptance here skips a capability check.
+ *
+ * Accepting too much widens the exemption; refusing too much breaks MCP Apps on a
+ * tools-only server. The tests below hold both edges, not just the refusals.
+ */
+import { describe, expect, it } from "vitest";
+import { isMcpAppUiUri } from "../mcp-app-partition.js";
+
+describe("isMcpAppUiUri", () => {
+  it("accepts the card URIs MCP Apps actually publishes", () => {
+    for (const uri of [
+      "ui://app/panel.html",
+      "ui://widget/main.html",
+      "ui://acme-plugin/cards/detail.html?id=1",
+      "ui://a",
+    ]) {
+      expect(isMcpAppUiUri(uri), uri).toBe(true);
+    }
+  });
+
+  it("refuses every scheme that is not the Apps path", () => {
+    // THE case. Each of these reached `resources/read` on any server holding the
+    // `resources` capability, because main had no scheme check on this path at all and
+    // the `ui://` restriction lived only in the renderer — the side the threat model
+    // assumes is compromised.
+    for (const uri of [
+      "file:///etc/passwd",
+      "file:///C:/Users/me/.ssh/id_rsa",
+      "https://example.com/x",
+      "doc:1",
+      "resource://internal/secrets",
+      "javascript:alert(1)",
+      "",
+      "not-a-uri",
+    ]) {
+      expect(isMcpAppUiUri(uri), uri).toBe(false);
+    }
+  });
+
+  it("is case-SENSITIVE, because it decides what skips a capability check", () => {
+    // Widening this widens the governance exemption, and the URI is passed verbatim to
+    // the server besides — the host has no business normalizing a scheme the server will
+    // compare literally. A rejection here costs nothing: it falls back to the ordinary
+    // `resources` rule rather than opening anything.
+    expect(isMcpAppUiUri("UI://app/panel.html")).toBe(false);
+    expect(isMcpAppUiUri("Ui://app/panel.html")).toBe(false);
+  });
+
+  it("requires an authority the URL parser can actually name", () => {
+    // This test grew by two rounds of the same mistake, which is why the implementation
+    // no longer enumerates: first it checked only `/`, then a reviewer found `?` and `#`
+    // reach the same empty authority, then another found `:` `[` `]` make the parser
+    // throw outright. The cases below are kept as a record of what guessing missed.
+    for (const uri of [
+      "ui://", // nothing after the scheme
+      "ui:///panel.html", // empty authority
+      "ui:////panel.html",
+      "ui://?q=1", // round two
+      "ui://#frag",
+      "ui://:80/x", // round three — `new URL` throws on these
+      "ui://[/x",
+      "ui://]/x",
+    ]) {
+      expect(isMcpAppUiUri(uri), uri).toBe(false);
+    }
+    // …and the shapes with a real authority still pass, including a query, a fragment,
+    // userinfo, and a non-ASCII host. `ui:` is a NON-SPECIAL scheme, so WHATWG parses an
+    // OPAQUE host and percent-encodes it (`%EC%95%B1`) — punycode is what a special
+    // scheme like `https:` would do (`xn--rf5b`). Named precisely because a later reader
+    // reasoning about host comparison would be misled by the wrong mechanism, and the
+    // assertion passes either way so nothing would catch it.
+    //
+    // Either way the value forwarded to the server is the original string — the parse is
+    // only ever used to ask the question.
+    for (const uri of [
+      "ui://app/panel.html?q=1#top",
+      "ui://user@host/x",
+      "ui://앱/카드.html",
+    ]) {
+      expect(isMcpAppUiUri(uri), uri).toBe(true);
+    }
+  });
+
+  it("refuses a scheme that only starts like the Apps one", () => {
+    // `ui:` without the slashes, and the near-miss that a bare `startsWith("ui")` would
+    // have taken.
+    expect(isMcpAppUiUri("ui:/panel.html")).toBe(false);
+    expect(isMcpAppUiUri("ui:panel.html")).toBe(false);
+    expect(isMcpAppUiUri("uix://app/panel.html")).toBe(false);
+  });
+
+  it("refuses control, whitespace and reordering characters", () => {
+    // The SAME class `isUsableResourceUri` refuses, because both ask one function for it.
+    // Control and whitespace first — these are why `hasInvisibleOrReorderingChars` alone
+    // is not enough: it deliberately admits TAB/LF/CR/space, which prose may hold and an
+    // identifier may not.
+    expect(isMcpAppUiUri("ui://app/pa nel.html")).toBe(false);
+    expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x0a)}.html`)).toBe(false);
+    expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x09)}.html`)).toBe(false);
+    expect(isMcpAppUiUri(`ui://app/panel${String.fromCodePoint(0x00)}.html`)).toBe(false);
+    // The char rule must see the RAW value, and these two probe it most directly. WHATWG
+    // strips tab/LF/CR from its input before parsing, so both parse to the hostname `app`
+    // and satisfy the authority check on their own — only the pre-parse check refuses
+    // them. A future edit validating the parsed form instead would turn these RED, which
+    // is the point: they are what stands between that edit and the regression.
+    //
+    // Not the only ones — space, LF and NUL above detect it too. Said that way because an
+    // earlier version claimed these two carried it alone, which would invite deleting the
+    // others, and because it first said "green" for what makes them fail. A comment that
+    // misstates which way a test moves is worse than none: it reports an invariant as
+    // unprotected when it is protected.
+    expect(isMcpAppUiUri(`ui://ap${String.fromCodePoint(0x09)}p/x`)).toBe(false);
+    expect(isMcpAppUiUri(`ui://app/pa${String.fromCodePoint(0x0d)}nel.html`)).toBe(false);
+    // …and the RFC 3986 excluded set, which is what stops a URI closing a fence it is
+    // interpolated into.
+    for (const ch of ['"', "<", ">", "\\", "^", "`", "{", "}", "|"]) {
+      expect(isMcpAppUiUri(`ui://app/pa${ch}nel.html`), ch).toBe(false);
+    }
+  });
+
+  it("refuses the invisible class WITHOUT enumerating it here", () => {
+    // The first version of this predicate hand-listed its ranges and leaked ten of the
+    // eleven members below — including U+061C, a bidi control the comment above it
+    // claimed to cover. Two reviewers found that independently.
+    //
+    // So these probes are deliberately drawn from OUTSIDE any list this module holds: if
+    // someone re-inlines an enumeration here, this test is what notices. A fixture built
+    // from the implementation's own ranges could not — that is the whole reason the leak
+    // survived its first test.
+    for (const code of [
+      0x00ad, // SOFT HYPHEN
+      0x034f, // COMBINING GRAPHEME JOINER
+      0x061c, // ARABIC LETTER MARK — a bidi control
+      0x115f, // HANGUL CHOSEONG FILLER
+      0x180e, // MONGOLIAN VOWEL SEPARATOR
+      0x2060, // WORD JOINER
+      0x2064, // INVISIBLE PLUS
+      0x200b, // ZERO WIDTH SPACE
+      0x202e, // RIGHT-TO-LEFT OVERRIDE
+      0xfe0f, // VARIATION SELECTOR-16
+      0xfeff, // ZERO WIDTH NO-BREAK SPACE
+    ]) {
+      const uri = `ui://app/pa${String.fromCodePoint(code)}nel.html`;
+      expect(isMcpAppUiUri(uri), `U+${code.toString(16).toUpperCase().padStart(4, "0")}`)
+        .toBe(false);
+    }
+  });
+
+  it("bounds the length", () => {
+    expect(isMcpAppUiUri(`ui://app/${"a".repeat(2039)}`)).toBe(true);
+    expect(isMcpAppUiUri(`ui://app/${"a".repeat(2040)}`)).toBe(false);
+  });
+
+  it("rejects non-strings", () => {
+    for (const value of [42, null, undefined, {}, ["ui://app/x"]]) {
+      expect(isMcpAppUiUri(value), String(value)).toBe(false);
+    }
+  });
+});

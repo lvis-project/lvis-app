@@ -12,6 +12,7 @@ import type {
   McpToolSchema,
   ValidationResult,
 } from "./types.js";
+import { isMcpAppUiUri } from "../shared/mcp-app-partition.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
@@ -66,9 +67,6 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   "notifications/cancelled",
   "notifications/progress",
 ]);
-
-/** MCP Apps (`io.modelcontextprotocol/ui`) resource scheme — an EXTENSION, not the core `resources` capability. */
-const MCP_APPS_UI_SCHEME = "ui://";
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
   version: "1.0",
@@ -341,11 +339,29 @@ export class McpGovernance {
     // capability. A tools-only server may legitimately return `_meta.ui` on a
     // tool result and have the host fetch the `ui://` resource, so this read must
     // NOT require `resources` (would break MCP Apps for every tools-only server).
-    if (method === "resources/read") {
-      const uri = params?.uri;
-      if (typeof uri === "string" && uri.startsWith(MCP_APPS_UI_SCHEME)) {
-        return { valid: true };
-      }
+    //
+    // Decided by the SHARED predicate, not a local `startsWith`. Precisely, the question
+    // asked here is "is this URI in the Apps namespace?" — NOT "is this the Apps caller",
+    // which governance cannot see: it is handed a method, so a `resources/read` issued by
+    // `readDeclaredResource` (or its template sibling) for a listed `ui://` URI is
+    // exempted too. That residual is unreachable, and for a STRUCTURAL reason rather
+    // than a contingent one: `isUsableResourceUri` lists `ui:` in RESERVED_SCHEMES, so a
+    // `ui://` URI can never enter `state.resources` or `state.resourceTemplates` in the
+    // first place — no listed entry can ever have that scheme, whatever the capability
+    // state.
+    //
+    // An earlier version argued this from `discoverResources` returning early without
+    // the capability. True, but contingent: `startPolicyRefresh` can NARROW a live
+    // server's capabilities without disconnecting it, and the catalogue is cleared only
+    // on teardown — so previously-listed URIs would outlive the approval. A reviewer
+    // found that hole in the reasoning; the scheme argument is immune to it.
+    //
+    // The predicate is shared with the scheme check in `McpClient.readResource` because
+    // both turn on that same namespace answer and must not differ: a URI this exempts but
+    // the client refuses is a dead request; one the client would serve but this refuses
+    // falls through to needing `resources`, which breaks Apps on a tools-only server.
+    if (method === "resources/read" && isMcpAppUiUri(params?.uri)) {
+      return { valid: true };
     }
 
     const required = REQUEST_METHOD_CAPABILITY[method];

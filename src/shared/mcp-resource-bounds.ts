@@ -121,6 +121,34 @@ const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
 const URI_EXCLUDED_CHARS_RE = /[\s"<>\\^`{}|]/;
 
 /**
+ * Every character rule a URI-shaped identifier must pass, as ONE function.
+ *
+ * Extracted because a second identifier kind needed the same rule and got a
+ * hand-enumerated copy instead: `isMcpAppUiUri` originally listed its own ranges and
+ * leaked ten of eleven sampled members — including U+061C, a bidi control its own comment
+ * claimed to cover. Two reviewers found it independently. That is the third time in this
+ * module's history that spelling this class by hand has leaked (see the note in
+ * `display-safe-text.ts`), so the composition now lives here and callers ask for it.
+ *
+ * `hasInvisibleOrReorderingChars` alone is not enough: it deliberately admits TAB/LF/CR
+ * and space, because prose may legitimately contain them and an identifier may not. The
+ * arm that catches those is the RFC 3986 one, via `\s` — not the control one.
+ *
+ * The control arm's unique contribution is measurably zero: a reviewer swept the codepoint
+ * space and found nothing it catches that the other two miss. It stays as belt and braces
+ * ACROSS A MODULE BOUNDARY — `\s` semantics and `Default_Ignorable_Code_Point` membership
+ * can both move under a future edit or an engine update, and this is the one arm whose
+ * coverage is unambiguous by inspection. Stated this way because an earlier version of
+ * this sentence credited the control arm with stopping TAB/LF/CR, which it does only
+ * redundantly, and a claim like that is how the wrong arm survives a cleanup.
+ */
+export function hasUnsafeUriChars(value: string): boolean {
+  return CONTROL_CHARS_RE.test(value)
+    || URI_EXCLUDED_CHARS_RE.test(value)
+    || hasInvisibleOrReorderingChars(value);
+}
+
+/**
  * URI schemes the host will carry as an OPAQUE identifier.
  *
  * The host never resolves any of these itself — it hands the string back to the
@@ -165,20 +193,13 @@ const RESERVED_SCHEMES = Object.freeze([
 export function isUsableResourceUri(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length === 0 || value.length > MCP_RESOURCE_URI_MAX_CHARS) return false;
-  if (CONTROL_CHARS_RE.test(value)) return false;
-  if (URI_EXCLUDED_CHARS_RE.test(value)) return false;
-  // Invisible and reordering characters, refused because this value is an IDENTIFIER:
-  // `annual-<RLO>gnp.exe` renders as `annual-exe.png`, and a zero-width space makes two
-  // different resources render identically. ONE definition, shared with
-  // `displaySafeLabel` — the two consumers differ in what they DO with a match (an
-  // identifier is refused, prose is normalized for display), not in what they recognize.
-  // The first cut enumerated ranges here and leaked 14 of 17 sampled members.
-  //
-  // Refusing costs a legitimate server nothing: RFC 3986 is US-ASCII, so the
-  // percent-encoded form round-trips byte-for-byte AND renders inertly. It is NOT the
-  // whole non-ASCII range — CJK and Hangul paths still catalogue — but it does refuse an
-  // emoji carrying a variation selector, which is the accepted cost of one class.
-  if (hasInvisibleOrReorderingChars(value)) return false;
+  // Every character rule, through the one function that spells them — see
+  // `hasUnsafeUriChars`. Refusing costs a legitimate server nothing: RFC 3986 is
+  // US-ASCII, so the percent-encoded form round-trips byte-for-byte AND renders
+  // inertly. It is NOT the whole non-ASCII range — CJK and Hangul paths still
+  // catalogue — but it does refuse an emoji carrying a variation selector, which is
+  // the accepted cost of one class.
+  if (hasUnsafeUriChars(value)) return false;
   const lowered = value.toLowerCase();
   if (RESERVED_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return false;
   if (ALLOWED_URI_SCHEMES.some((scheme) => lowered.startsWith(scheme))) return true;
