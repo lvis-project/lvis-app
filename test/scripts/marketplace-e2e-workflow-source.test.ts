@@ -60,6 +60,11 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     expect(finalJob).toContain("--user 10001:10001");
     expect(finalJob).toContain("--cap-drop ALL");
     expect(finalJob).toContain("--security-opt no-new-privileges");
+    expect(finalJob).toContain("--read-only");
+    expect(finalJob).toContain("--tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m");
+    expect(finalJob).toContain(
+      '--env "LVIS_MARKETPLACE_STORAGE_DIR=/tmp/m4-marketplace-storage"',
+    );
     expect(finalJob).not.toMatch(
       /docker (create|run)[\s\S]*?(?:-v |--volume |--mount )/u,
     );
