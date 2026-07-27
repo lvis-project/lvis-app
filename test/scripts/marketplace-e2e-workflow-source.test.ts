@@ -127,6 +127,68 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     }
   });
 
+  it("installs the EP attendance bundle through the consented Marketplace UI", () => {
+    const action = epAttendanceSpec.indexOf(
+      'marketplace.getByTestId(`marketplace:action:${EP_PLUGIN_ID}`)',
+    );
+    const actionClick = epAttendanceSpec.indexOf("await installAction.click()", action);
+    const consent = epAttendanceSpec.indexOf(
+      'dialog.getByTestId("plugin-install-consent")',
+      actionClick,
+    );
+    const networkDisclosure = epAttendanceSpec.indexOf(
+      'dialog.getByTestId("plugin-install-network-access")',
+      consent,
+    );
+    const consentControl = epAttendanceSpec.indexOf(
+      'name: "I understand this grants administrator privileges."',
+      networkDisclosure,
+    );
+    const confirmButton = epAttendanceSpec.indexOf(
+      'name: "Install with admin access"',
+      consentControl,
+    );
+    const acknowledge = epAttendanceSpec.indexOf("await consent.check()", confirmButton);
+    const confirm = epAttendanceSpec.indexOf(
+      "await installWithAdminAccess.click()",
+      acknowledge,
+    );
+    const runtimeLoaded = epAttendanceSpec.indexOf("runtimeLoaded: true", confirm);
+    const closeSettings = epAttendanceSpec.indexOf(
+      "closeSettingsWindow(ctx.app, marketplace)",
+      runtimeLoaded,
+    );
+    const activateWebview = epAttendanceSpec.indexOf("activateEpWebview(ctx)", closeSettings);
+
+    for (const step of [
+      action,
+      actionClick,
+      consent,
+      networkDisclosure,
+      consentControl,
+      confirmButton,
+      acknowledge,
+      confirm,
+      runtimeLoaded,
+      closeSettings,
+      activateWebview,
+    ]) {
+      expect(step).toBeGreaterThanOrEqual(0);
+    }
+    expect(actionClick).toBeGreaterThan(action);
+    expect(consent).toBeGreaterThan(actionClick);
+    expect(networkDisclosure).toBeGreaterThan(consent);
+    expect(consentControl).toBeGreaterThan(networkDisclosure);
+    expect(confirmButton).toBeGreaterThan(consentControl);
+    expect(acknowledge).toBeGreaterThan(confirmButton);
+    expect(confirm).toBeGreaterThan(acknowledge);
+    expect(runtimeLoaded).toBeGreaterThan(confirm);
+    expect(closeSettings).toBeGreaterThan(runtimeLoaded);
+    expect(activateWebview).toBeGreaterThan(closeSettings);
+    expect(epAttendanceSpec).toContain('installMode: "user-consented-marketplace-install"');
+    expect(epAttendanceSpec).not.toContain("host-managed-bootstrap");
+  });
+
   it("keeps trusted control code at workflow_sha and validates after candidate exit", () => {
     for (const name of [
       "stage-inputs",
