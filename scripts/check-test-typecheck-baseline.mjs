@@ -8,7 +8,7 @@
  * symbol, pass `bun run typecheck`, and reach CI green — failing only if a test happened
  * to execute that line.
  *
- * The debt is real (1,626 errors across 312 files), so this is a RATCHET, not a
+ * The debt is real (1,613 errors across 310 files), so this is a RATCHET, not a
  * pass/fail: a per-file error count is committed as a baseline, and the gate fails when
  * any file gains errors or when a file with no baseline entry has any. New test files are
  * therefore fully typechecked from the day they are written, and existing ones can only
@@ -427,8 +427,9 @@ export function decide({ update, measurement, baseline, expectedInventory }) {
   //
   // It used to sit inside the compare path only, which left `--update-baseline` fail-open: a
   // security reviewer reproduced it end-to-end with `tsc.js` unresolvable — the baseline was
-  // rewritten from 312 entries to `files: {}` at rc=0, after which the compare path's own
-  // empty-baseline carve-out reported "baseline held" green indefinitely. Reachable by
+  // rewritten from the then-current 312 entries to `files: {}` at rc=0, after which the
+  // compare path's own empty-baseline carve-out reported "baseline held" green indefinitely.
+  // Reachable by
   // running the update script mid-dependency-bump with typescript half-installed.
   //
   // Hoisting it here is what fixed that, and it is why there is exactly one call site rather
