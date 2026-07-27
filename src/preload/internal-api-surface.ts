@@ -13,8 +13,6 @@ import { t } from "../i18n/index.js";
 import { ipcUserKeyboardIntent } from "./gesture-intent.js";
 import { mcpApiSurface } from "./mcp-api-surface.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "../plugins/capabilities.js";
-import type { McpServerConfig, McpUiPayload } from "../mcp/types.js";
-import type { McpAppDetachedPayload } from "../shared/mcp-app-detached-payload.js";
 import type {
   PermissionReviewSuggestionPayload,
   UserApprovalHitPayload,
@@ -1435,9 +1433,10 @@ export function buildInternalApiSurface() {
     },
     onLoadSessionInMain: (handler: (sessionId: string) => boolean | void | Promise<boolean | void>) => {
       const listener = (_event: unknown, payload: { sessionId?: unknown }) => {
-        if (typeof payload?.sessionId !== "string") return;
+        const sessionId = payload?.sessionId;
+        if (typeof sessionId !== "string") return;
         void Promise.resolve()
-          .then(() => handler(payload.sessionId))
+          .then(() => handler(sessionId))
           .then((loaded) => {
             if (typeof (payload as { requestId?: unknown }).requestId !== "string") return;
             ipcRenderer.send(CHANNELS.window.loadSessionInMainResult, {

@@ -9,7 +9,7 @@
   //
   // This config does not replace the root one. `typecheck` stays the gate for production
   // sources and must stay clean; this is the wider net, held at a baseline
-  // (`check:typecheck-tests`) because the existing debt is 1,626 errors across 312 files
+  // (`check:typecheck-tests`) because the existing debt is 1,613 errors across 310 files
   // and fixing it in one change would be unreviewable.
   //
   // Deliberately adds NO compilerOptions. An earlier version relaxed `noUnusedLocals` and
@@ -39,8 +39,9 @@
   //
   // MEASURED, with the precondition stated precisely, because a reviewer could not reproduce
   // the looser version of this claim and was right to push back. Warm runs with CONSISTENT
-  // options are stable — we both measured that. What diverges is a buildinfo written by a run
-  // with DIFFERENT options and then read by the gate:
+  // options are stable — we both measured that. A historical pre-preload-cleanup measurement
+  // (when the committed baseline was 1,626 errors across 312 files) found divergence when a
+  // buildinfo written by a run with DIFFERENT options was then read by the gate:
   //
   //   dedicated buildinfo, cold                        → 1,626  (internal-api-surface: 3)
   //   same buildinfo, warm, same options               → 1,626  (3)
@@ -56,8 +57,9 @@
   // Giving this project its own `tsBuildInfoFile` was an earlier, INSUFFICIENT fix: it removed
   // only the two-programs-one-file case, and the different-options case above still diverged.
   // `incremental: false` removes the class by construction — no buildinfo is read or written,
-  // so cache state is not an input at all. Verified across cold, repeat, after-different-lib,
-  // and after-root-typecheck: 1,626 every time. A full run costs ~3 s and CI checks out cold,
+  // so cache state is not an input at all. The exact error total is intentionally not a current
+  // invariant: normal cleanup improves it. The historical result was stable across cold, repeat,
+  // after-different-lib, and after-root-typecheck. A full run costs ~3 s and CI checks out cold,
   // so incremental bought this gate nothing while costing it determinism.
   "extends": "./tsconfig.json",
   "compilerOptions": {
