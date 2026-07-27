@@ -2,7 +2,7 @@
 
 > **상태**: Phase 2-final + git-based bootstrap 반영 (2026-04-27)
 > **대상**: enterprise prod 마켓플레이스에 플러그인 / MCP 서버를 게시하는 퍼블리셔
-> **선행 읽음**: [플러그인 개발 가이드](./plugin-development.md), [Phase 2 마켓플레이스 디자인](../blueprints/phase2-proper-marketplace-design.md)
+> **선행 읽음**: [현재 English Plugin Development Guide](../../guides/plugin-development.md), [Phase 2 마켓플레이스 디자인](../blueprints/phase2-proper-marketplace-design.md)
 > **로컬 dev 루프**: 이 문서는 prod 흐름입니다. dev 환경에서 동일 흐름을 검증하려면 [`local-marketplace-testing.md`](./local-marketplace-testing.md). 마켓플레이스 우회 시나리오는 [`local-plugin-development.md`](./local-plugin-development.md).
 
 ---
@@ -155,7 +155,7 @@ MARKETPLACE_SIGNING_PRIVATE_KEY_PROD_V2=<base64>
 
 ## 플러그인 매니페스트 작성
 
-`plugin.json` 의 전체 스키마는 [플러그인 개발 가이드 §매니페스트](./plugin-development.md#플러그인-매니페스트-pluginjson) 참조. 마켓플레이스 게시 관점에서 **반드시** 챙겨야 하는 필드:
+`plugin.json` 의 현재 계약은 [English Plugin Development Guide §Manifest Basics](../../guides/plugin-development.md#manifest-basics)와 [`plugin-manifest.schema.json`](../../../schemas/plugin-manifest.schema.json)을 참조하세요. 한국어 [`plugin-development.md`](./plugin-development.md)는 역사 보존용입니다. 마켓플레이스 게시 관점에서 **반드시** 챙겨야 하는 필드:
 
 | 필드 | 비고 |
 |------|------|
