@@ -29,6 +29,8 @@ import type {
 } from "../plugin-host-generation.js";
 import type { ActivePluginGeneration } from "../plugin-generation-coordinator.js";
 
+type GenerationCommitScope = <T>(operation: () => Promise<T>) => Promise<T>;
+
 /** Restore owner write access before deleting immutable generation fixtures. */
 export async function makeTestTreeWritable(root: string): Promise<void> {
   await chmod(root, 0o700).catch(() => undefined);
@@ -489,26 +491,41 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
       return { generation, release: () => undefined };
     },
     runWithLease: async <T>(_lease: unknown, operation: () => Promise<T>) => operation(),
-    replaceRuntime: async (projection: PluginRuntimeGenerationProjection) => {
-      await publish(projection);
+    replaceRuntime: async (
+      projection: PluginRuntimeGenerationProjection,
+      commitScope?: GenerationCommitScope,
+    ) => {
+      const commit = () => publish(projection);
+      await (commitScope ? commitScope(commit) : commit());
     },
     replaceRuntimeWithCommit: <T>(
       projection: PluginRuntimeGenerationProjection,
       _receiptRaw: string,
       durableCommit: () => Promise<T>,
+      commitScope?: GenerationCommitScope,
     ) => runInLifecycleQueue(projection.manifest.id, async () => {
-      const result = await durableCommit();
-      const { retirement } = await publish(projection);
-      return { result, retirement };
+      const commit = async () => {
+        const result = await durableCommit();
+        const { retirement } = await publish(projection);
+        return { result, retirement };
+      };
+      return commitScope ? commitScope(commit) : commit();
     }),
     deactivate: (pluginId: string) => runInLifecycleQueue(pluginId, async () => {
       await deactivate(pluginId);
     }),
-    deactivateWithCommit: <T>(pluginId: string, durableCommit: () => Promise<T>) =>
+    deactivateWithCommit: <T>(
+      pluginId: string,
+      durableCommit: () => Promise<T>,
+      commitScope?: GenerationCommitScope,
+    ) =>
       runInLifecycleQueue(pluginId, async () => {
-        const result = await durableCommit();
-        const { retirement } = await deactivate(pluginId);
-        return { result, retirement };
+        const commit = async () => {
+          const result = await durableCommit();
+          const { retirement } = await deactivate(pluginId);
+          return { result, retirement };
+        };
+        return commitScope ? commitScope(commit) : commit();
       }),
     recoverRetirements: async () => undefined,
     waitForRetirements: async () => {

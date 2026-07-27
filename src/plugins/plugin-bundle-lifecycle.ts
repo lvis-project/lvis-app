@@ -40,6 +40,8 @@ import {
 
 const log = createLogger("plugin-bundle-lifecycle");
 const MAX_RETIREMENT_ATTEMPTS = 3;
+/** Internal runtime-only guard around a prepared generation's pointer commit. */
+type GenerationCommitScope = <T>(operation: () => Promise<T>) => Promise<T>;
 type RetirementPhase =
   | "operation-authority"
   | "skills"
@@ -160,9 +162,12 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     return this.serialize(pluginId, operation);
   }
 
-  replaceRuntime(runtime: PluginRuntimeGenerationProjection): Promise<void> {
+  replaceRuntime(
+    runtime: PluginRuntimeGenerationProjection,
+    commitScope?: GenerationCommitScope,
+  ): Promise<void> {
     return this.serialize(runtime.manifest.id, async () => {
-      await this.replaceRuntimeNow(runtime);
+      await this.replaceRuntimeNow(runtime, undefined, undefined, commitScope);
     });
   }
 
@@ -170,10 +175,11 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     runtime: PluginRuntimeGenerationProjection,
     receiptRaw: string,
     durableCommit: () => Promise<T>,
+    commitScope?: GenerationCommitScope,
   ): Promise<CommittedPluginGeneration<T>> {
     return this.serialize(
       runtime.manifest.id,
-      () => this.replaceRuntimeNow(runtime, receiptRaw, durableCommit),
+      () => this.replaceRuntimeNow(runtime, receiptRaw, durableCommit, commitScope),
     );
   }
 
@@ -186,8 +192,12 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   async deactivateWithCommit<T>(
     pluginId: string,
     durableCommit: () => Promise<T>,
+    commitScope?: GenerationCommitScope,
   ): Promise<CommittedPluginGeneration<T>> {
-    return this.serialize(pluginId, () => this.deactivateNow(pluginId, durableCommit));
+    return this.serialize(
+      pluginId,
+      () => this.deactivateNow(pluginId, durableCommit, commitScope),
+    );
   }
 
   getActive(pluginId: string): ActivePluginGenerationSnapshot | undefined {
@@ -404,6 +414,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     runtime: PluginRuntimeGenerationProjection,
     receiptRawOverride?: string,
     durableCommit?: () => Promise<T>,
+    commitScope?: GenerationCommitScope,
   ): Promise<CommittedPluginGeneration<T>> {
     const manifest = runtime.manifest;
     const pluginRoot = runtime.pluginRoot;
@@ -533,7 +544,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     let published;
     let result!: T;
     try {
-      published = await this.coordinator.commit(
+      const publish = () => this.coordinator.commit(
         candidate,
         async () => {
           if (durableCommit) result = await durableCommit();
@@ -547,6 +558,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
           preparedHooks.publish();
         },
       );
+      published = commitScope ? await commitScope(publish) : await publish();
     } catch (error) {
       candidate.state.runtime.hostEffects?.discard();
       const cleanupErrors: unknown[] = [];
@@ -606,6 +618,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   private async deactivateNow<T = void>(
     pluginId: string,
     durableCommit?: () => Promise<T>,
+    commitScope?: GenerationCommitScope,
   ): Promise<CommittedPluginGeneration<T>> {
     let result!: T;
     const active = this.coordinator.getActive(pluginId);
@@ -634,7 +647,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     );
     let published;
     try {
-      published = await this.coordinator.commit(
+      const publish = () => this.coordinator.commit(
         undefined,
         async () => {
           if (durableCommit) result = await durableCommit();
@@ -648,6 +661,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
           preparedHooks.publish();
         },
       );
+      published = commitScope ? await commitScope(publish) : await publish();
     } catch (error) {
       await this.deps.loopbackManager.discardGeneration(preparedLoopback);
       throw error;
