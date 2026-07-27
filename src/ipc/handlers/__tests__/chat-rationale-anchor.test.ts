@@ -5,6 +5,7 @@ import {
   type ChatSendContext,
 } from "../chat.js";
 import { formatAppMessageEnvelope } from "../../../shared/mcp-app-message-source.js";
+import { turnOptions } from "./chat-test-helpers.js";
 
 const completedTurn = {
   text: "done",
@@ -34,12 +35,6 @@ function makeFixture() {
     trackStreamTurn: (factory) => factory(),
   };
   return { deps, context, runTurn, sink };
-}
-
-function turnOptions(runTurn: ReturnType<typeof makeFixture>["runTurn"]):
-Record<string, unknown> {
-  const call = runTurn.mock.calls[0] as unknown[];
-  return call[3] as Record<string, unknown>;
 }
 
 describe("chat RequestAnchor trust boundary", () => {
