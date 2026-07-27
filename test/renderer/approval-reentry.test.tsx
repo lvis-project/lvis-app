@@ -1,14 +1,15 @@
 /**
- * Regression net for Copilot HIGH #2 — useApproval re-entrancy guard.
+ * Regression net for approval FIFO re-entrancy.
  *
  * Rapid double-invocation of decide() must only dispatch one IPC respond
- * call for the current in-flight approval. Without the inFlightRef guard,
- * the second call would shift() an already-shifted queue and silently drop
- * the follow-up pending item.
+ * call for the current in-flight approval. The pending head remains visible
+ * until that response is acknowledged, so the next item is never surfaced as
+ * an inert dialog.
  */
 import "./setup.js";
+import { useLayoutEffect } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { useApproval } from "../../src/ui/renderer/hooks/use-approval.js";
 
 type ApprovalHandler = (r: unknown) => void;
@@ -42,6 +43,55 @@ function installMockNs() {
 }
 
 describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
+  it("responds to a request that becomes interactive before passive effects", async () => {
+    const { emit, respond, drainAll } = installMockNs();
+
+    function ImmediateDecisionHarness() {
+      const { queue, decide } = useApproval();
+      // Browser input can arrive as soon as the dialog has been committed,
+      // before passive effects. Model that boundary directly: this layout
+      // effect runs after the queue has rendered but before paint.
+      useLayoutEffect(() => {
+        if (queue[0]?.id === "req-layout") {
+          void decide("allow-once");
+        }
+      }, [queue, decide]);
+      return null;
+    }
+
+    render(<ImmediateDecisionHarness />);
+
+    act(() => {
+      emit({
+        id: "req-layout",
+        category: "tool",
+        toolName: "read_file",
+        args: {},
+        reason: "r",
+        createdAt: 0,
+        requireExplicit: false,
+        nonce: "nonce-layout",
+        hmac: "hmac-layout",
+      });
+    });
+
+    await waitFor(() => {
+      expect(respond).toHaveBeenCalledTimes(1);
+    });
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-layout",
+        choice: "allow-once",
+        nonce: "nonce-layout",
+        hmac: "hmac-layout",
+      }),
+    );
+
+    await act(async () => {
+      drainAll();
+    });
+  });
+
   it("rapid double decide() only dispatches one respond() for the current item", async () => {
     const { emit, respond, drainOne } = installMockNs();
     const { result } = renderHook(() => useApproval());
@@ -79,9 +129,10 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
     });
 
     // Only one respond should have been issued for req-1 — the second decide
-    // should have early-returned from the inFlightRef guard.
+    // must early-return while req-1 remains the visible, in-flight head.
     expect(respond).toHaveBeenCalledTimes(1);
     expect(respond.mock.calls[0]?.[0]).toMatchObject({ requestId: "req-1" });
+    expect(result.current.queue.map((request) => request.id)).toEqual(["req-1", "req-2"]);
 
     // Drain the in-flight promise; both awaited calls resolve.
     await act(async () => {
@@ -89,6 +140,8 @@ describe("useApproval — Copilot HIGH #2 re-entrancy", () => {
       await first;
       await second;
     });
+
+    expect(result.current.queue.map((request) => request.id)).toEqual(["req-2"]);
 
     // The next decide should now go through for req-2 (not dropped).
     let third!: Promise<void>;
