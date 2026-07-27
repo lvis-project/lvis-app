@@ -38,6 +38,8 @@ const EP_PLUGIN_ID = "ep-api";
 const ATTENDANCE_SKILL_ID = "attendance";
 const TEST_DATE = "2026-07-24";
 const TEST_START_TIME = "09:15";
+const EP_AUTOLOAD_APPROVAL_TOOL_NAME = "ep_approval_read";
+const MAX_EP_AUTOLOAD_APPROVALS_AHEAD_OF_GRANT = 2;
 
 type BundleSnapshot = {
   ok: true;
@@ -456,10 +458,44 @@ async function readGuestGrant(
   return executeInGuest(ctx, guestId, "globalThis.__epAttendanceGrant");
 }
 
+function openApprovalDialog(page: Page) {
+  return page.locator('[data-testid="tool-approval-dialog"][data-state="open"]');
+}
+
 function openApprovalDialogForTool(page: Page, expectedToolName: string) {
   return page.locator(
     `[data-testid="tool-approval-dialog"][data-state="open"][data-approval-tool-name=${JSON.stringify(expectedToolName)}]`,
   );
+}
+
+async function denyEpAutoloadApprovalsAheadOfGrant(page: Page, expectedToolName: string): Promise<void> {
+  // The exact EP control shell auto-loads an authenticated count view after
+  // session restoration. Its generated read approval can precede the explicit
+  // operation grant below. Decline only that known background request, then
+  // require the requested grant to become the open FIFO head.
+  for (let dismissed = 0; dismissed < MAX_EP_AUTOLOAD_APPROVALS_AHEAD_OF_GRANT; dismissed += 1) {
+    const dialog = openApprovalDialog(page);
+    await expect(dialog).toHaveCount(1, { timeout: 10_000 });
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const actualToolName = await dialog.getAttribute("data-approval-tool-name");
+    if (actualToolName === expectedToolName) return;
+    if (actualToolName !== EP_AUTOLOAD_APPROVAL_TOOL_NAME) {
+      throw new Error(
+        `Unexpected approval ahead of ${expectedToolName}: ${actualToolName ?? "<missing tool name>"}`,
+      );
+    }
+
+    // Keep a handle to this exact request: Radix leaves its closing dialog in
+    // the DOM briefly, and the next queued request may use the same tool name.
+    const dialogHandle = await dialog.elementHandle();
+    if (!dialogHandle) throw new Error("Open EP autoload approval detached before denial");
+    const deny = dialog.getByTestId("deny-button");
+    await expect(deny).toBeEnabled();
+    await deny.click();
+    await dialogHandle.waitForElementState("hidden", { timeout: 5_000 });
+  }
+
+  await expect(openApprovalDialogForTool(page, expectedToolName)).toBeVisible({ timeout: 10_000 });
 }
 
 async function approveVisibleToolDialog(
@@ -695,6 +731,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
     expect(fake.requests.filter((entry) => entry.method === "POST")).toHaveLength(0);
 
     await startGuestGrant(ctx, guestId, writeArgs);
+    await denyEpAutoloadApprovalsAheadOfGrant(ctx.page, "ep_attendance_write");
     await approveVisibleToolDialog(
       ctx.page,
       "ep_attendance_write",
