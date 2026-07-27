@@ -20,6 +20,7 @@ import { openSettingsWindow } from "./settings-window.js";
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
 const PUBLISHER_KEY = process.env.MARKETPLACE_PUBLISHER_KEY ?? "";
+const REVIEWER_KEY = process.env.MARKETPLACE_REVIEWER_KEY ?? "";
 const ADMIN_KEY = process.env.MARKETPLACE_ADMIN_KEY ?? "";
 const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "";
 
@@ -95,8 +96,10 @@ test.skip(!builtMainExists(), "build the Electron app before running this spec")
 test("publish, approve, install, update, rollback, disable, re-enable, and uninstall atomically", async ({}, testInfo) => {
   testInfo.setTimeout(180_000);
   requireExactLoopbackMarketplaceOrigin(BASE_URL);
-  if (!PUBLISHER_KEY || !ADMIN_KEY) {
-    throw new Error("MARKETPLACE_PUBLISHER_KEY and MARKETPLACE_ADMIN_KEY are required");
+  if (!PUBLISHER_KEY || !REVIEWER_KEY || !ADMIN_KEY) {
+    throw new Error(
+      "MARKETPLACE_PUBLISHER_KEY, MARKETPLACE_ADMIN_KEY, and MARKETPLACE_REVIEWER_KEY are required",
+    );
   }
 
   const suffix = `${Date.now().toString(36)}-${process.pid.toString(36)}`;
@@ -110,7 +113,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
   await publishPlugin(BASE_URL, ADMIN_KEY, managedSlug, "1.0.0", managed);
   const hiddenBeforeApproval = await fetch(`${BASE_URL}/api/v1/plugins/${managedSlug}`);
   expect(hiddenBeforeApproval.status).toBe(404);
-  const approval = await approvePendingPlugin(BASE_URL, ADMIN_KEY, managedSlug, "1.0.0");
+  const approval = await approvePendingPlugin(BASE_URL, REVIEWER_KEY, managedSlug, "1.0.0");
   expect(approval.approval_state).toBe("approved");
   expect((await fetch(`${BASE_URL}/api/v1/plugins/${managedSlug}`)).status).toBe(200);
 
