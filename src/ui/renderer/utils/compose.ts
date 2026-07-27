@@ -98,9 +98,10 @@ export function composeOutgoing(params: {
   //    see, which would not be a smaller bound — it would be no bound, and the
   //    composer is the exact place the reviewers predicted that would happen.
   //
-  //    The text is passed through untouched. The host built the fence and the framing;
-  //    anything this function did to that string would be a second author on content
-  //    the fence exists to attribute to the first.
+  //    The renderer passes the text through untouched: the host built the fence and
+  //    framing, so changing it here would make the renderer a second author. With
+  //    PII redaction enabled, main may replace sensitive spans immediately before
+  //    the provider receives this otherwise byte-for-byte IPC payload.
   const resourceParts: UserContentPart[] = attachments
     .filter((a): a is Extract<Attachment, { kind: "resource" }> => a.kind === "resource")
     .map((res) => ({ type: "text", text: res.text }));
