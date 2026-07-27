@@ -191,7 +191,8 @@ check(
 // BOTH the `--update-baseline` write and the compare, from a SINGLE call site hoisted above
 // both branches in `main()`. It previously sat inside the compare path only, which left the
 // write fail-open: with `tsc.js` unresolvable, `--update-baseline` rewrote the baseline from
-// 312 entries to `files: {}` at rc=0, and the compare path's empty-baseline carve-out then
+// the then-current 312 entries to `files: {}` at rc=0, and the compare path's empty-baseline
+// carve-out then
 // reported green indefinitely.
 //
 // An earlier version of this block said the predicate is "applied at two points" and warned
@@ -206,7 +207,8 @@ check(
 // wording claimed otherwise.
 //
 // Verified by hand instead, four directions: broken compiler + real baseline refuses and leaves
-// the 312 entries intact; no baseline file still bootstraps; a corrupt baseline refuses; an
+// the then-current 312 entries intact; no baseline file still bootstraps; a corrupt baseline
+// refuses; an
 // intentionally emptied baseline with a working compiler writes. If the call site moves, re-run
 // those four — a green self-test does not cover you.
 */
@@ -564,11 +566,12 @@ check("never reports a test/ file", !nonTestEntries(ENTRIES).some((f) => f.start
 //
 // `tsconfig.tests.json` inherits from `tsconfig.json`, which sets `incremental: true`. That
 // made this gate's error count depend on compiler cache state rather than on the source. The
-// precondition is specific and worth stating, since a reviewer could not reproduce the loose
-// version: warm runs with the SAME options are stable, but a buildinfo written by a run with
-// DIFFERENT options and then read by the gate gives 1,625 instead of 1,626 —
-// `internal-api-surface.ts` reporting 2 rather than 3. `incremental: false` removes the class
-// by construction rather than patching an instance; see `tsconfig.tests.json` for the numbers.
+// precondition is specific and worth stating. A historical pre-preload-cleanup measurement
+// found that warm runs with the SAME options were stable, but a buildinfo written by a run with
+// DIFFERENT options and then read by the gate gave 1,625 instead of the then-current 1,626 —
+// `internal-api-surface.ts` reported 2 rather than 3. `incremental: false` removes the class
+// by construction rather than patching an instance; `tsconfig.tests.json` records that historical
+// measurement. The current baseline is expected to improve independently of this invariant.
 //
 // Asserted on the EFFECTIVE option after `extends` resolution, not on the literal text of the
 // config. Three earlier attempts got this wrong in instructive ways:
