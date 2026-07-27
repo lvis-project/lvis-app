@@ -25,7 +25,7 @@ import {
   teardownSeededElectron,
   type SeededElectronContext,
 } from "./seeded-electron.js";
-import { openSettingsWindow } from "./settings-window.js";
+import { closeSettingsWindow, openSettingsWindow } from "./settings-window.js";
 
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
@@ -482,6 +482,28 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       },
     });
 
+    const marketplace = await openSettingsWindow(ctx.app, ctx.page, "marketplace");
+    const installAction = marketplace.getByTestId(`marketplace:action:${EP_PLUGIN_ID}`);
+    await expect(installAction).toBeVisible();
+    await installAction.click();
+
+    const dialog = marketplace.getByRole("dialog");
+    await expect(dialog.getByTestId("plugin-install-consent")).toBeVisible();
+    await expect(dialog.getByTestId("plugin-install-network-access"))
+      .toContainText("attendance.portal.example.com");
+    const consent = dialog.getByRole("checkbox", {
+      name: "I understand this grants administrator privileges.",
+    });
+    const installWithAdminAccess = dialog.getByRole("button", {
+      name: "Install with admin access",
+    });
+    await expect(consent).not.toBeChecked();
+    await expect(installWithAdminAccess).toBeDisabled();
+    await consent.check();
+    await expect(consent).toBeChecked();
+    await expect(installWithAdminAccess).toBeEnabled();
+    await installWithAdminAccess.click();
+
     await expect.poll(
       async () => (await ctx!.page.evaluate(async () => {
         const api = globalThis as unknown as {
@@ -495,6 +517,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       version: bundle.version,
       runtimeLoaded: true,
     });
+    await closeSettingsWindow(ctx.app, marketplace);
 
     const pluginDataDir = join(ctx.lvisHome, "plugins", EP_PLUGIN_ID, "data");
     mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
@@ -771,7 +794,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
         marketplace: {
           target: "loopback:8765",
           approvalState: approval.approval_state,
-          installMode: "host-managed-bootstrap",
+          installMode: "user-consented-marketplace-install",
           pluginYankedBeforeUninstall: true,
           productionWriteExecuted: false,
         },
