@@ -26,10 +26,17 @@ import { fileURLToPath } from "node:url";
 import {
   compareToBaseline,
   countErrorsByFile,
+  expectedSourceFilesFromGitOutput,
   isEmptyMeasurementAgainstBaseline,
+  main,
+  missingExpectedSources,
   nonSourceMeasurements,
   nonTestEntries,
+  programSourceFiles,
   readBaselineFilesOrEmpty,
+  readExpectedSourceFiles,
+  runGate,
+  runTsc,
   unattributedDiagnostics,
 } from "./check-test-typecheck-baseline.mjs";
 
@@ -150,8 +157,8 @@ check(
 // An empty result means tsc produced nothing, which is what a broken invocation looks
 // like. The COMPARISON still reports it as "everything fixed" — that is correct at this
 // layer, since a file with zero errors genuinely is fixed — so the refusal has to live in
-// the runner, and it does: `main()` throws when the measurement is empty while the
-// baseline is not.
+// the runner, and it does: `runGate` returns a failure and `main` assigns that failure to the
+// process exit code when the measurement is empty while the baseline is not.
 //
 // An earlier version of this comment claimed the runner's project-load check already
 // covered that. It did not: a missing or moved `tsc.js` exits 1 with a node
@@ -176,6 +183,10 @@ check(
   "a non-empty measurement is never treated as empty",
   isEmptyMeasurementAgainstBaseline(new Map([["a.test.ts", 1]]), baseline) === false,
 );
+/*
+ * Historical note, superseded by the injectable runner tests below. Kept only to preserve the
+ * original failure analysis that motivated this follow-up.
+ *
 // WHAT THIS FILE CANNOT PIN, stated rather than left implicit. The predicate above guards
 // BOTH the `--update-baseline` write and the compare, from a SINGLE call site hoisted above
 // both branches in `main()`. It previously sat inside the compare path only, which left the
@@ -198,6 +209,267 @@ check(
 // the 312 entries intact; no baseline file still bootstraps; a corrupt baseline refuses; an
 // intentionally emptied baseline with a working compiler writes. If the call site moves, re-run
 // those four — a green self-test does not cover you.
+*/
+
+// ── Program coverage and runner placement. The parser sees diagnostics and listFiles output
+// from the SAME compiler invocation; the expected inventory deliberately comes from Git rather
+// than TypeScript's effective config, because a narrowed config cannot reveal its own omission.
+const EXPECTED_SOURCE_INVENTORY = expectedSourceFilesFromGitOutput(
+  [
+    "src/a.test.ts",
+    "scripts/check.mts",
+    "test/runner.cts",
+    "src/__probes__/excluded.ts",
+    "src/preload.cjs.ts",
+    "README.md",
+    "",
+  ].join("\0"),
+  () => true,
+);
+check(
+  "the independent source inventory includes intended TypeScript files only",
+  [...EXPECTED_SOURCE_INVENTORY].sort().join(",")
+    === "scripts/check.mts,src/a.test.ts,test/runner.cts",
+);
+check(
+  "a source deleted from disk is not required by the inventory",
+  !expectedSourceFilesFromGitOutput(
+    "src/present.test.ts\0src/deleted.test.ts\0",
+    (path) => !path.endsWith("deleted.test.ts"),
+  ).has("src/deleted.test.ts"),
+);
+const LISTED_PROGRAM_SOURCES = programSourceFiles(
+  [
+    "src/a.test.ts",
+    "scripts/check.mts",
+    "test/runner.cts",
+    "src/__probes__/excluded.ts",
+    "node_modules/typescript/lib/lib.es2023.d.ts",
+  ].join("\n"),
+);
+check("listFiles parsing keeps intended program sources", LISTED_PROGRAM_SOURCES.has("src/a.test.ts"));
+check("listFiles parsing ignores dependency declarations", !LISTED_PROGRAM_SOURCES.has("node_modules/typescript/lib/lib.es2023.d.ts"));
+const SELF_TEST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+check(
+  "listFiles parsing normalizes an absolute source path",
+  programSourceFiles(resolve(SELF_TEST_ROOT, "src", "a.test.ts")).has("src/a.test.ts"),
+);
+check(
+  "coverage reports an expected source omitted from the compiler program",
+  missingExpectedSources(EXPECTED_SOURCE_INVENTORY, new Set(["src/a.test.ts", "scripts/check.mts"]))
+    .join(",") === "test/runner.cts",
+);
+let measuredCompilerArgs = [];
+const measuredListFiles = runTsc((_command, args) => {
+  measuredCompilerArgs = args;
+  return {
+    status: 1,
+    signal: null,
+    stdout: "src/a.test.ts\nscripts/check.mts\n",
+    stderr: "",
+  };
+});
+check(
+  "the diagnostic measurement asks its same compiler invocation for listFiles",
+  measuredCompilerArgs.includes("--listFiles")
+    && measuredListFiles.programFiles.has("src/a.test.ts")
+    && measuredListFiles.programFiles.has("scripts/check.mts"),
+);
+let inventoryCommand;
+let inventoryArgs;
+const measuredInventory = readExpectedSourceFiles(
+  (command, args) => {
+    inventoryCommand = command;
+    inventoryArgs = args;
+    return {
+      status: 0,
+      signal: null,
+      stdout: "src/tracked.test.ts\0src/untracked.test.ts\0",
+      stderr: "",
+    };
+  },
+  () => true,
+);
+check(
+  "the independent inventory asks Git for tracked and untracked intended sources",
+  inventoryCommand === "git"
+    && inventoryArgs.join(",")
+      === "ls-files,-z,--cached,--others,--exclude-standard,--,src,scripts,test"
+    && measuredInventory.has("src/tracked.test.ts")
+    && measuredInventory.has("src/untracked.test.ts"),
+);
+
+const RUNNER_BASELINE = {
+  exists: true,
+  files: { "src/a.test.ts": 2, "src/b.test.ts": 1 },
+};
+const RUNNER_EXPECTED = new Set(["src/a.test.ts", "src/b.test.ts"]);
+function gateMeasurement(counts, programFiles = RUNNER_EXPECTED, tscStdout = "") {
+  return { counts, programFiles: new Set(programFiles), tscStdout };
+}
+const RUNNER_HELD = gateMeasurement(
+  new Map([["src/a.test.ts", 2], ["src/b.test.ts", 1]]),
+);
+function gateDeps(overrides = {}) {
+  return {
+    argv: [],
+    loadBaseline: () => RUNNER_BASELINE,
+    measure: () => RUNNER_HELD,
+    loadExpectedInventory: () => RUNNER_EXPECTED,
+    ...overrides,
+  };
+}
+function runGateCase(overrides = {}) {
+  const writes = [];
+  const stdout = [];
+  const stderr = [];
+  const exitCode = runGate(gateDeps({
+    saveBaseline: (payload) => writes.push(payload),
+    writeStdout: (message) => stdout.push(message),
+    writeStderr: (message) => stderr.push(message),
+    ...overrides,
+  }));
+  return { exitCode, writes, stdout, stderr };
+}
+
+const emptyUpdate = runGateCase({
+  argv: ["--update-baseline"],
+  measure: () => gateMeasurement(new Map(), new Set()),
+});
+check(
+  "runner refuses an empty update before it writes",
+  emptyUpdate.exitCode === 1
+    && emptyUpdate.writes.length === 0
+    && emptyUpdate.stderr.join("").includes("produced no diagnostics"),
+);
+const emptyCompare = runGateCase({
+  measure: () => gateMeasurement(new Map(), new Set()),
+});
+check(
+  "runner refuses an empty measurement before it compares",
+  emptyCompare.exitCode === 1
+    && emptyCompare.writes.length === 0
+    && emptyCompare.stdout.length === 0
+    && emptyCompare.stderr.join("").includes("produced no diagnostics"),
+);
+const nonSourceUpdate = runGateCase({
+  argv: ["--update-baseline"],
+  measure: () => gateMeasurement(new Map([["tsconfig.json", 1]]), new Set()),
+});
+check(
+  "runner refuses a non-source update before it writes",
+  nonSourceUpdate.exitCode === 1
+    && nonSourceUpdate.writes.length === 0
+    && nonSourceUpdate.stderr.join("").includes("non-source files"),
+);
+const narrowedProgramUpdate = runGateCase({
+  argv: ["--update-baseline"],
+  measure: () => gateMeasurement(
+    new Map([["src/a.test.ts", 2]]),
+    new Set(["src/a.test.ts"]),
+  ),
+});
+check(
+  "runner refuses a non-empty but narrowed program before it writes",
+  narrowedProgramUpdate.exitCode === 1
+    && narrowedProgramUpdate.writes.length === 0
+    && narrowedProgramUpdate.stderr.join("").includes("omitted 1 expected"),
+);
+const narrowedProgramCompare = runGateCase({
+  measure: () => gateMeasurement(
+    new Map([["src/a.test.ts", 2]]),
+    new Set(["src/a.test.ts"]),
+  ),
+});
+check(
+  "runner refuses a non-empty but narrowed program before it compares",
+  narrowedProgramCompare.exitCode === 1
+    && narrowedProgramCompare.writes.length === 0
+    && narrowedProgramCompare.stdout.length === 0
+    && narrowedProgramCompare.stderr.join("").includes("omitted 1 expected"),
+);
+const emptyInventoryUpdate = runGateCase({
+  argv: ["--update-baseline"],
+  loadExpectedInventory: () => new Set(),
+});
+check(
+  "runner refuses an empty independent inventory before it writes",
+  emptyInventoryUpdate.exitCode === 1
+    && emptyInventoryUpdate.writes.length === 0
+    && emptyInventoryUpdate.stderr.join("").includes("inventory was empty"),
+);
+const emptyInventoryCompare = runGateCase({
+  loadExpectedInventory: () => new Set(),
+});
+check(
+  "runner refuses an empty independent inventory before it compares",
+  emptyInventoryCompare.exitCode === 1
+    && emptyInventoryCompare.writes.length === 0
+    && emptyInventoryCompare.stdout.length === 0
+    && emptyInventoryCompare.stderr.join("").includes("inventory was empty"),
+);
+const bootstrapWrite = runGateCase({
+  argv: ["--update-baseline"],
+  loadBaseline: () => ({ exists: false, files: {} }),
+  loadExpectedInventory: () => new Set(["src/bootstrap.test.ts"]),
+  measure: () => gateMeasurement(
+    new Map([["src/bootstrap.test.ts", 1]]),
+    new Set(["src/bootstrap.test.ts"]),
+  ),
+});
+check(
+  "a complete first program bootstraps a baseline",
+  bootstrapWrite.exitCode === 0
+    && bootstrapWrite.writes.length === 1
+    && bootstrapWrite.writes[0].files["src/bootstrap.test.ts"] === 1,
+);
+const heldRunner = runGateCase();
+check(
+  "a complete unchanged program holds",
+  heldRunner.exitCode === 0
+    && heldRunner.writes.length === 0
+    && heldRunner.stdout.join("").includes("baseline held"),
+);
+const originalExitCode = process.exitCode;
+process.exitCode = 0;
+const regressionExitCode = main(gateDeps({
+  measure: () => gateMeasurement(
+    new Map([["src/a.test.ts", 3], ["src/b.test.ts", 1]]),
+  ),
+  writeStdout: () => {},
+  writeStderr: () => {},
+}));
+const assignedExitCode = process.exitCode;
+process.exitCode = originalExitCode ?? 0;
+check(
+  "a regression reaches the CLI exit code",
+  regressionExitCode === 1 && assignedExitCode === 1,
+);
+const signalFailure = runGateCase({
+  measure: () => runTsc(() => ({
+    status: null,
+    signal: "SIGTERM",
+    stdout: "",
+    stderr: "",
+  })),
+});
+check(
+  "a compiler signal becomes a failing runner exit",
+  signalFailure.exitCode === 1 && signalFailure.stderr.join("").includes("terminated by signal"),
+);
+const unexpectedStatus = runGateCase({
+  measure: () => runTsc(() => ({
+    status: 3,
+    signal: null,
+    stdout: "",
+    stderr: "",
+  })),
+});
+check(
+  "an unaccepted compiler status becomes a failing runner exit",
+  unexpectedStatus.exitCode === 1 && unexpectedStatus.stderr.join("").includes("tsc exited 3"),
+);
+
 // ── Config errors. A reviewer asked what happens to config codes outside the TS5xxx set
 // the runner used to look for, e.g. TS6059. Running tsc against a deliberately broken
 // config answered it, and the answer was worse than the question: a config error makes tsc
