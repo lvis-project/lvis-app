@@ -634,6 +634,7 @@ export function ToolApprovalDialog({
         size="lg"
         className="flex min-w-0 flex-col gap-0 overflow-hidden p-0"
         data-testid="tool-approval-dialog"
+        data-approval-tool-name={request.toolName}
         onInteractOutside={(e) => {
           if (request.requireExplicit) {
             e.preventDefault();
