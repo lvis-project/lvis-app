@@ -337,9 +337,10 @@ pasted into the draft are also redacted when the user attaches them with `@`.
   therefore adds one system badge, not one badge per attachment.
 - `redactForLLM` continues to emit count-only DLP audit rows per hit-bearing span. Their
   summed counts match the turn notice, but they are intentionally not a one-row-per-turn
-  telemetry contract. These new DLP records and the warning contain no raw resource body
-  or URI; existing resource-attachment metadata audit is a separate URI-bearing record
-  and is not changed by this decision.
+  telemetry contract. The main session ID is resolved at the hit, so a new/resume/fork
+  cannot attribute a later redaction to the boot-time session. These new DLP records and
+  the warning contain no raw resource body or URI; existing resource-attachment metadata
+  audit is a separate URI-bearing record and is not changed by this decision.
 - For normal Composer resource attachments, the existing limits bound this additional
   scan to at most 8 host-bounded text parts of 32 KB each (about 256 KB). That is not a
   claim that arbitrary internal IPC `text` parts are bounded by the resource policy.

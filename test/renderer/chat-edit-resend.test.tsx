@@ -189,8 +189,12 @@ describe("Chat edit & resend (Phase 3.2 regression net)", () => {
 
   it("restores optimistic rows when a staged-envelope failure rejects", async () => {
     const { container, api, emitChatStream } = await renderApp();
-    api.chatEditResend.mockRejectedValueOnce(
-      new Error("Error invoking remote method 'lvis:chat:edit-resend': Error: missing-app-envelope"),
+    let rejectEditResend: (reason?: unknown) => void = () => undefined;
+    api.chatEditResend.mockImplementationOnce(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectEditResend = reject;
+        }),
     );
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
@@ -233,10 +237,24 @@ describe("Chat edit & resend (Phase 3.2 regression net)", () => {
       fireEvent.click(saveBtn);
     });
 
+    await waitFor(() => expect(api.chatEditResend).toHaveBeenCalled());
+    await act(async () => {
+      // Main emits the aggregate notice before the DLP-damaged staged header
+      // fails closed. It must survive renderer rollback regardless of IPC order.
+      emitChatStream({ type: "redact_notice", count: 1, byKind: { PHONE_KR: 1 } });
+    });
+    await waitFor(() => expect(container.textContent).toContain("PII 1"));
+    await act(async () => {
+      rejectEditResend(
+        new Error("Error invoking remote method 'lvis:chat:edit-resend': Error: missing-app-envelope"),
+      );
+    });
+
     await waitFor(() => {
       expect(api.chatEditResend).toHaveBeenCalled();
       expect(container.textContent).toContain("existing assistant reply");
       expect(container.textContent).toContain("missing-app-envelope");
+      expect(container.textContent).toContain("PII 1");
       const tas = Array.from(container.querySelectorAll("textarea")) as HTMLTextAreaElement[];
       expect(tas.some((candidate) => candidate.value === "rejected staged edit")).toBe(true);
     });

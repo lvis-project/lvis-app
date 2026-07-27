@@ -42,11 +42,12 @@ function luhnValid(num: string): boolean {
 
 /** Optional auditLogger injected at boot to record DLP hits. */
 let _auditLogger: { log: (e: { timestamp: string; sessionId: string; type: "dlp"; dlp: { byKind: Record<string, number>; totalRedactions: number; turnId: string } }) => void } | null = null;
-let _sessionId = "unknown";
+type DlpAuditSessionSource = string | (() => string);
+let _sessionId: DlpAuditSessionSource = "unknown";
 
 export function initDlpAudit(
   auditLogger: typeof _auditLogger,
-  sessionId: string,
+  sessionId: DlpAuditSessionSource,
 ): void {
   _auditLogger = auditLogger;
   _sessionId = sessionId;
@@ -72,7 +73,10 @@ export function redactForLLM(text: string, turnId?: string): RedactResult {
   if (totalCount > 0 && _auditLogger) {
     _auditLogger.log({
       timestamp: new Date().toISOString(),
-      sessionId: _sessionId,
+      // A main-process session can change after IPC registration (new/resume/
+      // fork). Resolve a supplied getter at the hit rather than attributing
+      // every later redaction to the boot-time session.
+      sessionId: typeof _sessionId === "function" ? _sessionId() : _sessionId,
       type: "dlp",
       dlp: {
         byKind: counts,
