@@ -277,6 +277,26 @@ async function runtimeCounts(page: Page): Promise<RuntimeCounts> {
   });
 }
 
+async function pluginGuestId(page: Page): Promise<number | null> {
+  return page.locator("webview").evaluate((node) => {
+    try {
+      const webContentsId = (node as HTMLElement & {
+        getWebContentsId?: () => number;
+      }).getWebContentsId?.();
+      if (
+        typeof webContentsId === "number" &&
+        Number.isInteger(webContentsId) &&
+        webContentsId > 0
+      ) {
+        return webContentsId;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+}
+
 async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
   const viewKey = await ctx.page.evaluate(async (pluginId) => {
     const views = await (globalThis as unknown as {
@@ -301,22 +321,10 @@ async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
   }, viewKey!);
   await expect(ctx.page.locator("webview")).toHaveCount(1, { timeout: 15_000 });
   await expect.poll(
-    () => ctx.app.evaluate(({ webContents }) => {
-      const guest = webContents.getAllWebContents().find((candidate) =>
-        candidate.getType() === "webview" &&
-        /plugin-ui-shell\.html$/i.test(candidate.getURL())
-      );
-      return guest?.id ?? null;
-    }),
+    () => pluginGuestId(ctx.page),
     { timeout: 15_000 },
   ).not.toBeNull();
-  const guestId = await ctx.app.evaluate(({ webContents }) => {
-    const guest = webContents.getAllWebContents().find((candidate) =>
-      candidate.getType() === "webview" &&
-      /plugin-ui-shell\.html$/i.test(candidate.getURL())
-    );
-    return guest?.id ?? null;
-  });
+  const guestId = await pluginGuestId(ctx.page);
   if (guestId === null) throw new Error("EP plugin webview guest is missing");
   await expect.poll(
     () => ctx.app.evaluate(({ webContents }, id) =>
