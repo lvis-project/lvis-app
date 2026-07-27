@@ -222,6 +222,12 @@ export type ApprovalRequestInput = Omit<
   readonly executionPlan?: HostShellExecutionPlanAuditProjection;
   readonly forceExplicit?: true;
   /**
+   * Host-only memory capability for this request. One-shot approval routes set
+   * this false so a renderer cannot turn a per-invocation decision into a
+   * user-approval-store record. It is retained only in pending state.
+   */
+  readonly durableApprovalRecordAllowed?: boolean;
+  /**
    * Host-only binding for an explicit plain-shell fallback permit. It is retained only
    * in the pending entry and never serialized to the renderer or audit payload.
    */
@@ -397,6 +403,8 @@ interface PendingEntry {
    * agent-action) do not propagate a cache key.
    */
   approvalCacheKey?: string;
+  /** Host-owned permission to create a user-approval-store record. */
+  durableApprovalRecordAllowed: boolean;
   executionPlan?: HostShellExecutionPlanAuditProjection;
   hostShellExecutionPermitBinding?: HostShellExecutionPermitBinding;
   /** Confused-deputy nonce issued for this request (echoed back verbatim) */
@@ -599,6 +607,7 @@ export class ApprovalGate {
   async requestAndWait(req: ApprovalRequestInput): Promise<ApprovalDecision> {
     const {
       forceExplicit = false,
+      durableApprovalRecordAllowed: requestedDurableApprovalRecordAllowed,
       hostShellExecutionPermitBinding,
       executionPlan: requestedExecutionPlan,
       sandboxCapability: requestedSandboxCapability,
@@ -649,11 +658,21 @@ export class ApprovalGate {
     }
 
     const requestedChoices = req.allowedChoices;
-    const hasOneShotHostShellApprovalContract =
-      forceExplicit === true &&
+    const hasOneShotApprovalChoiceContract =
       requestedChoices?.length === 2 &&
       requestedChoices.includes("allow-once") &&
       requestedChoices.includes("deny-once");
+    // Exact one-shot requests and rationale prompts are never eligible for a
+    // durable user-approval record.  Treat this as an invariant instead of a
+    // caller preference: a future emitter must not be able to widen a
+    // per-invocation decision by setting the host-only option to `true`.
+    const durableApprovalRecordAllowed =
+      req.kind !== "rationale" &&
+      !hasOneShotApprovalChoiceContract &&
+      requestedDurableApprovalRecordAllowed !== false;
+    const hasOneShotHostShellApprovalContract =
+      forceExplicit === true &&
+      hasOneShotApprovalChoiceContract;
     if (
       hostShellExecutionPermitBinding !== undefined &&
       (
@@ -908,6 +927,7 @@ export class ApprovalGate {
         sourcePluginId: fullReq.sourcePluginId,
         approvalScope: fullReq.approvalScope,
         approvalCacheKey: fullReq.approvalCacheKey,
+        durableApprovalRecordAllowed,
         ...(executionPlanAudit === undefined
           ? {}
           : { executionPlan: executionPlanAudit }),
@@ -1113,6 +1133,7 @@ export class ApprovalGate {
     source: "builtin" | "plugin" | "mcp";
     trustOrigin: string;
     approvalCacheKey: string | undefined;
+    durableApprovalRecordAllowed: boolean;
   } | null {
     const entry = this.pending.get(requestId);
     if (!entry || entry.kind === "rationale") return null;
@@ -1125,6 +1146,7 @@ export class ApprovalGate {
       source: entry.source ?? "builtin",
       trustOrigin: entry.trustOrigin,
       approvalCacheKey: entry.approvalCacheKey,
+      durableApprovalRecordAllowed: entry.durableApprovalRecordAllowed,
     };
   }
 

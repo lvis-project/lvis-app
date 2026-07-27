@@ -18,10 +18,10 @@ describe("single-flight agent-action approver", () => {
     expect(buildSingleFlightAgentActionApprover(undefined)).toBeUndefined();
   });
 
-  it("builds the canonical agent-action request and treats allow-always as one-shot", async () => {
+  it("builds a host-constrained one-shot request for an external action", async () => {
     const requestAndWait = vi.fn(async () => ({
       requestId: "approval-1",
-      choice: "allow-always" as const,
+      choice: "allow-once" as const,
       rememberPattern: "ignored",
     }));
     const approve = buildSingleFlightAgentActionApprover(gate(requestAndWait))!;
@@ -33,6 +33,8 @@ describe("single-flight agent-action approver", () => {
     expect(requestAndWait).toHaveBeenNthCalledWith(1, expect.objectContaining({
       category: "agent-action",
       kind: "agent-action",
+      allowedChoices: ["allow-once", "deny-once"],
+      durableApprovalRecordAllowed: false,
       toolName: REQUEST.toolName,
       toolCategory: "meta",
       args: REQUEST.args,
@@ -53,6 +55,20 @@ describe("single-flight agent-action approver", () => {
     const approve = buildSingleFlightAgentActionApprover(gate(requestAndWait))!;
 
     await expect(approve(REQUEST)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["local-api", "allow-session"],
+    ["cli", "allow-always"],
+    ["a2a-remote-wire", "allow-session"],
+  ] as const)("fails closed when %s receives a non-one-shot %s response", async (trustOrigin, choice) => {
+    const requestAndWait = vi.fn(async () => ({
+      requestId: "approval-1",
+      choice,
+    }));
+    const approve = buildSingleFlightAgentActionApprover(gate(requestAndWait))!;
+
+    await expect(approve({ ...REQUEST, trustOrigin })).resolves.toBeNull();
   });
 
   it("single-flights attention prompts and exposes only safe diagnostic identity", async () => {
