@@ -1,4 +1,4 @@
-import { isAbsolute, normalize, posix, relative } from "node:path";
+import { isAbsolute, normalize, posix, relative, resolve } from "node:path";
 
 const LEGACY_SINGLE_MAIN_BUNDLE_BYTES = 10_828_547;
 
@@ -149,11 +149,17 @@ export function formatMainBundleBudget(measurement) {
   ].join(" ");
 }
 
-export function createMainBundleManifest(metafile, { outdir }) {
+export function createMainBundleManifest(metafile, { outdir, absWorkingDir = outdir }) {
   const normalizedOutdir = normalizedPath(outdir);
+  const normalizedWorkingDir = normalizedPath(absWorkingDir);
   const files = Object.entries(metafile.outputs)
     .map(([path, output]) => ({
-      path: normalizedPath(relative(normalizedOutdir, normalizedPath(path))),
+      path: normalizedPath(relative(
+        normalizedOutdir,
+        isAbsolute(path)
+          ? normalizedPath(path)
+          : normalizedPath(resolve(normalizedWorkingDir, path)),
+      )),
       bytes: output.bytes,
     }))
     .filter((entry) => entry.path !== ".." && !entry.path.startsWith("../"))
