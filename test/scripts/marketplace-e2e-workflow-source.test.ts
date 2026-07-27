@@ -66,6 +66,16 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     expect(finalJob).toContain("docker cp");
   });
 
+  it("starts the Marketplace with its image-provided virtualenv PATH", () => {
+    const finalJob = job("marketplace-e2e");
+    expect(finalJob).toContain(`--entrypoint /bin/sh \\
+            "m4-marketplace:$NONCE" \\
+            -c '`);
+    expect(finalJob).not.toContain(`--entrypoint /bin/sh \\
+            "m4-marketplace:$NONCE" \\
+            -lc '`);
+  });
+
   it("keeps trusted control code at workflow_sha and validates after candidate exit", () => {
     for (const name of [
       "stage-inputs",
