@@ -19,6 +19,7 @@ import { detectFromStream } from "../../../lib/stream-markers.js";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { PermissionReviewStatus } from "../../../shared/permission-review-status.js";
+import { isMissingStagedEnvelopeErrorMessage } from "../../../shared/staged-origins.js";
 import type { LvisApi } from "../types.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 
@@ -30,6 +31,19 @@ function permissionReviewKey(groupId: string, toolUseId: string): string {
 
 function shouldDwellPermissionReview(status: PermissionReviewStatus): boolean {
   return status === "reviewing" || status === "auto_approved";
+}
+
+function isMissingStagedEnvelopeIpcError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (isMissingStagedEnvelopeErrorMessage(error.message)) return true;
+  // Electron serializes a rejected `ipcRenderer.invoke` handler into this
+  // message form. Restrict the unwrap to the two optimistic replay endpoints
+  // so an unrelated provider error cannot trigger a history rollback merely by
+  // mentioning a fail-closed code.
+  const remote = error.message.match(
+    /^Error invoking remote method 'lvis:chat:(?:edit-resend|retry-effort)': Error: (.+)$/u,
+  );
+  return remote !== null && isMissingStagedEnvelopeErrorMessage(remote[1]);
 }
 
 /**
@@ -396,7 +410,7 @@ export function useChatState(api: LvisApi) {
         activeStreamIdRef.current = null;
         finalAssistantRoundClosedRef.current = false;
       } else if (ev.type === "redact_notice") {
-        // user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
+        // 발신 turn 콘텐츠(초안 + 텍스트 첨부)의 PII 리댁션을 알리는 시스템 배지.
         const count = (ev as unknown as { count?: number }).count ?? 0;
         const byKind = (ev as unknown as { byKind?: Record<string, number> }).byKind ?? {};
         const kindLabel = Object.entries(byKind)
@@ -695,8 +709,13 @@ export function useChatState(api: LvisApi) {
         }
       } catch (err) {
         failed = true;
+        const error = (err as Error).message;
         setEntries((p) =>
-          setAssistantError(p, t("useChatState.errorPrefix", { error: (err as Error).message }), thoughtRef.current),
+          setAssistantError(
+            isMissingStagedEnvelopeIpcError(err) ? prevEntries : p,
+            t("useChatState.errorPrefix", { error }),
+            thoughtRef.current,
+          ),
         );
       } finally {
         setEditBusy(false);
@@ -741,8 +760,13 @@ export function useChatState(api: LvisApi) {
         );
       }
     } catch (err) {
+      const error = (err as Error).message;
       setEntries((p) =>
-        setAssistantError(p, t("useChatState.errorPrefix", { error: (err as Error).message }), thoughtRef.current),
+        setAssistantError(
+          isMissingStagedEnvelopeIpcError(err) ? prevEntries : p,
+          t("useChatState.errorPrefix", { error }),
+          thoughtRef.current,
+        ),
       );
     } finally {
       finishStreamingRequest(requestId);
