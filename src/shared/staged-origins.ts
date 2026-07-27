@@ -239,6 +239,12 @@ export function isStagedTurnSource(source: string | null | undefined): boolean {
   return stagedOriginForSource(source) !== undefined;
 }
 
+/** True only for the table-owned fail-closed staged-envelope error codes. */
+export function isMissingStagedEnvelopeErrorMessage(value: unknown): boolean {
+  return typeof value === "string"
+    && STAGED_ORIGIN_KINDS.some((kind) => kind.missingEnvelopeError === value);
+}
+
 export interface StagedEnvelope {
   kind: StagedOriginKind;
   source: string;

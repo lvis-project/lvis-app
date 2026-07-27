@@ -429,9 +429,9 @@ export function collectChatPreviewModel({
         canOpenExternal: true,
       }, fileIds);
     } else if (attachment.kind === "resource") {
-      // Preview shows the fence VERBATIM, framing included. This panel exists to show
-      // what the model will actually receive, and the untrusted framing is part of that
-      // — stripping it here would preview a message the host never sends.
+      // Preview shows the renderer-held fence VERBATIM, framing included. Main may
+      // redact the provider-bound copy when the privacy setting is enabled, but
+      // stripping framing here would preview a message the host never sends.
       addUnique(targets, {
         id: `attachment:resource:${attachment.id}`,
         // `kind` selects the preview renderer (plain text), it is NOT a provenance
