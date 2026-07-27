@@ -259,7 +259,7 @@ interface Tool {
 **`installLocal` (개발자 sideload) 패키징 — host 가 자동 제외하는 경로**: host 의 `buildSideloadCopyFilter` (`src/plugins/sideload-filter.ts`) 는 install 시 다음 subtree 를 건너뛴다 — 플러그인 런타임에 무관하면서 staging 단계에서 깨지는 컨텐츠라 자동 제외:
 
 - `node_modules/electron`, `node_modules/@electron/*` — Electron 번들 `.asar` 가 patched fs 에 의해 "Invalid package" 로 폭사
-- `node_modules/.bin/` — npm/pnpm 이 만드는 dev-only 쉘 shim 들. 위에서 electron 패키지가 제외되면 `.bin/electron` 이 dangling 으로 남고 후속 `rejectEscapingSymlinks` 가 fail-closed 거부
+- `node_modules/.bin/` — npm/pnpm 이 만드는 dev-only 쉘 shim 들. 전체 subtree를 복사 전에 제외하므로 symlink 정책 검사(`rejectSideloadSymlinks`)까지 도달하지 않으며, 런타임은 이 바이너리를 호출하지 않음
 - `.git/` — VCS 메타데이터, 사이즈/프라이버시
 
 플러그인 런타임은 `.bin/` 쉘 shim 을 spawn 하지 않으므로 (in-process import 만), 위 제외는 손실 없음. 만약 플러그인이 위 경로 안의 파일에 의존한다면 — 예컨대 `dist/` 로 번들링하거나 manifest 가 명시적 자산 선언이 필요한지 다시 검토 필요.

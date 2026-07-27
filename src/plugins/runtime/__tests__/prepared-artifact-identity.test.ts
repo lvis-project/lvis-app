@@ -30,6 +30,7 @@ async function writePreparedPlugin(
   root: string,
   manifestId: string,
   installId: string,
+  entrySource?: (toolName: string) => string,
 ): Promise<{
   pluginRoot: string;
   manifest: PluginManifest;
@@ -59,7 +60,7 @@ async function writePreparedPlugin(
   await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
   await writeFile(
     join(pluginRoot, "entry.mjs"),
-    `export default async function createPlugin() {
+    entrySource?.(toolName) ?? `export default async function createPlugin() {
   return { handlers: { ${toolName}: async () => "pong" } };
 }
 `,
@@ -224,4 +225,93 @@ describe("prepared artifact install identity", () => {
     expect(runtime.resolvePluginInstallId("concurrent-owner"))
       .toBe("shared-identity");
   });
+
+  const failurePhases: ReadonlyArray<{
+    label: string;
+    entrySource?: (toolName: string) => string;
+    failsDurableCommit?: boolean;
+    failsPublication?: boolean;
+  }> = [
+    {
+      label: "module import",
+      entrySource: () => 'throw new Error("module import failure");\n',
+    },
+    {
+      label: "plugin factory",
+      entrySource: () => `export default async function createPlugin() {
+  throw new Error("plugin factory failure");
+}
+`,
+    },
+    {
+      label: "plugin start",
+      entrySource: (toolName) => `export default async function createPlugin() {
+  return {
+    handlers: { ${toolName}: async () => "pong" },
+    start: async () => { throw new Error("plugin start failure"); },
+  };
+}
+`,
+    },
+    { label: "durable commit", failsDurableCommit: true },
+    { label: "prepared publication", failsPublication: true },
+  ];
+
+  for (const phase of failurePhases) {
+    it(`releases both reserved identities after ${phase.label} failure`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "lvis-prepared-retry-"));
+      roots.push(root);
+      const pluginId = `retry-${phase.label.replaceAll(" ", "-")}`;
+      const installId = `catalog-${phase.label.replaceAll(" ", "-")}`;
+      const runtime = makeTestPluginRuntime(
+        {
+          rootDir: root,
+          registryPath: join(root, "plugins", "registry.json"),
+          pluginsRoot: join(root, "plugins"),
+        },
+        { installReceiptCacheRoot: join(root, "cache") },
+      );
+      const failure = new Error(`${phase.label} failure`);
+      const publicationSpy = phase.failsPublication
+        ? vi.spyOn(runtime, "prepareRuntimeGeneration").mockImplementation(
+          () => ({ publish: () => { throw failure; } }) as never,
+        )
+        : undefined;
+      const failedPrepared = await writePreparedPlugin(
+        root,
+        pluginId,
+        installId,
+        phase.entrySource,
+      );
+      const failedCommit = vi.fn(async () => {
+        if (phase.failsDurableCommit) throw failure;
+        return "first-commit";
+      });
+
+      await expect(runtime.activatePreparedArtifact({
+        installId,
+        ...failedPrepared,
+        durableCommit: failedCommit,
+      })).rejects.toThrow(failure.message);
+      publicationSpy?.mockRestore();
+
+      expect(runtime.listPluginIds()).not.toContain(pluginId);
+      if (phase.entrySource) expect(failedCommit).not.toHaveBeenCalled();
+      else expect(failedCommit).toHaveBeenCalledOnce();
+
+      const retryPrepared = await writePreparedPlugin(root, pluginId, installId);
+      const retryCommit = vi.fn(async () => "retry-commit");
+      const activated = await runtime.activatePreparedArtifact({
+        installId,
+        ...retryPrepared,
+        durableCommit: retryCommit,
+      });
+      await activated.retirement;
+
+      expect(activated.result).toBe("retry-commit");
+      expect(retryCommit).toHaveBeenCalledOnce();
+      expect(runtime.resolvePluginInstallId(pluginId)).toBe(installId);
+      await expect(runtime.call(`${pluginId.replaceAll("-", "_")}_ping`)).resolves.toBe("pong");
+    });
+  }
 });

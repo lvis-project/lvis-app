@@ -2,7 +2,7 @@ import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "../sideload-filter.js";
+import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "../sideload-filter.js";
 
 // ---------------------------------------------------------------------------
 // buildSideloadCopyFilter
@@ -38,7 +38,7 @@ describe("buildSideloadCopyFilter", () => {
   });
 
   // Without this, electron's filter leaves `.bin/electron` as a dangling
-  // symlink and `rejectEscapingSymlinks` aborts the entire install.
+  // symlink and `rejectSideloadSymlinks` aborts the entire install.
   it("rejects node_modules/.bin shell-shim subtree", () => {
     expect(filter(join(root, "node_modules", ".bin"))).toBe(false);
     expect(filter(join(root, "node_modules", ".bin", "electron"))).toBe(false);
@@ -68,10 +68,10 @@ describe("buildSideloadCopyFilter", () => {
 });
 
 // ---------------------------------------------------------------------------
-// rejectEscapingSymlinks
+// rejectSideloadSymlinks
 // ---------------------------------------------------------------------------
 
-describe("rejectEscapingSymlinks", () => {
+describe("rejectSideloadSymlinks", () => {
   let tmpDir: string;
   // A sibling directory outside tmpDir used as an escape target.
   // Created here so a real file exists on disk — realpathSync requires the
@@ -94,49 +94,57 @@ describe("rejectEscapingSymlinks", () => {
   it("passes for a directory with no symlinks", async () => {
     await mkdir(join(tmpDir, "dist"), { recursive: true });
     await writeFile(join(tmpDir, "plugin.json"), "{}");
-    await expect(rejectEscapingSymlinks(tmpDir)).resolves.toBeUndefined();
+    await expect(rejectSideloadSymlinks(tmpDir)).resolves.toBeUndefined();
   });
 
   // Symlink creation on Windows requires elevated privileges — skip on that platform.
   const itSymlink = it.skipIf(process.platform === "win32");
 
-  itSymlink("passes for internal symlinks (target within installDir)", async () => {
+  itSymlink("rejects an internal symlink before promotion", async () => {
     await writeFile(join(tmpDir, "real.js"), "");
     await symlink(join(tmpDir, "real.js"), join(tmpDir, "link.js"));
-    await expect(rejectEscapingSymlinks(tmpDir)).resolves.toBeUndefined();
+    await expect(rejectSideloadSymlinks(tmpDir)).rejects.toThrow(
+      "symbolic link is not allowed in install dir: link.js",
+    );
   });
 
   itSymlink("rejects a symlink whose target escapes installDir", async () => {
     const escaping = join(tmpDir, "escape.txt");
     await symlink(escapeTarget, escaping);
-    await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("symlink escapes install dir");
+    await expect(rejectSideloadSymlinks(tmpDir)).rejects.toThrow(
+      "symbolic link is not allowed in install dir: escape.txt",
+    );
   });
 
   itSymlink("rejects nested symlinks in node_modules escaping installDir", async () => {
     const nmDir = join(tmpDir, "node_modules", "evil-pkg");
     await mkdir(nmDir, { recursive: true });
     await symlink(escapeTarget, join(nmDir, "index.js"));
-    await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("symlink escapes install dir");
+    await expect(rejectSideloadSymlinks(tmpDir)).rejects.toThrow(
+      "symbolic link is not allowed in install dir: node_modules/evil-pkg/index.js",
+    );
   });
 
-  itSymlink("rejects dangling symlinks (target does not exist — unverifiable at install time)", async () => {
+  itSymlink("rejects dangling symlinks", async () => {
     const dangling = join(tmpDir, "dangling.js");
     await symlink(join(tmpDir, "nonexistent-target.js"), dangling);
-    await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("unresolvable symlink");
+    await expect(rejectSideloadSymlinks(tmpDir)).rejects.toThrow(
+      "symbolic link is not allowed in install dir: dangling.js",
+    );
   });
 
   it("throws for non-absolute dir argument", async () => {
-    await expect(rejectEscapingSymlinks("relative/path")).rejects.toThrow("must be absolute");
+    await expect(rejectSideloadSymlinks("relative/path")).rejects.toThrow("must be absolute");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Integration: cp({ filter }) + rejectEscapingSymlinks against a fixture that
+// Integration: cp({ filter }) + rejectSideloadSymlinks against a fixture that
 // mimics the ms-graph layout — proves the filter prevents the dangling-bin
 // regression that motivated this PR. A future refactor that splits filter and
 // walker would re-regress without this case.
 // ---------------------------------------------------------------------------
-describe("integration: cp filter + rejectEscapingSymlinks (ms-graph layout)", () => {
+describe("integration: cp filter + rejectSideloadSymlinks (ms-graph layout)", () => {
   let baseDir: string;
   let sourceDir: string;
   let stagingDir: string;
@@ -174,14 +182,14 @@ describe("integration: cp filter + rejectEscapingSymlinks (ms-graph layout)", ()
     await symlink("../never-existed/cli.js", join(sourceDir, "node_modules", ".bin", "phantom"));
 
     // Mirror the production install pipeline: cp with the sideload filter,
-    // then run rejectEscapingSymlinks on the staged dir.
+    // then run rejectSideloadSymlinks on the staged dir.
     const { cp } = await import("node:fs/promises");
     await cp(sourceDir, stagingDir, {
       recursive: true,
       verbatimSymlinks: true,
       filter: buildSideloadCopyFilter(sourceDir),
     });
-    await expect(rejectEscapingSymlinks(stagingDir)).resolves.toBeUndefined();
+    await expect(rejectSideloadSymlinks(stagingDir)).resolves.toBeUndefined();
 
     // Staging must contain plugin.json + dist/, but NOT electron / .bin.
     const { existsSync } = await import("node:fs");

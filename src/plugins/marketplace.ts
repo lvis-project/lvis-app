@@ -2,7 +2,7 @@ import { cp, mkdir, readFile, rename, rm, stat as statAsync } from "node:fs/prom
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, posix, resolve } from "node:path";
-import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "./sideload-filter.js";
+import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
@@ -2277,7 +2277,7 @@ export class PluginMarketplaceService {
           verbatimSymlinks: true,
           filter: buildSideloadCopyFilter(sourcePath),
         });
-        await rejectEscapingSymlinks(stagingDir);
+        await rejectSideloadSymlinks(stagingDir);
 
         const receiptFiles = await listFilesRecursive(stagingDir);
         const localReceiptRaw = await this.prepareInstallReceipt(pluginId, stagingDir, {
