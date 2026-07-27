@@ -43,6 +43,11 @@ const buildOptions = {
   platform: "node",
   target: ["node22"],
   legalComments: "none",
+  // Keep emitted public names stable for runtime diagnostics, while letting
+  // esbuild fold equivalent syntax and eliminate unreachable branches. The
+  // main bundle budget measures shipped bytes, so this is a production-safe
+  // optimization rather than a budget increase.
+  minifySyntax: true,
   external: [
     "electron",
     "electron-updater",
