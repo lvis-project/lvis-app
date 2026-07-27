@@ -28,15 +28,15 @@ const pluginShellJsUrl = pathToFileURL(resolve(__dirnameLocal, "..", "..", "plug
 const mockOnBeforeRequest = vi.fn();
 const mockOnBeforeRequestMcp = vi.fn();
 const mockOnBeforeRequestPlugin = vi.fn();
-const mockSetPreloadsPlugin = vi.fn();
+const mockRegisterPreloadScriptPlugin = vi.fn();
 const mockProtocolHandlePlugin = vi.fn();
-const mockSetPreloadsMcp = vi.fn();
+const mockRegisterPreloadScriptMcp = vi.fn();
 const mockProtocolHandleMcp = vi.fn();
 const mockSession = {
   webRequest: {
     onBeforeRequest: mockOnBeforeRequest,
   },
-  setPreloads: vi.fn(),
+  registerPreloadScript: vi.fn(),
 };
 const mockMcpSession = {
   webRequest: {
@@ -44,7 +44,7 @@ const mockMcpSession = {
   },
   // The MCP-app partition now also carries the sandbox-proxy relay preload and
   // the `lvis-mcp-app://` protocol handler that serves the proxy document.
-  setPreloads: mockSetPreloadsMcp,
+  registerPreloadScript: mockRegisterPreloadScriptMcp,
   protocol: {
     handle: mockProtocolHandleMcp,
   },
@@ -57,7 +57,7 @@ const mockPluginSession = {
   webRequest: {
     onBeforeRequest: mockOnBeforeRequestPlugin,
   },
-  setPreloads: mockSetPreloadsPlugin,
+  registerPreloadScript: mockRegisterPreloadScriptPlugin,
   protocol: {
     handle: mockProtocolHandlePlugin,
   },
@@ -152,7 +152,7 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server partition po
   beforeEach(() => {
     mockOnBeforeRequestMcp.mockClear();
     mockSessionApi.fromPartition.mockClear();
-    mockSetPreloadsMcp.mockClear();
+    mockRegisterPreloadScriptMcp.mockClear();
     mockProtocolHandleMcp.mockClear();
     mockMcpSession.setPermissionRequestHandler.mockClear();
     mockMcpSession.setPermissionCheckHandler.mockClear();
@@ -198,15 +198,16 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server partition po
     expect(invokeMcpHandler("https://cdn.jsdelivr.net/x")).toEqual({ cancel: true });
   });
 
-  it("installs the host-owned relay preload via setPreloads (sandboxed <webview> requirement)", () => {
+  it("registers the host-owned relay frame preload (sandboxed <webview> requirement)", () => {
     // The `preload=` ATTRIBUTE is silently ignored under sandbox=yes and is stripped
-    // by the will-attach-webview guards, so session.setPreloads is the only path.
+    // by the will-attach-webview guards, so the session-level preload is the only path.
     // The path must be host-resolved — an MCP server can never nominate a preload.
     installMcpAppPartitionPolicy("github-preload", mockSessionApi);
-    expect(mockSetPreloadsMcp).toHaveBeenCalledOnce();
-    const [paths] = mockSetPreloadsMcp.mock.calls[0] as [string[]];
-    expect(paths).toHaveLength(1);
-    expect(paths[0].endsWith("mcp-app-preload.cjs")).toBe(true);
+    expect(mockRegisterPreloadScriptMcp).toHaveBeenCalledOnce();
+    expect(mockRegisterPreloadScriptMcp).toHaveBeenCalledWith({
+      type: "frame",
+      filePath: expect.stringMatching(/mcp-app-preload\.cjs$/),
+    });
   });
 
   it("registers the lvis-mcp-app:// protocol handler that serves the sandbox proxy", () => {
@@ -243,21 +244,20 @@ describe("installMcpAppPartitionPolicy (#885 b1 — lazy per-server partition po
 describe("installPluginPartitionPolicy", () => {
   beforeEach(() => {
     mockOnBeforeRequestPlugin.mockClear();
-    mockSetPreloadsPlugin.mockClear();
+    mockRegisterPreloadScriptPlugin.mockClear();
     mockProtocolHandlePlugin.mockClear();
     mockSessionApi.fromPartition.mockClear();
   });
 
-  it("registers plugin-preload.cjs via session.setPreloads (sandboxed <webview> requirement)", () => {
+  it("registers plugin-preload.cjs as a session frame preload (sandboxed <webview> requirement)", () => {
     installPluginPartitionPolicy("persist:plugin:abc123", {}, mockSessionApi);
 
     expect(mockSessionApi.fromPartition).toHaveBeenCalledWith("persist:plugin:abc123");
-    expect(mockSetPreloadsPlugin).toHaveBeenCalledOnce();
-
-    const [preloadList] = mockSetPreloadsPlugin.mock.calls[0] as [string[]];
-    expect(Array.isArray(preloadList)).toBe(true);
-    expect(preloadList).toHaveLength(1);
-    expect(preloadList[0]).toMatch(/plugin-preload\.cjs$/);
+    expect(mockRegisterPreloadScriptPlugin).toHaveBeenCalledOnce();
+    expect(mockRegisterPreloadScriptPlugin).toHaveBeenCalledWith({
+      type: "frame",
+      filePath: expect.stringMatching(/plugin-preload\.cjs$/),
+    });
   });
 
   it("also installs the webRequest allowlist on the plugin partition session", () => {
@@ -285,10 +285,10 @@ describe("installPluginPartitionPolicy", () => {
     expect(mockProtocolHandlePlugin).toHaveBeenCalledWith("lvis-plugin", expect.any(Function));
   });
 
-  it("is idempotent: re-installing the same partition does not re-register setPreloads", () => {
+  it("is idempotent: re-installing the same partition does not re-register the preload", () => {
     installPluginPartitionPolicy("persist:plugin:idempotent", {}, mockSessionApi);
     installPluginPartitionPolicy("persist:plugin:idempotent", {}, mockSessionApi);
-    expect(mockSetPreloadsPlugin).toHaveBeenCalledOnce();
+    expect(mockRegisterPreloadScriptPlugin).toHaveBeenCalledOnce();
     expect(mockOnBeforeRequestPlugin).toHaveBeenCalledOnce();
   });
 });

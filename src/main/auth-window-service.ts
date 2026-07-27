@@ -15,9 +15,8 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { getCommonChromeOptions } from "./window-chrome.js";
+import { runtimeAssetPath } from "./main-paths.js";
 import { BrowserWindow, screen, session, type Cookie, type Session, type WebContents } from "electron";
 import { registerWindowEventListeners } from "./window-event-listeners.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
@@ -255,7 +254,7 @@ export async function forgetTrackedPluginAuthPartitions(
 }
 
 function authShellPreloadPath(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "../preload.cjs");
+  return runtimeAssetPath("preload.cjs");
 }
 
 export function buildAuthWindowShellHtml(input: {

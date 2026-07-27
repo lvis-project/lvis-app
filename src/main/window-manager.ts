@@ -588,7 +588,7 @@ export class WindowManager {
         // would NOT receive `--lvis-initial-theme=` (which carries host
         // theme cache). Plugin webviews already get theme via the
         // `host.theme.changed` event, never via argv. The MCP-app webview's
-        // relay preload is installed via `session.setPreloads()` on the partition
+        // relay preload is installed via `session.registerPreloadScript()` on the partition
         // (not the attribute), so stripping the ATTRIBUTE preload here does not
         // touch it — a no-op-safe hardening for that path too.
         delete prefs.additionalArguments;

@@ -535,11 +535,6 @@
     {
       "type": "exports",
       "file": "src/main/uv-runtime.ts",
-      "name": "currentUvTarget"
-    },
-    {
-      "type": "exports",
-      "file": "src/main/uv-runtime.ts",
       "name": "isPackagedUvRuntime"
     },
     {
