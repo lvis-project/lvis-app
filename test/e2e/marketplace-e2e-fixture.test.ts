@@ -1,6 +1,8 @@
+import AdmZip from "adm-zip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   approvePendingPlugin,
+  buildPluginZip,
   EXACT_LOOPBACK_MARKETPLACE_ORIGIN,
   postMarketplace,
   publishPlugin,
@@ -12,6 +14,36 @@ afterEach(() => {
 });
 
 describe("Marketplace E2E mutation containment", () => {
+  it("keeps the hook lifecycle probe ungoverned and dual-visible", () => {
+    const slug = "fixture-plugin";
+    const zip = new AdmZip(buildPluginZip(slug, "1.0.0", {
+      bundledContributions: true,
+    }));
+    const manifest = JSON.parse(zip.readAsText("plugin.json")) as {
+      tools: Array<{ name: string; _meta?: Record<string, unknown> }>;
+    };
+    const readTool = manifest.tools.find((tool) => tool.name === "fixture_plugin_read");
+    const hookProbeTool = manifest.tools.find(
+      (tool) => tool.name === "fixture_plugin_read_hook_probe",
+    );
+    const hookConfig = JSON.parse(zip.readAsText("hooks/audit.json")) as {
+      hooks: { PreToolUse: Array<{ matcher: string }> };
+    };
+
+    expect(readTool?._meta).toMatchObject({
+      "lvisai/operationPolicy": {
+        operations: { hook_probe: { kind: "read" } },
+      },
+    });
+    expect(hookProbeTool?._meta).toMatchObject({
+      ui: { visibility: ["model", "app"] },
+    });
+    expect(hookProbeTool?._meta).not.toHaveProperty("lvisai/operationPolicy");
+    expect(hookConfig.hooks.PreToolUse).toEqual([
+      expect.objectContaining({ matcher: "fixture_plugin_read_hook_probe" }),
+    ]);
+  });
+
   it("accepts only the canonical ephemeral Marketplace origin", () => {
     expect(requireExactLoopbackMarketplaceOrigin(EXACT_LOOPBACK_MARKETPLACE_ORIGIN))
       .toBe(EXACT_LOOPBACK_MARKETPLACE_ORIGIN);
