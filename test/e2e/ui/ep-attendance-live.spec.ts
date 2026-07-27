@@ -278,7 +278,7 @@ async function runtimeCounts(page: Page): Promise<RuntimeCounts> {
 }
 
 async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
-  const viewKey = await ctx.page.evaluate(async () => {
+  const viewKey = await ctx.page.evaluate(async (pluginId) => {
     const views = await (globalThis as unknown as {
       lvisApi: {
         listPluginUiExtensions(): Promise<Array<{
@@ -288,12 +288,12 @@ async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
       };
     }).lvisApi.listPluginUiExtensions();
     const ep = views.find((view) =>
-      view.pluginId === EP_PLUGIN_ID &&
+      view.pluginId === pluginId &&
       view.extension.id === "lge-control" &&
       view.extension.slot === "sidebar"
     );
     return ep ? `plugin:${ep.pluginId}:${ep.extension.id}` : null;
-  });
+  }, EP_PLUGIN_ID);
   expect(viewKey).toBe("plugin:ep-api:lge-control");
   await ctx.app.evaluate(({ BrowserWindow }, key) => {
     const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
@@ -573,14 +573,14 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       matchingPreToolUse: [],
     });
     const installedCounts = await runtimeCounts(ctx.page);
-    const trustRows = await ctx.page.evaluate(async () => {
+    const trustRows = await ctx.page.evaluate(async (pluginId) => {
       const api = globalThis as unknown as {
         lvisApi: {
           listPluginContributionTrust(id: string): Promise<{ ok: boolean; rows: unknown[] }>;
         };
       };
-      return api.lvisApi.listPluginContributionTrust(EP_PLUGIN_ID);
-    });
+      return api.lvisApi.listPluginContributionTrust(pluginId);
+    }, EP_PLUGIN_ID);
     expect(trustRows).toMatchObject({ ok: true, rows: [] });
 
     const guestId = await activateEpWebview(ctx);
