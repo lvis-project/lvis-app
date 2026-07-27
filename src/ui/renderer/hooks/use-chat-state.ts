@@ -47,6 +47,20 @@ function isMissingStagedEnvelopeIpcError(error: unknown): boolean {
 }
 
 /**
+ * A fail-closed staged-envelope rejection rolls main history back to the
+ * snapshot from before its optimistic edit/retry. DLP may already have sent
+ * its out-of-band `redact_notice` while that IPC call was pending, though.
+ * Keep only newly-arrived system entries so rollback cannot erase that notice
+ * while still dropping the optimistic user/streaming entries.
+ */
+function restoreStagedEnvelopeFailureEntries(previous: ChatEntry[], current: ChatEntry[]): ChatEntry[] {
+  const newSystemEntries = current.filter(
+    (entry) => entry.kind === "system" && !previous.includes(entry),
+  );
+  return newSystemEntries.length === 0 ? previous : [...previous, ...newSystemEntries];
+}
+
+/**
  * Chat state + stream hook.
  *
  * Owns everything chat-lifecycle: entries, streaming flag, the IPC
@@ -710,9 +724,10 @@ export function useChatState(api: LvisApi) {
       } catch (err) {
         failed = true;
         const error = (err as Error).message;
+        const stagedEnvelopeFailure = isMissingStagedEnvelopeIpcError(err);
         setEntries((p) =>
           setAssistantError(
-            isMissingStagedEnvelopeIpcError(err) ? prevEntries : p,
+            stagedEnvelopeFailure ? restoreStagedEnvelopeFailureEntries(prevEntries, p) : p,
             t("useChatState.errorPrefix", { error }),
             thoughtRef.current,
           ),
@@ -761,9 +776,10 @@ export function useChatState(api: LvisApi) {
       }
     } catch (err) {
       const error = (err as Error).message;
+      const stagedEnvelopeFailure = isMissingStagedEnvelopeIpcError(err);
       setEntries((p) =>
         setAssistantError(
-          isMissingStagedEnvelopeIpcError(err) ? prevEntries : p,
+          stagedEnvelopeFailure ? restoreStagedEnvelopeFailureEntries(prevEntries, p) : p,
           t("useChatState.errorPrefix", { error }),
           thoughtRef.current,
         ),
