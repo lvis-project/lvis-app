@@ -186,6 +186,90 @@ describe("Chat edit & resend (Phase 3.2 regression net)", () => {
       expect(container.textContent).toMatch(/편집 실패|invalid-index/);
     });
   });
+
+  it("restores optimistic rows when a staged-envelope failure rejects", async () => {
+    const { container, api, emitChatStream } = await renderApp();
+    let rejectEditResend: (reason?: unknown) => void = () => undefined;
+    api.chatEditResend.mockImplementationOnce(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectEditResend = reject;
+        }),
+    );
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "original staged turn" } });
+      fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+    });
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "existing assistant reply" });
+      emitChatStream({ type: "assistant_round", text: "existing assistant reply" });
+      emitChatStream({ type: "done" });
+    });
+
+    const editBtn = await waitFor(() => {
+      const btn = container.querySelector('button[title="편집"]');
+      if (!btn) throw new Error("edit button not yet rendered");
+      return btn as HTMLButtonElement;
+    });
+    await act(async () => {
+      fireEvent.click(editBtn);
+    });
+    const editorTa = await waitFor(() => {
+      const tas = Array.from(container.querySelectorAll("textarea")) as HTMLTextAreaElement[];
+      const ta = tas.find((t) => t.value === "original staged turn");
+      if (!ta) throw new Error("editor not ready");
+      return ta;
+    });
+    await act(async () => {
+      fireEvent.change(editorTa, { target: { value: "rejected staged edit" } });
+    });
+    const saveBtn = await waitFor(() => {
+      const btn = Array.from(container.querySelectorAll("button"))
+        .find((candidate) => candidate.textContent?.includes("저장 후 재전송"));
+      if (!btn) throw new Error("save not found");
+      return btn;
+    });
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    await waitFor(() => expect(api.chatEditResend).toHaveBeenCalled());
+    await act(async () => {
+      // Main emits the aggregate notice before the DLP-damaged staged header
+      // fails closed. It must survive renderer rollback regardless of IPC order.
+      emitChatStream({ type: "redact_notice", count: 1, byKind: { PHONE_KR: 1 } });
+    });
+    await waitFor(() => expect(container.textContent).toContain("PII 1"));
+    await act(async () => {
+      rejectEditResend(
+        new Error("Error invoking remote method 'lvis:chat:edit-resend': Error: missing-app-envelope"),
+      );
+    });
+
+    await waitFor(() => {
+      expect(api.chatEditResend).toHaveBeenCalled();
+      expect(container.textContent).toContain("existing assistant reply");
+      expect(container.textContent).toContain("missing-app-envelope");
+      expect(container.textContent).toContain("PII 1");
+      const tas = Array.from(container.querySelectorAll("textarea")) as HTMLTextAreaElement[];
+      expect(tas.some((candidate) => candidate.value === "rejected staged edit")).toBe(true);
+    });
+
+    const cancelBtn = Array.from(container.querySelectorAll("button"))
+      .find((candidate) => candidate.textContent?.trim() === "취소");
+    expect(cancelBtn).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(cancelBtn!);
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("original staged turn");
+      expect(container.textContent).toContain("existing assistant reply");
+    });
+  });
 });
 
 afterEach(() => {

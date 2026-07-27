@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 import {
+  initDlpAudit,
   redactAuditPayload,
   redactForLLM,
   redactFsPath,
@@ -56,6 +57,28 @@ describe("redactForLLM", () => {
     const r = redactForLLM("안녕하세요, LVIS 입니다.");
     expect(r.totalCount).toBe(0);
     expect(r.redacted).toBe("안녕하세요, LVIS 입니다.");
+  });
+
+  it("attributes audit rows to the session resolved at each redaction", () => {
+    const auditSessionIds: string[] = [];
+    let currentSessionId = "session-before-transition";
+    initDlpAudit(
+      { log: ({ sessionId }) => auditSessionIds.push(sessionId) },
+      () => currentSessionId,
+    );
+    try {
+      redactForLLM("first@example.com");
+      currentSessionId = "session-after-transition";
+      redactForLLM("second@example.com");
+
+      expect(auditSessionIds).toEqual([
+        "session-before-transition",
+        "session-after-transition",
+      ]);
+    } finally {
+      // DLP audit state is module-global; do not leak this test sink to other files.
+      initDlpAudit(null, "unknown");
+    }
   });
 });
 
