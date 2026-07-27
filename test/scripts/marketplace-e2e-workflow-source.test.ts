@@ -214,6 +214,38 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     expect(finalJob).toContain("candidate-evidence-root");
   });
 
+  it("preserves Host Playwright diagnostics when the candidate fails", () => {
+    const finalJob = job("marketplace-e2e");
+    const capture = finalJob.indexOf(
+      "name: Capture Host candidate diagnostics (failure)",
+    );
+    const upload = finalJob.indexOf(
+      "name: Upload Host candidate diagnostics (failure)",
+      capture,
+    );
+    const uploadEnd = finalJob.indexOf("\n      - name:", upload + 1);
+    expect(capture).toBeGreaterThan(finalJob.indexOf("docker start --attach"));
+    expect(upload).toBeGreaterThan(capture);
+    const captureBlock = finalJob.slice(capture, upload);
+    expect(captureBlock).toContain("if: failure()");
+    expect(captureBlock).toContain(
+      'docker cp "$HOST_CONTAINER:/workspace/lvis-app/test-results" candidate-diagnostics-raw',
+    );
+    expect(captureBlock).toContain(
+      "node control/scripts/sanitize-candidate-diagnostics.mjs",
+    );
+    expect(captureBlock).toContain('"diagnostics_safe=true" >> "$GITHUB_OUTPUT"');
+    expect(captureBlock).not.toContain("candidate-evidence");
+    expect(uploadEnd).toBeGreaterThan(upload);
+    const uploadBlock = finalJob.slice(upload, uploadEnd);
+    expect(uploadBlock).toContain(
+      "steps.capture-host-candidate-diagnostics.outputs.diagnostics_safe == 'true'",
+    );
+    expect(uploadBlock).toContain("actions/upload-artifact@");
+    expect(uploadBlock).toContain("path: candidate-diagnostics-safe/");
+    expect(uploadBlock).not.toContain("candidate-diagnostics-raw");
+  });
+
   it("executes Host and EP package scripts only after dropping root in build images", () => {
     for (const dockerfile of [hostDockerfile, epDockerfile]) {
       const nonRoot = dockerfile.indexOf("USER 10001:10001");
