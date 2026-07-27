@@ -257,6 +257,69 @@ describe("PluginBundleLifecycle", () => {
     expect(disconnectBundledGeneration).toHaveBeenCalledWith("ep-api", generationId);
   });
 
+  it("restores MCP approval after a same-artifact reinstall refreshes installedAt", async () => {
+    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
+    let activationId = "test-activation-v1";
+    const prepareBundledGeneration = vi.fn(async ({ pluginId, generationId }) => ({
+      pluginId,
+      generationId,
+      predecessorServerIds: [],
+      predecessorToolNames: [],
+      records: [],
+      registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+      published: false,
+    }));
+    const publishBundledGeneration = vi.fn((prepared) => { prepared.published = true; });
+    const lifecycle = makeLifecycle({
+      pluginRuntime: {
+        getPluginManifest: () => manifest,
+        getPluginRoot: () => pluginRoot,
+        getRuntimeGenerationProjection: () => ({
+          ...runtimeProjection(manifest, pluginRoot),
+          activationId,
+          installId: "ep-api",
+        }),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        postPublishRuntimeGeneration: vi.fn(),
+        publishRuntimeGeneration: vi.fn(),
+        unpublishRuntimeGeneration: vi.fn(),
+        prepareRuntimeRetirement: vi.fn(() => []),
+      },
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration,
+        publishBundledGeneration,
+        discardBundledGeneration: vi.fn(async () => undefined),
+        retirePublishedMcpReplacement: vi.fn(async () => undefined),
+        disconnectBundledGeneration: vi.fn(async () => undefined),
+      } as never,
+    });
+
+    await lifecycle.activate("ep-api");
+    await lifecycle.approveMcpServer("ep-api", "ep");
+    expect(lifecycle.listContributionTrust("ep-api")).toContainEqual(
+      expect.objectContaining({ kind: "mcpServer", localId: "ep", status: "approved" }),
+    );
+
+    const receiptPath = join(cacheRoot, "ep-api", "install-receipt.json");
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    receipt.installedAt = "2026-07-27T00:05:00.000Z";
+    await writeFile(receiptPath, JSON.stringify(receipt), "utf8");
+    activationId = "test-activation-v1-reinstalled";
+
+    await lifecycle.activate("ep-api");
+    expect(lifecycle.listContributionTrust("ep-api")).toContainEqual(
+      expect.objectContaining({ kind: "mcpServer", localId: "ep", status: "approved" }),
+    );
+    expect(prepareBundledGeneration).toHaveBeenCalledTimes(3);
+    expect(publishBundledGeneration).toHaveBeenCalledTimes(3);
+    await lifecycle.waitForRetirements();
+  });
+
   it("keeps published MCP trust committed when predecessor retirement exhausts retries", async () => {
     const { root, pluginRoot, cacheRoot, manifest } = await fixture();
     const publishBundledGeneration = vi.fn((prepared) => { prepared.published = true; });

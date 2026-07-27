@@ -12,6 +12,7 @@ import type {
   RuntimePlugin,
 } from "../types.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
+import { pluginArtifactGenerationId } from "../plugin-artifact-identity.js";
 import { installReceiptPath } from "../plugin-install-receipt.js";
 import type {
   PluginRuntimeGenerationAccess,
@@ -1293,11 +1294,7 @@ export abstract class PluginRuntimeState {
       installReceiptPath(this.installReceiptCacheRoot, receiptPluginId),
       "utf8",
     );
-    const artifactGenerationId = createHash("sha256")
-      .update(manifestRaw)
-      .update("\0")
-      .update(receiptRaw)
-      .digest("hex");
+    const artifactGenerationId = pluginArtifactGenerationId(manifestRaw, receiptRaw);
     const generationId = createHash("sha256")
       .update(artifactGenerationId)
       .update("\0")

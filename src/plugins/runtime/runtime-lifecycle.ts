@@ -10,6 +10,7 @@ import type {
 } from "../types.js";
 import type { Actor } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
+import { pluginArtifactGenerationId } from "../plugin-artifact-identity.js";
 import { updatePluginRegistry } from "../registry.js";
 import type {
   CommittedPluginGeneration,
@@ -1409,11 +1410,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimePublicationState {
     return this.withPreparedInstallIdentity(manifest.id, input.installId, async (installId) => {
     const candidateRegistryEntry = this.validatePreparedRegistryEntry(manifest, input.registryEntry);
     const activationId = randomUUID();
-    const artifactGenerationId = createHash("sha256")
-      .update(manifestRaw)
-      .update("\0")
-      .update(input.receiptRaw)
-      .digest("hex");
+    const artifactGenerationId = pluginArtifactGenerationId(manifestRaw, input.receiptRaw);
     const generationId = createHash("sha256")
       .update(artifactGenerationId)
       .update("\0")
