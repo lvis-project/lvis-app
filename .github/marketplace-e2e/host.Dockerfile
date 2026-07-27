@@ -55,6 +55,9 @@ USER 10001:10001
 ENV HOME=/home/lvis
 WORKDIR /workspace/lvis-app
 RUN bun install --frozen-lockfile \
+    && electron_config_cache=/tmp/electron-cache /usr/local/bin/node node_modules/electron/install.js \
+    && rm -rf /tmp/electron-cache \
+    && /usr/local/bin/node -e 'const fs = require("fs"); const electron = require("electron"); if (!fs.existsSync(electron)) throw new Error("Electron binary missing");' \
     && /usr/local/bin/node --test scripts/plugin-bundle-e2e-inputs.test.mjs \
     && bun run build
 
