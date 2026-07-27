@@ -1,8 +1,8 @@
 /**
  * Plugin UI Preload — #237 Option B
  *
- * Runs inside each plugin webview's isolated renderer process. Exposes a
- * narrow `window.lvisPlugin` bridge to plugin code. The pluginId is
+ * Runs inside the TOP frame of each plugin webview's isolated renderer
+ * process. Exposes a narrow `window.lvisPlugin` bridge to plugin code. The pluginId is
  * authoritative on the main side: the host renderer registers
  * (webContents.id → pluginId) before navigation, and main resolves
  * pluginId from `event.sender.id` on every plugin IPC. The renderer
@@ -63,9 +63,14 @@ import { CHANNELS } from "./contract/app-contract.js";
 const STICKY_EVENT_TYPES = new Set<string>(["host.theme.changed"]);
 const stickyLastPayload = new Map<string, unknown>();
 
-ipcRenderer.on(CHANNELS.pluginBridge.event, (_e, type: string, data: unknown) => {
-  if (STICKY_EVENT_TYPES.has(type)) stickyLastPayload.set(type, data);
-});
+// A session `frame` preload can also be evaluated in a child frame. The
+// plugin bridge must belong only to the registered top-level plugin shell:
+// child documents are plugin-controlled and must never gain host IPC access.
+if (process.isMainFrame) {
+  ipcRenderer.on(CHANNELS.pluginBridge.event, (_e, type: string, data: unknown) => {
+    if (STICKY_EVENT_TYPES.has(type)) stickyLastPayload.set(type, data);
+  });
+}
 
 function unwrapEnvelope(reply: unknown): unknown {
   if (!reply || typeof reply !== "object" || !("ok" in reply)) {
@@ -85,7 +90,7 @@ function hasActiveUserActivation(): boolean {
   return globalThis.navigator?.userActivation?.isActive === true;
 }
 
-contextBridge.exposeInMainWorld("lvisPlugin", {
+const pluginBridge = {
   callTool: async (
     name: string,
     args?: unknown,
@@ -225,4 +230,8 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
       }
     },
   },
-});
+};
+
+if (process.isMainFrame) {
+  contextBridge.exposeInMainWorld("lvisPlugin", pluginBridge);
+}
