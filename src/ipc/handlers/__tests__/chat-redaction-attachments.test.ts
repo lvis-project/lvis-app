@@ -6,6 +6,7 @@ import {
 } from "../chat.js";
 import { CHANNELS } from "../../../contract/app-contract.js";
 import { initDlpAudit } from "../../../audit/dlp-filter.js";
+import { turnOptions } from "./chat-test-helpers.js";
 
 const completedTurn = {
   text: "done",
@@ -35,11 +36,6 @@ function makeFixture(piiRedactEnabled: boolean) {
     trackStreamTurn: (factory) => factory(),
   };
   return { deps, context, runTurn, sink };
-}
-
-function turnOptions(runTurn: ReturnType<typeof makeFixture>["runTurn"]): Record<string, unknown> {
-  const call = runTurn.mock.calls[0] as unknown[];
-  return call[3] as Record<string, unknown>;
 }
 
 function redactNotices(sink: ReturnType<typeof vi.fn>) {
