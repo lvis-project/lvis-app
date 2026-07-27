@@ -24,7 +24,10 @@
  * server is eliciting (the resolver is bound per-server via the factory).
  */
 import { randomUUID } from "node:crypto";
-import type { ApprovalDecision, ApprovalRequest } from "../permissions/approval-gate.js";
+import type {
+  ApprovalDecision,
+  ApprovalRequestInput,
+} from "../permissions/approval-gate.js";
 import type { McpInputRequestResolver } from "./mcp-client.js";
 
 /** MCP `ElicitResult` (§8). Returned verbatim into `inputResponses[id]`. */
@@ -52,7 +55,7 @@ type SupportedElicitationSchema = {
 
 /** The single approval-gate method this resolver depends on (keeps it test-seam-able). */
 export interface ElicitationApprovalGate {
-  requestAndWait(req: Omit<ApprovalRequest, "requireExplicit">): Promise<ApprovalDecision>;
+  requestAndWait(req: ApprovalRequestInput): Promise<ApprovalDecision>;
 }
 
 function isElicitation(request: Record<string, unknown>): boolean {
@@ -197,6 +200,8 @@ export function createElicitationResolverFactory(deps: {
         id: randomUUID(),
         category: "agent-action",
         kind: "agent-action",
+        allowedChoices: ["allow-once", "deny-once"],
+        durableApprovalRecordAllowed: false,
         toolName: `mcp:${serverId}:elicitation`,
         toolCategory: "meta",
         args,

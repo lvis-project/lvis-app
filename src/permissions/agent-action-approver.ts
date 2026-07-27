@@ -60,10 +60,21 @@ export function buildSingleFlightAgentActionApprover(
 
     pending = true;
     try {
+      const requiresOneShotApproval =
+        options.allowOnceOnly === true ||
+        trustOrigin === "local-api" ||
+        trustOrigin === "cli" ||
+        trustOrigin === "a2a-remote-wire";
       const decision = await approvalGate.requestAndWait({
         id: randomUUID(),
         category: "agent-action",
         kind: "agent-action",
+        ...(requiresOneShotApproval
+          ? {
+              allowedChoices: ["allow-once", "deny-once"] as const,
+              durableApprovalRecordAllowed: false as const,
+            }
+          : {}),
         toolName,
         toolCategory: "meta",
         args,
@@ -72,7 +83,10 @@ export function buildSingleFlightAgentActionApprover(
         createdAt: Date.now(),
         trustOrigin,
       });
-      const allowed = options.allowOnceOnly
+      // The request constraint is defense in depth, not the only boundary:
+      // injected/test gates and future adapters must not turn a local/API/A2A
+      // one-shot grant into a durable receipt by returning another allow kind.
+      const allowed = requiresOneShotApproval
         ? decision.choice === "allow-once"
         : decision.choice.startsWith("allow");
       return allowed

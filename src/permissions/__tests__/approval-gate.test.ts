@@ -1643,6 +1643,80 @@ describe("ApprovalGate", () => {
       await promise;
     });
 
+    it("keeps the host one-shot record capability out of the renderer payload", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = {
+        ...makeRequest({ id: "req-one-shot-record-capability" }),
+        durableApprovalRecordAllowed: false as const,
+      };
+
+      const promise = gate.requestAndWait(req);
+      const sent = (wc.send.mock.calls[0] as unknown as [string, ApprovalRequest])[1];
+      expect(sent).not.toHaveProperty("durableApprovalRecordAllowed");
+      expect(gate.getRequestSnapshot(req.id)).toMatchObject({
+        durableApprovalRecordAllowed: false,
+      });
+
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve(req.id, {
+        requestId: req.id,
+        choice: "deny-once",
+        nonce,
+        hmac,
+      });
+      await promise;
+    });
+
+    it("defaults exact one-shot choices to a non-recordable host snapshot", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = makeRequest({
+        id: "req-one-shot-record-default",
+        allowedChoices: ["allow-once", "deny-once"],
+      });
+
+      const promise = gate.requestAndWait(req);
+      expect(gate.getRequestSnapshot(req.id)).toMatchObject({
+        durableApprovalRecordAllowed: false,
+      });
+
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve(req.id, {
+        requestId: req.id,
+        choice: "deny-once",
+        nonce,
+        hmac,
+      });
+      await promise;
+    });
+
+    it("does not let a caller make exact one-shot choices recordable", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = {
+        ...makeRequest({
+          id: "req-one-shot-record-explicit-true",
+          allowedChoices: ["allow-once", "deny-once"],
+        }),
+        durableApprovalRecordAllowed: true as const,
+      };
+
+      const promise = gate.requestAndWait(req);
+      expect(gate.getRequestSnapshot(req.id)).toMatchObject({
+        durableApprovalRecordAllowed: false,
+      });
+
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve(req.id, {
+        requestId: req.id,
+        choice: "deny-once",
+        nonce,
+        hmac,
+      });
+      await promise;
+    });
+
     it("does not auto-approve a read-only rationale request", async () => {
       const wc = makeMockWebContents();
       const gate = new ApprovalGate(
