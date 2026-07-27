@@ -46,6 +46,8 @@ describe("createElicitationResolverFactory", () => {
     expect(calls[0]).toMatchObject({
       category: "agent-action",
       kind: "agent-action",
+      allowedChoices: ["allow-once", "deny-once"],
+      durableApprovalRecordAllowed: false,
       toolName: "mcp:hr-server:elicitation",
       toolCategory: "meta",
       source: "mcp",

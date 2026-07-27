@@ -664,6 +664,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           category: "tool",
           kind: "tool",
           allowedChoices: ["allow-once", "deny-once"],
+          durableApprovalRecordAllowed: false,
           toolName,
           toolCategory: "write",
           args: inspected.approvalArgs,

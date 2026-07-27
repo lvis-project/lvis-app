@@ -621,6 +621,35 @@ jobs:
       - name: Run Host candidate to completion
         run: docker start --attach "$HOST_CONTAINER"
 
+      - name: Capture Host candidate diagnostics (failure)
+        id: capture-host-candidate-diagnostics
+        if: failure()
+        run: |
+          set -euo pipefail
+          if docker cp "$HOST_CONTAINER:/workspace/lvis-app/test-results" candidate-diagnostics-raw; then
+            if node control/scripts/sanitize-candidate-diagnostics.mjs \
+              candidate-diagnostics-raw \
+              candidate-diagnostics-safe; then
+              echo "diagnostics_safe=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::Host candidate diagnostics were rejected by the trusted sanitizer"
+              echo "diagnostics_safe=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            mkdir -p candidate-diagnostics-safe
+            echo "no Playwright result directory" > candidate-diagnostics-safe/README.txt
+            echo "diagnostics_safe=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload Host candidate diagnostics (failure)
+        if: failure() && steps.capture-host-candidate-diagnostics.outputs.diagnostics_safe == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: marketplace-host-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-diagnostics-safe/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Stop candidates before trusted evidence validation
         run: |
           set -euo pipefail

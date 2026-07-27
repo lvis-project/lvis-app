@@ -34,6 +34,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "no-deferred-queue": "formatIpcError.noDeferredQueue",
   "managed": "formatIpcError.managed",
   "durable-mode-denied": "formatIpcError.durableModeDenied",
+  "one-shot-not-recordable": "formatIpcError.durableModeDenied",
   "a2a-remote-disabled": "formatIpcError.remoteA2aDisabled",
   "a2a-remote-input-invalid": "formatIpcError.invalidInput",
   "a2a-remote-operation-rejected": "formatIpcError.remoteA2aOperationRejected",
