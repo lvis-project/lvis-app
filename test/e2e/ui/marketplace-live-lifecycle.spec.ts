@@ -433,9 +433,8 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       expect(JSON.stringify(result)).not.toContain("marketplace lifecycle hook probe");
     };
     const expectHookProbeDenied = async () => {
-      const result = await callHookProbe();
-      expect(result).toMatchObject({ ok: false });
-      expect(JSON.stringify(result)).toContain("marketplace lifecycle hook probe");
+      // A PreToolUse denial rejects the IPC call; it is not a tool result.
+      await expect(callHookProbe()).rejects.toThrow("marketplace lifecycle hook probe");
     };
     const baselineMcpCount = (await runtimeCounts()).mcps;
     let activeMcpProbe: Awaited<ReturnType<typeof callBundledMcp>> | null = null;
