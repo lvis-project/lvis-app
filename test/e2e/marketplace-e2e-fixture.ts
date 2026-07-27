@@ -126,15 +126,17 @@ export function buildPluginZip(
       : {}),
   };
   zip.addFile("plugin.json", Buffer.from(JSON.stringify(pluginJson)));
-  const handlerEntries = [
-    `${toolName}: async () => ({ version: ${JSON.stringify(version)} })`,
+  const serializedHandlerNames = JSON.stringify([
+    toolName,
     ...(options.bundledContributions
-      ? [`${hookProbeToolName}: async () => ({ version: ${JSON.stringify(version)} })`]
+      ? [hookProbeToolName]
       : []),
-  ].join(", ");
+  ]);
   zip.addFile("index.js", Buffer.from(
+    `const handlerNames = ${serializedHandlerNames};\n` +
+    `const handler = async () => ({ version: ${JSON.stringify(version)} });\n` +
     `export default async function createPlugin() {\n` +
-    `  return { handlers: { ${handlerEntries} } };\n` +
+    `  return { handlers: Object.fromEntries(handlerNames.map((name) => [name, handler])) };\n` +
     `}\n`,
   ));
   if (options.bundledContributions) {
