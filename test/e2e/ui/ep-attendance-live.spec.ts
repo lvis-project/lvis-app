@@ -30,6 +30,7 @@ import { openSettingsWindow } from "./settings-window.js";
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
 const PUBLISHER_KEY = process.env.MARKETPLACE_PUBLISHER_KEY ?? "";
+const REVIEWER_KEY = process.env.MARKETPLACE_REVIEWER_KEY ?? "";
 const ADMIN_KEY = process.env.MARKETPLACE_ADMIN_KEY ?? "";
 const EP_BUNDLE_PATH = process.env.EP_API_BUNDLE_PATH ?? "";
 const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "";
@@ -444,8 +445,10 @@ test.skip(!builtMainExists(), "build the Electron app before running this spec")
 test("exact EP attendance bundle reads, confirms one write, verifies readback, and retires", async ({}, testInfo) => {
   testInfo.setTimeout(180_000);
   requireExactLoopbackMarketplaceOrigin(BASE_URL);
-  if (!PUBLISHER_KEY || !ADMIN_KEY) {
-    throw new Error("MARKETPLACE_PUBLISHER_KEY and MARKETPLACE_ADMIN_KEY are required");
+  if (!PUBLISHER_KEY || !REVIEWER_KEY || !ADMIN_KEY) {
+    throw new Error(
+      "MARKETPLACE_PUBLISHER_KEY, MARKETPLACE_ADMIN_KEY, and MARKETPLACE_REVIEWER_KEY are required",
+    );
   }
   const bundle = inspectExactEpBundle();
   const fake = await startFakeAttendanceProvider();
@@ -454,7 +457,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
     await publishPlugin(BASE_URL, ADMIN_KEY, EP_PLUGIN_ID, bundle.version, bundle.bytes);
     const approval = await approvePendingPlugin(
       BASE_URL,
-      ADMIN_KEY,
+      REVIEWER_KEY,
       EP_PLUGIN_ID,
       bundle.version,
     );

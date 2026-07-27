@@ -19,6 +19,7 @@ env:
   SDK_SHA: ${{ github.event.client_payload.sdk_ref || vars.M4_SDK_SHA }}
   EP_API_SHA: ${{ github.event.client_payload.ep_api_ref || vars.M4_EP_API_SHA }}
   PUBLISHER_KEY: lvismkt_e2epub_${{ github.run_id }}_${{ github.run_attempt }}
+  REVIEWER_KEY: lvismkt_e2erev_${{ github.run_id }}_${{ github.run_attempt }}
   ADMIN_KEY: lvismkt_e2eadm_${{ github.run_id }}_${{ github.run_attempt }}
 
 jobs:
@@ -534,6 +535,7 @@ jobs:
             --read-only \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m \
             --env "PUBLISHER_KEY=$PUBLISHER_KEY" \
+            --env "REVIEWER_KEY=$REVIEWER_KEY" \
             --env "ADMIN_KEY=$ADMIN_KEY" \
             --env "MARKETPLACE_DB_URL=sqlite+aiosqlite:////tmp/m4-marketplace.db" \
             --env "LVIS_MARKETPLACE_STORAGE_DIR=/tmp/m4-marketplace-storage" \
@@ -552,6 +554,11 @@ jobs:
               python /app/e2e/scripts/seed_e2e_keys.py \
                 --publisher-key "$PUBLISHER_KEY" \
                 --admin-key "$ADMIN_KEY"
+              # Marketplace rejects self-approval, so seed a distinct reviewer
+              # principal for managed-plugin promotion.
+              python /app/e2e/scripts/seed_e2e_keys.py \
+                --publisher-key "$PUBLISHER_KEY" \
+                --admin-key "$REVIEWER_KEY"
               # The E2E seed builds the current schema with SQLAlchemy metadata.
               # Historical Marketplace migrations are PostgreSQL-specific, so do
               # not replay them against this disposable SQLite database.
@@ -587,6 +594,7 @@ jobs:
             --env "EP_API_SHA=$EP_API_SHA" \
             --env "MARKETPLACE_URL=http://127.0.0.1:8765" \
             --env "MARKETPLACE_PUBLISHER_KEY=$PUBLISHER_KEY" \
+            --env "MARKETPLACE_REVIEWER_KEY=$REVIEWER_KEY" \
             --env "MARKETPLACE_ADMIN_KEY=$ADMIN_KEY" \
             --env "EP_API_BUNDLE_PATH=/tmp/lvis-plugin-ep-$EP_API_SHA.zip" \
             --env "SDK_ROOT=/workspace/lvis-plugin-sdk" \

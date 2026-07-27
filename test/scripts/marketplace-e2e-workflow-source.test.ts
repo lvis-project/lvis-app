@@ -14,6 +14,14 @@ const epDockerfile = readFileSync(
   resolve(process.cwd(), ".github/marketplace-e2e/ep.Dockerfile"),
   "utf8",
 );
+const lifecycleSpec = readFileSync(
+  resolve(process.cwd(), "test/e2e/ui/marketplace-live-lifecycle.spec.ts"),
+  "utf8",
+);
+const epAttendanceSpec = readFileSync(
+  resolve(process.cwd(), "test/e2e/ui/ep-attendance-live.spec.ts"),
+  "utf8",
+);
 
 function job(name: string, next?: string): string {
   const start = workflow.indexOf(`\n  ${name}:\n`);
@@ -88,6 +96,35 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     expect(seed).toBeGreaterThanOrEqual(0);
     expect(stamp).toBeGreaterThan(seed);
     expect(finalJob).not.toContain("alembic upgrade head");
+  });
+
+  it("uses a separate admin reviewer to approve managed plugins", () => {
+    const finalJob = job("marketplace-e2e");
+    expect(workflow).toContain(
+      "REVIEWER_KEY: lvismkt_e2erev_${{ github.run_id }}_${{ github.run_attempt }}",
+    );
+    expect(finalJob).toContain(
+      '--env "REVIEWER_KEY=$REVIEWER_KEY"',
+    );
+    expect(finalJob).toContain(
+      '--env "MARKETPLACE_REVIEWER_KEY=$REVIEWER_KEY"',
+    );
+    const publisherSeed = finalJob.indexOf('--admin-key "$ADMIN_KEY"');
+    const reviewerSeed = finalJob.indexOf('--admin-key "$REVIEWER_KEY"');
+    expect(publisherSeed).toBeGreaterThanOrEqual(0);
+    expect(reviewerSeed).toBeGreaterThan(publisherSeed);
+
+    for (const spec of [lifecycleSpec, epAttendanceSpec]) {
+      expect(spec).toContain(
+        'const REVIEWER_KEY = process.env.MARKETPLACE_REVIEWER_KEY ?? "";',
+      );
+      expect(spec).toMatch(
+        /publishPlugin\(BASE_URL,\s*ADMIN_KEY,/u,
+      );
+      expect(spec).toMatch(
+        /approvePendingPlugin\(\s*BASE_URL,\s*REVIEWER_KEY,/u,
+      );
+    }
   });
 
   it("keeps trusted control code at workflow_sha and validates after candidate exit", () => {
