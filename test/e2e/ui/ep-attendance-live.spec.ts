@@ -404,7 +404,10 @@ async function invokeGuestTool<T>(
     guestId,
     startGuestToolCallSource(toolName, args, options.operationGrantToken),
   )).toBe("started");
-  const approvalDialog = page.getByTestId("tool-approval-dialog");
+  // Radix keeps a closing dialog in the DOM for its exit animation. Scope the
+  // locator to an *open* dialog for this invocation's tool, so a just-closed
+  // prior approval cannot be mistaken for this request.
+  const approvalDialog = openApprovalDialogForTool(page, toolName);
   const terminalOrApproval = async () => {
     const result = await readGuestToolCall<T>(ctx, guestId);
     if (result.state !== "pending") return "terminal" as const;
@@ -415,12 +418,13 @@ async function invokeGuestTool<T>(
   await expect.poll(terminalOrApproval, { timeout: 10_000 }).not.toBe("pending");
   if (await terminalOrApproval() === "approval") {
     if (options.approval === "forbid") {
-      const deny = page.getByTestId("deny-button");
+      const deny = approvalDialog.getByTestId("deny-button");
       if (await deny.isVisible().catch(() => false)) await deny.click();
       throw new Error(`${toolName} reached a forbidden approval`);
     }
     await approveVisibleToolDialog(
       page,
+      toolName,
       options.approvalReason ?? `Allow the exact EP E2E invocation of ${toolName}.`,
     );
   }
@@ -452,14 +456,24 @@ async function readGuestGrant(
   return executeInGuest(ctx, guestId, "globalThis.__epAttendanceGrant");
 }
 
-async function approveVisibleToolDialog(page: Page, reason: string): Promise<void> {
-  const dialog = page.getByTestId("tool-approval-dialog");
+function openApprovalDialogForTool(page: Page, expectedToolName: string) {
+  return page.locator(
+    `[data-testid="tool-approval-dialog"][data-state="open"][data-approval-tool-name=${JSON.stringify(expectedToolName)}]`,
+  );
+}
+
+async function approveVisibleToolDialog(
+  page: Page,
+  expectedToolName: string,
+  reason: string,
+): Promise<void> {
+  const dialog = openApprovalDialogForTool(page, expectedToolName);
   await expect(dialog).toBeVisible({ timeout: 10_000 });
-  const justification = page.getByTestId("nl-justification-input");
+  const justification = dialog.getByTestId("nl-justification-input");
   if (await justification.isVisible().catch(() => false)) {
     await justification.fill(reason);
   }
-  const approve = page.getByTestId("approve-button");
+  const approve = dialog.getByTestId("approve-button");
   await expect(approve).toBeEnabled();
   await approve.click();
 }
@@ -683,6 +697,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
     await startGuestGrant(ctx, guestId, writeArgs);
     await approveVisibleToolDialog(
       ctx.page,
+      "ep_attendance_write",
       "Confirm the exact EP attendance clock write against the loopback fixture.",
     );
     await expect.poll(
