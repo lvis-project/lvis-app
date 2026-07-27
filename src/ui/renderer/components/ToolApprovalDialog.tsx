@@ -634,7 +634,11 @@ export function ToolApprovalDialog({
         size="lg"
         className="flex min-w-0 flex-col gap-0 overflow-hidden p-0"
         data-testid="tool-approval-dialog"
-        data-approval-tool-name={request.toolName}
+        data-approval-request-id={isRationaleApproval ? undefined : request.id}
+        data-approval-tool-name={isRationaleApproval ? undefined : request.toolName}
+        data-approval-args={
+          isRationaleApproval ? undefined : canonicalStringifyForRenderer(request.args)
+        }
         onInteractOutside={(e) => {
           if (request.requireExplicit) {
             e.preventDefault();
