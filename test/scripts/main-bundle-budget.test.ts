@@ -169,6 +169,32 @@ describe("main bundle budget", () => {
     });
   });
 
+  it("creates the same manifest when esbuild reports paths relative to its working directory", () => {
+    const metafile = {
+      outputs: {
+        "dist/main.js": { bytes: 100 },
+        "dist/chunks/shared.js": { bytes: 50 },
+      },
+    };
+    expect(createMainBundleManifest(metafile, {
+      outdir: "/repo/dist",
+      absWorkingDir: "/repo",
+    })).toEqual({
+      schemaVersion: 1,
+      entry: "main.js",
+      files: [
+        { path: "chunks/shared.js", bytes: 50 },
+        { path: "main.js", bytes: 100 },
+      ],
+    });
+  });
+
+  it("pins logical esbuild paths so checkout layout cannot change the bundle budget", () => {
+    const buildSource = readFileSync(resolve("scripts/build-main-esbuild.mjs"), "utf8");
+    expect(buildSource).toContain("absWorkingDir: repoRoot,");
+    expect(buildSource).toContain("preserveSymlinks: true,");
+  });
+
   it("keeps window creation ahead of asynchronous boot loading", () => {
     const mainSource = readFileSync(resolve("src/main.ts"), "utf8");
     expect(mainSource).not.toMatch(/^import .* from "\.\/boot\.js";$/m);
