@@ -551,7 +551,10 @@ jobs:
               python /app/e2e/scripts/seed_e2e_keys.py \
                 --publisher-key "$PUBLISHER_KEY" \
                 --admin-key "$ADMIN_KEY"
-              alembic upgrade head
+              # The E2E seed builds the current schema with SQLAlchemy metadata.
+              # Historical Marketplace migrations are PostgreSQL-specific, so do
+              # not replay them against this disposable SQLite database.
+              alembic stamp head
               exec uvicorn lvis_marketplace.main:create_app \
                 --factory --host 127.0.0.1 --port 8765
             '
