@@ -589,7 +589,7 @@ export function McpAppView({
           // No `preload` attribute — under `sandbox=yes` it is silently ignored, and
           // in the DETACHED window the will-attach-webview guard strips it too (the
           // inline/main-window attach handler ignores this partition, so it does not).
-          // Either way the relay preload rides `session.setPreloads()` on the
+          // Either way the relay preload rides `session.registerPreloadScript()` on the
           // partition, which is the only mechanism that actually loads it.
           webpreferences: "contextIsolation=yes, sandbox=yes, nodeIntegration=no, javascript=yes",
           disablewebsecurity: "false",
