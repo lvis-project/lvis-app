@@ -549,15 +549,23 @@ export function ToolApprovalDialog({
     isRationaleApproval,
   ]);
 
-  // The primary Approve button grants for the scope selected in the radio
+  // Host-constrained approvals must not offer a durable choice that the
+  // approval gate will reject. The one-shot pair is used for operations such
+  // as governed plugin writes and host-shell execution permits.
+  const isHostConstrainedToOneShot =
+    request?.allowedChoices?.length === 2 &&
+    request.allowedChoices.includes("allow-once") &&
+    request.allowedChoices.includes("deny-once");
 
+  // The primary Approve button grants for the scope selected in the radio.
   // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
   // This is the durable choice that the memory store records.
   const approvalIsOneShot =
     isRationaleApproval ||
     isMcpElicitation ||
     isExternalOriginAgentAction ||
-    isRemoteA2AAction;
+    isRemoteA2AAction ||
+    isHostConstrainedToOneShot;
   const primaryApproveChoice: ApprovalChoice =
     approvalIsOneShot
       ? "allow-once"

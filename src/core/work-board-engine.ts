@@ -472,6 +472,8 @@ export function createWorkBoardEngine(
         id: `work-board-run:${itemId}:${randomUUID()}`,
         category: "agent-action",
         kind: "agent-action",
+        allowedChoices: ["allow-once", "deny-once"],
+        durableApprovalRecordAllowed: false,
         toolName: "work_board_run",
         toolCategory: "meta",
         reason: `Work item #${itemId} "${item.title}" — approve plan to execute?`,
