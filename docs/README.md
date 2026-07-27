@@ -11,7 +11,7 @@ The Korean documentation snapshot is preserved under [docs/ko](./ko/README.md). 
 | Vision | [Vision](./vision/README.md) | [Korean](./ko/vision/README.md) |
 | Architecture | [Architecture](./architecture/README.md) | [Korean](./ko/architecture/README.md) |
 | Guides | [Getting Started](./guides/getting-started.md) | [Korean](./ko/guides/getting-started.md) |
-| Plugin Development | [Plugin Development Guide](./guides/plugin-development.md) | [Korean](./ko/guides/plugin-development.md) |
+| Plugin Development | [Plugin Development Guide](./guides/plugin-development.md) | [Korean historical reference](./ko/guides/plugin-development.md) |
 | MCP Apps | [Authoring an MCP App (`ui://` card)](./guides/mcp-app-authoring.md) | — |
 | Release | [Production Release Checklist](./references/production-release-checklist.md) | [Korean](./ko/references/production-release-checklist.md) |
 | Blueprints | [Blueprints](./blueprints/README.md) | [Korean](./ko/blueprints/README.md) |

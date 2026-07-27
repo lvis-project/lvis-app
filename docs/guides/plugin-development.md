@@ -1,8 +1,8 @@
 # Plugin Development Guide
 
 This guide describes how to build LVIS plugins against the current host
-runtime. Korean source history is preserved at
-[docs/ko/guides/plugin-development.md](../ko/guides/plugin-development.md).
+runtime. Korean source history is preserved in the
+[Korean historical reference](../ko/guides/plugin-development.md).
 
 ## Plugin Model
 

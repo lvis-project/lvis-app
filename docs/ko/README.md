@@ -19,7 +19,7 @@ AI 프론티어 생산성 향상 엔터프라이즈 매니지먼트 시스템
 | [도구 거버넌스 보충](./architecture/tool-governance.md) | Builtin / Plugin / MCP 통합 보안 모델 |
 | [플러그인 배포 모델](./architecture/plugin-deployment-model.md) | managed vs user-installed 배포 정책 상세 |
 | [실행 가이드](./guides/getting-started.md) | 프로그램 설치 및 실행 방법 |
-| [플러그인 개발 가이드](./guides/plugin-development.md) | plugin.json, HostApi, UI 슬롯, 배포 흐름 |
+| [플러그인 개발 가이드 (역사 보존)](./guides/plugin-development.md) | 과거 한국어 검토·논의 이력 — 새 작성·검증은 [현재 English guide](../guides/plugin-development.md) |
 | [테마 및 UI primitive 기준](./development/theme-system.md) | semantic token theme system + shadcn registry primitive source of truth |
 | [도구 로딩 정책](./development/tool-loading-policy.md) | plugin/MCP/builtin tool registry, catalog, full-schema exposure, TPM-safe loading policy |
 | [레거시 sunset 정책](./development/legacy-sunset-policy.md) | migration/dormant experimental 코드 inventory, 유지 기준, 제거 PR 규칙 |
@@ -43,7 +43,7 @@ docs/
 │   └── plugin-deployment-model.md         # managed/user 배포 모델 상세
 ├── guides/
 │   ├── getting-started.md                 # 시작 및 실행 가이드
-│   └── plugin-development.md              # 플러그인 개발 가이드
+│   └── plugin-development.md              # 과거 한국어 검토·논의 이력
 └── blueprints/                            # 구현 계획·조사·closure report
 ```
 
