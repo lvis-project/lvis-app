@@ -8,7 +8,7 @@
  */
 
 import { dirname } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type {
   InstallPolicy,
@@ -58,6 +58,16 @@ import { declaredAppVisibleToolMethods } from "./plugin-loader.js";
 import type { InvocationOrigin } from "./origin-chain.js";
 import { createLogger } from "../../lib/logger.js";
 import { PluginRuntimeLifecycle } from "./runtime-lifecycle.js";
+import {
+  authInvalidation,
+  fallbackPluginAuthTransitionScope,
+  pluginAccountIdentityHash,
+  pluginAccountPrincipalHash,
+  pluginAuthOperationAccount,
+  type PluginAuthInvocation,
+  type PluginAuthObservation,
+  type PluginAuthOperationAccount,
+} from "./plugin-auth-identity.js";
 const log = createLogger("plugin-runtime");
 
 /**
@@ -71,88 +81,12 @@ export const MAX_UI_RESOURCE_HTML_BYTES = 4 * 1024 * 1024;
 
 export { runPluginFactoryWithTimeout, runPluginImportWithTimeout, runStartWithTimeout };
 export type { PluginPerfStats };
-
 export type { InstallPolicy };
 export { resolveManifestLoadPlan, readEnabledManifestSnapshots };
 
 // Re-export public interface types so callers that do
 // `import { PluginCard, PluginPerfStats } from "./runtime/index.js"` work.
 export type { ManifestLoadPlan, ManifestSnapshot };
-
-/** Host-private revocation tuple. Hash and minting generation are inseparable. */
-type PluginAuthInvalidation = Readonly<{
-  invalidatedAccountHash: string;
-  invalidatedAccountGenerationId: string;
-}>;
-
-type PluginAuthNoInvalidation = Readonly<{
-  invalidatedAccountHash?: undefined;
-  invalidatedAccountGenerationId?: undefined;
-}>;
-
-type PluginAuthObservation = PluginAuthInvalidation | PluginAuthNoInvalidation;
-type PluginAuthOperationAccount = Readonly<{
-  /** Stable scope shared with ordinary account operations for FIFO serialization. */
-  accountScopeHash: string;
-  /**
-   * Host-private synthetic principal used only by a manifest auth Tool's
-   * operation-policy path. It is never a cached authenticated account.
-   */
-  accountHash: string;
-}>;
-type PluginAuthInvocation = PluginAuthObservation & Readonly<{
-  epoch: number;
-  accountTransitionScopeHash: string;
-  operationAccount: PluginAuthOperationAccount;
-}>;
-
-function fallbackPluginAuthTransitionScope(pluginId: string): string {
-  return createHash("sha256")
-    .update("plugin-auth-transition/v1\0")
-    .update(pluginId)
-    .digest("hex");
-}
-
-function pluginAuthOperationAccount(
-  pluginId: string,
-  generationId: string,
-  appSessionId: string | undefined,
-  accountScopeHash: string,
-): PluginAuthOperationAccount {
-  const effectiveSessionId = appSessionId || `plugin-auth-${pluginId}-${generationId}`;
-  return Object.freeze({
-    accountScopeHash,
-    accountHash: createHash("sha256")
-      .update("plugin-auth-operation-principal/v1\0")
-      .update(pluginId)
-      .update("\0")
-      .update(generationId)
-      .update("\0")
-      .update(effectiveSessionId)
-      .update("\0")
-      .update(accountScopeHash)
-      .digest("hex"),
-  });
-}
-
-function authInvalidation(
-  current: { readonly principalHash: string } | undefined,
-  currentGenerationId: string,
-  retained: { readonly principalHash: string; readonly generationId: string } | undefined,
-): PluginAuthInvalidation | undefined {
-  if (current) {
-    return {
-      invalidatedAccountHash: current.principalHash,
-      invalidatedAccountGenerationId: currentGenerationId,
-    };
-  }
-  return retained
-    ? {
-        invalidatedAccountHash: retained.principalHash,
-        invalidatedAccountGenerationId: retained.generationId,
-      }
-    : undefined;
-}
 
 /**
  * Option C — non-active plugin catalog card.
@@ -947,7 +881,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
         if (installClaim === undefined) {
           throw new Error(`Plugin install provenance unknown: ${pluginId}`);
         }
-        const generationLifecycle = this.requireGenerationLifecycle(
+        const generationLifecycle = this.requireCapabilityCommitLifecycle(
           "plugin enabled-state change",
         );
         await generationLifecycle.runInLifecycleQueue(canonicalPluginId, async () => {
@@ -967,23 +901,95 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
           };
 
           let retirementError: unknown;
+          let unpublishedCleanup: (() => Promise<void>) | undefined;
           if (!enabled) {
-            if (!generationLifecycle.getActive(canonicalPluginId)) {
+            const plugin = this.plugins.get(canonicalPluginId);
+            const unpublishedCandidate = plugin && this.isUnpublishedLoadedCandidate(
+              canonicalPluginId,
+              plugin,
+              generationLifecycle,
+            )
+              ? plugin
+              : undefined;
+            if (!generationLifecycle.getActive(canonicalPluginId) && !unpublishedCandidate) {
               throw new Error(
                 `cannot disable plugin without an active generation: ${canonicalPluginId}`,
               );
             }
-            const { retirement } = await generationLifecycle.deactivateWithCommit(
+            this.assertNoActiveCapabilityDependents(
               canonicalPluginId,
-              persist,
+              "disable",
             );
+            if (unpublishedCandidate) {
+              const commitScope = this.capabilityDependencyCommitScope(() => {
+                this.assertNoActiveCapabilityDependents(
+                  canonicalPluginId,
+                  "disable",
+                );
+              });
+              await commitScope(async () => {
+                // The registry transition is the durable winner. Keep a
+                // preparing candidate retryable if that transaction fails;
+                // cancel and discard it only once the disabled state commits.
+                await persist();
+                this.clearCapabilityBlockedRetry(
+                  canonicalPluginId,
+                  `plugin '${canonicalPluginId}' capability dependency wait was cancelled by disable`,
+                );
+                this.beginPluginLifecycleOperation(canonicalPluginId);
+                this.preparation.clearFor(canonicalPluginId);
+                try {
+                  unpublishedCleanup = this.detachUnpublishedLoadedCandidate(
+                    canonicalPluginId,
+                    unpublishedCandidate,
+                    "unpublished plugin enabled-state disable",
+                  );
+                } catch (error) {
+                  retirementError = error;
+                }
+              });
+            } else {
+              this.clearCapabilityBlockedRetry(
+                canonicalPluginId,
+                `plugin '${canonicalPluginId}' capability dependency wait was cancelled by disable`,
+              );
+              this.beginPluginLifecycleOperation(canonicalPluginId);
+              this.preparation.clearFor(canonicalPluginId);
+              const { retirement } = await generationLifecycle.deactivateWithCommit(
+                canonicalPluginId,
+                persist,
+                this.capabilityDependencyCommitScope(() => {
+                  this.assertNoActiveCapabilityDependents(
+                    canonicalPluginId,
+                    "disable",
+                  );
+                }),
+              );
+              retirementError = await this.captureCommittedRetirementFailure(
+                canonicalPluginId,
+                retirement,
+                "plugin enabled-state disable",
+              );
+            }
             this.inactivePluginIds.add(canonicalPluginId);
             this.disabledPluginIds.add(canonicalPluginId);
-            retirementError = await this.captureCommittedRetirementFailure(
-              canonicalPluginId,
-              retirement,
-              "plugin enabled-state disable",
-            );
+            if (unpublishedCleanup) {
+              try {
+                await unpublishedCleanup();
+              } catch (error) {
+                retirementError = retirementError === undefined
+                  ? error
+                  : new AggregateError(
+                      [
+                        retirementError instanceof Error
+                          ? retirementError
+                          : new Error(String(retirementError)),
+                        error instanceof Error ? error : new Error(String(error)),
+                      ],
+                      `plugin '${canonicalPluginId}' committed disable cleanup failed`,
+                    );
+              }
+            }
           } else {
             if (generationLifecycle.getActive(canonicalPluginId)) {
               throw new Error(
@@ -1127,8 +1133,11 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     for (const [pluginId, manifest] of this.knownPluginManifests) {
       const runtimeLoaded = this.plugins.has(pluginId);
       const enabled = !this.inactivePluginIds.has(pluginId);
-      const active = enabled && runtimeLoaded;
+      // A loaded candidate is not active until its generation has actually
+      // published. This includes consumers blocked on a preparing provider.
+      const active = enabled && this.isPluginGenerationActive(pluginId);
       const loadStatus = this.preparation.isPreparing(pluginId)
+        || this.capabilityBlockedPluginIds.has(pluginId)
         ? "preparing"
         // #1176 active/inactive — a runtime-toggled inactive plugin stays in
         // `this.plugins` (loaded) but reports "disabled" so the UI reflects the
@@ -1288,6 +1297,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     payload?: unknown,
     expectedGenerationId?: string,
   ): Promise<unknown> {
+    this.throwIfToolOwnerNotReady(method);
     this.throwIfPluginNotStarted(pluginId);
     return this.withPinnedGeneration(pluginId, async (projection) => {
       const handler = projection.methods.get(method);
@@ -1508,10 +1518,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       this.pluginAccountHashes.delete(key);
       return invalidatedAccount ?? {};
     }
-    const identityHash = createHash("sha256")
-      .update("plugin-account-identity/v1\0")
-      .update(nested.account.trim().toLowerCase())
-      .digest("hex");
+    const identityHash = pluginAccountIdentityHash(nested.account);
     const existing = this.pluginAccountHashes.get(key);
     if (existing?.identityHash === identityHash) {
       this.pluginAuthTransitionPrincipals.set(pluginId, {
@@ -1520,12 +1527,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
       });
       return {};
     }
-    const principalHash = createHash("sha256")
-      .update("plugin-account-session/v1\0")
-      .update(identityHash)
-      .update("\0")
-      .update(randomUUID())
-      .digest("hex");
+    const principalHash = pluginAccountPrincipalHash(identityHash, randomUUID());
     const nextAccount = { identityHash, principalHash };
     this.pluginAccountHashes.set(key, nextAccount);
     this.pluginAuthTransitionPrincipals.set(pluginId, {
