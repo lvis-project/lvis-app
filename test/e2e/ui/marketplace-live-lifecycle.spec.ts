@@ -221,6 +221,10 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         };
         return api.lvisApi.callPluginMethod(name, payload);
       }, { name, payload });
+      // The approval-dialog probe below may take up to a second. Attach a
+      // temporary handler so an immediately rejected IPC call is still
+      // observed before the caller asserts its rejection.
+      void invocation.catch(() => undefined);
       const approvalDialog = ctx.page.getByTestId("tool-approval-dialog");
       const approvalVisible = await approvalDialog
         .waitFor({
@@ -597,8 +601,8 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     });
     expect((await contributionTrust()).rows).toEqual([]);
     await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount);
-    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
-    expect(await callHookProbe()).toMatchObject({ ok: false });
+    await expect(callLifecycleTool("hook_probe")).rejects.toThrow("Plugin method not found");
+    await expect(callHookProbe()).rejects.toThrow("Plugin method not found");
     transitions.push({
       state: "disabled",
       runtimeLoaded: false,
