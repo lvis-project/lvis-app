@@ -96,6 +96,47 @@ describe("Chat retry (Phase 3.2 regression net)", () => {
       expect(container.textContent).toMatch(/재시도 실패|rate-limited/);
     });
   });
+
+  it("restores previous entries when a staged-envelope failure rejects", async () => {
+    const { container, api, emitChatStream } = await renderApp();
+    let rejectRetry: (reason?: unknown) => void = () => undefined;
+    api.chatRetryEffort.mockImplementationOnce(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectRetry = reject;
+        }),
+    );
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await seedAssistantEntry(container, api, emitChatStream);
+
+    const retryBtn = await waitFor(() => {
+      const btn = container.querySelector('button[title="다시 시도 (깊이: high)"]');
+      if (!btn) throw new Error("retry button not found");
+      return btn as HTMLButtonElement;
+    });
+    await act(async () => {
+      fireEvent.click(retryBtn);
+    });
+
+    await waitFor(() => expect(api.chatRetryEffort).toHaveBeenCalled());
+    await act(async () => {
+      // Exercise the stream-first ordering used by the main-process DLP notice.
+      emitChatStream({ type: "redact_notice", count: 1, byKind: { PHONE_KR: 1 } });
+    });
+    await waitFor(() => expect(container.textContent).toContain("PII 1"));
+    await act(async () => {
+      rejectRetry(
+        new Error("Error invoking remote method 'lvis:chat:retry-effort': Error: missing-app-envelope"),
+      );
+    });
+
+    await waitFor(() => {
+      expect(api.chatRetryEffort).toHaveBeenCalled();
+      expect(container.textContent).toContain("Hello from LVIS");
+      expect(container.textContent).toContain("missing-app-envelope");
+      expect(container.textContent).toContain("PII 1");
+    });
+  });
 });
 
 afterEach(() => {

@@ -318,21 +318,44 @@ A clip is admitted in a line the model reads rather than a flag the UI could ign
 Stages land as separate PRs. Stage 1 touches no cluster-sensitive path; stages 2
 and 3 do (`src/tools`, `src/ipc`), so they carry the 3-role attestation.
 
-### Open decision: PII redaction does not reach an attached resource
+### Resolved decision: PII redaction covers attached resource text
 
-`sanitizeOutgoingInput` (the `piiRedactEnabled` toggle) is applied to the turn's INPUT
-text only; content parts pass untouched. Before the mention UI existed no renderer path
-produced a text part, so nothing text-bearing escaped redaction — a resource read is the
-first, and it can carry up to a read's worth of the user's own documents per attachment.
+The `piiRedactEnabled` privacy toggle applies in main immediately before the main
+Composer's `lvis:chat:send` turn reaches the provider. It processes the input and every
+validated `type: "text"` content part together. On the normal Composer path those parts
+are host-built MCP resource fences, so the SAME resource bytes that would be redacted if
+pasted into the draft are also redacted when the user attaches them with `@`.
 
-The inconsistency is what makes this worth deciding rather than assuming: the SAME bytes
-pasted into the composer ARE redacted, because a paste is inlined into the input.
+- The renderer still forwards its host-built fence byte-for-byte to main. With the toggle
+  enabled, only the provider-bound copy may differ: sensitive spans become placeholders.
+  This deliberately includes fence headers, so a matching value there no longer has
+  literal source-byte identity in that copy. Fence tags, attachment order, image/file
+  parts, user-origin provenance, and the raw keyboard `requestAnchorRawIntent` remain
+  unchanged.
+- The handler scans each text span separately and aggregates their counts into exactly
+  one `redact_notice` and one count-only warning for the logical turn. The renderer
+  therefore adds one system badge, not one badge per attachment.
+- `redactForLLM` continues to emit count-only DLP audit rows per hit-bearing span. Their
+  summed counts match the turn notice, but they are intentionally not a one-row-per-turn
+  telemetry contract. The main session ID is resolved at the hit, so a new/resume/fork
+  cannot attribute a later redaction to the boot-time session. These new DLP records and
+  the warning contain no raw resource body or URI; existing resource-attachment metadata
+  audit is a separate URI-bearing record and is not changed by this decision.
+- For normal Composer resource attachments, the existing limits bound this additional
+  scan to at most 8 host-bounded text parts of 32 KB each (about 256 KB). That is not a
+  claim that arbitrary internal IPC `text` parts are bounded by the resource policy.
 
-Not resolved here, deliberately. Redacting inside the fence means the host rewriting
-content the fence exists to attribute to the server, and the per-turn cost is real
-(8 attachments x 32 KB through the pattern set). Leaving it means a privacy toggle that
-silently stops applying when the user types `@`. That trade belongs to whoever owns the
-DLP surface, not to the composer PR that made it reachable.
+This scope is the main-chat provider boundary: normal Composer `chat:send` plus its
+edit-resend, continue, and retry replay helpers. A replay can fold an older resource fence
+into its input text, so applying the same boundary there also protects legacy/imported raw
+history. If DLP rewrites a replayed staged-provenance header into a value the parser cannot
+recognize, main retains only its fixed origin kind long enough to reject the replay
+fail-closed; it does not forward the raw source as a side channel, and the pre-send history
+truncate is restored. The current SideChat UI has no resource-attachment creation path, but its separate
+internal API can carry attachments. It has a separate stream channel and session store,
+while that attachment-capable surface currently has no DLP redaction, notice, or
+side-session audit correlation. Extending it needs an explicit side-channel and audit
+design rather than silently reusing main-chat behavior.
 
 ## 7. Deliberately excluded
 

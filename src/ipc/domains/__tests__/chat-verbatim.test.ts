@@ -11,6 +11,7 @@ import os from "node:os";
 import { mkdirSync, realpathSync } from "node:fs";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
+import { CHANNELS } from "../../../contract/app-contract.js";
 import {
   MCP_RESOURCE_ATTACHMENTS_PER_TURN,
   MCP_RESOURCE_FENCE_OPEN,
@@ -1375,6 +1376,210 @@ B${i}
         },
       }),
     );
+  });
+
+  it("redacts raw edit-resend and legacy resource replay content at the shared provider boundary", async () => {
+    const redactPii = async () => {
+      const dlp = await import("../../../audit/dlp-filter.js");
+      const redactForLLM = vi.mocked(dlp.redactForLLM);
+      redactForLLM.mockImplementation((text: string) => {
+        const emailHits = text.match(/alice@example\.com/g)?.length ?? 0;
+        const phoneHits = text.match(/010-1234-5678/g)?.length ?? 0;
+        const counts: Record<string, number> = {};
+        if (emailHits > 0) counts.EMAIL = emailHits;
+        if (phoneHits > 0) counts.PHONE_KR = phoneHits;
+        return {
+          redacted: text
+            .replaceAll("alice@example.com", "[REDACTED:EMAIL]")
+            .replaceAll("010-1234-5678", "[REDACTED:PHONE]"),
+          totalCount: emailHits + phoneHits,
+          counts,
+        };
+      });
+      return () => {
+        redactForLLM.mockImplementation((text: string) => ({
+          redacted: text,
+          totalCount: 0,
+          counts: {},
+        }));
+      };
+    };
+    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const send = vi.fn((channel: string, payload: unknown) => {
+      sent.push({ channel, payload });
+    });
+
+    const editLoop = makeConversationLoop("session-edit-redaction", [
+      { role: "user", content: "old text" },
+      { role: "assistant", content: "old answer" },
+    ]);
+    editLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    const editDeps = await setupHandlers(editLoop, {
+      getMainWindow: () => ({ webContents: { isDestroyed: () => false, send } }),
+    });
+    editDeps.settingsService.get.mockImplementation((key?: string) => {
+      if (key === "llm") return fakeLlmSettings();
+      if (key === "privacy") return { piiRedactEnabled: true };
+      return {};
+    });
+    const restoreRedactor = await redactPii();
+
+    try {
+      await invoke("lvis:chat:edit-resend", 0, "contact alice@example.com");
+
+      expect(editLoop.runTurn.mock.calls[0]?.[0]).toBe("contact [REDACTED:EMAIL]");
+      expect(sent.filter(({ payload }) => (payload as { type?: string }).type === "redact_notice"))
+        .toEqual([
+          {
+            channel: CHANNELS.chat.stream,
+            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 } },
+          },
+        ]);
+
+      const image = { type: "image", image: "data:image/png;base64,abc", mimeType: "image/png" };
+      const rawFence =
+        '<mcp-resource trust="untrusted-server-data" uri="mcp://alice@example.com/resource">contact alice@example.com</mcp-resource>';
+      const replayLoop = makeConversationLoop("session-replay-redaction", [
+        { role: "assistant", content: "earlier" },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "summarize [Resource #1]" },
+            { type: "text", text: rawFence },
+            image,
+          ],
+        },
+      ]);
+      replayLoop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+      const replayDeps = await setupHandlers(replayLoop, {
+        getMainWindow: () => ({ webContents: { isDestroyed: () => false, send } }),
+      });
+      replayDeps.settingsService.get.mockImplementation((key?: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        if (key === "privacy") return { piiRedactEnabled: true };
+        return {};
+      });
+
+      await invoke("lvis:chat:continue-last-user", { sessionId: "session-replay-redaction" });
+
+      const replayInput = replayLoop.runTurn.mock.calls[0]?.[0] as string;
+      const replayOptions = replayLoop.runTurn.mock.calls[0]?.[3] as Record<string, unknown>;
+      expect(replayInput).not.toContain("alice@example.com");
+      expect(replayInput).toContain("[REDACTED:EMAIL]");
+      expect(replayInput).toContain("<mcp-resource");
+      expect(replayInput).toContain("</mcp-resource>");
+      expect(replayOptions.attachments).toEqual([image]);
+      expect(sent.filter(({ payload }) => (payload as { type?: string }).type === "redact_notice"))
+        .toEqual([
+          {
+            channel: CHANNELS.chat.stream,
+            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 } },
+          },
+          {
+            channel: CHANNELS.chat.stream,
+            payload: { type: "redact_notice", count: 2, byKind: { EMAIL: 2 } },
+          },
+        ]);
+
+      const stagedLoop = makeConversationLoop("session-staged-redaction", [
+        {
+          role: "user",
+          content: '<app-message source="app:010-1234-5678">\\nstaged body\\n</app-message>',
+        },
+      ]);
+      stagedLoop.runTurn.mockResolvedValue({ text: "must not run", toolCalls: [], stopReason: "end_turn" });
+      const stagedDeps = await setupHandlers(stagedLoop, {
+        getMainWindow: () => ({ webContents: { isDestroyed: () => false, send } }),
+      });
+      stagedDeps.settingsService.get.mockImplementation((key?: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        if (key === "privacy") return { piiRedactEnabled: true };
+        return {};
+      });
+
+      // DLP turns the source header into a non-parseable placeholder. The
+      // replay must fail closed rather than treat the originally app-authored
+      // message as user-keyboard input with its force-ask gate removed.
+      await expect(invoke("lvis:chat:continue-last-user", { sessionId: "session-staged-redaction" }))
+        .rejects.toThrow("missing-app-envelope");
+      expect(stagedLoop.runTurn).not.toHaveBeenCalled();
+      expect(sent.filter(({ payload }) => (payload as { type?: string }).type === "redact_notice"))
+        .toEqual([
+          {
+            channel: CHANNELS.chat.stream,
+            payload: { type: "redact_notice", count: 1, byKind: { EMAIL: 1 } },
+          },
+          {
+            channel: CHANNELS.chat.stream,
+            payload: { type: "redact_notice", count: 2, byKind: { EMAIL: 2 } },
+          },
+          {
+            channel: CHANNELS.chat.stream,
+            payload: { type: "redact_notice", count: 1, byKind: { PHONE_KR: 1 } },
+          },
+        ]);
+    } finally {
+      restoreRedactor();
+    }
+  });
+
+  it("restores edit-resend and retry history when staged-header redaction fails closed", async () => {
+    const dlp = await import("../../../audit/dlp-filter.js");
+    const redactForLLM = vi.mocked(dlp.redactForLLM);
+    redactForLLM.mockImplementation((text: string) => {
+      const phoneHits = text.match(/010-1234-5678/g)?.length ?? 0;
+      const counts: Record<string, number> = phoneHits > 0 ? { PHONE_KR: phoneHits } : {};
+      return {
+        redacted: text.replaceAll("010-1234-5678", "[REDACTED:PHONE]"),
+        totalCount: phoneHits,
+        counts,
+      };
+    });
+    const stagedInput = '<app-message source="app:010-1234-5678">\\nstaged body\\n</app-message>';
+    const original = [
+      { role: "user", content: "existing user text" },
+      { role: "assistant", content: "existing assistant text" },
+    ];
+
+    try {
+      const editLoop = makeConversationLoop("session-edit-restore", [...original]);
+      const editDeps = await setupHandlers(editLoop);
+      editDeps.settingsService.get.mockImplementation((key?: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        if (key === "privacy") return { piiRedactEnabled: true };
+        return {};
+      });
+
+      await expect(invoke("lvis:chat:edit-resend", 0, stagedInput))
+        .rejects.toThrow("missing-app-envelope");
+      expect(editLoop.runTurn).not.toHaveBeenCalled();
+      expect(editLoop.getHistory().restore).toHaveBeenCalledWith(original);
+      expect(editLoop.getHistory().getMessages()).toEqual(original);
+
+      const retryLoop = makeConversationLoop("session-retry-restore", [
+        { role: "user", content: stagedInput },
+        { role: "assistant", content: "existing assistant text" },
+      ]);
+      const retryOriginal = [...retryLoop.getHistory().getMessages()];
+      const retryDeps = await setupHandlers(retryLoop);
+      retryDeps.settingsService.get.mockImplementation((key?: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        if (key === "privacy") return { piiRedactEnabled: true };
+        return {};
+      });
+
+      await expect(invoke("lvis:chat:retry-effort", { enableThinking: true }))
+        .rejects.toThrow("missing-app-envelope");
+      expect(retryLoop.runTurn).not.toHaveBeenCalled();
+      expect(retryLoop.getHistory().restore).toHaveBeenCalledWith(retryOriginal);
+      expect(retryLoop.getHistory().getMessages()).toEqual(retryOriginal);
+    } finally {
+      redactForLLM.mockImplementation((text: string) => ({
+        redacted: text,
+        totalCount: 0,
+        counts: {},
+      }));
+    }
   });
 
   it("resolves stored persona prompt id when retrying with effort settings", async () => {

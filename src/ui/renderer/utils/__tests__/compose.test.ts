@@ -210,10 +210,10 @@ describe("composeOutgoing — resource attachments", () => {
     expect(countResourceAttachmentFences(r.attachments)).toBe(1);
   });
 
-  it("passes the host-built text through byte-for-byte", () => {
-    // The renderer is not a second author on server content: whatever the host framed,
-    // the model sees. A composer that trimmed or re-wrapped it would be editing inside
-    // a fence whose whole purpose is attributing that text to the server.
+  it("passes the host-built text byte-for-byte to main", () => {
+    // The renderer is not a second author on server content: it forwards exactly what
+    // the host framed. Main may redact the provider-bound copy when privacy redaction
+    // is enabled, but a composer must never trim or re-wrap this provenance fence.
     const r = composeOutgoing({
       raw: "[Resource #5]",
       activePreset: null,

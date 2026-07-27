@@ -16,6 +16,7 @@ import {
   STAGED_ORIGIN_KINDS,
   isStagedSendOrigin,
   formatStagedEnvelope,
+  isMissingStagedEnvelopeErrorMessage,
   isStagedTurnSource,
   parseStagedEnvelope,
   parseStagedEnvelopePayload,
@@ -94,6 +95,14 @@ describe("staged-origin registry", () => {
     expect(isStagedTurnSource("app:")).toBe(false); // empty id — bounded pattern
     expect(isStagedTurnSource(null)).toBe(false);
     expect(isStagedTurnSource(undefined)).toBe(false);
+  });
+
+  it("recognizes only registry-owned fail-closed envelope errors", () => {
+    for (const kind of STAGED_ORIGIN_KINDS) {
+      expect(isMissingStagedEnvelopeErrorMessage(kind.missingEnvelopeError)).toBe(true);
+    }
+    expect(isMissingStagedEnvelopeErrorMessage("missing-unknown-envelope")).toBe(false);
+    expect(isMissingStagedEnvelopeErrorMessage(new Error("missing-app-envelope"))).toBe(false);
   });
 
   // The send gate narrows with a hand-written predicate, so a registered origin

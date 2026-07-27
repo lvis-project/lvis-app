@@ -66,8 +66,9 @@ export function registerIpcHandlers(
 ): void {
   const deps: IpcDeps = { ...services, getMainWindow, getAppWindows };
 
-  // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
-  initDlpAudit(deps.auditLogger, deps.conversationLoop.getSessionId());
+  // Resolve the session at each DLP hit: chat new/resume/fork can change the
+  // loop's session after handlers have been registered.
+  initDlpAudit(deps.auditLogger, () => deps.conversationLoop.getSessionId());
 
   registerSettingsHandlers(deps);
   registerTourHandlers(deps);
