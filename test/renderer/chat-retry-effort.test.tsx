@@ -99,8 +99,12 @@ describe("Chat retry (Phase 3.2 regression net)", () => {
 
   it("restores previous entries when a staged-envelope failure rejects", async () => {
     const { container, api, emitChatStream } = await renderApp();
-    api.chatRetryEffort.mockRejectedValueOnce(
-      new Error("Error invoking remote method 'lvis:chat:retry-effort': Error: missing-app-envelope"),
+    let rejectRetry: (reason?: unknown) => void = () => undefined;
+    api.chatRetryEffort.mockImplementationOnce(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectRetry = reject;
+        }),
     );
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
     await seedAssistantEntry(container, api, emitChatStream);
@@ -114,10 +118,23 @@ describe("Chat retry (Phase 3.2 regression net)", () => {
       fireEvent.click(retryBtn);
     });
 
+    await waitFor(() => expect(api.chatRetryEffort).toHaveBeenCalled());
+    await act(async () => {
+      // Exercise the stream-first ordering used by the main-process DLP notice.
+      emitChatStream({ type: "redact_notice", count: 1, byKind: { PHONE_KR: 1 } });
+    });
+    await waitFor(() => expect(container.textContent).toContain("PII 1"));
+    await act(async () => {
+      rejectRetry(
+        new Error("Error invoking remote method 'lvis:chat:retry-effort': Error: missing-app-envelope"),
+      );
+    });
+
     await waitFor(() => {
       expect(api.chatRetryEffort).toHaveBeenCalled();
       expect(container.textContent).toContain("Hello from LVIS");
       expect(container.textContent).toContain("missing-app-envelope");
+      expect(container.textContent).toContain("PII 1");
     });
   });
 });
