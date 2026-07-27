@@ -1,3 +1,5 @@
+FROM node:22-bookworm-slim AS node-runtime
+
 FROM oven/bun:1.3.14
 
 USER root
@@ -25,6 +27,11 @@ RUN apt-get update \
       xvfb \
     && rm -rf /var/lib/apt/lists/*
 
+# Bun provides a `node` shim, but it does not implement Node's `--test`
+# runner. Keep the test runtime within the app's supported Node 22 line.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+RUN /usr/local/bin/node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 4)) process.exit(1)"
+
 RUN groupadd --gid 10001 lvis \
     && useradd --create-home --uid 10001 --gid 10001 --shell /bin/bash lvis \
     && mkdir -p /workspace/lvis-app /workspace/lvis-plugin-sdk /evidence \
@@ -48,7 +55,7 @@ USER 10001:10001
 ENV HOME=/home/lvis
 WORKDIR /workspace/lvis-app
 RUN bun install --frozen-lockfile \
-    && bun run test:plugin-bundle-inputs \
+    && /usr/local/bin/node --test scripts/plugin-bundle-e2e-inputs.test.mjs \
     && bun run build
 
 ENTRYPOINT ["/bin/bash"]

@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
-import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import {
   makeTestPluginPaths,
+  preparedActivationOptionsForTest,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
@@ -228,6 +229,24 @@ describe("PluginMarketplaceService.installLocal", () => {
     const installDir = join(pluginsDir, "test-plugin");
     const result = await verifyInstallReceipt(cacheRoot, "test-plugin", installDir);
     expect(result.ok).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32")("rejects a contained source symlink before it can be promoted", async () => {
+    const target = join(sourceDir, "dist", "hostPlugin.js");
+    const link = join(sourceDir, "dist", "hostPlugin-link.js");
+    await symlink(target, link);
+
+    const service = makeService();
+    await expect(service.installLocal(sourceDir, preparedActivationOptionsForTest)).rejects.toThrow(
+      "symbolic link is not allowed in install dir: dist/hostPlugin-link.js",
+    );
+
+    expect(existsSync(join(pluginsDir, "test-plugin"))).toBe(false);
+    expect(existsSync(join(cacheRoot, "test-plugin", "install-receipt.json"))).toBe(false);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins).toEqual([]);
+    const names = await readdir(pluginsDir);
+    expect(names.some((name) => name.startsWith("test-plugin.tmp-"))).toBe(false);
   });
 
   it("preserves the active local generation when staged candidate start fails", async () => {
