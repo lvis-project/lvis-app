@@ -1,14 +1,11 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { projectRoot } from "./main-paths.js";
 
 const DEFAULT_RUNTIME_UV_DIR = path.join(lvisHome(), "runtime", "uv");
 
@@ -16,6 +13,7 @@ export interface BundledUvRuntimeOptions {
   defaultApp?: boolean;
   resourcesPath?: string;
   moduleDir?: string;
+  projectRoot?: string;
   uvRuntimeDir?: string;
   requireDevBinary?: boolean;
   platform?: NodeJS.Platform;
@@ -41,11 +39,15 @@ export function resolveBundledUvBinaryPath(options: BundledUvRuntimeOptions = {}
 }
 
 function resolveDevUvBinaryPath(uvTarget: UvTarget, options: BundledUvRuntimeOptions): string {
-  const moduleDir = options.moduleDir ?? __dirname;
-  const candidates = [
-    path.join(moduleDir, "..", "..", "..", "resources", "uv", uvTarget.dir, uvTarget.bin),
-    path.join(moduleDir, "..", "..", "resources", "uv", uvTarget.dir, uvTarget.bin),
-  ];
+  // The emitted main module may be an esbuild chunk. Its own directory is
+  // therefore not a stable route to repository resources; use the canonical
+  // app root unless a caller explicitly supplies the legacy module-dir seam.
+  const candidates = options.moduleDir
+    ? [
+      path.join(options.moduleDir, "..", "..", "..", "resources", "uv", uvTarget.dir, uvTarget.bin),
+      path.join(options.moduleDir, "..", "..", "resources", "uv", uvTarget.dir, uvTarget.bin),
+    ]
+    : [path.join(options.projectRoot ?? projectRoot, "resources", "uv", uvTarget.dir, uvTarget.bin)];
   if (options.requireDevBinary === false) {
     return candidates[0];
   }

@@ -334,6 +334,23 @@ async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
       ), guestId),
     { timeout: 15_000 },
   ).toBe(true);
+
+  // A session `frame` preload may be evaluated for child frames too. The
+  // bridge is deliberately limited to the registered top-level plugin shell;
+  // an iframe controlled by the plugin must not receive host IPC methods.
+  const childFrameBridgeType = await executeInGuest<string>(ctx, guestId, `
+    new Promise((resolve) => {
+      const frame = document.createElement("iframe");
+      frame.srcdoc = "<!doctype html><title>untrusted child</title>";
+      frame.addEventListener("load", () => {
+        const result = typeof frame.contentWindow?.lvisPlugin;
+        frame.remove();
+        resolve(result);
+      }, { once: true });
+      document.body.appendChild(frame);
+    })
+  `);
+  expect(childFrameBridgeType).toBe("undefined");
   return guestId;
 }
 

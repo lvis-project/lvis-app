@@ -1,24 +1,33 @@
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { join } from "node:path";
+import { projectRoot } from "./main-paths.js";
 
 let cachedIconPath: string | null | undefined;
 
-export function resolveAppIconPath(): string | undefined {
-  if (cachedIconPath !== undefined) {
+export interface AppIconPathOptions {
+  resourcesPath?: string;
+  projectRoot?: string;
+  cwd?: string;
+  exists?: (path: string) => boolean;
+}
+
+export function resolveAppIconPath(options: AppIconPathOptions = {}): string | undefined {
+  const useCache = Object.keys(options).length === 0;
+  if (useCache && cachedIconPath !== undefined) {
     return cachedIconPath ?? undefined;
   }
 
+  const resourcesPath = options.resourcesPath ?? process.resourcesPath;
+  const devProjectRoot = options.projectRoot ?? projectRoot;
+  const cwd = options.cwd ?? process.cwd();
+  const exists = options.exists ?? existsSync;
   const candidates = [
-    process.resourcesPath ? join(process.resourcesPath, "icon.png") : null,
-    resolve(__dirname, "..", "..", "build", "icon.png"),
-    resolve(__dirname, "..", "..", "..", "build", "icon.png"),
-    resolve(process.cwd(), "build", "icon.png"),
+    resourcesPath ? join(resourcesPath, "icon.png") : null,
+    join(devProjectRoot, "build", "icon.png"),
+    join(cwd, "build", "icon.png"),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
-  cachedIconPath = candidates.find((candidate) => existsSync(candidate)) ?? null;
-  return cachedIconPath ?? undefined;
+  const iconPath = candidates.find((candidate) => exists(candidate)) ?? null;
+  if (useCache) cachedIconPath = iconPath;
+  return iconPath ?? undefined;
 }

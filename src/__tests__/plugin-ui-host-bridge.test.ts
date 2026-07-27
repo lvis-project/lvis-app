@@ -14,7 +14,7 @@
  * locks the new dedicated-channel contract so a regression to the dotted name
  * cannot reintroduce that silent-fail.
  */
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // ─── Capture contextBridge registrations ─────────────────────────────────────
 
@@ -22,6 +22,7 @@ const exposed = new Map<string, unknown>();
 const mockInvoke = vi.fn();
 const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
+const originalIsMainFrame = Object.getOwnPropertyDescriptor(process, "isMainFrame");
 
 // Plugin preload uses NAMED imports — see plugin-preload.test.ts for the
 // reasoning. Mock matches that contract.
@@ -40,7 +41,17 @@ vi.mock("electron", () => {
 });
 
 beforeAll(async () => {
+  // The bridge is intentionally installed only for Electron's top frame.
+  Object.defineProperty(process, "isMainFrame", { configurable: true, value: true });
   await import("../plugin-preload.js");
+});
+
+afterAll(() => {
+  if (originalIsMainFrame) {
+    Object.defineProperty(process, "isMainFrame", originalIsMainFrame);
+  } else {
+    Reflect.deleteProperty(process, "isMainFrame");
+  }
 });
 
 type ConfigBridge = {
