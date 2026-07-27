@@ -24,6 +24,7 @@ RUN apt-get update \
       libxshmfence1 \
       libxss1 \
       python3 \
+      xauth \
       xvfb \
     && rm -rf /var/lib/apt/lists/*
 
