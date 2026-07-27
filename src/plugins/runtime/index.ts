@@ -1010,15 +1010,13 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
             }
             const pluginRoot = dirname(targetPlan.manifestPath);
             const receiptPluginId = installClaim ?? canonicalPluginId;
-            const integrity = await this.verifyReceiptAndDevGuard(
-              receiptPluginId,
-              pluginRoot,
-            );
+            const integrity = await this.verifyReceiptAndDevGuard(receiptPluginId, pluginRoot);
             if (!integrity.ok) {
               throw new Error(
                 `plugin re-enable receipt verification failed: ${canonicalPluginId}`,
               );
             }
+            this.assertEnabledCapabilityDependencies(manifest);
             const receiptRaw = await readFile(
               installReceiptPath(this.installReceiptCacheRoot, receiptPluginId),
               "utf8",
