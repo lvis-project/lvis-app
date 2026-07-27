@@ -193,6 +193,79 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(card?.active).toBe(true);
   });
 
+  it("keeps a consumer inactive when its required provider is disabled", async () => {
+    const providerId = "calendar-provider";
+    const providerDir = join(installedDir, providerId);
+    const providerManifestPath = join(providerDir, "plugin.json");
+    await mkdir(providerDir, { recursive: true });
+    await writeFile(
+      join(providerDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return { handlers: { calendar_provider_ping: async () => "pong" } };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      providerManifestPath,
+      JSON.stringify({
+        id: providerId,
+        name: "Calendar provider",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [{ name: "calendar_provider_ping", description: "calendar provider ping", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
+        capabilities: ["calendar-source"],
+        description: "set-enabled provider fixture",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+    const consumerManifest = JSON.parse(await readFile(manifestPath, "utf-8"));
+    consumerManifest.requires = { capabilities: ["calendar-source"] };
+    await writeFile(manifestPath, JSON.stringify(consumerManifest), "utf-8");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "se-plugin", manifestPath, enabled: false },
+          { id: providerId, manifestPath: providerManifestPath, enabled: false },
+        ],
+      }),
+      "utf-8",
+    );
+    const { receipt: consumerReceipt } = await buildInstallReceipt(join(installedDir, "se-plugin"), {
+      pluginId: "se-plugin",
+      version: "1.0.0",
+      installSource: "marketplace",
+      artifactSha256: "c".repeat(64),
+      signerKeyId: "poc-v1",
+      files: ["entry.mjs", "plugin.json"],
+      installedAt: new Date(0).toISOString(),
+    });
+    const { receipt: providerReceipt } = await buildInstallReceipt(providerDir, {
+      pluginId: providerId,
+      version: "1.0.0",
+      installSource: "marketplace",
+      artifactSha256: "d".repeat(64),
+      signerKeyId: "poc-v1",
+      files: ["entry.mjs", "plugin.json"],
+      installedAt: new Date(0).toISOString(),
+    });
+    await writeInstallReceipt(testDir, consumerReceipt);
+    await writeInstallReceipt(testDir, providerReceipt);
+
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    await expect(runtime.setPluginEnabled("se-plugin", true)).rejects.toThrow(
+      "missing required capabilities: calendar-source",
+    );
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    expect(runtime.listPluginIds()).not.toContain("se-plugin");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(false);
+  });
+
   it("re-enables a canonical manifest through its raw registry alias receipt", async () => {
     const installId = "se-plugin-marketplace";
     const pluginDir = join(installedDir, "se-plugin");
