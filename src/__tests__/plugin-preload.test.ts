@@ -7,7 +7,7 @@
  *
  * We load the preload once and capture its contextBridge registrations.
  */
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─── Capture contextBridge registrations ─────────────────────────────────────
 
@@ -15,6 +15,11 @@ const exposed = new Map<string, unknown>();
 const mockInvoke = vi.fn();
 const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
+const originalIsMainFrame = Object.getOwnPropertyDescriptor(process, "isMainFrame");
+
+function setMainFrame(value: boolean): void {
+  Object.defineProperty(process, "isMainFrame", { configurable: true, value });
+}
 
 // Plugin preload uses NAMED imports
 // (`import { contextBridge, ipcRenderer } from "electron"`) so esbuild
@@ -43,7 +48,17 @@ vi.mock("electron", () => {
 
 // Load the preload module once — top-level code executes once per module instance.
 beforeAll(async () => {
+  // This Node-based unit test emulates Electron's top-level preload frame.
+  setMainFrame(true);
   await import("../plugin-preload.js");
+});
+
+afterAll(() => {
+  if (originalIsMainFrame) {
+    Object.defineProperty(process, "isMainFrame", originalIsMainFrame);
+  } else {
+    Reflect.deleteProperty(process, "isMainFrame");
+  }
 });
 
 beforeEach(() => {
@@ -289,5 +304,20 @@ describe("plugin-preload bridge", () => {
     expect(bridge).not.toHaveProperty("onPluginInstallResult");
     expect(bridge).not.toHaveProperty("onPluginUninstallResult");
     expect(bridge).not.toHaveProperty("onPluginInstallProgress");
+  });
+
+  it("does not expose the bridge or IPC listener in a child frame", async () => {
+    // A session `frame` preload can execute in a plugin-controlled iframe.
+    // Reload the module under Electron's child-frame signal and require a
+    // fail-closed result rather than merely relying on main-side sender checks.
+    exposed.clear();
+    vi.resetModules();
+    setMainFrame(false);
+
+    await import("../plugin-preload.js");
+
+    expect(exposed.has("lvisPlugin")).toBe(false);
+    expect(mockOn).not.toHaveBeenCalled();
+    setMainFrame(true);
   });
 });

@@ -391,7 +391,7 @@ app.on("web-contents-created", (_event, contents) => {
   //
   // BUG (#498): `contents.session.partition` is undocumented and returns
   // `undefined` on current Electron, so this guard never matches and
-  // `setPreloads` is never called → plugin webviews load without the
+  // session preload is never registered → plugin webviews load without the
   // `lvisPlugin` contextBridge → shell aborts with "lvisPlugin bridge
   // missing". The proper fix pre-registers the policy at boot for every
   // known plugin partition (see `boot/steps/plugin-runtime.ts`); the

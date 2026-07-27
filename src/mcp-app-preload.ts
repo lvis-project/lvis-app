@@ -3,7 +3,7 @@
  *
  * Runs in the isolated world of the sandbox-proxy document
  * (`lvis-mcp-app://<hex(serverId)>/proxy.html`) inside each MCP-app <webview>.
- * Installed via `session.setPreloads()` on the per-server partition — the
+ * Installed via `session.registerPreloadScript()` on the per-server partition — the
  * `preload=` ATTRIBUTE is silently ignored under `sandbox=yes` and is stripped by
  * the `will-attach-webview` guards anyway, so the session preload is the only
  * viable path. The path is host-resolved; an MCP server can never nominate one.
