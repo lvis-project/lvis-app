@@ -76,6 +76,15 @@ describe("Marketplace E2E hostile-candidate containment", () => {
             -lc '`);
   });
 
+  it("stamps the transient E2E schema after seeding its API keys", () => {
+    const finalJob = job("marketplace-e2e");
+    const seed = finalJob.indexOf("python /app/e2e/scripts/seed_e2e_keys.py");
+    const stamp = finalJob.indexOf("alembic stamp head");
+    expect(seed).toBeGreaterThanOrEqual(0);
+    expect(stamp).toBeGreaterThan(seed);
+    expect(finalJob).not.toContain("alembic upgrade head");
+  });
+
   it("keeps trusted control code at workflow_sha and validates after candidate exit", () => {
     for (const name of [
       "stage-inputs",
