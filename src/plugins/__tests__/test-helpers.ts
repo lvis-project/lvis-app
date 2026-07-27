@@ -359,6 +359,11 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
   ): ActivePluginGeneration<HostPluginGenerationState> | undefined => {
     const existing = active.get(pluginId);
     if (existing) return existing;
+    // A failed prepared candidate has never been published into the runtime
+    // projection. Do not manufacture a legacy identity merely because failure
+    // cleanup asks whether a generation is active; doing so would make its
+    // later retry collide with a phantom `undefined` install claim.
+    if (!runtime.listPluginIds().includes(pluginId)) return undefined;
     if (runtime.resolvePluginInstallIdIfKnown(pluginId) === undefined) {
       (runtime as unknown as {
         rememberPluginInstallAlias(id: string, alias: undefined): void;

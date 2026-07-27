@@ -153,7 +153,12 @@ test("CLI creates a private evidence sink for later lifecycle merges", () => {
   );
 
   assert.equal(JSON.parse(readFileSync(evidencePath, "utf8")).refs.epApi, f.epApiSha);
-  assert.equal(statSync(evidencePath).mode & 0o777, 0o600);
+  // Windows does not expose POSIX file modes through chmod/stat. The
+  // production Marketplace E2E image is Linux, where this guards the
+  // private evidence-sink contract.
+  if (process.platform !== "win32") {
+    assert.equal(statSync(evidencePath).mode & 0o777, 0o600);
+  }
 });
 
 test("rejects an SDK ref that ep-api does not consume", () => {

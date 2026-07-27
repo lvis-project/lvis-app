@@ -1,5 +1,10 @@
 # LVIS 플러그인 개발 가이드
 
+> **역사 보존 문서 (현재 계약의 정본 아님).** 이 문서는 과거 한국어 검토·논의 이력을
+> 보존합니다. 새 플러그인의 작성·검증은 [현재 English guide](../../guides/plugin-development.md),
+> [`schemas/plugin-manifest.schema.json`](../../../schemas/plugin-manifest.schema.json),
+> [`src/plugins/public-contract.ts`](../../../src/plugins/public-contract.ts)를 따르세요.
+
 > **매니페스트 tool 계약 = pure MCP `Tool[]` (#885 Phase R).** `tools` 는 각 원소가
 > `{ name, description, inputSchema, _meta? }` 인 Tool 객체 배열이다. renderer 노출은
 > `_meta.ui.visibility` (`["model"]`/`["app"]`/`["model","app"]`), filesystem path 판정은
