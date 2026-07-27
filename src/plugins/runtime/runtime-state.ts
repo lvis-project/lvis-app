@@ -157,6 +157,8 @@ export abstract class PluginRuntimeState {
    */
   protected readonly inactivePluginIds = new Set<string>();
   protected readonly preparation: PreparationTracker;
+  /** Loaded or requested consumers waiting for a preparing capability provider. */
+  protected readonly capabilityBlockedPluginIds = new Set<string>();
   protected readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
   protected readonly pendingRestartPreparations = new Map<string, Promise<void>>();
   /**
@@ -213,7 +215,30 @@ export abstract class PluginRuntimeState {
   protected generationLifecycle: PluginRuntimeGenerationLifecycle | undefined;
   protected readonly pinnedGenerations =
     new AsyncLocalStorage<ReadonlyMap<string, string>>();
+  /**
+   * Cross-plugin capability admission has one short linearization boundary.
+   * Candidate import, factory execution, and startup intentionally happen
+   * outside this queue; only the final generation-pointer commit uses it.
+   */
+  private capabilityDependencyCommitTail: Promise<void> = Promise.resolve();
   protected loaded = false;
+
+  protected async withCapabilityDependencyCommit<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.capabilityDependencyCommitTail;
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.capabilityDependencyCommitTail = previous.then(() => next);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
 
   protected createPendingRestartCancellation(): PendingRestartCancellation {
     return createPendingRestartCancellation();
@@ -986,6 +1011,9 @@ export abstract class PluginRuntimeState {
 
   waitForPluginReady(pluginId: string): Promise<void> {
     const canonicalId = this.resolveKnownPluginId(pluginId);
+    if (this.preparation.isPreparing(canonicalId)) {
+      return this.preparation.waitForReady(canonicalId);
+    }
     if (this.plugins.has(canonicalId)) return Promise.resolve();
     return this.preparation.waitForReady(canonicalId);
   }
@@ -1033,6 +1061,7 @@ export abstract class PluginRuntimeState {
     this.failedPluginStubs.clear();
     this.loadFailureInfo.clear();
     this.disabledPluginIds.clear();
+    this.capabilityBlockedPluginIds.clear();
     this.preparation.clear();
     this.pendingRestarts.clear();
     this.pendingRestartPreparations.clear();
@@ -1191,7 +1220,10 @@ export abstract class PluginRuntimeState {
   protected throwIfToolOwnerNotReady(toolName: string): void {
     const pluginId = this.knownToolOwners.get(toolName);
     if (!pluginId) return;
-    if (this.preparation.isPreparing(pluginId)) {
+    if (
+      this.preparation.isPreparing(pluginId)
+      || this.capabilityBlockedPluginIds.has(pluginId)
+    ) {
       throw new Error(
         `Plugin '${pluginId}' is still installing its runtime dependencies. ` +
         `Try again after the plugin is ready.`,
