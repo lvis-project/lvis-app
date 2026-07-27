@@ -23,8 +23,9 @@
  * has already been bitten by `grep "error TS"` silently matching nothing because of the
  * escape codes. The flag gives one plain `file(line,col): error TSxxxx: msg` per line.
  *
- * FAILING CLOSED IS THE HARD PART HERE, and it is why this gate carries two refusals that the
- * repo's other two baseline gates do not need. `check-knip-baseline.mjs` parses JSON, so an
+ * FAILING CLOSED IS THE HARD PART HERE, and it is why this gate carries explicit config
+ * refusals plus a program-coverage check that the repo's other two baseline gates do not need.
+ * `check-knip-baseline.mjs` parses JSON, so an
  * unrunnable tool yields empty stdout and `JSON.parse` throws; `check-cluster-scope.mjs` treats
  * any nonzero exit as failure. Both get fail-closed behaviour for free. This gate can use
  * NEITHER mechanism: `tsc` exits nonzero precisely when it succeeds at finding the errors being
@@ -65,20 +66,75 @@
  * refusal: "the compiler did not run" is useless for a rootDir violation, and printing the
  * program-level lines was the one real benefit the third check had.
  *
- * KNOWN HOLE, not covered by either refusal: a config that NARROWS the program still passes.
- * Measure one file out of a baselined 312 and the comparison reports 311 "fixed" at exit 0.
- * The fix is a coverage check — every baselined file measured, or provably gone from disk —
- * which subsumes both refusals; see the follow-up.
+ * PROGRAM COVERAGE closes the remaining narrow-config route. The same `tsc` invocation emits
+ * `--listFiles` output, which is compared with an independent Git-backed inventory of the
+ * intended TypeScript sources. A source that exists in `src`, `scripts`, or `test` but is absent
+ * from the compiler program refuses both comparison and baseline writes. That covers both
+ * baselined files and brand-new source files; checking only the baseline would leave the latter
+ * invisible. Deliberate config exclusions and files actually deleted from disk are excluded from
+ * the expected inventory explicitly.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const PROJECT = resolve(ROOT, "tsconfig.tests.json");
 const BASELINE = resolve(ROOT, "test-typecheck-baseline.json");
 export const SCHEMA_VERSION = 1;
+
+const SOURCE_FILE_RE = /\.[cm]?tsx?$/;
+const INTENDED_SOURCE_RE = /^(?:src|scripts|test)\//;
+
+function normalizeRepoRelativePath(path) {
+  return path.replaceAll("\\", "/").replace(/^\.\//, "");
+}
+
+function isExpectedSourcePath(path) {
+  return SOURCE_FILE_RE.test(path)
+    && INTENDED_SOURCE_RE.test(path)
+    && path !== "src/preload.cjs.ts"
+    && !(path.startsWith("src/") && path.includes("/__probes__/"));
+}
+
+/**
+ * TypeScript source paths reported by `tsc --listFiles` that belong to the intended program.
+ *
+ * The compiler reports absolute paths on some platforms and relative paths on others. Normalize
+ * both to the repo-relative POSIX spelling used by the baseline and Git inventory.
+ */
+export function programSourceFiles(tscOutput) {
+  const files = new Set();
+  for (const raw of tscOutput.split(/\r?\n/)) {
+    const candidate = raw.trim();
+    if (!SOURCE_FILE_RE.test(candidate)) continue;
+    const repoRelative = normalizeRepoRelativePath(relative(ROOT, resolve(ROOT, candidate)));
+    if (INTENDED_SOURCE_RE.test(repoRelative)) files.add(repoRelative);
+  }
+  return files;
+}
+
+/**
+ * Convert the null-delimited output of `git ls-files` into the intended current source inventory.
+ *
+ * Git's cached view retains a path that a developer has deleted but not staged. That path is
+ * intentionally omitted when it no longer exists on disk: deletion is a legitimate "fixed"
+ * result, while a still-present file omitted by the compiler is not.
+ */
+export function expectedSourceFilesFromGitOutput(gitOutput, exists = existsSync) {
+  const files = new Set();
+  for (const raw of gitOutput.split("\0")) {
+    const path = normalizeRepoRelativePath(raw);
+    if (!isExpectedSourcePath(path) || !exists(resolve(ROOT, path))) continue;
+    files.add(path);
+  }
+  return files;
+}
+
+export function missingExpectedSources(expectedInventory, programFiles) {
+  return [...expectedInventory].filter((file) => !programFiles.has(file)).sort();
+}
 
 /**
  * One `tsc --pretty false` diagnostic line.
@@ -148,15 +204,10 @@ export function compareToBaseline(counts, baseline) {
  * Exported so the self-test pins THIS function rather than a restatement of it — a
  * re-spelled condition in the test is how a guard and its test drift apart.
  *
- * KNOWN LIMIT, stated because both reviewers reached for it independently and neither could
- * make it reachable: this is a BOUNDARY check, not a coverage check. A PARTIAL measurement —
- * one file parsed, the other 311 silently absent — passes it, and the comparison then reports
- * 311 files "fixed" at exit 0. Nobody has produced a tsc invocation that truncates that way:
- * config errors suppress the program entirely (empty, caught here), and the one realistic
- * truncation route, output exceeding `maxBuffer`, sets `result.error`, which `runTsc` throws
- * on. So it is theoretical rather than a defect — but it is a real hole in what this function
- * can promise, and the next person should not read `counts.size === 0` as "the measurement is
- * complete".
+ * This remains a BOUNDARY check, deliberately separate from coverage. It detects a compiler
+ * that produced no file diagnostics while the baseline expects some; `decide` immediately
+ * follows it with the independent inventory comparison that detects a non-empty but narrowed
+ * program. Keep the predicates narrow so the self-test can pin each failure shape directly.
  */
 export function isEmptyMeasurementAgainstBaseline(counts, baselineFiles) {
   return counts.size === 0 && Object.keys(baselineFiles).length > 0;
@@ -187,13 +238,13 @@ export function isEmptyMeasurementAgainstBaseline(counts, baselineFiles) {
  * currently has diagnostics, which is precisely why only a reviewer would find it.
  */
 export function nonSourceMeasurements(counts) {
-  return [...counts.keys()].filter((f) => !/\.[cm]?tsx?$/.test(f));
+  return [...counts.keys()].filter((f) => !SOURCE_FILE_RE.test(f));
 }
 
 /**
  * Diagnostics tsc attributed to no file at all.
  *
- * NOT a refusal — a MESSAGE ENRICHER for the empty-measurement refusal in `main()`. It was a
+ * NOT a refusal — a MESSAGE ENRICHER for the empty-measurement refusal in `decide`. It was a
  * third refusal until an architect reviewer showed it owned no failure shape: unattributedness
  * means program construction failed, tsc aborts before the semantic pass, and the measurement
  * is therefore always empty, so EMPTY always fires too. Measured across six config shapes.
@@ -212,19 +263,19 @@ export function unattributedDiagnostics(tscStdout) {
   return tscStdout.split(/\r?\n/).filter((line) => /^error TS\d+:/.test(line));
 }
 
-function runTsc() {
-  const result = spawnSync(
+export function runTsc(spawn = spawnSync) {
+  const result = spawn(
     process.execPath,
     [resolve(ROOT, "node_modules", "typescript", "lib", "tsc.js"),
-      "-p", PROJECT, "--noEmit", "--pretty", "false"],
+      "-p", PROJECT, "--noEmit", "--pretty", "false", "--listFiles"],
     { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   if (result.error) throw result.error;
   if (result.signal) throw new Error(`tsc terminated by signal ${result.signal}`);
   // Statuses are NOT the failure signal here, which is the whole difficulty: `tsc` exits 1
   // exactly when it succeeds at finding the errors this gate measures. 0/1/2 are all
-  // legitimate; anything else is a broken invocation. The real signals are the two content
-  // checks below plus the empty-measurement refusal in `main()`.
+  // legitimate; anything else is a broken invocation. The real signals are the ordered policy
+  // checks in `decide`.
   //
   // Measured across the docstring's scenarios, so this is not an assumption: the HEALTHY
   // control exits 1, four broken configs also exit 1, two exit 2, and the silent-no-op
@@ -236,7 +287,7 @@ function runTsc() {
   }
   const stdout = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   // NO refusal here. `unattributedDiagnostics` is still used — but to ENRICH the
-  // empty-measurement refusal's message in `main()`, not as a gate of its own. An architect
+  // empty-measurement refusal's message in `decide`, not as a gate of its own. An architect
   // reviewer showed why, with six config shapes measured against real tsc and reproduced
   // here: unattributedness IS program-construction failure (an unresolvable root file, a
   // missing type root, a rootDir violation, no inputs), so tsc aborts before the semantic
@@ -246,7 +297,33 @@ function runTsc() {
   // sibling class co-occurs, therefore this one plausibly can" does not transfer, and the
   // only remaining argument for a third refusal was insurance — which is the layered-defence
   // argument this repo rejects.
-  return stdout;
+  return {
+    tscStdout: stdout,
+    counts: countErrorsByFile(stdout),
+    programFiles: programSourceFiles(stdout),
+  };
+}
+
+/**
+ * Source inventory independent from TypeScript configuration resolution.
+ *
+ * The compiler's effective config cannot prove that it includes every source we intend to
+ * check: a narrowed config faithfully reports its own omission. Git gives this check its
+ * separate authority while also including local, untracked files that a developer may be
+ * adding to a PR.
+ */
+export function readExpectedSourceFiles(spawn = spawnSync, exists = existsSync) {
+  const result = spawn(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "src", "scripts", "test"],
+    { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (result.error) throw result.error;
+  if (result.signal) throw new Error(`git ls-files terminated by signal ${result.signal}`);
+  if (result.status !== 0) {
+    throw new Error(`git ls-files exited ${result.status}\n${result.stderr ?? ""}`);
+  }
+  return expectedSourceFilesFromGitOutput(result.stdout ?? "", exists);
 }
 
 /**
@@ -280,7 +357,7 @@ export function nonTestEntries(files) {
  * to be destroyed, and guessing is what fail-open looks like. Delete the file deliberately to
  * bootstrap.
  *
- * Exported for the same reason as the three refusals: a mutation sweep showed that replacing
+ * Exported for the same reason as the gate's refusal paths: a mutation sweep showed that replacing
  * the ENOENT check with an unconditional `return {}` left the self-test GREEN, and that
  * mutation re-opens the write-path fail-open (unreadable baseline + broken compiler → `{}` →
  * the guard passes → a real baseline is overwritten with an empty measurement). This was the
@@ -329,19 +406,20 @@ export function readBaselineFilesOrEmpty(path = BASELINE) {
   return readBaseline(path).files;
 }
 
-function main() {
-  const update = process.argv.includes("--update-baseline");
-  const tscStdout = runTsc();
-  const counts = countErrorsByFile(tscStdout);
+export function decide({ update, measurement, baseline, expectedInventory }) {
+  const { counts, programFiles, tscStdout } = measurement;
 
   // Before comparing OR writing: a measurement attributed to something that is not a
   // TypeScript source means the compiler was diagnosing the configuration, not the code.
   const nonSource = nonSourceMeasurements(counts);
   if (nonSource.length > 0) {
-    throw new Error(
-      `tsc attributed errors to non-source files (${nonSource.join(", ")}), which means it`
-      + " was diagnosing the configuration. Refusing to compare or write a baseline.",
-    );
+    return {
+      kind: "refuse",
+      exitCode: 1,
+      message:
+        `tsc attributed errors to non-source files (${nonSource.join(", ")}), which means it`
+        + " was diagnosing the configuration. Refusing to compare or write a baseline.",
+    };
   }
 
   // THE empty-measurement refusal — ONE call site, hoisted above both branches, guarding
@@ -358,7 +436,6 @@ function main() {
   // asked twice" — describing the two-call-site shape this replaced. A reviewer flagged the
   // wording precisely because it licenses moving the check back down into the update branch,
   // which would restore the original bug.
-  const baseline = readBaseline();
   const onDiskFiles = baseline.files;
   if (isEmptyMeasurementAgainstBaseline(counts, onDiskFiles)) {
     // Wording covers both callers: `update` is about to overwrite, `compare` is about to
@@ -369,14 +446,46 @@ function main() {
     // — which was the one real argument for having a third refusal. Folding it into the
     // message keeps the diagnosis and drops the speculative layer.
     const programLevel = unattributedDiagnostics(tscStdout);
-    throw new Error(
-      "tsc produced no diagnostics while the committed baseline expects them — the compiler"
-      + " did not run. Refusing to treat that as an improvement or to write it to the"
-      + " baseline."
-      + (programLevel.length > 0
-        ? `\n\ntsc reported these program-level errors:\n${programLevel.join("\n")}`
-        : `\n\ntsc produced no program-level errors either. Full output:\n${tscStdout}`),
-    );
+    return {
+      kind: "refuse",
+      exitCode: 1,
+      message:
+        "tsc produced no diagnostics while the committed baseline expects them — the compiler"
+        + " did not run. Refusing to treat that as an improvement or to write it to the"
+        + " baseline."
+        + (programLevel.length > 0
+          ? `\n\ntsc reported these program-level errors:\n${programLevel.join("\n")}`
+          : `\n\ntsc produced no program-level errors either. Full output:\n${tscStdout}`),
+    };
+  }
+
+  // This must stay above both update and compare. A non-empty diagnostic measurement says only
+  // that TypeScript checked *some* file; it does not prove a narrowed config included every
+  // intended source. The independent inventory covers existing baselined files and new files
+  // that have no baseline entry yet.
+  if (expectedInventory.size === 0) {
+    return {
+      kind: "refuse",
+      exitCode: 1,
+      message:
+        "the independent TypeScript source inventory was empty. Refusing to compare or write a"
+        + " baseline because program coverage cannot be established.",
+    };
+  }
+  const missingSources = missingExpectedSources(expectedInventory, programFiles);
+  if (missingSources.length > 0) {
+    const preview = missingSources.slice(0, 20);
+    return {
+      kind: "refuse",
+      exitCode: 1,
+      message:
+        `tsc omitted ${missingSources.length} expected TypeScript source file(s) from its`
+        + " program. Refusing to compare or write a baseline.\n"
+        + preview.map((file) => `  ${file}\n`).join("")
+        + (missingSources.length > preview.length
+          ? `  … and ${missingSources.length - preview.length} more\n`
+          : ""),
+    };
   }
 
   if (update) {
@@ -398,42 +507,91 @@ function main() {
           : ""),
       files: sorted,
     };
-    writeFileSync(BASELINE, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
-    process.stdout.write(
-      `[test-typecheck] baseline written: ${counts.size} files, ${total} errors\n`,
-    );
-    return;
+    return {
+      kind: "write",
+      exitCode: 0,
+      payload,
+      message: `[test-typecheck] baseline written: ${counts.size} files, ${total} errors\n`,
+    };
   }
 
   if (!baseline.exists) {
-    throw new Error(
-      `baseline ${BASELINE} does not exist; run check:typecheck-tests:update to create it`,
-    );
+    return {
+      kind: "refuse",
+      exitCode: 1,
+      message: `baseline ${BASELINE} does not exist; run check:typecheck-tests:update to create it`,
+    };
   }
   const { regressed, improved, fixed } = compareToBaseline(counts, onDiskFiles);
 
   if (regressed.length > 0) {
-    process.stderr.write("[test-typecheck] new type errors in files the baseline covers\n");
-    for (const row of regressed) {
-      process.stderr.write(`  ${row.file}: ${row.before} -> ${row.after}\n`);
-    }
-    process.stderr.write(
-      "\nThese files are typechecked by tsconfig.tests.json. Fix the errors — do NOT\n"
-      + "re-baseline to make this pass. `bun run check:typecheck-tests:update` exists for\n"
-      + "recording IMPROVEMENTS after you have cleaned a file.\n",
-    );
-    process.exit(1);
+    return {
+      kind: "regressed",
+      exitCode: 1,
+      message:
+        "[test-typecheck] new type errors in files the baseline covers\n"
+        + regressed.map((row) => `  ${row.file}: ${row.before} -> ${row.after}\n`).join("")
+        + "\nThese files are typechecked by tsconfig.tests.json. Fix the errors — do NOT\n"
+        + "re-baseline to make this pass. `bun run check:typecheck-tests:update` exists for\n"
+        + "recording IMPROVEMENTS after you have cleaned a file.\n",
+    };
   }
 
   const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
-  process.stdout.write(
-    `[test-typecheck] baseline held: ${counts.size} files, ${total} errors`
-    + `${improved.length > 0 || fixed.length > 0
-      ? ` (${improved.length} file(s) improved, ${fixed.length} fully fixed —`
-        + " run check:typecheck-tests:update to lock it in)"
-      : ""}\n`,
-  );
+  const changeSummary = improved.length > 0 || fixed.length > 0
+    ? ` (${improved.length} file(s) improved, ${fixed.length} fully fixed — run`
+      + " check:typecheck-tests:update to lock it in)"
+    : "";
+  return {
+    kind: "hold",
+    exitCode: 0,
+    message: `[test-typecheck] baseline held: ${counts.size} files, ${total} errors${changeSummary}\n`,
+  };
+}
+
+function writeBaseline(payload) {
+  writeFileSync(BASELINE, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Execute the gate through a narrow, injectable seam.
+ *
+ * `decide` owns the ordered policy; this function owns I/O. Keeping that boundary explicit lets
+ * the self-test prove that every refusal is evaluated before a baseline write and that a
+ * regression reaches the process exit code, without spawning a real compiler.
+ */
+export function runGate({
+  argv = process.argv.slice(2),
+  loadBaseline = readBaseline,
+  measure = runTsc,
+  loadExpectedInventory = readExpectedSourceFiles,
+  saveBaseline = writeBaseline,
+  writeStdout = (message) => process.stdout.write(message),
+  writeStderr = (message) => process.stderr.write(message),
+} = {}) {
+  try {
+    const decision = decide({
+      update: argv.includes("--update-baseline"),
+      baseline: loadBaseline(),
+      measurement: measure(),
+      expectedInventory: loadExpectedInventory(),
+    });
+    if (decision.kind === "write") saveBaseline(decision.payload);
+    if (decision.exitCode === 0) writeStdout(decision.message);
+    else writeStderr(decision.message);
+    return decision.exitCode;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    writeStderr(`[test-typecheck] ${message}\n`);
+    return 1;
+  }
+}
+
+export function main(deps) {
+  const exitCode = runGate(deps);
+  process.exitCode = exitCode;
+  return exitCode;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
