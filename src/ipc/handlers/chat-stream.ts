@@ -45,9 +45,11 @@ export type ChatStreamSink = (channel: string, payload: unknown) => void;
  *
  * Those replay paths re-send TEXT THAT WAS ALREADY STORED, so this default is a
  * claim about the click that triggered the replay — not about who authored the
- * text. {@link runStreamedTurn} therefore re-derives the origin from the input's
- * envelope, which is why replaying a staged turn cannot launder it into a
- * user-keyboard turn.
+ * text. Their registrar upgrades the claim from the raw staged envelope before
+ * DLP can rewrite a source header; {@link runStreamedTurn} then re-derives the
+ * origin from the provider-bound envelope or fails closed if that header is no
+ * longer parseable. A replayed staged turn therefore cannot launder itself into
+ * a user-keyboard turn.
  */
 export const STREAM_TURN_OPTIONS = { inputOrigin: "user-keyboard" as const };
 
@@ -109,7 +111,7 @@ export async function runStreamedTurn(
   const envelope = parseStagedEnvelope(input);
   const claimedKind = stagedOriginForInput(options.inputOrigin);
   // Fail CLOSED when a staged origin arrives with an unreadable envelope. It is
-  // reachable without an attacker: DLP redaction (`sanitizeOutgoingInput`) runs
+  // reachable without an attacker: outgoing DLP redaction runs
   // between the send gate and here, and a serverId that trips a PII pattern is
   // rewritten INSIDE the fence header. Returning `null` there would silently drop
   // the turn's staged origin — the exact fail-open this table exists to remove.

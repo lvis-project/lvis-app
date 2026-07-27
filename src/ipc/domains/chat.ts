@@ -20,6 +20,7 @@ import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
+import { parseStagedEnvelope, isMissingStagedEnvelopeErrorMessage } from "../../shared/staged-origins.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
@@ -42,6 +43,7 @@ import {
   isSafeSessionId,
   personaPromptIdFromUserMessage,
   resolvePersonaRolePrompt,
+  sanitizeOutgoingTurnContent,
   sanitizeOutgoingInput,
   markMainActiveAfterTurn,
   prepareParentMailboxTurn,
@@ -55,6 +57,11 @@ const log = createLogger("chat");
 const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
 const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
 const PROJECT_NOT_ALLOWED = { ok: false, error: "project-not-allowed" } as const;
+
+function isMissingStagedEnvelopeError(error: unknown): boolean {
+  return error instanceof Error
+    && isMissingStagedEnvelopeErrorMessage(error.message);
+}
 
 // ─── Chat import (#1500 / E3) — reverse of chat.export ────────────────────
 // Mirrors the export SOT shape (chat.export handler below, JSON branch):
@@ -406,19 +413,34 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const sink = buildSink(win?.webContents);
     const streamId = allocateStreamId();
     return trackStreamTurn(async () => {
+      // Edit/resend and history replay reach the provider through this separate
+      // main-chat path. Keep their input (including folded text attachments)
+      // under the same DLP boundary as a normal `chat:send` turn while
+      // preserving non-text attachments.
+      //
+      // Keep only the fixed staged-origin enum before DLP can rewrite a source
+      // header into a non-parseable placeholder. Passing that enum as the
+      // claim below lets runStreamedTurn fail closed rather than downgrade a
+      // replayed staged turn to user-keyboard; the raw source never crosses
+      // this boundary.
+      const replayStagedInputOrigin = parseStagedEnvelope(input)?.kind.inputOrigin;
+      const sanitized = sanitizeOutgoingTurnContent(settingsService, sink, input, attachments);
       const result = await runStreamedTurn(
         conversationLoop,
-        input,
+        sanitized.input,
         sink,
         streamId,
         {
           ...STREAM_TURN_OPTIONS,
-          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          ...(replayStagedInputOrigin ? { inputOrigin: replayStagedInputOrigin } : {}),
+          ...(sanitized.attachments && sanitized.attachments.length > 0
+            ? { attachments: sanitized.attachments }
+            : {}),
           ...(rolePrompt ? { rolePrompt } : {}),
           ...(displayText !== undefined ? { displayText } : {}),
         },
       );
-      await markMainActiveAfterTurn(deps, input);
+      await markMainActiveAfterTurn(deps, sanitized.input);
       return result;
     });
   };
@@ -700,9 +722,20 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
     const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
     if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
+    const messages = [...history];
     conversationLoop.getHistory().truncate(historyIndex);
-    const result = await streamTurn(newText, undefined, personaPrompt.rolePrompt);
-    return { ok: true, result };
+    try {
+      const result = await streamTurn(newText, undefined, personaPrompt.rolePrompt);
+      return { ok: true, result };
+    } catch (err) {
+      // A provider-bound replay can fail closed before runTurn (for example
+      // when DLP redacts a staged provenance header). Keep the original
+      // conversation intact instead of turning a safe rejection into data loss.
+      if (isMissingStagedEnvelopeError(err)) {
+        conversationLoop.getHistory().restore(messages);
+      }
+      throw err;
+    }
   });
 
   ipcMain.handle(CHANNELS.chat.fork, async (e, messageIndex: number) => {
@@ -801,7 +834,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
       );
       return { ok: true, result };
     } catch (err) {
-      if (opts.restoreOnFailure) {
+      // Retry intentionally keeps its legacy behavior for ordinary stream
+      // failures, but a DLP-induced staged-header rejection happens before
+      // provider work and must never turn the pre-send truncate into data loss.
+      if (opts.restoreOnFailure || isMissingStagedEnvelopeError(err)) {
         conversationLoop.getHistory().restore(messages);
       }
       throw err;

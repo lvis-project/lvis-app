@@ -17,7 +17,7 @@ import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import { PERSONA_PROMPT_ID_ALLOWLIST } from "../../main/persona-prompt-store.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
-import type { GenericMessage } from "../../engine/llm/types.js";
+import type { GenericMessage, UserContentPart } from "../../engine/llm/types.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
@@ -344,32 +344,82 @@ export function parseChatSendPayload(
   };
 }
 
+export interface SanitizedOutgoingTurnContent {
+  input: string;
+  attachments: UserContentPart[] | undefined;
+}
+
 /**
- * Apply PII redaction to outgoing chat input. On a hit, publishes a
- * `redact_notice` stream frame through the sink (byte-identical to the pre-C10
- * `webContents.send(lvis:chat:stream, ...)` call) and returns the redacted
- * text; otherwise returns the input unchanged.
+ * Apply PII redaction immediately before a main chat turn reaches the provider
+ * path. The user input and every validated text attachment are distinct DLP
+ * spans, so the count-only DLP audit remains attributable without recording
+ * raw text. The renderer receives one aggregate notice for the logical turn.
+ */
+export function sanitizeOutgoingTurnContent(
+  settingsService: IpcDeps["settingsService"],
+  sink: ChatStreamSink,
+  input: string,
+  attachments: UserContentPart[] | undefined,
+): SanitizedOutgoingTurnContent {
+  const privacy = settingsService.get("privacy");
+  if (!privacy?.piiRedactEnabled) return { input, attachments };
+
+  let effectiveInput = input;
+  let effectiveAttachments = attachments;
+  let totalCount = 0;
+  const counts: Record<string, number> = {};
+  const addResult = (result: ReturnType<typeof redactForLLM>) => {
+    totalCount += result.totalCount;
+    for (const [kind, count] of Object.entries(result.counts)) {
+      counts[kind] = (counts[kind] ?? 0) + count;
+    }
+  };
+
+  const inputResult = redactForLLM(input);
+  addResult(inputResult);
+  if (inputResult.totalCount > 0) effectiveInput = inputResult.redacted;
+
+  if (attachments) {
+    for (let index = 0; index < attachments.length; index += 1) {
+      const part = attachments[index]!;
+      if (part.type !== "text") continue;
+      const result = redactForLLM(part.text);
+      addResult(result);
+      if (result.totalCount === 0) continue;
+      const redactedAttachments =
+        effectiveAttachments === attachments
+          ? [...attachments]
+          : effectiveAttachments ?? [...attachments];
+      redactedAttachments[index] = { ...part, text: result.redacted };
+      effectiveAttachments = redactedAttachments;
+    }
+  }
+
+  if (totalCount > 0) {
+    // `redactForLLM` writes one count-only audit row per hit-bearing text span.
+    // The stream/UI surface is deliberately turn-level: one notice, no raw text
+    // or resource URI in this warning.
+    sink(CHANNELS.chat.stream, {
+      type: "redact_notice",
+      count: totalCount,
+      byKind: counts,
+    });
+    log.warn({ counts }, `outgoing turn content redacted — count=${totalCount}`);
+  }
+
+  return { input: effectiveInput, attachments: effectiveAttachments };
+}
+
+/**
+ * Backward-compatible input-only entry point for callers that have no content
+ * parts. Main chat sends use `sanitizeOutgoingTurnContent` above.
  */
 export function sanitizeOutgoingInput(
   settingsService: IpcDeps["settingsService"],
   sink: ChatStreamSink,
   input: string,
 ): string {
-  let effective = input;
-  const privacy = settingsService.get("privacy");
-  if (privacy?.piiRedactEnabled && typeof input === "string") {
-    const r = redactForLLM(input);
-    if (r.totalCount > 0) {
-      effective = r.redacted;
-      sink(CHANNELS.chat.stream, {
-        type: "redact_notice",
-        count: r.totalCount,
-        byKind: r.counts,
-      });
-      log.warn({ counts: r.counts }, `user draft redacted — count=${r.totalCount}`);
-    }
-  }
-  return effective;
+  return sanitizeOutgoingTurnContent(settingsService, sink, input, undefined).input;
 }
 
 /**
@@ -459,7 +509,6 @@ export async function handleChatSend(
   // parts. We validate the shape here so the conversation loop never
   // sees garbage.
   const validated = validateUserContentParts(attachments);
-  const effective = sanitizeOutgoingInput(settingsService, ctx.sink, input);
   const streamId = ctx.allocateStreamId();
   return ctx.trackStreamTurn(async () => {
     // The mailbox snapshot belongs to the same lease as the receiving turn.
@@ -468,14 +517,18 @@ export async function handleChatSend(
     const mailboxTurn = inputOrigin === "user-keyboard" || inputOrigin === "queue-auto"
       ? await prepareParentMailboxTurn(deps)
       : null;
+    // Redaction is inside the accepted turn lease: an overlapping send rejected
+    // as `streaming-active` must not create a notice or DLP audit record for a
+    // turn that never reaches the provider.
+    const sanitized = sanitizeOutgoingTurnContent(settingsService, ctx.sink, input, validated);
     const result = await runStreamedTurn(
       conversationLoop,
-      effective,
+      sanitized.input,
       ctx.sink,
       streamId,
       {
         ...STREAM_TURN_OPTIONS,
-        attachments: validated,
+        attachments: sanitized.attachments,
         inputOrigin,
         ...(inputOrigin === "user-keyboard" && userActivation === true
           ? { requestAnchorRawIntent: input }
@@ -490,7 +543,7 @@ export async function handleChatSend(
       },
     );
     await acknowledgeParentMailboxAfterTurn(deps, mailboxTurn, result);
-    await markMainActiveAfterTurn(deps, effective);
+    await markMainActiveAfterTurn(deps, sanitized.input);
     return result;
   });
 }
