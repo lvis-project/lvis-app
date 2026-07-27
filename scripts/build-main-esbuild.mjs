@@ -26,6 +26,9 @@ const manifestPath = resolve(outdir, "bundle-manifest.json");
 const watchMode = process.argv.includes("--watch");
 
 const buildOptions = {
+  // esbuild uses the caller's cwd for the module-label comments it emits. Pin
+  // it to this repository so the byte-budget is independent of invocation cwd.
+  absWorkingDir: repoRoot,
   entryPoints: { main: resolve(repoRoot, "src", "main.ts") },
   outdir,
   entryNames: "[name]",
@@ -34,6 +37,9 @@ const buildOptions = {
   format: "esm",
   splitting: true,
   metafile: true,
+  // A worktree may link node_modules to another checkout. Keep the logical
+  // import path so generated wrapper labels stay independent of that target.
+  preserveSymlinks: true,
   platform: "node",
   target: ["node22"],
   legalComments: "none",
@@ -144,7 +150,10 @@ if (watchMode) {
     requiredAsyncEntryPoint: resolve(repoRoot, "src", "boot.ts"),
   });
   assertMainBundleBudget(bundleMeasurement, MAIN_BUNDLE_BUDGETS);
-  const bundleManifest = createMainBundleManifest(result.metafile, { outdir });
+  const bundleManifest = createMainBundleManifest(result.metafile, {
+    outdir,
+    absWorkingDir: repoRoot,
+  });
   writeFileSync(manifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`, "utf8");
   process.stdout.write(`${formatMainBundleBudget(bundleMeasurement)}\n`);
 
