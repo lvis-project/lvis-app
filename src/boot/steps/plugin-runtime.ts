@@ -494,14 +494,14 @@ export async function initPluginRuntime(
     await pluginRuntime.startAll();
     log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 
-    // Pre-register the per-partition `setPreloads(...)` policy for every
+    // Pre-register the per-partition session preload policy for every
     // loaded plugin (#498). Electron's `<webview partition="persist:plugin:..."
   // preload="...">` honors `preload=` only when sandbox=no; with sandbox=yes
   // the preload script must be registered on the partition's Session via
-  // `session.setPreloads()`. The previous attach-time hook in main.ts
+  // `session.registerPreloadScript()`. The previous attach-time hook in main.ts
   // tries to read `contents.session.partition` to decide which partition
   // got attached, but that property is undocumented and returns
-  // `undefined` on current Electron — so the hook never fires `setPreloads`
+  // `undefined` on current Electron — so the hook never registers the preload
   // and plugin webviews load without the `lvisPlugin` contextBridge,
   // surfacing as "lvisPlugin bridge missing" in the shell. Pre-registering
   // by walking the loaded-plugin set sidesteps the partition-name read
