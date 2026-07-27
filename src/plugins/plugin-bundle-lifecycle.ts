@@ -8,6 +8,7 @@ import type { SkillStore } from "../main/skill-store.js";
 import type { McpManager, PreparedBundledMcpGeneration } from "../mcp/mcp-manager.js";
 import type { PluginLoopbackManager } from "../mcp/plugin-loopback-manager.js";
 import { PluginMcpTrustStore, preparePluginMcpGeneration } from "../mcp/plugin-mcp-projection.js";
+import { pluginArtifactGenerationId } from "./plugin-artifact-identity.js";
 import { installReceiptPath } from "./plugin-install-receipt.js";
 import {
   materializePluginContributions,
@@ -413,11 +414,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
         installReceiptPath(this.deps.receiptCacheRoot, runtime.installId ?? pluginId),
         "utf8",
       );
-    const artifactGenerationId = createHash("sha256")
-      .update(manifestRaw)
-      .update("\0")
-      .update(receiptRaw)
-      .digest("hex");
+    const artifactGenerationId = pluginArtifactGenerationId(manifestRaw, receiptRaw);
     const generationId = createHash("sha256")
       .update(artifactGenerationId)
       .update("\0")
