@@ -543,7 +543,7 @@ jobs:
             --env "PYTHONPATH=/app/e2e:/app/src" \
             --entrypoint /bin/sh \
             "m4-marketplace:$NONCE" \
-            -lc '
+            -c '
               set -eu
               signer_json="$(python /app/e2e/scripts/print_test_poc_signer_env.py --format json)"
               signer="$(printf "%s" "$signer_json" | python -c "import json,sys; print(json.load(sys.stdin)[\"MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1\"])")"
