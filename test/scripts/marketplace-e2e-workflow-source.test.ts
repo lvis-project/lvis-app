@@ -133,6 +133,19 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     );
   });
 
+  it("installs the Host Electron runtime while the image build has network access", () => {
+    const nonRoot = hostDockerfile.indexOf("USER 10001:10001");
+    const install = hostDockerfile.indexOf(
+      "electron_config_cache=/tmp/electron-cache /usr/local/bin/node node_modules/electron/install.js",
+    );
+    const cacheCleanup = hostDockerfile.indexOf("rm -rf /tmp/electron-cache");
+    const verify = hostDockerfile.indexOf("Electron binary missing");
+    expect(install).toBeGreaterThan(nonRoot);
+    expect(install).toBeGreaterThan(hostDockerfile.indexOf("bun install --frozen-lockfile"));
+    expect(cacheCleanup).toBeGreaterThan(install);
+    expect(verify).toBeGreaterThan(cacheCleanup);
+  });
+
   it("pins every third-party action to a full commit SHA", () => {
     for (const match of workflow.matchAll(
       /^\s*uses:\s*([^@\s]+)@([^\s#]+)/gmu,
