@@ -100,4 +100,4 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 - [구현 철학](../vision/philosophy.md)
 - [비전 & 골](../vision/README.md)
 - [실행 가이드](../guides/getting-started.md)
-- [플러그인 개발 가이드](../guides/plugin-development.md)
+- [현재 English 플러그인 개발 가이드](../../guides/plugin-development.md)
