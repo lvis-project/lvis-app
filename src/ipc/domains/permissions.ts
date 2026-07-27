@@ -767,6 +767,9 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     if (!snapshot) {
       return { ok: false, error: "no-such-request", message: "user-approval record: no in-flight ApprovalRequest for requestId" };
     }
+    if (!snapshot.durableApprovalRecordAllowed) {
+      return { ok: false, error: "one-shot-not-recordable", message: "user-approval record: one-shot approvals cannot be recorded" };
+    }
     try {
       // Canonicalize at IPC handler to catch any non-renderer
       // callers that bypass the renderer-side canonicalization. Non-JSON or

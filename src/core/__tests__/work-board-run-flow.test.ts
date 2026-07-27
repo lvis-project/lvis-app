@@ -637,6 +637,11 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       for (const r of requests) {
         expect((r as { toolName: string }).toolName).toBe("work_board_run");
         expect((r as { kind: string }).kind).toBe("agent-action");
+        expect((r as { allowedChoices?: unknown }).allowedChoices).toEqual([
+          "allow-once",
+          "deny-once",
+        ]);
+        expect((r as { durableApprovalRecordAllowed?: unknown }).durableApprovalRecordAllowed).toBe(false);
       }
     } finally {
       cleanup();

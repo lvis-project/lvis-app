@@ -1132,6 +1132,7 @@ export async function authorizeToolInvocation(
                 // This route intentionally has no durable approval record:
                 // its substrate is an honest plain host child for this call only.
                 allowedChoices: ["allow-once", "deny-once"] as const,
+                durableApprovalRecordAllowed: false as const,
                 forceExplicit: true as const,
                 ...(hostShellExecutionPermitBinding === undefined
                   ? {}
