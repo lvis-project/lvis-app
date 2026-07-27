@@ -146,6 +146,12 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     expect(verify).toBeGreaterThan(cacheCleanup);
   });
 
+  it("installs xauth alongside Xvfb for the Host UI lifecycle", () => {
+    expect(hostDockerfile).toMatch(
+      /^\s*xauth \\\r?\n\s*xvfb \\/mu,
+    );
+  });
+
   it("pins every third-party action to a full commit SHA", () => {
     for (const match of workflow.matchAll(
       /^\s*uses:\s*([^@\s]+)@([^\s#]+)/gmu,
