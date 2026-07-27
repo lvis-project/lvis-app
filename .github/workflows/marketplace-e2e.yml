@@ -536,6 +536,7 @@ jobs:
             --env "PUBLISHER_KEY=$PUBLISHER_KEY" \
             --env "ADMIN_KEY=$ADMIN_KEY" \
             --env "MARKETPLACE_DB_URL=sqlite+aiosqlite:////tmp/m4-marketplace.db" \
+            --env "LVIS_MARKETPLACE_STORAGE_DIR=/tmp/m4-marketplace-storage" \
             --env "LVIS_MARKETPLACE_RATE_LIMIT_DISABLED=1" \
             --env "LVIS_MARKETPLACE_SKIP_BOOTSTRAP=1" \
             --env "LVIS_MARKETPLACE_PLUGIN_SCHEMA_REMOTE_ENABLED=false" \
