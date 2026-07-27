@@ -31,6 +31,7 @@ import {
 import {
   getDeclaredEmittedEvents,
 } from "./manifest-validation.js";
+import { CapabilityDependencies } from "./capability-dependencies.js";
 import {
   buildPluginContext,
   resolveRealEntryPath,
@@ -134,10 +135,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimePublicationState {
       // Runtime identity is the literal manifest id. A registry id is only a
       // deployment alias and must not own tools, events, grants, or HostApi.
       const pluginId = outcome.manifest.id;
-      enabledManifestSnapshots.set(pluginId, {
-        manifest: outcome.manifest,
-        approvedPluginAccess: outcome.approvedPluginAccess,
-      });
+      // `requires.capabilities` is satisfied by installed *enabled* plugins.
+      // Preserve inactive manifests below for Settings/re-enable metadata, but
+      // never let an `enabled: false` registry entry advertise a capability
+      // during boot.
+      if (outcome.plan.enabled) {
+        enabledManifestSnapshots.set(pluginId, {
+          manifest: outcome.manifest,
+          approvedPluginAccess: outcome.approvedPluginAccess,
+        });
+      }
       this.rememberPluginInstallAlias(outcome.manifest.id, outcome.plan.pluginIdHint);
       this.knownPluginManifests.set(pluginId, outcome.manifest);
       this.knownPluginAccessGrants.set(pluginId, outcome.approvedPluginAccess);
@@ -1043,9 +1050,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimePublicationState {
 
     const requiredCapabilities = manifest.requires?.capabilities ?? [];
     if (requiredCapabilities.length > 0) {
-      const availableManifests = [...this.knownPluginManifests.entries()]
-        .filter(([id]) => id !== manifest.id)
-        .map(([, m]) => m);
+      const availableManifests = this.capabilityDependencies().enabledManifests(manifest.id);
       const dependencyResult = resolveDependencies(requiredCapabilities, availableManifests);
       if (!dependencyResult.ok) {
         if (!canCommit()) return "cancelled";
@@ -1309,6 +1314,16 @@ export class PluginRuntimeLifecycle extends PluginRuntimePublicationState {
     this.perf.recordStartup(manifest.id, startupMs);
     this.onEnable?.(manifest.id);
     return "started";
+  }
+
+  /** Capability providers are installed enabled manifests, not inactive metadata. */
+  protected capabilityDependencies(): CapabilityDependencies {
+    return new CapabilityDependencies(this.knownPluginManifests, this.inactivePluginIds, this.disabledPluginIds);
+  }
+
+  protected assertEnabledCapabilityDependencies(manifest: PluginManifest): void {
+    const missing = this.capabilityDependencies().missing(manifest);
+    if (missing.length > 0) throw new Error(`plugin re-enable blocked — missing required capabilities: ${missing.join(", ")}`);
   }
 
   /** I2 — Plugin live-reload (dev only). */

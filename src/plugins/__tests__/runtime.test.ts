@@ -1228,7 +1228,7 @@ describe("PluginRuntime.disable", () => {
     ).toThrow(/not allowed to emit/i);
   });
 
-  it("drops plugins whose required capabilities are not provided by enabled manifests", async () => {
+  it("does not let a disabled provider satisfy an enabled consumer's capabilities", async () => {
     const providerDir = join(installedDir, "cap-provider");
     await mkdir(providerDir, { recursive: true });
     await writeFile(
@@ -1304,7 +1304,7 @@ describe("PluginRuntime.disable", () => {
     );
 
     await writeTestPluginRegistry({ registryPath }, [
-      { id: "cap-provider", manifestPath: providerManifestPath, enabled: true },
+      { id: "cap-provider", manifestPath: providerManifestPath, enabled: false },
       {
         id: "needs-calendar",
         manifestPath: consumerManifestPath,
@@ -1316,10 +1316,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.listPluginIds()).toContain("cap-provider");
+    expect(runtime.listPluginIds()).not.toContain("cap-provider");
     expect(runtime.listPluginIds()).not.toContain("needs-calendar");
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/needs-calendar rejected .*mail-source/),
+      expect.stringMatching(/needs-calendar rejected .*calendar-source.*mail-source/),
     );
     errSpy.mockRestore();
   });
@@ -2157,6 +2157,45 @@ export default async function createPlugin({ hostApi }) {
     expect(afterA).toBe("hi-p-a-1");
     expect(beforeB).toBe("hi-p-b-1");
     expect(afterB).toBe("hi-p-b-1");
+  });
+
+  it("addPlugin does not let a disabled provider satisfy a consumer capability", async () => {
+    const providerPath = await writePlugin("p-calendar-provider");
+    const providerManifest = JSON.parse(await readFile(providerPath, "utf-8"));
+    providerManifest.capabilities = ["calendar-source"];
+    await writeFile(providerPath, JSON.stringify(providerManifest), "utf-8");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-calendar-provider", manifestPath: providerPath, enabled: false }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    const consumerPath = await writePlugin("p-calendar-consumer");
+    const consumerManifest = JSON.parse(await readFile(consumerPath, "utf-8"));
+    consumerManifest.requires = { capabilities: ["calendar-source"] };
+    await writeFile(consumerPath, JSON.stringify(consumerManifest), "utf-8");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "p-calendar-provider", manifestPath: providerPath, enabled: false },
+          { id: "p-calendar-consumer", manifestPath: consumerPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin("p-calendar-consumer")).rejects.toThrow(
+      /Missing capabilities: calendar-source/,
+    );
+    expect(runtime.listPluginIds()).not.toContain("p-calendar-provider");
+    expect(runtime.listPluginIds()).not.toContain("p-calendar-consumer");
   });
 
   it("addPlugin loads a newly-registered plugin without restarting others", async () => {

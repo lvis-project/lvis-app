@@ -22,6 +22,10 @@ import { withElectronNativeRebuildLock } from "../lib/electron-native-modules.mj
 import { ensureElectronAbiBetterSqlite3 } from "./node-native-abi.mjs";
 import { spawnSyncPortable as spawnSync } from "./spawn-command.mjs";
 import {
+  APP_TYPECHECK_GATE_SCRIPTS,
+  getMissingPackageScripts,
+} from "./app-typecheck-gate.mjs";
+import {
   isCanonicalGitPath,
   isReviewOnlyDocumentationPath,
   isSensitiveMarkdownPath,
@@ -693,6 +697,19 @@ function runJavaScriptFile(dir, relativePath) {
   run(getJsRuntime(), [filePath], dir);
 }
 
+function runAppTypecheckGate(dir, checkLabel) {
+  const missingScripts = getMissingPackageScripts(
+    APP_TYPECHECK_GATE_SCRIPTS,
+    (scriptName) => hasPackageScript(dir, scriptName)
+  );
+  if (missingScripts.length > 0) {
+    throw new Error(
+      `lvis-app ${checkLabel} requires package script(s): ${missingScripts.join(", ")}`
+    );
+  }
+  runPackageScripts(dir, APP_TYPECHECK_GATE_SCRIPTS);
+}
+
 function runAppChecks(dir) {
   const bun = available(commands.bun);
   if (!bun) {
@@ -702,7 +719,9 @@ function runAppChecks(dir) {
     runPackageScripts(join(dir, "packages", "plugin-sdk"), ["check:drift", "build"]);
   }
   ensureAppTestRuntimeAbi(dir);
-  runPackageScripts(dir, ["lint", "check:knip", "typecheck", "test", "build"]);
+  runPackageScripts(dir, ["lint", "check:knip"]);
+  runAppTypecheckGate(dir, "full checks");
+  runPackageScripts(dir, ["test", "build"]);
   runJavaScriptFile(dir, "scripts/check-tool-namespace.mjs");
 }
 
@@ -710,9 +729,6 @@ function runAppTargetedVitestChecks(dir, testFiles, supportTestFiles = []) {
   const bun = available(commands.bun);
   if (!bun) {
     throw new Error("bun is required for targeted lvis-app Vitest checks");
-  }
-  if (!hasPackageScript(dir, "typecheck")) {
-    throw new Error("lvis-app typecheck script is required for targeted Vitest checks");
   }
   if (!hasPackageScript(dir, "check:test-duplicates")) {
     throw new Error(
@@ -729,7 +745,7 @@ function runAppTargetedVitestChecks(dir, testFiles, supportTestFiles = []) {
     }
   }
 
-  runPackageScripts(dir, ["typecheck"]);
+  runAppTypecheckGate(dir, "targeted Vitest checks");
   run(bun, ["run", "check:test-duplicates", "--", "--fail-on-duplicates"], dir);
   ensureAppTestRuntimeAbi(dir);
   const vitestArgs = targetTestFiles.map((file) => `./${file}`);
@@ -737,10 +753,7 @@ function runAppTargetedVitestChecks(dir, testFiles, supportTestFiles = []) {
 }
 
 function runAppCommentOnlyChecks(dir) {
-  if (!hasPackageScript(dir, "typecheck")) {
-    throw new Error("lvis-app typecheck script is required for comment-only checks");
-  }
-  runPackageScripts(dir, ["typecheck"]);
+  runAppTypecheckGate(dir, "comment-only checks");
 }
 
 // ---------------------------------------------------------------------------
