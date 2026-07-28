@@ -46,7 +46,6 @@ function makeItem(id: string, minAppVersion?: string): PluginMarketplaceItem {
     publisher: "Test fixture",
     packageSpec: `@lvis/${id}@1.0.0`,
     packageName: `@lvis/${id}`,
-    tools: [],
     requires: minAppVersion ? { capabilities: [], minAppVersion } : undefined,
   };
 }
