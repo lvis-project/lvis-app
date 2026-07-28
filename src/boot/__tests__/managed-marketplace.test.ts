@@ -53,6 +53,7 @@ describe("resolveLegacyKeywordRepairIds", () => {
       { ...qualifyingCard, installFailureKind: "incompatible-app-version" as const },
       { ...qualifyingCard, installFailureMessage: "unknown property: 'startupTools'" },
       { ...qualifyingCard, installFailureMessage: undefined },
+      { ...qualifyingCard, installFailureMessage: "schema validation failed: /tools/0 unknown property: 'keywords'" },
     ])).toEqual([]);
   });
 });

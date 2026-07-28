@@ -54,7 +54,7 @@ export function resolveLegacyKeywordRepairIds(
       && card.loadStatus === "failed"
       && card.installFailureKind === "manifest-validation-error"
       && typeof card.installFailureMessage === "string"
-      && /unknown property:\s*['"]keywords['"]/i.test(card.installFailureMessage)
+      && /(?:^|\s)\/\s+unknown property:\s*['"]keywords['"]/i.test(card.installFailureMessage)
     ))
     .map((card) => card.id);
 }
