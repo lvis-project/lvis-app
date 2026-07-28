@@ -51,6 +51,19 @@ function makeItem(id: string, minAppVersion?: string): PluginMarketplaceItem {
   };
 }
 
+function makeUpgradeRequiredItem(id: string, minAppVersion: string): PluginMarketplaceItem {
+  return {
+    ...makeItem(id),
+    packageSpec: "",
+    packageName: "",
+    upgradeRequired: {
+      code: "upgrade_required",
+      minAppVersion,
+      message: `LVIS ${minAppVersion}+ is required to install this version. Update LVIS and try again.`,
+    },
+  };
+}
+
 describe("marketplace install minAppVersion gate", () => {
   let tmpDir: string;
 
@@ -129,6 +142,18 @@ describe("marketplace install minAppVersion gate", () => {
       threw = e as Error;
     }
     expect(threw).not.toBeInstanceOf(IncompatibleAppVersionError);
+  });
+
+  it("returns catalog update-required before plugin installation", async () => {
+    MOCK_APP_VERSION = "0.5.9";
+    const svc = makeTestPluginMarketplaceService(
+      tmpDir,
+      new StubFetcher([makeUpgradeRequiredItem("catalog-too-new", "1.2.3")]) as never,
+    );
+    await expect(svc.install("catalog-too-new")).rejects.toMatchObject({
+      required: "1.2.3",
+      current: "0.5.9",
+    });
   });
 
   it("blocks (throws IncompatibleAppVersionError) when minAppVersion > current app version", async () => {

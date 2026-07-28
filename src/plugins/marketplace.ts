@@ -17,7 +17,12 @@ import { isNewer } from "./update-detector.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
-import { ArtifactRollbackError, PluginArtifactStore, retryOnTransientFsLock } from "./plugin-artifact-store.js";
+import {
+  ArtifactRollbackError,
+  assertMarketplaceAppUpgradeNotRequired,
+  PluginArtifactStore,
+  retryOnTransientFsLock,
+} from "./plugin-artifact-store.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import {
   cleanupPendingPluginUpdateBackup,
@@ -535,7 +540,14 @@ export class PluginMarketplaceService {
     // Catalog cache is null when using the test mock fetcher; production
     // always has a cache base under `~/.lvis/plugins/.cache/` (set in
     // constructor).
-    const cacheBase = this.catalogCacheBase;
+    const cacheKey = this.fetcher.getCatalogCacheKey?.();
+    const cacheBase = this.catalogCacheBase === null
+      ? null
+      : cacheKey === undefined
+        ? this.catalogCacheBase
+        : cacheKey === null
+          ? null
+          : resolve(this.catalogCacheBase, "by-app-version", cacheKey);
     const useCache = cacheBase !== null && isOfflineCacheEnabled();
     let catalogPlugins: PluginMarketplaceItem[] | null = null;
 
@@ -674,6 +686,7 @@ export class PluginMarketplaceService {
       (x) => x.id === pluginId || x.slug === pluginId,
     );
     if (catalogItem) {
+      assertMarketplaceAppUpgradeNotRequired(catalogItem);
       assertNetworkAccessAcknowledgement({
         plugin: catalogItem,
         acknowledgement: options?.networkAccessAcknowledgement,
@@ -757,6 +770,7 @@ export class PluginMarketplaceService {
     if (!plugin) {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }
+    assertMarketplaceAppUpgradeNotRequired(plugin);
     const canonicalPluginId = plugin.id;
     if (seen.has(canonicalPluginId)) {
       return { pluginId: canonicalPluginId, installed: true };
@@ -1227,6 +1241,7 @@ export class PluginMarketplaceService {
           `Marketplace package "${pluginId}" is a ${plugin.pluginType} entry, not a plugin package`,
         );
       }
+      assertMarketplaceAppUpgradeNotRequired(plugin);
       assertNetworkAccessAcknowledgement({
         plugin,
         acknowledgement: options?.networkAccessAcknowledgement,
