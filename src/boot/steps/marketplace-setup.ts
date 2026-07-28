@@ -41,6 +41,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   if (marketplaceSettings.cloudBaseUrl) {
     marketplaceFetcher = new CloudMarketplaceFetcher({
       baseUrl: marketplaceSettings.cloudBaseUrl,
+      appVersion: app.getVersion(),
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
       allowPrivateNetwork: marketplaceSettings.cloudAllowPrivateNetwork,
     });
