@@ -1628,6 +1628,44 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
     );
   });
 
+  it("maps a no-compatible-version detail without an upgrade contract to a generic display-only row", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "generic-incompatible-detail",
+      name: "Generic incompatible detail",
+      latest_stable_version: "9.9.9",
+      latest_artifact_sha256: "a".repeat(64),
+      package_spec: "outer-package@9.9.9",
+      package_name: "outer-package",
+      install_policy: "admin",
+      plugin_type: "plugin",
+      requires: { min_app_version: "9.9.9" },
+      runtime: { transport: "http", url: "https://outer.example/mcp" },
+      app_version_resolution: "no_compatible_version",
+    }));
+
+    const detail = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).getPluginDetail("generic-incompatible-detail");
+
+    expect(detail).toMatchObject({
+      id: "generic-incompatible-detail",
+      packageSpec: "",
+      packageName: "",
+      pluginType: "plugin",
+      upgradeRequired: {
+        code: "upgrade_required",
+        message: "This package is unavailable in this version of LVIS. Update LVIS and try again.",
+      },
+    });
+    expect(detail?.upgradeRequired).not.toHaveProperty("minAppVersion");
+    expect(detail).not.toHaveProperty("version");
+    expect(detail).not.toHaveProperty("artifactSha256");
+    expect(detail).not.toHaveProperty("installPolicy");
+    expect(detail).not.toHaveProperty("requires");
+    expect(detail).not.toHaveProperty("mcpRuntime");
+  });
+
   it("fails closed when the update-required contract is malformed", async () => {
     mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
       slug: "incompatible-detail",
@@ -1638,6 +1676,20 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
         min_app_version: "1.2.3",
         message: "untrusted message",
       },
+    }));
+
+    await expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).getPluginDetail("incompatible-detail")).resolves.toBeNull();
+  });
+
+  it("fails closed when the update-required contract is explicitly null", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "incompatible-detail",
+      name: "Incompatible detail",
+      app_version_resolution: "no_compatible_version",
+      upgrade_required: null,
     }));
 
     await expect(new CloudMarketplaceFetcher({

@@ -125,7 +125,7 @@ describe("MarketplaceTab", () => {
     expect(screen.queryByTestId("marketplace:action:regular-plugin")).toBeNull();
   });
 
-  it("shows an update-required display row and blocks its install action", async () => {
+  it("shows a generic update-required display row and blocks its install action", async () => {
     const installMarketplacePlugin = vi.fn();
     Object.defineProperty(window, "lvisHost", {
       configurable: true,
@@ -143,8 +143,7 @@ describe("MarketplaceTab", () => {
       pluginType: "plugin",
       upgradeRequired: {
         code: "upgrade_required",
-        minAppVersion: "1.2.3",
-        message: "LVIS 1.2.3+ is required to install this version. Update LVIS and try again.",
+        message: "This package is unavailable in this version of LVIS. Update LVIS and try again.",
       },
     };
     const api = marketplaceTabApi({
@@ -155,7 +154,7 @@ describe("MarketplaceTab", () => {
     expect(await screen.findByTestId("marketplace:upgrade-required:future-plugin"))
       .toHaveTextContent("Update LVIS");
     expect(await screen.findByTestId("marketplace:upgrade-required-message:future-plugin"))
-      .toHaveTextContent("LVIS 1.2.3+ is required");
+      .toHaveTextContent("This package is unavailable in this version of LVIS.");
     const action = await screen.findByTestId("marketplace:action:future-plugin");
     expect((action as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(action);
