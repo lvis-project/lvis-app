@@ -946,9 +946,10 @@ export class PluginMarketplaceService {
    * version leaves the installed plugin untouched (no surprise downgrades).
     *
     * The only exception is a caller-requested legacy `keywords` repair for the
-    * fixed Git ID. It remains user-policy, requires a valid existing install
-    * and a strictly newer signed catalog version, never first-installs, and
-    * runs as actor="user".
+    * fixed Git ID. It requires an explicit existing `installSource: "user"`
+    * registry entry, a strictly newer signed catalog version, and no new
+    * networkAccess grant requiring UI acknowledgement. It never first-installs,
+    * cannot change a managed/local/legacy source, and runs as actor="user".
    *
    * Failure modes are intentionally graceful — marketplace unreachable or a
    * single plugin failing to install must NOT brick boot. Errors are logged
@@ -1043,6 +1044,27 @@ export class PluginMarketplaceService {
             await ensurePluginStateReadyForInstall(plugin.id);
             const currentRegistry = await readPluginRegistry(this.registryPath);
             const installedIds = await this.resolveInstalledIds(currentRegistry.plugins);
+            const currentEntry = currentRegistry.plugins.find(
+              (entry) => entry.id === plugin.id,
+            );
+            if (
+              candidate.kind === "legacy-keywords-repair"
+              && currentEntry?.installSource !== "user"
+            ) {
+              log.warn(
+                `ensureManagedInstalled: refusing legacy keywords repair for '${plugin.id}' without an existing user-owned registry entry`,
+              );
+              return "skipped";
+            }
+            if (
+              candidate.kind === "legacy-keywords-repair"
+              && buildNetworkAccessAcknowledgement(plugin.networkAccess)
+            ) {
+              log.warn(
+                `ensureManagedInstalled: skipping legacy keywords repair for '${plugin.id}' because network access needs user acknowledgement`,
+              );
+              return "skipped";
+            }
             if (installedIds.has(plugin.id)) {
               let installedVersion: string | null;
               try {

@@ -243,6 +243,24 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   }
 
 
+  async function writeGitRepairRegistry(
+    installSource: "admin" | "user" | "local-dev" | undefined,
+  ) {
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "lvis-plugin-git",
+          manifestPath: "lvis-plugin-git/plugin.json",
+          enabled: true,
+          ...(installSource ? { installSource } : {}),
+        }],
+      }),
+      "utf-8",
+    );
+  }
+
   it("blocks a managed reinstall before registry or artifact mutation while cleanup is pending", async () => {
     await writeAdminCatalog("2.0.0");
     await writeFile(
@@ -396,6 +414,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   it("repairs an installed Git legacy-keywords bridge under the user actor only", async () => {
     await writeGitRepairCatalog("0.1.12");
     const service = makeManagedService(testDir, marketplacePath);
+    await writeGitRepairRegistry("user");
     vi.spyOn(
       service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
       "resolveInstalledIds",
@@ -430,6 +449,77 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     });
   });
 
+  it.each(["admin", "local-dev", undefined])(
+    "does not repair Git when the existing registry source is %s",
+    async (installSource) => {
+      await writeGitRepairCatalog("0.1.12");
+      await writeGitRepairRegistry(installSource as "admin" | "local-dev" | undefined);
+      const service = makeManagedService(testDir, marketplacePath);
+      vi.spyOn(
+        service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
+        "resolveInstalledIds",
+      ).mockResolvedValue(new Set(["lvis-plugin-git"]));
+      vi.spyOn(
+        service as unknown as {
+          readInstalledVersionFromRegistry: (registry: unknown, id: string) => Promise<string | null>;
+        },
+        "readInstalledVersionFromRegistry",
+      ).mockResolvedValue("0.1.11");
+      const installSpy = vi.spyOn(
+        service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
+        "installWithDependencies",
+      );
+
+      const result = await service.ensureManagedInstalled({
+        activatePreparedArtifact: vi.fn() as never,
+        ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+        repairPluginIds: ["lvis-plugin-git"],
+      });
+
+      expect(installSpy).not.toHaveBeenCalled();
+      expect(result).toEqual({ installed: [], updated: [], failed: [] });
+    },
+  );
+
+  it("does not repair Git when the catalog adds unacknowledged network access", async () => {
+    await writeGitRepairCatalog("0.1.12");
+    await writeGitRepairRegistry("user");
+    const catalog = JSON.parse(await readFile(marketplacePath, "utf-8")) as {
+      plugins: Array<Record<string, unknown>>;
+    };
+    catalog.plugins[0]!.networkAccess = {
+      allowedDomains: ["api.example.com"],
+      reasoning: "Requires explicit user acknowledgement.",
+    };
+    await writeFile(marketplacePath, JSON.stringify(catalog), "utf-8");
+    const beforeRegistry = await readFile(registryPath, "utf-8");
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["lvis-plugin-git"]));
+    vi.spyOn(
+      service as unknown as {
+        readInstalledVersionFromRegistry: (registry: unknown, id: string) => Promise<string | null>;
+      },
+      "readInstalledVersionFromRegistry",
+    ).mockResolvedValue("0.1.11");
+    const installSpy = vi.spyOn(
+      service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
+      "installWithDependencies",
+    );
+
+    const result = await service.ensureManagedInstalled({
+      activatePreparedArtifact: vi.fn() as never,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      repairPluginIds: ["lvis-plugin-git"],
+    });
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({ installed: [], updated: [], failed: [] });
+    expect(await readFile(registryPath, "utf-8")).toBe(beforeRegistry);
+  });
+
   it("does not first-install an absent Git plugin for a legacy-keywords repair", async () => {
     await writeGitRepairCatalog("0.1.12");
     const service = makeManagedService(testDir, marketplacePath);
@@ -457,6 +547,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     async (installedVersion) => {
       await writeGitRepairCatalog("0.1.12");
       const service = makeManagedService(testDir, marketplacePath);
+      await writeGitRepairRegistry("user");
       vi.spyOn(
         service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
         "resolveInstalledIds",
