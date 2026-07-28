@@ -1144,23 +1144,29 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps the legacy catalog URL and appends an encoded app_version when configured", async () => {
+  it("keeps the legacy catalog URL and normalizes stable build metadata", async () => {
     mockedFetchPublic.mockResolvedValue(jsonResponse([]));
 
     await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
     }).listPlugins();
-    await new CloudMarketplaceFetcher({
+    const versionedFetcher = new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com/",
-      appVersion: "0.5.9+build 7",
-    }).listPlugins();
+      appVersion: "0.5.9+build.7",
+    });
+    await versionedFetcher.listPlugins();
 
     expect(mockedFetchPublic.mock.calls[0]?.[0]).toBe(
       "https://marketplace.example.com/api/v1/catalog",
     );
     expect(mockedFetchPublic.mock.calls[1]?.[0]).toBe(
-      "https://marketplace.example.com/api/v1/catalog?app_version=0.5.9%2Bbuild%207",
+      "https://marketplace.example.com/api/v1/catalog?app_version=0.5.9",
     );
+    expect(versionedFetcher.getCatalogCacheKey()).toBe("0.5.9");
+    expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+      appVersion: "0.5.9-preview",
+    }).getCatalogCacheKey()).toBeNull();
   });
 
   it("maps a resolved artifact atomically instead of using outer pointer policy", async () => {
@@ -1447,21 +1453,52 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
     });
   });
 
-  it("omits explicit no-compatible plugin/MCP rows but keeps marketplace assets", async () => {
+  it("keeps update-required display rows for every installable package type", async () => {
+    const upgradeRequired = {
+      code: "upgrade_required",
+      min_app_version: "1.2.3",
+      message: "LVIS 1.2.3+ is required to install this version. Update LVIS and try again.",
+    };
     mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
       plugins: [
         {
           slug: "incompatible-plugin",
           name: "Incompatible plugin",
           latest_stable_version: "9.9.9",
-          app_version_resolution: "no-compatible-version",
+          latest_artifact_sha256: "a".repeat(64),
+          package_spec: "outer-plugin@9.9.9",
+          package_name: "outer-plugin",
+          install_policy: "admin",
+          plugin_type: "plugin",
+          app_version_resolution: "no_compatible_version",
+          upgrade_required: upgradeRequired,
         },
         {
           slug: "incompatible-mcp",
           name: "Incompatible MCP",
-          plugin_type: "mcp",
           latest_stable_version: "9.9.9",
-          app_version_resolution: "no-compatible-version",
+          package_spec: "outer-mcp@9.9.9",
+          plugin_type: "mcp",
+          app_version_resolution: "no_compatible_version",
+          upgrade_required: upgradeRequired,
+        },
+        {
+          slug: "incompatible-agent",
+          name: "Incompatible agent",
+          latest_stable_version: "9.9.9",
+          package_spec: "outer-agent@9.9.9",
+          plugin_type: "agent",
+          app_version_resolution: "no_compatible_version",
+          upgrade_required: upgradeRequired,
+        },
+        {
+          slug: "incompatible-skill",
+          name: "Incompatible skill",
+          latest_stable_version: "9.9.9",
+          package_spec: "outer-skill@9.9.9",
+          plugin_type: "skill",
+          app_version_resolution: "no_compatible_version",
+          upgrade_required: upgradeRequired,
         },
         {
           id: "groq-provider",
@@ -1471,7 +1508,7 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
           package_name: "@lvis/groq-provider",
           plugin_type: "provider",
           provider_id: "groq",
-          app_version_resolution: "no-compatible-version",
+          app_version_resolution: "no_compatible_version",
         },
       ],
     }));
@@ -1481,8 +1518,30 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
       appVersion: "0.5.9",
     }).listPlugins();
 
-    expect(plugins).toHaveLength(1);
-    expect(plugins[0]).toMatchObject({
+    expect(plugins).toHaveLength(5);
+    for (const [id, pluginType] of Object.entries({
+      "incompatible-plugin": "plugin",
+      "incompatible-mcp": "mcp",
+      "incompatible-agent": "agent",
+      "incompatible-skill": "skill",
+    })) {
+      const item = plugins.find((candidate) => candidate.id === id);
+      expect(item).toMatchObject({
+        id,
+        pluginType,
+        packageSpec: "",
+        packageName: "",
+        upgradeRequired: {
+          code: "upgrade_required",
+          minAppVersion: "1.2.3",
+          message: upgradeRequired.message,
+        },
+      });
+      expect(item).not.toHaveProperty("version");
+      expect(item).not.toHaveProperty("artifactSha256");
+      expect(item).not.toHaveProperty("installPolicy");
+    }
+    expect(plugins.find((item) => item.id === "groq-provider")).toMatchObject({
       id: "groq-provider",
       pluginType: "provider",
       packageAsset: { type: "provider", providerId: "groq" },
@@ -1535,23 +1594,56 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
       appVersion: "0.5.9",
     }).listPlugins()).rejects.toThrow(/stable SemVer/);
   });
-  it("maps an explicit no-compatible detail to null and encodes its app version", async () => {
+  it("maps an explicit update-required detail without outer artifact metadata", async () => {
     mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
       slug: "incompatible-detail",
       name: "Incompatible detail",
       latest_stable_version: "9.9.9",
-      app_version_resolution: "no-compatible-version",
+      package_spec: "outer-package@9.9.9",
+      app_version_resolution: "no_compatible_version",
+      upgrade_required: {
+        code: "upgrade_required",
+        min_app_version: "1.2.3",
+        message: "LVIS 1.2.3+ is required to install this version. Update LVIS and try again.",
+      },
     }));
 
     const detail = await new CloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
-      appVersion: "0.5.9+build 7",
+      appVersion: "0.5.9+build.7",
     }).getPluginDetail("incompatible-detail");
 
-    expect(detail).toBeNull();
+    expect(detail).toMatchObject({
+      id: "incompatible-detail",
+      packageSpec: "",
+      packageName: "",
+      upgradeRequired: {
+        code: "upgrade_required",
+        minAppVersion: "1.2.3",
+      },
+    });
+    expect(detail).not.toHaveProperty("version");
     expect(mockedFetchPublic.mock.calls[0]?.[0]).toBe(
-      "https://marketplace.example.com/api/v1/plugins/incompatible-detail?app_version=0.5.9%2Bbuild%207",
+      "https://marketplace.example.com/api/v1/plugins/incompatible-detail?app_version=0.5.9",
     );
+  });
+
+  it("fails closed when the update-required contract is malformed", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "incompatible-detail",
+      name: "Incompatible detail",
+      app_version_resolution: "no_compatible_version",
+      upgrade_required: {
+        code: "upgrade_required",
+        min_app_version: "1.2.3",
+        message: "untrusted message",
+      },
+    }));
+
+    await expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).getPluginDetail("incompatible-detail")).resolves.toBeNull();
   });
 
 });
