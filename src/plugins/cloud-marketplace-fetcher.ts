@@ -39,6 +39,7 @@ import type {
   SignatureEnvelope,
 } from "./types.js";
 import { parseMcpOAuthMetadata, parseMcpRuntimeSpec } from "./mcp-runtime-spec.js";
+import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import {
   assertCompressedArtifactSize,
   MarketplaceArtifactLimitError,
@@ -64,6 +65,11 @@ const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export interface RealCloudMarketplaceConfig {
   baseUrl: string;
   apiKey?: string;
+  /**
+   * Running LVIS app version. When present, catalog reads ask the marketplace
+   * to select an artifact compatible with this exact host version.
+   */
+  appVersion?: string;
   timeoutMs?: number;
   /**
    * When true, allows guarded same-origin private/loopback marketplace calls.
@@ -104,7 +110,17 @@ interface ServerCatalogRow {
   /** Catalog-approved capabilities declared by this plugin (not dependency requirements). */
   capabilities?: unknown;
   /** S14: requires.capabilities[] (+ optional min_app_version) exposed by the server catalog. */
-  requires?: { capabilities?: unknown[]; min_app_version?: unknown } | null;
+  requires?: {
+    capabilities?: unknown;
+    min_app_version?: unknown;
+    minAppVersion?: unknown;
+  } | null;
+  /** Compatibility resolver result when catalog was requested with app_version. */
+  app_version_resolution?: unknown;
+  appVersionResolution?: unknown;
+  /** Immutable artifact selected by the compatibility resolver. */
+  resolved_artifact?: unknown;
+  resolvedArtifact?: unknown;
   /** lvis-marketplace#52: "plugin" (default) | "mcp". */
   plugin_type?: string;
   pluginType?: string;
@@ -176,18 +192,30 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     this.config = { ...this.config, allowPrivateNetwork: value };
   }
 
+  private withAppVersionQuery(path: string): string {
+    const configuredAppVersion = typeof this.config.appVersion === "string"
+      ? this.config.appVersion.trim()
+      : "";
+    return configuredAppVersion
+      ? `${path}?app_version=${encodeURIComponent(configuredAppVersion)}`
+      : path;
+  }
+
   async listPlugins(): Promise<PluginMarketplaceItem[]> {
-    const res = await this.request("GET", "/api/v1/catalog");
+    const res = await this.request("GET", this.withAppVersionQuery("/api/v1/catalog"));
     const data = (await res.json()) as unknown;
     const rows = this.extractRows(data);
-    return rows.map((row) => this.mapItem(row));
+    return rows.flatMap((row) => {
+      const item = this.mapItem(row);
+      return item ? [item] : [];
+    });
   }
 
   async getPluginDetail(slug: string): Promise<PluginMarketplaceItem | null> {
     try {
       const res = await this.request(
         "GET",
-        `/api/v1/plugins/${encodeURIComponent(slug)}`,
+        this.withAppVersionQuery(`/api/v1/plugins/${encodeURIComponent(slug)}`),
       );
       const data = (await res.json()) as unknown;
       return this.mapItem(this.asRow(data));
@@ -523,7 +551,17 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     };
   }
 
-  private mapItem(row: ServerCatalogRow): PluginMarketplaceItem {
+  private mapItem(row: ServerCatalogRow): PluginMarketplaceItem | null {
+    const pluginType = this.catalogPackageType(row);
+    const resolution = row.app_version_resolution ?? row.appVersionResolution;
+    if ((pluginType === "plugin" || pluginType === "mcp") && resolution !== undefined) {
+      if (resolution !== "resolved") return null;
+      row = this.mapResolvedArtifactRow(row, pluginType);
+    }
+    return this.mapCatalogItem(row);
+  }
+
+  private mapCatalogItem(row: ServerCatalogRow): PluginMarketplaceItem {
     if (typeof row.id === "string" && !SAFE_ID_RE.test(row.id)) {
       throw new Error(`marketplace row has invalid id format: "${row.id}"`);
     }
@@ -673,7 +711,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
           ? caps.filter((c): c is string => typeof c === "string")
           : [],
       };
-      const minAppVersion = row.requires.min_app_version;
+      const minAppVersion = row.requires.min_app_version ?? row.requires.minAppVersion;
       if (typeof minAppVersion === "string" && minAppVersion.length > 0) {
         requires.minAppVersion = minAppVersion;
       }
@@ -702,6 +740,207 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     }
 
     return item;
+  }
+
+  private catalogPackageType(
+    row: ServerCatalogRow,
+  ): NonNullable<PluginMarketplaceItem["pluginType"]> {
+    const pluginTypeRaw = row.plugin_type ?? row.pluginType;
+    return isMarketplacePackageType(pluginTypeRaw)
+      ? pluginTypeRaw
+      : "plugin";
+  }
+
+  /**
+   * Turns an explicitly selected resolver artifact into the only source for
+   * installation-relevant metadata. The outer catalog pointer remains
+   * presentation-only and must never grant policy for a held older artifact.
+   */
+  private mapResolvedArtifactRow(
+    row: ServerCatalogRow,
+    pluginType: "plugin" | "mcp",
+  ): ServerCatalogRow {
+    const catalogId = this.catalogIdForResolvedArtifact(row);
+    const resolved = this.asPlainRecord(
+      row.resolved_artifact ?? row.resolvedArtifact,
+    );
+    if (!resolved) {
+      throw new Error(
+        `marketplace row "${catalogId}" has no valid resolved_artifact`,
+      );
+    }
+
+    const version = this.requireResolverString(
+      resolved.version,
+      `resolved_artifact.version for "${catalogId}"`,
+    );
+    if (!STABLE_SEMVER_RE.test(version)) {
+      throw new Error(
+        `resolved_artifact.version for "${catalogId}" must be a stable SemVer`,
+      );
+    }
+    const artifactSha256 = this.requireResolverString(
+      resolved.artifact_sha256,
+      `resolved_artifact.artifact_sha256 for "${catalogId}"`,
+    );
+    if (!/^[a-f0-9]{64}$/i.test(artifactSha256)) {
+      throw new Error(
+        `resolved_artifact.artifact_sha256 for "${catalogId}" must be a SHA-256 hex digest`,
+      );
+    }
+
+    const manifest = this.asPlainRecord(resolved.manifest);
+    if (!manifest) {
+      throw new Error(
+        `resolved_artifact.manifest for "${catalogId}" must be an object`,
+      );
+    }
+    if (manifest.id !== catalogId) {
+      throw new Error(
+        `resolved_artifact.manifest id mismatch for "${catalogId}"`,
+      );
+    }
+    if (manifest.version !== version) {
+      throw new Error(
+        `resolved_artifact.manifest version mismatch for "${catalogId}"`,
+      );
+    }
+
+    const manifestRequires = this.resolvedManifestRequires(manifest, catalogId);
+    const selectedMinAppVersion = this.optionalResolverString(
+      resolved.min_app_version,
+      `resolved_artifact.min_app_version for "${catalogId}"`,
+    );
+    const manifestMinAppVersion = manifestRequires
+      ? this.optionalResolverString(
+          manifestRequires.minAppVersion,
+          `resolved_artifact.manifest.requires.minAppVersion for "${catalogId}"`,
+        )
+      : undefined;
+    if (
+      (selectedMinAppVersion && !STABLE_SEMVER_RE.test(selectedMinAppVersion)) ||
+      (manifestMinAppVersion && !STABLE_SEMVER_RE.test(manifestMinAppVersion))
+    ) {
+      throw new Error(
+        `resolved_artifact min_app_version for "${catalogId}" must be a stable SemVer`,
+      );
+    }
+    if (selectedMinAppVersion !== manifestMinAppVersion) {
+      throw new Error(
+        `resolved_artifact min_app_version does not match manifest.requires.minAppVersion for "${catalogId}"`,
+      );
+    }
+
+    const manifestRuntime = manifest.runtime ?? manifest.mcpRuntime;
+    if (pluginType === "mcp" && !parseMcpRuntimeSpec(manifestRuntime)) {
+      throw new Error(
+        `resolved_artifact.manifest for MCP "${catalogId}" has no valid runtime block`,
+      );
+    }
+
+    const packageName =
+      typeof manifest.packageName === "string"
+        ? manifest.packageName
+        : typeof manifest.package_name === "string"
+          ? manifest.package_name
+          : undefined;
+    const installPolicyRaw = manifest.installPolicy ?? manifest.install_policy;
+    const installPolicy =
+      typeof installPolicyRaw === "string" ? installPolicyRaw : undefined;
+    const normalizedRequires = manifestRequires
+      ? {
+          capabilities: manifestRequires.capabilities,
+          min_app_version: manifestMinAppVersion,
+        }
+      : undefined;
+
+    return {
+      ...row,
+      latest_stable_version: version,
+      latestStableVersion: undefined,
+      latest_artifact_sha256: artifactSha256,
+      channel: "stable",
+      package_spec: undefined,
+      packageSpec: undefined,
+      package_name: packageName,
+      packageName: undefined,
+      install_policy: installPolicy,
+      installPolicy: undefined,
+      dependencies: manifest.dependencies,
+      plugin_access: manifest.pluginAccess ?? manifest.plugin_access,
+      pluginAccess: undefined,
+      network_access: manifest.networkAccess ?? manifest.network_access,
+      networkAccess: undefined,
+      capabilities: manifest.capabilities,
+      requires: normalizedRequires,
+      runtime: manifestRuntime,
+      mcpRuntime: undefined,
+      mcp_auth: manifest.mcpAuth ?? manifest.mcp_auth,
+      mcpAuth: undefined,
+      manifest,
+    };
+  }
+
+  private catalogIdForResolvedArtifact(row: ServerCatalogRow): string {
+    if (typeof row.id === "string" && !SAFE_ID_RE.test(row.id)) {
+      throw new Error(`marketplace row has invalid id format: "${row.id}"`);
+    }
+    const idRaw = row.slug ?? row.id;
+    const id = typeof idRaw === "string"
+      ? idRaw
+      : typeof idRaw === "number" &&
+          Number.isFinite(idRaw) &&
+          Number.isSafeInteger(idRaw)
+        ? String(idRaw)
+        : undefined;
+    if (!id) {
+      throw new Error("marketplace row missing id/name");
+    }
+    if (!SAFE_ID_RE.test(id)) {
+      throw new Error(`marketplace row has invalid id format: "${id}"`);
+    }
+    return id;
+  }
+
+  private resolvedManifestRequires(
+    manifest: Record<string, unknown>,
+    catalogId: string,
+  ): Record<string, unknown> | undefined {
+    if (manifest.requires === undefined) return undefined;
+    const requires = this.asPlainRecord(manifest.requires);
+    if (!requires || Object.hasOwn(requires, "min_app_version")) {
+      throw new Error(
+        `resolved_artifact.manifest.requires for "${catalogId}" must use minAppVersion when present`,
+      );
+    }
+    return requires;
+  }
+
+  private requireResolverString(value: unknown, field: string): string {
+    const result = this.optionalResolverString(value, field);
+    if (result === undefined) {
+      throw new Error(`${field} is required`);
+    }
+    return result;
+  }
+
+  private optionalResolverString(
+    value: unknown,
+    field: string,
+  ): string | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new Error(`${field} must be a non-empty string when present`);
+    }
+    return value;
+  }
+
+  private asPlainRecord(
+    value: unknown,
+  ): Record<string, unknown> | undefined {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : undefined;
   }
 
   private mapMcpAuth(value: unknown, runtime: PluginMarketplaceItem["mcpRuntime"]): McpAuthMetadata | undefined {
