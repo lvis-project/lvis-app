@@ -99,7 +99,8 @@ export interface PluginMarketplaceItem {
    */
   upgradeRequired?: {
     code: "upgrade_required";
-    minAppVersion: string;
+    /** Omitted only when Marketplace cannot provide a trusted exact minimum. */
+    minAppVersion?: string;
     message: string;
   };
   /**

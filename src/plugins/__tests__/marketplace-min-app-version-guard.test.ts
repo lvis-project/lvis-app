@@ -63,11 +63,25 @@ function makeUpgradeRequiredItem(id: string, minAppVersion: string): PluginMarke
   };
 }
 
+function makeGenericUpgradeRequiredItem(id: string): PluginMarketplaceItem {
+  return {
+    ...makeItem(id),
+    packageSpec: "",
+    packageName: "",
+    upgradeRequired: {
+      code: "upgrade_required",
+      message: "This package is unavailable in this version of LVIS. Update LVIS and try again.",
+    },
+  };
+}
+
 describe("marketplace install minAppVersion gate", () => {
   let tmpDir: string;
+  let installArtifactCalls: number;
 
   beforeEach(async () => {
     MOCK_APP_VERSION = "1.4.0";
+    installArtifactCalls = 0;
     setIsPackaged(false);
     tmpDir = mkdtempSync(join(tmpdir(), "lvis-mav-"));
     await mkdir(resolve(tmpDir, "plugins"), { recursive: true });
@@ -88,6 +102,7 @@ describe("marketplace install minAppVersion gate", () => {
       },
       "installArtifact",
     ).mockImplementation(async (plugin, _version, _onProgress, opts) => {
+      installArtifactCalls += 1;
       const manifestRelPath = `installed/${plugin.id}/plugin.json`;
       const manifestAbsPath = resolve(tmpDir, "plugins", manifestRelPath);
       await mkdir(dirname(manifestAbsPath), { recursive: true });
@@ -153,6 +168,18 @@ describe("marketplace install minAppVersion gate", () => {
       required: "1.2.3",
       current: "0.5.9",
     });
+  });
+
+  it("blocks a generic catalog update-required row before plugin installation", async () => {
+    const svc = makeTestPluginMarketplaceService(
+      tmpDir,
+      new StubFetcher([makeGenericUpgradeRequiredItem("catalog-version-unavailable")]) as never,
+    );
+
+    await expect(svc.install("catalog-version-unavailable", undefined, {
+      activatePreparedArtifact: vi.fn() as never,
+    })).rejects.toThrow("This package is unavailable in this version of LVIS. Update LVIS and try again.");
+    expect(installArtifactCalls).toBe(0);
   });
 
   it("blocks (throws IncompatibleAppVersionError) when minAppVersion > current app version", async () => {
