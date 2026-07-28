@@ -207,6 +207,41 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
   }
+  async function writeGitRepairCatalog(
+    version: string,
+    gitPolicy: "user" | "admin" = "user",
+  ) {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "lvis-plugin-git",
+            name: "LVIS Git",
+            description: "fixture",
+            packageSpec: "file:../lvis-plugin-git",
+            packageName: "@lvis/plugin-git",
+            tools: [],
+            installPolicy: gitPolicy,
+            version,
+          },
+          {
+            id: "unrelated-user",
+            name: "Unrelated user plugin",
+            description: "fixture",
+            packageSpec: "file:../unrelated-user",
+            packageName: "@lvis/unrelated-user",
+            tools: [],
+            installPolicy: "user",
+            version: "9.0.0",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+  }
+
 
   it("blocks a managed reinstall before registry or artifact mutation while cleanup is pending", async () => {
     await writeAdminCatalog("2.0.0");
@@ -358,6 +393,124 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(installSpy).not.toHaveBeenCalled();
     expect(result.updated).toEqual([]);
   });
+  it("repairs an installed Git legacy-keywords bridge under the user actor only", async () => {
+    await writeGitRepairCatalog("0.1.12");
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["lvis-plugin-git", "unrelated-user"]));
+    vi.spyOn(
+      service as unknown as {
+        readInstalledVersionFromRegistry: (registry: unknown, id: string) => Promise<string | null>;
+      },
+      "readInstalledVersionFromRegistry",
+    ).mockImplementation(async (_registry, id) => id === "lvis-plugin-git" ? "0.1.11" : "1.0.0");
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    ).mockResolvedValue({ pluginId: "lvis-plugin-git", installed: true });
+
+    const result = await service.ensureManagedInstalled({
+      activatePreparedArtifact: vi.fn() as never,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      repairPluginIds: ["lvis-plugin-git"],
+    });
+
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    const [pluginId, actor] = installSpy.mock.calls[0]!;
+    expect(pluginId).toBe("lvis-plugin-git");
+    expect(actor).toBe("user");
+    expect(result).toEqual({
+      installed: [],
+      updated: ["lvis-plugin-git"],
+      failed: [],
+    });
+  });
+
+  it("does not first-install an absent Git plugin for a legacy-keywords repair", async () => {
+    await writeGitRepairCatalog("0.1.12");
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set());
+    const installSpy = vi.spyOn(
+      service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
+      "installWithDependencies",
+    );
+
+    const result = await service.ensureManagedInstalled({
+      activatePreparedArtifact: vi.fn() as never,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      repairPluginIds: ["lvis-plugin-git"],
+    });
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({ installed: [], updated: [], failed: [] });
+  });
+
+  it.each(["0.1.12", "0.1.13"])(
+    "does not repair Git when the installed version %s is not older",
+    async (installedVersion) => {
+      await writeGitRepairCatalog("0.1.12");
+      const service = makeManagedService(testDir, marketplacePath);
+      vi.spyOn(
+        service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
+        "resolveInstalledIds",
+      ).mockResolvedValue(new Set(["lvis-plugin-git"]));
+      vi.spyOn(
+        service as unknown as {
+          readInstalledVersionFromRegistry: (registry: unknown, id: string) => Promise<string | null>;
+        },
+        "readInstalledVersionFromRegistry",
+      ).mockResolvedValue(installedVersion);
+      const installSpy = vi.spyOn(
+        service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
+        "installWithDependencies",
+      );
+
+      const result = await service.ensureManagedInstalled({
+        activatePreparedArtifact: vi.fn() as never,
+        ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+        repairPluginIds: ["lvis-plugin-git"],
+      });
+
+      expect(installSpy).not.toHaveBeenCalled();
+      expect(result).toEqual({ installed: [], updated: [], failed: [] });
+    },
+  );
+
+  it("ignores arbitrary repair IDs instead of auto-updating another user plugin", async () => {
+    await writeGitRepairCatalog("0.1.12");
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["unrelated-user"]));
+    vi.spyOn(
+      service as unknown as {
+        readInstalledVersionFromRegistry: (registry: unknown, id: string) => Promise<string | null>;
+      },
+      "readInstalledVersionFromRegistry",
+    ).mockResolvedValue("1.0.0");
+    const installSpy = vi.spyOn(
+      service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
+      "installWithDependencies",
+    );
+
+    const result = await service.ensureManagedInstalled({
+      activatePreparedArtifact: vi.fn() as never,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      repairPluginIds: ["unrelated-user"],
+    });
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({ installed: [], updated: [], failed: [] });
+  });
+
 
   it("isolates a failed auto-update into result.failed without throwing", async () => {
     await writeAdminCatalog("2.0.0");

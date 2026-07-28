@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   _resetBootstrapInFlightForTest,
   resolveManagedPluginBootstrap,
+  resolveLegacyKeywordRepairIds,
   runManagedBootstrap,
 } from "../managed-marketplace.js";
 import type { PluginMarketplaceService } from "../../plugins/marketplace.js";
@@ -33,6 +34,29 @@ describe("resolveManagedPluginBootstrap", () => {
     })).toEqual({ enabled: true });
   });
 });
+describe("resolveLegacyKeywordRepairIds", () => {
+  const qualifyingCard = {
+    id: "lvis-plugin-git",
+    loadStatus: "failed" as const,
+    installFailureKind: "manifest-validation-error" as const,
+    installFailureMessage: "[manifest:lvis-plugin-git] schema validation failed: / unknown property: 'keywords'",
+  };
+
+  it("selects only the Git keywords manifest validation failure", () => {
+    expect(resolveLegacyKeywordRepairIds([qualifyingCard])).toEqual(["lvis-plugin-git"]);
+  });
+
+  it("rejects every near match", () => {
+    expect(resolveLegacyKeywordRepairIds([
+      { ...qualifyingCard, id: "another-plugin" },
+      { ...qualifyingCard, loadStatus: "loaded" as const },
+      { ...qualifyingCard, installFailureKind: "incompatible-app-version" as const },
+      { ...qualifyingCard, installFailureMessage: "unknown property: 'startupTools'" },
+      { ...qualifyingCard, installFailureMessage: undefined },
+    ])).toEqual([]);
+  });
+});
+
 
 describe("runManagedBootstrap concurrency", () => {
   afterEach(() => {
@@ -53,6 +77,7 @@ describe("runManagedBootstrap concurrency", () => {
     const pluginRuntime = {
       activatePreparedArtifact,
       cancelAllPendingRestarts: vi.fn(),
+      listPluginCards: vi.fn(() => []),
     } as unknown as PluginRuntime;
 
     const input = {
@@ -94,6 +119,7 @@ describe("runManagedBootstrap concurrency", () => {
     const pluginRuntime = {
       activatePreparedArtifact,
       cancelAllPendingRestarts: vi.fn(),
+      listPluginCards: vi.fn(() => []),
     } as unknown as PluginRuntime;
 
     await runManagedBootstrap({
@@ -113,6 +139,39 @@ describe("runManagedBootstrap concurrency", () => {
     });
     expect(activatePreparedArtifact).not.toHaveBeenCalled();
   });
+  it("passes the Git bridge repair ID only for the precise legacy manifest failure", async () => {
+    const ensureResult = { installed: [], updated: ["lvis-plugin-git"], failed: [] };
+    const ensureManagedInstalled = vi.fn(async () => ensureResult);
+    const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
+    const pluginRuntime = {
+      activatePreparedArtifact: vi.fn(),
+      cancelAllPendingRestarts: vi.fn(),
+      listPluginCards: vi.fn(() => [{
+        id: "lvis-plugin-git",
+        loadStatus: "failed" as const,
+        installFailureKind: "manifest-validation-error" as const,
+        installFailureMessage: "schema validation failed: / unknown property: 'keywords'",
+      }]),
+    } as unknown as PluginRuntime;
+
+    await runManagedBootstrap({
+      pluginMarketplace,
+      pluginRuntime,
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      mainWindow: null,
+      marketplace: {
+        backend: "real-cloud" as const,
+        cloudBaseUrl: "https://marketplace.example.com",
+      },
+    });
+
+    expect(ensureManagedInstalled).toHaveBeenCalledWith({
+      activatePreparedArtifact: expect.any(Function),
+      ensurePluginStateReadyForInstall: expect.any(Function),
+      repairPluginIds: ["lvis-plugin-git"],
+    });
+  });
+
 
   it("a fresh call after the in-flight settles starts a new run", async () => {
     const ensureResult = { installed: [], failed: [] };
@@ -121,6 +180,7 @@ describe("runManagedBootstrap concurrency", () => {
     const pluginRuntime = {
       activatePreparedArtifact: vi.fn(),
       cancelAllPendingRestarts: vi.fn(),
+      listPluginCards: vi.fn(() => []),
     } as unknown as PluginRuntime;
 
     const input = {

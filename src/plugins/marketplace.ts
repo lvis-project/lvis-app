@@ -116,6 +116,15 @@ function normalizeInstallPolicy(source: {
   return "user";
 }
 
+const LEGACY_KEYWORD_REPAIR_PLUGIN_ID = "lvis-plugin-git";
+
+type ManagedBootstrapCandidate = {
+  plugin: PluginMarketplaceItem;
+  actor: "user" | "it-admin";
+  allowMissing: boolean;
+  kind: "managed" | "legacy-keywords-repair";
+};
+
 function normalizePluginLookupKey(value: string | null | undefined): string {
   return (value ?? "")
     .trim()
@@ -935,6 +944,11 @@ export class PluginMarketplaceService {
    * user click (the user-click update path stays for user-policy plugins). The
    * update is gated to *strictly newer* versions only: a same-or-older catalog
    * version leaves the installed plugin untouched (no surprise downgrades).
+    *
+    * The only exception is a caller-requested legacy `keywords` repair for the
+    * fixed Git ID. It remains user-policy, requires a valid existing install
+    * and a strictly newer signed catalog version, never first-installs, and
+    * runs as actor="user".
    *
    * Failure modes are intentionally graceful — marketplace unreachable or a
    * single plugin failing to install must NOT brick boot. Errors are logged
@@ -943,6 +957,7 @@ export class PluginMarketplaceService {
   async ensureManagedInstalled(options: {
     activatePreparedArtifact: PreparedMarketplacePluginActivation;
     ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+    repairPluginIds?: readonly string[];
   }): Promise<{
     installed: string[];
     updated: string[];
@@ -973,14 +988,40 @@ export class PluginMarketplaceService {
       );
       return result;
     }
-    const managed = plugins.filter((p) => normalizeInstallPolicy(p) === "admin");
-    if (managed.length === 0) return result;
+    const requestedLegacyKeywordRepairs = new Set<string>(
+      (options.repairPluginIds ?? []).filter((pluginId) => (
+        pluginId === LEGACY_KEYWORD_REPAIR_PLUGIN_ID
+      )),
+    );
+    const candidates: ManagedBootstrapCandidate[] = plugins
+      .filter((plugin) => normalizeInstallPolicy(plugin) === "admin")
+      .map((plugin) => ({
+        plugin,
+        actor: "it-admin" as const,
+        allowMissing: true,
+        kind: "managed" as const,
+      }));
+    for (const plugin of plugins) {
+      if (
+        !requestedLegacyKeywordRepairs.has(plugin.id)
+        || normalizeInstallPolicy(plugin) !== "user"
+      ) continue;
+      if (candidates.some((candidate) => candidate.plugin.id === plugin.id)) continue;
+      candidates.push({
+        plugin,
+        actor: "user",
+        allowMissing: false,
+        kind: "legacy-keywords-repair",
+      });
+    }
+    if (candidates.length === 0) return result;
     // Round-3 §6: registry read errors must propagate. ENOENT is already
     // handled inside readPluginRegistry (returns empty default for first
     // boot); a corrupt registry must NOT silently force-reinstall every
     // managed plugin on top of an unknown prior state.
     await readPluginRegistry(this.registryPath);
-    for (const plugin of managed) {
+    for (const candidate of candidates) {
+      const { plugin } = candidate;
       let isUpdate = false;
       try {
         // Boot-time managed bootstrap is an internal, trusted flow —
@@ -1016,14 +1057,25 @@ export class PluginMarketplaceService {
                 return "skipped";
               }
               isUpdate = true;
+              if (candidate.kind === "legacy-keywords-repair") {
+                log.info(
+                  `ensureManagedInstalled: repairing legacy keywords manifest for user plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
+                );
+              } else {
+                log.info(
+                  `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
+                );
+              }
+            } else if (!candidate.allowMissing) {
               log.info(
-                `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
+                `ensureManagedInstalled: skipping legacy keywords repair for absent user plugin '${plugin.id}'`,
               );
+              return "skipped";
             }
             try {
               await this.installWithDependencies(
                 plugin.id,
-                "it-admin",
+                candidate.actor,
                 plugins,
                 new Set<string>(),
                 state,
@@ -1051,7 +1103,8 @@ export class PluginMarketplaceService {
         const msg = (err as Error).message;
         result.failed.push({ id: plugin.id, error: msg });
         this.rememberInstallFailure(plugin, err);
-        log.warn(`managed plugin '${plugin.id}' ${isUpdate ? "update" : "install"} failed: ${msg}`);
+        const operation = candidate.kind === "legacy-keywords-repair" ? "legacy keywords repair" : "managed plugin";
+        log.warn(`${operation} '${plugin.id}' ${isUpdate ? "update" : "install"} failed: ${msg}`);
       }
     }
     return result;

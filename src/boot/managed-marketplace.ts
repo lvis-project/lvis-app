@@ -5,7 +5,7 @@ import type {
   PreparedMarketplacePluginArtifact,
   PreparedMarketplacePluginActivation,
 } from "../plugins/marketplace.js";
-import type { PluginRuntime } from "../plugins/runtime.js";
+import type { PluginCard, PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
 import { withAllPluginInstallLocks } from "../plugins/install-lifecycle.js";
@@ -33,6 +33,30 @@ export function resolveManagedPluginBootstrap(input: {
     enabled: false,
     reason: "marketplace backend has no configured base URL",
   };
+}
+
+/**
+ * The only non-admin plugin eligible for a one-time boot repair. Old Git
+ * bundles used the removed top-level `keywords` manifest field, so a strict
+ * Host cannot load them far enough to offer the ordinary update UI. Keep the
+ * trigger deliberately narrow: a failed stub has no trustworthy manifest
+ * policy, and a generic user-plugin auto-update would violate user control.
+ */
+export function resolveLegacyKeywordRepairIds(
+  cards: readonly Pick<
+    PluginCard,
+    "id" | "loadStatus" | "installFailureKind" | "installFailureMessage"
+  >[],
+): string[] {
+  return cards
+    .filter((card) => (
+      card.id === "lvis-plugin-git"
+      && card.loadStatus === "failed"
+      && card.installFailureKind === "manifest-validation-error"
+      && typeof card.installFailureMessage === "string"
+      && /unknown property:\s*['"]keywords['"]/i.test(card.installFailureMessage)
+    ))
+    .map((card) => card.id);
 }
 
 export interface RunManagedBootstrapInput {
@@ -118,10 +142,12 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     // A dependency preparation can hold a per-plugin lifecycle lock forever.
     // Cancellation must happen before the outer all-plugin lock queues.
     pluginRuntime.cancelAllPendingRestarts();
+    const repairPluginIds = resolveLegacyKeywordRepairIds(pluginRuntime.listPluginCards());
     const ensureResult = await withAllPluginInstallLocks(async () => {
       return pluginMarketplace.ensureManagedInstalled({
         activatePreparedArtifact,
         ensurePluginStateReadyForInstall,
+        ...(repairPluginIds.length > 0 ? { repairPluginIds } : {}),
       });
     });
     const updated = ensureResult.updated ?? [];
