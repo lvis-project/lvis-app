@@ -77,6 +77,10 @@ function upgradeRequiredMessage(minAppVersion: string): string {
   return `LVIS ${minAppVersion}+ is required to install this version. Update LVIS and try again.`;
 }
 
+function genericUpgradeRequiredMessage(): string {
+  return "This package is unavailable in this version of LVIS. Update LVIS and try again.";
+}
+
 export interface RealCloudMarketplaceConfig {
   baseUrl: string;
   apiKey?: string;
@@ -614,7 +618,34 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     row: ServerCatalogRow,
     pluginType: ResolverInstallablePackageType,
   ): PluginMarketplaceItem | null {
-    const upgradeRequired = this.asPlainRecord(row.upgrade_required ?? row.upgradeRequired);
+    const id = this.catalogIdForResolvedArtifact(row);
+    const name = row.name ?? row.display_name ?? row.displayName ?? id;
+    if (!name || name.trim().length === 0) return null;
+    const displayOnlyItem = {
+      id,
+      slug: typeof row.slug === "string" ? row.slug : undefined,
+      name,
+      description: typeof row.description === "string" ? row.description : "",
+      packageSpec: "",
+      packageName: "",
+      pluginType,
+    };
+
+    const hasSnakeCaseUpgradeRequired = Object.prototype.hasOwnProperty.call(row, "upgrade_required");
+    const hasCamelCaseUpgradeRequired = Object.prototype.hasOwnProperty.call(row, "upgradeRequired");
+    if (!hasSnakeCaseUpgradeRequired && !hasCamelCaseUpgradeRequired) {
+      return {
+        ...displayOnlyItem,
+        upgradeRequired: {
+          code: "upgrade_required",
+          message: genericUpgradeRequiredMessage(),
+        },
+      };
+    }
+
+    const upgradeRequired = this.asPlainRecord(
+      hasSnakeCaseUpgradeRequired ? row.upgrade_required : row.upgradeRequired,
+    );
     const minAppVersion = upgradeRequired?.min_app_version;
     const message = upgradeRequired?.message;
     if (
@@ -627,17 +658,8 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       return null;
     }
 
-    const id = this.catalogIdForResolvedArtifact(row);
-    const name = row.name ?? row.display_name ?? row.displayName ?? id;
-    if (!name || name.trim().length === 0) return null;
     return {
-      id,
-      slug: typeof row.slug === "string" ? row.slug : undefined,
-      name,
-      description: typeof row.description === "string" ? row.description : "",
-      packageSpec: "",
-      packageName: "",
-      pluginType,
+      ...displayOnlyItem,
       upgradeRequired: {
         code: "upgrade_required",
         minAppVersion,
