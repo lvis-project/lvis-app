@@ -62,6 +62,21 @@ const SAFE_PACKAGE_NAME_RE =
  */
 const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
+type ResolverInstallablePackageType = "plugin" | "mcp" | "agent" | "skill";
+
+const APP_VERSION_WITH_OPTIONAL_BUILD_RE =
+  /^((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))(?:\+[0-9A-Za-z.-]+)?$/;
+
+function isResolverInstallablePackageType(
+  pluginType: NonNullable<PluginMarketplaceItem["pluginType"]>,
+): pluginType is ResolverInstallablePackageType {
+  return pluginType === "plugin" || pluginType === "mcp" || pluginType === "agent" || pluginType === "skill";
+}
+
+function upgradeRequiredMessage(minAppVersion: string): string {
+  return `LVIS ${minAppVersion}+ is required to install this version. Update LVIS and try again.`;
+}
+
 export interface RealCloudMarketplaceConfig {
   baseUrl: string;
   apiKey?: string;
@@ -118,6 +133,9 @@ interface ServerCatalogRow {
   /** Compatibility resolver result when catalog was requested with app_version. */
   app_version_resolution?: unknown;
   appVersionResolution?: unknown;
+  /** Machine-readable update instruction for a version-incompatible host. */
+  upgrade_required?: unknown;
+  upgradeRequired?: unknown;
   /** Immutable artifact selected by the compatibility resolver. */
   resolved_artifact?: unknown;
   resolvedArtifact?: unknown;
@@ -192,12 +210,31 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     this.config = { ...this.config, allowPrivateNetwork: value };
   }
 
-  private withAppVersionQuery(path: string): string {
+  getCatalogCacheKey(): string | null | undefined {
+    const configuredAppVersion = this.configuredAppVersion();
+    if (!configuredAppVersion) return undefined;
+    return this.normalizedResolverAppVersion() ?? null;
+  }
+
+  private configuredAppVersion(): string | undefined {
     const configuredAppVersion = typeof this.config.appVersion === "string"
       ? this.config.appVersion.trim()
       : "";
+    return configuredAppVersion || undefined;
+  }
+
+  private normalizedResolverAppVersion(): string | undefined {
+    const configuredAppVersion = this.configuredAppVersion();
     return configuredAppVersion
-      ? `${path}?app_version=${encodeURIComponent(configuredAppVersion)}`
+      ? APP_VERSION_WITH_OPTIONAL_BUILD_RE.exec(configuredAppVersion)?.[1]
+      : undefined;
+  }
+
+  private withAppVersionQuery(path: string): string {
+    const configuredAppVersion = this.configuredAppVersion();
+    const appVersion = this.normalizedResolverAppVersion() ?? configuredAppVersion;
+    return appVersion
+      ? `${path}?app_version=${encodeURIComponent(appVersion)}`
       : path;
   }
 
@@ -554,11 +591,59 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
   private mapItem(row: ServerCatalogRow): PluginMarketplaceItem | null {
     const pluginType = this.catalogPackageType(row);
     const resolution = row.app_version_resolution ?? row.appVersionResolution;
-    if ((pluginType === "plugin" || pluginType === "mcp") && resolution !== undefined) {
-      if (resolution !== "resolved") return null;
-      row = this.mapResolvedArtifactRow(row, pluginType);
+    if (isResolverInstallablePackageType(pluginType) && resolution !== undefined) {
+      if (resolution === "resolved") {
+        return this.mapCatalogItem(this.mapResolvedArtifactRow(row, pluginType));
+      }
+      if (resolution === "no_compatible_version") {
+        return this.mapUpgradeRequiredItem(row, pluginType);
+      }
+      // Unknown or malformed resolver status is never allowed to reuse the
+      // outer catalog artifact or policy.
+      return null;
     }
     return this.mapCatalogItem(row);
+  }
+
+  /**
+   * A no-compatible-version row is informational only. Deliberately construct
+   * a fresh DTO so an outer catalog version, digest, policy, or runtime can
+   * never become installable while the host is below the required version.
+   */
+  private mapUpgradeRequiredItem(
+    row: ServerCatalogRow,
+    pluginType: ResolverInstallablePackageType,
+  ): PluginMarketplaceItem | null {
+    const upgradeRequired = this.asPlainRecord(row.upgrade_required ?? row.upgradeRequired);
+    const minAppVersion = upgradeRequired?.min_app_version;
+    const message = upgradeRequired?.message;
+    if (
+      upgradeRequired?.code !== "upgrade_required" ||
+      typeof minAppVersion !== "string" ||
+      !STABLE_SEMVER_RE.test(minAppVersion) ||
+      typeof message !== "string" ||
+      message !== upgradeRequiredMessage(minAppVersion)
+    ) {
+      return null;
+    }
+
+    const id = this.catalogIdForResolvedArtifact(row);
+    const name = row.name ?? row.display_name ?? row.displayName ?? id;
+    if (!name || name.trim().length === 0) return null;
+    return {
+      id,
+      slug: typeof row.slug === "string" ? row.slug : undefined,
+      name,
+      description: typeof row.description === "string" ? row.description : "",
+      packageSpec: "",
+      packageName: "",
+      pluginType,
+      upgradeRequired: {
+        code: "upgrade_required",
+        minAppVersion,
+        message,
+      },
+    };
   }
 
   private mapCatalogItem(row: ServerCatalogRow): PluginMarketplaceItem {
@@ -754,11 +839,11 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
   /**
    * Turns an explicitly selected resolver artifact into the only source for
    * installation-relevant metadata. The outer catalog pointer remains
-   * presentation-only and must never grant policy for a held older artifact.
+   * presentation-only and must never grant policy for another artifact.
    */
   private mapResolvedArtifactRow(
     row: ServerCatalogRow,
-    pluginType: "plugin" | "mcp",
+    pluginType: ResolverInstallablePackageType,
   ): ServerCatalogRow {
     const catalogId = this.catalogIdForResolvedArtifact(row);
     const resolved = this.asPlainRecord(
