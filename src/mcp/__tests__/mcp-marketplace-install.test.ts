@@ -852,7 +852,6 @@ describe("installMcpFromMarketplace", () => {
         description: "",
         packageSpec: "remote-docs@1.0.0",
         packageName: "remote-docs",
-        tools: [],
         version: "1.0.0",
         pluginType: "mcp",
       });
