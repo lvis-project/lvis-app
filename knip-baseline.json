@@ -509,11 +509,6 @@
     },
     {
       "type": "exports",
-      "file": "src/main/managed-child-processes.ts",
-      "name": "spawnManaged"
-    },
-    {
-      "type": "exports",
       "file": "src/main/project-root-authorization.ts",
       "name": "DEFAULT_PROJECT_NAME"
     },

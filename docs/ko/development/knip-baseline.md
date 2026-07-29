@@ -47,6 +47,9 @@ workflow는 `web/node_modules` 없이도 선언을 분석할 수 있다.
 
 ## 허용된 런타임 및 패키징 사용
 
+- `@openai/codex` supplies the platform-native App Server executable resolved
+  dynamically by `src/main/codex-app-server-client.ts`; it is unpacked with the
+  packaged application rather than imported into the JavaScript bundle.
 - `better-sqlite3` is rebuilt in `postinstall`, staged by
   `scripts/packaged-runtime-assets.mjs`, guarded by package footprint tests, and
   kept external by `scripts/build-main-esbuild.mjs`.

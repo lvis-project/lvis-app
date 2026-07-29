@@ -16,6 +16,11 @@ import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defau
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
 import type { BundleId } from "../../shared/theme-bundles.js";
 import type { LlmModelListCache } from "../../shared/llm-model-list.js";
+import type {
+  CodexSubscriptionActionResult,
+  CodexSubscriptionDeviceCodeResult,
+  CodexSubscriptionModelsResult,
+} from "../../shared/codex-subscription.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
@@ -498,6 +503,12 @@ export type LvisApi = {
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
   listLlmModels: (request: LlmModelListRequest) => Promise<LlmModelListResult>;
+  codexSubscriptionStatus: () => Promise<CodexSubscriptionActionResult>;
+  codexSubscriptionStartBrowserLogin: () => Promise<CodexSubscriptionActionResult>;
+  codexSubscriptionStartDeviceCodeLogin: () => Promise<CodexSubscriptionDeviceCodeResult>;
+  codexSubscriptionCancelLogin: () => Promise<CodexSubscriptionActionResult>;
+  codexSubscriptionLogout: () => Promise<CodexSubscriptionActionResult>;
+  codexSubscriptionListModels: () => Promise<CodexSubscriptionModelsResult>;
   installMarketplaceProviderPreset: (
     preset: MarketplaceInstalledProviderPreset,
   ) => Promise<SettingsUpdateResult>;

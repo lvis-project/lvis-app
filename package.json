@@ -104,6 +104,7 @@
     "@anthropic-ai/sandbox-runtime": "0.0.67",
     "@modelcontextprotocol/ext-apps": "1.7.4",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "@openai/codex": "0.146.0",
     "adm-zip": "^0.6.0",
     "ai": "~7.0.2",
     "ajv": "^8.18.0",
@@ -226,6 +227,7 @@
     ],
     "asarUnpack": [
       "node_modules/@anthropic-ai/sandbox-runtime/vendor/**",
+      "node_modules/@openai/codex*/**",
       "node_modules/node-pty/**",
       "node_modules/better-sqlite3/**"
     ],

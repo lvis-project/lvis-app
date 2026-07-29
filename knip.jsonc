@@ -30,6 +30,7 @@
     "config": "vitest.analysis.config.ts"
   },
   "ignoreDependencies": [
+    "@openai/codex",
     "@sentry/electron",
     "@types/better-sqlite3",
     "better-sqlite3",
