@@ -20,6 +20,7 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
+  assertMarketplaceAppUpgradeNotRequired,
   assertSafeArtifactSlug,
   type PluginArtifactStore,
 } from "../plugins/plugin-artifact-store.js";
@@ -63,6 +64,7 @@ export async function installMcpFromMarketplace(
   if (!detail) {
     throw new Error(`marketplace catalog has no entry for slug "${safeSlug}"`);
   }
+  assertMarketplaceAppUpgradeNotRequired(detail);
   if (detail.pluginType && detail.pluginType !== "mcp") {
     throw new Error(
       `slug "${safeSlug}" is a ${detail.pluginType} entry — use the regular plugin install path instead`,

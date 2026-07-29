@@ -80,6 +80,13 @@ export type MarketplaceItem = {
   installPolicy?: "admin" | "user";
   pluginType?: MarketplacePackageType;
   packageAsset?: MarketplacePackageAsset;
+  /** Display-only compatibility result: update LVIS before installing. */
+  upgradeRequired?: {
+    code: "upgrade_required";
+    /** Omitted only when Marketplace cannot provide a trusted exact minimum. */
+    minAppVersion?: string;
+    message: string;
+  };
   mcpAuth?: {
     mode: "none" | "api-key" | "sso" | "oauth";
     transport?: "stdio" | "http";

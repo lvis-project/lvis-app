@@ -8,6 +8,11 @@ import type { MarketplaceAnnouncement } from "../shared/marketplace-announcement
 export type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
 
 export interface MarketplaceFetcher {
+  /**
+   * Optional cache partition for version-aware catalog responses. Null
+   * disables caching when the host version cannot be safely normalized.
+   */
+  getCatalogCacheKey?(): string | null | undefined;
   /** Lists catalog entries (latest stable version per plugin). */
   listPlugins(): Promise<PluginMarketplaceItem[]>;
   /** Returns the full detail for a single plugin slug, or null on 404. */
