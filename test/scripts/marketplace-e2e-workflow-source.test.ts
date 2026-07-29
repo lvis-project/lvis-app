@@ -37,8 +37,12 @@ describe("Marketplace E2E hostile-candidate containment", () => {
   it("limits repository secrets to exact, non-recursive input acquisition", () => {
     const staging = job("stage-inputs", "build-marketplace");
     expect(staging).toContain("M4_MARKETPLACE_CHECKOUT_TOKEN");
-    expect(staging).toContain("ref: ${{ env.MARKETPLACE_SHA }}");
-    expect(staging).toContain("ref: ${{ env.EP_API_SHA }}");
+    expect(staging).toContain(
+      "ref: ${{ steps.resolve-candidate-refs.outputs.marketplace_sha }}",
+    );
+    expect(staging).toContain(
+      "ref: ${{ steps.resolve-candidate-refs.outputs.ep_api_sha }}",
+    );
     expect(staging).toContain("submodules: false");
     expect(staging).not.toMatch(
       /bun (install|run)|uv (sync|run)|docker (build|run)/u,
@@ -49,6 +53,48 @@ describe("Marketplace E2E hostile-candidate containment", () => {
       workflow.indexOf("\n  build-marketplace:\n"),
     );
     expect(afterStaging).not.toContain("${{ secrets.");
+  });
+
+  it("resolves only open same-repository PR heads and retains raw-SHA main ancestry", () => {
+    const staging = job("stage-inputs", "build-marketplace");
+    expect(workflow).toContain("pull-requests: read");
+    expect(staging).toContain("id: resolve-candidate-refs");
+    expect(staging).toContain('payload_input="${DISPATCH_PAYLOAD:-null}"');
+    for (const selector of [
+      '"host_pr" "host_ref"',
+      '"marketplace_pr" "marketplace_ref"',
+      '"sdk_pr" "sdk_ref"',
+      '"ep_pr" "ep_api_ref"',
+    ]) {
+      expect(staging).toContain(selector);
+    }
+    expect(staging).toContain('[[ "$pr_number" =~ ^[1-9][0-9]*$ ]]');
+    expect(staging).toContain('if .state != "open" then');
+    expect(staging).toContain('.base.repo.full_name != $repo or .base.ref != "main"');
+    expect(staging).toContain('.head.repo.full_name != $repo');
+    expect(staging).toContain('test("^[0-9a-f]{40}$")');
+    expect(staging).toContain("only one of $pr_field or $ref_field");
+    expect(staging).toContain('if [[ "$selector_kind" == "raw-sha" ]]; then');
+    expect(staging).toContain(
+      'git -C "$repo" merge-base --is-ancestor "$expected" origin/main',
+    );
+    expect(staging).toContain('elif [[ "$selector_kind" != "same-repo-pr" ]]; then');
+
+    expect(staging).toContain('|| fail "Unable to resolve lvis-project/lvis-app candidate"');
+    expect(staging).toContain('validate_resolution "lvis-project/lvis-plugin-ep"');
+    for (const [name, next] of [
+      ["build-marketplace", "build-ep"],
+      ["build-ep", "marketplace-e2e"],
+      ["marketplace-e2e", undefined],
+    ] as const) {
+      const block = job(name, next);
+      expect(block).toContain("HOST_SHA: ${{ needs.stage-inputs.outputs.host_sha }}");
+      expect(block).toContain(
+        "MARKETPLACE_SHA: ${{ needs.stage-inputs.outputs.marketplace_sha }}",
+      );
+      expect(block).toContain("SDK_SHA: ${{ needs.stage-inputs.outputs.sdk_sha }}");
+      expect(block).toContain("EP_API_SHA: ${{ needs.stage-inputs.outputs.ep_api_sha }}");
+    }
   });
 
   it("never transfers EP source to the final runner", () => {

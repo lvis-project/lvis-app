@@ -1,9 +1,10 @@
 name: Marketplace E2E (publish ↔ install)
 
-# Cross-repository credentials exist only in stage-inputs. That job checks out
-# exact main-ancestor commits without submodules and runs only the trusted
-# control program from github.workflow_sha. Candidate code executes later on
-# fresh, secret-free runners and only inside containers.
+# Cross-repository credentials exist only in stage-inputs. That job resolves
+# immutable same-repository PR heads or verifies exact main-ancestor raw SHAs
+# without submodules, and runs only the trusted control program from
+# github.workflow_sha. Candidate code executes later on fresh, secret-free
+# runners and only inside containers.
 on:
   repository_dispatch:
     types: [marketplace-e2e]
@@ -12,12 +13,9 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 env:
-  HOST_SHA: ${{ github.event.client_payload.host_ref || github.sha }}
-  MARKETPLACE_SHA: ${{ github.event.client_payload.marketplace_ref || vars.M4_MARKETPLACE_SHA }}
-  SDK_SHA: ${{ github.event.client_payload.sdk_ref || vars.M4_SDK_SHA }}
-  EP_API_SHA: ${{ github.event.client_payload.ep_api_ref || vars.M4_EP_API_SHA }}
   PUBLISHER_KEY: lvismkt_e2epub_${{ github.run_id }}_${{ github.run_attempt }}
   REVIEWER_KEY: lvismkt_e2erev_${{ github.run_id }}_${{ github.run_attempt }}
   ADMIN_KEY: lvismkt_e2eadm_${{ github.run_id }}_${{ github.run_attempt }}
@@ -31,6 +29,10 @@ jobs:
     outputs:
       nonce: ${{ steps.bind.outputs.nonce }}
       manifest-sha256: ${{ steps.bind.outputs.manifest_sha256 }}
+      host_sha: ${{ steps.resolve-candidate-refs.outputs.host_sha }}
+      marketplace_sha: ${{ steps.resolve-candidate-refs.outputs.marketplace_sha }}
+      sdk_sha: ${{ steps.resolve-candidate-refs.outputs.sdk_sha }}
+      ep_api_sha: ${{ steps.resolve-candidate-refs.outputs.ep_api_sha }}
     steps:
       - name: Checkout trusted workflow control
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -41,11 +43,176 @@ jobs:
           submodules: false
           persist-credentials: false
 
+      - name: Resolve same-repository open PR heads
+        id: resolve-candidate-refs
+        shell: bash
+        env:
+          DISPATCH_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          HOST_DEFAULT_REF: ${{ github.sha }}
+          MARKETPLACE_DEFAULT_REF: ${{ vars.M4_MARKETPLACE_SHA }}
+          SDK_DEFAULT_REF: ${{ vars.M4_SDK_SHA }}
+          EP_API_DEFAULT_REF: ${{ vars.M4_EP_API_SHA }}
+          HOST_API_TOKEN: ${{ github.token }}
+          MARKETPLACE_API_TOKEN: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+          SDK_API_TOKEN: ${{ github.token }}
+          EP_API_TOKEN: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
+        run: |
+          set -euo pipefail
+          set +x
+
+          fail() {
+            echo "::error::$*" >&2
+            exit 1
+          }
+
+          payload_input="${DISPATCH_PAYLOAD:-null}"
+          payload="$(jq -ce '
+            if . == null then {} elif type == "object" then .
+            else error("client payload must be an object") end
+          ' <<<"$payload_input")" \
+            || fail "repository_dispatch client payload must be an object"
+
+          payload_has() {
+            jq -e --arg key "$1" 'has($key)' <<<"$payload" >/dev/null
+          }
+
+          payload_value() {
+            jq -er --arg key "$1" '
+              .[$key]
+              | if type == "number" or type == "string"
+                then tostring
+                else error("selector must be a number or string")
+                end
+            ' <<<"$payload"
+          }
+
+          api_get_pull() {
+            local token="$1"
+            local repo="$2"
+            local pr_number="$3"
+
+            [[ -n "$token" ]] || fail "$repo PR selector requires a GitHub API token"
+            GH_TOKEN="$token" gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$repo/pulls/$pr_number"
+          }
+
+          resolve_open_same_repository_pr() {
+            local repo="$1"
+            local pr_number="$2"
+            local token="$3"
+            local response
+
+            [[ "$pr_number" =~ ^[1-9][0-9]*$ ]] \
+              || fail "$repo PR selector must be a positive integer"
+            response="$(api_get_pull "$token" "$repo" "$pr_number")" \
+              || return 1
+            jq -er --arg repo "$repo" '
+              if .state != "open" then
+                error("candidate PR is not open")
+              elif .base.repo.full_name != $repo or .base.ref != "main" then
+                error("candidate PR does not target this repository main branch")
+              elif .head.repo.full_name != $repo then
+                error("candidate PR head is not from the same repository")
+              elif (.head.sha | type) != "string"
+                or (.head.sha | test("^[0-9a-f]{40}$") | not)
+              then
+                error("candidate PR head is not an exact lowercase commit SHA")
+              else
+                .head.sha
+              end
+            ' <<<"$response"
+          }
+
+          resolve_candidate() {
+            local repo="$1"
+            local pr_field="$2"
+            local ref_field="$3"
+            local default_ref="$4"
+            local token="$5"
+            local has_pr=false
+            local has_ref=false
+            local selector
+            local resolved_sha
+
+            if payload_has "$pr_field"; then has_pr=true; fi
+            if payload_has "$ref_field"; then has_ref=true; fi
+            if [[ "$has_pr" == true && "$has_ref" == true ]]; then
+              fail "$repo dispatch must provide only one of $pr_field or $ref_field"
+            fi
+            if [[ "$has_pr" == true ]]; then
+              selector="$(payload_value "$pr_field")" || return 1
+              resolved_sha="$(resolve_open_same_repository_pr \
+                "$repo" "$selector" "$token")" || return 1
+              printf '%s\tsame-repo-pr\n' "$resolved_sha"
+              return
+            fi
+
+            if [[ "$has_ref" == true ]]; then
+              selector="$(payload_value "$ref_field")" || return 1
+            else
+              selector="$default_ref"
+            fi
+            [[ "$selector" =~ ^[0-9a-f]{40}$ ]] \
+              || fail "$repo raw SHA selector must be an exact lowercase 40-character SHA"
+            printf '%s\traw-sha\n' "$selector"
+          }
+
+          validate_resolution() {
+            local repo="$1"
+            local sha="$2"
+            local selector_kind="$3"
+
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] \
+              || fail "$repo resolver did not return an exact lowercase commit SHA"
+            if [[ "$selector_kind" != "raw-sha" && "$selector_kind" != "same-repo-pr" ]]; then
+              fail "$repo resolver returned an unsupported selector kind"
+            fi
+          }
+
+          result="$(resolve_candidate \
+            "lvis-project/lvis-app" "host_pr" "host_ref" "$HOST_DEFAULT_REF" "$HOST_API_TOKEN")" \
+            || fail "Unable to resolve lvis-project/lvis-app candidate"
+          IFS=$'\t' read -r host_sha host_selector_kind <<<"$result" \
+            || fail "lvis-project/lvis-app resolver returned no candidate"
+          validate_resolution "lvis-project/lvis-app" "$host_sha" "$host_selector_kind"
+          result="$(resolve_candidate \
+            "lvis-project/lvis-marketplace" "marketplace_pr" "marketplace_ref" \
+            "$MARKETPLACE_DEFAULT_REF" "$MARKETPLACE_API_TOKEN")" \
+            || fail "Unable to resolve lvis-project/lvis-marketplace candidate"
+          IFS=$'\t' read -r marketplace_sha marketplace_selector_kind <<<"$result" \
+            || fail "lvis-project/lvis-marketplace resolver returned no candidate"
+          validate_resolution "lvis-project/lvis-marketplace" "$marketplace_sha" "$marketplace_selector_kind"
+          result="$(resolve_candidate \
+            "lvis-project/lvis-plugin-sdk" "sdk_pr" "sdk_ref" "$SDK_DEFAULT_REF" "$SDK_API_TOKEN")" \
+            || fail "Unable to resolve lvis-project/lvis-plugin-sdk candidate"
+          IFS=$'\t' read -r sdk_sha sdk_selector_kind <<<"$result" \
+            || fail "lvis-project/lvis-plugin-sdk resolver returned no candidate"
+          validate_resolution "lvis-project/lvis-plugin-sdk" "$sdk_sha" "$sdk_selector_kind"
+          result="$(resolve_candidate \
+            "lvis-project/lvis-plugin-ep" "ep_pr" "ep_api_ref" \
+            "$EP_API_DEFAULT_REF" "$EP_API_TOKEN")" \
+            || fail "Unable to resolve lvis-project/lvis-plugin-ep candidate"
+          IFS=$'\t' read -r ep_api_sha ep_api_selector_kind <<<"$result" \
+            || fail "lvis-project/lvis-plugin-ep resolver returned no candidate"
+          validate_resolution "lvis-project/lvis-plugin-ep" "$ep_api_sha" "$ep_api_selector_kind"
+
+          {
+            echo "host_sha=$host_sha"
+            echo "marketplace_sha=$marketplace_sha"
+            echo "sdk_sha=$sdk_sha"
+            echo "ep_api_sha=$ep_api_sha"
+            echo "host_selector_kind=$host_selector_kind"
+            echo "marketplace_selector_kind=$marketplace_selector_kind"
+            echo "sdk_selector_kind=$sdk_selector_kind"
+            echo "ep_api_selector_kind=$ep_api_selector_kind"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Checkout lvis-app
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: candidates/lvis-app
-          ref: ${{ env.HOST_SHA }}
+          ref: ${{ steps.resolve-candidate-refs.outputs.host_sha }}
           fetch-depth: 0
           submodules: false
           persist-credentials: false
@@ -55,7 +222,7 @@ jobs:
         with:
           repository: lvis-project/lvis-marketplace
           path: candidates/lvis-marketplace
-          ref: ${{ env.MARKETPLACE_SHA }}
+          ref: ${{ steps.resolve-candidate-refs.outputs.marketplace_sha }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
           fetch-depth: 0
           submodules: false
@@ -66,7 +233,7 @@ jobs:
         with:
           repository: lvis-project/lvis-plugin-sdk
           path: candidates/lvis-plugin-sdk
-          ref: ${{ env.SDK_SHA }}
+          ref: ${{ steps.resolve-candidate-refs.outputs.sdk_sha }}
           fetch-depth: 0
           submodules: false
           persist-credentials: false
@@ -76,16 +243,24 @@ jobs:
         with:
           repository: lvis-project/lvis-plugin-ep
           path: candidates/lvis-plugin-ep-api
-          ref: ${{ env.EP_API_SHA }}
+          ref: ${{ steps.resolve-candidate-refs.outputs.ep_api_sha }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
           fetch-depth: 0
           submodules: false
           persist-credentials: false
 
-      - name: Prove exact immutable main-ancestor refs
+      - name: Prove exact immutable candidate refs
         shell: bash
         env:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          HOST_SHA: ${{ steps.resolve-candidate-refs.outputs.host_sha }}
+          MARKETPLACE_SHA: ${{ steps.resolve-candidate-refs.outputs.marketplace_sha }}
+          SDK_SHA: ${{ steps.resolve-candidate-refs.outputs.sdk_sha }}
+          EP_API_SHA: ${{ steps.resolve-candidate-refs.outputs.ep_api_sha }}
+          HOST_SELECTOR_KIND: ${{ steps.resolve-candidate-refs.outputs.host_selector_kind }}
+          MARKETPLACE_SELECTOR_KIND: ${{ steps.resolve-candidate-refs.outputs.marketplace_selector_kind }}
+          SDK_SELECTOR_KIND: ${{ steps.resolve-candidate-refs.outputs.sdk_selector_kind }}
+          EP_API_SELECTOR_KIND: ${{ steps.resolve-candidate-refs.outputs.ep_api_selector_kind }}
         run: |
           set -euo pipefail
           for value in "$WORKFLOW_SHA" "$HOST_SHA" "$MARKETPLACE_SHA" "$SDK_SHA" "$EP_API_SHA"; do
@@ -96,20 +271,31 @@ jobs:
           done
           test "$(git -C control rev-parse HEAD)" = "$WORKFLOW_SHA"
           for spec in \
-            "candidates/lvis-app:$HOST_SHA" \
-            "candidates/lvis-marketplace:$MARKETPLACE_SHA" \
-            "candidates/lvis-plugin-sdk:$SDK_SHA" \
-            "candidates/lvis-plugin-ep-api:$EP_API_SHA"; do
+            "candidates/lvis-app:$HOST_SHA:$HOST_SELECTOR_KIND" \
+            "candidates/lvis-marketplace:$MARKETPLACE_SHA:$MARKETPLACE_SELECTOR_KIND" \
+            "candidates/lvis-plugin-sdk:$SDK_SHA:$SDK_SELECTOR_KIND" \
+            "candidates/lvis-plugin-ep-api:$EP_API_SHA:$EP_API_SELECTOR_KIND"; do
             repo="${spec%%:*}"
-            expected="${spec#*:}"
+            remainder="${spec#*:}"
+            expected="${remainder%%:*}"
+            selector_kind="${remainder#*:}"
             test "$(git -C "$repo" rev-parse HEAD)" = "$expected"
-            git -C "$repo" merge-base --is-ancestor "$expected" origin/main
+            if [[ "$selector_kind" == "raw-sha" ]]; then
+              git -C "$repo" merge-base --is-ancestor "$expected" origin/main
+            elif [[ "$selector_kind" != "same-repo-pr" ]]; then
+              echo "::error::Unsupported candidate selector kind: $selector_kind"
+              exit 1
+            fi
             test -z "$(git -C "$repo" status --porcelain=v1 --untracked-files=all --ignore-submodules=none)"
           done
 
       - name: Validate contracts and create safe source archives
         env:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          HOST_SHA: ${{ steps.resolve-candidate-refs.outputs.host_sha }}
+          MARKETPLACE_SHA: ${{ steps.resolve-candidate-refs.outputs.marketplace_sha }}
+          SDK_SHA: ${{ steps.resolve-candidate-refs.outputs.sdk_sha }}
+          EP_API_SHA: ${{ steps.resolve-candidate-refs.outputs.ep_api_sha }}
         run: |
           set -euo pipefail
           mkdir -p staged
@@ -179,6 +365,11 @@ jobs:
     needs: stage-inputs
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
+    env:
+      HOST_SHA: ${{ needs.stage-inputs.outputs.host_sha }}
+      MARKETPLACE_SHA: ${{ needs.stage-inputs.outputs.marketplace_sha }}
+      SDK_SHA: ${{ needs.stage-inputs.outputs.sdk_sha }}
+      EP_API_SHA: ${{ needs.stage-inputs.outputs.ep_api_sha }}
     steps:
       - name: Checkout trusted workflow control
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -273,6 +464,11 @@ jobs:
     needs: stage-inputs
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
+    env:
+      HOST_SHA: ${{ needs.stage-inputs.outputs.host_sha }}
+      MARKETPLACE_SHA: ${{ needs.stage-inputs.outputs.marketplace_sha }}
+      SDK_SHA: ${{ needs.stage-inputs.outputs.sdk_sha }}
+      EP_API_SHA: ${{ needs.stage-inputs.outputs.ep_api_sha }}
     steps:
       - name: Checkout trusted workflow control
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -368,6 +564,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     env:
+      HOST_SHA: ${{ needs.stage-inputs.outputs.host_sha }}
+      MARKETPLACE_SHA: ${{ needs.stage-inputs.outputs.marketplace_sha }}
+      SDK_SHA: ${{ needs.stage-inputs.outputs.sdk_sha }}
+      EP_API_SHA: ${{ needs.stage-inputs.outputs.ep_api_sha }}
       NONCE: ${{ needs.stage-inputs.outputs.nonce }}
       EXPECTED_MANIFEST_SHA: ${{ needs.stage-inputs.outputs.manifest-sha256 }}
       NETWORK_NAME: m4-internal-${{ github.run_id }}-${{ github.run_attempt }}
