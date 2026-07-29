@@ -858,19 +858,13 @@ jobs:
           docker cp \
             "$HOST_CONTAINER:/evidence/marketplace-live-lifecycle-evidence.json" \
             candidate-evidence/marketplace-live-lifecycle-evidence.json
-          if docker cp "$HOST_CONTAINER:/workspace/lvis-app/test-results" candidate-evidence/test-results; then
-            echo "copied Playwright test results"
-          else
-            mkdir -p candidate-evidence/test-results
-            echo "no Playwright result directory" > candidate-evidence/test-results/README.txt
-          fi
 
       - name: Validate nonce-bound evidence with trusted control
         env:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           set -euo pipefail
-          mkdir -p validated/raw
+          mkdir -p validated
           node control/scripts/marketplace-e2e-control.mjs finalize-evidence \
             --workflow-sha "$WORKFLOW_SHA" \
             --host-sha "$HOST_SHA" \
@@ -885,8 +879,6 @@ jobs:
             --candidate-evidence-root candidate-evidence \
             --candidate-evidence candidate-evidence/marketplace-live-lifecycle-evidence.json \
             --output validated/final-evidence.json
-          cp candidate-evidence/marketplace-live-lifecycle-evidence.json validated/raw/
-          cp -R candidate-evidence/test-results validated/raw/
           cp inputs/input-manifest.json \
             outputs/marketplace/marketplace-image-manifest.json \
             outputs/ep/ep-bundle-manifest.json \
@@ -896,7 +888,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: marketplace-live-lifecycle-evidence-${{ github.sha }}
-          path: validated/
+          path: validated/final-evidence.json
           if-no-files-found: error
           retention-days: 14
 
