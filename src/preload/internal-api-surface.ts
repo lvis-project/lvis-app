@@ -180,6 +180,12 @@ export function buildInternalApiSurface() {
   hasApiKey: async (vendor?: string) => ipcRenderer.invoke(CHANNELS.settings.hasApiKey, vendor) as Promise<boolean>,
   deleteApiKey: async (vendor: string) => ipcRenderer.invoke(CHANNELS.settings.deleteApiKey, vendor),
   listLlmModels: async (request: unknown) => ipcRenderer.invoke(CHANNELS.settings.listLlmModels, request),
+  codexSubscriptionStatus: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionStatus),
+  codexSubscriptionStartBrowserLogin: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionStartBrowserLogin),
+  codexSubscriptionStartDeviceCodeLogin: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionStartDeviceCodeLogin),
+  codexSubscriptionCancelLogin: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionCancelLogin),
+  codexSubscriptionLogout: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionLogout),
+  codexSubscriptionListModels: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionListModels),
   installMarketplaceProviderPreset: async (preset: unknown) =>
     ipcRenderer.invoke(CHANNELS.settings.marketplaceInstallProviderPreset, preset),
   uninstallMarketplaceProviderPreset: async (providerId: string) =>
