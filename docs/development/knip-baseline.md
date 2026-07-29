@@ -50,6 +50,9 @@ desktop workflows analyze the declarations without requiring `web/node_modules`.
 
 ## Whitelisted Runtime And Packaging Usage
 
+- `@openai/codex` supplies the platform-native App Server executable resolved
+  dynamically by `src/main/codex-app-server-client.ts`; it is unpacked with the
+  packaged application rather than imported into the JavaScript bundle.
 - `better-sqlite3` is rebuilt in `postinstall`, staged by
   `scripts/packaged-runtime-assets.mjs`, guarded by package footprint tests, and
   kept external by `scripts/build-main-esbuild.mjs`.

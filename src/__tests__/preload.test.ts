@@ -221,6 +221,23 @@ describe("preload — plugin webview asset URLs", () => {
     expect(mockRemoveListener).toHaveBeenCalledWith("lvis:settings:updated", listener);
   });
 
+  it.each([
+    ["codexSubscriptionStatus", "lvis:settings:codex-subscription:status"],
+    ["codexSubscriptionStartBrowserLogin", "lvis:settings:codex-subscription:start-browser-login"],
+    ["codexSubscriptionStartDeviceCodeLogin", "lvis:settings:codex-subscription:start-device-code-login"],
+    ["codexSubscriptionCancelLogin", "lvis:settings:codex-subscription:cancel-login"],
+    ["codexSubscriptionLogout", "lvis:settings:codex-subscription:logout"],
+    ["codexSubscriptionListModels", "lvis:settings:codex-subscription:list-models"],
+  ])("exposes %s through the internal Codex subscription bridge", async (apiKey, channel) => {
+    const api = await loadLvisApi();
+    const action = api[apiKey];
+
+    expect(typeof action).toBe("function");
+    await (action as () => Promise<unknown>)();
+
+    expect(mockInvoke).toHaveBeenCalledWith(channel);
+  });
+
   it("does not trust renderer-minted chat userActivation flags", async () => {
     const api = await loadLvisApi();
     const chatSend = api["chatSend"] as (
