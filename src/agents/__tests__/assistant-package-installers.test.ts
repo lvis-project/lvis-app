@@ -10,6 +10,10 @@ import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
 import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { PluginMarketplaceItem } from "../../plugins/types.js";
 
+vi.mock("../../shared/app-version.js", () => ({
+  getLvisAppVersion: () => "0.5.9",
+}));
+
 const TEST_INSTALL_ROOT = resolve(process.cwd(), ".lvis-package");
 const TEST_CACHE_ROOT = resolve(process.cwd(), ".lvis-package-cache");
 const TEST_AGENT_REGISTRY_PATH = resolve(process.cwd(), ".lvis-agent-registry.json");
@@ -172,6 +176,43 @@ describe("assistant package installers", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("returns update-required before agent or skill artifact work begins", async () => {
+    const upgradeRequired = {
+      code: "upgrade_required" as const,
+      minAppVersion: "1.2.3",
+      message: "LVIS 1.2.3+ is required to install this version. Update LVIS and try again.",
+    };
+    const agentStore = makeStore(zipBuffer({}));
+    const agentFetcher = {
+      ...makeFetcher("agent"),
+      getPluginDetail: vi.fn(async () => ({
+        ...marketplaceItem("agent"),
+        upgradeRequired,
+      })),
+    };
+    await expect(installAgentPackageFromMarketplace("reviewer", {
+      fetcher: agentFetcher,
+      store: agentStore,
+      registryPath: TEST_AGENT_REGISTRY_PATH,
+    })).rejects.toMatchObject({ required: "1.2.3", current: "0.5.9" });
+    expect(agentStore.downloadVerifiedArtifact).not.toHaveBeenCalled();
+
+    const skillStore = makeStore(zipBuffer({}));
+    const skillFetcher = {
+      ...makeFetcher("skill"),
+      getPluginDetail: vi.fn(async () => ({
+        ...marketplaceItem("skill"),
+        upgradeRequired,
+      })),
+    };
+    await expect(installSkillPackageFromMarketplace("audit", {
+      fetcher: skillFetcher,
+      store: skillStore,
+      registryPath: TEST_SKILL_REGISTRY_PATH,
+    })).rejects.toMatchObject({ required: "1.2.3", current: "0.5.9" });
+    expect(skillStore.downloadVerifiedArtifact).not.toHaveBeenCalled();
   });
 
   it("rejects an empty agent profile before extracting the package", async () => {

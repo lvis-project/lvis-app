@@ -45,7 +45,12 @@ import {
 } from "./zip-entry-path.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PublicKeyInput } from "./envelope-verifier.js";
-import type { PluginAccessSpec, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
+import {
+  IncompatibleAppVersionError,
+  type PluginAccessSpec,
+  type PluginMarketplaceItem,
+  type PluginRegistryEntryInstallSource,
+} from "./types.js";
 import { stripLegacyPluginToolGrants } from "./registry.js";
 import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import {
@@ -63,7 +68,24 @@ import {
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
 import { withMarketplaceArtifactResourceSlot } from "./marketplace-artifact-resource-gate.js";
+import { getLvisAppVersion } from "../shared/app-version.js";
 export { assertSafeArtifactSlug, SAFE_ARTIFACT_SLUG_RE } from "./plugin-id.js";
+
+/** Shared last-line defense for every marketplace artifact consumer. */
+export function assertMarketplaceAppUpgradeNotRequired(
+  plugin: Pick<PluginMarketplaceItem, "upgradeRequired">,
+): void {
+  const upgradeRequired = plugin.upgradeRequired;
+  if (upgradeRequired) {
+    if (upgradeRequired.minAppVersion) {
+      throw new IncompatibleAppVersionError(
+        upgradeRequired.minAppVersion,
+        getLvisAppVersion(),
+      );
+    }
+    throw new Error(upgradeRequired.message);
+  }
+}
 const log = createLogger("plugin-artifact-store");
 
 /**
@@ -368,6 +390,7 @@ export class PluginArtifactStore {
     onProgress?: (event: InstallerProgressEvent) => void,
     signal?: AbortSignal,
   ): Promise<VerifiedArtifact> {
+    assertMarketplaceAppUpgradeNotRequired(plugin);
     const slug = assertSafeArtifactSlug(plugin.slug ?? plugin.id);
     if (!isVerifiedMarketplaceFetcher(this.fetcher)) {
       throw new Error(
