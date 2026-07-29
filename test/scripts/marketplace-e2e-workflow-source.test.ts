@@ -260,6 +260,32 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     expect(finalJob).toContain("candidate-evidence-root");
   });
 
+  it("uploads only trusted lifecycle evidence after a successful candidate run", () => {
+    const finalJob = job("marketplace-e2e");
+    const validation = finalJob.indexOf(
+      "name: Validate nonce-bound evidence with trusted control",
+    );
+    const upload = finalJob.indexOf(
+      "name: Upload trusted lifecycle evidence",
+      validation,
+    );
+    const uploadEnd = finalJob.indexOf("\n      - name:", upload + 1);
+    expect(validation).toBeGreaterThan(finalJob.indexOf("docker start --attach"));
+    expect(upload).toBeGreaterThan(validation);
+    expect(uploadEnd).toBeGreaterThan(upload);
+    const validationBlock = finalJob.slice(validation, upload);
+    expect(validationBlock).toContain("--output validated/final-evidence.json");
+    expect(validationBlock).toContain("mkdir -p validated");
+    expect(validationBlock).not.toContain("validated/raw");
+    expect(validationBlock).not.toContain("cp candidate-evidence/");
+    expect(validationBlock).not.toContain("test-results");
+    const uploadBlock = finalJob.slice(upload, uploadEnd);
+    expect(uploadBlock).toContain("path: validated/final-evidence.json");
+    expect(uploadBlock).not.toMatch(/^\s*path: validated\/\s*$/mu);
+    expect(uploadBlock).not.toContain("candidate-evidence");
+    expect(uploadBlock).not.toContain("test-results");
+  });
+
   it("preserves Host Playwright diagnostics when the candidate fails", () => {
     const finalJob = job("marketplace-e2e");
     const capture = finalJob.indexOf(
