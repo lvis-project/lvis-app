@@ -13,6 +13,7 @@ import { app } from "electron";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "../../plugins/marketplace.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace.js";
 import { CloudMarketplaceFetcher } from "../../plugins/cloud-marketplace-fetcher.js";
+import { getLvisAppVersion } from "../../shared/app-version.js";
 import { createRefreshActiveLlmWildcard } from "./refresh-active-llm-wildcard.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
@@ -41,7 +42,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   if (marketplaceSettings.cloudBaseUrl) {
     marketplaceFetcher = new CloudMarketplaceFetcher({
       baseUrl: marketplaceSettings.cloudBaseUrl,
-      appVersion: app.getVersion(),
+      appVersion: getLvisAppVersion(),
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
       allowPrivateNetwork: marketplaceSettings.cloudAllowPrivateNetwork,
     });
