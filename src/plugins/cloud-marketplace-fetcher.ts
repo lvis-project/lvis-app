@@ -595,16 +595,19 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
   private mapItem(row: ServerCatalogRow): PluginMarketplaceItem | null {
     const pluginType = this.catalogPackageType(row);
     const resolution = row.app_version_resolution ?? row.appVersionResolution;
-    if (isResolverInstallablePackageType(pluginType) && resolution !== undefined) {
+    if (isResolverInstallablePackageType(pluginType)) {
       if (resolution === "resolved") {
         return this.mapCatalogItem(this.mapResolvedArtifactRow(row, pluginType));
       }
       if (resolution === "no_compatible_version") {
         return this.mapUpgradeRequiredItem(row, pluginType);
       }
-      // Unknown or malformed resolver status is never allowed to reuse the
-      // outer catalog artifact or policy.
-      return null;
+      if (resolution !== undefined || this.configuredAppVersion() !== undefined) {
+        // An app-version request is a resolver contract. Never reuse the
+        // outer catalog artifact or policy when the resolver status is absent,
+        // unknown, or malformed. Only an unversioned legacy read may do so.
+        return null;
+      }
     }
     return this.mapCatalogItem(row);
   }
@@ -620,7 +623,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
   ): PluginMarketplaceItem | null {
     const id = this.catalogIdForResolvedArtifact(row);
     const name = row.name ?? row.display_name ?? row.displayName ?? id;
-    if (!name || name.trim().length === 0) return null;
+    if (typeof name !== "string" || name.trim().length === 0) return null;
     const displayOnlyItem = {
       id,
       slug: typeof row.slug === "string" ? row.slug : undefined,
