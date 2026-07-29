@@ -1547,6 +1547,61 @@ describe("CloudMarketplaceFetcher app-version resolver", () => {
       packageAsset: { type: "provider", providerId: "groq" },
     });
   });
+
+  it("fails closed for versioned catalog rows without a resolver status or valid display name", async () => {
+    const installableTypes = ["plugin", "mcp", "agent", "skill"] as const;
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      plugins: [
+        ...installableTypes.map((pluginType) => ({
+          slug: `missing-resolution-${pluginType}`,
+          name: `Missing resolution ${pluginType}`,
+          plugin_type: pluginType,
+          latest_stable_version: "9.9.9",
+          latest_artifact_sha256: "a".repeat(64),
+          package_spec: `outer-${pluginType}@9.9.9`,
+          package_name: `outer-${pluginType}`,
+          install_policy: "admin",
+        })),
+        {
+          slug: "non-string-upgrade-name",
+          name: { untrusted: "name" },
+          plugin_type: "plugin",
+          app_version_resolution: "no_compatible_version",
+        },
+      ],
+    }));
+
+    await expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).listPlugins()).resolves.toEqual([]);
+  });
+
+  it("keeps legacy catalog and detail mapping only without appVersion", async () => {
+    const legacyRow = {
+      slug: "legacy-plugin",
+      name: "Legacy plugin",
+      plugin_type: "plugin",
+      latest_stable_version: "1.0.0",
+      package_spec: "legacy-plugin@1.0.0",
+    };
+    mockedFetchPublic
+      .mockResolvedValueOnce(jsonResponse([legacyRow]))
+      .mockResolvedValueOnce(jsonResponse(legacyRow));
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const catalog = await fetcher.listPlugins();
+    const detail = await fetcher.getPluginDetail("legacy-plugin");
+
+    expect(catalog).toMatchObject([{ id: "legacy-plugin", packageSpec: "legacy-plugin@1.0.0" }]);
+    expect(detail).toMatchObject({ id: "legacy-plugin", packageSpec: "legacy-plugin@1.0.0" });
+    expect(mockedFetchPublic.mock.calls.map(([url]) => url)).toEqual([
+      "https://marketplace.example.com/api/v1/catalog",
+      "https://marketplace.example.com/api/v1/plugins/legacy-plugin",
+    ]);
+  });
 });
 
 
@@ -1564,6 +1619,15 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
       slug: "detail-plugin",
       name: "Detail plugin",
       latest_stable_version: "1.0.0",
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0",
+        artifact_sha256: "a".repeat(64),
+        manifest: {
+          id: "detail-plugin",
+          version: "1.0.0",
+        },
+      },
     }));
 
     const detail = await new CloudMarketplaceFetcher({
@@ -1575,6 +1639,35 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
     expect(mockedFetchPublic.mock.calls[0]?.[0]).toBe(
       "https://marketplace.example.com/api/v1/plugins/detail-plugin?app_version=0.5.9",
     );
+  });
+
+  it("fails closed for versioned installable details without a resolver status or valid display name", async () => {
+    const installableTypes = ["plugin", "mcp", "agent", "skill"] as const;
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    });
+
+    for (const pluginType of installableTypes) {
+      const slug = `missing-detail-resolution-${pluginType}`;
+      mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+        slug,
+        name: `Missing detail resolution ${pluginType}`,
+        plugin_type: pluginType,
+        latest_stable_version: "9.9.9",
+        package_spec: `outer-${pluginType}@9.9.9`,
+      }));
+
+      await expect(fetcher.getPluginDetail(slug)).resolves.toBeNull();
+    }
+
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "non-string-detail-upgrade-name",
+      name: { untrusted: "name" },
+      plugin_type: "plugin",
+      app_version_resolution: "no_compatible_version",
+    }));
+    await expect(fetcher.getPluginDetail("non-string-detail-upgrade-name")).resolves.toBeNull();
   });
 
   it("rejects a selected non-stable version before it can form a package spec", async () => {
