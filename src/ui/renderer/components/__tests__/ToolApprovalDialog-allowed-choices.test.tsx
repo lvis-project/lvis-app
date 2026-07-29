@@ -50,6 +50,11 @@ describe("ToolApprovalDialog allowed choices", () => {
     expect(record).not.toHaveBeenCalled();
 
     onDecide.mockClear();
+    fireEvent.click(screen.getByTestId("deny-button"));
+
+    expect(onDecide).toHaveBeenCalledWith("deny-once");
+
+    onDecide.mockClear();
     fireEvent.keyDown(approve, { key: "a", code: "KeyA" });
 
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
