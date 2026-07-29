@@ -76,6 +76,7 @@ import { ko as ko_chatView } from "../generated/chatView.js";
 import { ko as ko_checkpointDivider } from "../generated/checkpointDivider.js";
 import { ko as ko_cherryBlossom } from "../generated/cherryBlossom.js";
 import { ko as ko_clipboardPaste } from "../generated/clipboardPaste.js";
+import { ko as ko_codexSubscriptionCard } from "../generated/codexSubscriptionCard.js";
 import { ko as ko_commandActions } from "../generated/commandActions.js";
 import { ko as ko_commandPopover } from "../generated/commandPopover.js";
 import { ko as ko_commandPopoverPanel } from "../generated/commandPopoverPanel.js";
@@ -259,6 +260,7 @@ export const koMessages: Record<string, string> = {
   ...ko_checkpointDivider,
   ...ko_cherryBlossom,
   ...ko_clipboardPaste,
+  ...ko_codexSubscriptionCard,
   ...ko_commandActions,
   ...ko_commandPopover,
   ...ko_commandPopoverPanel,

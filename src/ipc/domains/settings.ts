@@ -14,6 +14,7 @@ import {
   reconcileStartupLaunch,
   notifyStartupLaunchFailureIfNeeded,
 } from "../../main/startup-launch.js";
+import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import {
   isLLMVendor,
   isMarketplaceEligibleLLMVendor,
@@ -29,6 +30,45 @@ import {
 import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
+import {
+  CodexAppServerClient,
+  CodexAppServerError,
+} from "../../main/codex-app-server-client.js";
+import type {
+  CodexSubscriptionErrorCode,
+  CodexSubscriptionStatus,
+} from "../../shared/codex-subscription.js";
+
+function codexSubscriptionErrorCode(error: unknown): CodexSubscriptionErrorCode {
+  return error instanceof CodexAppServerError ? error.code : "codex-operation-failed";
+}
+
+function codexSubscriptionFailure(
+  client: CodexAppServerClient | null,
+  error: unknown,
+): { error: CodexSubscriptionErrorCode; status: CodexSubscriptionStatus } {
+  const code = codexSubscriptionErrorCode(error);
+  const status: CodexSubscriptionStatus = client?.getCachedStatus() ?? {
+    runtime: "ready",
+    connection: "signed-out",
+    planType: null,
+    pendingLogin: null,
+    pendingDeviceCode: null,
+  };
+  if (code === "codex-runtime-unavailable" || code === "codex-runtime-start-failed") {
+    return {
+      error: code,
+      status: {
+        runtime: "unavailable",
+        connection: "signed-out",
+        planType: null,
+        pendingLogin: null,
+        pendingDeviceCode: null,
+      },
+    };
+  }
+  return { error: code, status };
+}
 
 /** Authoritative remote route lineage is main-only and never projected to the renderer. */
 function rendererSettingsSnapshot(snapshot: ReturnType<IpcDeps["settingsService"]["getAll"]>) {
@@ -223,6 +263,37 @@ function llmSecretKeyForDeleteInput(deps: IpcDeps, vendor: unknown): string | un
 
 export function registerSettingsHandlers(deps: IpcDeps): void {
   const { settingsService, conversationLoop, auditLogger } = deps;
+  let codexSubscriptionClient: CodexAppServerClient | null = null;
+  let codexSubscriptionClientPromise: Promise<CodexAppServerClient> | null = null;
+  const getCodexSubscriptionClient = async (): Promise<CodexAppServerClient> => {
+    if (codexSubscriptionClient) return codexSubscriptionClient;
+    if (!codexSubscriptionClientPromise) {
+      const namespace = openFeatureNamespace("codex-subscription");
+      codexSubscriptionClientPromise = Promise.all([
+        namespace.childDir("home"),
+        namespace.childDir("sqlite"),
+        namespace.childDir("workspace"),
+      ])
+        .then(([runtimeHome, sqliteHome, workspaceDir]) => {
+          const client = new CodexAppServerClient({
+            runtimeHome,
+            sqliteHome,
+            workspaceDir,
+            openExternal: async (url) => {
+              const { shell } = await import("electron");
+              await shell.openExternal(url);
+            },
+          });
+          codexSubscriptionClient = client;
+          return client;
+        })
+        .catch(() => {
+          codexSubscriptionClientPromise = null;
+          throw new CodexAppServerError("codex-runtime-start-failed");
+        });
+    }
+    return codexSubscriptionClientPromise;
+  };
 
   // read-only — no sender guard needed
   ipcMain.handle(CHANNELS.settings.get, () => rendererSettingsSnapshot(settingsService.getAll()));
@@ -506,6 +577,97 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     });
   });
 
+  // ─── Codex subscription (isolated local App Server) ───────────────
+  // These are host-renderer-only. They can start a local runtime, launch a
+  // trusted browser page, or delete the isolated Codex session, so plugin and
+  // external frames must never invoke them.
+  ipcMain.handle(CHANNELS.settings.codexSubscriptionStatus, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.codexSubscriptionStatus, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    let client: CodexAppServerClient | null = null;
+    try {
+      client = await getCodexSubscriptionClient();
+      return { ok: true, status: await client.getStatus() };
+    } catch (error) {
+      return { ok: false, ...codexSubscriptionFailure(client, error) };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.settings.codexSubscriptionStartBrowserLogin, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.codexSubscriptionStartBrowserLogin, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    let client: CodexAppServerClient | null = null;
+    try {
+      client = await getCodexSubscriptionClient();
+      return { ok: true, status: await client.startBrowserLogin() };
+    } catch (error) {
+      return { ok: false, ...codexSubscriptionFailure(client, error) };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.settings.codexSubscriptionStartDeviceCodeLogin, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.codexSubscriptionStartDeviceCodeLogin, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    let client: CodexAppServerClient | null = null;
+    try {
+      client = await getCodexSubscriptionClient();
+      const result = await client.startDeviceCodeLogin();
+      // The verification URL is opened in main; only the one-time code crosses
+      // the renderer boundary.
+      return { ok: true, status: result.status, userCode: result.userCode };
+    } catch (error) {
+      return { ok: false, ...codexSubscriptionFailure(client, error) };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.settings.codexSubscriptionCancelLogin, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.codexSubscriptionCancelLogin, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    let client: CodexAppServerClient | null = null;
+    try {
+      client = await getCodexSubscriptionClient();
+      return { ok: true, status: await client.cancelLogin() };
+    } catch (error) {
+      return { ok: false, ...codexSubscriptionFailure(client, error) };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.settings.codexSubscriptionLogout, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.codexSubscriptionLogout, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    let client: CodexAppServerClient | null = null;
+    try {
+      client = await getCodexSubscriptionClient();
+      return { ok: true, status: await client.logout() };
+    } catch (error) {
+      return { ok: false, ...codexSubscriptionFailure(client, error) };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.settings.codexSubscriptionListModels, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.codexSubscriptionListModels, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    let client: CodexAppServerClient | null = null;
+    try {
+      client = await getCodexSubscriptionClient();
+      const result = await client.listModels();
+      return { ok: true, status: result.status, models: result.models };
+    } catch (error) {
+      return { ok: false, ...codexSubscriptionFailure(client, error) };
+    }
+  });
   // ─── Marketplace API Key ──────────────────────
   ipcMain.handle(CHANNELS.settings.marketplaceSetApiKey, async (e, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceSetApiKey, e); return UNAUTHORIZED_FRAME; }
