@@ -39,9 +39,17 @@ const EP_PLUGIN_ID = "ep-api";
 const ATTENDANCE_SKILL_ID = "attendance";
 const TEST_DATE = "2026-07-24";
 const TEST_START_TIME = "09:15";
-const EP_AUTOLOAD_APPROVAL_TOOL_NAME = "ep_approval_read";
-const EP_AUTOLOAD_APPROVAL_ARGS = canonicalStringify({ operation: "count" });
-const MAX_EP_AUTOLOAD_APPROVALS_AHEAD_OF_GRANT = 2;
+const EP_AUTOLOAD_APPROVALS = [
+  {
+    toolName: "ep_approval_read",
+    argsIdentity: canonicalStringify({ operation: "count" }),
+  },
+  {
+    toolName: "ep_profile_read",
+    argsIdentity: canonicalStringify({ operation: "current" }),
+  },
+] as const;
+const MAX_EP_AUTOLOAD_APPROVALS_AHEAD_OF_GRANT = EP_AUTOLOAD_APPROVALS.length;
 
 type BundleSnapshot = {
   ok: true;
@@ -494,10 +502,10 @@ async function denyEpAutoloadApprovalsAheadOfGrant(
   expectedToolName: string,
   expectedArgs: Record<string, unknown>,
 ): Promise<string> {
-  // The exact EP control shell auto-loads an authenticated count view after
-  // session restoration. Its generated read approval can precede the explicit
-  // operation grant below. Decline only that known background request, then
-  // require the requested grant to become the open FIFO head.
+  // The exact EP control shell restores its authenticated count and profile
+  // views after session restoration. Their generated read approvals can precede
+  // the explicit operation grant below. Decline only those exact background
+  // requests, then require the requested grant to become the open FIFO head.
   const expectedArgsIdentity = canonicalStringify(expectedArgs);
   for (let dismissed = 0; dismissed < MAX_EP_AUTOLOAD_APPROVALS_AHEAD_OF_GRANT; dismissed += 1) {
     const dialog = openApprovalDialog(page);
@@ -509,10 +517,12 @@ async function denyEpAutoloadApprovalsAheadOfGrant(
     if (actualToolName === expectedToolName && actualArgsIdentity === expectedArgsIdentity) {
       return requestId;
     }
-    if (
-      actualToolName !== EP_AUTOLOAD_APPROVAL_TOOL_NAME
-      || actualArgsIdentity !== EP_AUTOLOAD_APPROVAL_ARGS
-    ) {
+    const isKnownAutoloadApproval = EP_AUTOLOAD_APPROVALS.some(
+      ({ toolName, argsIdentity }) => (
+        actualToolName === toolName && actualArgsIdentity === argsIdentity
+      ),
+    );
+    if (!isKnownAutoloadApproval) {
       throw new Error(
         `Unexpected approval ahead of ${expectedToolName}: ${actualToolName ?? "<missing tool name>"}`,
       );
