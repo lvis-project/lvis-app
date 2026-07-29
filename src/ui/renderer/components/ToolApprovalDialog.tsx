@@ -931,6 +931,7 @@ export function ToolApprovalDialog({
               variant="outline"
               onClick={() => onDecide("deny-once")}
               title={tHook("toolApprovalDialog.shortcutD")}
+              data-testid="deny-button"
             >
               {tHook("toolApprovalDialog.denyOnce")}
             </Button>
