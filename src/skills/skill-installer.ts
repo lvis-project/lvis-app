@@ -1,7 +1,10 @@
 import { rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
-import type { PluginArtifactStore } from "../plugins/plugin-artifact-store.js";
+import {
+  assertMarketplaceAppUpgradeNotRequired,
+  type PluginArtifactStore,
+} from "../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../plugins/marketplace-fetcher.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
 import { parseFrontmatter, SKILL_NAME_ALLOWLIST } from "../main/skill-store.js";
@@ -33,6 +36,7 @@ export async function installSkillPackageFromMarketplace(
   }
   const detail = await opts.fetcher.getPluginDetail(slug);
   if (!detail) throw new Error(`marketplace catalog has no entry for slug "${slug}"`);
+  assertMarketplaceAppUpgradeNotRequired(detail);
   if (detail.pluginType !== "skill") {
     throw new Error(`slug "${slug}" is a ${detail.pluginType ?? "plugin"} entry, not a skill package`);
   }

@@ -335,6 +335,10 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     item: MarketplaceItem,
     options: { networkAccessAcknowledged?: boolean } = {},
   ) => {
+    if (item.upgradeRequired) {
+      setPackageStatus(item.upgradeRequired.message);
+      return;
+    }
     const packageType = item.pluginType ?? "plugin";
     setWorkingSlug(item.id);
     try {
@@ -482,9 +486,10 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             ) : visiblePackages.map((item) => {
               const packageType = item.pluginType ?? "plugin";
               const isWorking = workingSlug === item.id;
+              const upgradeRequired = item.upgradeRequired;
               const supportedAssetPackage = isMarketplaceAssetPackage(item);
               const unsupportedAssetPackage = isUnsupportedMarketplaceAssetPackage(item);
-              const canInstall = canInstallMarketplacePackageType(packageType, {
+              const canInstall = !upgradeRequired && canInstallMarketplacePackageType(packageType, {
                 hasSupportedAsset: supportedAssetPackage,
               });
               const canUninstall = item.installed && (
@@ -497,18 +502,22 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                 ? t("marketplaceTab.processingLabel")
                 : item.installed
                   ? t("marketplaceTab.removeButton")
+                  : upgradeRequired
+                    ? "Update LVIS"
+                    : unsupportedAssetPackage
+                      ? t("marketplaceTab.unsupportedAssetPackageButton")
+                      : canInstall
+                        ? t("marketplaceTab.installButton")
+                        : t("marketplaceTab.comingSoon");
+              const unavailableTitle = upgradeRequired
+                ? upgradeRequired.message
+                : canInstall
+                  ? undefined
                   : unsupportedAssetPackage
-                    ? t("marketplaceTab.unsupportedAssetPackageButton")
-                  : canInstall
-                    ? t("marketplaceTab.installButton")
-                    : t("marketplaceTab.comingSoon");
-              const unavailableTitle = canInstall
-                ? undefined
-                : unsupportedAssetPackage
-                  ? t("marketplaceTab.unsupportedAssetPackageTitle")
-                  : t("marketplaceTab.packageInstallUnavailableTitle", {
-                    label: marketplacePackageLabel(packageType),
-                  });
+                    ? t("marketplaceTab.unsupportedAssetPackageTitle")
+                    : t("marketplaceTab.packageInstallUnavailableTitle", {
+                      label: marketplacePackageLabel(packageType),
+                    });
               const trustLabelKeys = marketplaceTrustLabelKeysForPackage(packageType, {
                 hasSupportedAsset: supportedAssetPackage,
               });
@@ -522,6 +531,15 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                         <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">OAuth</Badge>
                       )}
                       {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">{t("marketplaceTab.installedBadge")}</Badge>}
+                      {upgradeRequired && (
+                        <Badge
+                          variant="outline"
+                          className="h-5 px-1.5 text-[10px]"
+                          data-testid={`marketplace:upgrade-required:${item.id}`}
+                        >
+                          Update LVIS
+                        </Badge>
+                      )}
                       {unsupportedAssetPackage && (
                         <Badge
                           variant="outline"
@@ -533,6 +551,14 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                       )}
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{item.description || item.packageSpec}</p>
+                    {upgradeRequired && (
+                      <p
+                        className="mt-0.5 text-[11px] text-warning"
+                        data-testid={`marketplace:upgrade-required-message:${item.id}`}
+                      >
+                        {upgradeRequired.message}
+                      </p>
+                    )}
                     {trustLabelKeys.length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1" data-testid={`marketplace:trust:${item.id}`}>
                         {trustLabelKeys.map((key) => (
