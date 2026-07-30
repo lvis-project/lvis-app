@@ -102,7 +102,7 @@
     "@ai-sdk/openai": "^4.0.0",
     "@ai-sdk/openai-compatible": "~3.0.0",
     "@anthropic-ai/sandbox-runtime": "0.0.67",
-    "@modelcontextprotocol/ext-apps": "1.7.4",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@openai/codex": "0.146.0",
     "adm-zip": "^0.6.0",
