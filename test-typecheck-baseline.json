@@ -301,7 +301,6 @@
     "test/renderer/render-app.tsx": 1,
     "test/renderer/star-flow.test.tsx": 2,
     "test/screenshots/fixtures.ts": 1,
-    "test/scripts/check-cluster-review-attestation.test.ts": 5,
     "test/scripts/check-cluster-scope.test.ts": 4,
     "test/scripts/check-cluster-sensitive-paths.test.ts": 1,
     "test/scripts/check-test-coverage.test.ts": 2,
