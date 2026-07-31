@@ -9,6 +9,7 @@ import {
   markStaleToolResults,
   evictAgedToolResultImages,
   estimateTokens,
+  estimateMessageTokensForWire,
   estimateMessagesTokens,
   countHangul,
   getModelPreflightThreshold,
@@ -16,6 +17,7 @@ import {
   getRuntimePreflightOverride,
 } from "../auto-compact.js";
 import { stubMarkedToolResults } from "../wire-serialize.js";
+import { estimateUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
 import type { GenericMessage } from "../llm/types.js";
 
@@ -464,6 +466,25 @@ describe("estimateTokens — chars/4 + 1 with Korean weighting (P11)", () => {
 });
 
 describe("estimateMessagesTokens — provider-wire shape", () => {
+  it("delegates user text, resource parts, and image overhead to the shared estimator", () => {
+    const content = [
+      { type: "text" as const, text: "한글 user body" },
+      { type: "text" as const, text: "<resource>server text</resource>" },
+      {
+        type: "image" as const,
+        image: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        width: 2048,
+        height: 512,
+      },
+    ];
+    const message: GenericMessage = { role: "user", content };
+    const expected = estimateUserMessageTokens(content);
+
+    expect(estimateMessageTokensForWire(message)).toBe(expected);
+    expect(estimateMessagesTokens([message])).toBe(expected);
+  });
+
   it("counts compacted tool_results as serialization stubs, not verbatim memory", () => {
     const messages = synth();
     const rawEstimate = estimateMessagesTokens(messages);

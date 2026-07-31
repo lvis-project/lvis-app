@@ -78,6 +78,17 @@ describe("validateUserContentParts attachment IPC boundary", () => {
     ]);
   });
 
+  it("preserves normalized image dimensions for provider-wire token estimation", () => {
+    const value = {
+      type: "image" as const,
+      image: VALID_PNG_DATA_URL,
+      mimeType: "image/png",
+      width: 2048,
+      height: 512,
+    };
+
+    expect(validateUserContentParts([value])).toEqual([value]);
+  });
   it("rejects URL-shaped, malformed/noncanonical, and mismatched binary data", () => {
     expect(validateUserContentParts([
       image("https://attacker.example/image.png"),

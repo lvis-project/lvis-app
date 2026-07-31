@@ -13,6 +13,7 @@
 import {
   type LLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
+import { serializeUserContentForEstimation } from "../../shared/multimodal-token-estimate.js";
 import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 import type { ToolResultImage } from "../../tools/types.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
@@ -231,20 +232,7 @@ export function userContentText(
 export function serializeMessageForEstimation(message: GenericMessage): string {
   switch (message.role) {
     case "user": {
-      const contentForEstimation =
-        typeof message.content === "string"
-          ? message.content
-          : message.content
-              .map((p) =>
-                p.type === "text"
-                  ? p.text
-                  : `[${p.type}:${p.type === "image" ? (p.mimeType ?? "image") : p.mimeType}]`,
-              )
-              .join("\n");
-      return JSON.stringify({
-        role: message.role,
-        content: contentForEstimation,
-      });
+      return serializeUserContentForEstimation(message.content);
     }
     case "assistant":
       return JSON.stringify({
