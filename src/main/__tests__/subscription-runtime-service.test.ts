@@ -557,6 +557,87 @@ describe("SubscriptionRuntimeService", () => {
   });
 
 
+  it("emits completed Codex usage as separate non-billable subscription telemetry", async () => {
+    const verificationRuntime = {
+      verifyIsolation: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    } as unknown as CodexConversationRuntime;
+    const textRuntime = {
+      startTurn: vi.fn(async (
+        _input: unknown,
+        callbacks: { onTextDelta?: (event: { threadId: string; turnId: string; itemId: string; delta: string }) => void },
+      ) => {
+        callbacks.onTextDelta?.({
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "message-1",
+          delta: "Reported answer",
+        });
+        return {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          status: "completed" as const,
+          tokenUsage: {
+            inputTokens: 71,
+            outputTokens: 13,
+            totalTokens: 96,
+            cachedInputTokens: 47,
+            cacheWriteInputTokens: 5,
+            reasoningOutputTokens: 8,
+            modelContextWindow: 128_000,
+          },
+        };
+      }),
+      isTurnActive: vi.fn(() => false),
+      interrupt: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    } as unknown as CodexConversationRuntime;
+    const runtimes = [verificationRuntime, textRuntime];
+    const registry = { stopAll: vi.fn(async () => undefined) } as unknown as AcpSubscriptionRuntimeRegistry;
+    const service = await SubscriptionRuntimeService.create(async () => undefined, {
+      namespace: namespace(),
+      codexClient: fakeCodexClient(),
+      acpRegistry: registry,
+      createCodexConversationRuntime: () => {
+        const runtime = runtimes.shift();
+        if (!runtime) throw new Error("missing-codex-test-runtime");
+        return runtime;
+      },
+    });
+
+    try {
+      await service.verify("codex");
+      const textSession = await service.openTextSession({ kind: "subscription", provider: "codex" });
+      const events: StreamEvent[] = [];
+      for await (const event of textSession.streamTurn("Report this completed turn.")) events.push(event);
+
+      expect(events).toEqual([
+        { type: "text_delta", text: "Reported answer" },
+        {
+          type: "message_complete",
+          stopReason: "end_turn",
+          subscriptionUsage: {
+            provider: "codex",
+            model: "default",
+            source: "provider-reported",
+            billable: false,
+            inputTokens: 71,
+            outputTokens: 13,
+            totalTokens: 96,
+            cacheReadTokens: 47,
+            cacheWriteTokens: 5,
+            reasoningOutputTokens: 8,
+            contextWindow: 128_000,
+          },
+        },
+      ]);
+      expect(events[1]).not.toHaveProperty("usage");
+      await textSession.stop();
+    } finally {
+      await service.stop();
+    }
+  });
+
   it("invalidates safe availability when an ACP runtime requests a native host capability", async () => {
     let onHostRequest: ((request: { kind: "permission" | "tool" | "other" }) => void | Promise<void>) | undefined;
     const session = {

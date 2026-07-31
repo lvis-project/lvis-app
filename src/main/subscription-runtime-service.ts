@@ -17,6 +17,7 @@ import {
   DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
   MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
   isSubscriptionRuntimeId,
+  normalizeSubscriptionUsageTelemetry,
   subscriptionRuntimeDescriptor,
   type SubscriptionChatRuntimeSelection,
   type SubscriptionConnectionState,
@@ -28,6 +29,7 @@ import {
   type SubscriptionRuntimeStatus,
   type SubscriptionRuntimeCapabilities,
   type SubscriptionImageAttachmentLimits,
+  type SubscriptionUsageTelemetry,
 } from "../shared/subscription-runtime.js";
 import {
   CodexAppServerClient,
@@ -37,6 +39,7 @@ import {
   CodexConversationRuntime,
   CodexConversationRuntimeError,
   type CodexConversationRuntimeOptions,
+  type CodexConversationTokenUsage,
 } from "./codex-conversation-runtime.js";
 import { SubscriptionToolBridge } from "./subscription-tool-bridge.js";
 import {
@@ -341,6 +344,28 @@ function transportDiagnosticFailure(error: unknown): Extract<StreamEvent, { type
     : undefined;
 }
 
+/** Convert the already-sanitized Codex `last` snapshot into non-billable SOT. */
+function codexReportedSubscriptionUsage(
+  selection: SubscriptionChatRuntimeSelection,
+  usage: CodexConversationTokenUsage,
+): SubscriptionUsageTelemetry | undefined {
+  return normalizeSubscriptionUsageTelemetry({
+    provider: "codex",
+    model: selection.model ?? "default",
+    source: "provider-reported",
+    billable: false,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    ...(usage.cachedInputTokens !== undefined ? { cacheReadTokens: usage.cachedInputTokens } : {}),
+    ...(usage.cacheWriteInputTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteInputTokens } : {}),
+    ...(usage.reasoningOutputTokens !== undefined
+      ? { reasoningOutputTokens: usage.reasoningOutputTokens }
+      : {}),
+    ...(usage.modelContextWindow !== undefined ? { contextWindow: usage.modelContextWindow } : {}),
+  });
+}
+
 /** Bounded single-consumer bridge from callback-style Codex events. */
 class SubscriptionEventQueue<T> implements AsyncIterable<T> {
   private readonly values: T[] = [];
@@ -526,7 +551,14 @@ class CodexSubscriptionTextSession implements SubscriptionTextSession {
         }
         if (result.status === "completed") {
           completed = true;
-          queue.push({ type: "message_complete", stopReason: "end_turn" });
+          const subscriptionUsage = result.tokenUsage
+            ? codexReportedSubscriptionUsage(this.selection, result.tokenUsage)
+            : undefined;
+          queue.push({
+            type: "message_complete",
+            stopReason: "end_turn",
+            ...(subscriptionUsage ? { subscriptionUsage } : {}),
+          });
           queue.finish();
           return;
         }

@@ -15,7 +15,10 @@ import type {
   TokenUsageByModel,
   ToolSchema,
 } from "../llm/types.js";
-import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
+import type {
+  SubscriptionChatRuntimeSelection,
+  SubscriptionUsageTelemetry,
+} from "../../shared/subscription-runtime.js";
 import type { RequestInputProjection } from "../request-input-projection.js";
 import type { CompressionStatus } from "../../shared/compact-status.js";
 import type { FallbackStatus } from "../llm/vercel/fallback-chain.js";
@@ -180,6 +183,8 @@ export interface TurnCallbacks {
     vendorProvider?: LLMVendor;
     vendorModel?: string;
     usageByModel?: TokenUsageByModel[];
+    /** Non-billable subscription telemetry, kept outside API pricing fields. */
+    subscriptionUsage?: SubscriptionUsageTelemetry[];
     breakdown?: Record<string, { count: number; ms: number }>;
   }) => void;
 }
@@ -230,6 +235,8 @@ export interface TurnResult {
   route: string;
   usage?: TokenUsage;
   usageByModel?: TokenUsageByModel[];
+  /** Non-billable subscription telemetry; never normalized as API usage. */
+  subscriptionUsage?: SubscriptionUsageTelemetry[];
   stopReason?: TurnStopReason;
   /** Structured terminate-and-resume request emitted with input-required. */
   inputRequired?: TurnInputRequired;
