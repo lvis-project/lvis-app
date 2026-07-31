@@ -314,7 +314,7 @@ export function sanitizedAcpSubscriptionEnvironment(
   env[ACP_SUBSCRIPTION_RUNTIME_MANIFESTS[provider].homeEnv] = isolatedHome;
   if (provider === "grok-build") {
     for (const key of GROK_DISABLED_FEATURE_ENV_NAMES) env[key] = "false";
-    env.GROK_AGENT = grokBuildGovernedAgentDefinitionPath(isolatedHome);
+    env.GROK_AGENT = grokBuildGovernedAgentDefinitionPath(isolatedHome, platform);
     env.GROK_REQUIRED_MINIMUM_VERSION = GROK_BUILD_REQUIRED_MINIMUM_VERSION;
   }
   // Avoid vendor debug output that can include login context. stderr is parsed
