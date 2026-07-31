@@ -9,11 +9,13 @@
  */
 import type {
   GenericMessage,
+  LLMProvider,
   LLMVendor,
   TokenUsage,
   TokenUsageByModel,
   ToolSchema,
 } from "../llm/types.js";
+import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 import type { RequestInputProjection } from "../request-input-projection.js";
 import type { CompressionStatus } from "../../shared/compact-status.js";
 import type { FallbackStatus } from "../llm/vercel/fallback-chain.js";
@@ -235,6 +237,19 @@ export interface TurnResult {
 
 export interface ConversationLoopDeps {
   settingsService: SettingsService;
+  /**
+   * Main-owned factory for a subscription-authenticated provider. It receives
+   * only the settings-normalized runtime selection; the returned provider is
+   * otherwise subject to the ordinary ConversationLoop contracts.
+   */
+  subscriptionProviderFactory?: (
+    selection: SubscriptionChatRuntimeSelection,
+    /**
+     * Parent selection used only when a transient sub-agent Codex model
+     * override is no longer present in the main-owned live catalog.
+     */
+    fallbackSelection?: SubscriptionChatRuntimeSelection,
+  ) => LLMProvider | null;
   systemPromptBuilder: SystemPromptBuilder;
   inputClassifier: InputClassifier;
   routeEngine: RouteEngine;
@@ -324,15 +339,12 @@ export interface ConversationLoopDeps {
    */
   forcedActiveToolNames?: ReadonlySet<string>;
   /**
-   * Sub-agent model override. When set, `refreshProvider()` uses this model
-   * ID for the primary provider instead of the active vendor block's model.
-   * `SubAgentRunner.resolveSubAgentModel` only ever sets this to a model the
-   * active vendor can actually serve — a complexity-tier-resolved ID, or an
-   * explicit ID validated against LLM_VENDOR_MODEL_OPTIONS. An unresolvable
-   * or unavailable value resolves to undefined so the child simply runs on
-   * the parent vendor block's model. The override therefore never feeds the
-   * provider a model-not-found that the (non-retryable) fallback chain would
-   * refuse to recover from.
+   * Sub-agent model override. API-key providers use it in place of the active
+   * vendor block's model after profile resolution. For Codex subscription
+   * runtimes it is only forwarded when it is a bounded, clean string; the
+   * main-owned runtime revalidates it against the live subscription catalog.
+   * ACP subscription runtimes retain their persisted default model because
+   * they do not expose a selectable model surface.
    */
   modelOverride?: string;
   /**
@@ -460,7 +472,7 @@ export interface ProviderRequestDiagnostics {
   round: number;
   assistantRoundIndex: number;
   inputOrigin: ChatInputOrigin;
-  configuredProvider: LLMVendor;
+  runtimeIdentity: string;
   model: string;
   preflightThresholdTokens: number;
   promptChars: number;

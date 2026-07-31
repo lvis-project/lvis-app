@@ -7,6 +7,7 @@ import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { activeHostApiVendor } from "./steps/refresh-active-llm-wildcard.js";
 import type { NotificationService } from "../main/notification-service.js";
 import { classifySubscription } from "../plugins/capabilities.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
@@ -31,9 +32,11 @@ export interface EventHint {
  * Plugins receive the actual key via `hostApi.getSecret("llm.apiKey.<vendor>")`,
  * which routes through the three-tier `hostSecrets.read[]` allowlist gate.
  * Injecting the key here would bypass the gate and leak the secret to every
- * loaded plugin regardless of its manifest. The single non-secret signal
- * the host shares is `hostApiVendor`, which mirrors the contract that
- * `refreshActiveLlmWildcard` in `boot.ts` re-applies on every vendor change.
+ * loaded plugin regardless of its manifest. The host projects `hostApiVendor`
+ * only while an API provider owns generation; it deliberately omits that
+ * legacy API identity while a subscription runtime is active. The same
+ * contract is re-applied by `refreshActiveLlmWildcard` after every runtime
+ * selection or API-vendor change.
  *
  * Per-plugin entries in `pluginConfigs` are merged unchanged.
  */
@@ -44,7 +47,10 @@ export function buildPluginConfigOverrides(settings: SettingsService): Record<st
   // Wildcard slot carries only non-secret metadata. The host secret stays
   // gated behind getSecret(); the previous `llmApiKey` injection (Cycle 2)
   // bypassed `hostSecrets.read[]` and is removed in Cycle 3 (CRIT-1).
-  overrides["*"] = { hostApiVendor: llm.provider };
+  const hostApiVendor = activeHostApiVendor(llm);
+  if (hostApiVendor) {
+    overrides["*"] = { hostApiVendor };
+  }
 
   // Merge per-plugin configs from settings
   const pluginConfigs = settings.get("pluginConfigs");

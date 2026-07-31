@@ -24,6 +24,7 @@ import { ComposerApiKeyChip } from "./ComposerApiKeyChip.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
 
+import { subscriptionImageAttachmentLimitViolation, type SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 type InputStatusRow = React.ComponentProps<typeof InputActionBar>["statusRow"];
 
 export interface ChatComposerDockProps {
@@ -58,6 +59,20 @@ export interface ChatComposerDockProps {
   onCommandPopoverOpenChange: (open: boolean) => void;
   ringSlot: React.ReactNode;
   onAttach: () => Promise<void> | void;
+  /** App-owned warning for a verified image-capability refusal only. */
+  onImageAttachmentUnavailable?: () => void;
+  /** Canonical selected subscription runtime policy; legacy markers are fallback-only. */
+  subscriptionRuntimePolicy?: SubscriptionRuntimeUiPolicy;
+  /** App-owned warning for a supported image that exceeds the runtime budget. */
+  onImageAttachmentLimitExceeded?: () => void;
+  /** Selected subscription runtime has not verified original local image input. */
+  subscriptionImageAttachmentProvider?: string;
+  /** Selected subscription runtime has not verified file-marker attachment support. */
+  subscriptionFileAttachmentProvider?: string;
+  /** False until the persisted active runtime selection is authoritative. */
+  settingsLoaded?: boolean;
+  subscriptionUnavailableProvider?: string;
+  subscriptionPendingProvider?: string;
   rolePresets: RolePreset[];
   activePreset: RolePreset | null;
   activePresetId: string;
@@ -65,6 +80,7 @@ export interface ChatComposerDockProps {
   onBottomSend: () => void;
   onCancel: () => void;
   enableThinkingChat: boolean;
+  reasoningAvailable?: boolean;
   onToggleThinking: (v: boolean) => Promise<void> | void;
   inputStatusRow: InputStatusRow;
   appMode?: AppMode;
@@ -123,8 +139,16 @@ export function ChatComposerDock({
   onRunMcpPrompt,
   commandPopoverOpen,
   onCommandPopoverOpenChange,
+  onImageAttachmentUnavailable,
+  onImageAttachmentLimitExceeded,
   ringSlot,
   onAttach,
+  subscriptionRuntimePolicy,
+  subscriptionImageAttachmentProvider,
+  subscriptionFileAttachmentProvider,
+  settingsLoaded,
+  subscriptionUnavailableProvider,
+  subscriptionPendingProvider,
   rolePresets,
   activePreset,
   activePresetId,
@@ -132,6 +156,7 @@ export function ChatComposerDock({
   onBottomSend,
   onCancel,
   enableThinkingChat,
+  reasoningAvailable,
   onToggleThinking,
   inputStatusRow,
   appMode,
@@ -183,6 +208,50 @@ export function ChatComposerDock({
   // exactly how the mention menu shipped with a dead keyboard. The counter itself is a
   // ref, so there is nothing to close over.
   const allocateN = useCallback(() => ++attachmentNCounter.current, [attachmentNCounter]);
+  const runtimeImageAttachmentProvider = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.imageAttachmentProvider
+    : subscriptionImageAttachmentProvider;
+  const runtimeFileAttachmentProvider = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.fileAttachmentProvider
+    : subscriptionFileAttachmentProvider;
+  const runtimeUnavailable = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.chatUnavailable
+    : subscriptionUnavailableProvider !== undefined;
+  const runtimePending = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.chatPending
+    : subscriptionPendingProvider !== undefined;
+  const attachmentInputsReady = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.attachmentInputsReady
+    : settingsLoaded !== false && !runtimePending;
+  const imagesEnabled = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.imagesEnabled
+    : attachmentInputsReady && runtimeImageAttachmentProvider === undefined;
+  const filesEnabled = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.filesEnabled
+    : attachmentInputsReady && runtimeFileAttachmentProvider === undefined;
+  const composerInputDisabled = viewMode !== null || (hasApiKey === false && (
+    runtimeUnavailable
+    || runtimePending
+    || !question.trimStart().startsWith("/")
+  ));
+  // A runtime may be switched after a draft has accumulated attachments. Keep
+  // the draft editable so the user can remove or preserve markers, but do not
+  // leave either visual send path enabled for an attachment type the newly
+  // selected runtime has not verified.
+  const draftHasUnsupportedAttachment =
+    (runtimeImageAttachmentProvider !== undefined
+      && attachments.some((attachment) => attachment.kind === "image"))
+    || (runtimeFileAttachmentProvider !== undefined
+      && attachments.some((attachment) => attachment.kind === "file"))
+    || subscriptionImageAttachmentLimitViolation(
+      subscriptionRuntimePolicy?.imageAttachmentLimits,
+      attachments
+        .filter((attachment) => attachment.kind === "image")
+        .map((attachment) => ({ bytes: attachment.bytes })),
+    ) !== null;
+  const composerSendDisabled = !attachmentInputsReady
+    || composerInputDisabled
+    || draftHasUnsupportedAttachment;
   return (
     <div
       className={[
@@ -259,7 +328,12 @@ export function ChatComposerDock({
               className="absolute right-0 top-0 z-20"
               data-testid="composer-api-key-chip-slot"
             >
-              <ComposerApiKeyChip onOpenSettings={onOpenSettings} />
+              <ComposerApiKeyChip
+                onOpenSettings={onOpenSettings}
+                subscriptionRuntimePolicy={subscriptionRuntimePolicy}
+                subscriptionUnavailableProvider={subscriptionUnavailableProvider}
+                subscriptionPendingProvider={subscriptionPendingProvider}
+              />
             </div>
           ) : null}
           <div className="lvis-surface-raised relative z-10 overflow-hidden rounded-xl border border-input-bar-border bg-input-bar text-input-bar-foreground transition-colors duration-[var(--motion-fast)] ease-[var(--motion-ease-standard)] focus-within:border-input-bar-focus focus-within:ring-1 focus-within:ring-input-bar-focus motion-reduce:transition-none">
@@ -271,21 +345,27 @@ export function ChatComposerDock({
           onAttachmentsChange={setAttachments}
           allocateN={allocateN}
           saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
+          discardClipboardImage={(filePath) => window.lvis.attach.discardClipboardImage(filePath)}
           openExternal={(p) => window.lvis.attach.openExternal(p)}
+          imagesEnabled={imagesEnabled}
+          imageAttachmentLimits={subscriptionRuntimePolicy?.imageAttachmentLimits}
           onSend={onComposerSend}
           suggestedReplies={suggestedReplies}
           commandActions={commandActions}
           inlinePlugins={plugins}
           onSelectPlugin={onSelectPlugin}
-          disabled={
-            // Context/TPM red zones stay sendable: main preflight runs
-            // compact before the LLM call. Slash commands still bypass
-            // API/view UI gates where they are the recovery path.
-            (hasApiKey === false || viewMode !== null) &&
-            !question.trimStart().startsWith("/")
-          }
-          onWarning={(msg) => console.warn(msg)}
-          placeholder={computeComposerPlaceholder({ hasApiKey, streaming, suggestedReplies })}
+          disabled={composerInputDisabled}
+          sendDisabled={composerSendDisabled}
+          onWarning={(message) => console.warn(message)}
+          onImageAttachmentUnavailable={onImageAttachmentUnavailable}
+          onImageAttachmentLimitExceeded={onImageAttachmentLimitExceeded}
+          placeholder={computeComposerPlaceholder({
+            hasApiKey,
+            streaming,
+            suggestedReplies,
+            subscriptionUnavailable: runtimeUnavailable,
+            subscriptionPending: runtimePending,
+          })}
         />
         <InputActionBar
           plugins={plugins}
@@ -298,9 +378,18 @@ export function ChatComposerDock({
           ringSlot={ringSlot}
           attachDisabled={
             attachments.length >= ATTACH_MAX_COUNT ||
-            hasApiKey === false
+            !attachmentInputsReady ||
+            hasApiKey === false ||
+            (!imagesEnabled && !filesEnabled)
           }
-          attachDisabledReason={hasApiKey === false ? "no-api-key" : "limit"}
+          attachDisabledReason={!attachmentInputsReady
+            ? "runtime-pending"
+            : (!imagesEnabled && !filesEnabled)
+            ? "subscription-unsupported"
+            : hasApiKey === false ? "no-api-key" : "limit"}
+          attachDisabledSubscriptionProvider={
+            runtimeImageAttachmentProvider ?? runtimeFileAttachmentProvider
+          }
           onAttach={onAttach}
           rolePresets={rolePresets}
           activePreset={activePreset}
@@ -308,10 +397,7 @@ export function ChatComposerDock({
           onSelectPreset={onSelectPreset}
           isBusy={streaming}
           isSendDisabled={
-            (hasApiKey === false || viewMode !== null) &&
-            !question.trimStart().startsWith("/")
-              ? true
-              : question.trim().length === 0 && attachments.length === 0
+            composerSendDisabled || (question.trim().length === 0 && attachments.length === 0)
           }
           onSend={onBottomSend}
           onCancel={() => {
@@ -319,6 +405,7 @@ export function ChatComposerDock({
             onCancel();
           }}
           enableThinkingChat={enableThinkingChat}
+          reasoningAvailable={reasoningAvailable}
           onToggleThinking={onToggleThinking}
           statusRow={inputStatusRow}
           appMode={appMode}

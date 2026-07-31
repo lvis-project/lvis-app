@@ -13,6 +13,7 @@
 import {
   type LLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
+import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 import type { ToolResultImage } from "../../tools/types.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
@@ -363,6 +364,15 @@ export interface StreamTurnParams {
 
 export interface LLMProvider {
   readonly vendor: LLMVendor;
+  /**
+   * Host-owned marker for a subscription-authenticated runtime.
+   *
+   * The marker identifies the credential/runtime selection only. Once the
+   * factory returns a provider, it follows the same host prompt, tool,
+   * approval, persistence, and compaction contracts as an API-key provider.
+   * Subscription usage is intentionally kept out of API-key pricing.
+   */
+  readonly subscriptionRuntime?: SubscriptionChatRuntimeSelection;
   streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent>;
 }
 

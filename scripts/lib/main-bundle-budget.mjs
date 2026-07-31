@@ -1,6 +1,36 @@
 import { isAbsolute, normalize, posix, relative, resolve } from "node:path";
 
 const LEGACY_SINGLE_MAIN_BUNDLE_BYTES = 10_828_547;
+// Root-level main-process outputs are executable entrypoints. Keep this list
+// explicit so package-footprint validation does not accidentally permit an
+// arbitrary extra root JavaScript file in app.asar.
+export const MAIN_BUNDLE_ROOT_FILES = Object.freeze([
+  "main.js",
+  "subscription-grok-tool-policy-hook.js",
+  "subscription-tool-mcp-server.js",
+]);
+
+const MAIN_BUNDLE_CHUNK_PATH = /^chunks\/[a-zA-Z0-9_-]+\.js$/;
+
+export function isMainBundleRootScriptPath(path) {
+  return typeof path === "string"
+    && !path.includes("/")
+    && !path.includes("\\")
+    && path.toLowerCase().endsWith(".js");
+}
+
+export function findUnexpectedMainBundleRootScripts(paths, manifestPaths) {
+  const manifestPathSet = new Set(manifestPaths);
+  return paths
+    .filter(isMainBundleRootScriptPath)
+    .filter((path) => !manifestPathSet.has(path));
+}
+
+export function isSafeMainBundleManifestPath(path) {
+  return typeof path === "string" && (
+    MAIN_BUNDLE_ROOT_FILES.includes(path) || MAIN_BUNDLE_CHUNK_PATH.test(path)
+  );
+}
 
 /**
  * A growth ratchet, not a target. `entryBytes` and `initialBytes` are the ones that cost

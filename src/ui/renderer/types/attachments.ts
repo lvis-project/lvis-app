@@ -8,7 +8,11 @@
  * always refer to the same payload.
  */
 
-export const ATTACH_MAX_COUNT = 5;
+/**
+ * Renderer compatibility name for the shared composer input capacity.
+ * The main-process picker and subscription transport consume the same limit.
+ */
+export { MAX_COMPOSER_ATTACHMENT_COUNT as ATTACH_MAX_COUNT } from "../../../shared/composer-image-input.js";
 
 /** Long-text-paste detection threshold: 50+ chars OR 3+ newlines. */
 export const PASTE_TEXT_MIN_CHARS = 50;

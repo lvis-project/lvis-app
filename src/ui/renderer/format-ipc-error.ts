@@ -72,6 +72,15 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-content": "formatIpcError.invalidContent",
   "missing-tokens": "formatIpcError.missingTokens",
 
+  // ── Subscription runtime ──
+  "acp-provider-not-supported": "formatIpcError.acpSubscriptionProviderNotSupported",
+  "active-chat-runtime-requires-subscription-selection": "formatIpcError.activeChatRuntimeRequiresSubscriptionSelection",
+  "codex-login-failed": "formatIpcError.codexLoginFailed",
+  "subscription-operation-failed": "formatIpcError.subscriptionChatUnavailable",
+  "subscription-chat-unavailable": "formatIpcError.subscriptionChatUnavailable",
+  "subscription-logout-not-supported": "formatIpcError.subscriptionLogoutNotSupported",
+  "subscription-provider-not-supported": "formatIpcError.subscriptionProviderNotSupported",
+
   // ── Preview / workspace file-read (preview.ts, workspace.ts) ──
   "not-a-file": "formatIpcError.notAFile",
   "not-a-dir": "formatIpcError.notADirectory",
@@ -172,6 +181,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // (#803 IPC convention). The snake_case shape is grandfathered until the
   // attach.ts handlers are rewritten (tracked in follow-up).
   "path_not_authorized": "formatIpcError.pathNotAuthorized",
+  "clipboard-image-not-owned": "formatIpcError.pathNotAuthorized",
   "not_image": "formatIpcError.notImage",
   "invalid_payload": "formatIpcError.invalidPayloadSnake",
   "denied_extension": "formatIpcError.deniedExtension",

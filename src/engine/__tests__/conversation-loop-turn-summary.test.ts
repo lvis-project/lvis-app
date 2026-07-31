@@ -27,6 +27,37 @@ class FakeProvider implements LLMProvider {
   }
 }
 
+const CODEX_USAGE_SUBSCRIPTION = {
+  kind: "subscription",
+  provider: "codex",
+  model: "gpt-5.5-codex",
+} as const;
+
+function fakeUsageReportingSubscriptionSettings() {
+  return {
+    // Keep Claude configured to prove the selected subscription runtime, not
+    // the dormant API-key vendor, owns the execution and accounting boundary.
+    ...fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
+    activeChatRuntime: CODEX_USAGE_SUBSCRIPTION,
+  };
+}
+
+function createUsageReportingSubscriptionProvider(): LLMProvider {
+  const primary: LLMProvider = {
+    vendor: "openai",
+    subscriptionRuntime: CODEX_USAGE_SUBSCRIPTION,
+    async *streamTurn(): AsyncIterable<StreamEvent> {
+      yield { type: "text_delta", text: "subscription answer" };
+      yield {
+        type: "message_complete",
+        stopReason: "end_turn",
+        usage: { inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 500, cacheWriteTokens: 100 },
+      };
+    },
+  };
+  return new FallbackProvider(primary, [], () => "test-key");
+}
+
 function createLoopWithRegistry(
   provider: LLMProvider,
   toolRegistry: ToolRegistry,
@@ -366,6 +397,152 @@ describe("ConversationLoop onTurnSummary", () => {
         ],
       }),
     );
+  });
+
+  it("keeps subscription usage opaque while retaining its audit route and projected context", async () => {
+    const toolRegistry = new ToolRegistry();
+    const saveSession = vi.fn(async (..._args: unknown[]) => {});
+    const memoryManager = {
+      saveSession,
+      listSessions: () => [],
+      loadSessionMetadata: () => ({}),
+      saveSessionMetadata: vi.fn(async () => {}),
+    };
+    const settingsService = {
+      get: fakeUsageReportingSubscriptionSettings,
+      getSecret: () => "test-key",
+    };
+    const auditLogger = {
+      logTurn: vi.fn(),
+      logToolCall: vi.fn(),
+      isPermissionAuditChainReady: () => false,
+    };
+    const loop = createLoopWithRegistry(
+      createUsageReportingSubscriptionProvider(),
+      toolRegistry,
+      {
+        settingsService: settingsService as never,
+        memoryManager: memoryManager as never,
+        auditLogger: auditLogger as never,
+        postTurnHookChain: new PostTurnHookChain({
+          memoryManager: memoryManager as never,
+          settingsService: settingsService as never,
+          auditLogger: auditLogger as never,
+        }),
+      },
+    );
+    const traceStep = vi.fn();
+    loop.setTracer({ step: traceStep } as never);
+    const priorApiUsage = {
+      inputTokens: 19,
+      outputTokens: 7,
+      cacheReadTokens: 3,
+    };
+    (loop as unknown as { cumulativeUsage: typeof priorApiUsage }).cumulativeUsage = {
+      ...priorApiUsage,
+    };
+
+    let summary: {
+      tokensIn: number;
+      freshInputTokens: number;
+      tokensOut: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+      vendorProvider?: string;
+      vendorModel?: string;
+      usageByModel?: unknown;
+    } | null = null;
+    const onLlmStatus = vi.fn();
+    await loop.runTurn("질문", {
+      onLlmStatus,
+      onTurnSummary: (value) => {
+        summary = value;
+      },
+    }, undefined, { inputOrigin: "user-keyboard" });
+
+    // Fallback status remains observable even though its synthetic OpenAI
+    // identity must never become a billable serving identity.
+    expect(onLlmStatus).toHaveBeenCalledWith(expect.objectContaining({
+      phase: "attempt",
+      provider: "openai",
+      model: "gpt-5.5-codex",
+    }));
+    expect(loop.getCumulativeUsage()).toEqual(priorApiUsage);
+    expect((loop as unknown as { lastRoundProviderInputTokens: number })
+      .lastRoundProviderInputTokens).toBe(0);
+
+    expect(summary).not.toBeNull();
+    expect(summary!.tokensIn).toBeGreaterThan(0);
+    expect(summary).toMatchObject({ freshInputTokens: 0, tokensOut: 0 });
+    expect(summary).not.toHaveProperty("cacheReadTokens");
+    expect(summary).not.toHaveProperty("cacheWriteTokens");
+    expect(summary).not.toHaveProperty("vendorProvider");
+    expect(summary).not.toHaveProperty("vendorModel");
+    expect(summary).not.toHaveProperty("usageByModel");
+
+    const auditPayload = auditLogger.logTurn.mock.calls.at(-1)?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    expect(auditPayload).toMatchObject({
+      route: "subscription:codex/gpt-5.5-codex",
+    });
+    expect(auditPayload?.tokenUsage).toBeUndefined();
+    expect(auditPayload?.usageByModel).toBeUndefined();
+    expect(auditPayload).not.toHaveProperty("vendorProvider");
+    expect(auditPayload).not.toHaveProperty("vendorModel");
+
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as
+      | GenericMessage[]
+      | undefined;
+    const finalAssistant = savedMessages?.slice().reverse()
+      .find((message) => message.role === "assistant");
+    const persistedSummary = finalAssistant?.meta?.turnSummary;
+    expect(persistedSummary).toMatchObject({ freshInputTokens: 0, tokensOut: 0 });
+    expect(persistedSummary).not.toHaveProperty("cacheReadTokens");
+    expect(persistedSummary).not.toHaveProperty("cacheWriteTokens");
+    expect(persistedSummary).not.toHaveProperty("vendorProvider");
+    expect(persistedSummary).not.toHaveProperty("vendorModel");
+    expect(persistedSummary).not.toHaveProperty("usageByModel");
+
+    const llmStreamTrace = traceStep.mock.calls.find((call) => call[0] === "LLM_STREAM")?.[1] as
+      | { request?: Record<string, unknown> }
+      | undefined;
+    expect(llmStreamTrace?.request).toMatchObject({
+      runtimeIdentity: "subscription:codex/gpt-5.5-codex",
+      preflightThresholdTokens: expect.any(Number),
+    });
+    expect(llmStreamTrace?.request).not.toHaveProperty("configuredProvider");
+  });
+
+  it("keeps the no-hook subscription audit path opaque", async () => {
+    const toolRegistry = new ToolRegistry();
+    const auditLogger = {
+      logTurn: vi.fn(),
+      logToolCall: vi.fn(),
+      isPermissionAuditChainReady: () => false,
+    };
+    const loop = createLoopWithRegistry(
+      createUsageReportingSubscriptionProvider(),
+      toolRegistry,
+      {
+        settingsService: {
+          get: fakeUsageReportingSubscriptionSettings,
+          getSecret: () => "test-key",
+        } as never,
+        auditLogger: auditLogger as never,
+      },
+    );
+
+    await loop.runTurn("질문", {}, undefined, { inputOrigin: "user-keyboard" });
+
+    const auditPayload = auditLogger.logTurn.mock.calls.at(-1)?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    expect(auditPayload).toMatchObject({
+      route: "subscription:codex/gpt-5.5-codex",
+    });
+    expect(auditPayload?.tokenUsage).toBeUndefined();
+    expect(auditPayload?.usageByModel).toBeUndefined();
   });
 
   it("persists turnSummary on the marker-stripped post-turn transcript", async () => {

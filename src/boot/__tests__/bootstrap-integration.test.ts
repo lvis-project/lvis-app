@@ -677,16 +677,18 @@ describe("bootstrap() integration lock", () => {
     expect(services.skillArtifactStore).toBeUndefined();
   });
 
-  it("injects dormant rationale only into interactive loop dependencies", () => {
+  it("keeps rationale interactive while wiring the subscription runtime across execution loops", () => {
     const mainDeps = h.captured["mainConversationDeps"] as {
       rationaleCoordinatorFactory?: unknown;
       closeRationaleSession?: unknown;
       pluginOperationGrants?: unknown;
       pluginOperationIdentityProvider?: unknown;
+      subscriptionProviderFactory?: unknown;
     };
     const sideDeps = h.captured["sideConversationDeps"] as {
       rationaleCoordinatorFactory?: unknown;
       closeRationaleSession?: unknown;
+      subscriptionProviderFactory?: unknown;
     };
 
     expect(typeof mainDeps.rationaleCoordinatorFactory).toBe("function");
@@ -696,6 +698,8 @@ describe("bootstrap() integration lock", () => {
     );
     expect(typeof mainDeps.closeRationaleSession).toBe("function");
     expect(typeof sideDeps.closeRationaleSession).toBe("function");
+    expect(typeof mainDeps.subscriptionProviderFactory).toBe("function");
+    expect(typeof sideDeps.subscriptionProviderFactory).toBe("function");
 
     const routineEngineOptions = h.captured["routineEngineOptions"] as {
       createConversationLoop: (input: { scope: unknown }) => unknown;
@@ -707,6 +711,7 @@ describe("bootstrap() integration lock", () => {
     >;
     expect(routineDeps["rationaleCoordinatorFactory"]).toBeUndefined();
     expect(routineDeps["closeRationaleSession"]).toBeUndefined();
+    expect(typeof routineDeps["subscriptionProviderFactory"]).toBe("function");
 
     const subAgentOptions = h.captured["subAgentOptions"] as {
       parentDeps: Record<string, unknown>;
@@ -715,6 +720,7 @@ describe("bootstrap() integration lock", () => {
       subAgentOptions.parentDeps["rationaleCoordinatorFactory"],
     ).toBeUndefined();
     expect(subAgentOptions.parentDeps["closeRationaleSession"]).toBeUndefined();
+    expect(typeof subAgentOptions.parentDeps["subscriptionProviderFactory"]).toBe("function");
     expect(subAgentOptions.parentDeps["pluginOperationGrants"]).toBe(
       mainDeps["pluginOperationGrants"],
     );

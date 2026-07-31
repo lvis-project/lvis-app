@@ -12,7 +12,7 @@
  * so they are absent from these metrics on BOTH arms (plugin loopback + external
  * MCP server) without this module needing a filter of its own.
  */
-import type { GenericMessage, LLMVendor, ToolSchema } from "../llm/types.js";
+import { isLLMVendor, type GenericMessage, type ToolSchema } from "../llm/types.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ToolSource } from "../../tools/types.js";
@@ -85,8 +85,9 @@ export function buildProviderRequestDiagnostics(sessionId: string, params: {
     round: number;
     assistantRoundIndex: number;
     inputOrigin: ChatInputOrigin;
-    configuredProvider: LLMVendor;
+    runtimeIdentity: string;
     model: string;
+    preflightThresholdTokens?: number;
     systemPrompt: string;
     messages: GenericMessage[];
     toolSchemas: ToolSchema[];
@@ -127,12 +128,12 @@ export function buildProviderRequestDiagnostics(sessionId: string, params: {
       round: params.round,
       assistantRoundIndex: params.assistantRoundIndex,
       inputOrigin: params.inputOrigin,
-      configuredProvider: params.configuredProvider,
+      runtimeIdentity: params.runtimeIdentity,
       model: params.model,
-      preflightThresholdTokens: getModelPreflightThreshold(
-        params.configuredProvider,
-        params.model,
-      ),
+      preflightThresholdTokens: params.preflightThresholdTokens
+        ?? (isLLMVendor(params.runtimeIdentity)
+          ? getModelPreflightThreshold(params.runtimeIdentity, params.model)
+          : 0),
       promptChars: params.systemPrompt.length,
       messageCount: params.messages.length,
       messageRoleCounts,
