@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import { costTier, estimateTokens, estimateTurnCost, type EstimateBreakdown } from "../../../lib/cost-estimator.js";
+import { costTier, estimateTurnCost, type EstimateBreakdown } from "../../../lib/cost-estimator.js";
 import {
   computeCost,
   lookupBillablePricingOptional,
@@ -9,18 +9,22 @@ import {
   type ModelPricing,
   type PricingVendor,
 } from "../../../shared/pricing-data.js";
-import { estimateMultimodalTokenOverhead } from "../../../shared/multimodal-token-estimate.js";
+import {
+  estimateOutgoingUserMessageTokens,
+  toUserContentForEstimation,
+} from "../../../shared/multimodal-token-estimate.js";
 import type { ComposedOutgoing } from "../utils/compose.js";
 
 type CostEstimateParams = {
   entries: ChatEntry[];
-  question: string;
+  /** Already-composed draft snapshot; App shares this with the context ring. */
+  draft: Pick<ComposedOutgoing, "text"> & Partial<Pick<ComposedOutgoing, "attachments">>;
   /** Omit when the active runtime has no verified billing contract. */
   llmVendor?: string;
   /** Omit when the active runtime has no verified billing contract. */
   llmModel?: string;
   maxOutputTokens: number;
-  composeOutgoing: (raw: string) => Pick<ComposedOutgoing, "text"> & Partial<Pick<ComposedOutgoing, "attachments">>;
+
   /** False suppresses all API-model-derived billing estimates. */
   enabled?: boolean;
 };
@@ -42,7 +46,7 @@ export function useCostEstimate(params: CostEstimateParams & { enabled: boolean 
  * whole conversation.
  */
 export function useCostEstimate(params: CostEstimateParams): EnabledCostEstimate | DisabledCostEstimate {
-  const { entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing, enabled = true } = params;
+  const { entries, draft, llmVendor, llmModel, maxOutputTokens, enabled = true } = params;
 
   const contextCarrierTokens = useMemo(() => {
     if (!enabled) return undefined;
@@ -79,13 +83,12 @@ export function useCostEstimate(params: CostEstimateParams): EnabledCostEstimate
     if (!enabled) return undefined;
     const pricing = lookupBillablePricingOptional(llmVendor ?? "", llmModel ?? "");
     const contextPricing = pricing ?? lookupPricing(llmVendor ?? "", llmModel ?? "");
-    const composed = question ? composeOutgoing(question) : { text: "", attachments: [] };
-    const draft = composed.text;
-    const attachmentTokens = estimateMultimodalTokenOverhead(composed.attachments ?? []);
+    const attachments = draft.attachments ?? [];
+    const draftContent = toUserContentForEstimation(draft.text, attachments);
+    const draftTokens = estimateOutgoingUserMessageTokens(draft.text, attachments);
     const pricingVendor = toPricingVendor(llmVendor ?? "");
     if (contextCarrierTokens !== undefined) {
-      const draftTokens = draft ? estimateTokens(JSON.stringify({ role: "user", content: draft })) : 0;
-      const inputTokens = contextCarrierTokens + draftTokens + attachmentTokens;
+      const inputTokens = contextCarrierTokens + draftTokens;
       const outputTokens = Math.max(0, maxOutputTokens);
       const { inputCost, outputCost, total } = pricing
         ? computeEstimatedCost(inputTokens, outputTokens, pricing, pricingVendor)
@@ -99,8 +102,8 @@ export function useCostEstimate(params: CostEstimateParams): EnabledCostEstimate
         pricingKnown: !!pricing,
       };
     }
-    const estimated = estimateTurnCost({ historySerialized, draft, maxOutputTokens, pricing: pricing ?? contextPricing });
-    const inputTokens = estimated.inputTokens + attachmentTokens;
+    const estimated = estimateTurnCost({ historySerialized, draft: draftContent, draftTokens, maxOutputTokens, pricing: pricing ?? contextPricing });
+    const inputTokens = estimated.inputTokens;
     if (!pricing) {
       return {
         ...estimated,
@@ -117,7 +120,7 @@ export function useCostEstimate(params: CostEstimateParams): EnabledCostEstimate
       ...computeEstimatedCost(inputTokens, estimated.outputTokens, pricing, pricingVendor),
       pricingKnown: true,
     };
-  }, [enabled, contextCarrierTokens, historySerialized, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing]);
+  }, [enabled, contextCarrierTokens, historySerialized, draft.text, draft.attachments, llmVendor, llmModel, maxOutputTokens]);
 
   const costBadgeClass = useMemo(() => {
     if (!costEstimate) return undefined;

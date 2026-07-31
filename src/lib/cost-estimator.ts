@@ -14,7 +14,13 @@
  */
 
 import { t } from "../i18n/index.js";
+import {
+  estimateUserMessageTokens,
+  type UserContentForTokenEstimate,
+} from "../shared/multimodal-token-estimate.js";
+import { estimateTokens } from "../shared/token-estimate.js";
 
+export { estimateTokens } from "../shared/token-estimate.js";
 export interface ModelPricingLite {
   inputPer1M: number;
   outputPer1M: number;
@@ -23,8 +29,13 @@ export interface ModelPricingLite {
 export interface EstimateInput {
   /** Already-serialized prior history messages. */
   historySerialized: string[];
-  /** The draft the user is about to send. */
-  draft: string;
+  /** The canonical draft the user is about to send, or undefined when empty. */
+  draft: UserContentForTokenEstimate | undefined;
+  /**
+   * Optional precomputed canonical draft estimate. Renderer callers use this
+   * to avoid serializing the composed draft twice per keystroke.
+   */
+  draftTokens?: number;
   /** Conservative max output tokens the model may produce this turn. */
   maxOutputTokens: number;
   pricing: ModelPricingLite;
@@ -39,21 +50,14 @@ export interface EstimateBreakdown {
   pricingKnown?: boolean;
 }
 
-/**
- * Mirror of `Math.ceil(serialized.length / 4) + 1` from the engine. Never
- * under-estimates — matches conservative path used by the provider layer.
- */
-export function estimateTokens(serialized: string): number {
-  if (!serialized) return 0;
-  return Math.ceil(serialized.length / 4) + 1;
-}
-
 export function estimateTurnCost(input: EstimateInput): EstimateBreakdown {
   const historyTokens = input.historySerialized.reduce(
     (sum, s) => sum + estimateTokens(s),
     0,
   );
-  const draftTokens = input.draft ? estimateTokens(JSON.stringify({ role: "user", content: input.draft })) : 0;
+  const precomputedDraftTokens = normalizePrecomputedTokens(input.draftTokens);
+  const draftTokens = precomputedDraftTokens ??
+    (hasDraftPayload(input.draft) ? estimateUserMessageTokens(input.draft) : 0);
   const inputTokens = historyTokens + draftTokens;
   const outputTokens = Math.max(0, input.maxOutputTokens);
   const inputCost = (inputTokens / 1_000_000) * input.pricing.inputPer1M;
@@ -66,6 +70,16 @@ export function estimateTurnCost(input: EstimateInput): EstimateBreakdown {
     total: inputCost + outputCost,
     pricingKnown: true,
   };
+}
+
+function hasDraftPayload(draft: UserContentForTokenEstimate | undefined): draft is UserContentForTokenEstimate {
+  return draft !== undefined && (typeof draft !== "string" || draft.length > 0) &&
+    (!Array.isArray(draft) || draft.length > 0);
+}
+
+function normalizePrecomputedTokens(value: number | undefined): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.ceil(value));
 }
 
 export type CostTier = "trivial" | "low" | "medium" | "high";

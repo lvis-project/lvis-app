@@ -7,7 +7,10 @@ import { serializeMessageForEstimation } from "./llm/types.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
 import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
 import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
-import { estimateMultimodalTokenOverhead } from "../shared/multimodal-token-estimate.js";
+import {
+  estimateMultimodalTokenOverhead,
+  estimateUserMessageTokens,
+} from "../shared/multimodal-token-estimate.js";
 import { estimateTokens } from "../shared/token-estimate.js";
 
 // Token-count primitives now live in shared/token-estimate.ts (architecture
@@ -121,37 +124,38 @@ export function getRuntimePreflightOverride(): number | null {
 // depends on engine-only types (GenericMessage, wire serialization, tool-result
 // stubbing) and so cannot move down to shared/.
 
-/** 메시지 배열의 총 토큰 추정 */
-export function estimateMessagesTokens(messages: GenericMessage[]): number {
-  let total = 0;
-  for (const msg of messages) {
-    // Estimate tokens from the provider-wire shape, not the verbatim
-    // in-memory shape. Marked tool_results keep raw content in memory for UI
-    // and checkpoint inspection, but stream-collector stubs them immediately
-    // before provider send. Counting the raw content here makes preflight and
-    // session-load rings fire far earlier than the actual payload.
-    total += estimateTokens(serializeMessageForWireEstimate(msg));
-    if (msg.role === "user" && Array.isArray(msg.content)) {
-      total += estimateMultimodalTokenOverhead(msg.content);
-    }
-    // A view_image tool_result carries its image on a sibling field, so the
-    // wire-estimate string above counts 0 for it. Add the image overhead while
-    // it is still LIVE (not yet marked/stubbed) — gated on the same not-stubbed
-    // predicate the serializer uses, so it stops counting once the image is
-    // dropped from the wire and never double-counts against the stub content.
-    if (
-      msg.role === "tool_result" &&
-      msg.image !== undefined &&
-      msg.meta?.compactedAt === undefined &&
-      msg.meta?.truncated === undefined &&
-      msg.meta?.serializedStub !== true
-    ) {
-      total += estimateMultimodalTokenOverhead([
-        { type: "image", width: msg.image.width, height: msg.image.height },
-      ]);
-    }
+/** Estimate one message from the provider-wire shape. */
+export function estimateMessageTokensForWire(message: GenericMessage): number {
+  if (message.role === "user") return estimateUserMessageTokens(message.content);
+
+  // Marked tool_results keep raw content in memory for UI and checkpoint
+  // inspection, but stream-collector stubs them immediately before provider
+  // send. Counting the raw content here makes preflight and session-load rings
+  // fire far earlier than the actual payload.
+  let total = estimateTokens(serializeMessageForWireEstimate(message));
+
+  // A view_image tool_result carries its image on a sibling field, so the
+  // wire-estimate string above counts 0 for it. Add the image overhead while
+  // it is still LIVE (not yet marked/stubbed) — gated on the same not-stubbed
+  // predicate the serializer uses, so it stops counting once the image is
+  // dropped from the wire and never double-counts against the stub content.
+  if (
+    message.role === "tool_result" &&
+    message.image !== undefined &&
+    message.meta?.compactedAt === undefined &&
+    message.meta?.truncated === undefined &&
+    message.meta?.serializedStub !== true
+  ) {
+    total += estimateMultimodalTokenOverhead([
+      { type: "image", width: message.image.width, height: message.image.height },
+    ]);
   }
   return total;
+}
+
+/** 메시지 배열의 총 토큰 추정 */
+export function estimateMessagesTokens(messages: GenericMessage[]): number {
+  return messages.reduce((total, message) => total + estimateMessageTokensForWire(message), 0);
 }
 
 function serializeMessageForWireEstimate(message: GenericMessage): string {
