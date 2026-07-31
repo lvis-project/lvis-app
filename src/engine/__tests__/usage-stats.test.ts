@@ -1,13 +1,45 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const auditStatGate = vi.hoisted(() => ({
+  target: undefined as string | undefined,
+  append: undefined as (() => void) | undefined,
+  appendBeforeStatOnCall: undefined as number | undefined,
+  appendAfterStatOnCall: undefined as number | undefined,
+  calls: 0,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    stat: async (...args: Parameters<typeof actual.stat>) => {
+      const isTarget = auditStatGate.target && String(args[0]) === auditStatGate.target;
+      if (isTarget) {
+        auditStatGate.calls += 1;
+        if (auditStatGate.calls === auditStatGate.appendBeforeStatOnCall) {
+          auditStatGate.append?.();
+        }
+      }
+      const metadata = await actual.stat(...args);
+      if (isTarget && auditStatGate.calls === auditStatGate.appendAfterStatOnCall) {
+        auditStatGate.append?.();
+      }
+      return metadata;
+    },
+  };
+});
+
 import {
   computeUsageSummary,
   readAuditEntries,
   computeMonthlyProjection,
   getUsageRange,
+  getUsageSummary,
+  createUsageSummaryCache,
   type AuditTurnEntry,
   type UsageTrendPoint,
 } from "../usage-stats.js";
@@ -23,6 +55,93 @@ function turn(partial: Partial<AuditTurnEntry>): AuditTurnEntry {
     ...partial,
   };
 }
+
+function summaryWithInput(inputTokens = 100): ReturnType<typeof computeUsageSummary> {
+  return computeUsageSummary([
+    turn({
+      timestamp: "2026-07-04T01:00:00Z",
+      tokenUsage: { inputTokens, outputTokens: 10 },
+    }),
+  ], new Date("2026-07-04T12:00:00Z"));
+}
+
+describe("UsageSummaryCache", () => {
+  it("reuses a stable revision and returns isolated summaries", async () => {
+    const cache = createUsageSummaryCache({ maxEntries: 2 });
+    const compute = vi.fn(async () => ({
+      summary: summaryWithInput(),
+      cacheable: true,
+    }));
+    const first = await cache.getOrCompute({
+      key: "stable",
+      now: new Date("2026-07-04T12:00:00Z"),
+      compute,
+    });
+    first.today.inputTokens = 999_999;
+    first.trend[0].inputTokens = 999_999;
+    first.subscription.sources["provider-reported"].totalTokens = 999_999;
+
+    const secondNow = new Date("2026-07-04T12:01:00Z");
+    const second = await cache.getOrCompute({
+      key: "stable",
+      now: secondNow,
+      compute,
+    });
+
+    expect(compute).toHaveBeenCalledTimes(1);
+    expect(second).not.toBe(first);
+    expect(second.today.inputTokens).toBe(100);
+    expect(second.trend[0].inputTokens).toBe(100);
+    expect(second.subscription.sources["provider-reported"].totalTokens).toBe(0);
+    expect(second.generatedAt).toBe(secondNow.toISOString());
+  });
+
+  it("does not retain an unstable snapshot", async () => {
+    const cache = createUsageSummaryCache();
+    const compute = vi.fn(async () => ({
+      summary: summaryWithInput(),
+      cacheable: false,
+    }));
+
+    await cache.getOrCompute({
+      key: "unstable",
+      now: new Date("2026-07-04T12:00:00Z"),
+      compute,
+    });
+    await cache.getOrCompute({
+      key: "unstable",
+      now: new Date("2026-07-04T12:01:00Z"),
+      compute,
+    });
+
+    expect(compute).toHaveBeenCalledTimes(2);
+  });
+
+  it("evicts the least recently used stable revision", async () => {
+    const cache = createUsageSummaryCache({ maxEntries: 2 });
+    const a = vi.fn(async () => ({ summary: summaryWithInput(100), cacheable: true }));
+    const b = vi.fn(async () => ({ summary: summaryWithInput(200), cacheable: true }));
+    const c = vi.fn(async () => ({ summary: summaryWithInput(300), cacheable: true }));
+    const get = (key: string, compute: () => Promise<{ summary: ReturnType<typeof summaryWithInput>; cacheable: boolean }>) => (
+      cache.getOrCompute({
+        key,
+        now: new Date("2026-07-04T12:00:00Z"),
+        compute,
+      })
+    );
+
+    await get("a", a);
+    await get("b", b);
+    await get("a", a);
+    await get("c", c);
+    await get("a", a);
+    await get("b", b);
+
+    expect(a).toHaveBeenCalledTimes(1);
+    expect(b).toHaveBeenCalledTimes(2);
+    expect(c).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("usage-stats", () => {
   it("aggregates today/week/month totals from turn entries", () => {
@@ -826,10 +945,249 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
   });
 });
 
-// Ensure env override cache does not bleed between tests.
+describe("usage summary cache wiring", () => {
+  it("invalidates a cached rolling summary after an active audit append", async () => {
+    const home = mkdtempSync(join(tmpdir(), "usage-summary-cache-append-"));
+    const originalHome = process.env.LVIS_HOME;
+    try {
+      process.env.LVIS_HOME = home;
+      const auditDir = join(home, "audit");
+      const now = new Date("2026-07-04T12:00:00Z");
+      const file = join(auditDir, "2026-07-04.jsonl");
+      mkdirSync(auditDir, { recursive: true });
+      writeFileSync(file, JSON.stringify(turn({
+        timestamp: "2026-07-04T01:00:00Z",
+        tokenUsage: { inputTokens: 100, outputTokens: 10 },
+      })) + "\n", "utf-8");
+
+      const first = await getUsageSummary(60, now);
+      appendFileSync(file, JSON.stringify(turn({
+        timestamp: "2026-07-04T02:00:00Z",
+        tokenUsage: { inputTokens: 200, outputTokens: 20 },
+      })) + "\n", "utf-8");
+      const second = await getUsageSummary(60, now);
+
+      expect(first.today.inputTokens).toBe(100);
+      expect(second.today.inputTokens).toBe(300);
+      expect(second.today.outputTokens).toBe(30);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalHome;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("retries a cache hit when an append lands between manifest scans", async () => {
+    const home = mkdtempSync(join(tmpdir(), "usage-summary-cache-race-"));
+    const originalHome = process.env.LVIS_HOME;
+    try {
+      process.env.LVIS_HOME = home;
+      const auditDir = join(home, "audit");
+      const file = join(auditDir, "2026-07-04.jsonl");
+      const now = new Date("2026-07-04T12:00:00Z");
+      mkdirSync(auditDir, { recursive: true });
+      writeFileSync(file, JSON.stringify(turn({
+        timestamp: "2026-07-04T01:00:00Z",
+        tokenUsage: { inputTokens: 100, outputTokens: 10 },
+      })) + "\n", "utf-8");
+
+      await getUsageSummary(60, now);
+      auditStatGate.target = file;
+      auditStatGate.appendAfterStatOnCall = 1;
+      auditStatGate.append = () => {
+        appendFileSync(file, JSON.stringify(turn({
+          timestamp: "2026-07-04T02:00:00Z",
+          tokenUsage: { inputTokens: 200, outputTokens: 20 },
+        })) + "\n", "utf-8");
+      };
+
+      const result = await getUsageSummary(60, now);
+
+      expect(auditStatGate.calls).toBeGreaterThanOrEqual(2);
+      expect(result.today.inputTokens).toBe(300);
+      expect(result.today.outputTokens).toBe(30);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalHome;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("retries a cache miss when audit data changes during a read", async () => {
+    const home = mkdtempSync(join(tmpdir(), "usage-summary-cache-miss-race-"));
+    const originalHome = process.env.LVIS_HOME;
+    try {
+      process.env.LVIS_HOME = home;
+      const auditDir = join(home, "audit");
+      const file = join(auditDir, "2026-07-04.jsonl");
+      const now = new Date("2026-07-04T12:00:00Z");
+      mkdirSync(auditDir, { recursive: true });
+      writeFileSync(file, JSON.stringify(turn({
+        timestamp: "2026-07-04T01:00:00Z",
+        tokenUsage: { inputTokens: 100, outputTokens: 10 },
+      })) + "\n", "utf-8");
+
+      auditStatGate.target = file;
+      auditStatGate.appendBeforeStatOnCall = 2;
+      auditStatGate.append = () => {
+        appendFileSync(file, JSON.stringify(turn({
+          timestamp: "2026-07-04T02:00:00Z",
+          tokenUsage: { inputTokens: 200, outputTokens: 20 },
+        })) + "\n", "utf-8");
+      };
+
+      const result = await getUsageSummary(60, now);
+
+      expect(auditStatGate.calls).toBeGreaterThanOrEqual(4);
+      expect(result.today.inputTokens).toBe(300);
+      expect(result.today.outputTokens).toBe(30);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalHome;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers a usage summary after a corrupt archive is repaired", async () => {
+    const home = mkdtempSync(join(tmpdir(), "usage-summary-cache-repair-"));
+    const originalHome = process.env.LVIS_HOME;
+    try {
+      process.env.LVIS_HOME = home;
+      const auditDir = join(home, "audit");
+      const archive = join(auditDir, "2026-07-04.jsonl.20260704.gz");
+      const now = new Date("2026-07-04T12:00:00Z");
+      const validRows = JSON.stringify(turn({
+        timestamp: "2026-07-04T01:00:00Z",
+        tokenUsage: { inputTokens: 100, outputTokens: 10 },
+      })) + "\n";
+      mkdirSync(auditDir, { recursive: true });
+      writeFileSync(
+        archive,
+        gzipSync(Buffer.from(validRows, "utf-8")).subarray(0, -8),
+      );
+
+      const corrupt = await getUsageSummary(60, now);
+      writeFileSync(archive, gzipSync(Buffer.from(validRows, "utf-8")));
+      const repaired = await getUsageSummary(60, now);
+
+      expect(corrupt.today.inputTokens).toBe(0);
+      expect(repaired.today.inputTokens).toBe(100);
+      expect(repaired.today.outputTokens).toBe(10);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalHome;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the KST calendar date in the rolling-summary cache key", async () => {
+    const home = mkdtempSync(join(tmpdir(), "usage-summary-cache-kst-"));
+    const originalHome = process.env.LVIS_HOME;
+    try {
+      process.env.LVIS_HOME = home;
+      const auditDir = join(home, "audit");
+      mkdirSync(auditDir, { recursive: true });
+      writeFileSync(
+        join(auditDir, "2026-07-03.jsonl"),
+        JSON.stringify(turn({
+          timestamp: "2026-07-03T15:30:00Z",
+          tokenUsage: { inputTokens: 100, outputTokens: 10 },
+        })) + "\n",
+        "utf-8",
+      );
+
+      const beforeKstMidnight = await getUsageSummary(
+        60,
+        new Date("2026-07-03T14:59:00Z"),
+      );
+      const afterKstMidnight = await getUsageSummary(
+        60,
+        new Date("2026-07-03T15:01:00Z"),
+      );
+
+      expect(beforeKstMidnight.today.inputTokens).toBe(0);
+      expect(afterKstMidnight.today.inputTokens).toBe(100);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalHome;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("recomputes a cached summary when the pricing override changes", async () => {
+    const home = mkdtempSync(join(tmpdir(), "usage-summary-cache-pricing-"));
+    const originalHome = process.env.LVIS_HOME;
+    try {
+      process.env.LVIS_HOME = home;
+      const auditDir = join(home, "audit");
+      mkdirSync(auditDir, { recursive: true });
+      writeFileSync(
+        join(auditDir, "2026-07-04.jsonl"),
+        JSON.stringify(turn({
+          timestamp: "2026-07-04T01:00:00Z",
+          tokenUsage: { inputTokens: 1_000, outputTokens: 10 },
+        })) + "\n",
+        "utf-8",
+      );
+      const now = new Date("2026-07-04T12:00:00Z");
+
+      const defaultPricing = await getUsageSummary(60, now);
+      process.env.LVIS_PRICING_OVERRIDE = JSON.stringify({
+        claude: {
+          "claude-sonnet-4-6": {
+            inputPer1M: 100,
+            outputPer1M: 100,
+            contextWindow: 1_000_000,
+          },
+        },
+      });
+      const overriddenPricing = await getUsageSummary(60, now);
+      delete process.env.LVIS_PRICING_OVERRIDE;
+      const restoredPricing = await getUsageSummary(60, now);
+
+      expect(overriddenPricing.today.cost).toBeGreaterThan(defaultPricing.today.cost);
+      expect(restoredPricing.today.cost).toBeCloseTo(defaultPricing.today.cost, 12);
+    } finally {
+      delete process.env.LVIS_PRICING_OVERRIDE;
+      if (originalHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalHome;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+function resetAuditStatGate(): void {
+  auditStatGate.target = undefined;
+  auditStatGate.append = undefined;
+  auditStatGate.appendBeforeStatOnCall = undefined;
+  auditStatGate.appendAfterStatOnCall = undefined;
+  auditStatGate.calls = 0;
+}
+
+// Ensure env override and the stat gate do not bleed between tests.
 beforeEach(() => {
   delete process.env.LVIS_PRICING_OVERRIDE;
+  resetAuditStatGate();
 });
 afterEach(() => {
   delete process.env.LVIS_PRICING_OVERRIDE;
+  resetAuditStatGate();
 });
