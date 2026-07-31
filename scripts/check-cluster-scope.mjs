@@ -115,8 +115,8 @@ export function isCommentOnlyPatch(patch) {
 }
 
 // Paths from records that carry a real (non-comment-only) change. A comment-only
-// edit to a sensitive file is documentation, not a security decision, so it no
-// longer forces cross-cutting review. Every record is still validated (via
+// edit to a sensitive file is documentation, not a security decision, so it
+// produces only an advisory. Every record is still validated (via
 // pathsFromFileRecords) before it can be excluded.
 function materialPathsFromFileRecords(records) {
   const paths = [];
