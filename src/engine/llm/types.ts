@@ -14,7 +14,10 @@ import {
   type LLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
 import { serializeUserContentForEstimation } from "../../shared/multimodal-token-estimate.js";
-import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
+import type {
+  SubscriptionChatRuntimeSelection,
+  SubscriptionUsageTelemetry,
+} from "../../shared/subscription-runtime.js";
 import type { ToolResultImage } from "../../tools/types.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
@@ -152,6 +155,8 @@ export interface MessageMeta {
      * the same granularity the provider bills.
      */
     usageByModel?: TokenUsageByModel[];
+    /** Non-billable subscription telemetry; never enters API-key pricing. */
+    subscriptionUsage?: SubscriptionUsageTelemetry[];
     breakdown?: Record<string, { count: number; ms: number }>;
   };
   /**
@@ -287,6 +292,8 @@ export type StreamEvent =
       type: "message_complete";
       stopReason: "end_turn" | "tool_use" | "max_tokens";
       usage?: TokenUsage;
+      /** Separate non-billable subscription telemetry for this provider round. */
+      subscriptionUsage?: SubscriptionUsageTelemetry;
       thinkingBlocks?: ThinkingBlock[];
     }
   | {

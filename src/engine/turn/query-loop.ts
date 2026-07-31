@@ -54,9 +54,9 @@ import {
   type A2AAgentCausalContext,
 } from "../a2a-agent-message-envelope.js";
 import { gateCrossAgentInterceptedMetaTools } from "./intercepted-meta-gate.js";
+import { createSubscriptionUsageCollector } from "./subscription-usage-telemetry.js";
 
 const log = createLogger("lvis");
-
 const MAX_TOOL_ROUNDS = 30;
 /**
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
@@ -86,7 +86,6 @@ const MAX_TOOL_SCHEMA_DROPS_PER_TURN = 5;
  * SubAgentRunner also relies on this cap to keep a sub-agent's total tool
  * execution count bounded by `maxRounds * MAX_TOOL_CALLS_PER_ROUND`.
  */
-
 // Intra-turn tool-result stubbing — deep tool loops (e.g. indexer turns of
 // 11~19 rounds) otherwise resend the full accumulated tool_result history on
 // every round, blowing past the model's per-minute token budget. Between
@@ -127,6 +126,7 @@ export async function queryLoop(
     stopReason?: TurnStopReason;
     inputRequired?: TurnInputRequired;
     usageByModel: TokenUsageByModel[];
+    subscriptionUsage: ReturnType<typeof createSubscriptionUsageCollector>["values"];
     vendorProvider?: LLMVendor;
     vendorModel?: string;
     finalToolSchemas: ToolSchema[];
@@ -165,6 +165,7 @@ export async function queryLoop(
       ? undefined
       : model;
     const usageByModel: TokenUsageByModel[] = [];
+    const subscriptionUsage = createSubscriptionUsageCollector();
     const addUsageForServingModel = (usage: TokenUsage): void => {
       if (servingVendorProvider === undefined || servingVendorModel === undefined) {
         return;
@@ -206,6 +207,7 @@ export async function queryLoop(
     ) => ({
       ...result,
       usageByModel: [...usageByModel],
+      subscriptionUsage: subscriptionUsage.values,
       ...(servingVendorProvider !== undefined && servingVendorModel !== undefined
         ? {
             vendorProvider: servingVendorProvider,
@@ -809,6 +811,7 @@ export async function queryLoop(
       }
 
       const { text: streamText, thought: thoughtContent, thinkingBlocks: roundThinkingBlocks, toolCalls: pendingToolCalls, stopReason } = stream;
+      subscriptionUsage.record(subscriptionRuntime, stream, self.lastRoundInputProjection?.totalTokens ?? 0);
       // Strip the suggested-replies block at the single chokepoint between the
       // raw stream and every downstream consumer (history, callbacks, return
       // value). Keeping this stripped here protects: (a) persisted session

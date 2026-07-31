@@ -237,6 +237,87 @@ describe("CodexConversationRuntime", () => {
     expect(JSON.stringify({ threadStart, turnStart })).not.toContain("danger-full-access");
   });
 
+  it("keeps only the newest exact Codex last usage snapshot across the turn/start reply race", async () => {
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") {
+        reply(current.child, requestId(message), {});
+        return;
+      }
+      if (message.method === "thread/start") {
+        reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        return;
+      }
+      if (message.method === "turn/start") {
+        notify(current.child, "thread/tokenUsage/updated", {
+          threadId: "other-thread",
+          turnId: "turn-1",
+          tokenUsage: { last: { inputTokens: 800, outputTokens: 80, totalTokens: 880 } },
+        });
+        notify(current.child, "thread/tokenUsage/updated", {
+          threadId: "thread-1",
+          turnId: "historic-turn",
+          tokenUsage: { last: { inputTokens: 700, outputTokens: 70, totalTokens: 770 } },
+        });
+        notify(current.child, "thread/tokenUsage/updated", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          tokenUsage: { last: { inputTokens: -1, outputTokens: 2, totalTokens: 1 } },
+        });
+        notify(current.child, "thread/tokenUsage/updated", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: { inputTokens: 4_000, outputTokens: 400, totalTokens: 4_400 },
+            last: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+          },
+        });
+        notify(current.child, "thread/tokenUsage/updated", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: { inputTokens: 9_999, outputTokens: 999, totalTokens: 10_998 },
+            last: {
+              inputTokens: 17,
+              outputTokens: 9,
+              totalTokens: 31,
+              cachedInputTokens: 11,
+              cacheWriteInputTokens: 2,
+              reasoningOutputTokens: 5,
+            },
+            modelContextWindow: 128_000,
+          },
+        });
+        reply(current.child, requestId(message), { turn: { id: "turn-1", status: "inProgress" } });
+        notify(current.child, "turn/completed", {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "completed" },
+        });
+      }
+    });
+
+    const result = await harness.runtime.startTurn({ text: "Record only this turn's token use." });
+    notify(harness.child, "thread/tokenUsage/updated", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      tokenUsage: { last: { inputTokens: 500, outputTokens: 50, totalTokens: 550 } },
+    });
+
+    expect(result).toEqual({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+      tokenUsage: {
+        inputTokens: 17,
+        outputTokens: 9,
+        totalTokens: 31,
+        cachedInputTokens: 11,
+        cacheWriteInputTokens: 2,
+        reasoningOutputTokens: 5,
+        modelContextWindow: 128_000,
+      },
+    });
+  });
+
   it("stages a subscription image as localImage bytes and removes it after completion", async () => {
     let stagedPath: string | undefined;
     const harness = createHarness((message, current) => {
@@ -926,7 +1007,7 @@ describe("CodexConversationRuntime", () => {
     });
   });
 
-  it("does not leave interrupt pending when completion precedes the turn/start response", async () => {
+  it("waits for turn/start identity before consuming a matching early completion", async () => {
     let deferredTurnStart: JsonRecord | null = null;
     let signalTurnStart: () => void = () => {};
     const turnStartReceived = new Promise<void>((resolveTurnStart) => {
@@ -954,16 +1035,95 @@ describe("CodexConversationRuntime", () => {
       threadId: "thread-1",
       turn: { id: "turn-1", status: "interrupted" },
     });
+    notify(harness.child, "turn/completed", {
+      threadId: "thread-1",
+      turn: { id: "turn-1", status: "failed" },
+    });
 
-    await interrupt;
-    expect(methodMessages(harness, "turn/interrupt")).toHaveLength(0);
     const turnStart = deferredTurnStart;
     if (!turnStart) throw new Error("missing-turn-start-request");
     reply(harness.child, requestId(turnStart), { turn: { id: "turn-1", status: "inProgress" } });
+    await interrupt;
+    expect(methodMessages(harness, "turn/interrupt")).toHaveLength(0);
     await expect(turn).resolves.toEqual({
       threadId: "thread-1",
       turnId: "turn-1",
       status: "interrupted",
+    });
+  });
+
+  it("ignores historic completion and usage before the authoritative turn/start response", async () => {
+    let deferredTurnStart: JsonRecord | null = null;
+    let signalTurnStart: () => void = () => {};
+    const turnStartReceived = new Promise<void>((resolveTurnStart) => {
+      signalTurnStart = resolveTurnStart;
+    });
+    const completed = vi.fn();
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") {
+        reply(current.child, requestId(message), {});
+        return;
+      }
+      if (message.method === "thread/start") {
+        reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        return;
+      }
+      if (message.method === "turn/start") {
+        deferredTurnStart = message;
+        signalTurnStart();
+      }
+    });
+
+    const turn = harness.runtime.startTurn(
+      { text: "Do not bind a resumed historic turn." },
+      { onTurnCompleted: completed },
+    );
+    await turnStartReceived;
+    notify(harness.child, "item/agentMessage/delta", {
+      threadId: "thread-1",
+      turnId: "historic-turn",
+      itemId: "historic-message",
+      delta: "old response",
+    });
+    notify(harness.child, "thread/tokenUsage/updated", {
+      threadId: "thread-1",
+      turnId: "historic-turn",
+      tokenUsage: {
+        total: { inputTokens: 80_000, outputTokens: 8_000, totalTokens: 88_000 },
+        last: { inputTokens: 800, outputTokens: 80, totalTokens: 880 },
+      },
+    });
+    notify(harness.child, "turn/completed", {
+      threadId: "thread-1",
+      turn: { id: "historic-turn", status: "completed" },
+    });
+    expect(completed).not.toHaveBeenCalled();
+
+    const turnStart = deferredTurnStart;
+    if (!turnStart) throw new Error("missing-turn-start-request");
+    reply(harness.child, requestId(turnStart), { turn: { id: "turn-live", status: "inProgress" } });
+    notify(harness.child, "thread/tokenUsage/updated", {
+      threadId: "thread-1",
+      turnId: "turn-live",
+      tokenUsage: { last: { inputTokens: 17, outputTokens: 9, totalTokens: 26 } },
+    });
+    notify(harness.child, "turn/completed", {
+      threadId: "thread-1",
+      turn: { id: "turn-live", status: "completed" },
+    });
+
+    await expect(turn).resolves.toEqual({
+      threadId: "thread-1",
+      turnId: "turn-live",
+      status: "completed",
+      tokenUsage: { inputTokens: 17, outputTokens: 9, totalTokens: 26 },
+    });
+    expect(completed).toHaveBeenCalledTimes(1);
+    expect(completed).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      turnId: "turn-live",
+      status: "completed",
+      tokenUsage: { inputTokens: 17, outputTokens: 9, totalTokens: 26 },
     });
   });
 

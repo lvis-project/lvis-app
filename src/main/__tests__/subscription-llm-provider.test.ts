@@ -81,9 +81,26 @@ describe("SubscriptionLlmProvider", () => {
   });
 
   it("preserves normal conversation context and opens an LVIS-governed tool session", async () => {
+    const subscriptionUsage = {
+      provider: "codex",
+      model: "gpt-5",
+      source: "provider-reported",
+      billable: false,
+      inputTokens: 21,
+      outputTokens: 8,
+      totalTokens: 34,
+      cacheReadTokens: 11,
+      cacheWriteTokens: 2,
+      reasoningOutputTokens: 5,
+    } as const;
     const { session, streamTurn, stop } = sessionWith([
       { type: "text_delta", text: "Safe answer" },
-      { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } },
+      {
+        type: "message_complete",
+        stopReason: "end_turn",
+        usage: { inputTokens: 1, outputTokens: 1 },
+        subscriptionUsage,
+      },
     ]);
     const service = {
       openTextSession: vi.fn(async () => session),
@@ -105,8 +122,9 @@ describe("SubscriptionLlmProvider", () => {
     });
     expect(events).toEqual([
       { type: "text_delta", text: "Safe answer" },
-      { type: "message_complete", stopReason: "end_turn" },
+      { type: "message_complete", stopReason: "end_turn", subscriptionUsage },
     ]);
+    expect(events[1]).not.toHaveProperty("usage");
     expect(service.openTextSession).toHaveBeenCalledWith(provider.subscriptionRuntime, { tools });
     const serialized = streamTurn.mock.calls[0]?.[0] as string;
     expect(serialized).toContain("Apply the LVIS conversation and use only declared host tools.");

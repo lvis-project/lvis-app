@@ -13,6 +13,116 @@ export type SubscriptionRuntimeId = (typeof SUBSCRIPTION_RUNTIME_IDS)[number];
 /** Shared cap for model ids carried by subscription runtime contracts. */
 export const MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH = 200;
 
+/**
+ * Provenance of a subscription-runtime token segment.
+ *
+ * This is deliberately separate from `TokenUsage`: API-key usage is a
+ * billable pricing contract, whereas these values describe consumption under
+ * an already-authenticated subscription. A local estimate must never be
+ * presented as provider-reported usage.
+ */
+export type SubscriptionUsageSource = "provider-reported" | "local-estimate";
+
+/**
+ * Renderer-safe per-round subscription usage.
+ *
+ * `totalTokens` is the provider's exact per-turn total where available, or
+ * the sum of the locally-estimated input/output values. It is never an API
+ * price input. `billable: false` makes the non-pricing boundary explicit at
+ * every persistence and IPC hop.
+ */
+export interface SubscriptionUsageTelemetry {
+  readonly provider: SubscriptionRuntimeId;
+  readonly model: string;
+  readonly source: SubscriptionUsageSource;
+  readonly billable: false;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
+  readonly reasoningOutputTokens?: number;
+  /** Provider metadata only; it is not used to re-enable the context ring. */
+  readonly contextWindow?: number;
+}
+
+const SUBSCRIPTION_USAGE_TELEMETRY_KEYS = new Set([
+  "provider",
+  "model",
+  "source",
+  "billable",
+  "inputTokens",
+  "outputTokens",
+  "totalTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "reasoningOutputTokens",
+  "contextWindow",
+]);
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/**
+ * Validates and copies telemetry arriving from transport, persisted history,
+ * or IPC. Unknown fields are rejected so raw provider payloads cannot leak
+ * across the main/renderer boundary by being carried incidentally.
+ */
+export function normalizeSubscriptionUsageTelemetry(
+  value: unknown,
+): SubscriptionUsageTelemetry | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  try {
+    const payload = value as Record<string, unknown>;
+    if (Object.keys(payload).some((key) => !SUBSCRIPTION_USAGE_TELEMETRY_KEYS.has(key))) {
+      return undefined;
+    }
+    const provider = payload.provider;
+    const model = payload.model;
+    const source = payload.source;
+    if (
+      !isSubscriptionRuntimeId(provider)
+      || typeof model !== "string"
+      || model.length === 0
+      || model.length > MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH
+      || (source !== "provider-reported" && source !== "local-estimate")
+      || payload.billable !== false
+      || !isNonNegativeSafeInteger(payload.inputTokens)
+      || !isNonNegativeSafeInteger(payload.outputTokens)
+      || !isNonNegativeSafeInteger(payload.totalTokens)
+      || (payload.cacheReadTokens !== undefined && !isNonNegativeSafeInteger(payload.cacheReadTokens))
+      || (payload.cacheWriteTokens !== undefined && !isNonNegativeSafeInteger(payload.cacheWriteTokens))
+      || (payload.reasoningOutputTokens !== undefined && !isNonNegativeSafeInteger(payload.reasoningOutputTokens))
+      || (payload.contextWindow !== undefined && !isPositiveSafeInteger(payload.contextWindow))
+    ) {
+      return undefined;
+    }
+    return {
+      provider,
+      model,
+      source,
+      billable: false,
+      inputTokens: payload.inputTokens,
+      outputTokens: payload.outputTokens,
+      totalTokens: payload.totalTokens,
+      ...(payload.cacheReadTokens !== undefined ? { cacheReadTokens: payload.cacheReadTokens } : {}),
+      ...(payload.cacheWriteTokens !== undefined ? { cacheWriteTokens: payload.cacheWriteTokens } : {}),
+      ...(payload.reasoningOutputTokens !== undefined
+        ? { reasoningOutputTokens: payload.reasoningOutputTokens }
+        : {}),
+      ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+
 export function isSubscriptionRuntimeId(value: unknown): value is SubscriptionRuntimeId {
   return typeof value === "string"
     && (SUBSCRIPTION_RUNTIME_IDS as readonly string[]).includes(value);
