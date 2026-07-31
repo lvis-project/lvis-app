@@ -6,7 +6,7 @@
  * this store. Paths are not credentials, but feature-namespace storage still
  * gives them the normal 0700 directory / 0600 atomic-write protection.
  */
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { mainDir } from "./main-paths.js";
 import type { AcpSubscriptionProviderId } from "../shared/acp-subscription.js";
@@ -530,15 +530,35 @@ async function assertIsolatedRuntimeHome(runtimeHome: string): Promise<void> {
 
 async function readExistingPolicyFile(filePath: string): Promise<string | null> {
   try {
-    const stat = await fs.lstat(filePath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_NATIVE_POLICY_FILE_BYTES) {
+    // Bind the link check, size check, and contents to one descriptor.
+    // Checking metadata by path and then reopening it leaves a path-swap
+    // window for a different policy file to reach the runtime.
+    // Node exposes descriptor no-follow only on POSIX. Windows uses a
+    // post-open lstat to reject an observed file-link/reparse replacement;
+    // the app-owned runtime home additionally prevents untrusted writes.
+    const noFollow = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
+    if (typeof noFollow !== "number") {
       throw new AcpSubscriptionRuntimePolicyError("acp-runtime-policy-unverified");
     }
-    const body = await fs.readFile(filePath, "utf8");
-    if (Buffer.byteLength(body, "utf8") > MAX_NATIVE_POLICY_FILE_BYTES) {
-      throw new AcpSubscriptionRuntimePolicyError("acp-runtime-policy-unverified");
+    const handle = await fs.open(filePath, fsConstants.O_RDONLY | noFollow);
+    try {
+      const pathStat = await fs.lstat(filePath);
+      if (!pathStat.isFile() || pathStat.isSymbolicLink()) {
+        throw new AcpSubscriptionRuntimePolicyError("acp-runtime-policy-unverified");
+      }
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > MAX_NATIVE_POLICY_FILE_BYTES) {
+        throw new AcpSubscriptionRuntimePolicyError("acp-runtime-policy-unverified");
+      }
+      const bytes = Buffer.allocUnsafe(MAX_NATIVE_POLICY_FILE_BYTES + 1);
+      const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+      if (bytesRead > MAX_NATIVE_POLICY_FILE_BYTES) {
+        throw new AcpSubscriptionRuntimePolicyError("acp-runtime-policy-unverified");
+      }
+      return bytes.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await handle.close();
     }
-    return body;
   } catch (error) {
     if (error instanceof AcpSubscriptionRuntimePolicyError) throw error;
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;

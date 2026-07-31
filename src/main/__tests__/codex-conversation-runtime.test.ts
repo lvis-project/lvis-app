@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeRecordedSpawn } from "../../__tests__/test-helpers.js";
 import {
   CodexConversationRuntime,
   sanitizedCodexConversationEnvironment,
@@ -51,10 +52,7 @@ function createHarness(onMessage?: (message: JsonRecord, harness: Harness) => bo
   const child = new FakeAppServerProcess();
   const spawnCalls: Harness["spawnCalls"] = [];
   const messages: JsonRecord[] = [];
-  const spawn: Spawn = (command, args, options) => {
-    spawnCalls.push({ command, args, options });
-    return child as unknown as ChildProcess;
-  };
+  const spawn: Spawn = makeRecordedSpawn(child as unknown as ChildProcess, spawnCalls);
   const runtime = new CodexConversationRuntime({
     runtimeHome,
     sqliteHome,
