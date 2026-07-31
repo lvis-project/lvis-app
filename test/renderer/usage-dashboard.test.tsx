@@ -33,8 +33,31 @@ const MOCK_SUMMARY = {
   generatedAt: new Date().toISOString(),
 };
 
-function usageDashboardApi(overrides: Partial<typeof MOCK_SUMMARY> = {}) {
-  const summary = { ...MOCK_SUMMARY, ...overrides };
+const MOCK_SUBSCRIPTION = {
+  today: { inputTokens: 140, outputTokens: 25, cacheReadTokens: 30, cacheWriteTokens: 4, reasoningOutputTokens: 10, totalTokens: 209, segments: 2 },
+  thisWeek: { inputTokens: 140, outputTokens: 25, cacheReadTokens: 30, cacheWriteTokens: 4, reasoningOutputTokens: 10, totalTokens: 209, segments: 2 },
+  thisMonth: { inputTokens: 140, outputTokens: 25, cacheReadTokens: 30, cacheWriteTokens: 4, reasoningOutputTokens: 10, totalTokens: 209, segments: 2 },
+  perRuntime: [
+    { provider: "codex", model: "*", inputTokens: 100, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 4, reasoningOutputTokens: 10, totalTokens: 164, segments: 1 },
+    { provider: "kimi-code", model: "*", inputTokens: 40, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningOutputTokens: 0, totalTokens: 45, segments: 1 },
+  ],
+  perModel: [
+    { provider: "codex", model: "gpt-5.4", inputTokens: 100, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 4, reasoningOutputTokens: 10, totalTokens: 164, segments: 1 },
+    { provider: "kimi-code", model: "default", inputTokens: 40, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningOutputTokens: 0, totalTokens: 45, segments: 1 },
+  ],
+  trend: [
+    { date: "2026-04-18", inputTokens: 140, outputTokens: 25, cacheReadTokens: 30, cacheWriteTokens: 4, reasoningOutputTokens: 10, totalTokens: 209, segments: 2 },
+  ],
+  sources: {
+    "provider-reported": { inputTokens: 100, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 4, reasoningOutputTokens: 10, totalTokens: 164, segments: 1 },
+    "local-estimate": { inputTokens: 40, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningOutputTokens: 0, totalTokens: 45, segments: 1 },
+  },
+};
+
+type DashboardSummary = typeof MOCK_SUMMARY & { subscription?: typeof MOCK_SUBSCRIPTION };
+
+function usageDashboardApi(overrides: Partial<DashboardSummary> = {}) {
+  const summary: DashboardSummary = { ...MOCK_SUMMARY, ...overrides };
   const { api } = makeMockLvisApi({ usage: summary });
   api.getUsageRange = vi.fn(async () => summary);
   api.exportUsageCsv = vi.fn(async () => ({ ok: true, filePath: "/tmp/lvis-usage.csv" }));
@@ -161,6 +184,20 @@ describe("UsageDashboard", () => {
   it("renders monthly projection line", async () => {
     await renderDashboard();
     await waitFor(() => expect(screen.getByText(/이 속도로면 월 약/)).toBeTruthy());
+  });
+
+  it("renders subscription telemetry in a separate token-only section", async () => {
+    const api = usageDashboardApi({ subscription: MOCK_SUBSCRIPTION });
+    await renderDashboard(api);
+
+    const section = await screen.findByTestId("subscription-usage-dashboard");
+    expect(section.textContent).toContain(t("usageDashboard.subscriptionUsageTitle"));
+    expect(section.textContent).toContain(t("usageDashboard.subscriptionUsageNotice"));
+    expect(section.textContent).toContain(t("usageDashboard.subscriptionReported"));
+    expect(section.textContent).toContain(t("usageDashboard.subscriptionLocalEstimate"));
+    expect(section.textContent).toContain("codex");
+    expect(section.textContent).toContain("gpt-5.4");
+    expect(section.textContent).not.toContain("$");
   });
 
   it("marks monthly projection as unknown when trend contains unknown-cost turns", async () => {

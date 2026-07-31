@@ -14,7 +14,7 @@ import { useTranslation } from "../../../i18n/react.js";
 
 export type TurnSummaryForBadge = Pick<
   TokenCostBadgeProps,
-  "tokensIn" | "freshInputTokens" | "tokensOut" | "cacheReadTokens" | "cacheWriteTokens" | "usageByModel"
+  "tokensIn" | "freshInputTokens" | "tokensOut" | "cacheReadTokens" | "cacheWriteTokens" | "usageByModel" | "subscriptionUsage"
 >;
 
 export function TurnActionBar({

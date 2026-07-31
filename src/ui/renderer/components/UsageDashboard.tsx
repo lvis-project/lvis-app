@@ -60,6 +60,20 @@ function formatCacheBreakdown(v: { cacheReadTokens?: number; cacheWriteTokens?: 
   });
 }
 
+type SubscriptionDashboardSummary = NonNullable<UsageSummaryShape["subscription"]>;
+
+function hasSubscriptionUsage(
+  subscription: UsageSummaryShape["subscription"],
+): subscription is SubscriptionDashboardSummary {
+  return subscription !== undefined && subscription.perRuntime.some((row) => row.segments > 0);
+}
+
+function formatSubscriptionSource(source: { totalTokens: number; segments: number }): string {
+  return `${formatTokens(source.totalTokens)} · ${t("usageDashboard.subscriptionSegments", {
+    count: String(source.segments),
+  })}`;
+}
+
 function buildCsvRows(summary: UsageSummaryShape): Array<Record<string, string | number>> {
   const rows: Array<Record<string, string | number>> = [];
   for (const pt of summary.trend) {
@@ -166,6 +180,7 @@ export function UsageDashboard({
     );
   }
 
+  const subscription = summary.subscription;
   const sparkPoints = summary.trend.map((p) => p.totalTokens);
   const projection = computeMonthlyProjection(summary.trend);
   const averageDailyKnownCost = summary.trend.length
@@ -304,6 +319,106 @@ export function UsageDashboard({
           )}
         </CardContent>
       </Card>
+
+      {hasSubscriptionUsage(subscription) && (
+        <Card data-testid="subscription-usage-dashboard">
+          <CardHeader className="pb-1 pt-3 px-3">
+            <CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.subscriptionUsageTitle")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 px-3 pb-3">
+            <div className="text-xs text-muted-foreground">
+              {t("usageDashboard.subscriptionUsageNotice")}
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { label: t("usageDashboard.today"), v: subscription.today },
+                { label: t("usageDashboard.thisWeek"), v: subscription.thisWeek },
+                { label: t("usageDashboard.thisMonth"), v: subscription.thisMonth },
+              ] as const).map(({ label, v }) => (
+                <div key={label} className="rounded border p-2">
+                  <div className="text-xs text-muted-foreground">{label}</div>
+                  <div className="text-sm font-semibold">{formatTokens(v.totalTokens)}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("usageDashboard.tokenInOut", {
+                      input: formatTokens(v.inputTokens),
+                      output: formatTokens(v.outputTokens),
+                    })}
+                  </div>
+                  <div className="text-xs text-muted-foreground">{formatCacheBreakdown(v)}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("usageDashboard.subscriptionSegments", { count: String(v.segments) })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid gap-1 text-xs sm:grid-cols-2">
+              <div>
+                <span className="font-medium">{t("usageDashboard.subscriptionReported")}</span>: {formatSubscriptionSource(subscription.sources["provider-reported"])}
+              </div>
+              <div>
+                <span className="font-medium">{t("usageDashboard.subscriptionLocalEstimate")}</span>: {formatSubscriptionSource(subscription.sources["local-estimate"])}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs text-muted-foreground">{t("usageDashboard.subscriptionTrend")}</div>
+              <Sparkline points={subscription.trend.map((point) => point.totalTokens)} />
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs text-muted-foreground">{t("usageDashboard.subscriptionByRuntime")}</div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-1">{t("usageDashboard.subscriptionRuntime")}</th>
+                    <th>{t("usageDashboard.colTokens")}</th>
+                    <th>{t("usageDashboard.colCache")}</th>
+                    <th>{t("usageDashboard.subscriptionSegmentsHeader")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {subscription.perRuntime.map((runtime) => (
+                    <tr key={runtime.provider} className="border-t">
+                      <td className="py-1 font-mono">{runtime.provider}</td>
+                      <td>{formatTokens(runtime.totalTokens)}</td>
+                      <td className="text-muted-foreground">{formatCacheBreakdown(runtime)}</td>
+                      <td>{runtime.segments}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs text-muted-foreground">{t("usageDashboard.subscriptionByModel")}</div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-1">{t("usageDashboard.colVendor")}</th>
+                    <th>{t("usageDashboard.colModel")}</th>
+                    <th>{t("usageDashboard.colTokens")}</th>
+                    <th>{t("usageDashboard.colCache")}</th>
+                    <th>{t("usageDashboard.subscriptionSegmentsHeader")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {subscription.perModel.map((model) => (
+                    <tr key={`${model.provider}:${model.model}`} className="border-t">
+                      <td className="py-1 font-mono">{model.provider}</td>
+                      <td className="font-mono break-all">{model.model}</td>
+                      <td>{formatTokens(model.totalTokens)}</td>
+                      <td className="text-muted-foreground">{formatCacheBreakdown(model)}</td>
+                      <td>{model.segments}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex justify-end">
         <Button size="sm" variant="outline" onClick={handleExportCsv} disabled={exporting || summary.trend.length === 0} className="h-7 px-3 text-[11px]">

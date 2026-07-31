@@ -9,6 +9,12 @@ import { join } from "node:path";
 import { iterateJsonlLines, withAuditSnapshotLock } from "../audit/jsonl-reader.js";
 import { kstDateKey, kstMonthStartKey, kstWeekStartKey, shiftKstDateKey } from "../shared/kst-date.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import {
+  normalizeSubscriptionUsageTelemetry,
+  type SubscriptionRuntimeId,
+  type SubscriptionUsageSource,
+  type SubscriptionUsageTelemetry,
+} from "../shared/subscription-runtime.js";
 import { isLLMVendor, type LLMVendor } from "./llm/types.js";
 import { getBillableModelPricing, computeCost, normalizeAiSdkUsageForCost } from "./llm/pricing.js";
 
@@ -32,6 +38,8 @@ export interface AuditTurnEntry {
       cacheWriteTokens?: number;
     };
   }>;
+  /** Untrusted persisted subscription telemetry; normalize before use. */
+  subscriptionUsage?: unknown;
   route?: string;
   input?: string;
 }
@@ -61,6 +69,45 @@ export interface UsageConversation extends UsageTotals {
   firstInput?: string;
 }
 
+/**
+ * Token-only consumption under an authenticated subscription.
+ *
+ * This intentionally has no `cost` field. Subscription telemetry is never
+ * passed to API-key pricing, cost projections, or API usage breakdowns.
+ */
+interface SubscriptionUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+  /** Number of measured provider request segments, not billable API turns. */
+  segments: number;
+}
+
+interface SubscriptionUsagePerRuntime extends SubscriptionUsageTotals {
+  provider: SubscriptionRuntimeId;
+  model: string;
+}
+
+interface SubscriptionUsageTrendPoint extends SubscriptionUsageTotals {
+  date: string; // YYYY-MM-DD
+}
+
+interface SubscriptionUsageSummary {
+  today: SubscriptionUsageTotals;
+  thisWeek: SubscriptionUsageTotals;
+  thisMonth: SubscriptionUsageTotals;
+  /** One row per subscription runtime, with `model: "*"`. */
+  perRuntime: SubscriptionUsagePerRuntime[];
+  /** One row per subscription runtime/model pair. */
+  perModel: SubscriptionUsagePerRuntime[];
+  trend: SubscriptionUsageTrendPoint[];
+  /** Separate provenance totals; never interpreted as price information. */
+  sources: Record<SubscriptionUsageSource, SubscriptionUsageTotals>;
+}
+
 export interface UsageSummary {
   today: UsageTotals;
   thisWeek: UsageTotals;
@@ -69,6 +116,7 @@ export interface UsageSummary {
   perModel: UsagePerVendor[];
   trend: UsageTrendPoint[];
   topConversations: UsageConversation[];
+  subscription: SubscriptionUsageSummary;
   generatedAt: string;
 }
 
@@ -80,6 +128,25 @@ function emptyTotals(): UsageTotals {
     cacheWriteTokens: 0,
     totalTokens: 0,
     cost: 0,
+  };
+}
+
+function emptySubscriptionTotals(): SubscriptionUsageTotals {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningOutputTokens: 0,
+    totalTokens: 0,
+    segments: 0,
+  };
+}
+
+function emptySubscriptionSources(): Record<SubscriptionUsageSource, SubscriptionUsageTotals> {
+  return {
+    "provider-reported": emptySubscriptionTotals(),
+    "local-estimate": emptySubscriptionTotals(),
   };
 }
 
@@ -103,6 +170,16 @@ type UsageSegment = {
   model: string;
   tokenUsage: NonNullable<AuditTurnEntry["tokenUsage"]>;
 };
+
+function parseSubscriptionUsageSegments(entry: AuditTurnEntry): SubscriptionUsageTelemetry[] {
+  if (!Array.isArray(entry.subscriptionUsage)) return [];
+  const segments: SubscriptionUsageTelemetry[] = [];
+  for (const raw of entry.subscriptionUsage) {
+    const telemetry = normalizeSubscriptionUsageTelemetry(raw);
+    if (telemetry) segments.push(telemetry);
+  }
+  return segments;
+}
 
 function parseUsageSegments(entry: AuditTurnEntry): UsageSegment[] {
   if (entry.usageByModel?.length) {
@@ -150,6 +227,21 @@ function addTo(
       : input + output;
   target.cost += cost;
   if (!costKnown) target.unknownCostTurns = (target.unknownCostTurns ?? 0) + 1;
+}
+
+function addSubscriptionTo(
+  target: SubscriptionUsageTotals,
+  telemetry: SubscriptionUsageTelemetry,
+): void {
+  target.inputTokens += telemetry.inputTokens;
+  target.outputTokens += telemetry.outputTokens;
+  target.cacheReadTokens += telemetry.cacheReadTokens ?? 0;
+  target.cacheWriteTokens += telemetry.cacheWriteTokens ?? 0;
+  target.reasoningOutputTokens += telemetry.reasoningOutputTokens ?? 0;
+  // `totalTokens` is the verified provider total or the local estimator's
+  // canonical total. Do not reconstruct it from cache/reasoning subfields.
+  target.totalTokens += telemetry.totalTokens;
+  target.segments += 1;
 }
 
 interface UsageAuditFile {
@@ -268,12 +360,55 @@ export function computeUsageSummary(
   const trendMap = new Map<string, UsageTrendPoint>();
   const convMap = new Map<string, UsageConversation>();
 
+  const subscription = {
+    today: emptySubscriptionTotals(),
+    thisWeek: emptySubscriptionTotals(),
+    thisMonth: emptySubscriptionTotals(),
+    perRuntime: [] as SubscriptionUsagePerRuntime[],
+    perModel: [] as SubscriptionUsagePerRuntime[],
+    trend: [] as SubscriptionUsageTrendPoint[],
+    sources: emptySubscriptionSources(),
+  };
+  const subscriptionPerRuntimeMap = new Map<SubscriptionRuntimeId, SubscriptionUsagePerRuntime>();
+  const subscriptionPerModelMap = new Map<string, SubscriptionUsagePerRuntime>();
+  const subscriptionTrendMap = new Map<string, SubscriptionUsageTrendPoint>();
+
   for (const e of entries) {
-    const segments = parseUsageSegments(e);
-    if (segments.length === 0) continue;
     const ts = new Date(e.timestamp);
     if (Number.isNaN(ts.getTime())) continue;
     const dKey = kstDateKey(ts);
+
+    for (const telemetry of parseSubscriptionUsageSegments(e)) {
+      if (dKey === todayKey) addSubscriptionTo(subscription.today, telemetry);
+      if (dKey >= weekKey) addSubscriptionTo(subscription.thisWeek, telemetry);
+      if (dKey >= monthKey) addSubscriptionTo(subscription.thisMonth, telemetry);
+      addSubscriptionTo(subscription.sources[telemetry.source], telemetry);
+
+      let runtime = subscriptionPerRuntimeMap.get(telemetry.provider);
+      if (!runtime) {
+        runtime = { provider: telemetry.provider, model: "*", ...emptySubscriptionTotals() };
+        subscriptionPerRuntimeMap.set(telemetry.provider, runtime);
+      }
+      addSubscriptionTo(runtime, telemetry);
+
+      const modelKey = `${telemetry.provider}\u0000${telemetry.model}`;
+      let model = subscriptionPerModelMap.get(modelKey);
+      if (!model) {
+        model = { provider: telemetry.provider, model: telemetry.model, ...emptySubscriptionTotals() };
+        subscriptionPerModelMap.set(modelKey, model);
+      }
+      addSubscriptionTo(model, telemetry);
+
+      let trendPoint = subscriptionTrendMap.get(dKey);
+      if (!trendPoint) {
+        trendPoint = { date: dKey, ...emptySubscriptionTotals() };
+        subscriptionTrendMap.set(dKey, trendPoint);
+      }
+      addSubscriptionTo(trendPoint, telemetry);
+    }
+
+    const segments = parseUsageSegments(e);
+    if (segments.length === 0) continue;
 
     // per conversation
     let c = convMap.get(e.sessionId);
@@ -336,6 +471,17 @@ export function computeUsageSummary(
     .sort((a, b) => b.cost - a.cost || b.totalTokens - a.totalTokens)
     .slice(0, 5);
 
+  subscription.perRuntime = Array.from(subscriptionPerRuntimeMap.values())
+    .sort((a, b) => b.totalTokens - a.totalTokens || a.provider.localeCompare(b.provider));
+  subscription.perModel = Array.from(subscriptionPerModelMap.values())
+    .sort((a, b) => (
+      b.totalTokens - a.totalTokens
+      || a.provider.localeCompare(b.provider)
+      || a.model.localeCompare(b.model)
+    ));
+  subscription.trend = Array.from(subscriptionTrendMap.values())
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   return {
     today,
     thisWeek,
@@ -344,6 +490,7 @@ export function computeUsageSummary(
     perModel: Array.from(perModelMap.values()).sort((a, b) => b.cost - a.cost),
     trend,
     topConversations,
+    subscription,
     generatedAt: now.toISOString(),
   };
 }

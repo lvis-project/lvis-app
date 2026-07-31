@@ -42,6 +42,10 @@ import {
 } from "./hmac-chain.js";
 import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-schema.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import {
+  normalizeSubscriptionUsageTelemetry,
+  type SubscriptionUsageTelemetry,
+} from "../shared/subscription-runtime.js";
 import { iterateJsonlLines, withAuditSnapshotLock } from "./jsonl-reader.js";
 
 const MAX_PERMISSION_AUDIT_LINE_BYTES = 1024 * 1024;
@@ -342,6 +346,8 @@ export interface AuditEntry {
       cacheWriteTokens?: number;
     };
   }>;
+  /** Non-billable subscription telemetry, persisted separately from API usage. */
+  subscriptionUsage?: SubscriptionUsageTelemetry[];
   toolExposure?: {
     loadedToolCount: number;
     loadedToolSourceCounts: { builtin: number; plugin: number; mcp: number };
@@ -1287,6 +1293,8 @@ export class AuditLogger {
         cacheWriteTokens?: number;
       };
     }>;
+    /** Non-billable subscription telemetry; sanitized again before write. */
+    subscriptionUsage?: SubscriptionUsageTelemetry[];
     toolExposure?: {
       loadedToolCount: number;
       loadedToolSourceCounts: { builtin: number; plugin: number; mcp: number };
@@ -1304,6 +1312,9 @@ export class AuditLogger {
     };
     route: string;
   }): void {
+    const subscriptionUsage = params.subscriptionUsage
+      ?.map((segment) => normalizeSubscriptionUsageTelemetry(segment))
+      .filter((segment): segment is SubscriptionUsageTelemetry => segment !== undefined);
     this.log({
       timestamp: this.now().toISOString(),
       sessionId: params.sessionId,
@@ -1313,6 +1324,7 @@ export class AuditLogger {
       toolCalls: params.toolCalls,
       tokenUsage: params.tokenUsage,
       usageByModel: params.usageByModel,
+      ...(subscriptionUsage && subscriptionUsage.length > 0 ? { subscriptionUsage } : {}),
       toolExposure: params.toolExposure,
       route: params.route,
     });
