@@ -16,6 +16,7 @@ import {
   sniffComposerImageFormat,
 } from "../shared/composer-image-input.js";
 import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../shared/mcp-resource-bounds.js";
+import { normalizeMultimodalTokenEstimateDimension } from "../shared/multimodal-token-estimate.js";
 import type { SubscriptionImageAttachmentLimits } from "../shared/subscription-runtime.js";
 import type { UserContentPart } from "../engine/llm/types.js";
 
@@ -255,10 +256,14 @@ export function normalizeLocalUserContentParts(raw: unknown): UserContentPart[] 
         typeof mimeType === "string" ? mimeType : undefined,
       );
       if (!normalized) continue;
+      const width = normalizeMultimodalTokenEstimateDimension(ownField(item, "width"));
+      const height = normalizeMultimodalTokenEstimateDimension(ownField(item, "height"));
       out.push({
         type: "image",
         image: `data:${normalized.mimeType};base64,${normalized.data}`,
         mimeType: normalized.mimeType,
+        ...(width === undefined ? {} : { width }),
+        ...(height === undefined ? {} : { height }),
       });
       continue;
     }
