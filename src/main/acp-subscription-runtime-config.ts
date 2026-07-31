@@ -7,7 +7,7 @@
  * gives them the normal 0700 directory / 0600 atomic-write protection.
  */
 import { constants as fsConstants, promises as fs } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, win32 } from "node:path";
 import { mainDir } from "./main-paths.js";
 import type { AcpSubscriptionProviderId } from "../shared/acp-subscription.js";
 import {
@@ -68,8 +68,13 @@ export const GROK_BUILD_GOVERNED_AGENT_PROFILE = Object.freeze({
 });
 
 /** Absolute app-owned path passed through GROK_AGENT, never renderer input. */
-export function grokBuildGovernedAgentDefinitionPath(runtimeHome: string): string {
-  return join(runtimeHome, GROK_BUILD_GOVERNED_AGENT_FILE_NAME);
+export function grokBuildGovernedAgentDefinitionPath(
+  runtimeHome: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === "win32"
+    ? win32.join(runtimeHome, GROK_BUILD_GOVERNED_AGENT_FILE_NAME)
+    : join(runtimeHome, GROK_BUILD_GOVERNED_AGENT_FILE_NAME);
 }
 
 const GROK_NATIVE_AGENT_PROFILE = [

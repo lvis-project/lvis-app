@@ -270,7 +270,7 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
         args: ["--version"],
       });
       expect(spawnCalls[0]?.options.env).toMatchObject({
-        GROK_AGENT: win32.normalize(grokBuildGovernedAgentDefinitionPath(runtimeHome)),
+        GROK_AGENT: grokBuildGovernedAgentDefinitionPath(runtimeHome, "win32"),
         GROK_REQUIRED_MINIMUM_VERSION: GROK_BUILD_REQUIRED_MINIMUM_VERSION,
       });
       expect(spawnCalls[1]).toMatchObject({
@@ -535,7 +535,7 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
 
     expect(environment).toMatchObject({
       GROK_HOME: win32.normalize(runtimeHome),
-      GROK_AGENT: win32.normalize(grokBuildGovernedAgentDefinitionPath(runtimeHome)),
+      GROK_AGENT: grokBuildGovernedAgentDefinitionPath(runtimeHome, "win32"),
       GROK_REQUIRED_MINIMUM_VERSION: GROK_BUILD_REQUIRED_MINIMUM_VERSION,
       USERPROFILE: win32.normalize(runtimeHome),
       APPDATA: win32.join(win32.normalize(runtimeHome), "appdata"),
