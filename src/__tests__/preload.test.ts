@@ -220,6 +220,25 @@ describe("preload — plugin webview asset URLs", () => {
     unsubscribe();
     expect(mockRemoveListener).toHaveBeenCalledWith("lvis:settings:updated", listener);
   });
+  it("exposes only validated subscription runtime status invalidations through preload", async () => {
+    const api = await loadLvisApi();
+    const handler = vi.fn();
+    const subscribe = api["onSubscriptionRuntimeStatusUpdated"] as (cb: (event: unknown) => void) => () => void;
+    const unsubscribe = subscribe(handler);
+
+    expect(mockOn).toHaveBeenCalledWith("lvis:settings:subscription:status-updated", expect.any(Function));
+    const listener = mockOn.mock.calls.at(-1)?.[1] as (event: unknown, payload: unknown) => void;
+    const validEvent = { provider: "codex", revision: 7 };
+    listener({}, validEvent);
+    listener({}, { provider: "codex", revision: 8, verificationUrl: "https://example.test/secret" });
+    listener({}, { provider: "not-a-provider", revision: 9 });
+    listener({}, { provider: "codex", revision: 0 });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(validEvent);
+
+    unsubscribe();
+    expect(mockRemoveListener).toHaveBeenCalledWith("lvis:settings:subscription:status-updated", listener);
+  });
 
   it.each([
     ["codexSubscriptionStatus", "lvis:settings:codex-subscription:status"],
@@ -236,6 +255,47 @@ describe("preload — plugin webview asset URLs", () => {
     await (action as () => Promise<unknown>)();
 
     expect(mockInvoke).toHaveBeenCalledWith(channel);
+  });
+
+  it.each([
+    ["acpSubscriptionStatus", "lvis:settings:acp-subscription:status"],
+    ["acpSubscriptionChooseRuntime", "lvis:settings:acp-subscription:choose-runtime"],
+    ["acpSubscriptionForgetRuntime", "lvis:settings:acp-subscription:forget-runtime"],
+    ["acpSubscriptionVerify", "lvis:settings:acp-subscription:verify"],
+    ["acpSubscriptionStartLogin", "lvis:settings:acp-subscription:start-login"],
+    ["acpSubscriptionCancelLogin", "lvis:settings:acp-subscription:cancel-login"],
+    ["acpSubscriptionLogout", "lvis:settings:acp-subscription:logout"],
+    ["acpSubscriptionOpenLoginBrowser", "lvis:settings:acp-subscription:open-login-browser"],
+  ])("exposes %s through the internal ACP subscription bridge", async (apiKey, channel) => {
+    const api = await loadLvisApi();
+    const action = api[apiKey];
+
+    expect(typeof action).toBe("function");
+    await (action as (provider: string) => Promise<unknown>)("kimi-code");
+
+    expect(mockInvoke).toHaveBeenCalledWith(channel, "kimi-code");
+  });
+
+  it.each([
+    ["subscriptionRuntimeStatus", "lvis:settings:subscription:status", ["codex"]],
+    ["subscriptionChooseRuntime", "lvis:settings:subscription:choose-runtime", ["kimi-code"]],
+    ["subscriptionForgetRuntime", "lvis:settings:subscription:forget-runtime", ["kimi-code"]],
+    ["subscriptionVerifyRuntime", "lvis:settings:subscription:verify", ["codex"]],
+    ["subscriptionStartLogin", "lvis:settings:subscription:start-login", ["codex", "browser"]],
+    ["subscriptionOpenLoginBrowser", "lvis:settings:subscription:open-login-browser", ["kimi-code"]],
+    ["subscriptionCancelLogin", "lvis:settings:subscription:cancel-login", ["codex"]],
+    ["subscriptionLogout", "lvis:settings:subscription:logout", ["codex"]],
+    ["subscriptionListModels", "lvis:settings:subscription:list-models", ["codex"]],
+    ["subscriptionUseForChat", "lvis:settings:subscription:use-for-chat", ["codex", "gpt-5"]],
+    ["subscriptionUseApiForChat", "lvis:settings:subscription:use-api-for-chat", []],
+  ])("exposes %s through the common subscription bridge", async (apiKey, channel, args) => {
+    const api = await loadLvisApi();
+    const action = api[apiKey];
+
+    expect(typeof action).toBe("function");
+    await (action as (...values: unknown[]) => Promise<unknown>)(...args);
+
+    expect(mockInvoke).toHaveBeenCalledWith(channel, ...args);
   });
 
   it("does not trust renderer-minted chat userActivation flags", async () => {

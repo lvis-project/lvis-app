@@ -30,6 +30,10 @@ import type { StreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
+import {
+  isSubscriptionRuntimeStatusUpdatedEvent,
+  type SubscriptionRuntimeStatusUpdatedEvent,
+} from "../shared/subscription-runtime.js";
 
 type MemoryProjectOptions = {
   projectRoot?: string;
@@ -176,6 +180,17 @@ export function buildInternalApiSurface() {
     ipcRenderer.on(SETTINGS.updated, listener);
     return () => ipcRenderer.removeListener(SETTINGS.updated, listener);
   },
+  onSubscriptionRuntimeStatusUpdated: (
+    handler: (event: SubscriptionRuntimeStatusUpdatedEvent) => void,
+  ) => {
+    const listener = (_event: unknown, payload: unknown) => {
+      if (isSubscriptionRuntimeStatusUpdatedEvent(payload)) {
+        handler(payload);
+      }
+    };
+    ipcRenderer.on(CHANNELS.settings.subscriptionRuntimeStatusUpdated, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.settings.subscriptionRuntimeStatusUpdated, listener);
+  },
   setApiKey: async (vendor: string, apiKey: string) => ipcRenderer.invoke(CHANNELS.settings.setApiKey, vendor, apiKey),
   hasApiKey: async (vendor?: string) => ipcRenderer.invoke(CHANNELS.settings.hasApiKey, vendor) as Promise<boolean>,
   deleteApiKey: async (vendor: string) => ipcRenderer.invoke(CHANNELS.settings.deleteApiKey, vendor),
@@ -186,6 +201,36 @@ export function buildInternalApiSurface() {
   codexSubscriptionCancelLogin: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionCancelLogin),
   codexSubscriptionLogout: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionLogout),
   codexSubscriptionListModels: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionListModels),
+  subscriptionRuntimeStatus: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionRuntimeStatus, provider),
+  subscriptionChooseRuntime: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionChooseRuntime, provider),
+  subscriptionForgetRuntime: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionForgetRuntime, provider),
+  subscriptionVerifyRuntime: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionVerifyRuntime, provider),
+  subscriptionStartLogin: async (provider: unknown, method: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionStartLogin, provider, method),
+  subscriptionOpenLoginBrowser: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionOpenLoginBrowser, provider),
+  subscriptionCancelLogin: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionCancelLogin, provider),
+  subscriptionLogout: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionLogout, provider),
+  subscriptionListModels: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionListModels, provider),
+  subscriptionUseForChat: async (provider: unknown, model?: unknown) => model === undefined
+    ? ipcRenderer.invoke(CHANNELS.settings.subscriptionUseForChat, provider)
+    : ipcRenderer.invoke(CHANNELS.settings.subscriptionUseForChat, provider, model),
+  subscriptionUseApiForChat: async () => ipcRenderer.invoke(CHANNELS.settings.subscriptionUseApiForChat),
+  acpSubscriptionStatus: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionStatus, provider),
+  acpSubscriptionChooseRuntime: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionChooseRuntime, provider),
+  acpSubscriptionForgetRuntime: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionForgetRuntime, provider),
+  acpSubscriptionVerify: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionVerify, provider),
+  acpSubscriptionStartLogin: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionStartLogin, provider),
+  acpSubscriptionOpenLoginBrowser: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionOpenLoginBrowser, provider),
+  acpSubscriptionCancelLogin: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionCancelLogin, provider),
+  acpSubscriptionLogout: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionLogout, provider),
   installMarketplaceProviderPreset: async (preset: unknown) =>
     ipcRenderer.invoke(CHANNELS.settings.marketplaceInstallProviderPreset, preset),
   uninstallMarketplaceProviderPreset: async (providerId: string) =>

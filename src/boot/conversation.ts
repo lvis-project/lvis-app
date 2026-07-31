@@ -25,6 +25,8 @@ import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
+import type { LLMProvider } from "../engine/llm/types.js";
+import type { SubscriptionChatRuntimeSelection } from "../shared/subscription-runtime.js";
 import { isDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
 import {
   defaultWorkspaceProject,
@@ -223,6 +225,11 @@ export interface ConversationDeps {
   rewireReviewerAgent?: () => void;
   /** Main-process fetch implementation for SDK-backed LLM calls. */
   llmFetch?: typeof fetch;
+  /** Main-owned factory for a subscription-authenticated LLM provider. */
+  subscriptionProviderFactory?: (
+    selection: SubscriptionChatRuntimeSelection,
+    fallbackSelection?: SubscriptionChatRuntimeSelection,
+  ) => LLMProvider | null;
 }
 
 /**
@@ -259,6 +266,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "isDefaultProjectRoot"
   | "getDefaultProject"
   | "authorizeProject"
+  | "subscriptionProviderFactory"
 >;
 
 export function createRoutineConversationLoop(
@@ -331,6 +339,7 @@ export function createRoutineConversationLoop(
     forcedActivePluginIds,
     ...(forcedActiveToolNames.size > 0 ? { forcedActiveToolNames } : {}),
     additionalDirectories: scope?.directories ?? [],
+    subscriptionProviderFactory: deps.subscriptionProviderFactory,
     headless: true,
     // postTurnHookChain / idleScheduler intentionally omitted — routine loops
     // are isolated from interactive chat side effects. The fallback persistence
@@ -378,6 +387,7 @@ export type SideChatConversationLoopDeps = Pick<
   | "rationaleCoordinatorFactory"
   | "closeRationaleSession"
   | "auditLogger"
+  | "subscriptionProviderFactory"
 > & {
   /** Isolated MemoryManager rooted at `~/.lvis/side-chat/`. */
   sideChatMemoryManager: MemoryManager;
@@ -436,6 +446,7 @@ export function createSideChatConversationLoop(
       ? { closeRationaleSession: deps.closeRationaleSession }
       : {}),
     llmFetch: deps.llmFetch,
+    subscriptionProviderFactory: deps.subscriptionProviderFactory,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
     authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
@@ -487,6 +498,7 @@ export function createConversationLoop(deps: ConversationDeps,
     auditLogger: deps.auditLogger,
     rewireReviewerAgent: deps.rewireReviewerAgent,
     llmFetch: deps.llmFetch,
+    subscriptionProviderFactory: deps.subscriptionProviderFactory,
   });
   loop.newConversation("main");
   return loop;

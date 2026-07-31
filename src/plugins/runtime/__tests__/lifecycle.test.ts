@@ -176,6 +176,84 @@ export default async function createPlugin() {
     await expect(runtime.call("lc_restart_remove_race_ping")).rejects.toThrow(/not found/);
   });
 
+
+  it("cancels an in-flight replacement before it can start or publish", async () => {
+    const pluginId = "lc-restart-shutdown-cancel";
+    const pluginDir = join(installedDir, pluginId);
+    const armPath = join(testDir, "restart-shutdown-arm");
+    const enteredPath = join(testDir, "restart-shutdown-entered");
+    const releasePath = join(testDir, "restart-shutdown-release");
+    const candidateStartedPath = join(testDir, "restart-shutdown-candidate-started");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `import { access, writeFile } from "node:fs/promises";
+async function exists(path) {
+  try { await access(path); return true; } catch { return false; }
+}
+export default async function createPlugin() {
+  const candidate = await exists(${JSON.stringify(armPath)});
+  if (candidate) {
+    await writeFile(${JSON.stringify(enteredPath)}, "entered");
+    while (!(await exists(${JSON.stringify(releasePath)}))) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+  return {
+    handlers: { lc_restart_shutdown_cancel_ping: async () => candidate ? "replacement" : "predecessor" },
+    start: async () => {
+      if (candidate) await writeFile(${JSON.stringify(candidateStartedPath)}, "started");
+    },
+    stop: async () => {},
+  };
+}`,
+      "utf-8",
+    );
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: pluginId,
+        name: "Restart Shutdown Cancel",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [{
+          name: "lc_restart_shutdown_cancel_ping",
+          description: "restart cancellation shutdown regression tool",
+          inputSchema: { type: "object", properties: {} },
+          _meta: { ui: { visibility: ["model", "app"] } },
+        }],
+        description: "Cancellation must prevent an in-flight replacement from starting or publishing.",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [{ id: pluginId, manifestPath, enabled: true }] }),
+      "utf-8",
+    );
+
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await writeFile(armPath, "armed", "utf-8");
+    const restart = runtime.restartPlugin(pluginId);
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      try { await access(enteredPath); break; }
+      catch { await new Promise((resolve) => setTimeout(resolve, 5)); }
+    }
+    await expect(access(enteredPath)).resolves.toBeUndefined();
+
+    // This is the host shutdown cancellation boundary. The replacement is
+    // still inside its factory, so once it resolves neither `start` nor the
+    // runtime-generation publication may run.
+    runtime.cancelAllPendingRestarts();
+    await writeFile(releasePath, "release", "utf-8");
+
+    await expect(restart).resolves.toBe("failed");
+    await expect(access(candidateStartedPath)).rejects.toThrow();
+    await expect(runtime.call("lc_restart_shutdown_cancel_ping")).resolves.toBe("predecessor");
+  });
   it("bounds an uncertain replacement start and preserves the predecessor generation", async () => {
     const pluginDir = join(installedDir, "lc-restart-timeout");
     const armPath = join(testDir, "restart-timeout-arm");

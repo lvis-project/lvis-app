@@ -1,6 +1,6 @@
 import "../../../../../test/renderer/setup.js";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { estimateTokens } from "../../../../lib/cost-estimator.js";
 import { useCostEstimate } from "../use-cost-estimate.js";
@@ -83,5 +83,25 @@ describe("useCostEstimate", () => {
     expect(result.current.costEstimate.total).toBe(0);
     expect(result.current.costEstimate.pricingKnown).toBe(false);
     expect(result.current.costBadgeClass).toBe("text-muted-foreground");
+  });
+
+  it("does not derive an API cost estimate when the runtime has no verified billing contract", () => {
+    const composeOutgoing = vi.fn((raw: string) => ({ text: raw }));
+    const { result } = renderHook(() =>
+      useCostEstimate({
+        entries: [],
+        question: "subscription runtime draft",
+        // These deliberately stale API values must be ignored.
+        llmVendor: "openai",
+        llmModel: "gpt-5.4-nano",
+        maxOutputTokens: 1_000,
+        composeOutgoing,
+        enabled: false,
+      }),
+    );
+
+    expect(result.current.costEstimate).toBeUndefined();
+    expect(result.current.costBadgeClass).toBeUndefined();
+    expect(composeOutgoing).not.toHaveBeenCalled();
   });
 });

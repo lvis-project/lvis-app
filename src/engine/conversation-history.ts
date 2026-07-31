@@ -4,6 +4,7 @@
 
 import type { GenericMessage } from "./llm/types.js";
 import { trimOversizedToolResult } from "../shared/tool-result-trim.js";
+import { normalizeLocalUserContentParts } from "../main/subscription-attachment-input.js";
 
 export interface ConversationHistoryOptions {
   maxMessages?: number;
@@ -119,7 +120,16 @@ export class ConversationHistory {
     // with `meta.serializedStub: true` would otherwise bypass the cap
     // check in `wire-serialize.stubMarkedToolResults` (security review
     // Minor 2).
-    const capped = messages.map((m) => applyToolResultCap(m, { recompute: true }));
+    // Persisted user multipart content is untrusted: retain text and verified
+    // local data URLs, but discard remote/malformed binary parts before any
+    // resume, checkpoint, or retry can hand the history to a provider.
+    const capped: GenericMessage[] = [];
+    for (const message of messages) {
+      const normalized = normalizeRestoredUserContent(
+        applyToolResultCap(message, { recompute: true }),
+      );
+      if (normalized) capped.push(normalized);
+    }
     this.messages = normalizeToolPairInvariant(capped).messages;
     this.trim();
   }
@@ -236,6 +246,13 @@ function applyToolResultCap(
     ...message,
     meta: { ...preservedMeta, truncated: trimmed.truncated },
   };
+}
+
+/** Apply the untrusted-user attachment policy while preserving trusted tool results. */
+function normalizeRestoredUserContent(message: GenericMessage): GenericMessage | null {
+  if (message.role !== "user" || typeof message.content === "string") return message;
+  const content = normalizeLocalUserContentParts(message.content);
+  return content ? { ...message, content } : null;
 }
 
 export function normalizeToolPairInvariant(
