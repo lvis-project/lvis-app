@@ -60,7 +60,7 @@ function pluginShellEvent(): IpcMainInvokeEvent {
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-const mockAuditLogger = { log: vi.fn(), search: vi.fn(), getStats: vi.fn() };
+const mockAuditLogger = { log: vi.fn(), search: vi.fn(), getStats: vi.fn(), flush: vi.fn(async (): Promise<void> => {}) };
 const mockGenerateText = vi.fn(async () => "AI daily summary");
 
 function makeMinimalDeps() {
@@ -93,6 +93,23 @@ describe("lvis:usage:summary", () => {
     expect(result.days).toBe(30);
   });
 
+  it("waits for pending audit writes before reading usage", async () => {
+    const { getUsageSummary } = await import("../../engine/usage-stats.js");
+    let releaseFlush: (() => void) | undefined;
+    mockAuditLogger.flush.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseFlush = resolve;
+    }));
+
+    const pending = invoke("lvis:usage:summary", trustedEvent(), 30) as Promise<unknown>;
+    await Promise.resolve();
+    expect(getUsageSummary).not.toHaveBeenCalled();
+    releaseFlush?.();
+    await pending;
+
+    expect(mockAuditLogger.flush).toHaveBeenCalledTimes(1);
+    expect(getUsageSummary).toHaveBeenCalledWith(30);
+  });
+
   it("defaults to 60 days when no argument", async () => {
     const { getUsageSummary } = await import("../../engine/usage-stats.js");
     await invoke("lvis:usage:summary", trustedEvent());
@@ -108,12 +125,14 @@ describe("lvis:usage:range", () => {
   it("rejects unauthorized sender", async () => {
     const result = await invoke("lvis:usage:range", untrustedEvent(), { dateFrom: "2026-01-01", dateTo: "2026-01-31" });
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(mockAuditLogger.flush).not.toHaveBeenCalled();
   });
 
   it("calls getUsageRange with opts on authorized sender", async () => {
     const { getUsageRange } = await import("../../engine/usage-stats.js");
     const opts = { dateFrom: "2026-01-01", dateTo: "2026-01-31" };
     await invoke("lvis:usage:range", trustedEvent(), opts);
+    expect(mockAuditLogger.flush).toHaveBeenCalledTimes(1);
     expect(getUsageRange).toHaveBeenCalledWith(opts);
   });
 });
@@ -126,6 +145,7 @@ describe("lvis:usage:daily-summary", () => {
   it("rejects unauthorized sender", async () => {
     const result = await invoke("lvis:usage:daily-summary", untrustedEvent(), { date: "2026-07-04" });
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(mockAuditLogger.flush).not.toHaveBeenCalled();
   });
 
   it("rejects plugin shell frames even though they are local file URLs", async () => {
@@ -199,6 +219,7 @@ describe("lvis:usage:export-csv", () => {
   it("rejects unauthorized sender", async () => {
     const result = await invoke("lvis:usage:export-csv", untrustedEvent(), []);
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(mockAuditLogger.flush).not.toHaveBeenCalled();
   });
 
   it("returns { ok: false, canceled: true } when dialog is canceled", async () => {

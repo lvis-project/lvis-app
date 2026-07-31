@@ -9,14 +9,26 @@
  */
 import { redactForLLM } from "../../audit/dlp-filter.js";
 
+export interface UsageAuditFlushBoundary {
+  flush(): Promise<void>;
+}
+
 /** PUBLIC `lvis:usage:summary` — rolling usage summary over `days` (default 60). */
-export async function handleUsageSummary(days?: number) {
+export async function handleUsageSummary(
+  days?: number,
+  auditLogger?: UsageAuditFlushBoundary,
+) {
+  await auditLogger?.flush();
   const { getUsageSummary } = await import("../../engine/usage-stats.js");
   return getUsageSummary(typeof days === "number" ? days : 60);
 }
 
 /** PUBLIC `lvis:usage:range` — usage aggregated over an explicit date range. */
-export async function handleUsageRange(opts: { dateFrom: string; dateTo: string }) {
+export async function handleUsageRange(
+  opts: { dateFrom: string; dateTo: string },
+  auditLogger?: UsageAuditFlushBoundary,
+) {
+  await auditLogger?.flush();
   const { getUsageRange } = await import("../../engine/usage-stats.js");
   return getUsageRange(opts);
 }
