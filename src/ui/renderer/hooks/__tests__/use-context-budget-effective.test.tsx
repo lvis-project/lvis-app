@@ -7,6 +7,7 @@ import "../../../../../test/renderer/setup.js";
  */
 import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
+import { estimateOutgoingUserMessageTokens } from "../../../../shared/multimodal-token-estimate.js";
 import { useContextBudget } from "../use-context-budget.js";
 
 describe("useContextBudget — effectiveBudget (Issue #912)", () => {
@@ -60,6 +61,29 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
     expect(result.current.usedTokens).toBe(42_000);
   });
 
+  it("adds the canonical composed draft estimate without recreating attachment policy", () => {
+    const attachments = [
+      { type: "text" as const, text: "<resource>서버 리소스 본문</resource>" },
+      {
+        type: "image" as const,
+        image: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        width: 2048,
+        height: 512,
+      },
+    ];
+    const draftTokenEstimate = estimateOutgoingUserMessageTokens("한글 초안", attachments);
+    const { result } = renderHook(() =>
+      useContextBudget({
+        entries: [{ kind: "context_usage", tokensIn: 42_000, source: "compact-estimate" }],
+        llmVendor: "azure-foundry",
+        llmModel: "gpt-5.4-mini",
+        draftTokenEstimate,
+      }),
+    );
+
+    expect(result.current.usedTokens).toBe(42_000 + draftTokenEstimate);
+  });
   it("uses tpmLimit when smaller than contextBudget (nano)", () => {
     // gpt-5.4-nano: contextWindow=400K, tpmDefault=200K → effectiveBudget=200K
     const { result } = renderHook(() =>
@@ -109,7 +133,7 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
         // These deliberately stale API values must be ignored.
         llmVendor: "openai",
         llmModel: "gpt-5.4-nano",
-        draftText: "subscription runtime draft",
+        draftTokenEstimate: 99_999,
         enabled: false,
       }),
     );

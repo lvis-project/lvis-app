@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GenericMessage, ToolSchema } from "../llm/types.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
+import { estimateUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { estimateRequestInputProjection, projectNextTurnInputTokens } from "../request-input-projection.js";
 
 describe("estimateRequestInputProjection", () => {
@@ -33,6 +34,28 @@ describe("estimateRequestInputProjection", () => {
     );
   });
 
+  it("counts multipart user text and images through the shared user-wire estimator", () => {
+    const content = [
+      { type: "text" as const, text: "한글 본문" },
+      { type: "text" as const, text: "<resource>server text</resource>" },
+      {
+        type: "image" as const,
+        image: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        width: 2048,
+        height: 512,
+      },
+    ];
+    const messages: GenericMessage[] = [{ role: "user", content }];
+    const projection = estimateRequestInputProjection({
+      systemPrompt: "",
+      messages,
+      toolSchemas: [],
+    });
+
+    expect(projection.messageTokens).toBe(estimateUserMessageTokens(content));
+    expect(projection.totalTokens).toBe(projection.messageTokens);
+  });
   it("uses provider-wire tool_result stubs through estimateMessagesTokens", () => {
     const raw = "large result ".repeat(2_000);
     const messages: GenericMessage[] = [
