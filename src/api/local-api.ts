@@ -215,9 +215,9 @@ export function createLocalApi(deps: LocalApiDeps): LocalApi {
       case PERMISSIONS.getMode:
         return handleGetMode(ipc);
       case CHANNELS.usage.summary:
-        return handleUsageSummary(args as Parameters<typeof handleUsageSummary>[0]);
+        return handleUsageSummary(args as Parameters<typeof handleUsageSummary>[0], ipc.auditLogger);
       case CHANNELS.usage.range:
-        return handleUsageRange(args as Parameters<typeof handleUsageRange>[0]);
+        return handleUsageRange(args as Parameters<typeof handleUsageRange>[0], ipc.auditLogger);
       default: {
         // Exhaustiveness guard — every PublicChannel must be routed above.
         const _exhaustive: never = channel;

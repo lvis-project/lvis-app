@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -506,7 +507,7 @@ describe("usage-stats", () => {
     ]);
   });
 
-  it("reads JSONL audit files and ignores non-turn entries", () => {
+  it("reads JSONL audit files and ignores non-turn entries", async () => {
     const dir = mkdtempSync(join(tmpdir(), "usage-stats-"));
     try {
       mkdirSync(dir, { recursive: true });
@@ -535,9 +536,63 @@ describe("usage-stats", () => {
         ].join("\n") + "\n",
         "utf-8",
       );
-      const read = readAuditEntries(dir, 365);
+      const read = await readAuditEntries(dir, 365);
       expect(read.length).toBe(2);
       expect(read.every((e) => e.type === "turn")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("reads canonical gzip archives and excludes non-telemetry channels", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "usage-gzip-"));
+    const now = new Date("2026-07-04T12:00:00Z");
+    try {
+      const archivedTurn = turn({
+        timestamp: "2026-07-03T15:30:00Z",
+        sessionId: "archived",
+        input: "archived input",
+        tokenUsage: { inputTokens: 100, outputTokens: 10 },
+      });
+      const rawTurn = turn({
+        timestamp: "2026-07-04T01:00:00Z",
+        sessionId: "raw",
+        tokenUsage: { inputTokens: 200, outputTokens: 20 },
+      });
+      writeFileSync(
+        join(dir, "2026-07-03.jsonl.20260704120000000.11111111-1111-4111-8111-111111111111.gz"),
+        gzipSync(Buffer.from(`${JSON.stringify(archivedTurn)}\n`, "utf-8")),
+      );
+      writeFileSync(join(dir, "2026-07-04.jsonl"), `${JSON.stringify(rawTurn)}\n`, "utf-8");
+      writeFileSync(
+        join(dir, "2026-07-03.permission-shadow.jsonl.20260704.gz"),
+        gzipSync(Buffer.from(`${JSON.stringify(turn({ tokenUsage: { inputTokens: 9_999, outputTokens: 0 } }))}\n`, "utf-8")),
+      );
+
+      const entries = await readAuditEntries(dir, 2, now);
+      expect(entries.map((entry) => entry.sessionId)).toEqual(["archived", "raw"]);
+      expect(computeUsageSummary(entries, now).today.inputTokens).toBe(300);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips an entire corrupted gzip archive without losing valid files", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "usage-gzip-corrupt-"));
+    const now = new Date("2026-07-04T12:00:00Z");
+    try {
+      const partialArchive = gzipSync(Buffer.from([
+        JSON.stringify(turn({ sessionId: "should-not-count", timestamp: "2026-07-03T15:30:00Z" })),
+        JSON.stringify(turn({ sessionId: "also-should-not-count", timestamp: "2026-07-03T15:31:00Z" })),
+      ].join("\n") + "\n", "utf-8")).subarray(0, -8);
+      writeFileSync(join(dir, "2026-07-03.jsonl.20260704.gz"), partialArchive);
+      writeFileSync(
+        join(dir, "2026-07-04.jsonl"),
+        `${JSON.stringify(turn({ sessionId: "valid", timestamp: "2026-07-04T01:00:00Z" }))}\n`,
+        "utf-8",
+      );
+
+      const entries = await readAuditEntries(dir, 2, now);
+      expect(entries.map((entry) => entry.sessionId)).toEqual(["valid"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -590,7 +645,7 @@ describe("computeMonthlyProjection", () => {
 });
 
 describe("getUsageRange (via readAuditEntries + filter)", () => {
-  it("filters entries to exact date range", () => {
+  it("filters entries to exact date range", async () => {
     const dir = mkdtempSync(join(tmpdir(), "usage-range-"));
     try {
       mkdirSync(dir, { recursive: true });
@@ -628,7 +683,7 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
         "utf-8",
       );
 
-      const entries = readAuditEntries(dir, 365).filter((e) => {
+      const entries = (await readAuditEntries(dir, 365)).filter((e) => {
         const d = e.timestamp.slice(0, 10);
         return d >= "2026-04-10" && d <= "2026-04-15";
       });
@@ -644,7 +699,7 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
     }
   });
 
-  it("reads adjacent UTC audit files for a selected KST day", () => {
+  it("reads adjacent UTC gzip archives for a selected KST day", async () => {
     const home = mkdtempSync(join(tmpdir(), "usage-range-kst-home-"));
     const originalHome = process.env.LVIS_HOME;
     try {
@@ -652,8 +707,8 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
       const auditDir = join(home, "audit");
       mkdirSync(auditDir, { recursive: true });
       writeFileSync(
-        join(auditDir, "2026-07-03.jsonl"),
-        [
+        join(auditDir, "2026-07-03.jsonl.20260704.gz"),
+        gzipSync(Buffer.from([
           JSON.stringify({
             timestamp: "2026-07-03T14:30:00Z",
             sessionId: "s1",
@@ -668,11 +723,10 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
             route: "claude/claude-sonnet-4-6",
             tokenUsage: { inputTokens: 100, outputTokens: 10 },
           }),
-        ].join("\n") + "\n",
-        "utf-8",
+        ].join("\n") + "\n", "utf-8")),
       );
 
-      const summary = getUsageRange({
+      const summary = await getUsageRange({
         dateFrom: "2026-07-04",
         dateTo: "2026-07-04",
       });
