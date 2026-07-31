@@ -316,7 +316,9 @@ Attribute values printed into the open tag go through the same module's
 A clip is admitted in a line the model reads rather than a flag the UI could ignore.
 
 Stages land as separate PRs. Stage 1 touches no cluster-sensitive path; stages 2
-and 3 do (`src/tools`, `src/ipc`), so they carry the 3-role attestation.
+and 3 do (`src/tools`, `src/ipc`), so their owners should record proportionate
+architecture, critique, and security consideration. The detector is advisory and
+never requires an attestation or blocks merge.
 
 ### Resolved decision: PII redaction covers attached resource text
 

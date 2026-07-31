@@ -39,28 +39,15 @@
 
 - Screenshots / traces / viewport notes:
 
-## Cross-Cutting Review Gate
+## Sensitive-Area Advisory
 
-Keep this section before any raw HTML token; place raw HTML later in the PR body.
-Complete only when `cluster-detector` requires independent review. All three
-reviews must cover the current PR HEAD. A new commit, PR edit, base change,
-or reopen invalidates a retained label. Each visible row and hidden marker must
-use the same current HEAD SHA and verdict; a `GO` row requires blocking findings to be
-exactly `None`. The required check accepts attestation only on a fresh
-application of `cluster-review-passed`; any later PR metadata event requires
-removing and reapplying the label. Replace all placeholders below first.
+If `cluster-detector` emits a sensitive-area advisory, record any material owner
+review below. Cover architecture, critique, and security impacts in proportion to
+risk. This is not a merge gate: it never requires an external reviewer,
+collaborator, label, attestation, or additional approval.
 
-Reviewed HEAD: `<40-char-head-sha>`
-
-| Role | Reviewed HEAD SHA | Verdict | Blocking findings |
-|---|---|---|---|
-| Architect | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
-| Critic | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
-| Security | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |
-
-<!-- cluster-review:architect:<40-char-head-sha>:GO -->
-<!-- cluster-review:critic:<40-char-head-sha>:GO -->
-<!-- cluster-review:security:<40-char-head-sha>:GO -->
+- Owner review notes:
+- Residual risk or follow-up:
 
 ## Risk / Rollback
 

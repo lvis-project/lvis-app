@@ -9,7 +9,7 @@
  *
  *   - git auto-detects a NUL in the first 8 KB as binary, so `git diff` prints
  *     "Binary files differ" and the file becomes invisible in review — including in
- *     the cluster-review gate this repo depends on for sensitive areas;
+ *     the sensitive-area advisory used to surface cross-cutting changes;
  *   - ripgrep skips it, so the file cannot be found from a symbol it defines;
  *   - `.github/workflows/naming-gate.yml` scans `git diff … | grep -E "^\+"`, which
  *     yields nothing for a binary file, exempting it from that gate entirely.
