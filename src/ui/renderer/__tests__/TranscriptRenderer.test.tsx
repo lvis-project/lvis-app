@@ -127,6 +127,32 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
     expect(queryByTestId("token-cost-badge")).toBeNull();
   });
 
+  it("keeps non-billable subscription telemetry visible when API pricing is gated off", () => {
+    const summary = completedTurnSummary();
+    const current = summary.get(0);
+    if (!current) throw new Error("test turn summary missing");
+    current.subscriptionUsage = [{
+      provider: "codex",
+      model: "gpt-5.4",
+      source: "provider-reported",
+      billable: false,
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+    }];
+
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[user("q"), assistant("a")]}
+        streaming={false}
+        currentSessionId="s1"
+        turnSummaryByTurnStart={summary}
+        showTokenCostBadge={false}
+      />,
+    );
+    expect(getByTestId("token-cost-badge").getAttribute("data-usage-kind")).toBe("subscription");
+  });
+
   it("continues to show token and cost estimates by default for runtimes with a usage contract", () => {
     const { getByTestId } = renderCore(
       <TranscriptRenderer entries={[user("q"), assistant("a")]} streaming={false} currentSessionId="s1" turnSummaryByTurnStart={completedTurnSummary()} />,

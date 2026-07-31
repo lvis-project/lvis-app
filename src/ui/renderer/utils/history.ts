@@ -6,6 +6,7 @@ import {
   EMPTY_ASSISTANT_RESPONSE_TEXT,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
+  normalizeSubscriptionUsageList,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
@@ -167,6 +168,7 @@ export function historyToEntries(
         m.turnSummary &&
         !isPreservedPreCompactTurn(m, latestCheckpointCreatedAt)
       ) {
+        const subscriptionUsage = normalizeSubscriptionUsageList(m.turnSummary.subscriptionUsage);
         out.push({
           kind: "turn_summary",
           turnDurationMs: m.turnSummary.turnDurationMs,
@@ -190,6 +192,7 @@ export function historyToEntries(
           ...(m.turnSummary.usageByModel !== undefined
             ? { usageByModel: m.turnSummary.usageByModel }
             : {}),
+          ...(subscriptionUsage !== undefined ? { subscriptionUsage } : {}),
           ...(m.turnSummary.breakdown
             ? { breakdown: m.turnSummary.breakdown }
             : {}),
