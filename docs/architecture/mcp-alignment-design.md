@@ -154,7 +154,7 @@ Ordered; each *change → unblocks → gate*. Because each plugin gets its own c
 2. **`mrtr-input-loop`** — client MRTR loop: on `input_required`, gather `inputRequests` (elicitation via approval gate, sampling via host LLM), retry with a new id, echo `requestState` verbatim. *Gate:* MRTR fixture (form + url elicitation, new-id + opacity assertions).
 3. **`plugin-loopback-server`** — define the in-process loopback transport + the stdio transport; project `PluginManifest`/`toolSchemas` → `server/discover`+`tools/list`+`tools/call`; run **one first-party plugin** as a loopback MCP server behind a per-plugin client; route `ToolRegistry` registration through MCP discovery instead of `pluginToolsForRegistration`; dialect draft-07→2020-12; category/etc. in `_meta`. *Gate:* SDK schema + validator + fixtures in **one PR** (No-Fallback); migrated plugin passes the full permission pipeline identically (category SOT from `_meta`).
 4. **`untrusted-stdio-isolation`** — out-of-process stdio runtime for marketplace plugins (+ bubblewrap/sandbox-exec), spawn/lifecycle, the spawnable-server artifact format. *Gate:* a marketplace plugin runs isolated; crash/hang containment test; artifact re-sign + installed-plugin migration path.
-5. **`governance-per-request`** — move governance from static `allowedCapabilities` whitelist to per-request capability declaration + per-request gating; keep deny-by-default, namespace, max-tools. *Gate:* **cluster review** (permissions area triggers CLAUDE.md §Cross-Cutting Review Gate — budget for it).
+5. **`governance-per-request`** — move governance from static `allowedCapabilities` whitelist to per-request capability declaration + per-request gating; keep deny-by-default, namespace, max-tools. *Advisory:* record proportionate owner architecture, critique, and security consideration for the permissions area; this never blocks merge.
 6. **`hooks-on-mcp-calls`** (#811 continuation) — re-anchor `PreToolUse`/`PermissionRequest`/`PostToolUse` to the host's `tools/call`; hook stdin reads `_meta["lvisai/category"]` + per-request identity; add the `mcp__.*` matcher; then continue the #811 generic-command-hooks milestone in this frame. *Gate:* deny still blocks the call; fail-closed preserved; audit HMAC chain intact.
 7. **`tasks-extension`** — adopt `io.modelcontextprotocol/tasks` for long-running plugin tools (verified: separate `experimental-ext-tasks` repo; `tasks/get`/`tasks/update`/`tasks/cancel`; `notifications/tasks` carries the full `DetailedTask`; `CreateTaskResult` sets `resultType:"task"`). *Gate:* pin the extension's draft schema at the milestone (it versions independently of the core RC); durable task store survives restart.
 8. **`apps-and-skills-extensions`** — `io.modelcontextprotocol/ui` (Apps; native-host iframe) and `io.modelcontextprotocol/skills` (skills as `skill://` Resources). *Gate:* CSP/permission enforcement per `_meta.ui`; skill digest verification; per-skill opt-in before any skill-declared code execution. Treat Apps/Skills version axes as independent of the core RC.
@@ -221,8 +221,8 @@ remains (gated).** `boot/plugins.ts` now has the SOT `LOOPBACK_MIGRATED_PLUGIN_I
 plugins from BOTH registration and the replaced id set, so the manager's tools are
 never clobbered (unit-tested via an injectable set). **The live flip = populate
 the SOT with a pilot id + wire `PluginLoopbackManager` into the boot step's
-onEnable/onDisable + 3-agent cluster review (permission/boot trust boundary) +
-Playwright e2e.** No bundled first-party plugin exists (all are in-house
+onEnable/onDisable + proportionate owner review advisory (permission/boot trust
+boundary) + Playwright e2e.** No bundled first-party plugin exists (all are in-house
 marketplace repos; installed here: `ep`, `local-indexer`), so the pilot is an
 environment/product choice. Until the SOT is populated, behavior is unchanged.
 
@@ -230,7 +230,7 @@ environment/product choice. Until the SOT is populated, behavior is unchanged.
 takes an injected `McpClientCapabilityProvider`, called per outbound request so
 the advertised `clientCapabilities` track the active turn (interactive → advertise
 elicitation; headless → none → clean `-32003` not a hung approval). Remaining
-(cluster-review gated, permissions area): the per-request server-capability GATING
+(sensitive-area advisory, permissions area): the per-request server-capability GATING
 in `mcp-governance.ts` (move off the static connect-time `allowedCapabilities`
 whitelist) + the exact deriving signals (§6 open decision).
 
@@ -300,7 +300,7 @@ loopback manager and delete `pluginToolsForRegistration` + its adapter (7 call
 sites + ~6 test files) — is the single highest-blast-radius change in the
 initiative; the boot wiring is in place (flip `LOOPBACK_MIGRATED_PLUGIN_IDS` to
 universal), so once (a)+(b) hold it is a bounded, mechanical removal best done as a
-focused change with a cluster review, not rushed.
+focused change with proportionate owner review, not rushed.
 
 **Follow-up wiring + cleanup (A + E streams, post-flag-day).** Done + verified
 (full suite 6363 passed/0 failed + build green; A1 security-review GO, E8

@@ -371,9 +371,10 @@ Security-sensitive areas are intentionally centralized:
 - `src/boot` for startup wiring and policy initialization;
 - tool executor and sandbox helpers for runtime enforcement.
 
-Changes spanning these areas require cross-cutting review. Documentation-only
-mirrors under `docs/ko` are excluded from naming-process gates because they
-preserve historical source text; production paths remain covered.
+Changes spanning these areas merit proportionate cross-cutting review. That
+review is advisory, never a merge gate. Documentation-only mirrors under `docs/ko`
+are excluded from naming-process gates because they preserve historical source
+text; production paths remain covered.
 
 ## Documentation Language Policy
 
