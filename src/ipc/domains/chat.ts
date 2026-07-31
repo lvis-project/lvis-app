@@ -18,6 +18,10 @@ import { t } from "../../i18n/index.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
+import {
+  MAX_LOCAL_USER_CONTENT_PARTS,
+  normalizeLocalUserContentParts,
+} from "../../main/subscription-attachment-input.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { parseStagedEnvelope, isMissingStagedEnvelopeErrorMessage } from "../../shared/staged-origins.js";
@@ -86,14 +90,25 @@ function hasOnlyKeys(obj: Record<string, unknown>, allowed: readonly string[]): 
   return Object.keys(obj).every((k) => allowed.includes(k));
 }
 
+function isOptionalNonNegativeSafeInteger(value: unknown): boolean {
+  return value === undefined
+    || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+}
+
 function isValidUserContentPart(part: unknown): boolean {
   if (!part || typeof part !== "object" || Array.isArray(part)) return false;
   const p = part as Record<string, unknown>;
   const type = p.type;
-  if (typeof type !== "string" || !(type in USER_CONTENT_PART_KEYS)) return false;
+  if (typeof type !== "string" || !Object.hasOwn(USER_CONTENT_PART_KEYS, type)) return false;
   if (!hasOnlyKeys(p, USER_CONTENT_PART_KEYS[type])) return false;
   if (type === "text") return typeof p.text === "string";
-  if (type === "image") return typeof p.image === "string";
+  if (type === "image") return (
+    typeof p.image === "string"
+    && (p.mimeType === undefined || typeof p.mimeType === "string")
+    && isOptionalNonNegativeSafeInteger(p.width)
+    && isOptionalNonNegativeSafeInteger(p.height)
+    && isOptionalNonNegativeSafeInteger(p.bytes)
+  );
   if (type === "file") return typeof p.data === "string" && typeof p.mimeType === "string";
   return false;
 }
@@ -128,7 +143,9 @@ function isValidImportedMessage(raw: unknown): raw is GenericMessage {
     case "user": {
       if (!hasOnlyKeys(m, ["role", "content"])) return false;
       if (typeof m.content === "string") return true;
-      return Array.isArray(m.content) && m.content.every(isValidUserContentPart);
+      return Array.isArray(m.content)
+        && m.content.length <= MAX_LOCAL_USER_CONTENT_PARTS
+        && m.content.every(isValidUserContentPart);
     }
     case "assistant": {
       if (!hasOnlyKeys(m, ["role", "content", "thought", "toolCalls"])) return false;
@@ -149,6 +166,39 @@ function isValidImportedMessage(raw: unknown): raw is GenericMessage {
     }
     default:
       return false;
+  }
+}
+
+/**
+ * Rebuild imported records instead of retaining parsed object references.
+ * User multipart content is normalized through the same bounded local-data URL
+ * contract used by live IPC and the provider mapper, so imports cannot persist
+ * a remote URL that the AI SDK would later fetch.
+ */
+function normalizeImportedMessage(message: GenericMessage): GenericMessage | null {
+  switch (message.role) {
+    case "user": {
+      if (typeof message.content === "string") {
+        return { role: "user", content: message.content };
+      }
+      const content = normalizeLocalUserContentParts(message.content);
+      return content && content.length === message.content.length ? { role: "user", content } : null;
+    }
+    case "assistant":
+      return {
+        role: "assistant",
+        content: message.content,
+        ...(message.thought !== undefined ? { thought: message.thought } : {}),
+        ...(message.toolCalls !== undefined ? { toolCalls: message.toolCalls } : {}),
+      };
+    case "tool_result":
+      return {
+        role: "tool_result",
+        toolUseId: message.toolUseId,
+        content: message.content,
+        ...(message.toolName !== undefined ? { toolName: message.toolName } : {}),
+        ...(message.isError !== undefined ? { isError: message.isError } : {}),
+      };
   }
 }
 
@@ -224,35 +274,17 @@ function validateImportedSessionJson(raw: unknown): ImportValidationResult {
   if (r.messages.length > MAX_IMPORTED_MESSAGES) {
     return { ok: false, messages: [], error: "too-many-messages" };
   }
+  const messages: GenericMessage[] = [];
   for (const candidate of r.messages) {
     if (!isValidImportedMessage(candidate)) {
       return { ok: false, messages: [], error: "invalid-message-shape" };
     }
-  }
-  // Re-derive plain objects containing ONLY the whitelisted keys per role —
-  // never persist the caller's original object references (defense in depth
-  // even though isValidImportedMessage already rejected unknown keys).
-  const messages = (r.messages as GenericMessage[]).map((m): GenericMessage => {
-    switch (m.role) {
-      case "user":
-        return { role: "user", content: m.content };
-      case "assistant":
-        return {
-          role: "assistant",
-          content: m.content,
-          ...(m.thought !== undefined ? { thought: m.thought } : {}),
-          ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
-        };
-      case "tool_result":
-        return {
-          role: "tool_result",
-          toolUseId: m.toolUseId,
-          content: m.content,
-          ...(m.toolName !== undefined ? { toolName: m.toolName } : {}),
-          ...(m.isError !== undefined ? { isError: m.isError } : {}),
-        };
+    const normalized = normalizeImportedMessage(candidate);
+    if (!normalized) {
+      return { ok: false, messages: [], error: "invalid-message-shape" };
     }
-  });
+    messages.push(normalized);
+  }
   return { ok: true, messages };
 }
 

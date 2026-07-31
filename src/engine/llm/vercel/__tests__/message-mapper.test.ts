@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { genericToModelMessages } from "../message-mapper.js";
 import type { GenericMessage } from "../../types.js";
+import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../../../main/subscription-attachment-input.js";
 
 describe("genericToModelMessages — multimodal user content", () => {
   it("preserves string content as a single text part (backward compat)", () => {
@@ -55,8 +56,8 @@ describe("genericToModelMessages — multimodal user content", () => {
   });
 
   it("maps mixed text + image + file in order", () => {
-    const img = "data:image/png;base64,xxx";
-    const file = "data:text/plain;base64,yyy";
+    const img = "data:image/png;base64,iVBORw0KGgo=";
+    const file = "data:text/plain;base64,eXl5";
     const msgs: GenericMessage[] = [
       {
         role: "user",
@@ -77,6 +78,49 @@ describe("genericToModelMessages — multimodal user content", () => {
     expect((content[2] as { type: string }).type).toBe("text");
     expect((content[3] as { type: string }).type).toBe("file");
     expect((content[4] as { type: string }).type).toBe("text");
+  });
+
+  it("drops tampered remote attachments while preserving verified local input", () => {
+    const localImage = "data:image/png;base64,iVBORw0KGgo=";
+    const localFile = "data:text/plain;base64,SGVsbG8=";
+    const out = genericToModelMessages([{
+      role: "user",
+      content: [
+        { type: "text", text: "keep this" },
+        { type: "image", image: "https://attacker.example/image.png", mimeType: "image/png" },
+        { type: "file", data: "https://attacker.example/document.txt", mimeType: "text/plain" },
+        { type: "image", image: localImage, mimeType: "image/png" },
+        { type: "file", data: localFile, mimeType: "text/plain" },
+      ],
+    }]);
+
+    expect(out).toEqual([{
+      role: "user",
+      content: [
+        { type: "text", text: "keep this" },
+        { type: "image", image: localImage, mediaType: "image/png" },
+        { type: "file", data: localFile, mediaType: "text/plain" },
+      ],
+    }]);
+    expect(JSON.stringify(out)).not.toContain("attacker.example");
+    expect(genericToModelMessages([{
+      role: "user",
+      content: [
+        { type: "image", image: "https://attacker.example/only.png", mimeType: "image/png" },
+      ],
+    }])).toEqual([]);
+  });
+
+  it("drops oversized multipart input before provider mapping", () => {
+    const oversized: GenericMessage[] = [{
+      role: "user",
+      content: Array.from(
+        { length: MAX_LOCAL_USER_CONTENT_PARTS + 1 },
+        () => ({ type: "text" as const, text: "bounded" }),
+      ),
+    }];
+
+    expect(genericToModelMessages(oversized)).toEqual([]);
   });
 
   it("does not regress assistant or tool_result handling", () => {

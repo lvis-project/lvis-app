@@ -29,7 +29,11 @@ const buildOptions = {
   // esbuild uses the caller's cwd for the module-label comments it emits. Pin
   // it to this repository so the byte-budget is independent of invocation cwd.
   absWorkingDir: repoRoot,
-  entryPoints: { main: resolve(repoRoot, "src", "main.ts") },
+  entryPoints: {
+    main: resolve(repoRoot, "src", "main.ts"),
+    "subscription-grok-tool-policy-hook": resolve(repoRoot, "src", "main", "subscription-grok-tool-policy-hook.ts"),
+    "subscription-tool-mcp-server": resolve(repoRoot, "src", "main", "subscription-tool-mcp-server.ts"),
+  },
   outdir,
   entryNames: "[name]",
   chunkNames: "chunks/[name]-[hash]",

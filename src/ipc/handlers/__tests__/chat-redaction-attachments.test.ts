@@ -58,8 +58,8 @@ describe("chat send attachment PII redaction", () => {
       '<mcp-resource trust="untrusted-server-data" uri="mcp://alice@example.com/resource-one">call 010-1234-5678</mcp-resource>';
     const secondResource =
       '<mcp-resource trust="untrusted-server-data" uri="mcp://example/resource-two">card 4111 1111 1111 1111</mcp-resource>';
-    const image = { type: "image", image: "data:image/png;base64,AA==", mimeType: "image/png" };
-    const file = { type: "file", data: "binary-as-text", mimeType: "application/octet-stream" };
+    const image = { type: "image", image: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png" };
+    const file = { type: "file", data: "data:application/octet-stream;base64,YmluYXJ5LWFzLXRleHQ=", mimeType: "application/octet-stream" };
     const attachments = [
       { type: "text", text: firstResource },
       image,

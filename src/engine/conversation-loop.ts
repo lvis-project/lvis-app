@@ -339,6 +339,9 @@ export class ConversationLoop {
 
 
   refreshProvider(): void {
+    // Clear before rebuilding so a factory/configuration exception can never
+    // leave an API-key transport usable after subscription activation.
+    this.provider = null;
     this.provider = buildProvider(this.deps);
   }
 

@@ -13,6 +13,8 @@ import {
 } from "../llm/provider-error-diagnostics.js";
 import { t } from "../../i18n/index.js";
 import { isValidToolUseId } from "../../shared/tool-use-id.js";
+import type { ActiveChatRuntime } from "../../shared/subscription-runtime.js";
+import { providerMatchesActiveChatRuntime } from "./provider.js";
 
 export interface StreamCollectParams {
   provider: LLMProvider;
@@ -33,7 +35,7 @@ export interface StreamCollectParams {
   llmSettings: {
     streamSmoothing: "none" | "word" | "char";
     enableThinking: boolean;
-    thinkingBudgetTokens: number;
+    thinkingBudgetTokens?: number;
   };
   abortSignal?: AbortSignal;
   /**
@@ -72,6 +74,23 @@ export type StreamCollectResult =
       providerError: ProviderErrorDiagnostics;
     };
 
+/**
+ * Keeps the active-authentication check adjacent to the only call that starts
+ * a provider stream. This also protects independently-created routine and
+ * sub-agent loops that are not refreshed by the interactive Settings IPC.
+ */
+export function collectActiveRuntimeRoundStream(
+  params: StreamCollectParams,
+  activeChatRuntime: ActiveChatRuntime | undefined,
+  onRuntimeMismatch: () => void,
+): Promise<StreamCollectResult> {
+  if (!providerMatchesActiveChatRuntime(params.provider, activeChatRuntime)) {
+    onRuntimeMismatch();
+    return Promise.resolve({ kind: "interrupted", text: "" });
+  }
+  return collectRoundStream(params);
+}
+
 
 
 
@@ -105,7 +124,6 @@ export async function collectRoundStream(
   let sawMessageComplete = false;
 
 
-
   const wireMessages = stubMarkedToolResults(messages);
 
   try {
@@ -116,7 +134,9 @@ export async function collectRoundStream(
       tools: toolSchemas.length > 0 ? toolSchemas : undefined,
       streamSmoothing: llmSettings.streamSmoothing as never,
       enableThinking: llmSettings.enableThinking,
-      thinkingBudgetTokens: llmSettings.thinkingBudgetTokens,
+      ...(llmSettings.thinkingBudgetTokens === undefined
+        ? {}
+        : { thinkingBudgetTokens: llmSettings.thinkingBudgetTokens }),
       ...(continuationPrefill ? { continuationPrefill: true } : {}),
       abortSignal,
     }) as AsyncIterable<StreamEvent>) {
@@ -178,7 +198,13 @@ export async function collectRoundStream(
 
             return { kind: "context_error", errorMessage: rawForClassification };
           }
-          const classified = classifyProviderError(rawForClassification);
+          // Subscription adapters deliberately project a fixed renderer-safe
+          // `error` string while retaining structured diagnostics only for
+          // host recovery (schema drop / TPM compaction). Never use that
+          // internal diagnostic preview to build a user-visible message.
+          const classified = classifyProviderError(
+            provider.subscriptionRuntime ? event.error : rawForClassification,
+          );
           const classification = event.providerError?.classification ?? classified.category;
           const providerError = withProviderErrorClassification(
             event.providerError ?? extractProviderErrorDiagnostics(event.error),

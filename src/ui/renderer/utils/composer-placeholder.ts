@@ -15,7 +15,11 @@ export function computeComposerPlaceholder(opts: {
   hasApiKey: boolean | null | undefined;
   streaming: boolean;
   suggestedReplies: SuggestedRepliesSnapshot;
+  subscriptionPending?: boolean;
+  subscriptionUnavailable?: boolean;
 }): string {
+  if (opts.subscriptionPending) return t("subscriptionProvidersSection.statusChecking");
+  if (opts.subscriptionUnavailable) return t("formatIpcError.subscriptionChatUnavailable");
   if (opts.hasApiKey === false) return t("composerPlaceholder.apiKeyMissing");
   if (hasActiveSuggestedReplies(opts.suggestedReplies)) {
     return "";

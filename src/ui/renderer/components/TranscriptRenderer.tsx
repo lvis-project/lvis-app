@@ -110,6 +110,9 @@ export interface SharedTranscriptProps {
   /** Final TurnActionBar vendor fallback when a turn_summary has no vendor. */
   activeVendor?: LLMVendor;
 
+  /** False when the active runtime has no trustworthy token/billing contract. */
+  showTokenCostBadge?: boolean;
+
   /** When true, WorkGroup render decisions are traced via debugLog. */
   debugStreamEnabled?: boolean;
 
@@ -145,6 +148,7 @@ export function TranscriptRenderer({
   actions,
   viewMode = null,
   activeVendor,
+  showTokenCostBadge = true,
   debugStreamEnabled = false,
   workGroupsForceOpen = false,
 }: SharedTranscriptProps): React.ReactElement {
@@ -596,7 +600,7 @@ export function TranscriptRenderer({
               source omits the action callbacks. */}
           <TurnActionBar
             timestamp={entry.kind === "assistant" ? entry.createdAt : undefined}
-            turnSummary={summary}
+            turnSummary={showTokenCostBadge ? summary : undefined}
             pricing={summaryPricing}
             vendor={summaryVendor ?? activeVendor}
             isStarred={!!isEntryStarred(idx)}
@@ -647,6 +651,7 @@ export function TranscriptRenderer({
     searchMatches,
     searchOpen,
     setEditingEntryIdx,
+    showTokenCostBadge,
     streaming,
     summaryByTurnStart,
     viewMode,

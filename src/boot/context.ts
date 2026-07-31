@@ -27,6 +27,7 @@ import type { InputClassifier } from "../core/input-classifier.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import type { LLMProvider } from "../engine/llm/types.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { PermissionManager } from "../permissions/permission-manager.js";
@@ -72,6 +73,7 @@ import type { RemoteA2AActionController } from "../main/remote-a2a-action-contro
 import type { PluginBundleLifecycle } from "../plugins/plugin-bundle-lifecycle.js";
 import type { PluginOperationGrantCoordinator } from "../permissions/plugin-operation-grant.js";
 import type { PluginOperationIdentityProvider } from "../tools/invocation-services.js";
+import type { SubscriptionChatRuntimeSelection } from "../shared/subscription-runtime.js";
 
 type PluginPaths = ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
 type WorkBoardStorage = ReturnType<typeof import("../work-board/storage.js").createDirStorage>;
@@ -147,11 +149,18 @@ export class BootContext {
   declare pluginMarketplace: PluginMarketplaceService;
   declare refreshMarketplaceFetcherConfig: () => void;
   declare refreshActiveLlmWildcard: () => void;
+  /** Cancels the active-LLM wildcard restart debounce during host shutdown. */
+  declare disposeRefreshActiveLlmWildcard: () => void;
   declare refreshSandboxNetworkConfig: () => void;
   declare buildSandboxUnionDomains: () => Promise<string[]>;
 
   // ── Prompt / reviewer wiring ───────────────────────────────────────────────
   declare systemPromptBuilder: SystemPromptBuilder;
+  /** One main-owned subscription transport factory shared by reviewer and chat loops. */
+  declare subscriptionProviderFactory: (
+    selection: SubscriptionChatRuntimeSelection,
+    fallbackSelection?: SubscriptionChatRuntimeSelection,
+  ) => LLMProvider | null;
   /**
    * MCP-app `ui/update-model-context` slots. ONE instance, two consumers, and that is the
    * whole design: the gated IPC WRITES a card's slot, and the SystemPromptBuilder source
@@ -274,9 +283,11 @@ const BOOT_CONTEXT_FIELDS = [
   "pluginMarketplace",
   "refreshMarketplaceFetcherConfig",
   "refreshActiveLlmWildcard",
+  "disposeRefreshActiveLlmWildcard",
   "refreshSandboxNetworkConfig",
   "buildSandboxUnionDomains",
   "systemPromptBuilder",
+  "subscriptionProviderFactory",
   "mcpAppModelContext",
   "rationaleScopeReviewer",
   "rationaleHostService",

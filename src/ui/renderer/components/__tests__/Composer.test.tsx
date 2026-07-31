@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent, screen, act } from "@testing-library/react";
+import { render, fireEvent, screen, act, waitFor } from "@testing-library/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Composer, type ComposerHandle } from "../Composer.js";
 import { t } from "../../../../i18n/runtime.js";
@@ -14,6 +14,7 @@ import type { UserKeyboardIntentSnapshot } from "../../../../shared/chat-origin.
 import type { QuickAction } from "../command-actions.js";
 import type { PluginEntry } from "../PluginGridButton.js";
 import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../../../shared/mcp-resource-bounds.js";
+import type { SubscriptionImageAttachmentLimits } from "../../../../shared/subscription-runtime.js";
 
 // Stable across renders ON PURPOSE. Passing nothing let Composer's default parameter
 // mint a fresh `[]` every render, which rebuilt the memoized keydown handler every
@@ -41,12 +42,20 @@ function Harness({
   onWarningCb,
   suggestedReplies,
   exposeSetAttachments,
+  imagesEnabled,
+  imageAttachmentLimits,
+  onImageAttachmentLimitExceeded,
+  discardClipboardImage,
 }: {
   initialText?: string;
   initialAttachments?: Attachment[];
   onSendCb?: () => void;
   onWarningCb?: (message: string) => void;
   suggestedReplies?: SuggestedRepliesSnapshot;
+  imagesEnabled?: boolean;
+  imageAttachmentLimits?: SubscriptionImageAttachmentLimits | null;
+  onImageAttachmentLimitExceeded?: () => void;
+  discardClipboardImage?: (path: string) => Promise<unknown>;
   /**
    * Hands the attachment setter to the test.
    *
@@ -88,10 +97,14 @@ function Harness({
       onAttachmentsChange={setAttachments}
       allocateN={() => ++counterRef.current}
       saveClipboardImage={mockSave}
+      discardClipboardImage={discardClipboardImage}
       onSend={stableOnSend}
+      imagesEnabled={imagesEnabled}
       commandActions={STABLE_COMMAND_ACTIONS}
       inlinePlugins={STABLE_PLUGINS}
       onSelectPlugin={STABLE_SELECT_PLUGIN}
+      imageAttachmentLimits={imageAttachmentLimits}
+      onImageAttachmentLimitExceeded={onImageAttachmentLimitExceeded}
       onWarning={stableOnWarning}
       suggestedReplies={suggestedReplies}
     />
@@ -114,6 +127,16 @@ const img2: ImageAttachment = {
   id: "i2",
   n: 2,
 };
+
+function imageClipboardData(file: File | null = null): DataTransfer {
+  const items = Object.assign([
+    { kind: "file", type: "image/png", getAsFile: () => file },
+  ], { length: 1 }) as unknown as DataTransferItemList;
+  return {
+    items,
+    getData: () => "",
+  } as unknown as DataTransfer;
+}
 
 describe("Composer", () => {
   it("renders empty composer with placeholder", () => {
@@ -175,6 +198,91 @@ describe("Composer", () => {
       />,
     );
     expect(screen.getByTestId("composer-limit-warning")).toBeTruthy();
+  });
+
+  it("blocks clipboard image attachment when native image input is unavailable", () => {
+    const onWarningCb = vi.fn();
+    mockSave.mockClear();
+    render(<Harness imagesEnabled={false} onWarningCb={onWarningCb} />);
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    fireEvent.paste(textarea, { clipboardData: imageClipboardData() });
+
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(onWarningCb).toHaveBeenCalledWith(
+      t("app.subscriptionAttachmentUnsupported", { provider: "subscription" }),
+    );
+    expect(textarea.value).toBe("");
+  });
+
+  it("blocks clipboard image attachment when the active subscription budget is exceeded", async () => {
+    const onImageAttachmentLimitExceeded = vi.fn();
+    const discardClipboardImage = vi.fn(async () => undefined);
+    mockSave.mockClear();
+    render(
+      <Harness
+        imageAttachmentLimits={{ maxCount: 5, maxBytesPerImage: 512, maxTotalBytes: 512 }}
+        onImageAttachmentLimitExceeded={onImageAttachmentLimitExceeded}
+        discardClipboardImage={discardClipboardImage}
+      />,
+    );
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    fireEvent.paste(
+      textarea,
+      { clipboardData: imageClipboardData(new File(["image"], "clip.png", { type: "image/png" })) },
+    );
+    await waitFor(() => {
+      expect(mockSave).toHaveBeenCalledOnce();
+    });
+    expect(onImageAttachmentLimitExceeded).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(discardClipboardImage).toHaveBeenCalledWith("/tmp/lvis-clip-1.png");
+    });
+    expect(textarea.value).toBe("");
+    expect(screen.queryByTestId("attachment-chip")).toBeNull();
+  });
+
+  it("releases a saved clipboard image when the runtime rejects it before async commit", async () => {
+    const discardClipboardImage = vi.fn(async () => undefined);
+    let resolveSave!: (value: Awaited<ReturnType<typeof mockSave>>) => void;
+    const pendingSave = new Promise<Awaited<ReturnType<typeof mockSave>>>((resolve) => {
+      resolveSave = resolve;
+    });
+    mockSave.mockClear();
+    mockSave.mockImplementationOnce(async () => pendingSave);
+
+    const { rerender } = render(
+      <Harness imagesEnabled discardClipboardImage={discardClipboardImage} />,
+    );
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    fireEvent.paste(
+      textarea,
+      { clipboardData: imageClipboardData(new File(["image"], "clip.png", { type: "image/png" })) },
+    );
+    await waitFor(() => {
+      expect(mockSave).toHaveBeenCalledOnce();
+    });
+
+    rerender(<Harness imagesEnabled={false} discardClipboardImage={discardClipboardImage} />);
+    await act(async () => {
+      resolveSave({
+        ok: true,
+        path: "/tmp/lvis-state-switch.png",
+        width: 100,
+        height: 80,
+        bytes: 1024,
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,xxx",
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(discardClipboardImage).toHaveBeenCalledWith("/tmp/lvis-state-switch.png");
+    });
+    expect(screen.queryByTestId("attachment-chip")).toBeNull();
+    expect(textarea.value).toBe("");
   });
 
   it("calls onSend on Enter (without shift)", () => {

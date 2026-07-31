@@ -25,23 +25,42 @@ import { KeyRound, Store } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 
+import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 export interface ComposerApiKeyChipProps {
+  subscriptionPendingProvider?: string;
+  subscriptionRuntimePolicy?: SubscriptionRuntimeUiPolicy;
   onOpenSettings: (tab?: string) => void;
+  subscriptionUnavailableProvider?: string;
 }
 
-export function ComposerApiKeyChip({ onOpenSettings }: ComposerApiKeyChipProps) {
+export function ComposerApiKeyChip({
+  onOpenSettings,
+  subscriptionUnavailableProvider,
+  subscriptionRuntimePolicy,
+  subscriptionPendingProvider,
+}: ComposerApiKeyChipProps) {
   const { t } = useTranslation();
+  const subscriptionUnavailable = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.chatUnavailable
+    : subscriptionUnavailableProvider !== undefined;
+  const subscriptionPending = subscriptionRuntimePolicy ? subscriptionRuntimePolicy.chatPending : subscriptionPendingProvider !== undefined;
+  const subscriptionIssue = subscriptionUnavailable || subscriptionPending;
+  const title = subscriptionPending
+    ? t("subscriptionProvidersSection.statusChecking")
+    : subscriptionUnavailable
+    ? t("formatIpcError.subscriptionChatUnavailable")
+    : t("chatView.noApiKeyTitle");
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          data-testid="composer-api-key-chip"
+          data-testid={subscriptionIssue ? "composer-subscription-runtime-chip" : "composer-api-key-chip"}
           className="inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-secondary px-2.5 py-1 text-[11px] text-secondary-foreground transition-colors hover:bg-muted"
         >
           <KeyRound className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-          {t("chatView.noApiKeyTitle")}
+          {title}
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -52,7 +71,7 @@ export function ComposerApiKeyChip({ onOpenSettings }: ComposerApiKeyChipProps) 
         data-testid="composer-api-key-popover"
       >
         <p className="px-2 pb-1 pt-1.5 text-[11px] leading-snug text-muted-foreground">
-          {t("chatView.noApiKeyDescription")}
+          {subscriptionIssue ? title : t("chatView.noApiKeyDescription")}
         </p>
         <button
           type="button"
@@ -63,7 +82,7 @@ export function ComposerApiKeyChip({ onOpenSettings }: ComposerApiKeyChipProps) 
           <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           {t("chatView.openSettingsButton")}
         </button>
-        <button
+        {!subscriptionIssue ? <button
           type="button"
           data-testid="composer-api-key-chip:marketplace"
           onClick={() => onOpenSettings("marketplace")}
@@ -71,7 +90,7 @@ export function ComposerApiKeyChip({ onOpenSettings }: ComposerApiKeyChipProps) 
         >
           <Store className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           {t("chatView.openMarketplaceButton")}
-        </button>
+        </button> : null}
       </PopoverContent>
     </Popover>
   );

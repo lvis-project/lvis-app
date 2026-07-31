@@ -37,6 +37,7 @@ import { isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
 import {
   type LlmModelListCache,
 } from "../shared/llm-model-list.js";
+import type { ActiveChatRuntime } from "../shared/subscription-runtime.js";
 import {
   isMarketplaceProviderPresetId,
   marketplaceProviderPresetSecretKey,
@@ -57,6 +58,7 @@ import {
   marketplaceProviderPresetSecretInvalidationIds,
   mergeLlmPatch,
   normalizeA2ARemote,
+  normalizeActiveChatRuntime,
   normalizeAppearance,
   normalizeDiagnostics,
   normalizeFeatureFlags,
@@ -107,6 +109,12 @@ export function settingsFilePath(userDataPath: string): string {
  *   the policy. Stale on-disk keys are dropped on next write.
  */
 export interface LLMSettings {
+  /**
+   * Selects the execution boundary for new chat turns. API credentials and
+   * their provider/model configuration remain under `provider` and `vendors`
+   * even while a subscription runtime is active.
+   */
+  activeChatRuntime: ActiveChatRuntime;
   provider: LLMVendor;
   /**
    * Marketplace custom provider preset selected in the provider picker.
@@ -144,6 +152,7 @@ export interface LLMSettings {
  * marketplace provider block.
  */
 export interface LLMSettingsPatch {
+  activeChatRuntime?: ActiveChatRuntime;
   provider?: LLMVendor;
   marketplaceProviderPresetId?: string;
   vendors?: Partial<Record<LLMVendor, Partial<LLMVendorSettings>>>;
@@ -1049,7 +1058,11 @@ export class SettingsService {
   }
 
   async replaceLlm(llm: LLMSettings): Promise<AppSettings> {
-    this.settings.llm = structuredClone(llm);
+    const replacement = structuredClone(llm);
+    this.settings.llm = {
+      ...replacement,
+      activeChatRuntime: normalizeActiveChatRuntime(replacement.activeChatRuntime),
+    };
     await this.saveSettings();
     return this.getAll();
   }

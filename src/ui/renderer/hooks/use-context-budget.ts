@@ -39,24 +39,37 @@ import { estimateTokens } from "../../../engine/auto-compact.js";
  */
 export function useContextBudget(params: {
   entries: ChatEntry[];
-  llmVendor: string;
-  llmModel: string;
+  /** Omit when the active runtime has no verified pricing/context contract. */
+  llmVendor?: string;
+  /** Omit when the active runtime has no verified pricing/context contract. */
+  llmModel?: string;
   draftText?: string;
   draftExtraTokens?: number;
+  /** False disables all API-model-derived budget and TPM projections. */
+  enabled?: boolean;
 }) {
-  const { entries, llmVendor, llmModel, draftText, draftExtraTokens = 0 } = params;
+  const {
+    entries,
+    llmVendor,
+    llmModel,
+    draftText,
+    draftExtraTokens = 0,
+    enabled = true,
+  } = params;
 
   const contextBudget = useMemo(() => {
+    if (!enabled) return 0;
     // Effective window picks the 1M beta tier when the model defines one
     // (adapter auto-sends `context-1m-2025-08-07`). LVIS reservation
     // then subtracts output + safety reservation so the ring hits 100% at
     // the compact threshold, not at raw context = full.
     // `lookupPricing` always returns a value (FALLBACK_PRICING on miss),
     // so no null branch is needed here.
-    return getUsableContext(effectiveContextWindow(lookupPricing(llmVendor, llmModel)));
-  }, [llmVendor, llmModel]);
+    return getUsableContext(effectiveContextWindow(lookupPricing(llmVendor ?? "", llmModel ?? "")));
+  }, [enabled, llmVendor, llmModel]);
 
   const baseTokens = useMemo(() => {
+    if (!enabled) return 0;
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
       if (e?.kind === "turn_summary" || e?.kind === "context_usage") {
@@ -67,13 +80,13 @@ export function useContextBudget(params: {
     // Memo key avoids the O(n) scan on every streaming delta — the array
     // identity changes but the *last* entry is the only one that matters
     // for the latest turn_summary. Mirrors the pattern in `use-cost-estimate`.
-  }, [entries.length, entries[entries.length - 1]]);
+  }, [enabled, entries.length, entries[entries.length - 1]]);
 
   // Add draft token estimate so the ring updates as the user types.
   // estimateTokens applies Korean 1.3x weighting (chars/4 heuristic).
   const draftTokens = useMemo(
-    () => (draftText ? estimateTokens(draftText) : 0) + Math.max(0, draftExtraTokens),
-    [draftText, draftExtraTokens],
+    () => enabled ? (draftText ? estimateTokens(draftText) : 0) + Math.max(0, draftExtraTokens) : 0,
+    [enabled, draftText, draftExtraTokens],
   );
 
   const usedTokens = baseTokens + draftTokens;
@@ -90,11 +103,12 @@ export function useContextBudget(params: {
 
 
   const tpmLimit = useMemo(() => {
-    const pricing = lookupPricing(llmVendor, llmModel);
+    if (!enabled) return undefined;
+    const pricing = lookupPricing(llmVendor ?? "", llmModel ?? "");
     return typeof pricing.tpmDefault === "number" && pricing.tpmDefault > 0
       ? pricing.tpmDefault
       : undefined;
-  }, [llmVendor, llmModel]);
+  }, [enabled, llmVendor, llmModel]);
 
   const tpmPct = useMemo(
     () => (tpmLimit && tpmLimit > 0 ? usedTokens / tpmLimit : undefined),

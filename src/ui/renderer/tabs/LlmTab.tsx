@@ -59,7 +59,7 @@ import { SettingsSection } from "../components/SettingsSection.js";
 import { SettingsHelpPopover } from "../components/SettingsHelpPopover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { formatIpcError } from "../format-ipc-error.js";
-import { CodexSubscriptionCard } from "./CodexSubscriptionCard.js";
+import { SubscriptionProvidersController } from "./SubscriptionProvidersController.js";
 
 export interface FallbackEntry {
   provider: string;
@@ -1249,7 +1249,7 @@ export function LlmTab(props: LlmTabProps) {
         </div>
       </SettingsSection>
 
-      <CodexSubscriptionCard api={api} />
+      <SubscriptionProvidersController api={api} />
 
       {/* Section — Host Resolver Map.
           A dedicated Apply button triggers the relaunch confirm dialog because
