@@ -164,6 +164,41 @@ export function forceKillManagedChildProcesses(reason: string): number {
   return killed;
 }
 
+/**
+ * Immediately terminate one tracked child and its descendants/process group.
+ *
+ * Long-running authentication processes are cancelled independently of app
+ * shutdown, so relying on the global shutdown sweep would leave a provider
+ * browser/device flow alive after an explicit user cancellation or timeout.
+ * This intentionally uses the exact same tree-kill semantics as the shutdown
+ * path and never forwards child output into the log.
+ */
+export function forceKillManagedChildProcess(child: ChildProcess, reason: string): void {
+  const entry = [...managedChildren].find((candidate) => candidate.child === child);
+  if (entry && !isKillable(entry)) {
+    entry.dispose();
+    return;
+  }
+  if (!entry && child.exitCode !== null && child.exitCode !== undefined) return;
+
+  try {
+    forceKillProcessTree(child, entry?.killProcessGroup ?? false, entry?.processGroupId);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ESRCH") {
+      log.warn({
+        pid: child.pid ?? null,
+        label: entry?.label ?? "untracked-child-process",
+        reason,
+        code: code ?? null,
+        err: err instanceof Error ? err.message : String(err),
+      }, "managed-child: force kill failed");
+    }
+  } finally {
+    entry?.dispose();
+  }
+}
+
 export function __resetManagedChildProcessesForTest(): void {
   for (const entry of [...managedChildren]) entry.dispose();
   managedChildren.clear();

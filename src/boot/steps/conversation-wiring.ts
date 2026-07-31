@@ -45,12 +45,77 @@ import { WORK_BOARD } from "../../shared/ipc-channels.js";
 import { fanOutToAllWindows } from "../../ipc/broadcast-helpers.js";
 import { emitEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import { createSubscriptionLlmProvider } from "../../main/subscription-llm-provider.js";
+import {
+  SubscriptionRuntimeServiceError,
+  type SubscriptionRuntimeAuditSink,
+} from "../../main/subscription-runtime-service.js";
+import { validateExternalUrl } from "../../shared/external-url.js";
+import type { LLMProvider } from "../../engine/llm/types.js";
+import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
+import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { BootContext } from "../context.js";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
 import { captureRationalePolicyEpoch } from "../../tools/pipeline/rationale-policy-epoch.js";
 import type { RationaleCoordinatorFactory } from "../../engine/turn/rationale-conversation-orchestration.js";
 
 const log = createLogger("lvis");
+
+export interface SubscriptionChatLoopBindings {
+  readonly subscriptionProviderFactory: (
+    selection: SubscriptionChatRuntimeSelection,
+    fallbackSelection?: SubscriptionChatRuntimeSelection,
+  ) => LLMProvider | null;
+}
+
+/**
+ * Main-process-only subscription provider factory. It
+ * intentionally owns no runtime paths and accepts only a settings-normalized
+ * selection; the shared runtime service owns credential and transport state.
+ */
+export function createSubscriptionChatLoopBindings(input: {
+  readonly shellOpenExternal: (url: string) => Promise<void>;
+  readonly auditLogger: Pick<AuditLogger, "log">;
+}): SubscriptionChatLoopBindings {
+  const openExternal = async (url: string): Promise<void> => {
+    const validated = validateExternalUrl(url);
+    if (!validated.ok) {
+      throw new SubscriptionRuntimeServiceError("subscription-verification-url-unavailable");
+    }
+    await input.shellOpenExternal(validated.url);
+  };
+  const audit: SubscriptionRuntimeAuditSink = (event) => {
+    const requestKind = typeof event.requestKind === "string"
+      && /^[a-z-]{1,80}$/.test(event.requestKind)
+      ? event.requestKind
+      : undefined;
+    try {
+      input.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "subscription-runtime",
+        type: "warn",
+        input: JSON.stringify({
+          provider: event.provider,
+          outcome: event.outcome,
+          ...(requestKind ? { requestKind } : {}),
+        }),
+      });
+    } catch {
+      // Audit availability must not make the provider usable or unusable.
+    }
+  };
+  return Object.freeze({
+    subscriptionProviderFactory: (
+      selection: SubscriptionChatRuntimeSelection,
+      fallbackSelection?: SubscriptionChatRuntimeSelection,
+    ) => createSubscriptionLlmProvider({
+      selection,
+      ...(fallbackSelection ? { fallbackSelection } : {}),
+      openExternal,
+      runtimeServiceOptions: { audit },
+    }),
+  });
+}
 
 export interface IsolatedConversationMemoryManagers {
   sideChatMemoryManager: MemoryManager;
@@ -138,6 +203,7 @@ export async function wireConversation(
     agentProfileStore,
     getMainWindow,
     mainWindow,
+    subscriptionProviderFactory,
   } = ctx;
 
   const { sideChatMemoryManager, subAgentMemoryManager } = isolatedMemoryManagers;
@@ -160,6 +226,7 @@ export async function wireConversation(
     pluginOperationIdentityProvider,
     auditLogger: bootAuditLogger,
     llmFetch,
+    subscriptionProviderFactory,
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: (input) => createRoutineConversationLoop(
@@ -252,6 +319,7 @@ export async function wireConversation(
     auditLogger: bootAuditLogger,
     rewireReviewerAgent,
     llmFetch,
+    subscriptionProviderFactory,
     ...rationaleBindings,
   });
 
@@ -289,6 +357,7 @@ export async function wireConversation(
     llmFetch,
     sideChatMemoryManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+    subscriptionProviderFactory,
     ...sideChatRationaleBindings,
   });
   ctx.sideChatConversationLoop = sideChatConversationLoop;
@@ -396,6 +465,7 @@ export async function wireConversation(
         : {}),
       rewireReviewerAgent,
       llmFetch,
+      subscriptionProviderFactory,
     },
     toolRegistry,
     subAgentMemoryManager,

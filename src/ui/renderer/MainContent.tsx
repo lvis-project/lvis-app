@@ -98,6 +98,7 @@ export interface MainContentProps {
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   statusBar?: Parameters<typeof ChatView>[0]["statusBar"];
+  onAttachmentWarning?: Parameters<typeof ChatView>[0]["onAttachmentWarning"];
   actionPanelOpen?: Parameters<typeof ChatView>[0]["actionPanelOpen"];
   onActionPanelOpenChange?: Parameters<typeof ChatView>[0]["onActionPanelOpenChange"];
   sidePanelOpen?: Parameters<typeof ChatView>[0]["sidePanelOpen"];
@@ -168,6 +169,7 @@ function HomeChatPane(props: MainContentProps) {
         onPluginPrimaryAction={props.onPluginPrimaryAction}
         onRoutineAcknowledge={props.onRoutineAcknowledge}
         statusBar={props.statusBar}
+        onAttachmentWarning={props.onAttachmentWarning}
         actionPanelOpen={props.actionPanelOpen}
         onActionPanelOpenChange={props.onActionPanelOpenChange}
         sidePanelOpen={props.sidePanelOpen}

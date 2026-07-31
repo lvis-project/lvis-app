@@ -154,6 +154,7 @@ import { ko as ko_spotlightTour } from "../generated/spotlightTour.js";
 import { ko as ko_starredView } from "../generated/starredView.js";
 import { ko as ko_statusBar } from "../generated/statusBar.js";
 import { ko as ko_subAgentCard } from "../generated/subAgentCard.js";
+import { ko as ko_subscriptionProvidersSection } from "../generated/subscriptionProvidersSection.js";
 import { ko as ko_suggestedRepliesChipRow } from "../generated/suggestedRepliesChipRow.js";
 import { ko as ko_suggestedRepliesGhost } from "../generated/suggestedRepliesGhost.js";
 import { ko as ko_summaryToast } from "../generated/summaryToast.js";
@@ -338,6 +339,7 @@ export const koMessages: Record<string, string> = {
   ...ko_starredView,
   ...ko_statusBar,
   ...ko_subAgentCard,
+  ...ko_subscriptionProvidersSection,
   ...ko_suggestedRepliesChipRow,
   ...ko_suggestedRepliesGhost,
   ...ko_summaryToast,

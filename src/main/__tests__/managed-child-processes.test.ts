@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __resetManagedChildProcessesForTest,
   forceKillManagedChildProcesses,
+  forceKillManagedChildProcess,
   getManagedChildProcessCount,
   trackManagedChildProcess,
 } from "../managed-child-processes.js";
@@ -52,6 +53,7 @@ describe("managed child process tracking", () => {
     // Regression guard for the race between `before-quit` shutdown and a
     // child that resolved on its own a microtask earlier. `isKillable`
     // must short-circuit so the SIGKILL is not sent to a dead pid (which
+
     // could otherwise race with PID reuse and signal an unrelated
     // process on long-lived hosts).
     const child = makeChild();
@@ -63,6 +65,27 @@ describe("managed child process tracking", () => {
     expect(getManagedChildProcessCount()).toBe(0);
   });
 
+
+  it("force kills and untracks one specifically cancelled child", () => {
+    const child = makeChild();
+    trackManagedChildProcess(child, { label: "device-code-login" });
+
+    forceKillManagedChildProcess(child, "device-code-login-cancelled");
+
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
+
+  it("does not signal a specifically cancelled child that already exited", () => {
+    const child = makeChild();
+    child.exitCode = 0;
+    trackManagedChildProcess(child, { label: "device-code-login" });
+
+    forceKillManagedChildProcess(child, "device-code-login-cancelled");
+
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
   itPosix("keeps a detached process group tracked after the root exits", () => {
     const child = makeChild();
     child.pid = 1234;

@@ -359,6 +359,34 @@ describe("compactWithBoundary — LLM call integration", () => {
     expect(r.boundary!.structuredSummary.sections.Goal).toBe("auth refactor");
     expect(r.boundary!.compactNum).toBe(1);
   });
+  it("runs direct compaction through a subscription runtime", async () => {
+    let streamCalled = false;
+    const llm: LLMProvider = {
+      vendor: "claude",
+      subscriptionRuntime: { kind: "subscription", provider: "codex" },
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        streamCalled = true;
+        yield { type: "text_delta", text: makeFullSummaryText() };
+        yield { type: "message_complete", stopReason: "end_turn" };
+      },
+    };
+    const messages = makeLongHistory(50);
+
+    const result = await compactWithBoundary({
+      messages,
+      llm,
+      model: "default",
+      preserveRecentTokens: 200,
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
+      compactNum: 1,
+    });
+
+    expect(result).toMatchObject({ status: "summarized" });
+    expect(result.boundary).not.toBeNull();
+    expect(result.newHistory.length).toBeLessThan(messages.length);
+    expect(streamCalled).toBe(true);
+  });
 
   it("returns NOOP status when nothing to compact (preserveRecentTokens covers all)", async () => {
     const llm = makeMockLlm(["(should not be called)"]);

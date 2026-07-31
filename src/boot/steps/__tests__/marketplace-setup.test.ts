@@ -9,6 +9,11 @@ const state = vi.hoisted(() => {
     fetcherConfigs: [] as Array<Record<string, unknown>>,
     getLvisAppVersion: vi.fn(() => canonicalAppVersion),
     refreshActiveLlmWildcard: vi.fn(),
+    disposeRefreshActiveLlmWildcard: vi.fn(),
+    refreshDeps: null as {
+      getActiveVendor: () => string | undefined;
+      cancelPendingRestarts: () => void;
+    } | null,
   };
 });
 
@@ -39,9 +44,18 @@ vi.mock("../../../plugins/marketplace.js", () => ({
 }));
 
 vi.mock("../refresh-active-llm-wildcard.js", () => ({
-  createRefreshActiveLlmWildcard: vi.fn(() => ({
-    refresh: state.refreshActiveLlmWildcard,
-  })),
+  activeHostApiVendor: (llm: { provider?: string; activeChatRuntime?: { kind?: string } }) =>
+    llm.activeChatRuntime?.kind === "subscription" ? undefined : llm.provider,
+  createRefreshActiveLlmWildcard: vi.fn((deps: unknown) => {
+    state.refreshDeps = deps as {
+      getActiveVendor: () => string | undefined;
+      cancelPendingRestarts: () => void;
+    };
+    return {
+      refresh: state.refreshActiveLlmWildcard,
+      dispose: state.disposeRefreshActiveLlmWildcard,
+    };
+  }),
 }));
 
 vi.mock("../../../lib/logger.js", () => ({
@@ -53,10 +67,13 @@ vi.mock("../../../lib/logger.js", () => ({
 
 import { setupMarketplace } from "../marketplace-setup.js";
 
-function makeContext(): BootContext {
+function makeContext(
+  activeChatRuntime: { kind: "api" } | { kind: "subscription"; provider: "codex" } = { kind: "api" },
+): BootContext {
   return {
     settingsService: {
       get: vi.fn((key: string) => {
+        if (key === "llm") return { provider: "openai", activeChatRuntime };
         if (key === "marketplace") {
           return {
             cloudBaseUrl: "https://marketplace.example.com",
@@ -71,7 +88,7 @@ function makeContext(): BootContext {
     pluginPaths: {},
     deploymentGuard: {},
     bootAuditLogger: {},
-    pluginRuntime: {},
+    pluginRuntime: { cancelAllPendingRestarts: vi.fn() },
   } as unknown as BootContext;
 }
 
@@ -80,6 +97,8 @@ describe("setupMarketplace app-version resolver wiring", () => {
     state.fetcherConfigs.length = 0;
     state.getLvisAppVersion.mockClear();
     state.refreshActiveLlmWildcard.mockClear();
+    state.disposeRefreshActiveLlmWildcard.mockClear();
+    state.refreshDeps = null;
   });
 
   it("passes the canonical LVIS app version to CloudMarketplaceFetcher", async () => {
@@ -96,5 +115,22 @@ describe("setupMarketplace app-version resolver wiring", () => {
     ]);
     expect(state.getLvisAppVersion).toHaveBeenCalledOnce();
     expect(state.refreshActiveLlmWildcard).toHaveBeenCalledOnce();
+    expect(ctx.disposeRefreshActiveLlmWildcard).toBe(state.disposeRefreshActiveLlmWildcard);
+  });
+  it("omits stale API-provider metadata when a subscription runtime owns generation", async () => {
+    const ctx = makeContext({ kind: "subscription", provider: "codex" });
+
+    await setupMarketplace(ctx);
+
+    expect(state.refreshDeps?.getActiveVendor()).toBeUndefined();
+  });
+
+  it("wires wildcard disposal to the runtime's in-flight restart cancellation", async () => {
+    const ctx = makeContext();
+
+    await setupMarketplace(ctx);
+
+    state.refreshDeps!.cancelPendingRestarts();
+    expect(ctx.pluginRuntime.cancelAllPendingRestarts).toHaveBeenCalledOnce();
   });
 });

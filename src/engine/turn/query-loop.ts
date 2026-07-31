@@ -6,7 +6,7 @@
  */
 import type { LoopContext } from "./loop-context.js";
 import type { TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
-import type { LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
+import type { GenericMessage, LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
 import type { RequestAnchor } from "../../tools/pipeline/rationale-control.js";
@@ -29,7 +29,7 @@ import type {
   ToolResult,
   ToolUseBlock,
 } from "../../tools/executor.js";
-import { collectRoundStream } from "./stream-collector.js";
+import { collectActiveRuntimeRoundStream } from "./stream-collector.js";
 import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
 import { vendorSupportsLengthContinuation } from "../llm/vendor-capabilities.js";
 import { rejectedToolNameFromError, withoutDroppedTools } from "../llm/rejected-tool-schema.js";
@@ -37,10 +37,11 @@ import { handleRequestPlugin, REQUEST_PLUGIN_TOOL } from "./plugin-expansion.js"
 import { handleToolSearch, TOOL_SEARCH_TOOL } from "./tool-search.js";
 import { applyKnowledgeDepthCap } from "./knowledge-cap.js";
 import { nextToolTrustOrigin, rationaleProvenanceFor } from "./trust-origin.js";
-import { markStaleToolResults, evictAgedToolResultImages, getModelPreflightThreshold, isContextLengthError } from "../auto-compact.js";
+import { contextBudgetForCurrentRuntime } from "./compaction.js";
+import { markStaleToolResults, evictAgedToolResultImages, isContextLengthError } from "../auto-compact.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
-import { GUIDE_JOINED_MAX_CHARS } from "./guidance-limits.js";
+import { GUIDE_JOINED_MAX_CHARS, mergeGuidanceApprovalReasonPrefixes } from "./guidance-limits.js";
 import { parseStagedEnvelope } from "../../shared/staged-origins.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
@@ -54,13 +55,7 @@ import {
 } from "../a2a-agent-message-envelope.js";
 import { gateCrossAgentInterceptedMetaTools } from "./intercepted-meta-gate.js";
 
-
 const log = createLogger("lvis");
-
-
-
-
-
 
 const MAX_TOOL_ROUNDS = 30;
 /**
@@ -106,20 +101,6 @@ const INTRA_TURN_PRESERVE_RECENT_RESULTS = 2 * MAX_TOOL_CALLS_PER_ROUND;
 // so short turns don't pay the mark overhead.
 const MICRO_COMPACT_FLOOR_FACTOR = 0.5;
 
-const MULTIPLE_SUB_AGENT_APPROVAL_PREFIX = "[Sub-Agent: multiple sources]";
-
-function mergeApprovalReasonPrefixes(
-  current: string | undefined,
-  queued: readonly (string | undefined)[],
-): string | undefined {
-  const values = new Set(
-    [current, ...queued].filter((value): value is string => Boolean(value)),
-  );
-  if (values.size === 0) return undefined;
-  if (values.size === 1) return values.values().next().value;
-  return MULTIPLE_SUB_AGENT_APPROVAL_PREFIX;
-}
-
 export async function queryLoop(
   self: LoopContext,
     initialSystemPrompt: string,
@@ -146,8 +127,8 @@ export async function queryLoop(
     stopReason?: TurnStopReason;
     inputRequired?: TurnInputRequired;
     usageByModel: TokenUsageByModel[];
-    vendorProvider: LLMVendor;
-    vendorModel: string;
+    vendorProvider?: LLMVendor;
+    vendorModel?: string;
     finalToolSchemas: ToolSchema[];
     promotedToolNames: string[];
   }> {
@@ -156,13 +137,38 @@ export async function queryLoop(
       llmSettings.vendors,
       llmSettings.provider,
     );
-    const model = activeBlock.model;
+    const subscriptionRuntime = self.provider?.subscriptionRuntime;
+    // Subscription transports have no host-verifiable API-key billing identity.
+    // A future runtime must add an explicit subscription telemetry contract
+    // before its usage can cross this engine boundary.
+    const subscriptionUsageIsOpaque = subscriptionRuntime !== undefined;
+    const runtimeContextBudget = contextBudgetForCurrentRuntime(self);
+    const model = subscriptionRuntime ? subscriptionRuntime.model ?? "default" : activeBlock.model;
+    // Login-backed runtimes own their own reasoning policy. Never project the
+    // inactive API vendor's toggle/budget into a subscription prompt.
+    const roundLlmSettings = subscriptionRuntime
+      ? { streamSmoothing: llmSettings.streamSmoothing, enableThinking: false }
+      : { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing };
+    // Subscription transports receive an ordinary serialized prompt for every
+    // LVIS round. Until a runtime exposes and proves a native assistant-prefill
+    // continuation protocol, a max_tokens response must remain a partial
+    // response rather than being host-stitched as if that prompt were a prefill.
+    const supportsLengthContinuation = subscriptionRuntime === undefined
+      && vendorSupportsLengthContinuation(llmSettings.provider);
+
     let systemPrompt = initialSystemPrompt;
     let activeApprovalReasonPrefix = bounds.approvalReasonPrefix;
-    let servingVendorProvider: LLMVendor = llmSettings.provider;
-    let servingVendorModel = model;
+    let servingVendorProvider: LLMVendor | undefined = subscriptionUsageIsOpaque
+      ? undefined
+      : llmSettings.provider;
+    let servingVendorModel: string | undefined = subscriptionUsageIsOpaque
+      ? undefined
+      : model;
     const usageByModel: TokenUsageByModel[] = [];
     const addUsageForServingModel = (usage: TokenUsage): void => {
+      if (servingVendorProvider === undefined || servingVendorModel === undefined) {
+        return;
+      }
       usageByModel.push({
         vendorProvider: servingVendorProvider,
         vendorModel: servingVendorModel,
@@ -187,8 +193,7 @@ export async function queryLoop(
     // tools stay excluded — a mid-turn rebuild (request_plugin / tool_search)
     // must not reintroduce a tool the provider already rejected and re-break
     // the turn.
-    const rebuildTurnToolSchemas = (): ToolSchema[] =>
-      withoutDroppedTools(self.rebuildToolSchemas(scope), droppedToolSchemaNames);
+    const rebuildTurnToolSchemas = (): ToolSchema[] => withoutDroppedTools(self.rebuildToolSchemas(scope), droppedToolSchemaNames);
     let toolSchemas: ToolSchema[] = rebuildTurnToolSchemas();
     const withServingIdentity = (
       result: {
@@ -201,8 +206,12 @@ export async function queryLoop(
     ) => ({
       ...result,
       usageByModel: [...usageByModel],
-      vendorProvider: servingVendorProvider,
-      vendorModel: servingVendorModel,
+      ...(servingVendorProvider !== undefined && servingVendorModel !== undefined
+        ? {
+            vendorProvider: servingVendorProvider,
+            vendorModel: servingVendorModel,
+          }
+        : {}),
       finalToolSchemas: [...toolSchemas],
       promotedToolNames: [...new Set(promotedToolNamesForTurn)],
     });
@@ -211,6 +220,7 @@ export async function queryLoop(
         onFallback: callbacks?.onFallback,
         onStatus: (status) => {
           if (
+            !subscriptionUsageIsOpaque &&
             (status.phase === "attempt" || status.phase === "retry") &&
             status.provider &&
             status.model
@@ -229,6 +239,9 @@ export async function queryLoop(
       usage: TokenUsage,
       updateContextCalibration: boolean,
     ): void => {
+      if (subscriptionUsageIsOpaque) {
+        return;
+      }
       const cacheRead = usage.cacheReadTokens ?? 0;
       const cacheWrite = usage.cacheWriteTokens ?? 0;
       const adjustedInput = Math.max(
@@ -453,7 +466,7 @@ export async function queryLoop(
         if (truncatedCount > 0) {
           joined = t("be_conversationLoop.guidanceTruncationMarker", { count: truncatedCount, joined });
         }
-        activeApprovalReasonPrefix = mergeApprovalReasonPrefixes(
+        activeApprovalReasonPrefix = mergeGuidanceApprovalReasonPrefixes(
           activeApprovalReasonPrefix,
           kept.map((entry) => entry.approvalReasonPrefix),
         );
@@ -545,13 +558,9 @@ export async function queryLoop(
       // vLLM resumes it verbatim. For mid-<think> truncation the prefill text is
       // `<think>\n…` (open, no closing tag) so the model finishes reasoning
       // before answering; add_generation_prompt:false blocks a 2nd auto <think>.
-      const messagesForRound =
-        continuationPrefillText !== undefined
-          ? [
-              ...baseMessagesForRound,
-              { role: "assistant" as const, content: continuationPrefillText },
-            ]
-          : baseMessagesForRound;
+      const messagesForRound: GenericMessage[] = continuationPrefillText !== undefined ? [
+        ...baseMessagesForRound, { role: "assistant" as const, content: continuationPrefillText },
+      ] : baseMessagesForRound;
       self.lastRoundInputProjection = estimateRequestInputProjection({
         systemPrompt,
         messages: messagesForRound,
@@ -567,8 +576,9 @@ export async function queryLoop(
         round,
         assistantRoundIndex: roundIndex,
         inputOrigin: bounds.inputOrigin,
-        configuredProvider: llmSettings.provider,
+        runtimeIdentity: runtimeContextBudget.identity,
         model,
+        preflightThresholdTokens: runtimeContextBudget.preflight,
         systemPrompt,
         messages: messagesForRound,
         toolSchemas,
@@ -585,18 +595,22 @@ export async function queryLoop(
         ...toolExposure,
         request: requestDiagnostics,
       });
-      const stream = await collectRoundStream({
-        provider: turnProvider,
-        model,
-        systemPrompt,
-        messages: messagesForRound,
-        toolSchemas,
-        llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
-        abortSignal,
-        continuationPrefill: continuationPrefillText !== undefined,
-        onReasoningDelta: callbacks?.onReasoningDelta,
-        onTextDelta: callbacks?.onTextDelta,
-      });
+      const stream = await collectActiveRuntimeRoundStream(
+        {
+          provider: turnProvider,
+          model,
+          systemPrompt,
+          messages: messagesForRound,
+          toolSchemas,
+          llmSettings: roundLlmSettings,
+          abortSignal,
+          continuationPrefill: continuationPrefillText !== undefined,
+          onReasoningDelta: callbacks?.onReasoningDelta,
+          onTextDelta: callbacks?.onTextDelta,
+        },
+        self.deps.settingsService.get("llm").activeChatRuntime,
+        () => self.abortCurrentTurn(new Error("active chat runtime changed")),
+      );
       // One-shot: clear so a following tool round or terminal round does not
       // re-inject the prefill. The continuation branch below re-sets it when the
       // chain extends. (Carry text/thought persist independently for stitching.)
@@ -827,7 +841,7 @@ export async function queryLoop(
       const willContinue =
         stopReason === "max_tokens" &&
         pendingToolCalls.length === 0 &&
-        vendorSupportsLengthContinuation(llmSettings.provider) &&
+        supportsLengthContinuation &&
         continuationsRun < MAX_LENGTH_CONTINUATIONS &&
         assistantRoundsRun + 1 < effectiveMaxRounds &&
         madeProgress;
@@ -1394,7 +1408,7 @@ export async function queryLoop(
             executeOptions,
             provider: turnProvider,
             model,
-            llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
+            llmSettings: roundLlmSettings,
             ...(abortSignal ? { abortSignal } : {}),
             requestAnchor: bounds.requestAnchor ?? null,
             rationaleProvenance: currentRationaleProvenance,
@@ -1537,9 +1551,10 @@ export async function queryLoop(
       // provider send stubs them on the wire. Mirrors the sub-agent fallback
       // mark (clear()/restore() atomic swap). Gated on the already-computed
       // per-round projection to skip short turns; the threshold SOT is
-      // getModelPreflightThreshold so no literal is introduced.
+      // contextBudgetForCurrentRuntime so subscription turns never inherit an
+      // inactive API-key provider's context budget.
       const microCompactFloor = Math.floor(
-        getModelPreflightThreshold(llmSettings.provider, model) * MICRO_COMPACT_FLOOR_FACTOR,
+        runtimeContextBudget.preflight * MICRO_COMPACT_FLOOR_FACTOR,
       );
       if (
         microCompactFloor > 0 &&

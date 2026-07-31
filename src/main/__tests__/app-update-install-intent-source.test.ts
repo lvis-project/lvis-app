@@ -25,14 +25,19 @@ describe("app update install intent source contract", () => {
     expect(source).toContain("app.quit();");
   });
 
-  it("lets updater-owned before-quit bypass plugin shutdown interception", () => {
+  it("keeps the boot-time plugin fallback behind the main shutdown lifecycle", () => {
     const source = readFileSync(new URL("../../boot/steps/plugin-runtime.ts", import.meta.url), "utf8");
+    const beforeQuitStart = source.indexOf('app.once("before-quit"');
     const beforeQuitHandler = source.slice(
-      source.indexOf('app.prependOnceListener("before-quit"'),
-      source.indexOf("return {", source.indexOf('app.prependOnceListener("before-quit"')),
+      beforeQuitStart,
+      source.indexOf("return {", beforeQuitStart),
     );
     expect(beforeQuitHandler).toContain("if (isAppUpdateInstallRequested()) return;");
+    expect(beforeQuitHandler).toContain("if (isAppShutdownStarted()) return;");
     expect(beforeQuitHandler.indexOf("isAppUpdateInstallRequested")).toBeLessThan(
+      beforeQuitHandler.indexOf("event.preventDefault();"),
+    );
+    expect(beforeQuitHandler.indexOf("isAppShutdownStarted")).toBeLessThan(
       beforeQuitHandler.indexOf("event.preventDefault();"),
     );
   });

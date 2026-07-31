@@ -18,6 +18,7 @@ import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
 import { isAppUpdateInstallRequested } from "../../main/app-update-install-intent.js";
+import { isAppShutdownStarted } from "../../main/app-state.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
 import { AuditLogger } from "../../audit/audit-logger.js";
@@ -307,8 +308,9 @@ export async function initPluginRuntime(
     })();
     return pluginShutdownPromise;
   };
-  app.prependOnceListener("before-quit", (event) => {
+  app.once("before-quit", (event) => {
     if (isAppUpdateInstallRequested()) return;
+    if (isAppShutdownStarted()) return;
     if (pluginShutdownHandlers.length === 0 || pluginShutdownRan) return;
     event.preventDefault();
     void (async () => {

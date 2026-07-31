@@ -106,6 +106,12 @@ vi.mock("electron", () => {
 import { registerIpcHandlers } from "../index.js";
 import { setIsPackaged, _resetForTest } from "../../boot/dev-flags.js";
 import type { AppServices } from "../../boot/types.js";
+import {
+  CHANNELS,
+  CHANNEL_GESTURE,
+  isPublicChannel,
+  PUBLIC_CHANNELS,
+} from "../../contract/app-contract.js";
 
 // Every top-level service field of AppServices. The mock proxy enumerates
 // these so `{ ...services }` inside registerIpcHandlers carries a live nested
@@ -189,6 +195,14 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
     // before the snapshot diff even matters.
     expect(unique.length).toBeGreaterThan(50);
   });
+  it("keeps subscription status invalidation internal and outbound-only", () => {
+    const event = CHANNELS.settings.subscriptionRuntimeStatusUpdated;
+    expect(event).toBe("lvis:settings:subscription:status-updated");
+    expect(channels).not.toContain(event);
+    expect(PUBLIC_CHANNELS).not.toContain(event);
+    expect(isPublicChannel(event)).toBe(false);
+    expect(CHANNEL_GESTURE[event]).toBeUndefined();
+  });
 
   it("locks the sorted unique channel list", () => {
     const sorted = [...new Set(channels)].sort();
@@ -205,6 +219,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:app:info",
         "lvis:approval:respond",
         "lvis:ask-user-question:respond",
+        "lvis:attach:discardClipboardImage",
         "lvis:attach:openExternal",
         "lvis:attach:openFile",
         "lvis:attach:readImage",
@@ -349,6 +364,14 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:runtime:env",
         "lvis:session-todo:clear",
         "lvis:session-todo:list",
+        "lvis:settings:acp-subscription:cancel-login",
+        "lvis:settings:acp-subscription:choose-runtime",
+        "lvis:settings:acp-subscription:forget-runtime",
+        "lvis:settings:acp-subscription:logout",
+        "lvis:settings:acp-subscription:open-login-browser",
+        "lvis:settings:acp-subscription:start-login",
+        "lvis:settings:acp-subscription:status",
+        "lvis:settings:acp-subscription:verify",
         "lvis:settings:apply-host-map",
         "lvis:settings:codex-subscription:cancel-login",
         "lvis:settings:codex-subscription:list-models",
@@ -369,6 +392,17 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:settings:marketplace:uninstall-provider-preset",
         "lvis:settings:set-api-key",
         "lvis:settings:set-web-api-key",
+        "lvis:settings:subscription:cancel-login",
+        "lvis:settings:subscription:choose-runtime",
+        "lvis:settings:subscription:forget-runtime",
+        "lvis:settings:subscription:list-models",
+        "lvis:settings:subscription:logout",
+        "lvis:settings:subscription:open-login-browser",
+        "lvis:settings:subscription:start-login",
+        "lvis:settings:subscription:status",
+        "lvis:settings:subscription:use-api-for-chat",
+        "lvis:settings:subscription:use-for-chat",
+        "lvis:settings:subscription:verify",
         "lvis:settings:update",
         "lvis:shell:open-external",
         "lvis:sidechat:abort",

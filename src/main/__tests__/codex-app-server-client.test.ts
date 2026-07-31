@@ -94,6 +94,7 @@ interface Harness {
   runtimeHome: string;
   sqliteHome: string;
   workspaceDir: string;
+  runtimeTempDir: string;
   server: FakeAppServer;
   spawnCalls: Array<{ command: string; args: ReadonlyArray<string>; options: SpawnOptions }>;
 }
@@ -111,9 +112,11 @@ function createHarness(
   const runtimeHome = join(runtimeRoot, "home");
   const sqliteHome = join(runtimeRoot, "sqlite");
   const workspaceDir = join(runtimeRoot, "workspace");
+  const runtimeTempDir = join(runtimeRoot, "temporary");
   mkdirSync(runtimeHome);
   mkdirSync(sqliteHome);
   mkdirSync(workspaceDir);
+  mkdirSync(runtimeTempDir);
   const spawnCalls: Harness["spawnCalls"] = [];
   const spawn: Spawn = (command, args, options) => {
     spawnCalls.push({ command, args, options });
@@ -124,6 +127,7 @@ function createHarness(
     runtimeHome,
     sqliteHome,
     workspaceDir,
+    runtimeTempDir,
     resolveExecutable: () => "C:\\test\\codex.exe",
     spawn,
     clientVersion: "test-version",
@@ -135,6 +139,7 @@ function createHarness(
     runtimeHome,
     sqliteHome,
     workspaceDir,
+    runtimeTempDir,
     server,
     spawnCalls,
   };
@@ -167,6 +172,13 @@ describe("CodexAppServerClient", () => {
     vi.stubEnv("HtTpS_PrOxY", "https://proxy.example.test");
     vi.stubEnv("SSL_CERT_FILE", "C:\\test\\custom-ca.pem");
     vi.stubEnv("RuSt_LoG", "trace");
+    vi.stubEnv("HOME", "host-home");
+    vi.stubEnv("TMPDIR", "host-tmpdir");
+    vi.stubEnv("PATH", "host-path");
+    vi.stubEnv("USERPROFILE", "C:\\host-profile");
+    vi.stubEnv("APPDATA", "C:\\host-appdata");
+    vi.stubEnv("LOCALAPPDATA", "C:\\host-local-appdata");
+    vi.stubEnv("TEMP", "C:\\host-temp");
 
     const harness = createHarness((request) => {
       if (request.method === "initialize") return standardInitialize(request);
@@ -223,6 +235,8 @@ describe("CodexAppServerClient", () => {
         env: expect.objectContaining({
           CODEX_HOME: harness.runtimeHome,
           CODEX_SQLITE_HOME: harness.sqliteHome,
+          HOME: harness.runtimeHome,
+          TMPDIR: harness.runtimeTempDir,
           RUST_LOG: "error",
         }),
       },
@@ -237,6 +251,17 @@ describe("CodexAppServerClient", () => {
     expect(childEnvNames.some((name) => name.startsWith("OPENAI_") || name.startsWith("OTEL_"))).toBe(false);
     expect(childEnvNames).not.toEqual(expect.arrayContaining(["HTTPS_PROXY", "SSL_CERT_FILE"]));
     expect(childEnv.RUST_LOG).toBe("error");
+    expect(childEnv.HOME).toBe(harness.runtimeHome);
+    expect(childEnv.TMPDIR).toBe(harness.runtimeTempDir);
+    expect(childEnv.PATH).not.toBe("host-path");
+    expect(JSON.stringify(childEnv)).not.toContain("host-");
+    if (process.platform === "win32") {
+      expect(childEnv.USERPROFILE).toBe(harness.runtimeHome);
+      expect(childEnv.APPDATA).toBe(harness.runtimeHome);
+      expect(childEnv.LOCALAPPDATA).toBe(harness.runtimeHome);
+      expect(childEnv.TEMP).toBe(harness.runtimeTempDir);
+      expect(childEnv.TMP).toBe(harness.runtimeTempDir);
+    }
   });
   it("sends initialized before awaiting the initialize result", async () => {
     const harness = createHarness((request) => {

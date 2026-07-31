@@ -344,11 +344,13 @@ describe("ensureElectronNativeModules", () => {
       JSON.stringify({ pid: process.pid, token: "unknown-liveness" }),
       "utf8",
     );
+    const reaperCreatedAt = new Date("2024-01-01T00:00:00.000Z");
+    utimesSync(`${lockDir}.reaper`, reaperCreatedAt, reaperCreatedAt);
 
     expect(__internalForTests.inspectReaperState({
       lockDir,
       inspectProcess: () => "unknown",
-      now: () => Date.now() + 20_000,
+      now: () => reaperCreatedAt.getTime() + 20_000,
     })).toMatchObject({
       state: "ambiguous",
       ownerPid: process.pid,
@@ -359,7 +361,7 @@ describe("ensureElectronNativeModules", () => {
     expect(__internalForTests.inspectReaperState({
       lockDir,
       inspectProcess: () => "alive",
-      now: () => Date.now() + 120_001,
+      now: () => reaperCreatedAt.getTime() + 120_001,
     })).toMatchObject({
       state: "ambiguous",
       ownerState: "valid",

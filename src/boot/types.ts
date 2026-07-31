@@ -168,12 +168,11 @@ export interface AppServices {
    */
   refreshMarketplaceFetcherConfig?: () => void;
   /**
-   * #893 — Re-sync the plugin runtime's wildcard config overrides
-   * (`hostApiKey` / `hostApiVendor`) against the current active LLM
-   * vendor's apiKey. Invoked from the settings IPC handler after the
-   * vendor changes or an apiKey is set/deleted, so plugins reading
-   * `hostApi.config.get("hostApiKey")` observe the new value on their
-   * next call without an app restart.
+   * #893 — Re-sync the plugin runtime's wildcard config overrides. Only the
+   * non-secret `hostApiVendor` is projected, and only while an API provider
+   * owns generation; subscription runtime selection clears it. Invoked from
+   * settings IPC after runtime or API-vendor changes so plugins observe the
+   * correct execution identity on their next call without an app restart.
    */
   refreshActiveLlmWildcard?: () => void;
   /**
