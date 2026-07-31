@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { estimateOutgoingUserMessageTokens } from "../../../../shared/multimodal-token-estimate.js";
 import {
   composeImportedTriggerOutgoing,
   composeOutgoing,
@@ -113,6 +114,17 @@ describe("composeOutgoing", () => {
     expect(r.attachments[0].type).toBe("image");
   });
 
+  it("exposes paste and file expansions to the canonical outgoing token estimate", () => {
+    const raw = "compare [File #2] with [Pasted text #3 +3 lines]";
+    const r = composeOutgoing({
+      raw,
+      activePreset: null,
+      attachments: [file2, paste3],
+    });
+
+    expect(estimateOutgoingUserMessageTokens(r.text, r.attachments))
+      .toBeGreaterThan(estimateOutgoingUserMessageTokens(raw, r.attachments));
+  });
   it("preserves literal $ sequences in pasted text (no regex backreference mutation)", () => {
     // String.prototype.replace's STRING form interprets `$&`, `$1`, `$$`,
     // etc. as backreference tokens. Use a replacer function to bypass.

@@ -609,11 +609,10 @@ describe("useCostEstimate (memo invariants)", () => {
     const { result } = renderHook(() =>
       useCostEstimate({
         entries: [],
-        question: "hello",
+        draft: { text: "hello", attachments: [] },
         llmVendor: "openai",
         llmModel: "gpt-4o-mini",
         maxOutputTokens: 1024,
-        composeOutgoing: (raw: string) => ({ text: raw, attachments: [] }),
       }),
     );
     expect(result.current.costEstimate).toBeDefined();

@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { GenericMessage, LLMProvider, StreamEvent } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
-import { estimateTokens, estimateMessagesTokens } from "./auto-compact.js";
+import { estimateTokens, estimateMessageTokensForWire, estimateMessagesTokens } from "./auto-compact.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { createLogger } from "../lib/logger.js";
 import {
@@ -356,7 +356,7 @@ async function dropOldestUntilUnderBudget(
   // re-ran `estimateMessagesTokens(surviving)` after every shift (O(N²)
   // serialization cost on 200+ message histories while holding `isCompacting`
   // lock). Maintain a running total instead — O(N).
-  const perMessageTokens = toCompact.map((m) => estimateTokens(serializeMessageForEstimation(m)));
+  const perMessageTokens = toCompact.map(estimateMessageTokensForWire);
   let currentTotal = perMessageTokens.reduce((a, b) => a + b, 0);
   if (currentTotal <= budget) {
     return { messages: toCompact, droppedCount: 0, truncatedDir: "" };
@@ -687,7 +687,7 @@ function splitForBoundary(
   let preservedTokens = 0;
   if (preserveRecentTokens > 0) {
     for (let i = messages.length - 1; i >= 0; i--) {
-      const msgTokens = estimateTokens(serializeMessageForEstimation(messages[i]));
+      const msgTokens = estimateMessageTokensForWire(messages[i]);
       if (preservedTokens + msgTokens > preserveRecentTokens) break;
       preservedTokens += msgTokens;
       preserveStart = i;
