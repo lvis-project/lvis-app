@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, win32 } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeRecordedSpawn } from "../../__tests__/test-helpers.js";
 import {
   AcpSubscriptionRuntimeClient,
   resolveAcpSubscriptionExecutable,
@@ -53,10 +54,7 @@ function createLoginHarness(provider: "kimi-code" | "grok-build" = "kimi-code"):
 
   const child = new FakeRuntimeProcess();
   const spawnCalls: LoginHarness["spawnCalls"] = [];
-  const spawn: Spawn = (command, args, options) => {
-    spawnCalls.push({ command, args, options });
-    return child as unknown as ChildProcess;
-  };
+  const spawn: Spawn = makeRecordedSpawn(child as unknown as ChildProcess, spawnCalls);
   const client = new AcpSubscriptionRuntimeClient({
     provider,
     runtimeHome,

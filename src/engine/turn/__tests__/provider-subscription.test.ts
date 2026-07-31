@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { collectAsyncIterable as collect } from "../../../__tests__/test-helpers.js";
+
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../../llm/types.js";
 import type { ConversationLoop } from "../../conversation-loop.js";
 import { FallbackProvider } from "../../llm/vercel/fallback-chain.js";
@@ -14,12 +16,6 @@ import {
 } from "../../../shared/subscription-runtime.js";
 
 const SAFE_SUBSCRIPTION_FAILURE = "Subscription runtime could not complete. Verify the connected runtime and try again.";
-
-async function collect(events: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> {
-  const values: StreamEvent[] = [];
-  for await (const event of events) values.push(event);
-  return values;
-}
 
 function retryParams(): StreamTurnParams {
   return {

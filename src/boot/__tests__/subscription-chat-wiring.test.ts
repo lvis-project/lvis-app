@@ -5,6 +5,7 @@ import type { LLMProvider, StreamEvent, StreamTurnParams } from "../../engine/ll
 import type { SubscriptionRuntimeAuditEvent } from "../../main/subscription-runtime-service.js";
 import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { makeConversationLoopMemoryManager } from "../../engine/__tests__/conversation-loop-test-helpers.js";
 
 const h = vi.hoisted(() => ({
   createSubscriptionLlmProvider: vi.fn(),
@@ -48,18 +49,6 @@ function providerFor(runtimeSelection: SubscriptionChatRuntimeSelection): LLMPro
   };
 }
 
-function memoryManagerStub() {
-  return {
-    getAgentsMd: () => "",
-    getMemoryIndex: () => "",
-    getUserPreferences: () => "",
-    getMemoryContext: () => "",
-    saveSession: () => Promise.resolve(),
-    listSessions: () => [],
-    saveSessionMetadata: () => Promise.resolve(),
-  };
-}
-
 function sharedLoopDeps() {
   return {
     settingsService: {
@@ -73,7 +62,7 @@ function sharedLoopDeps() {
     inputClassifier: new InputClassifier(),
     routeEngine: new RouteEngine(),
     toolRegistry: new ToolRegistry(),
-    memoryManager: memoryManagerStub(),
+    memoryManager: makeConversationLoopMemoryManager(),
     pluginRuntime: { listPluginCards: () => [] },
     permissionManager: {},
     approvalGate: {},
@@ -109,7 +98,7 @@ describe("subscription chat boot wiring", () => {
     } as unknown as Parameters<typeof createConversationLoop>[0]);
     const side = createSideChatConversationLoop({
       ...shared,
-      sideChatMemoryManager: memoryManagerStub(),
+      sideChatMemoryManager: makeConversationLoopMemoryManager(),
       ...bindings,
     } as unknown as Parameters<typeof createSideChatConversationLoop>[0]);
     const routine = createRoutineConversationLoop({
