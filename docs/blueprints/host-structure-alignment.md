@@ -215,8 +215,8 @@ top-level dir** (contract/api/cli/sdk), not trailed to the end.
 
 Full list in the PR description. Highest: executor `invocation-context` closure/sandbox-relaxation
 inversion; boot/main weak locks (mitigated by C1/C3 + per-move test repoint); renderer forward-ref/
-render-order coupling; module-singleton lifetime (move with consumer); **Cross-Cutting Review Gate**
-(permissions/audit/sandbox/ipc/boot touched across C5–C12 → 3-agent cluster review before merge);
+render-order coupling; module-singleton lifetime (move with consumer); **Sensitive-Area Advisory**
+(permissions/audit/sandbox/ipc/boot touched across C5–C12 → proportionate owner review notes, never a merge gate);
 No-Fallback rule (each surface moves whole); esbuild entry + `boot.ts` export shape must not change.
 
 ## 8. Discovered issues — handled INLINE in this PR (not deferred to backlog)
