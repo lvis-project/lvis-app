@@ -109,6 +109,14 @@ describe("UsageDashboard — workspace stats section", () => {
 });
 
 describe("UsageDashboard", () => {
+  it("builds preset ranges from the KST calendar day", async () => {
+    const { presetToDates } = await import("../../src/ui/renderer/components/UsageDashboard.js");
+    expect(presetToDates("7d", new Date("2026-07-03T16:00:00Z"))).toEqual({
+      dateFrom: "2026-06-28",
+      dateTo: "2026-07-04",
+    });
+  });
+
   it("renders without crashing", async () => {
     const { container } = await renderDashboard();
     await waitFor(() => expect(container).toBeTruthy());
