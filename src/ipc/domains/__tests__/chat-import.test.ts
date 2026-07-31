@@ -191,7 +191,7 @@ describe("lvis:chat:import — canonical attachment storage", () => {
         role: "user",
         content: [
           { type: "text", text: "keep" },
-          { type: "image", image: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png" },
+          { type: "image", image: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png", width: 8, height: 8 },
           { type: "file", data: "data:text/plain;base64,SGVsbG8=", mimeType: "text/plain" },
         ],
       }],

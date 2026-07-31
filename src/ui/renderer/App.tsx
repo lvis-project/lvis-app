@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { estimateTokens } from "../../shared/token-estimate.js";
 import { useTranslation } from "../../i18n/react.js";
-import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
+import { composeOutgoing as composeOutgoingUtil, type ComposedOutgoing } from "./utils/compose.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { AppProviders } from "./AppProviders.js";
 import { AppDialogs } from "./AppDialogs.js";
@@ -28,7 +27,7 @@ import { MainContent } from "./MainContent.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
-import { estimateMultimodalTokenOverhead } from "../../shared/multimodal-token-estimate.js";
+import { estimateOutgoingUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
@@ -429,30 +428,22 @@ export function App() {
   const subscriptionPendingProvider = subscriptionRuntimePolicy.pendingProvider;
   const subscriptionImageAttachmentProvider = subscriptionRuntimePolicy.imageAttachmentProvider;
   const subscriptionFileAttachmentProvider = subscriptionRuntimePolicy.fileAttachmentProvider;
-  const draftAttachmentTokens = useMemo(
-    () => {
-      const imageOverhead = estimateMultimodalTokenOverhead(attachments
-        .filter((attachment) => attachment.kind === "image")
-        .map((attachment) => ({
-          type: "image",
-          mimeType: attachment.mimeType,
-          width: attachment.width,
-          height: attachment.height,
-          bytes: attachment.bytes,
-        })));
-      // A resource attachment is TEXT the turn will carry, and it is the only draft
-      // attachment whose size the composer does not otherwise show. Counting only
-      // images left the overflow indicator green on a turn up to eight reads heavier
-      // than it displayed — the number exists to tell a user the request is about to be
-      // large, and this is the largest thing they can add.
-      const resourceTokens = attachments.reduce(
-        (total, attachment) =>
-          attachment.kind === "resource" ? total + estimateTokens(attachment.text) : total,
-        0,
-      );
-      return imageOverhead + resourceTokens;
-    },
-    [attachments],
+  const composeOutgoing = useCallback(
+    (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
+    [activePreset, attachments],
+  );
+  // This is the same trimmed draft the send path composes. Both pre-send
+  // surfaces consume it, so pasted text, file paths, resource text parts, and
+  // images cannot drift from the actual user payload.
+  const composedDraft = useMemo<ComposedOutgoing>(() => {
+    const trimmedQuestion = question.trim();
+    return trimmedQuestion.length > 0
+      ? composeOutgoing(trimmedQuestion)
+      : { text: "", attachments: [] };
+  }, [question, composeOutgoing]);
+  const draftTokenEstimate = useMemo(
+    () => estimateOutgoingUserMessageTokens(composedDraft.text, composedDraft.attachments),
+    [composedDraft],
   );
 
   const { usedTokens, contextBudget, effectiveBudget, contextOverflowPct, tpmLimit, tpmPct, isTpmOverflow } =
@@ -460,11 +451,9 @@ export function App() {
       entries,
       llmVendor: subscriptionRuntimeSelected ? undefined : llmVendor,
       llmModel: subscriptionRuntimeSelected ? undefined : llmModel,
-      draftText: question,
-      draftExtraTokens: draftAttachmentTokens,
+      draftTokenEstimate,
       enabled: apiUsageProjectionAvailable,
     });
-
   // Plugin/built-in view routing + host-managed plugin auth lifecycle (the 4
   // auth-gate refs + action guard + pluginAuthErrors + the two drain effects +
   // the uninstalled-plugin fallback), extracted as ONE unit. appMode is the sole
@@ -657,11 +646,6 @@ export function App() {
     });
   }, [api, checkApiKey, refreshLlmSettings]);
 
-  const composeOutgoing = useCallback(
-    (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
-    [activePreset, attachments],
-  );
-
   // Composer send pipeline. Owns handleAsk (+ its turnRequestRef guard) and
   // writes handleAskRef.current each render so the forward-ref cycle with
   // use-routine-overlay's handlePluginPrimaryAction stays live. See
@@ -751,11 +735,10 @@ export function App() {
   const { costEstimate, costBadgeClass } =
     useCostEstimate({
       entries,
-      question,
+      draft: composedDraft,
       llmVendor: subscriptionRuntimeSelected ? undefined : llmVendor,
       llmModel: subscriptionRuntimeSelected ? undefined : llmModel,
       maxOutputTokens,
-      composeOutgoing,
       enabled: apiUsageProjectionAvailable,
     });
   // Strict variant — `undefined` means "model not in catalog" so the cost
