@@ -165,10 +165,28 @@ export interface CodexConversationTurnInput {
 
 type CodexConversationTurnStatus = "completed" | "interrupted" | "failed";
 
+interface PendingTurnCompletion {
+  readonly status: CodexConversationTurnStatus;
+  readonly providerError?: SubscriptionTransportDiagnosticError["providerError"];
+}
+
+/** Safe, per-turn projection of Codex App Server `tokenUsage.last`. */
+export interface CodexConversationTokenUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly cachedInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+  readonly reasoningOutputTokens?: number;
+  readonly modelContextWindow?: number;
+}
+
 export interface CodexConversationTurnResult {
   threadId: string;
   turnId: string;
   status: CodexConversationTurnStatus;
+  /** Present only for a completed turn with an exact App Server `last` snapshot. */
+  tokenUsage?: CodexConversationTokenUsage;
   providerError?: SubscriptionTransportDiagnosticError["providerError"];
 }
 
@@ -231,6 +249,14 @@ interface ActiveTurn {
   readonly resolveTurnId: (turnId: string) => void;
   readonly rejectTurnId: (error: Error) => void;
   turnId: string | null;
+  /** ID from the authoritative turn/start response; only it may settle this turn. */
+  authoritativeTurnId: string | null;
+  /** Latest exact App Server `tokenUsage.last` for this active remote turn. */
+  latestTokenUsage: CodexConversationTokenUsage | undefined;
+  /** Bounded start-response race buffer keyed by the provider turn id. */
+  readonly pendingTokenUsageByTurnId: Map<string, CodexConversationTokenUsage>;
+  /** Bounded terminal-notification buffer until turn/start proves its exact id. */
+  readonly pendingCompletionByTurnId: Map<string, PendingTurnCompletion>;
   settled: boolean;
   interruptPromise: Promise<void> | null;
   /** App-owned temporary localImage files, removed on every terminal path. */
@@ -613,6 +639,59 @@ function projectTurnStatus(value: unknown): CodexConversationTurnStatus {
   return "failed";
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/**
+ * Project only `tokenUsage.last`: App Server's `total` is thread-cumulative
+ * and must never become a per-turn audit or renderer value.
+ */
+function projectTurnTokenUsage(
+  payload: JsonRecord,
+): { threadId: string; turnId: string; tokenUsage: CodexConversationTokenUsage } | null {
+  const threadId = boundedIdentifier(payload.threadId);
+  const turnId = boundedIdentifier(payload.turnId);
+  const usage = isRecord(payload.tokenUsage) ? payload.tokenUsage : null;
+  if (!usage) return null;
+  const last = isRecord(usage.last) ? usage.last : null;
+  if (
+    !threadId
+    || !turnId
+    || !last
+    || !isNonNegativeSafeInteger(last.inputTokens)
+    || !isNonNegativeSafeInteger(last.outputTokens)
+    || !isNonNegativeSafeInteger(last.totalTokens)
+    || (last.cachedInputTokens !== undefined && !isNonNegativeSafeInteger(last.cachedInputTokens))
+    || (last.cacheWriteInputTokens !== undefined && !isNonNegativeSafeInteger(last.cacheWriteInputTokens))
+    || (last.reasoningOutputTokens !== undefined && !isNonNegativeSafeInteger(last.reasoningOutputTokens))
+    || (usage.modelContextWindow !== undefined && !isPositiveSafeInteger(usage.modelContextWindow))
+  ) {
+    return null;
+  }
+  return {
+    threadId,
+    turnId,
+    tokenUsage: {
+      inputTokens: last.inputTokens,
+      outputTokens: last.outputTokens,
+      totalTokens: last.totalTokens,
+      ...(last.cachedInputTokens !== undefined ? { cachedInputTokens: last.cachedInputTokens } : {}),
+      ...(last.cacheWriteInputTokens !== undefined
+        ? { cacheWriteInputTokens: last.cacheWriteInputTokens }
+        : {}),
+      ...(last.reasoningOutputTokens !== undefined
+        ? { reasoningOutputTokens: last.reasoningOutputTokens }
+        : {}),
+      ...(usage.modelContextWindow !== undefined ? { modelContextWindow: usage.modelContextWindow } : {}),
+    },
+  };
+}
+
 /**
  * A reusable App Server conversation transport for subscription-backed Codex
  * chat. It intentionally exposes only LVIS-governed dynamic tools, never
@@ -733,7 +812,7 @@ export class CodexConversationRuntime {
       });
       const turnId = this.projectTurnId(result);
       if (!turnId) throw new CodexConversationRuntimeError("codex-operation-failed");
-      this.setActiveTurnId(active, turnId);
+      this.setAuthoritativeTurnId(active, turnId);
     } catch (error) {
       const normalized = error instanceof SubscriptionAttachmentTransportError
         ? error
@@ -793,6 +872,10 @@ export class CodexConversationRuntime {
       resolveTurnId,
       rejectTurnId,
       turnId: null,
+      authoritativeTurnId: null,
+      latestTokenUsage: undefined,
+      pendingTokenUsageByTurnId: new Map<string, CodexConversationTokenUsage>(),
+      pendingCompletionByTurnId: new Map<string, PendingTurnCompletion>(),
       settled: false,
       interruptPromise: null,
       attachmentPaths: [],
@@ -1070,15 +1153,36 @@ export class CodexConversationRuntime {
   }
 
   private setActiveTurnId(active: ActiveTurn, turnId: string): void {
+    if (active.authoritativeTurnId !== null && active.authoritativeTurnId !== turnId) return;
     if (active.turnId === turnId) return;
+    // Notification IDs remain provisional until the matching turn/start RPC
+    // reply arrives; they must not unlock cancellation or usage attribution.
     active.turnId = turnId;
+  }
+
+  private setAuthoritativeTurnId(active: ActiveTurn, turnId: string): void {
+    if (active.authoritativeTurnId && active.authoritativeTurnId !== turnId) {
+      throw new CodexConversationRuntimeError("codex-operation-failed");
+    }
+    active.authoritativeTurnId = turnId;
+    active.turnId = turnId;
+    // Consume only the exact pre-response `last` snapshot. Any provisional or
+    // historic notification is discarded once the RPC proves this turn ID.
+    active.latestTokenUsage = active.pendingTokenUsageByTurnId.get(turnId);
+    active.pendingTokenUsageByTurnId.clear();
     active.resolveTurnId(turnId);
+
+    const completion = active.pendingCompletionByTurnId.get(turnId);
+    active.pendingCompletionByTurnId.clear();
+    if (completion) {
+      this.resolveTurnCompletion(active, turnId, completion.status, completion.providerError);
+    }
   }
 
   private async interruptActiveTurn(active: ActiveTurn): Promise<void> {
     let turnId: string;
     try {
-      turnId = active.turnId ?? await active.turnIdReady;
+      turnId = active.authoritativeTurnId ?? await active.turnIdReady;
     } catch {
       return;
     }
@@ -1363,6 +1467,10 @@ export class CodexConversationRuntime {
       if (event) this.invokeCallback(this.activeTurn?.callbacks.onReasoningDelta, event);
       return;
     }
+    if (method === "thread/tokenUsage/updated") {
+      this.recordTokenUsageNotification(payload);
+      return;
+    }
     if (method === "turn/completed") this.completeTurnFromNotification(payload);
   }
 
@@ -1440,20 +1548,73 @@ export class CodexConversationRuntime {
     return { ...event, summaryIndex };
   }
 
+  private recordTokenUsageNotification(payload: JsonRecord): void {
+    const event = projectTurnTokenUsage(payload);
+    const active = this.activeTurn;
+    if (
+      !event
+      || !active
+      || active.settled
+      || this.activeTurn !== active
+      || active.threadId !== event.threadId
+    ) {
+      return;
+    }
+    // A usage notification is never allowed to bind the active turn. App
+    // Server can re-send historic thread usage after a resume/fork, so retain
+    // snapshots by ID until turn/start proves the exact active turn.
+    if (active.authoritativeTurnId === event.turnId) {
+      active.latestTokenUsage = event.tokenUsage;
+      return;
+    }
+    if (active.authoritativeTurnId !== null) return;
+    if (
+      !active.pendingTokenUsageByTurnId.has(event.turnId)
+      && active.pendingTokenUsageByTurnId.size >= 2
+    ) {
+      return;
+    }
+    // A newer notification replaces the earlier `last` snapshot; it is not a
+    // delta and must never be summed.
+    active.pendingTokenUsageByTurnId.set(event.turnId, event.tokenUsage);
+  }
+
   private completeTurnFromNotification(payload: JsonRecord): void {
     const active = this.activeTurn;
     const threadId = boundedIdentifier(payload.threadId);
     const turn = isRecord(payload.turn) ? payload.turn : null;
     const turnId = boundedIdentifier(turn?.id);
-    if (!active || !threadId || !turnId || active.threadId !== threadId) return;
-    if (active.turnId && active.turnId !== turnId) return;
-    this.setActiveTurnId(active, turnId);
+    if (!active || active.settled || !threadId || !turnId || active.threadId !== threadId) return;
+
     const status = projectTurnStatus(turn?.status);
     const providerError = status === "failed" ? projectSubscriptionTransportErrorDiagnostics(turn) : undefined;
+    // A terminal notification cannot establish identity: resumed/forked threads
+    // may replay historic completions before this request's turn/start reply.
+    if (active.authoritativeTurnId === null) {
+      // The first terminal status wins, matching immediate post-response
+      // semantics and preventing a replayed duplicate from changing it.
+      if (active.pendingCompletionByTurnId.has(turnId)) return;
+      if (active.pendingCompletionByTurnId.size >= 2) return;
+      active.pendingCompletionByTurnId.set(turnId, { status, ...(providerError ? { providerError } : {}) });
+      return;
+    }
+    if (active.authoritativeTurnId !== turnId) return;
+    this.resolveTurnCompletion(active, turnId, status, providerError);
+  }
+
+  private resolveTurnCompletion(
+    active: ActiveTurn,
+    turnId: string,
+    status: CodexConversationTurnStatus,
+    providerError: SubscriptionTransportDiagnosticError["providerError"] | undefined,
+  ): void {
     const result: CodexConversationTurnResult = {
-      threadId,
+      threadId: active.threadId,
       turnId,
       status,
+      ...(status === "completed" && active.latestTokenUsage
+        ? { tokenUsage: active.latestTokenUsage }
+        : {}),
       ...(providerError ? { providerError } : {}),
     };
     this.resolveActiveTurn(active, result);
@@ -1462,6 +1623,8 @@ export class CodexConversationRuntime {
   private resolveActiveTurn(active: ActiveTurn, result: CodexConversationTurnResult): void {
     if (active.settled) return;
     active.settled = true;
+    active.pendingTokenUsageByTurnId.clear();
+    active.pendingCompletionByTurnId.clear();
     void this.discardStagedImages(active.attachmentPaths);
     if (this.activeTurn === active) this.activeTurn = null;
     active.resolveCompletion(result);
@@ -1471,6 +1634,8 @@ export class CodexConversationRuntime {
   private rejectActiveTurn(active: ActiveTurn, error: Error): void {
     if (active.settled) return;
     active.settled = true;
+    active.pendingTokenUsageByTurnId.clear();
+    active.pendingCompletionByTurnId.clear();
     void this.discardStagedImages(active.attachmentPaths);
     if (this.activeTurn === active) this.activeTurn = null;
     active.rejectTurnId(error);

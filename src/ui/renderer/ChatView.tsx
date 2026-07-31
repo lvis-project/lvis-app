@@ -422,6 +422,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           ...(e.vendorProvider !== undefined ? { vendorProvider: e.vendorProvider } : {}),
           ...(e.vendorModel !== undefined ? { vendorModel: e.vendorModel } : {}),
           ...(e.usageByModel !== undefined ? { usageByModel: e.usageByModel } : {}),
+          ...(e.subscriptionUsage !== undefined ? { subscriptionUsage: e.subscriptionUsage } : {}),
         });
       }
     }

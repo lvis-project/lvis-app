@@ -12,6 +12,7 @@ import {
   type ModelPricing,
 } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
+import type { SubscriptionUsageTelemetry } from "../../../shared/subscription-runtime.js";
 
 export interface TokenCostBadgePricing {
   inputPer1M: number;
@@ -58,6 +59,11 @@ export interface TokenCostBadgeProps {
       cacheWriteTokens?: number;
     };
   }>;
+  /**
+   * Non-billable subscription usage. When present this takes precedence over
+   * API-key pricing inputs and is rendered as a token-only provenance badge.
+   */
+  subscriptionUsage?: readonly SubscriptionUsageTelemetry[];
 }
 
 function formatTokens(n: number): string {
@@ -74,6 +80,16 @@ function formatCost(c: number): string {
   return `$${c.toFixed(2)}`;
 }
 
+function sumSubscriptionTokens(
+  segments: readonly SubscriptionUsageTelemetry[],
+  field: "totalTokens",
+): number {
+  return segments.reduce(
+    (total, segment) => Math.min(Number.MAX_SAFE_INTEGER, total + segment[field]),
+    0,
+  );
+}
+
 function TokenCostBadgeImpl({
   tokensIn,
   freshInputTokens,
@@ -83,11 +99,64 @@ function TokenCostBadgeImpl({
   pricing,
   vendor,
   usageByModel,
+  subscriptionUsage,
 }: TokenCostBadgeProps) {
   // Default = tokens. 사용자 요청: 청구액보다 토큰 수치가 더 직관적.
   // 클릭으로 cost 토글 가능 (pricing 이 있을 때만).
   const { t } = useTranslation();
   const [mode, setMode] = useState<"tokens" | "cost">("tokens");
+  const hasSubscriptionUsage = (subscriptionUsage?.length ?? 0) > 0;
+
+  // Subscription telemetry has no per-call price. Keep it entirely out of
+  // the API-key pricing branch: even a caller accidentally providing a vendor
+  // or pricing table cannot make it look like a zero-dollar API request.
+  if (hasSubscriptionUsage && subscriptionUsage) {
+    const totalTokens = sumSubscriptionTokens(subscriptionUsage, "totalTokens");
+    if (totalTokens === 0) return null;
+    const hasReportedUsage = subscriptionUsage.some(
+      (usage) => usage.source === "provider-reported",
+    );
+    const hasEstimatedUsage = subscriptionUsage.some(
+      (usage) => usage.source === "local-estimate",
+    );
+    const sourceBadgeLabels = [
+      ...(hasReportedUsage ? [t("tokenCostBadge.subscriptionReportedBadge")] : []),
+      ...(hasEstimatedUsage ? [t("tokenCostBadge.subscriptionEstimatedBadge")] : []),
+    ];
+    const sourceDetailLabels = [
+      ...(hasReportedUsage ? [t("tokenCostBadge.subscriptionReportedLabel")] : []),
+      ...(hasEstimatedUsage ? [t("tokenCostBadge.subscriptionEstimatedLabel")] : []),
+    ];
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            data-testid="token-cost-badge"
+            data-usage-kind="subscription"
+            className="inline-flex items-center gap-1 rounded border border-border/(--opacity-medium) bg-muted/(--opacity-muted) px-1.5 py-0.5 text-[10px] tabular-nums"
+            aria-label={t("tokenCostBadge.ariaLabelSubscriptionUsage")}
+          >
+            <span>🪙 {formatTokens(totalTokens)}</span>
+            <span className="text-muted-foreground">{sourceBadgeLabels.join(" · ")}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs tabular-nums">
+          <div className="text-[10px] uppercase tracking-wider opacity-60 mb-1">
+            {t("tokenCostBadge.breakdownTitle")}
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>{sourceDetailLabels.join(" · ")}</span>
+            <span>{totalTokens.toLocaleString()}</span>
+          </div>
+          <div className="mt-1 border-t border-border/(--opacity-medium) pt-1 font-semibold text-muted-foreground">
+            {t("tokenCostBadge.subscriptionPricingUnavailableLabel")}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
   const headlineTokens = freshInputTokens + tokensOut;
   if (headlineTokens === 0 && tokensIn === 0) return null;
 

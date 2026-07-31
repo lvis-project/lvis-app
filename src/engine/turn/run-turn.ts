@@ -32,6 +32,7 @@ import { createLogger } from "../../lib/logger.js";
 import type { A2AAgentCausalContext } from "../a2a-agent-message-envelope.js";
 import { createRequestAnchor } from "../../tools/pipeline/rationale-control.js";
 import { providerMatchesActiveChatRuntime } from "./provider.js";
+import { aggregateSubscriptionUsage } from "./subscription-usage-telemetry.js";
 
 const log = createLogger("lvis");
 
@@ -39,6 +40,7 @@ function commitsHostInjectedMessages(stopReason: TurnStopReason | undefined,
 ): boolean {
   return stopReason === "end_turn" || stopReason === "input-required";
 }
+
 
 export async function runTurn(
   self: LoopContext,
@@ -536,6 +538,9 @@ export async function runTurn(
         })),
         toolExposure: postTurnToolExposure,
         route: subscriptionAuditRoute ?? routeResult.route,
+        ...(isSubscriptionRuntime && result.subscriptionUsage.length > 0
+          ? { subscriptionUsage: result.subscriptionUsage }
+          : {}),
         ...(!isSubscriptionRuntime
           ? {
               tokenUsage: result.usage,
@@ -631,6 +636,9 @@ export async function runTurn(
         })),
         tokenUsage: auditTokenUsage,
         usageByModel: auditUsageByModel,
+        ...(isSubscriptionRuntime && result.subscriptionUsage.length > 0
+          ? { subscriptionUsage: result.subscriptionUsage }
+          : {}),
         toolExposure: postTurnToolExposure,
         route: auditRoute,
       });
@@ -663,6 +671,8 @@ export async function runTurn(
       result.text.trim().length > 0;
     const billableTurnUsage = isSubscriptionRuntime ? undefined : result.usage;
     const billableUsageByModel = isSubscriptionRuntime ? [] : result.usageByModel;
+    const subscriptionTurnUsage = isSubscriptionRuntime ? result.subscriptionUsage : [];
+    const subscriptionTotals = aggregateSubscriptionUsage(subscriptionTurnUsage);
     log.info(
       `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${billableTurnUsage ? `in=${billableTurnUsage.inputTokens} out=${billableTurnUsage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
     );
@@ -693,13 +703,16 @@ export async function runTurn(
       });
       self.lastContextInputTokens = turnTokensIn;
       self.lastContextInputProjectionTokens = postTurnProjection.totalTokens;
-      turnTokensOut = billableTurnUsage?.outputTokens ?? 0;
-      const turnCacheRead = billableTurnUsage?.cacheReadTokens ?? 0;
-      const turnCacheWrite = billableTurnUsage?.cacheWriteTokens ?? 0;
-      const turnFreshInput = Math.max(
-        0,
-        (billableTurnUsage?.inputTokens ?? 0) - turnCacheRead - turnCacheWrite,
-      );
+      turnTokensOut = billableTurnUsage?.outputTokens
+        ?? (subscriptionTotals.outputTokens + subscriptionTotals.reasoningOutputTokens);
+      const turnCacheRead = billableTurnUsage?.cacheReadTokens ?? subscriptionTotals.cacheReadTokens;
+      const turnCacheWrite = billableTurnUsage?.cacheWriteTokens ?? subscriptionTotals.cacheWriteTokens;
+      const turnFreshInput = isSubscriptionRuntime
+        ? subscriptionTotals.inputTokens
+        : Math.max(
+          0,
+          (billableTurnUsage?.inputTokens ?? 0) - turnCacheRead - turnCacheWrite,
+        );
       const breakdown =
         turnToolBreakdown.size > 0
           ? Object.fromEntries(turnToolBreakdown.entries())
@@ -730,6 +743,9 @@ export async function runTurn(
           : {}),
         ...(billableUsageByModel.length > 0
           ? { usageByModel: billableUsageByModel }
+          : {}),
+        ...(subscriptionTurnUsage.length > 0
+          ? { subscriptionUsage: subscriptionTurnUsage }
           : {}),
         ...(breakdown ? { breakdown } : {}),
       };

@@ -228,7 +228,7 @@ export async function runStreamedTurn(
           ...(compactStatus !== undefined ? { compactStatus } : {}),
           ...(truncatedDir !== undefined ? { truncatedDir } : {}),
         }),
-      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, vendorProvider, vendorModel, usageByModel, breakdown }) =>
+      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, vendorProvider, vendorModel, usageByModel, subscriptionUsage, breakdown }) =>
         send({
           type: "turn_summary",
           turnDurationMs,
@@ -242,6 +242,7 @@ export async function runStreamedTurn(
           vendorProvider,
           vendorModel,
           ...(usageByModel !== undefined ? { usageByModel } : {}),
+          ...(subscriptionUsage !== undefined ? { subscriptionUsage } : {}),
           ...(breakdown ? { breakdown } : {}),
         }),
       onLlmStatus: (status) => send({ type: "llm_status", ...status }),

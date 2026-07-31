@@ -13,7 +13,11 @@ import {
 } from "../llm/provider-error-diagnostics.js";
 import { t } from "../../i18n/index.js";
 import { isValidToolUseId } from "../../shared/tool-use-id.js";
-import type { ActiveChatRuntime } from "../../shared/subscription-runtime.js";
+import {
+  normalizeSubscriptionUsageTelemetry,
+  type ActiveChatRuntime,
+  type SubscriptionUsageTelemetry,
+} from "../../shared/subscription-runtime.js";
 import { providerMatchesActiveChatRuntime } from "./provider.js";
 
 export interface StreamCollectParams {
@@ -59,6 +63,8 @@ export type StreamCollectResult =
       toolCalls: ToolCallBlock[];
       stopReason: "end_turn" | "tool_use" | "max_tokens";
       usage?: TokenUsage;
+      /** Non-billable subscription telemetry for this completed remote round. */
+      subscriptionUsage?: SubscriptionUsageTelemetry;
     }
 
   | { kind: "interrupted"; text: string }
@@ -121,6 +127,7 @@ export async function collectRoundStream(
   const toolCallIds = new Set<string>();
   let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
   let usage: TokenUsage | undefined;
+  let subscriptionUsage: SubscriptionUsageTelemetry | undefined;
   let sawMessageComplete = false;
 
 
@@ -189,6 +196,9 @@ export async function collectRoundStream(
             thinkingBlocks = event.thinkingBlocks;
           }
           if (event.usage) usage = event.usage;
+          if (event.subscriptionUsage) {
+            subscriptionUsage = normalizeSubscriptionUsageTelemetry(event.subscriptionUsage);
+          }
           break;
         case "error": {
           if (abortSignal?.aborted) return { kind: "interrupted", text };
@@ -261,5 +271,6 @@ export async function collectRoundStream(
     toolCalls,
     stopReason,
     usage,
+    ...(subscriptionUsage ? { subscriptionUsage } : {}),
   };
 }

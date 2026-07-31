@@ -18,7 +18,10 @@ import {
   type ProviderErrorDiagnostics,
 } from "../engine/llm/provider-error-diagnostics.js";
 import { rejectedToolNameFromError } from "../engine/llm/rejected-tool-schema.js";
-import type { SubscriptionChatRuntimeSelection } from "../shared/subscription-runtime.js";
+import {
+  normalizeSubscriptionUsageTelemetry,
+  type SubscriptionChatRuntimeSelection,
+} from "../shared/subscription-runtime.js";
 import { MAX_ACP_SUBSCRIPTION_TEXT_WITH_IMAGES_BYTES } from "./acp-subscription-session-client.js";
 import {
   getSubscriptionRuntimeService,
@@ -467,9 +470,17 @@ export class SubscriptionLlmProvider implements LLMProvider {
           return;
         }
         if (event.type === "message_complete") {
-          // Subscription transports do not provide billable API-key usage.
-          // Preserve the engine stop reason but never invent cost data.
-          yield { type: "message_complete", stopReason: event.stopReason };
+          // Subscription transports never expose API-key billing `usage`.
+          // The separate, validated telemetry retains token provenance without
+          // allowing the API pricing path to observe it.
+          const subscriptionUsage = event.subscriptionUsage
+            ? normalizeSubscriptionUsageTelemetry(event.subscriptionUsage)
+            : undefined;
+          yield {
+            type: "message_complete",
+            stopReason: event.stopReason,
+            ...(subscriptionUsage ? { subscriptionUsage } : {}),
+          };
           continue;
         }
         yield event;
