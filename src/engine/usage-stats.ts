@@ -4,7 +4,7 @@
  * Parses audit-logger JSONL files (~/.lvis/audit/YYYY-MM-DD.jsonl) and
  * produces token + cost summaries for the Usage Dashboard.
  */
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { iterateJsonlLines, withAuditSnapshotLock } from "../audit/jsonl-reader.js";
 import { kstDateKey, kstMonthStartKey, kstWeekStartKey, shiftKstDateKey } from "../shared/kst-date.js";
@@ -250,6 +250,24 @@ interface UsageAuditFile {
   archiveOrder: string;
 }
 
+interface UsageAuditFileManifest {
+  name: string;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+}
+
+interface UsageAuditFileSnapshot {
+  file: UsageAuditFile;
+  manifest: UsageAuditFileManifest;
+}
+
+interface UsageAuditSnapshot {
+  files: UsageAuditFile[];
+  manifest: UsageAuditFileManifest[];
+  complete: boolean;
+}
+
 const RAW_USAGE_AUDIT_FILE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/;
 const LEGACY_USAGE_AUDIT_ARCHIVE = /^(\d{4}-\d{2}-\d{2})\.jsonl\.(\d{8})\.gz$/;
 const UNIQUE_USAGE_AUDIT_ARCHIVE = /^(\d{4}-\d{2}-\d{2})\.jsonl\.(\d{17})\.[0-9a-f-]{36}\.gz$/i;
@@ -267,12 +285,12 @@ function parseUsageAuditFile(name: string): UsageAuditFile | undefined {
   return undefined;
 }
 
-async function listUsageAuditFiles(auditDir: string): Promise<UsageAuditFile[]> {
+async function tryListUsageAuditFiles(auditDir: string): Promise<UsageAuditFile[] | undefined> {
   let names: string[];
   try {
     names = await readdir(auditDir);
   } catch {
-    return [];
+    return undefined;
   }
   return names
     .map(parseUsageAuditFile)
@@ -284,6 +302,91 @@ async function listUsageAuditFiles(auditDir: string): Promise<UsageAuditFile[]> 
     ));
 }
 
+async function listUsageAuditFiles(auditDir: string): Promise<UsageAuditFile[]> {
+  return (await tryListUsageAuditFiles(auditDir)) ?? [];
+}
+
+async function snapshotUsageAuditFiles(
+  auditDir: string,
+  matchesFile: (file: UsageAuditFile) => boolean,
+): Promise<UsageAuditSnapshot> {
+  const listed = await tryListUsageAuditFiles(auditDir);
+  if (!listed) return { files: [], manifest: [], complete: false };
+  const files = listed.filter(matchesFile);
+  const snapshots: Array<UsageAuditFileSnapshot | undefined> = await Promise.all(
+    files.map(async (file) => {
+      try {
+        const metadata = await stat(join(auditDir, file.name));
+        if (!metadata.isFile()) return undefined;
+        return {
+          file,
+          manifest: {
+            name: file.name,
+            size: metadata.size,
+            mtimeMs: metadata.mtimeMs,
+            ctimeMs: metadata.ctimeMs,
+          },
+        };
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  const present = snapshots.filter((snapshot): snapshot is UsageAuditFileSnapshot => (
+    snapshot !== undefined
+  ));
+  return {
+    files,
+    manifest: present.map((snapshot) => snapshot.manifest),
+    complete: present.length === files.length,
+  };
+}
+
+interface UsageAuditEntryRead {
+  entries: AuditTurnEntry[];
+  complete: boolean;
+}
+
+async function readUsageAuditEntriesWithStatus(
+  auditDir: string,
+  files: readonly UsageAuditFile[],
+  matchesEntry: (entry: AuditTurnEntry) => boolean = () => true,
+): Promise<UsageAuditEntryRead> {
+  const entries: AuditTurnEntry[] = [];
+  let complete = true;
+
+  for (const file of files) {
+    // Only commit a file's rows after its stream completes. A corrupted gzip can
+    // yield valid prefix rows before failing, which must not become partial usage.
+    const rows: AuditTurnEntry[] = [];
+    try {
+      for await (const line of iterateJsonlLines(join(auditDir, file.name))) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line) as AuditTurnEntry;
+          if (entry.type === "turn" && matchesEntry(entry)) rows.push(entry);
+        } catch {
+          // Skip malformed rows while retaining valid records in this file.
+        }
+      }
+      entries.push(...rows);
+    } catch {
+      // A bad or disappearing file must not hide usage from other audit files.
+      complete = false;
+    }
+  }
+
+  return { entries, complete };
+}
+
+async function readUsageAuditEntriesFromFiles(
+  auditDir: string,
+  files: readonly UsageAuditFile[],
+  matchesEntry: (entry: AuditTurnEntry) => boolean = () => true,
+): Promise<AuditTurnEntry[]> {
+  return (await readUsageAuditEntriesWithStatus(auditDir, files, matchesEntry)).entries;
+}
+
 async function readUsageAuditEntries(
   auditDir: string,
   matchesFile: (file: UsageAuditFile) => boolean,
@@ -293,29 +396,7 @@ async function readUsageAuditEntries(
     auditDir,
     async () => {
       const files = (await listUsageAuditFiles(auditDir)).filter(matchesFile);
-      const out: AuditTurnEntry[] = [];
-
-      for (const file of files) {
-        // Only commit a file's rows after its stream completes. A corrupted gzip can
-        // yield valid prefix rows before failing, which must not become partial usage.
-        const rows: AuditTurnEntry[] = [];
-        try {
-          for await (const line of iterateJsonlLines(join(auditDir, file.name))) {
-            if (!line.trim()) continue;
-            try {
-              const entry = JSON.parse(line) as AuditTurnEntry;
-              if (entry.type === "turn" && matchesEntry(entry)) rows.push(entry);
-            } catch {
-              // Skip malformed rows while retaining valid records in this file.
-            }
-          }
-          out.push(...rows);
-        } catch {
-          // A bad or disappearing file must not hide usage from other audit files.
-        }
-      }
-
-      return out;
+      return readUsageAuditEntriesFromFiles(auditDir, files, matchesEntry);
     },
   );
 }
@@ -495,6 +576,238 @@ export function computeUsageSummary(
   };
 }
 
+const DEFAULT_USAGE_SUMMARY_CACHE_ENTRIES = 24;
+
+type CachedUsageSummary = Omit<UsageSummary, "generatedAt">;
+
+interface UsageSummaryCacheLoad {
+  summary: UsageSummary;
+  /** Do not retain a summary if the audit snapshot changed while it was read. */
+  cacheable: boolean;
+  /** Retry only when the audit revision moved while this request was reading. */
+  retryable?: boolean;
+}
+
+export interface UsageSummaryCache {
+  get(key: string, now: Date): UsageSummary | undefined;
+  store(key: string, summary: UsageSummary, now: Date): UsageSummary;
+  getOrCompute(params: {
+    key: string;
+    now: Date;
+    compute: () => Promise<UsageSummaryCacheLoad>;
+  }): Promise<UsageSummary>;
+}
+
+function toCachedUsageSummary(summary: UsageSummary): CachedUsageSummary {
+  const { generatedAt: _generatedAt, ...payload } = summary;
+  return structuredClone(payload);
+}
+
+function cloneCachedUsageSummary(
+  summary: CachedUsageSummary,
+  now: Date,
+): UsageSummary {
+  return {
+    ...structuredClone(summary),
+    generatedAt: now.toISOString(),
+  };
+}
+
+/**
+ * A bounded LRU for immutable usage aggregates. The caller owns the revision
+ * key so audit mutations, calendar boundaries, and price changes never reuse
+ * a stale summary.
+ */
+export function createUsageSummaryCache(
+  options: { maxEntries?: number } = {},
+): UsageSummaryCache {
+  const maxEntries = options.maxEntries ?? DEFAULT_USAGE_SUMMARY_CACHE_ENTRIES;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    throw new RangeError("Usage summary cache maxEntries must be a positive integer");
+  }
+
+  const entries = new Map<string, CachedUsageSummary>();
+  const get = (key: string, now: Date): UsageSummary | undefined => {
+    const cached = entries.get(key);
+    if (!cached) return undefined;
+    // Moving the hit to the back preserves least-recently-used eviction.
+    entries.delete(key);
+    entries.set(key, cached);
+    return cloneCachedUsageSummary(cached, now);
+  };
+  const store = (
+    key: string,
+    summary: UsageSummary,
+    now: Date,
+  ): UsageSummary => {
+    const cachedSummary = toCachedUsageSummary(summary);
+    entries.set(key, cachedSummary);
+    while (entries.size > maxEntries) {
+      const leastRecentlyUsed = entries.keys().next().value;
+      if (leastRecentlyUsed === undefined) break;
+      entries.delete(leastRecentlyUsed);
+    }
+    // Return a clone so callers cannot mutate the value we retained.
+    return cloneCachedUsageSummary(cachedSummary, now);
+  };
+
+  return {
+    get,
+    store,
+    async getOrCompute({ key, now, compute }): Promise<UsageSummary> {
+      const cached = get(key, now);
+      if (cached) return cached;
+
+      const loaded = await compute();
+      if (loaded.cacheable) return store(key, loaded.summary, now);
+      return cloneCachedUsageSummary(
+        toCachedUsageSummary(loaded.summary),
+        now,
+      );
+    },
+  };
+}
+
+const usageSummaryCache = createUsageSummaryCache();
+
+type UsageSummaryCacheQuery =
+  | { kind: "range"; dateFrom: string; dateTo: string }
+  | { kind: "rolling"; days: number };
+
+function createUsageSummaryCacheKey(params: {
+  auditDir: string;
+  query: UsageSummaryCacheQuery;
+  now: Date;
+  manifest: readonly UsageAuditFileManifest[];
+}): string {
+  return JSON.stringify({
+    version: 1,
+    auditDir: params.auditDir,
+    query: params.query,
+    kstDate: kstDateKey(params.now),
+    pricingOverride: process.env.LVIS_PRICING_OVERRIDE ?? null,
+    manifest: params.manifest,
+  });
+}
+
+function manifestsMatch(
+  left: readonly UsageAuditFileManifest[],
+  right: readonly UsageAuditFileManifest[],
+): boolean {
+  return left.length === right.length && left.every((file, index) => {
+    const other = right[index];
+    return (
+      file.name === other.name
+      && file.size === other.size
+      && file.mtimeMs === other.mtimeMs
+      && file.ctimeMs === other.ctimeMs
+    );
+  });
+}
+
+interface CachedUsageSummaryRequest {
+  auditDir: string;
+  query: UsageSummaryCacheQuery;
+  now: Date;
+  matchesFile: (file: UsageAuditFile) => boolean;
+  matchesEntry: (entry: AuditTurnEntry) => boolean;
+}
+
+async function loadUsageSummaryFromSnapshot(
+  request: CachedUsageSummaryRequest,
+  before: UsageAuditSnapshot,
+): Promise<UsageSummaryCacheLoad> {
+  const read = await readUsageAuditEntriesWithStatus(
+    request.auditDir,
+    before.files,
+    request.matchesEntry,
+  );
+  const after = await snapshotUsageAuditFiles(
+    request.auditDir,
+    request.matchesFile,
+  );
+  const manifestStable = (
+    before.complete
+    && after.complete
+    && manifestsMatch(before.manifest, after.manifest)
+  );
+  return {
+    summary: computeUsageSummary(read.entries, request.now),
+    cacheable: manifestStable && read.complete,
+    // A stable corrupt or unreadable file must stay uncached, but retrying it
+    // immediately only repeats the same failed stream work.
+    retryable: !manifestStable,
+  };
+}
+
+async function getCachedUsageSummary(
+  request: CachedUsageSummaryRequest,
+): Promise<UsageSummary> {
+  return withAuditSnapshotLock(
+    request.auditDir,
+    async () => {
+      // Rotation shares this lock. Active appends use per-file locks, so a
+      // cache hit validates the manifest again before it can be returned.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const before = await snapshotUsageAuditFiles(
+          request.auditDir,
+          request.matchesFile,
+        );
+        const compute = () => loadUsageSummaryFromSnapshot(request, before);
+
+        if (!before.complete) {
+          const loaded = await compute();
+          return cloneCachedUsageSummary(
+            toCachedUsageSummary(loaded.summary),
+            request.now,
+          );
+        }
+
+        const key = createUsageSummaryCacheKey({
+          auditDir: request.auditDir,
+          query: request.query,
+          now: request.now,
+          manifest: before.manifest,
+        });
+        const cached = usageSummaryCache.get(key, request.now);
+        if (cached) {
+          const after = await snapshotUsageAuditFiles(
+            request.auditDir,
+            request.matchesFile,
+          );
+          if (after.complete && manifestsMatch(before.manifest, after.manifest)) {
+            return cached;
+          }
+          continue;
+        }
+
+        const loaded = await compute();
+        if (loaded.cacheable) {
+          return usageSummaryCache.store(key, loaded.summary, request.now);
+        }
+        if (!loaded.retryable) {
+          return cloneCachedUsageSummary(
+            toCachedUsageSummary(loaded.summary),
+            request.now,
+          );
+        }
+      }
+
+      // A continuously-appending file should still return a fresh best-effort
+      // view, but it must not leave an unstable revision in the cache.
+      const before = await snapshotUsageAuditFiles(
+        request.auditDir,
+        request.matchesFile,
+      );
+      const loaded = await loadUsageSummaryFromSnapshot(request, before);
+      return cloneCachedUsageSummary(
+        toCachedUsageSummary(loaded.summary),
+        request.now,
+      );
+    },
+  );
+}
+
 export interface UsageRangeOptions {
   dateFrom: string; // YYYY-MM-DD inclusive
   dateTo: string;   // YYYY-MM-DD inclusive
@@ -509,22 +822,27 @@ export async function getUsageRange(
   now: Date = new Date(),
 ): Promise<UsageSummary> {
   const auditDir = join(lvisHome(), "audit");
-  const entries = await readUsageAuditEntries(
+  const fileDateFrom = shiftKstDateKey(opts.dateFrom, -1);
+  const fileDateTo = shiftKstDateKey(opts.dateTo, 1);
+
+  return getCachedUsageSummary({
     auditDir,
-    (file) => (
-      file.date >= shiftKstDateKey(opts.dateFrom, -1)
-      && file.date <= shiftKstDateKey(opts.dateTo, 1)
+    query: {
+      kind: "range",
+      dateFrom: opts.dateFrom,
+      dateTo: opts.dateTo,
+    },
+    now,
+    matchesFile: (file) => (
+      file.date >= fileDateFrom && file.date <= fileDateTo
     ),
-  );
-
-  const filtered = entries.filter((entry) => {
-    const timestamp = new Date(entry.timestamp);
-    if (Number.isNaN(timestamp.getTime())) return false;
-    const date = kstDateKey(timestamp);
-    return date >= opts.dateFrom && date <= opts.dateTo;
+    matchesEntry: (entry) => {
+      const timestamp = new Date(entry.timestamp);
+      if (Number.isNaN(timestamp.getTime())) return false;
+      const date = kstDateKey(timestamp);
+      return date >= opts.dateFrom && date <= opts.dateTo;
+    },
   });
-
-  return computeUsageSummary(filtered, now);
 }
 
 /**
@@ -544,6 +862,17 @@ export async function getUsageSummary(
   now: Date = new Date(),
 ): Promise<UsageSummary> {
   const auditDir = join(lvisHome(), "audit");
-  const entries = await readAuditEntries(auditDir, days, now);
-  return computeUsageSummary(entries, now);
+  const cutoffDateKey = shiftKstDateKey(kstDateKey(now), -days);
+  const cutoffFileKey = shiftKstDateKey(cutoffDateKey, -1);
+
+  return getCachedUsageSummary({
+    auditDir,
+    query: { kind: "rolling", days },
+    now,
+    matchesFile: (file) => file.date >= cutoffFileKey,
+    matchesEntry: (entry) => {
+      const timestamp = new Date(entry.timestamp);
+      return !Number.isNaN(timestamp.getTime()) && kstDateKey(timestamp) >= cutoffDateKey;
+    },
+  });
 }
