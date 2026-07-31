@@ -151,6 +151,32 @@ describe("AuditLogger ordered async writer", () => {
     });
   });
 
+  it("rolls plain telemetry channels at the UTC day boundary", async () => {
+    let now = new Date("2026-07-03T23:59:59.000Z");
+    const logger = new AuditLogger(auditDir, { now: () => now });
+    logger.log({ ...entry(1), timestamp: now.toISOString() });
+    logger.logShadow({ ...entry(1), timestamp: now.toISOString() });
+    logger.logSandboxGate({ platform: process.platform, onSignal: "off", outcome: "skip" });
+    await logger.flush();
+
+    now = new Date("2026-07-04T00:00:01.000Z");
+    logger.log({ ...entry(2), timestamp: now.toISOString() });
+    logger.logShadow({ ...entry(2), timestamp: now.toISOString() });
+    logger.logSandboxGate({ platform: process.platform, onSignal: "off", outcome: "skip" });
+    await logger.flush();
+
+    const firstDay = "2026-07-03";
+    const secondDay = "2026-07-04";
+    expect(readFileSync(join(auditDir, `${firstDay}.jsonl`), "utf-8")).toContain('"input":"1"');
+    expect(readFileSync(join(auditDir, `${secondDay}.jsonl`), "utf-8")).toContain('"input":"2"');
+    expect(readFileSync(join(auditDir, `${firstDay}.permission-shadow.jsonl`), "utf-8")).toContain('"input":"1"');
+    expect(readFileSync(join(auditDir, `${secondDay}.permission-shadow.jsonl`), "utf-8")).toContain('"input":"2"');
+    expect(readFileSync(join(auditDir, `${firstDay}.sandbox-gate.jsonl`), "utf-8")).toContain(firstDay);
+    expect(readFileSync(join(auditDir, `${secondDay}.sandbox-gate.jsonl`), "utf-8")).toContain(now.toISOString());
+    expect(logger.getPermissionShadowLogFile()).toBe(join(auditDir, `${secondDay}.permission-shadow.jsonl`));
+    expect(logger.getSandboxGateLogFile()).toBe(join(auditDir, `${secondDay}.sandbox-gate.jsonl`));
+  });
+
   it("creates the telemetry file with user-only permissions", async () => {
     const logger = new AuditLogger(auditDir);
     logger.log(entry(1));
