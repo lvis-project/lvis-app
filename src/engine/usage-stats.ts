@@ -4,11 +4,13 @@
  * Parses audit-logger JSONL files (~/.lvis/audit/YYYY-MM-DD.jsonl) and
  * produces token + cost summaries for the Usage Dashboard.
  */
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { iterateJsonlLines, withAuditSnapshotLock } from "../audit/jsonl-reader.js";
+import { kstDateKey, kstMonthStartKey, kstWeekStartKey, shiftKstDateKey } from "../shared/kst-date.js";
+import { lvisHome } from "../shared/lvis-home.js";
 import { isLLMVendor, type LLMVendor } from "./llm/types.js";
 import { getBillableModelPricing, computeCost, normalizeAiSdkUsageForCost } from "./llm/pricing.js";
-import { lvisHome } from "../shared/lvis-home.js";
 
 export interface AuditTurnEntry {
   timestamp: string;
@@ -150,69 +152,100 @@ function addTo(
   if (!costKnown) target.unknownCostTurns = (target.unknownCostTurns ?? 0) + 1;
 }
 
-const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-
-function dateKey(d: Date): string {
-  return new Date(d.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
+interface UsageAuditFile {
+  name: string;
+  date: string;
+  archiveOrder: string;
 }
 
-function shiftDateKey(key: string, days: number): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
-  if (!match) return key;
-  const shifted = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days));
-  return shifted.toISOString().slice(0, 10);
+const RAW_USAGE_AUDIT_FILE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/;
+const LEGACY_USAGE_AUDIT_ARCHIVE = /^(\d{4}-\d{2}-\d{2})\.jsonl\.(\d{8})\.gz$/;
+const UNIQUE_USAGE_AUDIT_ARCHIVE = /^(\d{4}-\d{2}-\d{2})\.jsonl\.(\d{17})\.[0-9a-f-]{36}\.gz$/i;
+
+function parseUsageAuditFile(name: string): UsageAuditFile | undefined {
+  const raw = RAW_USAGE_AUDIT_FILE.exec(name);
+  if (raw) return { name, date: raw[1], archiveOrder: "~" };
+
+  const legacy = LEGACY_USAGE_AUDIT_ARCHIVE.exec(name);
+  if (legacy) return { name, date: legacy[1], archiveOrder: `${legacy[2]}000000000` };
+
+  const unique = UNIQUE_USAGE_AUDIT_ARCHIVE.exec(name);
+  if (unique) return { name, date: unique[1], archiveOrder: unique[2] };
+
+  return undefined;
 }
 
-/** KST-local week starts Monday. */
-function weekStartKey(d: Date): string {
-  const x = new Date(d.getTime() + KST_OFFSET_MS);
-  x.setUTCHours(0, 0, 0, 0);
-  const day = x.getUTCDay(); // 0 Sun .. 6 Sat in KST civil date
-  const diff = (day === 0 ? 6 : day - 1);
-  x.setUTCDate(x.getUTCDate() - diff);
-  return x.toISOString().slice(0, 10);
+async function listUsageAuditFiles(auditDir: string): Promise<UsageAuditFile[]> {
+  let names: string[];
+  try {
+    names = await readdir(auditDir);
+  } catch {
+    return [];
+  }
+  return names
+    .map(parseUsageAuditFile)
+    .filter((file): file is UsageAuditFile => file !== undefined)
+    .sort((a, b) => (
+      a.date.localeCompare(b.date)
+      || a.archiveOrder.localeCompare(b.archiveOrder)
+      || a.name.localeCompare(b.name)
+    ));
 }
 
-function monthStartKey(d: Date): string {
-  const x = new Date(d.getTime() + KST_OFFSET_MS);
-  return `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, "0")}-01`;
+async function readUsageAuditEntries(
+  auditDir: string,
+  matchesFile: (file: UsageAuditFile) => boolean,
+  matchesEntry: (entry: AuditTurnEntry) => boolean = () => true,
+): Promise<AuditTurnEntry[]> {
+  return withAuditSnapshotLock(
+    auditDir,
+    async () => {
+      const files = (await listUsageAuditFiles(auditDir)).filter(matchesFile);
+      const out: AuditTurnEntry[] = [];
+
+      for (const file of files) {
+        // Only commit a file's rows after its stream completes. A corrupted gzip can
+        // yield valid prefix rows before failing, which must not become partial usage.
+        const rows: AuditTurnEntry[] = [];
+        try {
+          for await (const line of iterateJsonlLines(join(auditDir, file.name))) {
+            if (!line.trim()) continue;
+            try {
+              const entry = JSON.parse(line) as AuditTurnEntry;
+              if (entry.type === "turn" && matchesEntry(entry)) rows.push(entry);
+            } catch {
+              // Skip malformed rows while retaining valid records in this file.
+            }
+          }
+          out.push(...rows);
+        } catch {
+          // A bad or disappearing file must not hide usage from other audit files.
+        }
+      }
+
+      return out;
+    },
+  );
 }
 
 /**
  * Read audit JSONL entries from ~/.lvis/audit for the last `days` days.
  */
-export function readAuditEntries(auditDir: string, days: number = 60): AuditTurnEntry[] {
-  if (!existsSync(auditDir)) return [];
-  const cutoff = new Date();
-  cutoff.setUTCDate(cutoff.getUTCDate() - days);
-  const cutoffDateKey = dateKey(cutoff);
-  const cutoffFileKey = shiftDateKey(cutoffDateKey, -1);
-
-  const files = readdirSync(auditDir)
-    .filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
-    .filter((f) => f.slice(0, 10) >= cutoffFileKey)
-    .sort();
-
-  const out: AuditTurnEntry[] = [];
-  for (const file of files) {
-    let text: string;
-    try {
-      text = readFileSync(join(auditDir, file), "utf-8");
-    } catch {
-      continue;
-    }
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const entry = JSON.parse(line) as AuditTurnEntry;
-        const ts = new Date(entry.timestamp);
-        if (entry.type === "turn" && !Number.isNaN(ts.getTime()) && dateKey(ts) >= cutoffDateKey) out.push(entry);
-      } catch {
-        // skip malformed
-      }
-    }
-  }
-  return out;
+export async function readAuditEntries(
+  auditDir: string,
+  days: number = 60,
+  now: Date = new Date(),
+): Promise<AuditTurnEntry[]> {
+  const cutoffDateKey = shiftKstDateKey(kstDateKey(now), -days);
+  const cutoffFileKey = shiftKstDateKey(cutoffDateKey, -1);
+  return readUsageAuditEntries(
+    auditDir,
+    (file) => file.date >= cutoffFileKey,
+    (entry) => {
+      const timestamp = new Date(entry.timestamp);
+      return !Number.isNaN(timestamp.getTime()) && kstDateKey(timestamp) >= cutoffDateKey;
+    },
+  );
 }
 
 /**
@@ -222,9 +255,9 @@ export function computeUsageSummary(
   entries: AuditTurnEntry[],
   now: Date = new Date(),
 ): UsageSummary {
-  const todayKey = dateKey(now);
-  const weekKey = weekStartKey(now);
-  const monthKey = monthStartKey(now);
+  const todayKey = kstDateKey(now);
+  const weekKey = kstWeekStartKey(now);
+  const monthKey = kstMonthStartKey(now);
 
   const today = emptyTotals();
   const thisWeek = emptyTotals();
@@ -240,7 +273,7 @@ export function computeUsageSummary(
     if (segments.length === 0) continue;
     const ts = new Date(e.timestamp);
     if (Number.isNaN(ts.getTime())) continue;
-    const dKey = dateKey(ts);
+    const dKey = kstDateKey(ts);
 
     // per conversation
     let c = convMap.get(e.sessionId);
@@ -324,45 +357,27 @@ export interface UsageRangeOptions {
  * Compute a usage summary filtered to an explicit date range.
  * Reads only JSONL files whose filename date falls within the range.
  */
-export function getUsageRange(opts: UsageRangeOptions): UsageSummary {
+export async function getUsageRange(
+  opts: UsageRangeOptions,
+  now: Date = new Date(),
+): Promise<UsageSummary> {
   const auditDir = join(lvisHome(), "audit");
-  if (!existsSync(auditDir)) return computeUsageSummary([]);
+  const entries = await readUsageAuditEntries(
+    auditDir,
+    (file) => (
+      file.date >= shiftKstDateKey(opts.dateFrom, -1)
+      && file.date <= shiftKstDateKey(opts.dateTo, 1)
+    ),
+  );
 
-  const files = readdirSync(auditDir)
-    .filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
-    .filter((f) => {
-      const d = f.slice(0, 10);
-      return d >= shiftDateKey(opts.dateFrom, -1) && d <= shiftDateKey(opts.dateTo, 1);
-    })
-    .sort();
-
-  const entries: AuditTurnEntry[] = [];
-  for (const file of files) {
-    let text: string;
-    try {
-      text = readFileSync(join(auditDir, file), "utf-8");
-    } catch {
-      continue;
-    }
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const entry = JSON.parse(line) as AuditTurnEntry;
-        if (entry.type === "turn") entries.push(entry);
-      } catch {
-        // skip malformed
-      }
-    }
-  }
-
-  const filtered = entries.filter((e) => {
-    const ts = new Date(e.timestamp);
-    if (Number.isNaN(ts.getTime())) return false;
-    const d = dateKey(ts);
-    return d >= opts.dateFrom && d <= opts.dateTo;
+  const filtered = entries.filter((entry) => {
+    const timestamp = new Date(entry.timestamp);
+    if (Number.isNaN(timestamp.getTime())) return false;
+    const date = kstDateKey(timestamp);
+    return date >= opts.dateFrom && date <= opts.dateTo;
   });
 
-  return computeUsageSummary(filtered);
+  return computeUsageSummary(filtered, now);
 }
 
 /**
@@ -377,8 +392,11 @@ export function computeMonthlyProjection(trend: UsageTrendPoint[]): number {
 }
 
 /** Default convenience — reads from `~/.lvis/audit` and computes a 60-day summary. */
-export function getUsageSummary(days: number = 60): UsageSummary {
+export async function getUsageSummary(
+  days: number = 60,
+  now: Date = new Date(),
+): Promise<UsageSummary> {
   const auditDir = join(lvisHome(), "audit");
-  const entries = readAuditEntries(auditDir, days);
-  return computeUsageSummary(entries);
+  const entries = await readAuditEntries(auditDir, days, now);
+  return computeUsageSummary(entries, now);
 }

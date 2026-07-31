@@ -12,12 +12,12 @@ export function registerUsageHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
 
   // read-only, sender guard optional
-  ipcMain.handle(CHANNELS.usage.summary, async (_e, days?: number) => handleUsageSummary(days));
+  ipcMain.handle(CHANNELS.usage.summary, async (_e, days?: number) => handleUsageSummary(days, auditLogger));
 
   // read-only; sender guard optional but added for cross-window consistency
   ipcMain.handle(CHANNELS.usage.range, async (e, opts: { dateFrom: string; dateTo: string }) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.range, e); return UNAUTHORIZED_FRAME; }
-    return handleUsageRange(opts);
+    return handleUsageRange(opts, auditLogger);
   });
 
   ipcMain.handle(CHANNELS.usage.dailySummary, async (e, input: UsageDailySummaryInput) => {
