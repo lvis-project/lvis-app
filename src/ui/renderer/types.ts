@@ -21,6 +21,19 @@ import type {
   CodexSubscriptionDeviceCodeResult,
   CodexSubscriptionModelsResult,
 } from "../../shared/codex-subscription.js";
+import type {
+  AcpSubscriptionActionResult,
+  AcpSubscriptionProviderId,
+} from "../../shared/acp-subscription.js";
+import type {
+  ActiveChatRuntime,
+  SubscriptionLoginMethod,
+  SubscriptionRuntimeActionResult,
+  SubscriptionRuntimeErrorCode,
+  SubscriptionRuntimeId,
+  SubscriptionRuntimeModelsResult,
+  SubscriptionRuntimeStatusUpdatedEvent,
+} from "../../shared/subscription-runtime.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
@@ -218,6 +231,7 @@ export type LLMVendorSettingsRenderer = {
 export type AppSettings = {
   llm: {
     provider: string;
+    activeChatRuntime?: ActiveChatRuntime;
     marketplaceProviderPresetId?: string;
     vendors: Record<string, LLMVendorSettingsRenderer>;
     streamSmoothing: "none" | "word" | "char";
@@ -488,6 +502,9 @@ export type LvisApi = {
     hostResolverMap: string,
   ) => Promise<{ ok: boolean; error?: string; message?: string }>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
+  onSubscriptionRuntimeStatusUpdated: (
+    handler: (event: SubscriptionRuntimeStatusUpdatedEvent) => void,
+  ) => () => void;
   listPersonaPromptSummaries: () => Promise<{ prompts: Array<Pick<RolePreset, "id" | "name">> }>;
   listPersonaPrompts: () => Promise<{ prompts: RolePreset[] }>;
   savePersonaPrompt: (prompt: { id: string; name: string; systemPromptAdd: string }) => Promise<
@@ -509,6 +526,28 @@ export type LvisApi = {
   codexSubscriptionCancelLogin: () => Promise<CodexSubscriptionActionResult>;
   codexSubscriptionLogout: () => Promise<CodexSubscriptionActionResult>;
   codexSubscriptionListModels: () => Promise<CodexSubscriptionModelsResult>;
+  subscriptionRuntimeStatus: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionChooseRuntime: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionForgetRuntime: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionVerifyRuntime: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionStartLogin: (provider: SubscriptionRuntimeId, method: SubscriptionLoginMethod) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionOpenLoginBrowser: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionCancelLogin: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionLogout: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionListModels: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeModelsResult>;
+  subscriptionUseForChat: (provider: SubscriptionRuntimeId, model?: string) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionUseApiForChat: () => Promise<
+    | { ok: true }
+    | { ok: false; error: SubscriptionRuntimeErrorCode }
+  >;
+  acpSubscriptionStatus: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionChooseRuntime: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionForgetRuntime: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionVerify: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionStartLogin: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionOpenLoginBrowser: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionCancelLogin: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionLogout: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
   installMarketplaceProviderPreset: (
     preset: MarketplaceInstalledProviderPreset,
   ) => Promise<SettingsUpdateResult>;
@@ -1888,6 +1927,12 @@ export interface LvisAttachApi {
     bytes?: number;
     mimeType?: string;
     dataUrl?: string;
+    error?: string;
+  }>;
+  discardClipboardImage: (filePath: string) => Promise<{
+    ok: boolean;
+    /** The app revoked this rejected image's capability without pathname deletion. */
+    retained?: true;
     error?: string;
   }>;
   openExternal: (filePath: string) => Promise<{ ok: boolean; error?: string }>;

@@ -12,6 +12,8 @@ import {
   CODEX_SUBSCRIPTION_SIGNED_OUT_STATUS,
 } from "../shared/codex-subscription.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
+import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH } from "../shared/subscription-runtime.js";
+import { sanitizedCodexConversationEnvironment } from "./codex-conversation-runtime.js";
 import { spawnManaged } from "./managed-child-processes.js";
 
 const require = createRequire(import.meta.url);
@@ -19,7 +21,6 @@ const require = createRequire(import.meta.url);
 const RPC_REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RPC_LINE_BYTES = 1_000_000;
 const MAX_MODEL_COUNT = 100;
-const MAX_MODEL_ID_LENGTH = 200;
 const MAX_PLAN_TYPE_LENGTH = 80;
 const MAX_DEVICE_CODE_LENGTH = 128;
 
@@ -50,6 +51,8 @@ export interface CodexAppServerClientOptions {
   sqliteHome: string;
   /** Existing blank working directory with no project config or rules. */
   workspaceDir: string;
+  /** Existing isolated temporary directory; defaults to the isolated home. */
+  runtimeTempDir?: string;
   /** Test seam for the packaged Codex executable resolver. */
   resolveExecutable?: () => string;
   /** Test seam; production always uses managed-child-processes. */
@@ -159,40 +162,6 @@ function spawnPackagedCodex(
   return spawnManaged(command, args, options, { label: "codex-app-server" });
 }
 
-const BLOCKED_SUBSCRIPTION_ENV_NAMES = new Set([
-  "OPENAI_API_KEY",
-  "CODEX_API_KEY",
-  "OPENAI_BASE_URL",
-  "CODEX_API_BASE_URL",
-  "CODEX_ACCESS_TOKEN",
-  "CODEX_HOME",
-  "CODEX_SQLITE_HOME",
-  "RUST_LOG",
-  "LOG_FORMAT",
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "ALL_PROXY",
-  "NO_PROXY",
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-  "NODE_EXTRA_CA_CERTS",
-  "SSLKEYLOGFILE",
-  "RUST_BACKTRACE",
-]);
-
-function blocksInheritedSubscriptionEnvironment(key: string): boolean {
-  const normalized = key.toUpperCase();
-  if (
-    normalized.startsWith("CODEX_")
-    || normalized.startsWith("OPENAI_")
-    || normalized.startsWith("OTEL_")
-  ) {
-    return true;
-  }
-  return BLOCKED_SUBSCRIPTION_ENV_NAMES.has(normalized)
-    || (process.platform === "linux" && normalized.startsWith("LD_"))
-    || (process.platform === "darwin" && normalized.startsWith("DYLD_"));
-}
 
 function validateRuntimeDirectory(runtimeHome: string): string {
   const trimmed = runtimeHome.trim();
@@ -211,19 +180,12 @@ function validateRuntimeDirectory(runtimeHome: string): string {
   return directory;
 }
 
-function sanitizedCodexEnvironment(runtimeHome: string, sqliteHome: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  // Windows environment keys are case-insensitive, so filter all inherited
-  // spellings before injecting the integration-owned isolated locations.
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!blocksInheritedSubscriptionEnvironment(key)) env[key] = value;
-  }
-  return {
-    ...env,
-    CODEX_HOME: runtimeHome,
-    CODEX_SQLITE_HOME: sqliteHome,
-    RUST_LOG: "error",
-  };
+function sanitizedCodexEnvironment(
+  runtimeHome: string,
+  sqliteHome: string,
+  runtimeTempDir: string,
+): NodeJS.ProcessEnv {
+  return sanitizedCodexConversationEnvironment(runtimeHome, sqliteHome, runtimeTempDir);
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -281,6 +243,7 @@ export class CodexAppServerClient {
   private readonly runtimeHome: string;
   private readonly sqliteHome: string;
   private readonly workspaceDir: string;
+  private readonly runtimeTempDir: string;
   private child: ChildProcess | null = null;
   private startPromise: Promise<void> | null = null;
   private nextRequestId = 1;
@@ -300,6 +263,7 @@ export class CodexAppServerClient {
     this.runtimeHome = options.runtimeHome;
     this.sqliteHome = options.sqliteHome;
     this.workspaceDir = options.workspaceDir;
+    this.runtimeTempDir = options.runtimeTempDir ?? options.runtimeHome;
   }
 
   async getStatus(): Promise<CodexSubscriptionStatus> {
@@ -418,10 +382,10 @@ export class CodexAppServerClient {
     const models: CodexSubscriptionModel[] = [];
     for (const row of rows) {
       if (!isRecord(row)) continue;
-      const id = boundedString(row.id ?? row.model, MAX_MODEL_ID_LENGTH);
+      const id = boundedString(row.id ?? row.model, MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH);
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      const displayName = boundedString(row.displayName, MAX_MODEL_ID_LENGTH) ?? id;
+      const displayName = boundedString(row.displayName, MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH) ?? id;
       const inputModalities = Array.isArray(row.inputModalities)
         ? row.inputModalities
           .map((item) => boundedString(item, 40))
@@ -505,6 +469,7 @@ export class CodexAppServerClient {
     const runtimeHome = validateRuntimeDirectory(this.runtimeHome);
     const sqliteHome = validateRuntimeDirectory(this.sqliteHome);
     const workspaceDir = validateRuntimeDirectory(this.workspaceDir);
+    const runtimeTempDir = validateRuntimeDirectory(this.runtimeTempDir);
     let child: ChildProcess;
     try {
       child = this.spawn(
@@ -530,7 +495,7 @@ export class CodexAppServerClient {
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
           shell: false,
-          env: sanitizedCodexEnvironment(runtimeHome, sqliteHome),
+          env: sanitizedCodexEnvironment(runtimeHome, sqliteHome, runtimeTempDir),
         },
       );
     } catch {

@@ -14,6 +14,7 @@
  */
 import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
 import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
+import { normalizeLocalUserContentParts } from "../../main/subscription-attachment-input.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import { PERSONA_PROMPT_ID_ALLOWLIST } from "../../main/persona-prompt-store.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
@@ -248,39 +249,7 @@ export async function resolvePersonaRolePrompt(
 export function validateUserContentParts(
   raw: unknown,
 ): import("../../engine/llm/types.js").UserContentPart[] | undefined {
-  if (raw === undefined || raw === null) return undefined;
-  if (!Array.isArray(raw)) return undefined;
-  const out: import("../../engine/llm/types.js").UserContentPart[] = [];
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) continue;
-    const t = (item as { type?: unknown }).type;
-    if (t === "text") {
-      const text = (item as { text?: unknown }).text;
-      if (typeof text !== "string") continue;
-      out.push({ type: "text", text });
-      continue;
-    }
-    if (t === "image") {
-      const image = (item as { image?: unknown }).image;
-      const mimeType = (item as { mimeType?: unknown }).mimeType;
-      if (typeof image !== "string") continue;
-      out.push({
-        type: "image",
-        image,
-        ...(typeof mimeType === "string" ? { mimeType } : {}),
-      });
-      continue;
-    }
-    if (t === "file") {
-      const data = (item as { data?: unknown }).data;
-      const mimeType = (item as { mimeType?: unknown }).mimeType;
-      if (typeof data !== "string" || typeof mimeType !== "string") continue;
-      out.push({ type: "file", data, mimeType });
-      continue;
-    }
-    // Unknown tag → drop
-  }
-  return out.length > 0 ? out : undefined;
+  return normalizeLocalUserContentParts(raw);
 }
 
 export function parseChatSendPayload(

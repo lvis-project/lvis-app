@@ -20,14 +20,22 @@ class FakeProvider implements LLMProvider {
     yield* this.events;
   }
 }
+class SubscriptionFakeProvider extends FakeProvider {
+  readonly subscriptionRuntime = { kind: "subscription", provider: "codex" } as const;
+}
 
-function buildLoop(provider: LLMProvider | null): ConversationLoop {
+
+function buildLoop(
+  provider: LLMProvider | null,
+  activeChatRuntime: { kind: "api" } | { kind: "subscription"; provider: "codex"; model?: string } = { kind: "api" },
+): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   const inputClassifier = new InputClassifier();
   const routeEngine = new RouteEngine();
+  const llm = { ...fakeLlmSettings(), activeChatRuntime };
   const loop = new ConversationLoop({
     settingsService: {
-      get: () => fakeLlmSettings(),
+      get: () => llm,
       getSecret: () => "test-key",
     },
     systemPromptBuilder: { build: () => "system" },
@@ -118,6 +126,41 @@ describe("ConversationLoop.generateText", () => {
     ).rejects.toThrow("LLM generation aborted");
     expect(provider.lastParams).toBeNull();
   });
+  it("runs plugin one-shot generation through a subscription runtime", async () => {
+    const provider = new SubscriptionFakeProvider([
+      { type: "text_delta", text: "subscription answer" },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider, { kind: "subscription", provider: "codex" });
+
+    await expect(loop.generateText("prompt")).resolves.toBe("subscription answer");
+    expect(provider.lastParams).toMatchObject({
+      model: "default",
+      tools: [],
+    });
+  });
+  it("refuses a stale API provider after subscription activation before it can stream", async () => {
+    const provider = new FakeProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider, { kind: "subscription", provider: "codex" });
+
+    await expect(loop.generateText("prompt")).rejects.toThrow("LLM provider not configured");
+    expect(provider.lastParams).toBeNull();
+  });
+  it("refuses a stale API provider at the chat execution boundary before streaming", async () => {
+    const provider = new FakeProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider, { kind: "subscription", provider: "codex" });
+
+    await expect(
+      loop.runTurn("hello", undefined, undefined, {
+        inputOrigin: "user-keyboard",
+      }),
+    ).rejects.toThrow(/provider|프로바이더/i);
+    expect(provider.lastParams).toBeNull();
+  });
 });
 
 describe("ConversationLoop.pingProvider", () => {
@@ -162,5 +205,37 @@ describe("ConversationLoop.pingProvider", () => {
       model: LLM_VENDOR_DEFAULTS.openai.model,
       error: "rate_limit",
     });
+  });
+  it("executes a normal ping through a subscription runtime", async () => {
+    const provider = new SubscriptionFakeProvider([
+      { type: "text_delta", text: "PONG" },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider, { kind: "subscription", provider: "codex" });
+
+    await expect(loop.pingProvider()).resolves.toMatchObject({
+      configured: true,
+      online: true,
+      vendor: "subscription:codex",
+      model: "default",
+    });
+    expect(provider.lastParams?.messages).toEqual([{ role: "user", content: "ping" }]);
+    expect(provider.lastParams?.abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("returns not-configured instead of pinging a stale API provider after subscription activation", async () => {
+    const provider = new FakeProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider, { kind: "subscription", provider: "codex" });
+
+    await expect(loop.pingProvider()).resolves.toMatchObject({
+      configured: false,
+      online: false,
+      vendor: "subscription:codex",
+      model: "default",
+      error: "not-configured",
+    });
+    expect(provider.lastParams).toBeNull();
   });
 });

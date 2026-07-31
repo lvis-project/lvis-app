@@ -34,6 +34,11 @@
     },
     {
       "type": "duplicates",
+      "file": "src/main/acp-subscription-session-client.ts",
+      "name": "MAX_ACP_SUBSCRIPTION_IMAGE_BYTES,MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES"
+    },
+    {
+      "type": "duplicates",
       "file": "src/shared/llm-vendor-defaults.ts",
       "name": "BUILT_IN_LLM_VENDOR_IDS,DEFAULT_VISIBLE_LLM_VENDOR_IDS"
     },
@@ -136,6 +141,16 @@
       "type": "exports",
       "file": "scripts/lib/electron-native-modules.mjs",
       "name": "withElectronNativeRebuildLock"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/lib/main-bundle-budget.mjs",
+      "name": "isMainBundleRootScriptPath"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/lib/main-bundle-budget.mjs",
+      "name": "MAIN_BUNDLE_ROOT_FILES"
     },
     {
       "type": "exports",
@@ -459,6 +474,26 @@
     },
     {
       "type": "exports",
+      "file": "src/main/acp-subscription-runtime-config.ts",
+      "name": "GROK_BUILD_GOVERNED_AGENT_FILE_NAME"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/acp-subscription-runtime-config.ts",
+      "name": "GROK_BUILD_MCP_TOOLSET_SENTINEL"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/acp-subscription-runtime-config.ts",
+      "name": "validateAcpSubscriptionMcpServerConfig"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/acp-subscription-session-client.ts",
+      "name": "buildAcpSubscriptionSessionNewParams"
+    },
+    {
+      "type": "exports",
       "file": "src/main/ask-user-question-gate.ts",
       "name": "IPC_ASK_USER_QUESTION_REQUEST"
     },
@@ -526,6 +561,51 @@
       "type": "exports",
       "file": "src/main/shutdown-timeout.ts",
       "name": "__resetShutdownTimeoutWarnLatchesForTest"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-attachment-input.ts",
+      "name": "isSubscriptionPromptAttachment"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-attachment-input.ts",
+      "name": "MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-attachment-input.ts",
+      "name": "normalizeInlineLocalDataUrl"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-attachment-input.ts",
+      "name": "subscriptionAttachmentByteLength"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-grok-tool-policy-hook.ts",
+      "name": "runGrokPreToolPolicyHook"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-llm-provider.ts",
+      "name": "SUBSCRIPTION_ATTACHMENT_INPUT_TOO_LARGE"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-tool-mcp-server.ts",
+      "name": "createSubscriptionToolMcpServer"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-tool-mcp-server.ts",
+      "name": "isSubscriptionToolMcpServerEntrypoint"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-tool-mcp-server.ts",
+      "name": "runSubscriptionToolMcpServer"
     },
     {
       "type": "exports",
@@ -746,6 +826,11 @@
       "type": "exports",
       "file": "src/shared/a2a.ts",
       "name": "A2A_TASK_STATE_WORKING"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/composer-image-input.ts",
+      "name": "composerImageMimeForExtension"
     },
     {
       "type": "exports",
@@ -1614,11 +1699,6 @@
     },
     {
       "type": "types",
-      "file": "src/engine/llm/provider-error-diagnostics.ts",
-      "name": "ProviderRateLimitDiagnostics"
-    },
-    {
-      "type": "types",
       "file": "src/engine/llm/types.ts",
       "name": "StreamSmoothing"
     },
@@ -1841,6 +1921,31 @@
       "type": "types",
       "file": "src/main/bash-ast-validator.ts",
       "name": "ValidationDecision"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationDynamicToolDefinition"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationDynamicToolFunction"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationDynamicToolHandler"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationDynamicToolNamespace"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationJsonValue"
     },
     {
       "type": "types",
@@ -2791,6 +2896,11 @@
       "type": "types",
       "file": "src/ui/renderer/preview/workspace-tabs.ts",
       "name": "WorkspaceTabMode"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/tabs/SubscriptionProvidersSection.tsx",
+      "name": "SubscriptionProviderCapabilities"
     },
     {
       "type": "types",

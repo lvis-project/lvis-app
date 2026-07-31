@@ -14,7 +14,7 @@ import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "../../plug
 import type { MarketplaceFetcher } from "../../plugins/marketplace.js";
 import { CloudMarketplaceFetcher } from "../../plugins/cloud-marketplace-fetcher.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
-import { createRefreshActiveLlmWildcard } from "./refresh-active-llm-wildcard.js";
+import { activeHostApiVendor, createRefreshActiveLlmWildcard } from "./refresh-active-llm-wildcard.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
 
@@ -89,14 +89,18 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   // change-restart contract is independently unit-testable. Same semantics
   // as before: first call seeds, subsequent vendor changes trigger a
   // debounced restart sweep of every loaded plugin.
-  const { refresh: refreshActiveLlmWildcard } = createRefreshActiveLlmWildcard({
-    getActiveVendor: () => settingsService.get("llm").provider,
+  const {
+    refresh: refreshActiveLlmWildcard,
+    dispose: disposeRefreshActiveLlmWildcard,
+  } = createRefreshActiveLlmWildcard({
+    getActiveVendor: () => activeHostApiVendor(settingsService.get("llm")),
     setWildcardConfigOverride: (config) => pluginRuntime.setWildcardConfigOverride(config),
     clearWildcardConfigOverride: (keys) => pluginRuntime.clearWildcardConfigOverride(keys),
     listPluginIds: () => pluginRuntime.listPluginIds(),
     restartPlugin: async (pid) => {
       await pluginRuntime.restartPlugin(pid);
     },
+    cancelPendingRestarts: () => pluginRuntime.cancelAllPendingRestarts(),
   });
   refreshActiveLlmWildcard();
 
@@ -162,6 +166,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   ctx.pluginMarketplace = pluginMarketplace;
   ctx.refreshMarketplaceFetcherConfig = refreshMarketplaceFetcherConfig;
   ctx.refreshActiveLlmWildcard = refreshActiveLlmWildcard;
+  ctx.disposeRefreshActiveLlmWildcard = disposeRefreshActiveLlmWildcard;
   ctx.buildSandboxUnionDomains = buildSandboxUnionDomains;
   ctx.refreshSandboxNetworkConfig = refreshSandboxNetworkConfig;
 }

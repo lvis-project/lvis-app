@@ -55,6 +55,10 @@ class RecordingToolLoopProvider implements LLMProvider {
   }
 }
 
+class KimiSubscriptionToolLoopProvider extends RecordingToolLoopProvider {
+  readonly subscriptionRuntime = { kind: "subscription", provider: "kimi-code" } as const;
+}
+
 describe("ConversationLoop intra-turn tool-result stubbing (issue #1171)", () => {
   afterEach(() => {
     delete process.env.LVIS_DEV_PREFLIGHT_OVERRIDE;
@@ -141,5 +145,55 @@ describe("ConversationLoop intra-turn tool-result stubbing (issue #1171)", () =>
     const noStubLastRound = tokens[0] + fillingSlope * (tokens.length - 1);
     const last = tokens[tokens.length - 1];
     expect(last).toBeLessThan(noStubLastRound);
+  });
+
+  it("uses the active Kimi subscription budget rather than an inactive API-key provider", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      createDynamicTool({
+        name: "probe",
+        description: "returns a sizeable result",
+        source: "builtin",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: { n: { type: "number" } } },
+        // 16 results clear Kimi's 14.8K micro-compact floor, but stay well
+        // below an inactive Claude 1M context's 384K floor.
+        execute: async () => ({
+          output: "RESULT " + "x".repeat(4_000),
+          isError: false,
+        }),
+      }),
+    );
+
+    const settings = {
+      ...fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
+      activeChatRuntime: { kind: "subscription" as const, provider: "kimi-code" as const },
+    };
+    const provider = new KimiSubscriptionToolLoopProvider(17);
+    const loop = new ConversationLoop({
+      settingsService: {
+        get: () => settings,
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("deep tool loop", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    const history = (loop as unknown as {
+      history: { getMessages: () => Array<{ role: string; meta?: { compactedAt?: string } }> };
+    }).history.getMessages();
+    expect(history.some((message) =>
+      message.role === "tool_result" && message.meta?.compactedAt !== undefined,
+    )).toBe(true);
   });
 });

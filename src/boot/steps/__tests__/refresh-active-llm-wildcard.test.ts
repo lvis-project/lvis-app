@@ -10,12 +10,12 @@
  *   2. Vendor change after the seed triggers a debounced restart sweep
  *   3. Bursty calls within the debounce window coalesce to ONE sweep
  *   4. Same-vendor calls are no-ops once seeded (no extra restarts)
- *   5. Empty / undefined vendor leaves the wildcard slot untouched
+ *   5. Subscription selection clears the legacy API vendor slot
  *   6. Wildcard slot always exposes `hostApiVendor` only (no `hostApiKey`)
  *   7. `restartPlugin` rejection is logged but does not crash the timer
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRefreshActiveLlmWildcard } from "../refresh-active-llm-wildcard.js";
+import { activeHostApiVendor, createRefreshActiveLlmWildcard } from "../refresh-active-llm-wildcard.js";
 
 function makeDeps(initial: { vendor?: string } = {}) {
   let vendor = initial.vendor ?? "openai";
@@ -23,6 +23,7 @@ function makeDeps(initial: { vendor?: string } = {}) {
   const clearOverride = vi.fn();
   const listPluginIds = vi.fn(() => ["plugin-a", "plugin-b"]);
   const restartPlugin = vi.fn(async (_id: string) => undefined);
+  const cancelPendingRestarts = vi.fn();
   return {
     setVendor: (next: string | undefined) => { vendor = next as string; },
     deps: {
@@ -31,12 +32,14 @@ function makeDeps(initial: { vendor?: string } = {}) {
       clearWildcardConfigOverride: clearOverride,
       listPluginIds,
       restartPlugin,
+      cancelPendingRestarts,
       // Default 200 ms — tests use a real fake timer.
     },
     setOverride,
     clearOverride,
     listPluginIds,
     restartPlugin,
+    cancelPendingRestarts,
   };
 }
 
@@ -57,7 +60,7 @@ describe("createRefreshActiveLlmWildcard (#893 / PR #894 Cycle 3)", () => {
     // Wildcard slot received the non-secret vendor metadata.
     expect(ctx.setOverride).toHaveBeenCalledWith({ hostApiVendor: "openai" });
     // The stale `hostApiKey` slot is always swept.
-    expect(ctx.clearOverride).toHaveBeenCalledWith(["hostApiKey"]);
+    expect(ctx.clearOverride).toHaveBeenCalledWith(["hostApiKey", "hostApiVendor"]);
     // First call must not restart any plugin — that would churn on boot.
     vi.advanceTimersByTime(1_000);
     expect(ctx.restartPlugin).not.toHaveBeenCalled();
@@ -121,14 +124,19 @@ describe("createRefreshActiveLlmWildcard (#893 / PR #894 Cycle 3)", () => {
     expect(ctx.setOverride).toHaveBeenCalledTimes(3);
   });
 
-  it("empty / undefined vendor leaves the wildcard slot untouched", () => {
-    const ctx = makeDeps({ vendor: "" });
+  it("clears API vendor metadata and restarts plugins when a subscription runtime becomes active", () => {
+    const ctx = makeDeps({ vendor: "openai" });
     const { refresh } = createRefreshActiveLlmWildcard(ctx.deps);
 
     refresh();
-    expect(ctx.setOverride).not.toHaveBeenCalled();
-    expect(ctx.clearOverride).not.toHaveBeenCalled();
-    expect(ctx.restartPlugin).not.toHaveBeenCalled();
+    ctx.setVendor(undefined);
+    refresh();
+
+    expect(ctx.clearOverride).toHaveBeenLastCalledWith(["hostApiKey", "hostApiVendor"]);
+    expect(ctx.setOverride).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(200);
+    expect(ctx.restartPlugin).toHaveBeenCalledWith("plugin-a");
+    expect(ctx.restartPlugin).toHaveBeenCalledWith("plugin-b");
   });
 
   it("never injects hostApiKey via the wildcard slot (CRIT-1 contract)", () => {
@@ -183,5 +191,44 @@ describe("createRefreshActiveLlmWildcard (#893 / PR #894 Cycle 3)", () => {
     vi.advanceTimersByTime(1_000);
     // Timer was cleared — no plugins were restarted post-dispose.
     expect(ctx.restartPlugin).not.toHaveBeenCalled();
+
+    // Disposal is terminal for shutdown safety: a late settings event cannot
+    // schedule a fresh plugin restart after teardown begins.
+    ctx.setVendor("gemini");
+    refresh();
+    vi.advanceTimersByTime(1_000);
+    expect(ctx.restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("cancels restarts already in flight when shutdown begins after the debounce fires", () => {
+    const ctx = makeDeps({ vendor: "openai" });
+    let resolveRestart: (() => void) | undefined;
+    const pendingRestart = new Promise<undefined>((resolve) => {
+      resolveRestart = () => resolve(undefined);
+    });
+    ctx.deps.restartPlugin = vi.fn((_id: string) => pendingRestart);
+    const { refresh, dispose } = createRefreshActiveLlmWildcard(ctx.deps);
+
+    refresh();
+    ctx.setVendor("claude");
+    refresh();
+    vi.advanceTimersByTime(200);
+
+    // The timer has fired and both PluginRuntime restart operations are now
+    // pending. `dispose()` must reach the runtime cancellation boundary; a
+    // timer-only cleanup would be too late to prevent a candidate publish.
+    expect(ctx.deps.restartPlugin).toHaveBeenCalledTimes(2);
+    dispose();
+    dispose();
+
+    expect(ctx.cancelPendingRestarts).toHaveBeenCalledOnce();
+    resolveRestart?.();
+  });
+});
+
+describe("activeHostApiVendor", () => {
+  it("projects only the active API provider", () => {
+    expect(activeHostApiVendor({ provider: "openai", activeChatRuntime: { kind: "api" } })).toBe("openai");
+    expect(activeHostApiVendor({ provider: "openai", activeChatRuntime: { kind: "subscription", provider: "codex" } })).toBeUndefined();
   });
 });

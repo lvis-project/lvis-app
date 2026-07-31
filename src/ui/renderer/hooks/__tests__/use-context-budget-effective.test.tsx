@@ -101,4 +101,27 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
     // unknown model has no tpmDefault — fall through to contextBudget.
     expect(result.current.effectiveBudget).toBe(result.current.contextBudget);
   });
+
+  it("does not project API context or TPM limits when the runtime has no verified usage contract", () => {
+    const { result } = renderHook(() =>
+      useContextBudget({
+        entries: [],
+        // These deliberately stale API values must be ignored.
+        llmVendor: "openai",
+        llmModel: "gpt-5.4-nano",
+        draftText: "subscription runtime draft",
+        enabled: false,
+      }),
+    );
+
+    expect(result.current).toMatchObject({
+      usedTokens: 0,
+      contextBudget: 0,
+      effectiveBudget: 0,
+      contextOverflowPct: 0,
+      isTpmOverflow: false,
+    });
+    expect(result.current.tpmLimit).toBeUndefined();
+    expect(result.current.tpmPct).toBeUndefined();
+  });
 });

@@ -6,6 +6,7 @@ import { createLoopRationaleBindings } from "../conversation-wiring.js";
 
 vi.mock("electron", () => ({
   BrowserWindow: { getAllWindows: vi.fn(() => []) },
+  shell: { openExternal: vi.fn(async () => {}) },
 }));
 
 describe("createLoopRationaleBindings", () => {

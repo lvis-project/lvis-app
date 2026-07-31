@@ -57,8 +57,8 @@ export interface InputActionBarProps {
   attachDisabled: boolean;
 
 
-
-  attachDisabledReason?: "limit" | "no-api-key";
+  attachDisabledReason?: "limit" | "no-api-key" | "subscription-unsupported" | "runtime-pending";
+  attachDisabledSubscriptionProvider?: string;
   // Leading — role preset (persona), placed before the ring.
   rolePresets: RolePreset[];
   activePreset: RolePreset | null | undefined;
@@ -76,6 +76,8 @@ export interface InputActionBarProps {
   onCancel: () => void;
   /** Thinking (extended reasoning) toggle + depth, before Send. */
   enableThinkingChat: boolean;
+  /** Whether the selected runtime accepts this app-controlled reasoning setting. */
+  reasoningAvailable?: boolean;
   onToggleThinking: (next: boolean) => void | Promise<void>;
 
   // Status sub-row.
@@ -93,9 +95,18 @@ export interface InputActionBarProps {
 
 function attachButtonLabel(
   disabled: boolean,
-  reason: "limit" | "no-api-key",
+  reason: "limit" | "no-api-key" | "subscription-unsupported" | "runtime-pending",
+  subscriptionProvider?: string,
 ): string {
   if (!disabled) return t("inputActionBar.attachEnabled");
+  if (reason === "runtime-pending") {
+    return t("subscriptionProvidersSection.statusChecking");
+  }
+  if (reason === "subscription-unsupported") {
+    return t("app.subscriptionAttachmentUnsupported", {
+      provider: subscriptionProvider ?? "subscription",
+    });
+  }
   if (reason === "no-api-key") return t("inputActionBar.attachDisabledNoApiKey");
   return t("inputActionBar.attachDisabledLimit");
 }
@@ -131,6 +142,7 @@ export function InputActionBar({
   onAttach,
   attachDisabled,
   attachDisabledReason = "limit",
+  attachDisabledSubscriptionProvider,
   rolePresets,
   activePreset,
   activePresetId,
@@ -140,6 +152,7 @@ export function InputActionBar({
   onSend,
   onCancel,
   enableThinkingChat,
+  reasoningAvailable = true,
   onToggleThinking,
   statusRow,
   appMode = "work",
@@ -235,8 +248,8 @@ export function InputActionBar({
             disabled={attachDisabled}
             data-testid="iab-attach-button"
             className="h-[26px] w-[26px] shrink-0 border-input-bar-border bg-input-bar-subtle p-0 text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) hover:text-input-bar-action focus-visible:ring-input-bar-focus motion-reduce:transition-none"
-            title={attachButtonLabel(attachDisabled, attachDisabledReason)}
-            aria-label={attachButtonLabel(attachDisabled, attachDisabledReason)}
+            title={attachButtonLabel(attachDisabled, attachDisabledReason, attachDisabledSubscriptionProvider)}
+            aria-label={attachButtonLabel(attachDisabled, attachDisabledReason, attachDisabledSubscriptionProvider)}
           >
             <Paperclip className="h-3.5 w-3.5" />
           </Button>
@@ -283,6 +296,7 @@ export function InputActionBar({
         onOpenPermissions={onOpenPermissions}
         onOpenApprovalQueue={onOpenApprovalQueue}
         enableThinkingChat={enableThinkingChat}
+        reasoningAvailable={reasoningAvailable}
         onToggleThinking={onToggleThinking}
       />
     </div>
@@ -306,6 +320,7 @@ function StatusSubRow({
   onOpenPermissions,
   onOpenApprovalQueue,
   enableThinkingChat,
+  reasoningAvailable,
   onToggleThinking,
 }: {
   statusRow: InputStatusRow;
@@ -315,6 +330,7 @@ function StatusSubRow({
   onOpenPermissions?: () => void;
   onOpenApprovalQueue?: () => void;
   enableThinkingChat: boolean;
+  reasoningAvailable: boolean;
   onToggleThinking: (next: boolean) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -418,10 +434,13 @@ function StatusSubRow({
           </span>
         )}
 
-        <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-
-        {/* 추론 (reasoning) slider — BETWEEN the model cell and the dot. */}
-        <ReasoningSlider enabled={enableThinkingChat} onToggle={onToggleThinking} />
+        {reasoningAvailable && (
+          <>
+            <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
+            {/* 추론 (reasoning) slider — BETWEEN the model cell and the dot. */}
+            <ReasoningSlider enabled={enableThinkingChat} onToggle={onToggleThinking} />
+          </>
+        )}
 
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 

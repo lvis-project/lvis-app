@@ -190,4 +190,24 @@ describe("settings.update shortcut/startup reconcile", () => {
     expect(reconcileGlobalShortcuts).toHaveBeenCalledTimes(1);
     expect(reconcileStartupLaunch).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects activeChatRuntime through ordinary settings.update", async () => {
+    const deps = makeDeps({ flip: "none" });
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:update", {
+      llm: { activeChatRuntime: { kind: "subscription", provider: "codex" } },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "active-chat-runtime-requires-subscription-selection",
+    });
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+    expect(deps.auditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "subscription-runtime",
+      type: "warn",
+    }));
+  });
 });

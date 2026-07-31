@@ -55,6 +55,7 @@ import {
   type ReviewerSettingsBlock,
 } from "../../permissions/permission-settings-store.js";
 import type { LLMProvider, LLMVendor } from "../../engine/llm/types.js";
+import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js";
 import { createLogger } from "../../lib/logger.js";
 import {
   LlmRationaleScopeReviewer,
@@ -211,7 +212,8 @@ export interface WireReviewerResult {
 }
 
 export interface ActiveReviewerLlmIdentity {
-  provider: LLMVendor;
+  /** API-key vendor or a subscription runtime identity for cache partitioning. */
+  provider: LLMVendor | `subscription:${SubscriptionRuntimeId}`;
   marketplaceProviderPresetId?: string;
   model: string;
   baseUrl?: string;

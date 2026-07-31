@@ -35,14 +35,11 @@ const MAX_MODEL_ID_LENGTH = 256;
 
 const STANDARD_MODEL_LIST_BASE_URLS: Partial<Record<LLMVendor, string>> = {
   openai: "https://api.openai.com/v1",
-  // NOTE (#1574): the correct GitHub Models list endpoint is `/catalog/models`
-  // — this base yields `/inference/models`, which 404s, so copilot model-list
-  // already falls back to the seed. Left unfixed on purpose: GitHub Models is
-  // fully retired 2026-07-30, and `/catalog/models` returns a non-OpenAI shape
-  // that would need its own parser branch — not worth building for a days-away
-  // sunset.
-  copilot: "https://models.github.ai/inference",
+  copilot: "https://models.github.ai/catalog",
 };
+
+const GITHUB_MODELS_CATALOG_ENDPOINT = "https://models.github.ai/catalog/models";
+const GITHUB_MODELS_API_VERSION = "2026-03-10";
 
 function modelDiscoveryPolicyAllowsFetch(
   policy: MarketplaceProviderModelDiscoveryPolicy | undefined,
@@ -457,16 +454,20 @@ function modelEntryFromRow(row: unknown): LlmModelListEntry | null {
   if (!record) return { id };
   const architecture = optionalRecord(record.architecture);
   const topProvider = optionalRecord(record.top_provider);
+  const limits = optionalRecord(record.limits);
   const pricing = pricingFromRecord(record.pricing);
   const name = optionalString(record.name);
-  const provider = optionalString(record.provider);
+  const provider = optionalString(record.provider) ?? optionalString(record.publisher);
   const ownedBy = optionalString(record.owned_by);
-  const description = optionalString(record.description);
+  const description = optionalString(record.description) ?? optionalString(record.summary);
   const contextLength = optionalNumber(record.context_length)
     ?? optionalNumber(record.contextLength)
-    ?? optionalNumber(topProvider?.context_length);
-  const inputModalities = optionalStringArray(architecture?.input_modalities);
-  const outputModalities = optionalStringArray(architecture?.output_modalities);
+    ?? optionalNumber(topProvider?.context_length)
+    ?? optionalNumber(limits?.max_input_tokens);
+  const inputModalities = optionalStringArray(architecture?.input_modalities)
+    ?? optionalStringArray(record.supported_input_modalities);
+  const outputModalities = optionalStringArray(architecture?.output_modalities)
+    ?? optionalStringArray(record.supported_output_modalities);
   const supportedParameters = optionalStringArray(record.supported_parameters);
   const entry: LlmModelListEntry = {
     id,
@@ -653,6 +654,10 @@ export async function listLlmModelsFromSettings(
     };
   }
   const headers: Record<string, string> = { Accept: "application/json" };
+  if (endpoint === GITHUB_MODELS_CATALOG_ENDPOINT) {
+    headers.Accept = "application/vnd.github+json";
+    headers["X-GitHub-Api-Version"] = GITHUB_MODELS_API_VERSION;
+  }
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
   let requestEndpoint = endpoint;
