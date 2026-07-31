@@ -9,6 +9,7 @@ import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
+import { kstDateKey } from "../../../shared/kst-date.js";
 
 export interface StarredItem {
   id: string;
@@ -75,18 +76,6 @@ interface HeatmapMonthLabel {
   label: string;
 }
 
-const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Asia/Seoul",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function koreaDateKey(date: Date): string {
-  const parts = KOREA_DATE_KEY_FORMATTER.formatToParts(date);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
-}
 
 function dateFromKey(dateKey: string): Date {
   const [year = "0", month = "1", day = "1"] = dateKey.split("-");
@@ -185,15 +174,15 @@ export function StarredView({
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
   const [visibleYear, setVisibleYear] = useState<number>(
-    () => Number(koreaDateKey(new Date()).slice(0, 4)),
+    () => Number(kstDateKey(new Date()).slice(0, 4)),
   );
   const [dailyUsageResult, setDailyUsageResult] = useState<DailyUsageResult | null>(null);
   const [discoveredSessions, setDiscoveredSessions] = useState<SessionSummary[]>([]);
   const [yearlyUsageByDate, setYearlyUsageByDate] = useState<Map<string, number>>(() => new Map());
   const [llmSummary, setLlmSummary] = useState<string | null>(null);
   const [llmSummaryState, setLlmSummaryState] = useState<"idle" | "loading" | "error">("idle");
-  const selectedKey = koreaDateKey(selectedDate);
-  const todayKey = koreaDateKey(new Date());
+  const selectedKey = kstDateKey(selectedDate);
+  const todayKey = kstDateKey(new Date());
   const currentYear = Number(todayKey.slice(0, 4));
   const getUsageRange = (api as Partial<LvisApi>).getUsageRange;
   const currentDailyUsageResult = (
@@ -210,17 +199,17 @@ export function StarredView({
     return Array.from(byId.values());
   }, [discoveredSessions, sessions]);
   const sessionsForDay = useMemo(
-    () => allSessions.filter((session) => koreaDateKey(new Date(session.modifiedAt)) === selectedKey),
+    () => allSessions.filter((session) => kstDateKey(new Date(session.modifiedAt)) === selectedKey),
     [allSessions, selectedKey],
   );
   const starredForDay = useMemo(
-    () => starred.filter((item) => koreaDateKey(new Date(item.starredAt)) === selectedKey),
+    () => starred.filter((item) => kstDateKey(new Date(item.starredAt)) === selectedKey),
     [selectedKey, starred],
   );
   const activityDateKeys = useMemo(() => {
     const keys = new Set<string>();
-    for (const session of allSessions) keys.add(koreaDateKey(new Date(session.modifiedAt)));
-    for (const item of starred) keys.add(koreaDateKey(new Date(item.starredAt)));
+    for (const session of allSessions) keys.add(kstDateKey(new Date(session.modifiedAt)));
+    for (const item of starred) keys.add(kstDateKey(new Date(item.starredAt)));
     for (const [dateKey, tokens] of yearlyUsageByDate) if (tokens > 0) keys.add(dateKey);
     return keys;
   }, [allSessions, starred, yearlyUsageByDate]);
@@ -409,16 +398,16 @@ export function StarredView({
               month={calendarMonth}
               onMonthChange={(month) => {
                 setCalendarMonth(month);
-                setVisibleYear(Number(koreaDateKey(month).slice(0, 4)));
+                setVisibleYear(Number(kstDateKey(month).slice(0, 4)));
               }}
               onSelect={(date) => {
                 if (!date) return;
                 setSelectedDate(date);
                 setCalendarMonth(date);
-                setVisibleYear(Number(koreaDateKey(date).slice(0, 4)));
+                setVisibleYear(Number(kstDateKey(date).slice(0, 4)));
               }}
               disabled={(date) => {
-                const dateKey = koreaDateKey(date);
+                const dateKey = kstDateKey(date);
                 return dateKey > todayKey || !activityDateKeys.has(dateKey);
               }}
               modifiers={{ hasActivity: activityMatchers }}

@@ -10,25 +10,24 @@ import { WorkspaceStatsSection } from "./WorkspaceStatsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
 import type { SettingsTab } from "../../../shared/settings-tabs.js";
+import { kstDateKey, shiftKstDateKey } from "../../../shared/kst-date.js";
 
 type Preset = "7d" | "30d" | "90d" | "all" | "custom";
 
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+function todayKey(now = new Date()): string {
+  return kstDateKey(now);
 }
 
-function daysAgoKey(n: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - n);
-  return d.toISOString().slice(0, 10);
+function daysAgoKey(n: number, now = new Date()): string {
+  return shiftKstDateKey(kstDateKey(now), -n);
 }
 
-function presetToDates(preset: Preset): { dateFrom: string; dateTo: string } {
-  const to = todayKey();
-  if (preset === "7d") return { dateFrom: daysAgoKey(6), dateTo: to };
-  if (preset === "30d") return { dateFrom: daysAgoKey(29), dateTo: to };
-  if (preset === "90d") return { dateFrom: daysAgoKey(89), dateTo: to };
-  return { dateFrom: daysAgoKey(365 * 5), dateTo: to };
+export function presetToDates(preset: Preset, now = new Date()): { dateFrom: string; dateTo: string } {
+  const to = todayKey(now);
+  if (preset === "7d") return { dateFrom: daysAgoKey(6, now), dateTo: to };
+  if (preset === "30d") return { dateFrom: daysAgoKey(29, now), dateTo: to };
+  if (preset === "90d") return { dateFrom: daysAgoKey(89, now), dateTo: to };
+  return { dateFrom: daysAgoKey(365 * 5, now), dateTo: to };
 }
 
 function sumUnknownCostTurns(rows: Array<{ unknownCostTurns?: number }>): number {

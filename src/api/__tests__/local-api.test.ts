@@ -59,6 +59,16 @@ describe("local-api dispatch — public read routing", () => {
     expect(result).toEqual({ ok: true, data: { mode: "plan" } });
   });
 
+  it("flushes audit writes before routing external usage reads", async () => {
+    const flush = vi.fn(async () => undefined);
+    const api = createLocalApi(makeDeps({ auditLogger: { flush } }));
+
+    const result = await api.dispatch({ channel: CHANNELS.usage.summary, origin: "local-api" });
+
+    expect(result.ok).toBe(true);
+    expect(flush).toHaveBeenCalledTimes(1);
+  });
+
   it("routes chat sessions (read) to its handler", async () => {
     const listSessionsPage = vi.fn(() => []);
     const api = createLocalApi(
