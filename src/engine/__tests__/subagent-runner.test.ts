@@ -43,6 +43,10 @@ import type { LLMProvider, StreamEvent, StreamTurnParams,
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import {
+  MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
+  type SubscriptionChatRuntimeSelection,
+} from "../../shared/subscription-runtime.js";
 import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { PluginManifest } from "../../plugins/types.js";
@@ -52,6 +56,8 @@ import { A2ASubAgentMessageBus } from "../a2a-subagent-message-bus.js";
 import { SubAgentMessageMailbox } from "../subagent-message-mailbox.js";
 
 // ─── Test scaffolding ─────────────────────────────────
+
+const SUBSCRIPTION_SELECTION = { kind: "subscription", provider: "codex" } as const;
 
 class ScriptedProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -282,6 +288,58 @@ describe("SubAgentRunner — maxRounds bound", () => {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();
     }
+  });
+
+  it("inherits a subscription provider factory for child execution", async () => {
+    const toolRegistry = new ToolRegistry();
+    const subscriptionProviderFactory = vi.fn((selection: SubscriptionChatRuntimeSelection) => new class extends ScriptedProvider {
+      readonly subscriptionRuntime = selection;
+    }([
+      [
+        { type: "text_delta", text: "subscription child completed" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]));
+    // Deliberately absent from the default API-key vendor catalog. Codex must
+    // send it to main's live subscription catalog instead of dropping it here.
+    const profileModel = "codex-live-only-test-model";
+    const configuredSettings = {
+      ...fakeLlmSettings(),
+      activeChatRuntime: SUBSCRIPTION_SELECTION,
+    };
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      settingsService: {
+        get: () => configuredSettings,
+        getSecret: () => "test-key",
+      },
+      subscriptionProviderFactory,
+    } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["parentDeps"];
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+
+    const result = await runner.spawn({
+      title: "subscription child",
+      instructions: "finish the task",
+      maxRounds: 2,
+      profileModel,
+    });
+
+    expect(subscriptionProviderFactory).toHaveBeenCalledWith(
+      {
+        ...SUBSCRIPTION_SELECTION,
+        model: profileModel,
+      },
+      SUBSCRIPTION_SELECTION,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      summary: expect.stringContaining("subscription child completed"),
+      stopReason: "end_turn",
+    });
   });
 });
 
@@ -1223,6 +1281,26 @@ describe("resolveSubAgentModel — #1112 complexity resolution", () => {
     expect(resolveSubAgentModel(undefined, "claude")).toBeNull();
     expect(resolveSubAgentModel("", "claude")).toBeNull();
     expect(resolveSubAgentModel("   ", "claude")).toBeNull();
+  });
+
+  it("uses the active Codex subscription catalog instead of the stale API-key vendor catalog", () => {
+    const codex = { kind: "subscription", provider: "codex" } as const;
+
+    expect(resolveSubAgentModel("  codex-live-only-model  ", "claude", codex))
+      .toBe("codex-live-only-model");
+    // Complexity names are not model IDs and Codex has no static engine map;
+    // the persisted subscription selection remains in effect.
+    expect(resolveSubAgentModel("high", "openai", codex)).toBeNull();
+    expect(resolveSubAgentModel("bad\u0000model", "openai", codex)).toBeNull();
+    expect(resolveSubAgentModel("x".repeat(MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH + 1), "openai", codex)).toBeNull();
+  });
+
+  it("keeps an ACP subscription's persisted default model", () => {
+    expect(resolveSubAgentModel(
+      "codex-live-only-model",
+      "openai",
+      { kind: "subscription", provider: "kimi-code" },
+    )).toBeNull();
   });
 
   it("returns null when the active vendor is outside the union (boundary)", () => {

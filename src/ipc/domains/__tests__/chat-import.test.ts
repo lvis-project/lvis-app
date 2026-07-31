@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
+import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../../main/subscription-attachment-input.js";
 
 const CHANNEL = "lvis:chat:import";
 const MAX_SESSION_FILE_BYTES = 5_000_000;
@@ -156,6 +157,48 @@ describe("lvis:chat:import — success round-trip", () => {
   });
 });
 
+describe("lvis:chat:import — canonical attachment storage", () => {
+  it("canonicalizes verified local multipart attachments before persistence", async () => {
+    const deps = await setup();
+    setFile({
+      ...validExport,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "keep" },
+          {
+            type: "image",
+            image: "data:IMAGE/PNG;base64,iVBORw0KGgo=",
+            mimeType: "IMAGE/PNG",
+            width: 8,
+            height: 8,
+            bytes: 8,
+          },
+          {
+            type: "file",
+            data: "data:TEXT/PLAIN;base64,SGVsbG8=",
+            mimeType: "TEXT/PLAIN",
+          },
+        ],
+      }],
+    });
+
+    const result = await invoke();
+    expect(result.ok).toBe(true);
+    expect(deps.memoryManager.saveImportedSession).toHaveBeenCalledWith(
+      result.sessionId,
+      [{
+        role: "user",
+        content: [
+          { type: "text", text: "keep" },
+          { type: "image", image: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png" },
+          { type: "file", data: "data:text/plain;base64,SGVsbG8=", mimeType: "text/plain" },
+        ],
+      }],
+    );
+  });
+});
+
 describe("lvis:chat:import — rejection branches (fail-closed)", () => {
   it("returns canceled when the user dismisses the file dialog", async () => {
     const deps = await setup();
@@ -201,6 +244,68 @@ describe("lvis:chat:import — rejection branches (fail-closed)", () => {
     expect(result).toEqual({ ok: false, error: "empty-messages" });
   });
 
+  it("rejects remote multipart attachment URLs rather than persisting them", async () => {
+    const deps = await setup();
+    setFile({
+      ...validExport,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "do not partially import this" },
+          { type: "image", image: "https://attacker.example/image.png", mimeType: "image/png" },
+          { type: "file", data: "https://attacker.example/document.txt", mimeType: "text/plain" },
+        ],
+      }],
+    });
+
+    const result = await invoke();
+    expect(result).toEqual({ ok: false, error: "invalid-message-shape" });
+    expect(deps.memoryManager.saveImportedSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid optional image metadata", async () => {
+    const deps = await setup();
+    const invalidMetadata = [
+      { mimeType: 1 },
+      { width: -1 },
+      { height: 1.5 },
+      { bytes: Number.MAX_SAFE_INTEGER + 1 },
+    ];
+
+    for (const metadata of invalidMetadata) {
+      setFile({
+        ...validExport,
+        messages: [{
+          role: "user",
+          content: [{
+            type: "image",
+            image: "data:image/png;base64,iVBORw0KGgo=",
+            ...metadata,
+          }],
+        }],
+      });
+      expect(await invoke()).toEqual({ ok: false, error: "invalid-message-shape" });
+    }
+    expect(deps.memoryManager.saveImportedSession).not.toHaveBeenCalled();
+  });
+
+
+  it("rejects an oversized multipart array before validating each part", async () => {
+    const deps = await setup();
+    setFile({
+      ...validExport,
+      messages: [{
+        role: "user",
+        content: Array.from(
+          { length: MAX_LOCAL_USER_CONTENT_PARTS + 1 },
+          () => ({ type: "text", text: "bounded" }),
+        ),
+      }],
+    });
+
+    expect(await invoke()).toEqual({ ok: false, error: "invalid-message-shape" });
+    expect(deps.memoryManager.saveImportedSession).not.toHaveBeenCalled();
+  });
   it("rejects a message with an unknown role (whole import fails, no partial)", async () => {
     const deps = await setup();
     setFile({

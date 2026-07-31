@@ -34,7 +34,15 @@ import type { BootContext } from "../context.js";
 const log = createLogger("lvis");
 
 export function wireReviewerAndPermissions(ctx: BootContext): void {
-  const { toolRegistry, permissionManager, settingsService, llmFetch, getMainWindow, bootAuditLogger } = ctx;
+  const {
+    toolRegistry,
+    permissionManager,
+    settingsService,
+    llmFetch,
+    getMainWindow,
+    bootAuditLogger,
+    subscriptionProviderFactory,
+  } = ctx;
 
   // §6.3: PermissionManager — instance was constructed before
   // initPluginRuntime (cluster M1) so the resolveApiKey host wiring could
@@ -50,11 +58,21 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
   // VercelUnifiedProvider streaming surface — the reviewer needs only a
   // one-shot complete() call shape.
   const reviewerStreamProviderFor = (vendor: string): LLMProvider | null => {
+    const llmSettings = settingsService.get("llm");
+    const activeChatRuntime = llmSettings.activeChatRuntime;
+    if (activeChatRuntime?.kind === "subscription") {
+      // Treat the runtime id as part of the reviewer identity. This keeps
+      // verdict cache entries scoped to the authenticated transport and makes
+      // a stale active-LLM read fail closed rather than falling through to an
+      // API-key provider.
+      if (vendor !== `subscription:${activeChatRuntime.provider}`) return null;
+      return subscriptionProviderFactory(activeChatRuntime);
+    }
+
     // Reviewer legacy provider names still resolve through the shared map.
     // Active-LLM following passes canonical LLMVendor names directly.
     const llmVendor = reviewerVendorFor(vendor) ?? (isLLMVendor(vendor) ? vendor : null);
     if (!llmVendor) return null;
-    const llmSettings = settingsService.get("llm");
     const block = getLlmVendorSettings(llmSettings.vendors, llmVendor);
     const hasMarketplaceProviderPresetSelection =
       llmVendor === "openai-compatible" && Boolean(llmSettings.marketplaceProviderPresetId);
@@ -105,6 +123,13 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
   };
   const readActiveReviewerLlm = () => {
     const llm = settingsService.get("llm");
+    const activeChatRuntime = llm.activeChatRuntime;
+    if (activeChatRuntime?.kind === "subscription") {
+      return {
+        provider: `subscription:${activeChatRuntime.provider}` as `subscription:${typeof activeChatRuntime.provider}`,
+        model: activeChatRuntime.model ?? "default",
+      };
+    }
     const provider = llm.provider;
     const block = getLlmVendorSettings(llm.vendors, provider);
     const activeMarketplaceProviderPreset =

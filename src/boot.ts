@@ -101,6 +101,7 @@ import { setupPluginToolExecutor } from "./boot/steps/plugin-tool-executor.js";
 import { wireRationaleHost } from "./boot/steps/rationale-host-wiring.js";
 import {
   createIsolatedConversationMemoryManagers,
+  createSubscriptionChatLoopBindings,
   wireConversation,
 } from "./boot/steps/conversation-wiring.js";
 import { detachWorkspaceRootSessions } from "./memory/workspace-root-session-lifecycle.js";
@@ -571,6 +572,14 @@ export async function bootstrap(
         ),
   });
   ctx.systemPromptBuilder = systemPromptBuilder;
+
+  // Subscription-authenticated reviewers run before conversation wiring, so
+  // construct the one main-owned provider factory here and share it with both
+  // the reviewer and all conversation-loop variants below.
+  ctx.subscriptionProviderFactory = createSubscriptionChatLoopBindings({
+    shellOpenExternal: (url) => shell.openExternal(url),
+    auditLogger: ctx.bootAuditLogger,
+  }).subscriptionProviderFactory;
 
   // Permission policy P4 — reviewer agent + PermissionManager broadcast wiring.
   wireReviewerAndPermissions(ctx);

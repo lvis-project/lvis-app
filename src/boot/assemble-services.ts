@@ -21,6 +21,16 @@ import type { ReadyBootContext } from "./context.js";
 
 export function assembleAppServices(ctx: ReadyBootContext): AppServices {
   let shutdownPromise: Promise<void> | null = null;
+  let activeLlmWildcardDisposed = false;
+
+  // App cleanup invokes plugin shutdown handlers before `services.shutdown()`.
+  // Dispose here as well as in `shutdown()` so a pending vendor-change debounce
+  // cannot restart a plugin while its shutdown hook is running.
+  const disposeActiveLlmWildcard = (): void => {
+    if (activeLlmWildcardDisposed) return;
+    ctx.disposeRefreshActiveLlmWildcard();
+    activeLlmWildcardDisposed = true;
+  };
 
   return {
     pythonRuntime: ctx.pythonRuntime,
@@ -80,7 +90,10 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     telemetry: ctx.telemetry,
     pluginTelemetry: ctx.pluginTelemetry,
     autoUpdaterStop: ctx.autoUpdaterStop,
-    runPluginShutdownHandlers: ctx.runPluginShutdownHandlers,
+    runPluginShutdownHandlers: async () => {
+      disposeActiveLlmWildcard();
+      await ctx.runPluginShutdownHandlers();
+    },
     pluginPaths: ctx.pluginPaths,
     clearAuthPartitionService,
     forgetPluginAuthPartitionsService,
@@ -115,6 +128,8 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
           }
         };
 
+        // Direct callers bypass the app-level plugin-shutdown phase.
+        attempt(disposeActiveLlmWildcard);
         attempt(() => ctx.disposePluginNotifications());
         attempt(() => ctx.disposePluginEventBridge());
         attempt(() => ctx.autoUpdaterStop?.());

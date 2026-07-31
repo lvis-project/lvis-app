@@ -64,6 +64,9 @@ function makeDeps(appWindows: ReturnType<typeof makeWindow>[], vendorBaseUrl?: s
     conversationLoop: {
       refreshProvider: vi.fn(),
     },
+    sideChatConversationLoop: {
+      refreshProvider: vi.fn(),
+    },
     auditLogger: { log: vi.fn() },
     getAppWindows: vi.fn(() => appWindows),
   };
@@ -90,6 +93,7 @@ describe("set-api-key broadcast (M3)", () => {
 
     expect(deps.settingsService.setSecret).toHaveBeenCalledWith("llm.apiKey.claude", "sk-ant-test");
     expect(deps.conversationLoop.refreshProvider).toHaveBeenCalled();
+    expect(deps.sideChatConversationLoop.refreshProvider).toHaveBeenCalled();
     for (const win of windows) {
       expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
     }
@@ -183,6 +187,7 @@ describe("delete-api-key broadcast (MAJOR-3)", () => {
 
     expect(deps.settingsService.deleteSecret).toHaveBeenCalledWith("llm.apiKey.gemini");
     expect(deps.conversationLoop.refreshProvider).toHaveBeenCalled();
+    expect(deps.sideChatConversationLoop.refreshProvider).toHaveBeenCalled();
     for (const win of windows) {
       expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
     }
@@ -321,6 +326,34 @@ describe("marketplace:delete-api-key broadcast (MAJOR-3)", () => {
   });
 });
 
+describe("marketplace provider preset runtime refresh", () => {
+  it("refreshes both chat runtime providers after installing a provider preset", async () => {
+    const windows: ReturnType<typeof makeWindow>[] = [];
+    const baseDeps = makeDeps(windows);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        installMarketplaceProviderPreset: vi.fn(async () => ({ ok: true })),
+      },
+    };
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await expect(invoke("lvis:settings:marketplace:install-provider-preset", {
+      providerId: "router-a",
+      label: "Router A",
+      baseUrl: "https://router.example/v1",
+      defaultModel: "router/default",
+      modelOptions: ["router/default"],
+      requiresApiKey: true,
+    })).resolves.toEqual({ ok: true });
+
+    expect(deps.conversationLoop.refreshProvider).toHaveBeenCalledOnce();
+    expect(deps.sideChatConversationLoop.refreshProvider).toHaveBeenCalledOnce();
+  });
+});
 // ─── MAJOR-2 R2: settings:update triggers rewireReviewerAgent when baseUrl changes ──
 
 describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry baseUrl change", () => {
@@ -365,6 +398,8 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
     await invoke("lvis:settings:update", { llm: { provider: "claude" } });
 
     expect(rewire).toHaveBeenCalledOnce();
+    expect(deps.conversationLoop.refreshProvider).toHaveBeenCalledOnce();
+    expect(deps.sideChatConversationLoop.refreshProvider).toHaveBeenCalledOnce();
   });
 
   it("calls rewireReviewerAgent when the active LLM model changes", async () => {
@@ -645,9 +680,86 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
     expect(replaceLlm).toHaveBeenCalledWith(prevLlm);
     expect(rewire).toHaveBeenCalledTimes(2);
     expect(deps.conversationLoop.refreshProvider).toHaveBeenCalled();
+    expect(deps.sideChatConversationLoop.refreshProvider).toHaveBeenCalled();
     expect(refreshWildcard).toHaveBeenCalled();
   });
 
+  it("does not restore a stale LLM predecessor over a newer concurrent update", async () => {
+    const previousLlm = {
+      provider: "openai",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        claude: { model: "claude-sonnet-4-6" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const appliedLlm = {
+      provider: "claude",
+      vendors: {
+        openai: { model: "gpt-4o" },
+        claude: { model: "claude-sonnet-4-6" },
+        "azure-foundry": { baseUrl: null },
+      },
+    };
+    const newerLlm = {
+      ...appliedLlm,
+      vendors: {
+        ...appliedLlm.vendors,
+        openai: { model: "gpt-5.1" },
+      },
+    };
+    let currentLlm = structuredClone(previousLlm);
+    const baseDeps = makeDeps([]);
+    const replaceLlm = vi.fn(async (replacement: unknown) => {
+      currentLlm = structuredClone(replacement as typeof previousLlm);
+      return { llm: currentLlm };
+    });
+    const patch = vi.fn((partial: unknown) => {
+      const llm = (partial as { llm?: { provider?: string; vendors?: { openai?: { model?: string } } } }).llm;
+      if (llm?.provider === "claude") {
+        currentLlm = structuredClone(appliedLlm);
+      } else if (llm?.vendors?.openai?.model === "gpt-5.1") {
+        currentLlm = structuredClone(newerLlm);
+      }
+      return Promise.resolve({ llm: currentLlm });
+    });
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        getAll: vi.fn(() => ({ appearance: { language: "en" }, llm: currentLlm })),
+        get: vi.fn((key: string) => {
+          if (key === "llm") return currentLlm;
+          if (key === "marketplace") return { cloudAllowPrivateNetwork: false };
+          if (key === "shortcuts") return { toggleWindow: null, enabled: false };
+          if (key === "system") return { launchAtStartup: false, launchMinimized: false };
+          return {};
+        }),
+        patch,
+        replaceLlm,
+      },
+      rewireReviewerAgent: undefined as (() => void) | undefined,
+    };
+    const rewire = vi.fn(() => {
+      void deps.settingsService.patch({ llm: { vendors: { openai: { model: "gpt-5.1" } } } });
+      throw new Error("reviewer unavailable");
+    });
+    deps.rewireReviewerAgent = rewire;
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:update", { llm: { provider: "claude" } });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "reviewer-rewire-failed",
+      message: "reviewer unavailable",
+    });
+    expect(rewire).toHaveBeenCalledOnce();
+    expect(replaceLlm).not.toHaveBeenCalled();
+    expect(currentLlm).toEqual(newerLlm);
+  });
   it("uses exact LLM replacement rollback when failed update adds active transport fields", async () => {
     const windows: ReturnType<typeof makeWindow>[] = [];
     const rewire = vi.fn()
@@ -895,6 +1007,86 @@ describe("Minor-1: broadcastSettingsSnapshot helper — all mutation handlers ca
     expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
   });
 
+  it("suppresses a stale generic settings:update locale side effect and snapshot", async () => {
+    const win = makeWindow();
+    const initialLlm = {
+      provider: "openai",
+      vendors: { "azure-foundry": { baseUrl: null } },
+    };
+    let settings = {
+      appearance: { language: "en" },
+      llm: initialLlm,
+      marketplace: { cloudAllowPrivateNetwork: false },
+      shortcuts: { toggleWindow: null, enabled: false },
+      system: { launchAtStartup: false, launchMinimized: false },
+    };
+    let resolveJa!: (messages: Record<string, string>) => void;
+    let signalJaRequested!: () => void;
+    const jaLoading = new Promise<Record<string, string>>((resolve) => {
+      resolveJa = resolve;
+    });
+    const jaRequested = new Promise<void>((resolve) => {
+      signalJaRequested = resolve;
+    });
+    const { __setLocaleLoaderForTest } = await import("../../../i18n/messages/index.js");
+    const restoreJa = __setLocaleLoaderForTest("ja", () => {
+      signalJaRequested();
+      return jaLoading;
+    });
+    const restoreFr = __setLocaleLoaderForTest("fr", async () => ({}));
+    const { getLocale, setLocale } = await import("../../../i18n/index.js");
+    setLocale("en");
+    const baseDeps = makeDeps([win]);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        getAll: vi.fn(() => structuredClone(settings)),
+        get: vi.fn((key: string) => {
+          if (key === "llm") return settings.llm;
+          if (key === "marketplace") return settings.marketplace;
+          if (key === "shortcuts") return settings.shortcuts;
+          if (key === "system") return settings.system;
+          return {};
+        }),
+        patch: vi.fn(async (partial: unknown) => {
+          const language = (partial as { appearance?: { language?: unknown } }).appearance?.language;
+          if (typeof language === "string") {
+            settings = {
+              ...settings,
+              appearance: { ...settings.appearance, language },
+            };
+          }
+          return structuredClone(settings);
+        }),
+      },
+    };
+
+    try {
+      const { registerSettingsHandlers } = await import("../settings.js");
+      registerSettingsHandlers(deps as never);
+
+      const older = invoke("lvis:settings:update", { appearance: { language: "ja" } });
+      await jaRequested;
+      await expect(invoke("lvis:settings:update", { appearance: { language: "fr" } }))
+        .resolves.toMatchObject({ appearance: { language: "fr" } });
+      expect(getLocale()).toBe("fr");
+      resolveJa({});
+      await expect(older).resolves.toMatchObject({ appearance: { language: "ja" } });
+
+      expect(getLocale()).toBe("fr");
+      const snapshots = win.webContents.send.mock.calls
+        .filter(([channel]) => channel === SETTINGS.updated)
+        .map(([, snapshot]) => snapshot as { appearance?: { language?: string } });
+      expect(snapshots).toEqual([
+        expect.objectContaining({ appearance: { language: "fr" } }),
+      ]);
+    } finally {
+      restoreJa();
+      restoreFr();
+      setLocale("en");
+    }
+  });
   it("loads and applies a lazy main-process locale before broadcasting settings:update", async () => {
     const win = makeWindow();
     const snapshot = {

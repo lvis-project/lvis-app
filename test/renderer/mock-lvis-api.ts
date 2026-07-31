@@ -9,6 +9,7 @@ import { vi, type Mock } from "vitest";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 import type { ChatEntry, StreamEvent } from "../../src/lib/chat-stream-state.js";
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../../src/shared/subagent-events.js";
+import type { SubscriptionRuntimeStatusUpdatedEvent } from "../../src/shared/subscription-runtime.js";
 
 export type MockLvisApi = Record<string, Mock>;
 
@@ -23,6 +24,8 @@ type AgentSpawnEvent = SharedAgentSpawnEvent<ChatEntry>;
 
 type ApiOverrides = {
   settings?: unknown;
+  /** Override the settings RPC itself when a renderer test needs to control its timing. */
+  getSettings?: () => Promise<unknown>;
   personaPrompts?: unknown[];
   sessions?: Array<{
     id: string;
@@ -38,6 +41,7 @@ type ApiOverrides = {
   history?: ({ sessionId: string } & HistoryMock) | Promise<{ sessionId: string } & HistoryMock>;
   historyBySession?: Record<string, HistoryMock | Promise<HistoryMock>>;
   hasApiKey?: boolean;
+  subscriptionRuntimeStatus?: unknown;
   hasProvider?: boolean;
   usage?: unknown;
   appInfo?: unknown;
@@ -120,6 +124,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitPluginRuntimeUpdated: (payload: { pluginId: string }) => void;
   emitNotificationToast: (payload: unknown) => void;
   emitNotificationClicked: (payload: unknown) => void;
+  emitSubscriptionRuntimeStatusUpdated: (event: SubscriptionRuntimeStatusUpdatedEvent) => void;
 } {
   let settings = overrides.settings ?? DEFAULT_SETTINGS;
   let personaPrompts = overrides.personaPrompts ?? [];
@@ -133,6 +138,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const history = overrides.history ?? { sessionId: currentSession, messages: [] };
   const historyBySession = overrides.historyBySession ?? {};
   const hasApiKey = overrides.hasApiKey ?? true;
+  const subscriptionRuntimeStatus = overrides.subscriptionRuntimeStatus ?? {
+    ok: false,
+    error: { code: "subscription-runtime-not-configured", message: "not configured" },
+  };
   const hasProvider = overrides.hasProvider ?? true;
   const usage = overrides.usage ?? DEFAULT_USAGE;
   const appInfo = overrides.appInfo ?? DEFAULT_APP_INFO;
@@ -161,6 +170,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const workBoardItemChangedHandlers = new Set<(p: unknown) => void>();
   const viewHandlers = new Set<(v: string) => void>();
   const settingsUpdatedHandlers = new Set<(settings: unknown) => void>();
+  const subscriptionRuntimeStatusUpdatedHandlers = new Set<(event: SubscriptionRuntimeStatusUpdatedEvent) => void>();
   const settingsWindowSavedHandlers = new Set<() => void>();
   const personaPromptsUpdatedHandlers = new Set<() => void>();
   const settingsWindowTabHandlers = new Set<(tab: string) => void>();
@@ -200,7 +210,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
         return () => tourStartHandlers.delete(handler);
       }),
     },
-    getSettings: vi.fn(async () => settings),
+    getSettings: vi.fn(overrides.getSettings ?? (async () => settings)),
     updateSettings: vi.fn(async (p: unknown) => {
       settings = { ...(settings as object), ...(p as object) };
       settingsUpdatedHandlers.forEach((handler) => handler(settings));
@@ -210,6 +220,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     onSettingsUpdated: vi.fn((handler: (settings: unknown) => void) => {
       settingsUpdatedHandlers.add(handler);
       return () => settingsUpdatedHandlers.delete(handler);
+    }),
+    onSubscriptionRuntimeStatusUpdated: vi.fn((handler: (event: SubscriptionRuntimeStatusUpdatedEvent) => void) => {
+      subscriptionRuntimeStatusUpdatedHandlers.add(handler);
+      return () => subscriptionRuntimeStatusUpdatedHandlers.delete(handler);
     }),
     listPersonaPromptSummaries: vi.fn(async () => ({
       prompts: personaPrompts.map((item) => ({
@@ -238,6 +252,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     setApiKey: vi.fn(async () => ({ ok: true })),
     hasApiKey: vi.fn(async () => hasApiKey),
+    subscriptionRuntimeStatus: vi.fn(async () => subscriptionRuntimeStatus),
     deleteApiKey: vi.fn(async () => ({ ok: true })),
     listLlmModels: vi.fn(async () => ({
       ok: false,
@@ -633,6 +648,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitPluginRuntimeUpdated: (payload) => pluginRuntimeUpdatedHandlers.forEach((h) => h(payload)),
     emitNotificationToast: (payload) => notificationToastHandlers.forEach((h) => h(payload)),
     emitNotificationClicked: (payload) => notificationClickedHandlers.forEach((h) => h(payload)),
+    emitSubscriptionRuntimeStatusUpdated: (event) =>
+      subscriptionRuntimeStatusUpdatedHandlers.forEach((handler) => handler(event)),
   };
 }
 

@@ -21,8 +21,88 @@ import { compactedHistoryWithContextCarrier, contentTruncatedHistoryWithContextC
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
+import { getPreflightThreshold, getUsableContext } from "../../shared/context-budget.js";
+import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 
 const log = createLogger("lvis");
+
+// ACP runtimes do not expose a trustworthy model-context descriptor. Keep a
+// conservative independent budget rather than accidentally inheriting an
+// inactive API-key provider's potentially much larger context window.
+const SUBSCRIPTION_FALLBACK_CONTEXT_WINDOW = 64_000;
+const SUBSCRIPTION_FALLBACK_PREFLIGHT = getPreflightThreshold(
+  SUBSCRIPTION_FALLBACK_CONTEXT_WINDOW,
+);
+const SUBSCRIPTION_FALLBACK_USABLE_CONTEXT = getUsableContext(
+  SUBSCRIPTION_FALLBACK_CONTEXT_WINDOW,
+);
+
+interface RuntimeContextBudget {
+  readonly model: string;
+  readonly preflight: number;
+  readonly usableContext: number;
+  readonly identity: string;
+}
+
+/**
+ * A Codex sub-agent may carry a profile-model candidate paired with the active
+ * Codex selection as its same-runtime fallback. The engine's provider marker
+ * cannot receive the asynchronous live-catalog resolution result, so both
+ * valid and stale candidates deliberately use the 64K subscription budget for
+ * the whole child loop. This prevents candidate pricing metadata from ever
+ * deferring compaction beyond the verified parent model's unknown capacity.
+ */
+function hasPendingCodexProfileFallback(
+  self: ConversationLoop,
+  subscriptionRuntime: SubscriptionChatRuntimeSelection,
+): boolean {
+  if (subscriptionRuntime.provider !== "codex" || subscriptionRuntime.model === undefined) return false;
+  const activeChatRuntime = self.deps.settingsService.get("llm").activeChatRuntime;
+  return activeChatRuntime?.kind === "subscription"
+    && activeChatRuntime.provider === "codex"
+    && activeChatRuntime.model !== subscriptionRuntime.model;
+}
+
+export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeContextBudget {
+  const subscriptionRuntime = self.provider?.subscriptionRuntime;
+  if (subscriptionRuntime) {
+    const model = subscriptionRuntime.model ?? "default";
+    if (subscriptionRuntime.provider === "codex" && subscriptionRuntime.model) {
+      if (hasPendingCodexProfileFallback(self, subscriptionRuntime)) {
+        return {
+          model,
+          preflight: SUBSCRIPTION_FALLBACK_PREFLIGHT,
+          usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
+          identity: `subscription:codex/${model}`,
+        };
+      }
+      // Codex catalog model IDs are OpenAI model IDs, but remain isolated from
+      // the user's inactive API-key configuration and pricing accounting.
+      return {
+        model,
+        preflight: getModelPreflightThreshold("openai", model),
+        usableContext: getModelUsableContext("openai", model),
+        identity: `subscription:codex/${model}`,
+      };
+    }
+    return {
+      model,
+      preflight: SUBSCRIPTION_FALLBACK_PREFLIGHT,
+      usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
+      identity: `subscription:${subscriptionRuntime.provider}/${model}`,
+    };
+  }
+
+  const llmSettings = self.deps.settingsService.get("llm");
+  const provider = llmSettings.provider;
+  const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
+  return {
+    model,
+    preflight: getModelPreflightThreshold(provider, model),
+    usableContext: getModelUsableContext(provider, model),
+    identity: `${provider}/${model}`,
+  };
+}
 
 
 
@@ -52,10 +132,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
       };
     }
 
-    const llmSettings = self.deps.settingsService.get("llm");
-    const provider = llmSettings.provider;
-    const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
-    const preflight = getModelPreflightThreshold(provider, model);
+    const { model, preflight } = contextBudgetForCurrentRuntime(self);
     const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
 
     self.isCompacting = true;
@@ -200,10 +277,7 @@ export async function applyBoundaryToSession(
           self.compactNum,
           messagesBefore,
         );
-        const llmSettings = self.deps.settingsService.get("llm");
-        const provider = llmSettings.provider;
-        const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
-        const usable = getModelUsableContext(provider, model);
+        const { usableContext: usable } = contextBudgetForCurrentRuntime(self);
         const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
         const checkpointEntry: import("../../memory/memory-manager.js").Checkpoint = {
           id: crypto.randomUUID(),
@@ -278,10 +352,7 @@ export async function applyBoundaryToSession(
     // Same-session checkpoint chain.
     // ctxUsageAtTrigger 분모는 *usable context window* (LVIS reservation 적용).
     try {
-      const llmSettings = self.deps.settingsService.get("llm");
-      const provider = llmSettings.provider;
-      const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
-      const usable = getModelUsableContext(provider, model);
+      const { usableContext: usable } = contextBudgetForCurrentRuntime(self);
       const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
       const checkpointEntry: import("../../memory/memory-manager.js").Checkpoint = {
         id: crypto.randomUUID(),
@@ -366,10 +437,7 @@ export async function runPreflightGuard(
     }
     if (!self.provider) return false;
 
-    const llmSettings = self.deps.settingsService.get("llm");
-    const provider = llmSettings.provider;
-    const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
-    const preflight = getModelPreflightThreshold(provider, model);
+    const { model, preflight, identity } = contextBudgetForCurrentRuntime(self);
     if (!forceRecover && !forceRateLimit && preflight <= 0) return false;
 
     const messagesBefore = self.history.getMessages();
@@ -409,7 +477,7 @@ export async function runPreflightGuard(
     });
     try {
       log.info(
-        `preflight: TRIGGER — source=${triggerSource} estimated=${estimated} contextTokensIn=${contextTokensIn} preflight=${preflight} (model=${provider}/${model}) → LLM compact #${self.compactNum + 1}`,
+        `preflight: TRIGGER — source=${triggerSource} estimated=${estimated} contextTokensIn=${contextTokensIn} preflight=${preflight} (model=${identity}) → LLM compact #${self.compactNum + 1}`,
       );
       // Adaptive token-budget preserve — usagePct 가 높을수록 줄인다. 별도 invariant 로
       // compactWithBoundary 가 최근 5 user turn (+ 현재 pending user question)

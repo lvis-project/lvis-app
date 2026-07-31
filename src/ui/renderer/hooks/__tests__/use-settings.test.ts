@@ -114,6 +114,40 @@ describe("useSettings", () => {
     expect(result.current.enableThinkingChat).toBe(false);
   });
 
+  it("never writes API thinking while settings are unresolved or subscription chat is selected", async () => {
+    const subscriptionSettings = makeSettings();
+    subscriptionSettings.llm.activeChatRuntime = { kind: "subscription", provider: "codex" };
+    let resolveSettings!: (settings: AppSettings) => void;
+    const pendingSettings = new Promise<AppSettings>((resolve) => {
+      resolveSettings = resolve;
+    });
+    const { api } = makeMockLvisApi({ settings: subscriptionSettings, hasApiKey: true });
+    api.getSettings = vi.fn(() => pendingSettings);
+
+    const { result } = renderHook(() => useSettings(api as unknown as LvisApi));
+
+    // Before hydration a delayed persisted subscription must not let the
+    // initial API thinking default persist against the inactive vendor.
+    await act(async () => {
+      await result.current.toggleThinking(false);
+    });
+    expect(api.updateSettings).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSettings(subscriptionSettings);
+      await pendingSettings;
+    });
+    await waitFor(() => expect(result.current.activeSubscriptionRuntime).toEqual({
+      kind: "subscription",
+      provider: "codex",
+    }));
+
+    await act(async () => {
+      await result.current.toggleThinking(false);
+    });
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
   it("falls back to vendor defaults when a broadcast omits the active vendor block", async () => {
     let onSettingsUpdated: ((settings: AppSettings) => void) | undefined;
     const { api } = makeMockLvisApi({ settings: makeSettings(), hasApiKey: false });
@@ -197,5 +231,131 @@ describe("useSettings", () => {
       expect(result.current.llmVendor).toBe("openai-compatible");
       expect(result.current.llmReadyWithoutApiKey).toBe(true);
     });
+  });
+
+  it("uses only an explicitly chat-capable selected subscription runtime as no-key chat readiness", async () => {
+    const settings = makeSettings();
+    settings.llm.activeChatRuntime = { kind: "subscription", provider: "codex" };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    api.subscriptionRuntimeStatus = vi.fn(async () => ({
+      ok: true,
+      status: {
+        provider: "codex",
+        runtime: "ready",
+        connection: "connected",
+        planType: "subscription",
+        pendingLogin: null,
+        pendingDeviceCode: null,
+        canOpenVerificationUrl: false,
+        version: "test",
+        capabilities: {
+          chat: true,
+          tools: false,
+          projectAccess: false,
+          plugins: false,
+          mcp: false,
+          generateText: false,
+          compaction: false,
+          routine: false,
+          subagent: false,
+          images: true,
+          imageAttachmentLimits: {
+            maxCount: 5,
+            maxBytesPerImage: 25 * 1024 * 1024,
+            maxTotalBytes: 25 * 1024 * 1024,
+          },
+          files: true,
+        },
+      },
+    }));
+
+    const { result } = renderHook(() => useSettings(api as unknown as LvisApi));
+
+    await waitFor(() => {
+      expect(result.current.activeSubscriptionRuntime).toEqual({ kind: "subscription", provider: "codex" });
+      expect(result.current.subscriptionChatReady).toBe(true);
+      expect(result.current.subscriptionImagesReady).toBe(true);
+      expect(result.current.subscriptionFilesReady).toBe(true);
+    });
+    expect(api.subscriptionRuntimeStatus).toHaveBeenCalledWith("codex");
+  });
+
+  it("fails closed synchronously when an active subscription status revision arrives", async () => {
+    const settings = makeSettings();
+    settings.llm.activeChatRuntime = { kind: "subscription", provider: "codex" };
+    const { api, emitSubscriptionRuntimeStatusUpdated } = makeMockLvisApi({ settings, hasApiKey: false });
+    api.subscriptionRuntimeStatus = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: {
+          provider: "codex",
+          runtime: "ready",
+          connection: "connected",
+          planType: "subscription",
+          pendingLogin: null,
+          pendingDeviceCode: null,
+          canOpenVerificationUrl: false,
+          version: "test",
+          capabilities: {
+            chat: true,
+            tools: false,
+            projectAccess: false,
+            plugins: false,
+            mcp: false,
+            generateText: false,
+            compaction: false,
+            routine: false,
+            subagent: false,
+            images: true,
+            imageAttachmentLimits: {
+              maxCount: 5,
+              maxBytesPerImage: 25 * 1024 * 1024,
+              maxTotalBytes: 25 * 1024 * 1024,
+            },
+            files: true,
+          },
+        },
+      })
+      .mockImplementation(() => new Promise<never>(() => {}));
+
+    const { result } = renderHook(() => useSettings(api as unknown as LvisApi));
+    await waitFor(() => {
+      expect(result.current.subscriptionRuntimePolicy.chatReady).toBe(true);
+      expect(result.current.subscriptionRuntimePolicy.imagesEnabled).toBe(true);
+      expect(result.current.subscriptionRuntimePolicy.filesEnabled).toBe(true);
+    });
+
+    act(() => {
+      emitSubscriptionRuntimeStatusUpdated({ provider: "codex", revision: 1 });
+    });
+
+    // The event invalidates the old safe projection before its re-probe settles,
+    // so send, picker, paste, and file ingress all see a non-permissive policy.
+    expect(result.current.subscriptionRuntimePolicy.chatReady).toBeNull();
+    expect(result.current.subscriptionRuntimePolicy.imagesReady).toBeNull();
+    expect(result.current.subscriptionRuntimePolicy.filesReady).toBeNull();
+    expect(result.current.subscriptionRuntimePolicy.attachmentInputsReady).toBe(false);
+    expect(result.current.subscriptionRuntimePolicy.imagesEnabled).toBe(false);
+    expect(result.current.subscriptionRuntimePolicy.filesEnabled).toBe(false);
+  });
+
+  it("fails closed when the selected subscription runtime has not verified chat capability", async () => {
+    const settings = makeSettings();
+    settings.llm.activeChatRuntime = { kind: "subscription", provider: "codex", model: "gpt-5.4" };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    api.subscriptionRuntimeStatus = vi.fn(async () => ({
+      ok: false,
+      error: { code: "subscription-runtime-not-configured", message: "not configured" },
+    }));
+
+    const { result } = renderHook(() => useSettings(api as unknown as LvisApi));
+
+    await waitFor(() => {
+      expect(result.current.activeSubscriptionRuntime).toEqual({ kind: "subscription", provider: "codex", model: "gpt-5.4" });
+      expect(result.current.subscriptionChatReady).toBe(false);
+      expect(result.current.subscriptionImagesReady).toBe(false);
+      expect(result.current.subscriptionFilesReady).toBe(false);
+    });
+    expect(api.subscriptionRuntimeStatus).toHaveBeenCalledWith("codex");
   });
 });

@@ -31,6 +31,7 @@ import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import type { A2AAgentCausalContext } from "../a2a-agent-message-envelope.js";
 import { createRequestAnchor } from "../../tools/pipeline/rationale-control.js";
+import { providerMatchesActiveChatRuntime } from "./provider.js";
 
 const log = createLogger("lvis");
 
@@ -123,7 +124,20 @@ export async function runTurn(
 
     self.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin,
   });
-    if (!self.provider) {
+    let activeChatRuntime = self.deps.settingsService.get("llm").activeChatRuntime;
+    if (!providerMatchesActiveChatRuntime(self.provider, activeChatRuntime)) {
+      try {
+        // Settings IPC updates both loops synchronously before persistence, but
+        // this execution-boundary retry closes any stale instance that reached
+        // the loop through a non-IPC construction or an earlier failed refresh.
+        self.refreshProvider();
+      } catch {
+        // refreshProvider clears the old provider before building. Treat a
+        // rebuild failure as unconfigured rather than retaining an API client.
+      }
+      activeChatRuntime = self.deps.settingsService.get("llm").activeChatRuntime;
+    }
+    if (!providerMatchesActiveChatRuntime(self.provider, activeChatRuntime)) {
       const err = t("be_conversationLoop.llmProviderNotConfigured");
       callbacks?.onError?.(err);
       throw new Error(err);
@@ -385,6 +399,11 @@ export async function runTurn(
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
     // build() 호출 전에 setToolScope 수행.
     const scope = self.resolveToolScope(input);
+    const subscriptionRuntime = self.provider?.subscriptionRuntime;
+    const isSubscriptionRuntime = subscriptionRuntime !== undefined;
+    const subscriptionAuditRoute = subscriptionRuntime
+      ? `subscription:${subscriptionRuntime.provider}/${subscriptionRuntime.model || "default"}`
+      : undefined;
     const initialToolSchemas = self.rebuildToolSchemas(scope);
 
     // ─── Token Preflight (same-session checkpoint compaction) ───
@@ -515,12 +534,16 @@ export async function runTurn(
           name: tc.name,
           isError: false,
         })),
-        tokenUsage: result.usage,
-        usageByModel: result.usageByModel,
         toolExposure: postTurnToolExposure,
-        route: routeResult.route,
-        vendorProvider: result.vendorProvider,
-        vendorModel: result.vendorModel,
+        route: subscriptionAuditRoute ?? routeResult.route,
+        ...(!isSubscriptionRuntime
+          ? {
+              tokenUsage: result.usage,
+              usageByModel: result.usageByModel,
+              vendorProvider: result.vendorProvider,
+              vendorModel: result.vendorModel,
+            }
+          : {}),
       });
       // PostTurnHookChain owns the durable transcript projection: mark-stale
       // compaction plus marker-stripped assistant output. Keep in-memory history
@@ -578,20 +601,26 @@ export async function runTurn(
       // child loops with `postTurnHookChain: undefined`, which would
       // otherwise log every sub-agent LLM turn as the bare `"llm"` route
       // and lose vendor/model granularity in `~/.lvis/audit.jsonl`.
-      const auditRoute = result.usage
-        ? `${result.vendorProvider}/${result.vendorModel}`
-        : routeResult.route;
-      const auditTokenUsage = normalizeAiSdkUsageForCost(
-        result.usage,
-        result.vendorProvider,
-      );
-      const auditUsageByModel = result.usageByModel?.map((segment) => ({
-        ...segment,
-        tokenUsage: normalizeAiSdkUsageForCost(
-          segment.tokenUsage,
-          segment.vendorProvider,
-        ),
-      }));
+      const auditRoute = subscriptionAuditRoute
+        ?? (result.usage && result.vendorProvider && result.vendorModel
+          ? `${result.vendorProvider}/${result.vendorModel}`
+          : routeResult.route);
+      const auditVendorProvider = isSubscriptionRuntime ? undefined : result.vendorProvider;
+      const auditTokenUsage = auditVendorProvider
+        ? normalizeAiSdkUsageForCost(
+          result.usage,
+          auditVendorProvider,
+        )
+        : undefined;
+      const auditUsageByModel = isSubscriptionRuntime
+        ? undefined
+        : result.usageByModel?.map((segment) => ({
+          ...segment,
+          tokenUsage: normalizeAiSdkUsageForCost(
+            segment.tokenUsage,
+            segment.vendorProvider,
+          ),
+        }));
       self.auditLogger.logTurn({
         sessionId: self.sessionId,
         input,
@@ -632,8 +661,10 @@ export async function runTurn(
       result.stopReason !== "stream-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0;
+    const billableTurnUsage = isSubscriptionRuntime ? undefined : result.usage;
+    const billableUsageByModel = isSubscriptionRuntime ? [] : result.usageByModel;
     log.info(
-      `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${result.usage ? `in=${result.usage.inputTokens} out=${result.usage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
+      `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${billableTurnUsage ? `in=${billableTurnUsage.inputTokens} out=${billableTurnUsage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
     );
     if (willEmitSummary) {
       // tokensIn = turn-end projected context input. It is calibrated from
@@ -654,31 +685,33 @@ export async function runTurn(
       const lastRoundProjection =
         self.lastRoundInputProjection ?? postTurnProjection;
       turnTokensIn = projectNextTurnInputTokens({
-        providerInputTokens: self.lastRoundProviderInputTokens,
+        providerInputTokens: isSubscriptionRuntime
+          ? 0
+          : self.lastRoundProviderInputTokens,
         lastRoundProjection,
         postTurnProjection,
       });
       self.lastContextInputTokens = turnTokensIn;
       self.lastContextInputProjectionTokens = postTurnProjection.totalTokens;
-      turnTokensOut = result.usage?.outputTokens ?? 0;
-      const turnCacheRead = result.usage?.cacheReadTokens ?? 0;
-      const turnCacheWrite = result.usage?.cacheWriteTokens ?? 0;
+      turnTokensOut = billableTurnUsage?.outputTokens ?? 0;
+      const turnCacheRead = billableTurnUsage?.cacheReadTokens ?? 0;
+      const turnCacheWrite = billableTurnUsage?.cacheWriteTokens ?? 0;
       const turnFreshInput = Math.max(
         0,
-        (result.usage?.inputTokens ?? 0) - turnCacheRead - turnCacheWrite,
+        (billableTurnUsage?.inputTokens ?? 0) - turnCacheRead - turnCacheWrite,
       );
       const breakdown =
         turnToolBreakdown.size > 0
           ? Object.fromEntries(turnToolBreakdown.entries())
           : undefined;
       const uniqueUsageModelKeys = new Set(
-        result.usageByModel?.map(
+        billableUsageByModel.map(
           (segment) => `${segment.vendorProvider}\u0000${segment.vendorModel}`,
-        ) ?? [],
+        ),
       );
       const singleUsageModel =
-        uniqueUsageModelKeys.size === 1 && result.usageByModel?.[0]
-          ? result.usageByModel[0]
+        uniqueUsageModelKeys.size === 1 && billableUsageByModel[0]
+          ? billableUsageByModel[0]
           : undefined;
       const turnSummaryPayload = {
         turnDurationMs: Math.max(0, Date.now() - turnStartedAt),
@@ -695,8 +728,8 @@ export async function runTurn(
               vendorModel: singleUsageModel.vendorModel,
             }
           : {}),
-        ...(result.usageByModel.length > 0
-          ? { usageByModel: result.usageByModel }
+        ...(billableUsageByModel.length > 0
+          ? { usageByModel: billableUsageByModel }
           : {}),
         ...(breakdown ? { breakdown } : {}),
       };

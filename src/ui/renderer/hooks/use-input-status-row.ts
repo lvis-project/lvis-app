@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
 import { shortVendorLabel } from "./status-bar/vendor-label.js";
+import {
+  isSubscriptionRuntimeId,
+  subscriptionRuntimeDescriptor,
+} from "../../../shared/subscription-runtime.js";
 
 /**
  * In-bar status sub-row data.
@@ -55,6 +59,14 @@ export function useInputStatusRow(api: LvisApi): InputStatusRow {
 
     const apply = (settings: Awaited<ReturnType<LvisApi["getSettings"]>>) => {
       if (cancelled) return;
+      const activeRuntime = settings.llm?.activeChatRuntime;
+      if (activeRuntime?.kind === "subscription" && isSubscriptionRuntimeId(activeRuntime.provider)) {
+        const model = typeof activeRuntime.model === "string" ? activeRuntime.model.trim() : "";
+        const label = subscriptionRuntimeDescriptor(activeRuntime.provider).label;
+        setVendorModel(model.length > 0 ? `${label} · ${model}` : label);
+        setActive(true);
+        return;
+      }
       const provider = settings.llm?.provider ?? "";
       const model = settings.llm?.vendors?.[provider]?.model ?? "";
       const vendorLabel = shortVendorLabel(provider);

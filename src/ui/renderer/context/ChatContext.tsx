@@ -6,6 +6,7 @@ import type { EstimateBreakdown } from "../../../lib/cost-estimator.js";
 import type { ModelPricing } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { Attachment } from "../types/attachments.js";
+import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 
 /**
  * Cross-cutting chat-view state bundle. Groups props by concern so ChatView
@@ -34,6 +35,8 @@ export interface ChatContextValue {
 
   // API state
   hasApiKey: boolean | null;
+  /** True once the persisted active runtime selection has been loaded. */
+  settingsLoaded?: boolean;
   onOpenSettings: (tab?: string) => void;
 
   // Search
@@ -81,19 +84,39 @@ export interface ChatContextValue {
 
   // Thinking toggle
   enableThinkingChat: boolean;
+  /** False when the selected chat runtime does not expose an effort control. */
+  reasoningAvailable?: boolean;
   toggleThinking: (v: boolean) => Promise<void> | void;
 
-  // Cost
-  costEstimate: EstimateBreakdown;
-  costBadgeClass: string;
+  /** False when the selected runtime does not expose pricing/context limits. */
+  usageAvailable?: boolean;
+
+  /** Canonical selected-subscription readiness and attachment policy. */
+  subscriptionRuntimePolicy?: SubscriptionRuntimeUiPolicy;
+
+  /** Selected login runtime has not verified original local image attachment egress. */
+  subscriptionImageAttachmentProvider?: string;
+
+  /** Selected login runtime has not verified file attachment support. */
+  subscriptionFileAttachmentProvider?: string;
+
+  /** Selected login runtime needs sign-in or verification before chat can run. */
+  subscriptionUnavailableProvider?: string;
+
+  /** Selected login runtime is still checking whether chat is available. */
+  subscriptionPendingProvider?: string;
+
+  // Cost (unknown for runtimes without a verified billing contract).
+  costEstimate?: EstimateBreakdown;
+  costBadgeClass?: string;
 
 
 
-  activePricing: ModelPricing | undefined;
+  activePricing?: ModelPricing;
 
 
 
-  activeVendor: LLMVendor;
+  activeVendor?: LLMVendor;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);

@@ -32,6 +32,8 @@ import { useSlashPickerRuntime } from "../hooks/use-slash-picker-runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import type { SubscriptionImageAttachmentLimits } from "../../../shared/subscription-runtime.js";
+import { subscriptionImageAttachmentLimitViolation } from "../utils/subscription-runtime-ui-policy.js";
 import { SuggestedRepliesGhost } from "./SuggestedRepliesGhost.js";
 import { SuggestedRepliesChipRow } from "./SuggestedRepliesChipRow.js";
 import {
@@ -78,14 +80,26 @@ export interface ComposerProps {
     dataUrl?: string;
     error?: string;
   }>;
+  /** Releases an app-owned clipboard temp image after this composer refuses it. */
+  discardClipboardImage?: (path: string) => Promise<unknown>;
   /** Open via OS default app — for the overlay's open button. */
   openExternal?: (path: string) => Promise<unknown>;
   onSend: (intent: UserKeyboardIntentSnapshot) => void;
 
 
   disabled?: boolean;
+  /** False when the active runtime cannot accept original local image input. */
+  imagesEnabled?: boolean;
+  /** Exact main-verified raw-image budget for the selected subscription runtime. */
+  imageAttachmentLimits?: SubscriptionImageAttachmentLimits | null;
+  /** Disable Enter-to-send while preserving editable draft text and markers. */
+  sendDisabled?: boolean;
   placeholder?: string;
   onWarning?: (message: string) => void;
+  /** Overrides the generic warning only for a live image-capability refusal. */
+  onImageAttachmentUnavailable?: () => void;
+  /** Overrides the generic warning when a supported image exceeds its runtime budget. */
+  onImageAttachmentLimitExceeded?: () => void;
   /**
    * Suggested-replies snapshot from `useSuggestedReplies()`. Composer renders
    * (a) `best` as ghost text inside the textarea when value is empty + not
@@ -125,6 +139,16 @@ export interface ComposerProps {
  */
 const NOOP_SELECT_PLUGIN = () => {};
 
+function clipboardContainsImage(event: ClipboardEvent): boolean {
+  const items = event.clipboardData?.items;
+  if (!items) return false;
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (item?.kind === "file" && item.type.startsWith("image/")) return true;
+  }
+  return false;
+}
+
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
   {
     text,
@@ -133,11 +157,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onAttachmentsChange,
     allocateN,
     saveClipboardImage,
+    discardClipboardImage,
     openExternal,
     onSend,
     disabled = false,
+    imagesEnabled = true,
+    imageAttachmentLimits,
+    sendDisabled = false,
     placeholder,
     onWarning,
+    onImageAttachmentUnavailable,
+    onImageAttachmentLimitExceeded,
     suggestedReplies,
     commandActions = [],
     inlinePlugins = [],
@@ -147,6 +177,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 ) {
   const { t } = useTranslation();
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const imagesEnabledRef = useRef(imagesEnabled);
+  imagesEnabledRef.current = imagesEnabled;
+  const imageAttachmentLimitsRef = useRef(imageAttachmentLimits);
+  imageAttachmentLimitsRef.current = imageAttachmentLimits;
   // Mirror of the controlled value for callbacks that outlive the render they were
   // created in — the asynchronous resource attach is the one that needs it.
   const textRef = useRef(text);
@@ -338,6 +372,31 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     [insertAtCursor],
   );
 
+  const warnImageAttachmentUnavailable = useCallback(() => {
+    if (onImageAttachmentUnavailable) {
+      onImageAttachmentUnavailable();
+      return;
+    }
+    onWarning?.(t("app.subscriptionAttachmentUnsupported", { provider: "subscription" }));
+  }, [onImageAttachmentUnavailable, onWarning, t]);
+
+  const warnImageAttachmentLimitExceeded = useCallback(() => {
+    if (onImageAttachmentLimitExceeded) {
+      onImageAttachmentLimitExceeded();
+      return;
+    }
+    onWarning?.(t("app.subscriptionAttachmentUnsupported", { provider: "subscription" }));
+  }, [onImageAttachmentLimitExceeded, onWarning, t]);
+
+  const discardRejectedClipboardImage = useCallback((filePath: string) => {
+    try {
+      const discard = discardClipboardImage?.(filePath);
+      void discard?.catch(() => {});
+    } catch {
+      // Best-effort cleanup does not alter the local refusal path.
+    }
+  }, [discardClipboardImage]);
+
   const handlePaste = useCallback(
     async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       // When the composer is disabled (no API key, context overflow, etc.)
@@ -345,12 +404,46 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       // short-circuit, clipboard paste would silently bypass that gate
       // and grow attachment state while the user cannot send.
       if (disabled) return;
+      // Keep ordinary text paste available when only native image egress is
+      // unavailable. A clipboard image itself is consumed so the browser does
+      // not create an untracked attachment-like draft representation.
+      if (!imagesEnabledRef.current && clipboardContainsImage(e.nativeEvent)) {
+        e.preventDefault();
+        warnImageAttachmentUnavailable();
+        return;
+      }
       const outcome = await handleClipboardPaste(e.nativeEvent, {
         count: chipStripCount,
         allocateN,
         saveClipboardImage,
         max: ATTACH_MAX_COUNT,
       });
+      // A runtime switch may occur while the clipboard image is being saved.
+      // Recheck the live capability before committing renderer attachment
+      // state, not only when the asynchronous operation started.
+      if (outcome.newAttachment?.kind === "image" && !imagesEnabledRef.current) {
+        e.preventDefault();
+        discardRejectedClipboardImage(outcome.newAttachment.path);
+        warnImageAttachmentUnavailable();
+        return;
+      }
+      if (
+        outcome.newAttachment?.kind === "image"
+        && subscriptionImageAttachmentLimitViolation(
+          imageAttachmentLimitsRef.current,
+          [
+            ...liveAttachments
+              .filter((attachment) => attachment.kind === "image")
+              .map((attachment) => ({ bytes: attachment.bytes })),
+            { bytes: outcome.newAttachment.bytes },
+          ],
+        )
+      ) {
+        e.preventDefault();
+        discardRejectedClipboardImage(outcome.newAttachment.path);
+        warnImageAttachmentLimitExceeded();
+        return;
+      }
       if (!outcome.handled) return;
       e.preventDefault();
       if (outcome.warning) onWarning?.(outcome.warning);
@@ -367,9 +460,24 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         // marker → would destructively cleanup the chip before the text
         // catches up).
         let inserted = false;
+        let imageAttachmentBudgetRejected = false;
         flushSync(() => {
           onAttachmentsChange((prev) => {
             if (prev.length >= ATTACH_MAX_COUNT) return prev;
+            if (candidate.kind === "image") {
+              const images = prev
+                .filter((attachment) => attachment.kind === "image")
+                .map((attachment) => ({ bytes: attachment.bytes }));
+              if (
+                subscriptionImageAttachmentLimitViolation(
+                  imageAttachmentLimitsRef.current,
+                  [...images, { bytes: candidate.bytes }],
+                )
+              ) {
+                imageAttachmentBudgetRejected = true;
+                return prev;
+              }
+            }
             inserted = true;
             return [...prev, candidate];
           });
@@ -377,7 +485,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             insertAtCursor(outcome.insertText);
           }
         });
-        if (!inserted) {
+        if (imageAttachmentBudgetRejected) {
+          if (candidate.kind === "image") {
+            discardRejectedClipboardImage(candidate.path);
+          }
+          warnImageAttachmentLimitExceeded();
+        } else if (!inserted) {
+          if (candidate.kind === "image") {
+            discardRejectedClipboardImage(candidate.path);
+          }
           onWarning?.(
             t("composer.attachLimitPasteBlocked", { max: ATTACH_MAX_COUNT }),
           );
@@ -389,11 +505,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     },
     [
       disabled,
+      imagesEnabled,
       liveAttachments,
       allocateN,
       saveClipboardImage,
+      discardRejectedClipboardImage,
       onWarning,
       onAttachmentsChange,
+      warnImageAttachmentUnavailable,
+      warnImageAttachmentLimitExceeded,
       insertAtCursor,
     ],
   );
@@ -601,7 +721,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         }
 
         e.preventDefault();
-        if (disabled) return;
+        if (disabled || sendDisabled) return;
         // PR-D dismiss memory: a new user message means we're transitioning
         // to the next turn — release the dismiss latch so the next suggestion
         // push renders fresh regardless of any prior Escape during this turn.
@@ -612,6 +732,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     [
       captureUserKeyboardIntent,
       disabled,
+      sendDisabled,
       onSend,
       text,
       onTextChange,

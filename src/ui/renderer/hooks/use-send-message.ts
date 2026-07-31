@@ -22,6 +22,7 @@ import type { Attachment } from "../types/attachments.js";
 import type { useChatState } from "./use-chat-state.js";
 import type { useSessions } from "./use-sessions.js";
 import type { useSettings } from "./use-settings.js";
+import { subscriptionImageAttachmentLimitViolation } from "../utils/subscription-runtime-ui-policy.js";
 import type { HandleAskRefFn } from "./use-routine-overlay.js";
 
 type Api = ReturnType<typeof getApi>;
@@ -53,6 +54,10 @@ export interface UseSendMessageDeps {
   llmVendor: Settings["llmVendor"];
   llmModel: Settings["llmModel"];
   llmReadyWithoutApiKey: Settings["llmReadyWithoutApiKey"];
+  /** Canonical safe status and raw-image budget for the selected runtime. */
+  subscriptionRuntimePolicy: Settings["subscriptionRuntimePolicy"];
+  /** False until the active runtime selection has been read from settings. */
+  settingsReady?: boolean;
   onOpenSettings: (tab?: string) => void;
   setQuestion: Dispatch<SetStateAction<string>>;
   /**
@@ -114,7 +119,9 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
     appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
-    llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,
+    llmVendor, llmModel, llmReadyWithoutApiKey, subscriptionRuntimePolicy,
+    settingsReady = true,
+    onOpenSettings, setQuestion, handleAskRef,
   } = deps;
 
   const turnRequestRef = useRef(0);
@@ -137,6 +144,10 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         if (debugStreamEnabled) debugLog("handleAsk", "skip:empty");
         return;
       }
+      // Do not let a fast legacy-key probe race ahead of the authoritative
+      // runtime selection. Until settings resolves we cannot know whether a
+      // subscription login, rather than an API-key provider, is selected.
+      if (!settingsReady) return;
       // `mcp-prompt` joins `default` here because both are USER-initiated: the
       // picker is live while a turn streams, so without this a click lands on
       // `trackStreamTurn` and surfaces a raw "stream already active" error. The
@@ -182,8 +193,44 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
           return;
         }
       }
-      if (!llmReadyWithoutApiKey && !(await checkApiKey())) {
+      // Once a subscription runtime is selected its verified chat capability is
+      // the only send gate. A stored API key belongs to the inactive runtime and
+      // must never make this path sendable while login/verification is pending.
+      if (subscriptionRuntimePolicy.subscriptionSelected && subscriptionRuntimePolicy.chatReady !== true) {
         onOpenSettings("llm");
+        return;
+      }
+      if (!subscriptionRuntimePolicy.subscriptionSelected && !llmReadyWithoutApiKey && !(await checkApiKey())) {
+        onOpenSettings("llm");
+        return;
+      }
+      // Preserve the draft if the selected login runtime has not explicitly
+      // verified the exact attachment flow in use. Image payloads are native
+      // provider input; normal files retain LVIS's governed read-tool flow.
+      // Missing/pending capability projections fail closed rather than relying
+      // on an inactive API-key vendor setting.
+      const interactiveComposerSend = mode === "default" && opts?.inputOrigin !== "queue-auto";
+      const hasImageAttachment = interactiveComposerSend
+        && attachments.some((attachment) => attachment.kind === "image");
+      const hasFileAttachment = interactiveComposerSend
+        && attachments.some((attachment) => attachment.kind === "file");
+      if (
+        subscriptionRuntimePolicy.subscriptionSelected
+        && (
+          (hasImageAttachment && subscriptionRuntimePolicy.imagesReady !== true)
+          || (hasFileAttachment && subscriptionRuntimePolicy.filesReady !== true)
+          || (
+            hasImageAttachment
+            && subscriptionImageAttachmentLimitViolation(
+              subscriptionRuntimePolicy.imageAttachmentLimits,
+              attachments.filter((attachment) => attachment.kind === "image"),
+            ) !== null
+          )
+        )
+      ) {
+        setErrorWithThought(t("app.subscriptionAttachmentUnsupported", {
+          provider: subscriptionRuntimePolicy.provider ?? "subscription",
+        }));
         return;
       }
       const requestId = ++turnRequestRef.current;
@@ -211,7 +258,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       // freely; check at send time and confirm before silently dropping
       // image parts on a text-only model.
       const hasImageParts = outgoingAttachments.some((p) => p.type === "image");
-      if (hasImageParts && !supportsVision(llmVendor, llmModel)) {
+      const subscriptionRuntimeOwnsImageCapability = subscriptionRuntimePolicy.subscriptionSelected;
+      if (hasImageParts && !subscriptionRuntimeOwnsImageCapability && !supportsVision(llmVendor, llmModel)) {
         const proceed = window.confirm(t("app.visionNotSupportedConfirm", { llmModel }));
         if (!proceed) {
           // Restore the original (untrimmed) draft text so the user can
@@ -340,6 +388,8 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
       llmVendor,
       llmModel,
       llmReadyWithoutApiKey,
+      subscriptionRuntimePolicy,
+      settingsReady,
       onOpenSettings,
       setAttachments,
       setQuestion,

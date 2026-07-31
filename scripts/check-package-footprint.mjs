@@ -14,6 +14,10 @@ import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { resolveBuildAssets } from "./lib/build-assets.mjs";
+import {
+  findUnexpectedMainBundleRootScripts,
+  isSafeMainBundleManifestPath,
+} from "./lib/main-bundle-budget.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -219,9 +223,7 @@ if (mainBundleManifest.schemaVersion !== 1 || mainBundleManifest.entry !== "main
 }
 const mainBundleFiles = new Map();
 for (const file of mainBundleManifest.files) {
-  const safePath = typeof file?.path === "string"
-    && /^(?:main\.js|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(file.path)
-    ? file.path
+  const safePath = isSafeMainBundleManifestPath(file?.path) ? file.path
     : null;
   if (!safePath || !Number.isInteger(file.bytes) || file.bytes < 0) {
     fail("main bundle manifest contains an invalid file entry", [JSON.stringify(file)]);
@@ -256,6 +258,20 @@ const unexpectedMainChunks = packagedMainChunkEntries.filter(
 );
 if (unexpectedMainChunks.length > 0) {
   fail("stale main-process chunks leaked into app.asar", unexpectedMainChunks);
+}
+
+const packagedMainRootScripts = entries
+  .filter((entry) => entry.startsWith("/dist/src/main/"))
+  .map((entry) => entry.slice("/dist/src/main/".length));
+const unexpectedMainRootScripts = findUnexpectedMainBundleRootScripts(
+  packagedMainRootScripts,
+  mainBundleFiles.keys(),
+);
+if (unexpectedMainRootScripts.length > 0) {
+  fail(
+    "stale main-process root entrypoints leaked into app.asar",
+    unexpectedMainRootScripts.map((path) => `/dist/src/main/${path}`),
+  );
 }
 
 // Lazy renderer chunks — mermaid loads via a webpack dynamic import that

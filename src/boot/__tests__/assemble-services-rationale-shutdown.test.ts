@@ -19,6 +19,10 @@ describe("assembleAppServices rationale shutdown", () => {
       order.push(name);
     };
     const ctx = {
+      disposeRefreshActiveLlmWildcard: mark("active-llm-wildcard"),
+      runPluginShutdownHandlers: vi.fn(async () => {
+        order.push("plugin-shutdown");
+      }),
       disposePluginNotifications: mark("plugin-notifications"),
       disposePluginEventBridge: mark("plugin-event-bridge"),
       preferenceRefreshService: { stop: mark("preference") },
@@ -55,10 +59,13 @@ describe("assembleAppServices rationale shutdown", () => {
     } as unknown as BootContext;
 
     const services = assembleAppServices(ctx);
+    await services.runPluginShutdownHandlers?.();
     const shutdown = services.shutdown();
 
     await expect(shutdown).rejects.toThrow("application service shutdown failed");
     expect(order).toEqual([
+      "active-llm-wildcard",
+      "plugin-shutdown",
       "plugin-notifications",
       "plugin-event-bridge",
       "preference",
