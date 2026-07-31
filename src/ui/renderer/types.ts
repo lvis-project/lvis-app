@@ -32,6 +32,7 @@ import type {
   SubscriptionRuntimeErrorCode,
   SubscriptionRuntimeId,
   SubscriptionRuntimeModelsResult,
+  SubscriptionUsageSource,
   SubscriptionRuntimeStatusUpdatedEvent,
 } from "../../shared/subscription-runtime.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
@@ -382,6 +383,32 @@ export type UsageTotals = {
 export type UsagePerX = UsageTotals & { vendor: string; model: string };
 export type UsageTrendPt = UsageTotals & { date: string };
 export type UsageConv = UsageTotals & { sessionId: string; turns: number; firstInput?: string };
+
+/** Token-only telemetry for authenticated subscription runtimes. */
+type SubscriptionUsageTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+  segments: number;
+};
+type SubscriptionUsagePerX = SubscriptionUsageTotals & {
+  provider: SubscriptionRuntimeId;
+  model: string;
+};
+type SubscriptionUsageTrendPt = SubscriptionUsageTotals & { date: string };
+type SubscriptionUsageSummaryShape = {
+  today: SubscriptionUsageTotals;
+  thisWeek: SubscriptionUsageTotals;
+  thisMonth: SubscriptionUsageTotals;
+  perRuntime: SubscriptionUsagePerX[];
+  perModel: SubscriptionUsagePerX[];
+  trend: SubscriptionUsageTrendPt[];
+  sources: Record<SubscriptionUsageSource, SubscriptionUsageTotals>;
+};
+
 export type UsageSummaryShape = {
   today: UsageTotals;
   thisWeek: UsageTotals;
@@ -390,6 +417,8 @@ export type UsageSummaryShape = {
   perModel: UsagePerX[];
   trend: UsageTrendPt[];
   topConversations: UsageConv[];
+  /** Kept separate from API-key usage and all cost calculations. */
+  subscription?: SubscriptionUsageSummaryShape;
   generatedAt: string;
 };
 

@@ -48,6 +48,89 @@ describe("usage-stats", () => {
     expect(summary.thisMonth.inputTokens).toBe(1_250_000);
   });
 
+  it("keeps subscription telemetry separate from API price summaries", () => {
+    const now = new Date("2026-07-04T12:00:00Z");
+    const summary = computeUsageSummary([
+      {
+        timestamp: "2026-07-04T01:00:00Z",
+        sessionId: "mixed-runtime-turn",
+        type: "turn",
+        route: "openai/gpt-4.1",
+        tokenUsage: { inputTokens: 1_000, outputTokens: 500 },
+        subscriptionUsage: [
+          {
+            provider: "codex",
+            model: "gpt-5.4",
+            source: "provider-reported",
+            billable: false,
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: 30,
+            cacheWriteTokens: 4,
+            reasoningOutputTokens: 10,
+            totalTokens: 164,
+          },
+          {
+            provider: "kimi-code",
+            model: "default",
+            source: "local-estimate",
+            billable: false,
+            inputTokens: 40,
+            outputTokens: 5,
+            totalTokens: 45,
+          },
+          // The normalizer rejects raw/expanded provider payloads at the
+          // persisted-data boundary instead of letting them pollute totals.
+          {
+            provider: "codex",
+            model: "gpt-5.4",
+            source: "provider-reported",
+            billable: false,
+            inputTokens: 999,
+            outputTokens: 999,
+            totalTokens: 1_998,
+            rawProviderPayload: { shouldNotReachRenderer: true },
+          },
+        ],
+      },
+    ], now);
+
+    // API-key totals and pricing keep their original scope.
+    expect(summary.today.totalTokens).toBe(1_500);
+    expect(summary.perVendor.map((row) => row.vendor)).toEqual(["openai"]);
+    expect(summary.perModel.map((row) => row.model)).toEqual(["gpt-4.1"]);
+
+    // Subscription values stay in the token-only sibling summary.
+    expect(summary.subscription.today).toMatchObject({
+      inputTokens: 140,
+      outputTokens: 25,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 4,
+      reasoningOutputTokens: 10,
+      totalTokens: 209,
+      segments: 2,
+    });
+    expect(summary.subscription.sources["provider-reported"]).toMatchObject({
+      totalTokens: 164,
+      segments: 1,
+    });
+    expect(summary.subscription.sources["local-estimate"]).toMatchObject({
+      totalTokens: 45,
+      segments: 1,
+    });
+    expect(summary.subscription.perRuntime).toEqual([
+      expect.objectContaining({ provider: "codex", model: "*", totalTokens: 164 }),
+      expect.objectContaining({ provider: "kimi-code", model: "*", totalTokens: 45 }),
+    ]);
+    expect(summary.subscription.perModel).toEqual([
+      expect.objectContaining({ provider: "codex", model: "gpt-5.4", totalTokens: 164 }),
+      expect.objectContaining({ provider: "kimi-code", model: "default", totalTokens: 45 }),
+    ]);
+    expect(summary.subscription.trend).toEqual([
+      expect.objectContaining({ date: "2026-07-04", totalTokens: 209 }),
+    ]);
+  });
+
   it("uses KST calendar days for today and trend around UTC midnight", () => {
     const now = new Date("2026-07-03T16:00:00Z"); // 2026-07-04 01:00 KST
     const entries: AuditTurnEntry[] = [

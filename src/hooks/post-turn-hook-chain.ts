@@ -15,6 +15,7 @@ import { createLogger } from "../lib/logger.js";
 import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../lib/chat-stream-state.js";
 import { t } from "../i18n/index.js";
 import { getLlmVendorSettings } from "../shared/llm-vendor-defaults.js";
+import type { SubscriptionUsageTelemetry } from "../shared/subscription-runtime.js";
 const log = createLogger("post-turn");
 
 export interface PostTurnHookContext {
@@ -33,6 +34,8 @@ export interface PostTurnHookContext {
    */
   tokenUsage?: TokenUsage;
   usageByModel?: TokenUsageByModel[];
+  /** Separate non-billable subscription telemetry; never enters price normalization. */
+  subscriptionUsage?: SubscriptionUsageTelemetry[];
   toolExposure?: {
     loadedToolCount: number;
     loadedToolSourceCounts: { builtin: number; plugin: number; mcp: number };
@@ -235,6 +238,7 @@ export class PostTurnHookChain {
         toolCalls: ctx.toolCalls,
         tokenUsage: auditTokenUsage,
         usageByModel: auditUsageByModel,
+        subscriptionUsage: ctx.subscriptionUsage,
         toolExposure: ctx.toolExposure,
         route: auditRoute,
       });

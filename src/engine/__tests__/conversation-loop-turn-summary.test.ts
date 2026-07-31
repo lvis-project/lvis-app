@@ -51,7 +51,18 @@ function createUsageReportingSubscriptionProvider(): LLMProvider {
       yield {
         type: "message_complete",
         stopReason: "end_turn",
-        usage: { inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 500, cacheWriteTokens: 100 },
+        subscriptionUsage: {
+          provider: "codex",
+          model: "gpt-5.5-codex",
+          source: "provider-reported",
+          billable: false,
+          inputTokens: 1_000,
+          outputTokens: 200,
+          cacheReadTokens: 500,
+          cacheWriteTokens: 100,
+          reasoningOutputTokens: 30,
+          totalTokens: 1_830,
+        },
       };
     },
   };
@@ -399,7 +410,7 @@ describe("ConversationLoop onTurnSummary", () => {
     );
   });
 
-  it("keeps subscription usage opaque while retaining its audit route and projected context", async () => {
+  it("persists reported subscription usage separately from API billing while retaining its audit route and projected context", async () => {
     const toolRegistry = new ToolRegistry();
     const saveSession = vi.fn(async (..._args: unknown[]) => {});
     const memoryManager = {
@@ -451,6 +462,7 @@ describe("ConversationLoop onTurnSummary", () => {
       vendorProvider?: string;
       vendorModel?: string;
       usageByModel?: unknown;
+      subscriptionUsage?: unknown;
     } | null = null;
     const onLlmStatus = vi.fn();
     await loop.runTurn("질문", {
@@ -473,9 +485,17 @@ describe("ConversationLoop onTurnSummary", () => {
 
     expect(summary).not.toBeNull();
     expect(summary!.tokensIn).toBeGreaterThan(0);
-    expect(summary).toMatchObject({ freshInputTokens: 0, tokensOut: 0 });
-    expect(summary).not.toHaveProperty("cacheReadTokens");
-    expect(summary).not.toHaveProperty("cacheWriteTokens");
+    expect(summary).toMatchObject({ freshInputTokens: 1_000, tokensOut: 230 });
+    expect(summary).toMatchObject({ cacheReadTokens: 500, cacheWriteTokens: 100 });
+    expect(summary!.subscriptionUsage).toEqual([
+      expect.objectContaining({
+        provider: "codex",
+        model: "gpt-5.5-codex",
+        source: "provider-reported",
+        billable: false,
+        totalTokens: 1_830,
+      }),
+    ]);
     expect(summary).not.toHaveProperty("vendorProvider");
     expect(summary).not.toHaveProperty("vendorModel");
     expect(summary).not.toHaveProperty("usageByModel");
@@ -488,6 +508,9 @@ describe("ConversationLoop onTurnSummary", () => {
     });
     expect(auditPayload?.tokenUsage).toBeUndefined();
     expect(auditPayload?.usageByModel).toBeUndefined();
+    expect(auditPayload?.subscriptionUsage).toEqual([
+      expect.objectContaining({ source: "provider-reported", billable: false }),
+    ]);
     expect(auditPayload).not.toHaveProperty("vendorProvider");
     expect(auditPayload).not.toHaveProperty("vendorModel");
 
@@ -497,9 +520,11 @@ describe("ConversationLoop onTurnSummary", () => {
     const finalAssistant = savedMessages?.slice().reverse()
       .find((message) => message.role === "assistant");
     const persistedSummary = finalAssistant?.meta?.turnSummary;
-    expect(persistedSummary).toMatchObject({ freshInputTokens: 0, tokensOut: 0 });
-    expect(persistedSummary).not.toHaveProperty("cacheReadTokens");
-    expect(persistedSummary).not.toHaveProperty("cacheWriteTokens");
+    expect(persistedSummary).toMatchObject({ freshInputTokens: 1_000, tokensOut: 230 });
+    expect(persistedSummary).toMatchObject({ cacheReadTokens: 500, cacheWriteTokens: 100 });
+    expect(persistedSummary?.subscriptionUsage).toEqual([
+      expect.objectContaining({ source: "provider-reported", billable: false }),
+    ]);
     expect(persistedSummary).not.toHaveProperty("vendorProvider");
     expect(persistedSummary).not.toHaveProperty("vendorModel");
     expect(persistedSummary).not.toHaveProperty("usageByModel");
@@ -514,7 +539,7 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(llmStreamTrace?.request).not.toHaveProperty("configuredProvider");
   });
 
-  it("keeps the no-hook subscription audit path opaque", async () => {
+  it("uses a local estimate for subscription sessions without a provider usage report", async () => {
     const toolRegistry = new ToolRegistry();
     const auditLogger = {
       logTurn: vi.fn(),
@@ -522,7 +547,14 @@ describe("ConversationLoop onTurnSummary", () => {
       isPermissionAuditChainReady: () => false,
     };
     const loop = createLoopWithRegistry(
-      createUsageReportingSubscriptionProvider(),
+      {
+        vendor: "openai",
+        subscriptionRuntime: CODEX_USAGE_SUBSCRIPTION,
+        async *streamTurn(): AsyncIterable<StreamEvent> {
+          yield { type: "text_delta", text: "estimated subscription answer" };
+          yield { type: "message_complete", stopReason: "end_turn" };
+        },
+      },
       toolRegistry,
       {
         settingsService: {
@@ -543,6 +575,15 @@ describe("ConversationLoop onTurnSummary", () => {
     });
     expect(auditPayload?.tokenUsage).toBeUndefined();
     expect(auditPayload?.usageByModel).toBeUndefined();
+    expect(auditPayload?.subscriptionUsage).toEqual([
+      expect.objectContaining({
+        provider: "codex",
+        source: "local-estimate",
+        billable: false,
+        inputTokens: expect.any(Number),
+        outputTokens: expect.any(Number),
+      }),
+    ]);
   });
 
   it("persists turnSummary on the marker-stripped post-turn transcript", async () => {
