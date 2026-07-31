@@ -9,7 +9,6 @@
 import { dialog, ipcMain, nativeImage, shell } from "electron";
 import { t } from "../../i18n/index.js";
 import { promises as fs } from "node:fs";
-import { randomBytes } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validateHostRendererSender, validateSender, auditUnauthorized } from "../gated.js";
@@ -308,17 +307,13 @@ export function registerAttachHandlers(deps: IpcDeps): void {
         const canonicalBase64 = buf.toString("base64");
         const img = nativeImage.createFromBuffer(buf);
         const { width, height } = img.getSize();
-        // Collision-resistant filename: ms-precision timestamp + 8 random
-        // hex chars. The previous truncated-to-second ISO format collided
-        // when the user pasted multiple images within the same second
-        // (e.g. dragging a screenshot burst).
-        const ts = Date.now();
-        const rand = randomBytes(4).toString("hex");
-        const fileName = `lvis-clip-${ts}-${rand}.${detected.extension}`;
-        const target = path.join(os.tmpdir(), fileName);
-        // `wx` ensures this app created the exact file that is later eligible
-        // for capability revocation; do not overwrite a coincidental path.
-        await fs.writeFile(target, buf, { flag: "wx" });
+        // A fresh private directory is the secure boundary. A random basename
+        // in the shared OS temp directory still lets an attacker race the path
+        // before creation; mkdtemp reserves the directory atomically.
+        const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "lvis-clip-"));
+        const target = path.join(targetDir, "image." + detected.extension);
+        // wx binds the capability to the exact file this process created.
+        await fs.writeFile(target, buf, { flag: "wx", mode: 0o600 });
         // Authorize for downstream readImage / openExternal — we just
         // wrote this file ourselves so it's safe to read back.
         authorizeClipboardTempImage(target);

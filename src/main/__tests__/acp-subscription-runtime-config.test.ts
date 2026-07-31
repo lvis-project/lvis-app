@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -50,6 +50,27 @@ describe("ACP subscription native policies", () => {
     expect(readFileSync(files.configToml as string, "utf8")).toBe(appended);
   });
 
+  it("rejects a symlinked native policy when descriptor no-follow is available", async () => {
+    if (process.platform === "win32") return;
+    const runtimeHome = createRuntimeHome("acp-v8-kimi-code-symlink");
+    const files = acpSubscriptionNativePolicyFiles("kimi-code", runtimeHome);
+    const externalPolicy = join(runtimeHome, "external-policy.toml");
+    writeFileSync(externalPolicy, "untrusted policy", "utf8");
+    symlinkSync(externalPolicy, files.configToml as string);
+
+    await expect(ensureAcpSubscriptionNativePolicy("kimi-code", runtimeHome)).rejects.toMatchObject({
+      code: "acp-runtime-policy-unverified",
+    });
+  });
+  it("rejects an oversized native policy before accepting its contents", async () => {
+    const runtimeHome = createRuntimeHome("acp-v8-kimi-code-oversized");
+    const files = acpSubscriptionNativePolicyFiles("kimi-code", runtimeHome);
+    writeFileSync(files.configToml as string, "x".repeat(64 * 1024 + 1), "utf8");
+
+    await expect(ensureAcpSubscriptionNativePolicy("kimi-code", runtimeHome)).rejects.toMatchObject({
+      code: "acp-runtime-policy-unverified",
+    });
+  });
   it("pins the exact Grok bridge-only policy in each config precedence path and fails closed on tampering", async () => {
     const runtimeHome = createRuntimeHome("acp-v8-grok-build-home");
     const files = acpSubscriptionNativePolicyFiles("grok-build", runtimeHome);

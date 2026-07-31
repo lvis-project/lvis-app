@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { collectAsyncIterable as collect } from "../../__tests__/test-helpers.js";
 import type { StreamEvent, StreamTurnParams } from "../../engine/llm/types.js";
 import { FallbackProvider } from "../../engine/llm/vercel/fallback-chain.js";
 import {
@@ -13,12 +14,6 @@ import type {
   SubscriptionTextSession,
 } from "../subscription-runtime-service.js";
 import { SubscriptionRuntimeServiceError } from "../subscription-runtime-service.js";
-
-async function collect(events: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> {
-  const values: StreamEvent[] = [];
-  for await (const event of events) values.push(event);
-  return values;
-}
 
 function params(overrides: Partial<StreamTurnParams> = {}): StreamTurnParams {
   return {

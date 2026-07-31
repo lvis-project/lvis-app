@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { invokeAppIpcHandler } from "./test-helpers.js";
 
 const { handlers, showOpenDialogMock } = vi.hoisted(() => ({
@@ -38,6 +38,7 @@ function invokeWithSenderFrame(
 }
 
 const savedPaths = new Set<string>();
+const savedTempDirs = new Set<string>();
 let root: string;
 
 async function saveOwnedClipboardImage(): Promise<string> {
@@ -48,6 +49,7 @@ async function saveOwnedClipboardImage(): Promise<string> {
   expect(result).toMatchObject({ ok: true });
   expect(result.path).toEqual(expect.any(String));
   savedPaths.add(result.path!);
+  savedTempDirs.add(dirname(result.path!));
   return result.path!;
 }
 
@@ -65,6 +67,7 @@ beforeEach(() => {
 
 afterAll(() => {
   for (const filePath of savedPaths) rmSync(filePath, { force: true });
+  for (const directory of savedTempDirs) rmSync(directory, { recursive: true, force: true });
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -182,6 +185,12 @@ describe("lvis:attach image MIME normalization", () => {
     });
     expect(result.path).toEqual(expect.any(String));
     savedPaths.add(result.path!);
+    savedTempDirs.add(dirname(result.path!));
+    expect(basename(dirname(result.path!))).toMatch(/^lvis-clip-/u);
+    expect(basename(result.path!)).toBe("image.png");
+    if (process.platform !== "win32") {
+      expect(statSync(result.path!).mode & 0o077).toBe(0);
+    }
 
     expect(await invoke(CHANNELS.attach.saveClipboardImage, {
       base64: Buffer.from("not an image").toString("base64"),
