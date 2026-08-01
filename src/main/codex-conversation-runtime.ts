@@ -1330,7 +1330,28 @@ export class CodexConversationRuntime {
   ): Promise<void> {
     const call = this.projectDynamicToolCall(params);
     const active = this.activeTurn;
-    if (!call || !this.isActiveDynamicToolCall(active, call, child)) {
+    if (
+      !call
+      || !active
+      || active.settled
+      || this.activeTurn !== active
+      || this.child !== child
+      || active.threadId !== call.threadId
+    ) {
+      this.writeServerRequestError(id, -32602, "Invalid dynamic tool request", child);
+      return;
+    }
+    // The response may be queued behind this reverse RPC on the same event
+    // turn. Wait for it, then revalidate the exact ID before executing LVIS.
+    if (active.authoritativeTurnId === null) {
+      try {
+        await active.turnIdReady;
+      } catch {
+        this.writeServerRequestError(id, -32602, "Invalid dynamic tool request", child);
+        return;
+      }
+    }
+    if (!this.isActiveDynamicToolCall(active, call, child)) {
       this.writeServerRequestError(id, -32602, "Invalid dynamic tool request", child);
       return;
     }
@@ -1410,7 +1431,10 @@ export class CodexConversationRuntime {
       && !active.settled
       && this.activeTurn === active
       && active.threadId === call.threadId
-      && (active.turnId === null || active.turnId === call.turnId);
+      // Only the turn/start response proves that a reverse RPC belongs to
+      // this turn. A resumed thread can replay a same-thread dynamic call
+      // before that response, and it must never reach the LVIS tool bridge.
+      && active.authoritativeTurnId === call.turnId;
   }
 
   private writeServerRequestError(
@@ -1508,12 +1532,13 @@ export class CodexConversationRuntime {
       || !tool
       || (item.namespace !== undefined && item.namespace !== null && !namespace)
       || active.threadId !== threadId
-      || (active.turnId !== null && active.turnId !== turnId)
+      || (active.authoritativeTurnId !== null && active.authoritativeTurnId !== turnId)
       || !this.threadDynamicTools?.keys.has(dynamicToolKey(namespace, tool))
     ) {
       return false;
     }
-    this.setActiveTurnId(active, turnId);
+    // item/started is descriptive only: it neither binds a provisional ID nor
+    // executes a tool. The reverse RPC above waits for authoritative identity.
     return true;
   }
 
@@ -1594,7 +1619,13 @@ export class CodexConversationRuntime {
       // The first terminal status wins, matching immediate post-response
       // semantics and preventing a replayed duplicate from changing it.
       if (active.pendingCompletionByTurnId.has(turnId)) return;
-      if (active.pendingCompletionByTurnId.size >= 2) return;
+      if (active.pendingCompletionByTurnId.size >= 2) {
+        // A third distinct terminal notification before turn/start identifies
+        // the active turn is ambiguous. Dropping it can lose the real terminal
+        // signal and leave the caller waiting forever, so close fail-closed.
+        this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"));
+        return;
+      }
       active.pendingCompletionByTurnId.set(turnId, { status, ...(providerError ? { providerError } : {}) });
       return;
     }
