@@ -63,6 +63,44 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     expect(result.summary).toBe("컴팩트 불필요: 메시지 수가 충분히 적습니다.");
   });
 
+  it("uses the provider-native projection for manual compact estimates", async () => {
+    const history: GenericMessage[] = [
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ];
+    const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(history) }));
+    loop.resetAndResume("manual-provider-projection");
+    const projection = {
+      totalTokens: 12_345,
+      systemPromptTokens: 0,
+      messageTokens: 12_345,
+      toolSchemaTokens: 0,
+    };
+    const projectRequestInput = vi.fn(() => projection);
+    const provider = { ...makeProviderStub(), projectRequestInput };
+    (loop as unknown as { provider: typeof provider }).provider = provider;
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce({
+      status: CompressionStatus.NOOP,
+      boundary: null,
+      newHistory: history,
+      removedCount: 0,
+      estimatedAfter: 0,
+      truncatedCount: 0,
+    });
+    const started = vi.fn();
+
+    await loop.manualCompact({ onCompactStarted: started });
+
+    expect(projectRequestInput).toHaveBeenCalledWith(expect.objectContaining({
+      systemPrompt: expect.any(String),
+      messages: expect.any(Array),
+      toolSchemas: expect.any(Array),
+    }));
+    expect(started).toHaveBeenCalledWith(expect.objectContaining({
+      estimatedBefore: 12_345,
+    }));
+  });
+
   it("compacts subscription-runtime history through the normal compaction provider", async () => {
     const history: GenericMessage[] = [
       { role: "user", content: "question" },

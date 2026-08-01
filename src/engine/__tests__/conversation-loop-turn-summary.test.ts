@@ -11,6 +11,7 @@ import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { PostTurnHookChain } from "../../hooks/post-turn-hook-chain.js";
 import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
+import { contextBudgetForCurrentRuntime } from "../turn/compaction.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -61,6 +62,7 @@ function createUsageReportingSubscriptionProvider(): LLMProvider {
           cacheReadTokens: 500,
           cacheWriteTokens: 100,
           reasoningOutputTokens: 30,
+          contextWindow: 64_000,
           totalTokens: 1_830,
         },
       };
@@ -481,10 +483,30 @@ describe("ConversationLoop onTurnSummary", () => {
     }));
     expect(loop.getCumulativeUsage()).toEqual(priorApiUsage);
     expect((loop as unknown as { lastRoundProviderInputTokens: number })
-      .lastRoundProviderInputTokens).toBe(0);
+      .lastRoundProviderInputTokens).toBe(1_000);
+    expect((loop as unknown as {
+      lastReportedSubscriptionContextWindow: { provider: string; model: string; contextWindow: number } | null;
+    }).lastReportedSubscriptionContextWindow).toEqual({
+      provider: "codex",
+      model: "gpt-5.5-codex",
+      contextWindow: 64_000,
+    });
+    expect(contextBudgetForCurrentRuntime(loop)).toMatchObject({
+      preflight: 29_600,
+      usableContext: 37_000,
+    });
 
     expect(summary).not.toBeNull();
-    expect(summary!.tokensIn).toBeGreaterThan(0);
+    const lastRoundProjection = (loop as unknown as {
+      lastRoundInputProjection: { totalTokens: number } | null;
+      lastContextInputProjectionTokens: number;
+    });
+    expect(summary!.tokensIn).toBe(Math.max(
+      0,
+      1_000
+        + lastRoundProjection.lastContextInputProjectionTokens
+        - (lastRoundProjection.lastRoundInputProjection?.totalTokens ?? 0),
+    ));
     expect(summary).toMatchObject({ freshInputTokens: 1_000, tokensOut: 230 });
     expect(summary).toMatchObject({ cacheReadTokens: 500, cacheWriteTokens: 100 });
     expect(summary!.subscriptionUsage).toEqual([
@@ -584,6 +606,64 @@ describe("ConversationLoop onTurnSummary", () => {
         outputTokens: expect.any(Number),
       }),
     ]);
+    expect((loop as unknown as { lastRoundProviderInputTokens: number })
+      .lastRoundProviderInputTokens).toBe(0);
+    expect((loop as unknown as { lastReportedSubscriptionContextWindow: unknown })
+      .lastReportedSubscriptionContextWindow).toBeNull();
+  });
+
+  it("does not reuse an earlier subscription telemetry baseline after a telemetry-less final tool round", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "baseline_probe",
+      description: "Return a bounded probe result.",
+      source: "builtin",
+      category: "read",
+      jsonSchema: { type: "object", properties: {} },
+      isReadOnly: () => true,
+      execute: async () => ({ output: "probe complete", isError: false }),
+    }));
+    let calls = 0;
+    const provider: LLMProvider = {
+      vendor: "openai",
+      subscriptionRuntime: CODEX_USAGE_SUBSCRIPTION,
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        if (calls++ === 0) {
+          yield { type: "tool_call", id: "baseline-probe-1", name: "baseline_probe", input: {} };
+          yield {
+            type: "message_complete",
+            stopReason: "tool_use",
+            subscriptionUsage: {
+              provider: "codex",
+              model: "gpt-5.5-codex",
+              source: "provider-reported",
+              billable: false,
+              inputTokens: 777,
+              outputTokens: 1,
+              totalTokens: 778,
+              contextWindow: 64_000,
+            },
+          };
+          return;
+        }
+        yield { type: "text_delta", text: "final answer without telemetry" };
+        yield { type: "message_complete", stopReason: "end_turn" };
+      },
+    };
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      settingsService: {
+        get: fakeUsageReportingSubscriptionSettings,
+        getSecret: () => "test-key",
+      } as never,
+    });
+
+    await loop.runTurn("run the probe", {}, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(calls).toBe(2);
+    expect((loop as unknown as { lastRoundProviderInputTokens: number })
+      .lastRoundProviderInputTokens).toBe(0);
+    expect((loop as unknown as { lastReportedSubscriptionContextWindow: unknown })
+      .lastReportedSubscriptionContextWindow).toBeNull();
   });
 
   it("persists turnSummary on the marker-stripped post-turn transcript", async () => {
