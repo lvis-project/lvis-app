@@ -11,6 +11,7 @@ import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
 import {
   estimateRequestInputProjection,
   type RequestInputProjection,
+  type RequestInputProjectionInput,
 } from "./request-input-projection.js";
 
 import type {
@@ -118,6 +119,12 @@ export class ConversationLoop {
 
 
   lastRoundProviderInputTokens = 0;
+  /** Latest exact Codex context window, kept only for the matching runtime model. */
+  lastReportedSubscriptionContextWindow: {
+    readonly provider: "codex";
+    readonly model: string;
+    readonly contextWindow: number;
+  } | null = null;
   /**
    * Engine request-input projection for the exact request submitted to the
    * latest provider round. Includes system prompt, provider-wire messages, and
@@ -342,6 +349,7 @@ export class ConversationLoop {
     // Clear before rebuilding so a factory/configuration exception can never
     // leave an API-key transport usable after subscription activation.
     this.provider = null;
+    this.lastReportedSubscriptionContextWindow = null;
     this.provider = buildProvider(this.deps);
   }
 
@@ -393,11 +401,15 @@ export class ConversationLoop {
     }
   }
 
+  projectProviderRequestInput(input: RequestInputProjectionInput): RequestInputProjection {
+    return estimateRequestInputProjection(input, this.provider ?? undefined);
+  }
+
   estimateCurrentRequestProjection(params: {
     systemPrompt: string;
     toolSchemas: ToolSchema[];
   }): RequestInputProjection {
-    return estimateRequestInputProjection({
+    return this.projectProviderRequestInput({
       systemPrompt: params.systemPrompt,
       messages: this.history.getMessages(),
       toolSchemas: params.toolSchemas,
