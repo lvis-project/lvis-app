@@ -39,7 +39,6 @@ import { applyKnowledgeDepthCap } from "./knowledge-cap.js";
 import { nextToolTrustOrigin, rationaleProvenanceFor } from "./trust-origin.js";
 import { contextBudgetForCurrentRuntime } from "./compaction.js";
 import { markStaleToolResults, evictAgedToolResultImages, isContextLengthError } from "../auto-compact.js";
-import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { GUIDE_JOINED_MAX_CHARS, mergeGuidanceApprovalReasonPrefixes } from "./guidance-limits.js";
 import { parseStagedEnvelope } from "../../shared/staged-origins.js";
@@ -54,7 +53,7 @@ import {
   type A2AAgentCausalContext,
 } from "../a2a-agent-message-envelope.js";
 import { gateCrossAgentInterceptedMetaTools } from "./intercepted-meta-gate.js";
-import { createSubscriptionUsageCollector } from "./subscription-usage-telemetry.js";
+import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } from "./subscription-usage-telemetry.js";
 
 const log = createLogger("lvis");
 const MAX_TOOL_ROUNDS = 30;
@@ -155,7 +154,6 @@ export async function queryLoop(
     // response rather than being host-stitched as if that prompt were a prefill.
     const supportsLengthContinuation = subscriptionRuntime === undefined
       && vendorSupportsLengthContinuation(llmSettings.provider);
-
     let systemPrompt = initialSystemPrompt;
     let activeApprovalReasonPrefix = bounds.approvalReasonPrefix;
     let servingVendorProvider: LLMVendor | undefined = subscriptionUsageIsOpaque
@@ -563,11 +561,13 @@ export async function queryLoop(
       const messagesForRound: GenericMessage[] = continuationPrefillText !== undefined ? [
         ...baseMessagesForRound, { role: "assistant" as const, content: continuationPrefillText },
       ] : baseMessagesForRound;
-      self.lastRoundInputProjection = estimateRequestInputProjection({
-        systemPrompt,
-        messages: messagesForRound,
-        toolSchemas,
+      self.lastRoundInputProjection = self.projectProviderRequestInput({
+        systemPrompt, messages: messagesForRound, toolSchemas,
+        continuationPrefill: continuationPrefillText !== undefined,
+        enableThinking: roundLlmSettings.enableThinking,
+        thinkingBudgetTokens: subscriptionRuntime ? undefined : activeBlock.thinkingBudgetTokens,
       });
+      if (subscriptionRuntime) self.lastRoundProviderInputTokens = 0;
       const toolExposure = self.buildToolExposureMetrics(
         scope,
         toolSchemas,
@@ -806,12 +806,12 @@ export async function queryLoop(
       // 3) cache read/write 는 별도 누적 — 비용 계산은 다른 가중치 (read 0.1×,
       //    write 1.25×) 적용 가능하도록 분리 보존. Audit/UsageDashboard
       //    경계에서는 `normalizeAiSdkUsageForCost` 로 computeCost 계약에 맞춘다.
-      if (stream.usage) {
-        recordProviderUsage(stream.usage, true);
-      }
+      if (stream.usage) recordProviderUsage(stream.usage, true);
 
       const { text: streamText, thought: thoughtContent, thinkingBlocks: roundThinkingBlocks, toolCalls: pendingToolCalls, stopReason } = stream;
-      subscriptionUsage.record(subscriptionRuntime, stream, self.lastRoundInputProjection?.totalTokens ?? 0);
+      recordSubscriptionRoundTelemetry(
+        self, subscriptionUsage, subscriptionRuntime, stream, stopReason === "end_turn",
+      );
       // Strip the suggested-replies block at the single chokepoint between the
       // raw stream and every downstream consumer (history, callbacks, return
       // value). Keeping this stripped here protects: (a) persisted session

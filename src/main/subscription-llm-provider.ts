@@ -8,10 +8,14 @@
 import type {
   GenericMessage,
   LLMProvider,
+  ProviderRequestInputProjection,
+  ProviderRequestInputProjectionParams,
   StreamEvent,
+  ToolSchema,
   StreamTurnParams,
 } from "../engine/llm/types.js";
 import { userContentText } from "../engine/llm/types.js";
+import { prepareMarkedToolResultsForWire } from "../engine/wire-serialize.js";
 import { classifyProviderError, type ErrorCategory } from "../engine/llm/error-classifier.js";
 import {
   extractProviderErrorDiagnostics,
@@ -22,6 +26,8 @@ import {
   normalizeSubscriptionUsageTelemetry,
   type SubscriptionChatRuntimeSelection,
 } from "../shared/subscription-runtime.js";
+import { estimateMultimodalTokenOverhead } from "../shared/multimodal-token-estimate.js";
+import { estimateTokens } from "../shared/token-estimate.js";
 import { MAX_ACP_SUBSCRIPTION_TEXT_WITH_IMAGES_BYTES } from "./acp-subscription-session-client.js";
 import {
   getSubscriptionRuntimeService,
@@ -36,6 +42,7 @@ import {
   SubscriptionAttachmentTransportError,
   type SubscriptionPromptAttachment,
 } from "./subscription-attachment-input.js";
+import { SubscriptionToolBridge } from "./subscription-tool-bridge.js";
 
 const MAX_SERIALIZED_INPUT_BYTES = 700 * 1024;
 const MAX_ACP_SERIALIZED_INPUT_BYTES = 512 * 1024;
@@ -370,9 +377,8 @@ export interface SerializedSubscriptionConversation {
  * envelope, while original user images travel only through the verified native
  * image channel. This avoids base64 expansion inside the history JSONL frame.
  */
-export function serializeSubscriptionConversationPayload(
+function buildSubscriptionConversationPayload(
   params: StreamTurnParams,
-  maxBytes = MAX_SERIALIZED_INPUT_BYTES,
 ): SerializedSubscriptionConversation {
   const attachments: SubscriptionPromptAttachment[] = [];
   const latestUserMessageIndex = params.messages.reduce(
@@ -396,7 +402,7 @@ export function serializeSubscriptionConversationPayload(
     if (error instanceof SubscriptionAttachmentInputRejectedError) throw error;
     throw new Error("subscription-input-serialization-failed");
   }
-  const serialized = [
+  const text = [
     "You are serving one LVIS model turn. Apply the system prompt and conversation in the JSON envelope below.",
     "Use only LVIS-declared host tools. Never attempt native shell, filesystem, browser, permission, or account operations.",
     "When a host tool is requested, LVIS executes it under its normal permission and audit policy, then starts the next model round with the tool result.",
@@ -404,10 +410,18 @@ export function serializeSubscriptionConversationPayload(
     requestJson,
     "</lvis-request-json>",
   ].join("\n\n");
-  if (Buffer.byteLength(serialized, "utf8") > maxBytes) {
+  return Object.freeze({ text, attachments: Object.freeze(attachments) });
+}
+
+export function serializeSubscriptionConversationPayload(
+  params: StreamTurnParams,
+  maxBytes = MAX_SERIALIZED_INPUT_BYTES,
+): SerializedSubscriptionConversation {
+  const payload = buildSubscriptionConversationPayload(params);
+  if (Buffer.byteLength(payload.text, "utf8") > maxBytes) {
     throw new SubscriptionInputTooLargeError();
   }
-  return Object.freeze({ text: serialized, attachments: Object.freeze(attachments) });
+  return payload;
 }
 
 /** Backward-compatible text projection for callers that do not use images. */
@@ -416,6 +430,53 @@ export function serializeSubscriptionConversation(
   maxBytes = MAX_SERIALIZED_INPUT_BYTES,
 ): string {
   return serializeSubscriptionConversationPayload(params, maxBytes).text;
+}
+
+/** Only the newest user images travel through the native subscription channel. */
+function estimateCurrentNativeImageTokens(messages: GenericMessage[]): number {
+  let latestUser: Extract<GenericMessage, { role: "user" }> | undefined;
+  for (const message of messages) {
+    if (message.role === "user") latestUser = message;
+  }
+  if (!latestUser || typeof latestUser.content === "string") return 0;
+  const images: Array<{ type: "image"; width?: number; height?: number }> = [];
+  for (const part of latestUser.content) {
+    if (part.type === "image") {
+      images.push({ type: "image", width: part.width, height: part.height });
+    }
+  }
+  return estimateMultimodalTokenOverhead(images);
+}
+
+/**
+ * Counts only the tool schema shape the active transport can make model-visible.
+ * Codex receives bridge-normalized function definitions at thread/start; Kimi
+ * receives the same normalized schema from LVIS's MCP discovery endpoint.
+ */
+function estimateSubscriptionToolSidecarTokens(
+  selection: SubscriptionChatRuntimeSelection,
+  tools: readonly ToolSchema[],
+): number | undefined {
+  // Grok remains unsupported until its native profile/tool input is attested;
+  // preserve generic fallback rather than claim partial projection coverage.
+  if (selection.provider === "grok-build") return undefined;
+  if (tools.length === 0) return 0;
+  const bridgedTools = new SubscriptionToolBridge(tools).tools;
+  if (selection.provider === "codex") {
+    const dynamicTools = bridgedTools.map((tool) => ({
+      type: "function" as const,
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    }));
+    return estimateTokens(JSON.stringify({ dynamicTools }));
+  }
+  if (selection.provider === "kimi-code") {
+    // ACP framing remains runtime-owned, but this is the exact LVIS bridge
+    // payload exposed to its MCP tool-discovery path.
+    return estimateTokens(JSON.stringify({ tools: bridgedTools }));
+  }
+  return undefined;
 }
 
 /**
@@ -433,6 +494,49 @@ export class SubscriptionLlmProvider implements LLMProvider {
     this.fallbackSelection = options.fallbackSelection
       ? immutableSelection(options.fallbackSelection)
       : undefined;
+  }
+
+  /**
+   * Reuses the exact text-envelope builder and bridge normalization used by
+   * streamTurn. Codex provider reports calibrate the remaining tokenizer drift
+   * after a completed round without entering API-key billing.
+   */
+  projectRequestInput(
+    input: ProviderRequestInputProjectionParams,
+  ): ProviderRequestInputProjection | undefined {
+    try {
+      const payload = buildSubscriptionConversationPayload({
+        model: this.subscriptionRuntime.model ?? "default",
+        systemPrompt: input.systemPrompt,
+        messages: prepareMarkedToolResultsForWire(input.messages),
+        tools: input.toolSchemas.length > 0 ? input.toolSchemas : undefined,
+        ...(input.continuationPrefill ? { continuationPrefill: true } : {}),
+        ...(input.enableThinking ? { enableThinking: true } : {}),
+        ...(input.thinkingBudgetTokens === undefined
+          ? {}
+          : { thinkingBudgetTokens: input.thinkingBudgetTokens }),
+      });
+      const toolSchemaTokens = estimateSubscriptionToolSidecarTokens(
+        this.subscriptionRuntime,
+        input.toolSchemas,
+      );
+      if (toolSchemaTokens === undefined) return undefined;
+      const messageTokens =
+        estimateTokens(payload.text) + estimateCurrentNativeImageTokens(input.messages);
+      return {
+        // Subscription transports embed the system prompt in their controlled
+        // envelope, so this component intentionally represents the complete
+        // envelope rather than pretending it was a separate provider field.
+        systemPromptTokens: 0,
+        messageTokens,
+        toolSchemaTokens,
+        totalTokens: messageTokens + toolSchemaTokens,
+      };
+    } catch {
+      // Preserve the actual stream's fail-closed attachment/size errors. A
+      // projection must never create a new preflight failure surface.
+      return undefined;
+    }
   }
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {

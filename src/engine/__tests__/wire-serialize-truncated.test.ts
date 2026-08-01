@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GenericMessage } from "../llm/types.js";
-import { stubMarkedToolResults } from "../wire-serialize.js";
+import { prepareMarkedToolResultsForWire } from "../wire-serialize.js";
 
 function makeToolResult(opts: {
   toolUseId: string;
@@ -23,13 +23,13 @@ function makeToolResult(opts: {
   };
 }
 
-describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
+describe("prepareMarkedToolResultsForWire — Issue #902 truncated marker", () => {
   it("passes through messages with no markers (reference equality)", () => {
     const messages: GenericMessage[] = [
       { role: "user", content: "hi" },
       makeToolResult({ toolUseId: "t1", toolName: "bash", content: "ok" }),
     ];
-    const out = stubMarkedToolResults(messages);
+    const out = prepareMarkedToolResultsForWire(messages);
     expect(out).toBe(messages); // no allocation
   });
 
@@ -45,7 +45,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
         trimmedAt: "2026-05-18T00:00:00.000Z",
       },
     });
-    const out = stubMarkedToolResults([msg]);
+    const out = prepareMarkedToolResultsForWire([msg]);
     expect(out[0]).not.toBe(msg);
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
     expect(stub.content).toContain("Issue #902");
@@ -73,7 +73,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
       },
       compactedAt: "2026-05-18T00:01:00.000Z",
     });
-    const out = stubMarkedToolResults([msg]);
+    const out = prepareMarkedToolResultsForWire([msg]);
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
     // The compactedAt path uses the generic stub (no "Issue #902" marker)
     expect(stub.content).not.toContain("Issue #902");
@@ -93,7 +93,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
       },
       serializedStub: true,
     });
-    const out = stubMarkedToolResults([msg]);
+    const out = prepareMarkedToolResultsForWire([msg]);
     expect(out[0]).toBe(msg);
     expect((out[0] as { content: string }).content).toBe("[already stub]");
   });
@@ -116,7 +116,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
         },
       },
     };
-    const out = stubMarkedToolResults([msg]);
+    const out = prepareMarkedToolResultsForWire([msg]);
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
     // The sanitized tool=... segment never carries the dangerous chars.
     expect(stub.content).toContain("tool=evil?tool?script?");
@@ -139,7 +139,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
         },
       },
     };
-    const out = stubMarkedToolResults([msg]);
+    const out = prepareMarkedToolResultsForWire([msg]);
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
     expect(stub.content).toContain(`toolUseId=${JSON.stringify("toolu bad<script>")}`);
     expect(stub.content).toContain(`read_tool_result_chunk with toolUseId=${JSON.stringify("toolu bad<script>")}`);
@@ -157,7 +157,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
         trimmedAt: "2026-05-18T00:00:00.000Z",
       },
     });
-    const out = stubMarkedToolResults([msg]);
+    const out = prepareMarkedToolResultsForWire([msg]);
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
     expect(stub.content).toContain("originalLines=scan-skipped");
     expect(stub.content).toContain("originalTokens=scan-skipped");
@@ -181,7 +181,7 @@ describe("stubMarkedToolResults — Issue #902 truncated marker", () => {
         },
       },
     };
-    const out = stubMarkedToolResults([msg]);
+    const out = prepareMarkedToolResultsForWire([msg]);
     const stub = out[0] as Extract<GenericMessage, { role: "tool_result" }>;
     expect(stub.toolUseId).toBe("t-xyz");
     expect(stub.toolName).toBe("meeting_start");
