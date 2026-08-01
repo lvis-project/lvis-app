@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { collectAsyncIterable as collect } from "../../__tests__/test-helpers.js";
-import type { StreamEvent, StreamTurnParams } from "../../engine/llm/types.js";
+import type {
+  ProviderRequestInputProjectionParams,
+  StreamEvent,
+  StreamTurnParams,
+} from "../../engine/llm/types.js";
 import { FallbackProvider } from "../../engine/llm/vercel/fallback-chain.js";
+import { SubscriptionToolBridge } from "../subscription-tool-bridge.js";
+import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
+import { estimateMultimodalTokenOverhead } from "../../shared/multimodal-token-estimate.js";
+import { estimateTokens } from "../../shared/token-estimate.js";
 import {
   createSubscriptionLlmProvider,
   serializeSubscriptionConversation,
@@ -67,6 +75,144 @@ function sessionWith(events: StreamEvent[]): {
 }
 
 describe("SubscriptionLlmProvider", () => {
+  it("projects the subscription envelope plus bridge-normalized transport sidecars", () => {
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex", model: "gpt-5.5-codex" },
+      service: { openTextSession: vi.fn() } as Pick<SubscriptionRuntimeService, "openTextSession">,
+    });
+    const toolSchemas = [{
+      name: "read_file",
+      description: "Read an approved file through LVIS.",
+      inputSchema: { type: "object" as const, properties: { path: { type: "string" } } },
+    }];
+    const input = {
+      systemPrompt: "Use the governed LVIS conversation.",
+      messages: [
+        {
+          role: "user" as const,
+          content: [
+            { type: "text" as const, text: "Older image must stay a text marker." },
+            { type: "image" as const, image: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png", width: 4096, height: 4096 },
+          ],
+        },
+        {
+          role: "tool_result" as const,
+          toolUseId: "call-1",
+          toolName: "read_file",
+          content: "raw stale tool result ".repeat(500),
+          meta: { compactedAt: "2026-08-01T00:00:00.000Z" },
+        },
+        {
+          role: "user" as const,
+          content: [
+            { type: "text" as const, text: "Inspect the current image." },
+            { type: "image" as const, image: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png", width: 1024, height: 512 },
+          ],
+        },
+      ],
+      toolSchemas,
+      continuationPrefill: true,
+      enableThinking: true,
+      thinkingBudgetTokens: 2048,
+    } satisfies ProviderRequestInputProjectionParams;
+
+    const projection = provider.projectRequestInput(input);
+    const payload = serializeSubscriptionConversationPayload({
+      model: "gpt-5.5-codex",
+      systemPrompt: input.systemPrompt,
+      messages: stubMarkedToolResults(input.messages),
+      tools: input.toolSchemas,
+      continuationPrefill: true,
+      enableThinking: true,
+      thinkingBudgetTokens: 2048,
+    });
+    const expectedNativeImageTokens = estimateMultimodalTokenOverhead([
+      { type: "image", width: 1024, height: 512 },
+    ]);
+    const expectedToolSchemaTokens = estimateTokens(JSON.stringify({
+      dynamicTools: [{
+        type: "function",
+        name: toolSchemas[0].name,
+        description: toolSchemas[0].description,
+        inputSchema: toolSchemas[0].inputSchema,
+      }],
+    }));
+
+    expect(projection).toEqual({
+      systemPromptTokens: 0,
+      messageTokens: estimateTokens(payload.text) + expectedNativeImageTokens,
+      toolSchemaTokens: expectedToolSchemaTokens,
+      totalTokens: estimateTokens(payload.text) + expectedNativeImageTokens + expectedToolSchemaTokens,
+    });
+    expect(payload.text).toContain('"continuationPrefill":true');
+    expect(payload.text).toContain('"enableThinking":true');
+    expect(payload.text).not.toContain("raw stale tool result");
+    expect(payload.text).not.toContain("iVBORw0KGgo=");
+
+    const wrapped = new FallbackProvider(provider, [], () => "must-not-read-api-key");
+    expect(wrapped.projectRequestInput(input)).toEqual(projection);
+    expect(wrapped.withCallbacks({}).projectRequestInput?.(input)).toEqual(projection);
+  });
+
+  it("uses the bridge-normalized wire shape for Codex and Kimi tool sidecars", () => {
+    const toolSchemas = [{
+      name: "read file safely",
+      description: "Read a governed local file.",
+      inputSchema: { type: "object" as const, properties: { path: { type: "string" } } },
+    }];
+    const input = {
+      systemPrompt: "system",
+      messages: [{ role: "user" as const, content: "inspect it" }],
+      toolSchemas,
+    } satisfies ProviderRequestInputProjectionParams;
+    const bridgedTools = new SubscriptionToolBridge(toolSchemas).tools;
+    const expectedCodex = estimateTokens(JSON.stringify({
+      dynamicTools: bridgedTools.map((tool) => ({
+        type: "function",
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+    }));
+    const expectedKimi = estimateTokens(JSON.stringify({ tools: bridgedTools }));
+    const rawToolTokens = estimateTokens(JSON.stringify({ tools: toolSchemas }));
+    const service = { openTextSession: vi.fn() } as Pick<SubscriptionRuntimeService, "openTextSession">;
+
+    const codex = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex", model: "gpt-5.5-codex" },
+      service,
+    });
+    const kimi = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "kimi-code", model: "kimi-k2" },
+      service,
+    });
+    const grok = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "grok-build", model: "grok-code-fast" },
+      service,
+    });
+
+    expect(codex.projectRequestInput(input)?.toolSchemaTokens).toBe(expectedCodex);
+    expect(kimi.projectRequestInput(input)?.toolSchemaTokens).toBe(expectedKimi);
+    expect(grok.projectRequestInput(input)).toBeUndefined();
+    expect(expectedCodex).not.toBe(rawToolTokens);
+  });
+
+  it("falls back to the generic projection when native input cannot serialize", () => {
+    const provider = createSubscriptionLlmProvider({
+      selection: { kind: "subscription", provider: "codex" },
+      service: { openTextSession: vi.fn() } as Pick<SubscriptionRuntimeService, "openTextSession">,
+    });
+
+    expect(provider.projectRequestInput({
+      systemPrompt: "system",
+      messages: [{
+        role: "user",
+        content: [{ type: "file", data: "data:text/plain;base64,WA==", mimeType: "text/plain" }],
+      }],
+      toolSchemas: [],
+    })).toBeUndefined();
+  });
+
   it("serializes a disabled subscription reasoning policy without an API budget", () => {
     const serialized = serializeSubscriptionConversation(params({
       enableThinking: false,

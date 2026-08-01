@@ -13,7 +13,13 @@
  *     (pre-stream failure). Mid-stream recovery is not attempted because we
  *     cannot replay partial output deterministically.
  */
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../types.js";
+import type {
+  LLMProvider,
+  ProviderRequestInputProjection,
+  ProviderRequestInputProjectionParams,
+  StreamEvent,
+  StreamTurnParams,
+} from "../types.js";
 import type { LLMVendor } from "../types.js";
 import type { ProviderConfig } from "../types.js";
 import type { SubscriptionChatRuntimeSelection } from "../../../shared/subscription-runtime.js";
@@ -231,8 +237,15 @@ export class FallbackProvider implements LLMProvider {
     return {
       vendor: this.vendor,
       ...(this.subscriptionRuntime ? { subscriptionRuntime: this.subscriptionRuntime } : {}),
+      projectRequestInput: (input) => this.projectRequestInput(input),
       streamTurn: (params) => this.streamTurnWithCallbacks(params, callbacks),
     };
+  }
+
+  projectRequestInput(
+    input: ProviderRequestInputProjectionParams,
+  ): ProviderRequestInputProjection | undefined {
+    return this.primary.projectRequestInput?.(input);
   }
 
   streamTurnWithCallbacks(

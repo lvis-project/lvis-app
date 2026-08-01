@@ -6,6 +6,7 @@ import type { LLMProvider, StreamEvent, StreamTurnParams } from "../../llm/types
 import type { ConversationLoop } from "../../conversation-loop.js";
 import { FallbackProvider } from "../../llm/vercel/fallback-chain.js";
 import { rejectedToolNameFromError } from "../../llm/rejected-tool-schema.js";
+import { getModelPreflightThreshold, getModelUsableContext } from "../../auto-compact.js";
 import { contextBudgetForCurrentRuntime } from "../compaction.js";
 import { buildProvider, pingProvider } from "../provider.js";
 import { collectRoundStream } from "../stream-collector.js";
@@ -136,6 +137,33 @@ describe("buildProvider subscription model overrides", () => {
       preflight: 29_600,
       usableContext: 37_000,
       identity: `subscription:codex/${modelOverride}`,
+    });
+  });
+
+  it("ignores an unusably small reported Codex context window", () => {
+    const selection = {
+      kind: "subscription",
+      provider: "codex",
+      model: "gpt-5.5-codex",
+    } as const satisfies SubscriptionChatRuntimeSelection;
+    const { deps } = buildSubscriptionDeps(selection);
+    const provider = buildProvider(deps);
+
+    const budget = contextBudgetForCurrentRuntime({
+      provider,
+      deps,
+      lastReportedSubscriptionContextWindow: {
+        provider: "codex",
+        model: "gpt-5.5-codex",
+        contextWindow: 1,
+      },
+    } as unknown as ConversationLoop);
+
+    expect(budget).toEqual({
+      model: "gpt-5.5-codex",
+      preflight: getModelPreflightThreshold("openai", "gpt-5.5-codex"),
+      usableContext: getModelUsableContext("openai", "gpt-5.5-codex"),
+      identity: "subscription:codex/gpt-5.5-codex",
     });
   });
 

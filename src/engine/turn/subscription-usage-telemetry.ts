@@ -9,6 +9,28 @@ import type { StreamCollectResult } from "./stream-collector.js";
 
 type CompletedSubscriptionRound = Extract<StreamCollectResult, { kind: "ok" }>;
 
+export interface SubscriptionUsageCollector {
+  record(
+    runtime: SubscriptionChatRuntimeSelection | undefined,
+    stream: CompletedSubscriptionRound,
+    inputTokens: number,
+  ): SubscriptionUsageTelemetry | undefined;
+  readonly values: SubscriptionUsageTelemetry[];
+}
+
+/** Mutable engine fields calibrated only from terminal Codex provider reports. */
+export interface SubscriptionContextTelemetryTarget {
+  readonly lastRoundInputProjection: { readonly totalTokens: number } | null;
+  lastRoundProviderInputTokens: number;
+  lastContextInputTokens: number;
+  lastContextInputProjectionTokens: number;
+  lastReportedSubscriptionContextWindow: {
+    readonly provider: "codex";
+    readonly model: string;
+    readonly contextWindow: number;
+  } | null;
+}
+
 function estimateLocalSubscriptionUsage(params: {
   provider: SubscriptionChatRuntimeSelection["provider"];
   model: string;
@@ -31,15 +53,15 @@ function estimateLocalSubscriptionUsage(params: {
 }
 
 /** Collects exact provider reports or the shared wire-shape fallback per round. */
-export function createSubscriptionUsageCollector() {
+export function createSubscriptionUsageCollector(): SubscriptionUsageCollector {
   const segments: SubscriptionUsageTelemetry[] = [];
   return {
     record(
       runtime: SubscriptionChatRuntimeSelection | undefined,
       stream: CompletedSubscriptionRound,
       inputTokens: number,
-    ): void {
-      if (!runtime) return;
+    ): SubscriptionUsageTelemetry | undefined {
+      if (!runtime) return undefined;
       const reportedUsage = stream.subscriptionUsage
         && stream.subscriptionUsage.provider === runtime.provider
         ? normalizeSubscriptionUsageTelemetry(stream.subscriptionUsage)
@@ -57,11 +79,48 @@ export function createSubscriptionUsageCollector() {
         },
       });
       if (usage) segments.push(usage);
+      return usage;
     },
     get values(): SubscriptionUsageTelemetry[] {
       return [...segments];
     },
   };
+}
+
+/**
+ * Records each subscription round while allowing only a terminal Codex provider
+ * report to calibrate engine context state. The caller resets the provider
+ * baseline before each stream, so a telemetry-less final round remains local.
+ */
+export function recordSubscriptionRoundTelemetry(
+  target: SubscriptionContextTelemetryTarget,
+  collector: SubscriptionUsageCollector,
+  runtime: SubscriptionChatRuntimeSelection | undefined,
+  stream: CompletedSubscriptionRound,
+  isTerminal: boolean,
+): void {
+  const usage = collector.record(
+    runtime,
+    stream,
+    target.lastRoundInputProjection?.totalTokens ?? 0,
+  );
+  if (
+    !isTerminal
+    || usage?.provider !== "codex"
+    || usage.source !== "provider-reported"
+  ) return;
+
+  target.lastRoundProviderInputTokens = usage.inputTokens;
+  target.lastContextInputTokens = usage.inputTokens;
+  target.lastContextInputProjectionTokens =
+    target.lastRoundInputProjection?.totalTokens ?? 0;
+  if (usage.contextWindow !== undefined) {
+    target.lastReportedSubscriptionContextWindow = {
+      provider: "codex",
+      model: usage.model,
+      contextWindow: usage.contextWindow,
+    };
+  }
 }
 
 /** Keeps subscription telemetry separate from API usage and price calculations. */

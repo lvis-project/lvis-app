@@ -215,6 +215,7 @@ export function newConversation(
     self.history.clear();
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     self.lastRoundProviderInputTokens = 0;
+    self.lastReportedSubscriptionContextWindow = null;
     self.lastRoundInputProjection = null;
     self.lastContextInputTokens = 0;
     self.lastContextInputProjectionTokens = 0;
@@ -290,6 +291,7 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.history.restore(normalized.messages);
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     self.lastRoundProviderInputTokens = 0;
+    self.lastReportedSubscriptionContextWindow = null;
     self.lastRoundInputProjection = null;
     self.lastContextInputTokens = latestPersistedContextTokens(normalized.messages);
     self.lastContextInputProjectionTokens = 0;
@@ -332,6 +334,7 @@ export function resetAndResume(self: ConversationLoop, sessionId: string): {
       outputTokens: 0,
     };
     self.lastRoundProviderInputTokens = 0;
+    self.lastReportedSubscriptionContextWindow = null;
     self.lastRoundInputProjection = null;
     self.rateLimitRecoveryAttempted = false;
 
