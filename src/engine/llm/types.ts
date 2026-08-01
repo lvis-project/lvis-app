@@ -357,6 +357,28 @@ export interface StreamTurnParams {
   abortSignal?: AbortSignal;
 }
 
+/**
+ * Provider-owned request projection input. Most API-key providers use the
+ * engine's generic wire estimator; transports with a distinct native envelope
+ * may return their own projection through LLMProvider.
+ */
+export interface ProviderRequestInputProjectionParams {
+  systemPrompt: string;
+  messages: GenericMessage[];
+  toolSchemas: ToolSchema[];
+  continuationPrefill?: boolean;
+  enableThinking?: boolean;
+  thinkingBudgetTokens?: number;
+}
+
+/** Cross-provider context-pressure projection; it is never billing usage. */
+export interface ProviderRequestInputProjection {
+  totalTokens: number;
+  systemPromptTokens: number;
+  messageTokens: number;
+  toolSchemaTokens: number;
+}
+
 export interface LLMProvider {
   readonly vendor: LLMVendor;
   /**
@@ -368,6 +390,14 @@ export interface LLMProvider {
    * Subscription usage is intentionally kept out of API-key pricing.
    */
   readonly subscriptionRuntime?: SubscriptionChatRuntimeSelection;
+  /**
+   * Optional transport-native input projection. Returning undefined preserves
+   * the engine's generic estimator instead of widening provider failures into
+   * preflight/compaction control flow.
+   */
+  projectRequestInput?(
+    input: ProviderRequestInputProjectionParams,
+  ): ProviderRequestInputProjection | undefined;
   streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent>;
 }
 

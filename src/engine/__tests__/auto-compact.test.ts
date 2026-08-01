@@ -16,7 +16,7 @@ import {
   setRuntimePreflightOverride,
   getRuntimePreflightOverride,
 } from "../auto-compact.js";
-import { stubMarkedToolResults } from "../wire-serialize.js";
+import { prepareMarkedToolResultsForWire } from "../wire-serialize.js";
 import { estimateUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
 import type { GenericMessage } from "../llm/types.js";
@@ -326,7 +326,7 @@ describe("intra-turn tool-result stubbing (issue #1171)", () => {
     }
 
     // Wire form: the 14 marked become stubs; the 16 preserved stay verbatim.
-    const wire = stubMarkedToolResults(afterMark);
+    const wire = prepareMarkedToolResultsForWire(afterMark);
     const wireResults = wire.filter((m) => m.role === "tool_result");
     expect(wireResults).toHaveLength(30);
     for (let i = 0; i < 30; i++) {
@@ -399,8 +399,8 @@ describe("intra-turn tool-result stubbing (issue #1171)", () => {
     expect(layeredMarked).toHaveLength(baselineMarked.length); // both = 22 ("all but last 8")
 
     // The projected wire token count is identical to the post-turn-only path.
-    expect(estimateMessagesTokens(stubMarkedToolResults(layered.messages))).toBe(
-      estimateMessagesTokens(stubMarkedToolResults(baseline.messages)),
+    expect(estimateMessagesTokens(prepareMarkedToolResultsForWire(layered.messages))).toBe(
+      estimateMessagesTokens(prepareMarkedToolResultsForWire(baseline.messages)),
     );
   });
 });

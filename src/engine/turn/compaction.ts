@@ -16,7 +16,6 @@ import type {
 import { compactWithBoundary, DEFAULT_PRESERVE_RECENT_TURNS, renderBoundaryAsPreamble } from "../structured-compact.js";
 import { CompressionStatus } from "../../shared/compact-status.js";
 import { estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "../auto-compact.js";
-import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { compactedHistoryWithContextCarrier, contentTruncatedHistoryWithContextCarrier } from "./context-carrier.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
@@ -42,6 +41,16 @@ interface RuntimeContextBudget {
   readonly preflight: number;
   readonly usableContext: number;
   readonly identity: string;
+}
+
+function safeReportedContextBudget(
+  contextWindow: number | undefined,
+): Pick<RuntimeContextBudget, "preflight" | "usableContext"> | undefined {
+  if (typeof contextWindow !== "number" || !Number.isSafeInteger(contextWindow) || contextWindow <= 0) return undefined;
+  const usableContext = getUsableContext(contextWindow);
+  const preflight = getPreflightThreshold(contextWindow);
+  // A malformed tiny provider window must not turn the preflight guard off.
+  return usableContext > 0 && preflight > 0 ? { preflight, usableContext } : undefined;
 }
 
 /**
@@ -78,10 +87,25 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
       }
       // Codex catalog model IDs are OpenAI model IDs, but remain isolated from
       // the user's inactive API-key configuration and pricing accounting.
+      const catalogPreflight = getModelPreflightThreshold("openai", model);
+      const catalogUsableContext = getModelUsableContext("openai", model);
+      const reported = self.lastReportedSubscriptionContextWindow;
+      const reportedBudget = safeReportedContextBudget(
+        reported?.provider === "codex" && reported.model === model
+          ? reported.contextWindow
+          : undefined,
+      );
+      // A matching terminal Codex report may make the catalog budget more
+      // conservative, never larger. Invalid/tiny reports retain the catalog
+      // threshold so a malformed external value cannot disable preflight.
       return {
         model,
-        preflight: getModelPreflightThreshold("openai", model),
-        usableContext: getModelUsableContext("openai", model),
+        preflight: reportedBudget
+          ? Math.min(catalogPreflight, reportedBudget.preflight)
+          : catalogPreflight,
+        usableContext: reportedBudget
+          ? Math.min(catalogUsableContext, reportedBudget.usableContext)
+          : catalogUsableContext,
         identity: `subscription:codex/${model}`,
       };
     }
@@ -141,11 +165,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
       const scope = self.resolveToolScope("");
       const toolSchemas = self.rebuildToolSchemas(scope);
       const projectionContext = self.createRequestProjectionContext(scope, null, undefined, toolSchemas);
-      const requestProjection = estimateRequestInputProjection({
-        systemPrompt: projectionContext.systemPrompt,
-        messages: messagesBefore,
-        toolSchemas,
-      });
+      const requestProjection = projectionContext.estimateCurrent();
       // Mirror runPreflightGuard's pre-compact UX hint so slash-`/compact`
 
       // potentially long-running LLM summarization.
@@ -441,11 +461,7 @@ export async function runPreflightGuard(
     if (!forceRecover && !forceRateLimit && preflight <= 0) return false;
 
     const messagesBefore = self.history.getMessages();
-    const requestProjection = estimateRequestInputProjection({
-      systemPrompt: projectionContext.systemPrompt,
-      messages: messagesBefore,
-      toolSchemas: projectionContext.toolSchemas,
-    });
+    const requestProjection = projectionContext.estimateCurrent();
     const estimated = requestProjection.totalTokens;
     // Two-signal preflight: local request projection can drift from provider
     // tokenization. Pair it with the latest provider-calibrated context-fill
