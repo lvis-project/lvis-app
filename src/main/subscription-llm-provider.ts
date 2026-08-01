@@ -15,7 +15,7 @@ import type {
   StreamTurnParams,
 } from "../engine/llm/types.js";
 import { userContentText } from "../engine/llm/types.js";
-import { stubMarkedToolResults } from "../engine/wire-serialize.js";
+import { prepareMarkedToolResultsForWire } from "../engine/wire-serialize.js";
 import { classifyProviderError, type ErrorCategory } from "../engine/llm/error-classifier.js";
 import {
   extractProviderErrorDiagnostics,
@@ -508,7 +508,7 @@ export class SubscriptionLlmProvider implements LLMProvider {
       const payload = buildSubscriptionConversationPayload({
         model: this.subscriptionRuntime.model ?? "default",
         systemPrompt: input.systemPrompt,
-        messages: stubMarkedToolResults(input.messages),
+        messages: prepareMarkedToolResultsForWire(input.messages),
         tools: input.toolSchemas.length > 0 ? input.toolSchemas : undefined,
         ...(input.continuationPrefill ? { continuationPrefill: true } : {}),
         ...(input.enableThinking ? { enableThinking: true } : {}),

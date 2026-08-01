@@ -4,7 +4,7 @@
 
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "../llm/types.js";
 import { isContextLengthError } from "../auto-compact.js";
-import { stubMarkedToolResults } from "../wire-serialize.js";
+import { prepareMarkedToolResultsForWire } from "../wire-serialize.js";
 import { classifyProviderError } from "../llm/error-classifier.js";
 import {
   extractProviderErrorDiagnostics,
@@ -131,7 +131,7 @@ export async function collectRoundStream(
   let sawMessageComplete = false;
 
 
-  const wireMessages = stubMarkedToolResults(messages);
+  const wireMessages = prepareMarkedToolResultsForWire(messages);
 
   try {
     for await (const event of provider.streamTurn({
