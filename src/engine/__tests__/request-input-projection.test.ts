@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { GenericMessage, ToolSchema } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, ToolSchema } from "../llm/types.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { estimateUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { estimateRequestInputProjection, projectNextTurnInputTokens } from "../request-input-projection.js";
@@ -56,6 +56,46 @@ describe("estimateRequestInputProjection", () => {
     expect(projection.messageTokens).toBe(estimateUserMessageTokens(content));
     expect(projection.totalTokens).toBe(projection.messageTokens);
   });
+  it("leaves the generic API-key estimator unchanged when transport flags are present", () => {
+    const input = {
+      systemPrompt: "system",
+      messages: [{ role: "user" as const, content: "hello" }],
+      toolSchemas: [],
+    };
+
+    expect(estimateRequestInputProjection({
+      ...input,
+      continuationPrefill: true,
+      enableThinking: true,
+      thinkingBudgetTokens: 2048,
+    })).toEqual(estimateRequestInputProjection(input));
+  });
+
+  it("falls back when an optional provider projection throws or violates the token contract", () => {
+    const input = {
+      systemPrompt: "system",
+      messages: [{ role: "user" as const, content: "hello" }],
+      toolSchemas: [],
+    };
+    const generic = estimateRequestInputProjection(input);
+    const throwingProvider = {
+      projectRequestInput: () => {
+        throw new Error("projection-failure");
+      },
+    } satisfies Pick<LLMProvider, "projectRequestInput">;
+    const malformedProvider = {
+      projectRequestInput: () => ({
+        totalTokens: Number.NaN,
+        systemPromptTokens: 1,
+        messageTokens: -1,
+        toolSchemaTokens: 1,
+      }),
+    } as unknown as Pick<LLMProvider, "projectRequestInput">;
+
+    expect(estimateRequestInputProjection(input, throwingProvider)).toEqual(generic);
+    expect(estimateRequestInputProjection(input, malformedProvider)).toEqual(generic);
+  });
+
   it("uses provider-wire tool_result stubs through estimateMessagesTokens", () => {
     const raw = "large result ".repeat(2_000);
     const messages: GenericMessage[] = [

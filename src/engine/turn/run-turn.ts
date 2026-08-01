@@ -15,8 +15,7 @@ import type { MessageMeta } from "../llm/types.js";
 import { queryLoop } from "./query-loop.js";
 import { initialToolTrustOrigin, summarizePermissionUserIntent,
 } from "./trust-origin.js";
-import { estimateRequestInputProjection, projectNextTurnInputTokens,
-} from "../request-input-projection.js";
+import { projectNextTurnInputTokens } from "../request-input-projection.js";
 import { markStaleToolResults } from "../auto-compact.js";
 import { normalizeAiSdkUsageForCost } from "../llm/pricing.js";
 import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
@@ -493,7 +492,7 @@ export async function runTurn(
     const postTurnToolExposure = self.buildToolExposureMetrics(
       scope,
       result.finalToolSchemas,
-      estimateRequestInputProjection({
+      self.projectProviderRequestInput({
         systemPrompt,
         messages: self.history.getMessages(),
         toolSchemas: result.finalToolSchemas,
@@ -687,7 +686,7 @@ export async function runTurn(
       //   `result.usage` 는 turn-aggregate (queryLoop:1098 turnUsage), 그러므로
       //   여기서 단순 산수만 하면 정확. 이전 badge 버그는 last-round raw 와
       //   turn-aggregate cache 를 빼느라 음수 → 0 으로 잘리던 mismatch.
-      const postTurnProjection = estimateRequestInputProjection({
+      const postTurnProjection = self.projectProviderRequestInput({
         systemPrompt,
         messages: self.history.getMessages(),
         toolSchemas: result.finalToolSchemas,
@@ -695,9 +694,7 @@ export async function runTurn(
       const lastRoundProjection =
         self.lastRoundInputProjection ?? postTurnProjection;
       turnTokensIn = projectNextTurnInputTokens({
-        providerInputTokens: isSubscriptionRuntime
-          ? 0
-          : self.lastRoundProviderInputTokens,
+        providerInputTokens: self.lastRoundProviderInputTokens,
         lastRoundProjection,
         postTurnProjection,
       });
