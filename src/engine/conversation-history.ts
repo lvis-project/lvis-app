@@ -118,7 +118,7 @@ export class ConversationHistory {
     // `serializedStub`) read off disk is stripped and re-derived from the
     // actual content. Defends against jsonl tampering: a row that arrives
     // with `meta.serializedStub: true` would otherwise bypass the cap
-    // check in `wire-serialize.stubMarkedToolResults` (security review
+    // check in `wire-serialize.prepareMarkedToolResultsForWire` (security review
     // Minor 2).
     // Persisted user multipart content is untrusted: retain text and verified
     // local data URLs, but discard remote/malformed binary parts before any
@@ -204,7 +204,7 @@ function normalizeMaxMessages(maxMessages: number | undefined): number {
  * through with reference equality.
  *
  * Why meta-only (no content swap here): provider sends run through
- * `wire-serialize.stubMarkedToolResults`, while `MemoryManager.saveSession`
+ * `wire-serialize.prepareMarkedToolResultsForWire`, while `MemoryManager.saveSession`
  * writes a stub JSONL row plus a file-backed artifact for oversized raw
  * content. This keeps in-memory content raw verbatim for the UI / inspection
  * while protecting both provider context and session JSONL size.

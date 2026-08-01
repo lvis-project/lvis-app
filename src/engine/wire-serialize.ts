@@ -39,7 +39,7 @@ function buildToolResultTruncatedStubForWire(
 
 
 
-export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessage[] {
+export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): GenericMessage[] {
 
 
   let firstEligibleIdx = -1;

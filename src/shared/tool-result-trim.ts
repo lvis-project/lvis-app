@@ -5,7 +5,7 @@
  * cap; otherwise returns the input unchanged. Used by
  * `ConversationHistory.append`/`.restore` to *mark* over-cap tool_result
  * messages with `meta.truncated`; provider sends use
- * `wire-serialize.stubMarkedToolResults`, while session saves use
+ * `wire-serialize.prepareMarkedToolResultsForWire`, while session saves use
  * `MemoryManager.saveSession` to write a short JSONL stub plus a
  * file-backed artifact. In-memory content stays raw verbatim for UI,
  * inspection, and chunk reads.

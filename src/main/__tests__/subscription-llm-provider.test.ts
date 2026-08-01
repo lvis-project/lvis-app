@@ -7,7 +7,7 @@ import type {
 } from "../../engine/llm/types.js";
 import { FallbackProvider } from "../../engine/llm/vercel/fallback-chain.js";
 import { SubscriptionToolBridge } from "../subscription-tool-bridge.js";
-import { stubMarkedToolResults } from "../../engine/wire-serialize.js";
+import { prepareMarkedToolResultsForWire } from "../../engine/wire-serialize.js";
 import { estimateMultimodalTokenOverhead } from "../../shared/multimodal-token-estimate.js";
 import { estimateTokens } from "../../shared/token-estimate.js";
 import {
@@ -120,7 +120,7 @@ describe("SubscriptionLlmProvider", () => {
     const payload = serializeSubscriptionConversationPayload({
       model: "gpt-5.5-codex",
       systemPrompt: input.systemPrompt,
-      messages: stubMarkedToolResults(input.messages),
+      messages: prepareMarkedToolResultsForWire(input.messages),
       tools: input.toolSchemas,
       continuationPrefill: true,
       enableThinking: true,
