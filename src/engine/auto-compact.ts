@@ -186,7 +186,7 @@ function serializeMessageForWireEstimate(message: GenericMessage): string {
 // 이전 동작: content 즉시 stub 으로 교체 → memory/wire/disk 단일 source.
 // 현재 동작: meta.compactedAt 만 set, content *verbatim* 보존.
 //   - memory: verbatim (UI / checkpoint preview 가 원본 표시 가능)
-//   - wire: `wire-serialize.ts:stubMarkedToolResults` 가 provider 호출 직전 stub 변환
+//   - wire: `wire-serialize.ts:prepareMarkedToolResultsForWire` 가 provider 호출 직전 stub 변환
 //   - disk: `MemoryManager.saveSession` 이 stub JSONL + file-backed artifact 로 영속화
 //
 // `meta.stripped` / `meta.strippedAt` / `meta.originalLength` 는 제거됨 (호환성 layer 없음).
