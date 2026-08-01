@@ -1127,6 +1127,37 @@ describe("CodexConversationRuntime", () => {
     });
   });
 
+  it("fails closed when pre-authoritative completion identity capacity overflows", async () => {
+    let signalTurnStart: () => void = () => {};
+    const turnStartReceived = new Promise<void>((resolveTurnStart) => {
+      signalTurnStart = resolveTurnStart;
+    });
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") {
+        reply(current.child, requestId(message), {});
+        return;
+      }
+      if (message.method === "thread/start") {
+        reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        return;
+      }
+      if (message.method === "turn/start") signalTurnStart();
+    });
+
+    const turn = harness.runtime.startTurn({ text: "Do not lose the live terminal signal" });
+    await turnStartReceived;
+    for (const turnId of ["historic-one", "historic-two", "turn-live"]) {
+      notify(harness.child, "turn/completed", {
+        threadId: "thread-1",
+        turn: { id: turnId, status: "completed" },
+      });
+    }
+
+    await expect(turn).rejects.toMatchObject({ code: "codex-operation-failed" });
+    expect(harness.child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(harness.runtime.isTurnActive()).toBe(false);
+  });
+
   it("rejects a pending turn and force-kills the managed child on shutdown", async () => {
     let turnStartSeen: (() => void) | null = null;
     const waitForTurnStart = new Promise<void>((resolveTurnStart) => {
@@ -1242,6 +1273,83 @@ describe("CodexConversationRuntime", () => {
       }],
     });
     expect(harness.child.kill).not.toHaveBeenCalled();
+  });
+
+  it("rejects a same-thread dynamic tool request before turn/start proves its identity", async () => {
+    const dynamicTools = [{
+      name: "lvis_echo",
+      description: "Returns a value only through the LVIS host bridge.",
+      inputSchema: { type: "object" as const, properties: {} },
+    }] as const;
+    const onDynamicToolCall = vi.fn(async () => "must not run");
+    let deferredTurnStart: JsonRecord | null = null;
+    let signalTurnStart: () => void = () => {};
+    const turnStartReceived = new Promise<void>((resolveTurnStart) => {
+      signalTurnStart = resolveTurnStart;
+    });
+    const harness = createHarness((message, current) => {
+      if (message.method === "initialize") {
+        reply(current.child, requestId(message), {});
+        return;
+      }
+      if (message.method === "thread/start") {
+        reply(current.child, requestId(message), { thread: { id: "thread-1" } });
+        return;
+      }
+      if (message.method === "turn/start") {
+        deferredTurnStart = message;
+        signalTurnStart();
+        return;
+      }
+      if (message.id === "historic-tool-rpc") {
+        expect(message).toEqual({
+          id: "historic-tool-rpc",
+          error: { code: -32602, message: "Invalid dynamic tool request" },
+        });
+      }
+    });
+
+    const turn = harness.runtime.startTurn(
+      { text: "Reject a replayed tool call", dynamicTools },
+      { onDynamicToolCall },
+    );
+    await turnStartReceived;
+    notify(harness.child, "item/started", {
+      threadId: "thread-1",
+      turnId: "historic-turn",
+      item: {
+        id: "historic-tool-item",
+        type: "dynamicToolCall",
+        namespace: null,
+        tool: "lvis_echo",
+        arguments: {},
+      },
+    });
+    serverRequest(harness.child, "historic-tool-rpc", "item/tool/call", {
+      threadId: "thread-1",
+      turnId: "historic-turn",
+      callId: "historic-call",
+      namespace: null,
+      tool: "lvis_echo",
+      arguments: {},
+    });
+    await Promise.resolve();
+    expect(onDynamicToolCall).not.toHaveBeenCalled();
+
+    const turnStart = deferredTurnStart;
+    if (!turnStart) throw new Error("missing-turn-start-request");
+    reply(harness.child, requestId(turnStart), { turn: { id: "turn-live", status: "inProgress" } });
+    await vi.waitFor(() => expect(harness.messages).toContainEqual({
+      id: "historic-tool-rpc",
+      error: { code: -32602, message: "Invalid dynamic tool request" },
+    }));
+    notify(harness.child, "turn/completed", {
+      threadId: "thread-1",
+      turn: { id: "turn-live", status: "completed" },
+    });
+
+    await expect(turn).resolves.toEqual({ threadId: "thread-1", turnId: "turn-live", status: "completed" });
+    expect(onDynamicToolCall).not.toHaveBeenCalled();
   });
 
   it("rejects malformed dynamic tool requests without invoking LVIS", async () => {
