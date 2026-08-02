@@ -13,31 +13,15 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
 import {
-  makeConversationLoopDeps as makeBaseDeps,
+  makeConversationLoopDeps as makeDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
+  makeConversationLoopMemoryReviewer as makeMemoryReviewer,
   makeConversationTurnProvider as makeProviderStub,
 } from "./conversation-loop-test-helpers.js";
 import { getModelPreflightThreshold } from "../auto-compact.js";
 import { getPreflightThreshold } from "../../shared/context-budget.js";
-
-function makeMemoryReviewer(): NonNullable<ConversationLoopDeps["memoryReviewer"]> {
-  return {
-    review: async () => "reviewed recap",
-  };
-}
-
-/**
- * Compaction now fails closed without the shared no-tool reviewer. Keep the
- * loop fixture focused on compaction behavior rather than boot wiring.
- */
-function makeDeps(
-  overrides: Partial<ConversationLoopDeps> = {},
-): ConversationLoopDeps {
-  return makeBaseDeps({ memoryReviewer: makeMemoryReviewer(), ...overrides });
-}
 
 vi.mock("../structured-compact.js", () => ({
   DEFAULT_PRESERVE_RECENT_TURNS: 5,

@@ -2,15 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PreferenceRefreshService } from "../preference-refresh-service.js";
 import type { MemoryManager } from "../memory-manager.js";
 import type { IdleStateChangeListener } from "../../main/idle-scheduler.js";
-import type { MemoryReviewerService } from "../memory-reviewer-service.js";
-
-type MemoryReviewer = Pick<MemoryReviewerService, "review">;
-
-function createMemoryReviewer(implementation: MemoryReviewer["review"]) {
-  return {
-    review: vi.fn<MemoryReviewer["review"]>(implementation),
-  };
-}
+import { createMemoryReviewer } from "./memory-reviewer-test-helpers.js";
 
 
 function makeMemoryManager() {
