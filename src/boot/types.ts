@@ -10,6 +10,7 @@ import type { PluginRuntime, PluginToolInvocationDelegate,
 import type { PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import type { MemoryCaptureService } from "../memory/memory-capture-service.js";
 import type { InputClassifier } from "../core/input-classifier.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -32,6 +33,7 @@ import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
+import type { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../memory/memory-consolidation-service.js";
 import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
 import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
 import { createLogger } from "../lib/logger.js";
@@ -79,6 +81,8 @@ export interface AppServices {
   /** Main-owned renderer action boundary; renderer supplies only target id and user intent. */
   remoteA2AActionController?: RemoteA2AActionController;
   memoryManager: MemoryManager;
+  /** Host-owned LLM review gate for explicit and automatic long-term memory. */
+  memoryCaptureService?: MemoryCaptureService;
   inputClassifier: InputClassifier;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
@@ -149,6 +153,8 @@ export interface AppServices {
   skillArtifactStore?: import("../plugins/plugin-artifact-store.js").PluginArtifactStore;
   idleScheduler?: IdleSchedulerService;
   preferenceRefreshService?: PreferenceRefreshService;
+  memoryConsolidationService?: MemoryConsolidationService;
+  memoryMaintenanceCoordinator?: MemoryMaintenanceCoordinator;
   bashAstValidator: BashAstValidator;
   auditService: AuditService;
   /** A3 — structured audit logger (JSONL, ~/.lvis/audit/) */

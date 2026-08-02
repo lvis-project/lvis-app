@@ -23,6 +23,7 @@ import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { AuditService } from "../main/audit-service.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import type { MemoryCaptureService } from "../memory/memory-capture-service.js";
 import type { InputClassifier } from "../core/input-classifier.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { RouteEngine } from "../core/route-engine.js";
@@ -57,6 +58,7 @@ import type { RoutineEngine } from "../core/routine-engine.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
 import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
+import type { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../memory/memory-consolidation-service.js";
 import type { McpManager } from "../mcp/mcp-manager.js";
 import type { PluginLoopbackManager } from "../mcp/plugin-loopback-manager.js";
 import type { McpGovernance } from "../mcp/mcp-governance.js";
@@ -107,6 +109,7 @@ export class BootContext {
   declare a2aRemoteRuntime: A2ARemoteRuntime | undefined;
   declare remoteA2AActionController: RemoteA2AActionController | undefined;
   declare memoryManager: MemoryManager;
+  declare memoryCaptureService: MemoryCaptureService;
   declare inputClassifier: InputClassifier;
   declare toolRegistry: ToolRegistry;
   declare routeEngine: RouteEngine;
@@ -200,6 +203,8 @@ export class BootContext {
   /** Side-chat (workspace rail) — 2nd loop with isolated `~/.lvis/side-chat/` store. */
   declare sideChatConversationLoop: ConversationLoop;
   declare preferenceRefreshService: PreferenceRefreshService;
+  declare memoryConsolidationService: MemoryConsolidationService;
+  declare memoryMaintenanceCoordinator: MemoryMaintenanceCoordinator;
   declare workBoardEngine: WorkBoardEngine;
   declare workBoardReporter: WorkBoardReporter;
 
@@ -251,6 +256,7 @@ const BOOT_CONTEXT_FIELDS = [
   "a2aRemoteRuntime",
   "remoteA2AActionController",
   "memoryManager",
+  "memoryCaptureService",
   "inputClassifier",
   "toolRegistry",
   "routeEngine",
@@ -305,6 +311,8 @@ const BOOT_CONTEXT_FIELDS = [
   "conversationLoop",
   "sideChatConversationLoop",
   "preferenceRefreshService",
+  "memoryConsolidationService",
+  "memoryMaintenanceCoordinator",
   "workBoardEngine",
   "workBoardReporter",
   "disposePluginNotifications",

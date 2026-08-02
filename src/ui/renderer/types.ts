@@ -229,6 +229,9 @@ export type LLMVendorSettingsRenderer = {
   thinkingBudgetTokens: number;
 };
 
+/** How eligible user input is proposed for long-term memory. */
+export type MemoryCaptureMode = "off" | "review" | "auto";
+
 export type AppSettings = {
   llm: {
     provider: string;
@@ -323,6 +326,9 @@ export type AppSettings = {
   /** Experimental feature flags — all default false. */
   features?: {
     idlePreferenceRefresh?: boolean;
+    idleMemoryConsolidation?: boolean;
+    /** Default off: model-reviewed memory capture needs an explicit opt-in. */
+    memoryCaptureMode?: MemoryCaptureMode;
     /** Idle parents may start a gated turn for queued background sub-agent messages. Default false. */
     subAgentAutonomousWake?: boolean;
     /** #893 — `true` after the user has dismissed the first-boot onboarding. */
@@ -476,6 +482,41 @@ export type ProjectQueryOptions = {
   projectName?: string;
   includeUnscoped?: boolean;
 };
+
+/** Host-owned metadata attached to a managed long-term memory. */
+type MemoryEntry = {
+  filename: string;
+  title: string;
+  content: string;
+  updatedAt?: string;
+  projectRoot?: string;
+  projectName?: string;
+  id?: string;
+  kind?: "preference" | "constraint" | "fact" | "goal" | "reference" | "note";
+  state?: "candidate" | "active";
+  source?: "user" | "assistant" | "import";
+  createdAt?: string;
+  confirmedAt?: string;
+  expiresAt?: string;
+  pinned?: boolean;
+};
+
+/** A review-only memory always has an immutable id and remains outside prompts. */
+export type MemoryCandidate = MemoryEntry & { id: string; state: "candidate" };
+
+type MemoryMutationResult =
+  | { ok: true; entry?: MemoryEntry }
+  | { ok: false; error: string };
+
+type LongTermMemoryConsolidationScopeResult = {
+  status: "updated" | "up-to-date" | "empty";
+  sourceCount: number;
+  consolidatedAt?: string;
+};
+
+type LongTermMemoryConsolidationResult =
+  | { ok: true; global: LongTermMemoryConsolidationScopeResult; project?: LongTermMemoryConsolidationScopeResult }
+  | { ok: false; error: string };
 
 export type PluginMarketplaceActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; rolledBackTo?: string; version?: string }
@@ -824,8 +865,11 @@ export type LvisApi = {
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
   starredRemove: (opts: { id?: string; sessionId?: string; messageIndex?: number }) => Promise<{ ok: boolean }>;
   memoryListEntries: (opts?: ProjectQueryOptions) => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string; projectRoot?: string; projectName?: string }>>;
+  memoryListCandidates: (opts?: ProjectQueryOptions) => Promise<MemoryCandidate[]>;
   memorySaveEntry: (t: string, c: string, opts?: ProjectQueryOptions) => Promise<unknown>;
-  memoryDeleteEntry: (f: string) => Promise<void>;
+  memoryDeleteEntry: (f: string, opts?: ProjectQueryOptions) => Promise<MemoryMutationResult>;
+  memoryActivateCandidate: (id: string, opts?: ProjectQueryOptions) => Promise<MemoryMutationResult>;
+  memoryDeleteCandidate: (id: string, opts?: ProjectQueryOptions) => Promise<MemoryMutationResult>;
   memorySearchEntries: (q: string, opts?: ProjectQueryOptions) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string; projectRoot?: string; projectName?: string }>>;
   memoryGetIndex: (opts?: ProjectQueryOptions) => Promise<string>;
   memoryUpdateIndexIfUnchanged: (expectedContent: string, nextContent: string) => Promise<boolean>;
@@ -846,6 +890,7 @@ export type LvisApi = {
     | { ok: false; error: string }
   >;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
+  memoryRefreshLongTerm: () => Promise<LongTermMemoryConsolidationResult>;
   listAgentProfiles: () => Promise<{ agents: AssistantAgentSummary[] }>;
   listSkills: () => Promise<{ skills: AssistantSkillSummary[] }>;
   installAgentFromMarketplace: (slug: string) => Promise<

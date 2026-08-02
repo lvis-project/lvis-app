@@ -83,6 +83,9 @@ export const CHANNELS = {
     entriesList: "lvis:memory:entries:list",
     entriesSave: "lvis:memory:entries:save",
     entriesDelete: "lvis:memory:entries:delete",
+    candidatesList: "lvis:memory:candidates:list",
+    candidateActivate: "lvis:memory:candidates:activate",
+    candidateDelete: "lvis:memory:candidates:delete",
     entriesSearch: "lvis:memory:entries:search",
     indexGet: "lvis:memory:index:get",
     indexUpdateIfUnchanged: "lvis:memory:index:update-if-unchanged",
@@ -94,6 +97,7 @@ export const CHANNELS = {
     userPrefsGet: "lvis:memory:user-prefs:get",
     userPrefsUpdate: "lvis:memory:user-prefs:update",
     userPrefsRefresh: "lvis:memory:user-prefs:refresh",
+    longTermRefresh: "lvis:memory:long-term:refresh",
   },
   starred: {
     list: "lvis:starred:list",

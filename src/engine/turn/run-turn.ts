@@ -32,6 +32,7 @@ import type { A2AAgentCausalContext } from "../a2a-agent-message-envelope.js";
 import { createRequestAnchor } from "../../tools/pipeline/rationale-control.js";
 import { providerMatchesActiveChatRuntime } from "./provider.js";
 import { aggregateSubscriptionUsage } from "./subscription-usage-telemetry.js";
+import type { MemoryCaptureTaintReason } from "../../memory/memory-capture-service.js";
 
 const log = createLogger("lvis");
 
@@ -102,6 +103,12 @@ export async function runTurn(
     const inputOrigin: ChatInputOrigin = options.inputOrigin;
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const attachmentParts = options.attachments ?? [];
+    const memoryCaptureTaint = new Set<MemoryCaptureTaintReason>();
+    if (!isUserKeyboardOrigin(inputOrigin)) memoryCaptureTaint.add("non-keyboard-origin");
+    if (attachmentParts.length > 0) memoryCaptureTaint.add("attachment");
+    if (options.initialGuidance) memoryCaptureTaint.add("initial-guidance");
+    if (options.a2aCausalContext) memoryCaptureTaint.add("a2a-causal-context");
+    if (options.originSource) memoryCaptureTaint.add("overlay-origin");
     const toolTrustOrigin = attachmentParts.length > 0
       ? "file-content"
       : initialToolTrustOrigin(inputOrigin, turnInput);
@@ -420,6 +427,7 @@ export async function runTurn(
           options?.rolePrompt,
           initialToolSchemas,
           effectiveSessionId,
+          input,
         ),
         turnSignal,
         callbacks,
@@ -431,6 +439,7 @@ export async function runTurn(
       options?.originSource ?? null,
       options?.rolePrompt,
       effectiveSessionId,
+      input,
     );
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     self.tracer.step("PROMPT_ASSEMBLE", {
@@ -464,6 +473,8 @@ export async function runTurn(
           ...(requestAnchor ? { requestAnchor } : {}),
           permissionUserIntent,
           rolePrompt: options?.rolePrompt,
+          onMemoryCaptureTaint: (reason) => memoryCaptureTaint.add(reason),
+          memoryQuery: input,
         },
       ),
     );
@@ -529,8 +540,14 @@ export async function runTurn(
         sessionId: self.sessionId,
         ...self.getSessionProjectContext(),
         messages: self.history.getMessages(),
-        input,
+        // Only the original textual user input can ever be capture evidence.
+        // The assistant output, attachments, tool results, and staged guidance
+        // are excluded by the host gate below.
+        input: turnInput,
+        inputOrigin,
+        memoryCaptureTaint: [...memoryCaptureTaint],
         output: result.text,
+        stopReason: result.stopReason,
         toolCalls: result.toolCalls.map((tc) => ({
           name: tc.name,
           isError: false,

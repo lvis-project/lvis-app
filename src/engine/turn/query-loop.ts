@@ -54,6 +54,7 @@ import {
 } from "../a2a-agent-message-envelope.js";
 import { gateCrossAgentInterceptedMetaTools } from "./intercepted-meta-gate.js";
 import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } from "./subscription-usage-telemetry.js";
+import { appendUsageForServingModel } from "./usage-by-model.js";
 
 const log = createLogger("lvis");
 const MAX_TOOL_ROUNDS = 30;
@@ -117,6 +118,8 @@ export async function queryLoop(
       requestAnchor?: RequestAnchor;
       permissionUserIntent?: string;
       rolePrompt?: ActiveRolePrompt;
+      onMemoryCaptureTaint?: (reason: "staged-guidance") => void;
+      memoryQuery?: string;
     },
   ): Promise<{
     text: string;
@@ -164,21 +167,6 @@ export async function queryLoop(
       : model;
     const usageByModel: TokenUsageByModel[] = [];
     const subscriptionUsage = createSubscriptionUsageCollector();
-    const addUsageForServingModel = (usage: TokenUsage): void => {
-      if (servingVendorProvider === undefined || servingVendorModel === undefined) {
-        return;
-      }
-      usageByModel.push({
-        vendorProvider: servingVendorProvider,
-        vendorModel: servingVendorModel,
-        tokenUsage: {
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
-          ...(usage.cacheWriteTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
-        },
-      });
-    };
     // Provider-as-oracle: tools the provider 400'd on (invalid_function_parameters)
     // and we dropped this turn. Turn-scoped — resets naturally each queryLoop call.
     const droppedToolSchemaNames = new Set<string>();
@@ -262,12 +250,17 @@ export async function queryLoop(
         cacheReadTokens: (turnUsage?.cacheReadTokens ?? 0) + cacheRead,
         cacheWriteTokens: (turnUsage?.cacheWriteTokens ?? 0) + cacheWrite,
       };
-      addUsageForServingModel({
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cacheReadTokens: cacheRead,
-        cacheWriteTokens: cacheWrite,
-      });
+      appendUsageForServingModel(
+        usageByModel,
+        servingVendorProvider,
+        servingVendorModel,
+        {
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cacheReadTokens: cacheRead,
+          cacheWriteTokens: cacheWrite,
+        },
+      );
       self.cumulativeUsage.inputTokens += adjustedInput;
       self.cumulativeUsage.outputTokens += usage.outputTokens;
       self.cumulativeUsage.cacheReadTokens =
@@ -444,6 +437,7 @@ export async function queryLoop(
           .map((entry) => parseStagedEnvelope(entry.text))
           .find((parsed) => parsed !== null);
         if (stagedGuidance) {
+          bounds.onMemoryCaptureTaint?.("staged-guidance");
           stagedOrigin = stagedGuidance.source;
           toolTrustOrigin = stagedGuidance.kind.inputOrigin;
         }
@@ -520,6 +514,7 @@ export async function queryLoop(
                   stagedOrigin,
                   bounds.rolePrompt,
                   bounds.sessionIdOverride ?? self.sessionId,
+                  bounds.memoryQuery,
                 ),
                 toolSchemas,
               }),
@@ -533,6 +528,7 @@ export async function queryLoop(
               stagedOrigin,
               bounds.rolePrompt,
               bounds.sessionIdOverride ?? self.sessionId,
+              bounds.memoryQuery,
             );
           }
         }
@@ -1583,6 +1579,7 @@ export async function queryLoop(
           stagedOrigin,
           bounds.rolePrompt,
           bounds.sessionIdOverride ?? self.sessionId,
+          bounds.memoryQuery,
         );
       }
     }

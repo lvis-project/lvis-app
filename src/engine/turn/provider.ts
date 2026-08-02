@@ -26,8 +26,41 @@ import {
 } from "../../shared/subscription-runtime.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
 import { t } from "../../i18n/index.js";
+import { estimateTokens } from "../../shared/token-estimate.js";
+import { normalizeOutputTokenLimit } from "../llm/output-token-limit.js";
 
 export const AI_PROVIDER_PING_TIMEOUT_MS = 8_000;
+
+/** Optional host-owned constraints for a background one-shot generation. */
+export interface GenerateTextOptions {
+  /**
+   * Maximum generated output tokens requested by an internal background caller.
+   * Invalid values are ignored and valid values are clamped before transport.
+   */
+  outputTokenLimit?: number;
+}
+
+/**
+ * Keep the generic collector within its estimated token budget when a native
+ * transport cannot enforce `outputTokenLimit` itself. No ellipsis is appended:
+ * an extra marker could violate the cap.
+ */
+function truncateTextToOutputTokenLimit(value: string, tokenLimit: number): string {
+  if (estimateTokens(value) <= tokenLimit) return value;
+  const codePoints = Array.from(value);
+  let low = 0;
+  let high = codePoints.length;
+  while (low < high) {
+    const midpoint = Math.ceil((low + high) / 2);
+    const candidate = codePoints.slice(0, midpoint).join("");
+    if (estimateTokens(candidate) <= tokenLimit) {
+      low = midpoint;
+    } else {
+      high = midpoint - 1;
+    }
+  }
+  return codePoints.slice(0, low).join("");
+}
 
 function cleanCodexModelOverride(value: string | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -222,29 +255,61 @@ export async function generateText(
   prompt: string,
   systemPrompt = t("be_conversationLoop.generateTextSystemPrompt"),
   abortSignal?: AbortSignal,
+  options?: GenerateTextOptions,
 ): Promise<string> {
     const llm = settingsService.get("llm");
     if (!provider || !providerMatchesActiveChatRuntime(provider, llm.activeChatRuntime)) {
       throw new Error("LLM provider not configured");
     }
     if (abortSignal?.aborted) throw new Error("LLM generation aborted");
+    const outputTokenLimit = normalizeOutputTokenLimit(options?.outputTokenLimit);
+    const outputLimitController = outputTokenLimit === undefined
+      ? undefined
+      : new AbortController();
+    const providerAbortSignal = outputLimitController
+      ? abortSignal
+        ? AbortSignal.any([abortSignal, outputLimitController.signal])
+        : outputLimitController.signal
+      : abortSignal;
+    let outputLimitReached = false;
     let text = "";
     const block = getLlmVendorSettings(llm.vendors, llm.provider);
     const model = provider.subscriptionRuntime
       ? provider.subscriptionRuntime.model ?? "default"
       : block.model;
+    try {
     for await (const ev of provider.streamTurn({
       systemPrompt,
       messages: [{ role: "user", content: prompt }],
       tools: [],
       model,
-      abortSignal,
+      ...(outputTokenLimit === undefined ? {} : { outputTokenLimit }),
+      abortSignal: providerAbortSignal,
     })) {
       if (abortSignal?.aborted) throw new Error("LLM generation aborted");
-      if (ev.type === "text_delta" && ev.text) text += ev.text;
+      if (ev.type === "text_delta" && ev.text) {
+        const nextText = text + ev.text;
+        if (outputTokenLimit === undefined) {
+          text = nextText;
+        } else {
+          text = truncateTextToOutputTokenLimit(nextText, outputTokenLimit);
+          if (
+            text.length < nextText.length
+            || estimateTokens(text) >= outputTokenLimit
+          ) {
+            outputLimitReached = true;
+            outputLimitController?.abort();
+            break;
+          }
+        }
+      }
       if (ev.type === "message_complete") break;
       if (ev.type === "error") throw new Error(`LLM stream error: ${ev.error}`);
     }
+    } catch (error) {
+      if (!outputLimitReached || abortSignal?.aborted) throw error;
+    }
+    if (abortSignal?.aborted) throw new Error("LLM generation aborted");
     // Plugins and routines consume generateText() return verbatim — strip the
     // suggested-replies block so it never reaches non-chat-stream callers.
     return stripSuggestedReplies(text).trim();

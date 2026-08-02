@@ -60,6 +60,26 @@ function invokeMemorySearch<T>(
     : ipcRenderer.invoke(channel, query, opts) as Promise<T>;
 }
 
+function invokeMemoryDelete<T>(
+  channel: string,
+  filename: string,
+  opts?: MemoryProjectOptions,
+): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel, filename) as Promise<T>
+    : ipcRenderer.invoke(channel, filename, opts) as Promise<T>;
+}
+
+function invokeMemoryCandidateAction<T>(
+  channel: string,
+  id: string,
+  opts?: MemoryProjectOptions,
+): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel, { id }) as Promise<T>
+    : ipcRenderer.invoke(channel, { id, opts }) as Promise<T>;
+}
+
 type PluginActionResult =
   | {
       ok: true;
@@ -449,9 +469,16 @@ export function buildInternalApiSurface() {
   // ─── Memory ──────────────────────────────────────
   memoryListEntries: async (opts?: MemoryProjectOptions) =>
     invokeWithOptionalMemoryOptions(CHANNELS.memory.entriesList, opts),
+  memoryListCandidates: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions(CHANNELS.memory.candidatesList, opts),
   memorySaveEntry: async (title: string, content: string, opts?: MemoryProjectOptions) =>
     ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content, opts),
-  memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke(CHANNELS.memory.entriesDelete, filename),
+  memoryDeleteEntry: async (filename: string, opts?: MemoryProjectOptions) =>
+    invokeMemoryDelete(CHANNELS.memory.entriesDelete, filename, opts),
+  memoryActivateCandidate: async (id: string, opts?: MemoryProjectOptions) =>
+    invokeMemoryCandidateAction(CHANNELS.memory.candidateActivate, id, opts),
+  memoryDeleteCandidate: async (id: string, opts?: MemoryProjectOptions) =>
+    invokeMemoryCandidateAction(CHANNELS.memory.candidateDelete, id, opts),
   memorySearchEntries: async (query: string, opts?: MemoryProjectOptions) =>
     invokeMemorySearch(CHANNELS.memory.entriesSearch, query, opts),
   memoryGetIndex: async (opts?: MemoryProjectOptions) =>
@@ -469,6 +496,7 @@ export function buildInternalApiSurface() {
   memoryGetUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsGet) as Promise<string>,
   memoryUpdateUserPrefs: async (content: string) => ipcRenderer.invoke(CHANNELS.memory.userPrefsUpdate, content),
   memoryRefreshUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsRefresh),
+  memoryRefreshLongTerm: async () => ipcRenderer.invoke(CHANNELS.memory.longTermRefresh),
 
   // ─── Plugins ─────────────────────────────────────
   listPersonaPromptSummaries: async () => ipcRenderer.invoke(CHANNELS.prompts.listSummaries),
