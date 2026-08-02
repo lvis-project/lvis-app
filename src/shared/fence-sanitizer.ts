@@ -7,6 +7,8 @@
  *   · `<mcp-app-context trust="untrusted-app-data">` — a card's model-context slot
  *   · `<mcp-resource trust="untrusted-server-data">` — a server resource the USER
  *     attached to their own turn (the turn stays theirs; only the body is untrusted)
+ *   · `<lvis-preference-source>` — a memory/profile source used to refresh preferences
+ *   · `<lvis-memory-consolidation-source>` / `<lvis-long-term-memory-overview>` — derived-memory inputs and prompt context
  *
  * The fence IS the labelling mechanism, so a body that can emit its own closing tag
  * defeats it: everything the author writes after that tag appears, to the model, to sit
@@ -25,6 +27,12 @@ export type FenceTag =
   | "mcp-app-context"
   | "lvis-mcp-server-guidance"
   | "mcp-prompt"
+  | "lvis-user-preferences"
+  | "lvis-memory-index"
+  | "lvis-user-memory"
+  | "lvis-preference-source"
+  | "lvis-memory-consolidation-source"
+  | "lvis-long-term-memory-overview"
   | "mcp-resource";
 
 /**

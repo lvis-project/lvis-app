@@ -52,6 +52,8 @@ const buildOptions = {
   // main bundle budget measures shipped bytes, so this is a production-safe
   // optimization rather than a budget increase.
   minifySyntax: true,
+  // Whitespace minification preserves emitted identifiers and runtime behavior.
+  minifyWhitespace: true,
   external: [
     "electron",
     "electron-updater",

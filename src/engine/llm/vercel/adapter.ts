@@ -33,6 +33,7 @@ import {
 import { TOOL_SEARCH_TOOL_NAME } from "../../../tools/registry.js";
 import type { MarketplaceInstalledProviderPreset } from "../../../shared/marketplace-package-assets.js";
 import { isGuardedInsecureCredentialedModelProviderFetch } from "../marketplace-provider-fetch.js";
+import { normalizeOutputTokenLimit } from "../output-token-limit.js";
 
 /** Vendor slot recognised by VercelUnifiedProvider. */
 export type VercelVendor = LLMVendor;
@@ -382,6 +383,10 @@ export class VercelUnifiedProvider implements LLMProvider {
             ? smoothStream({ chunking: /./u })
             : undefined;
 
+      // Unlike removed user tuning controls, this is a host-owned safety cap
+      // for bounded background calls and is absent from normal chat requests.
+      const outputTokenLimit = normalizeOutputTokenLimit(params.outputTokenLimit);
+
       // Idle ceiling: compose the caller's abortSignal with an idle-deadline
       // controller so a stalled provider stream (no deltas) aborts instead of
       // hanging the turn forever. resetIdleTimer() re-arms on every delta below.
@@ -415,6 +420,7 @@ export class VercelUnifiedProvider implements LLMProvider {
           messages,
           ...(tools ? { tools } : {}),
           ...(transform ? { experimental_transform: transform } : {}),
+          ...(outputTokenLimit === undefined ? {} : { maxOutputTokens: outputTokenLimit }),
           abortSignal,
           ...(providerOptions
             ? {

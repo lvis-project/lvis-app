@@ -5,6 +5,11 @@
 import type { BrowserWindow } from "electron";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import type {
+  AutomaticMemoryCaptureSubmitter,
+  MemoryCaptureService,
+} from "../memory/memory-capture-service.js";
+import type { MemoryReviewerService } from "../memory/memory-reviewer-service.js";
 import type { SkillCatalogEntry } from "../main/skill-store.js";
 import type { InputClassifier } from "../core/input-classifier.js";
 import type { RouteEngine } from "../core/route-engine.js";
@@ -109,6 +114,7 @@ export function createPostTurnHookChain(opts: {
   memoryManager: MemoryManager;
   idleScheduler?: IdleSchedulerService;
   settingsService: SettingsService;
+  memoryCaptureService?: AutomaticMemoryCaptureSubmitter;
   /**
    * Shared AuditLogger. When provided, PostTurnHookChain
    * reuses the same instance as HostApi.logEvent so plugin + host audit
@@ -129,6 +135,7 @@ export function createPostTurnHookChain(opts: {
     auditLogger,
     idleScheduler: opts.idleScheduler,
     settingsService: opts.settingsService,
+    memoryCaptureService: opts.memoryCaptureService,
     sessionTodoStore: opts.sessionTodoStore,
   });
   return { postTurnHookChain, auditLogger };
@@ -179,6 +186,10 @@ export interface ConversationDeps {
   /** Host-owned capability; defaults false when omitted. */
   supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;
+  /** Main-chat explicit saves use the host's common memory-review path. */
+  memoryCaptureService?: MemoryCaptureService;
+  /** Main, routine, and side-chat recap share this host-owned reviewer lane. */
+  memoryReviewer?: Pick<MemoryReviewerService, "review">;
   permissionManager: PermissionManager;
   routineEngine: RoutineEngine;
   idleScheduler?: IdleSchedulerService;
@@ -253,6 +264,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "routeEngine"
   | "toolRegistry"
   | "memoryManager"
+  | "memoryReviewer"
   | "permissionManager"
   | "approvalGate"
   | "hookRunner"
@@ -322,6 +334,7 @@ export function createRoutineConversationLoop(
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.memoryManager,
+    memoryReviewer: deps.memoryReviewer,
     permissionManager: deps.permissionManager,
     approvalGate: deps.approvalGate,
     hookRunner: deps.hookRunner,
@@ -377,6 +390,7 @@ export type SideChatConversationLoopDeps = Pick<
   | "toolRegistry"
   | "permissionManager"
   | "approvalGate"
+  | "memoryReviewer"
   | "hookRunner"
   | "scriptHookManager"
   | "bashAstValidator"
@@ -429,6 +443,7 @@ export function createSideChatConversationLoop(
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.sideChatMemoryManager,
+    memoryReviewer: deps.memoryReviewer,
     permissionManager: deps.permissionManager,
     approvalGate: deps.approvalGate,
     hookRunner: deps.hookRunner,
@@ -474,6 +489,8 @@ export function createConversationLoop(deps: ConversationDeps,
       ? { closeRationaleSession: deps.closeRationaleSession }
       : {}),
     memoryManager: deps.memoryManager,
+    memoryCaptureService: deps.memoryCaptureService,
+    memoryReviewer: deps.memoryReviewer,
     permissionManager: deps.permissionManager,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
     routineEngine: deps.routineEngine,
@@ -517,6 +534,28 @@ export interface CallLlmRateLimitOptions {
   windowMs?: number;
 }
 
+type CallLlmOptions = {
+  maxTokens?: number;
+  systemPrompt?: string;
+  signal?: AbortSignal;
+};
+
+/**
+ * Keeps the legacy/public `maxTokens` name at the plugin boundary while
+ * translating it into the engine's host-owned background output ceiling.
+ */
+function callLlmWithOptionalOutputLimit(
+  conversationLoop: ConversationLoop,
+  prompt: string,
+  opts?: CallLlmOptions,
+): Promise<string> {
+  return opts?.maxTokens === undefined
+    ? conversationLoop.generateText(prompt, opts?.systemPrompt, opts?.signal)
+    : conversationLoop.generateText(
+      prompt, opts?.systemPrompt, opts?.signal, { outputTokenLimit: opts.maxTokens },
+    );
+}
+
 export function createCallLlmForPlugin(
   conversationLoop: ConversationLoop,
   auditLogger: AuditLogger,
@@ -557,11 +596,7 @@ export function createCallLlmForPlugin(
       });
     } catch {}
 
-    return conversationLoop.generateText(
-      prompt,
-      opts?.systemPrompt,
-      opts?.signal,
-    );
+    return callLlmWithOptionalOutputLimit(conversationLoop, prompt, opts);
   };
 }
 
@@ -576,10 +611,6 @@ export function createCallLlm(
   opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal },
 ) => Promise<string> {
   return (prompt, opts) => {
-    return conversationLoop.generateText(
-      prompt,
-      opts?.systemPrompt,
-      opts?.signal,
-    );
+    return callLlmWithOptionalOutputLimit(conversationLoop, prompt, opts);
   };
 }

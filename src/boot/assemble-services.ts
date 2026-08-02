@@ -41,6 +41,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     a2aRemoteRuntime: ctx.a2aRemoteRuntime,
     remoteA2AActionController: ctx.remoteA2AActionController,
     memoryManager: ctx.memoryManager,
+    memoryCaptureService: ctx.memoryCaptureService,
     inputClassifier: ctx.inputClassifier,
     routeEngine: ctx.routeEngine,
     toolRegistry: ctx.toolRegistry,
@@ -62,6 +63,8 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     skillArtifactStore: ctx.skillArtifactStore,
     idleScheduler: ctx.idleScheduler,
     preferenceRefreshService: ctx.preferenceRefreshService,
+    memoryConsolidationService: ctx.memoryConsolidationService,
+    memoryMaintenanceCoordinator: ctx.memoryMaintenanceCoordinator,
     bashAstValidator: ctx.bashAstValidator,
     auditService: ctx.auditService,
     auditLogger: ctx.bootAuditLogger,
@@ -135,6 +138,8 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
         attempt(() => ctx.autoUpdaterStop?.());
         attempt(() => ctx.telemetry?.stop());
         attempt(() => ctx.pluginTelemetry?.stop());
+        attempt(() => ctx.memoryMaintenanceCoordinator.stop());
+        attempt(() => ctx.memoryCaptureService.stop());
         attempt(() => ctx.preferenceRefreshService.stop());
         attempt(() => ctx.idleScheduler?.stop());
         attempt(() => ctx.a2aRemoteRuntime?.dispose());

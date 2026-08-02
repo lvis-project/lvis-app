@@ -30,6 +30,8 @@ export const en = {
   "rolesTab.detailMemoryTitlePlaceholder": "Detailed memory title",
   "rolesTab.detailMemoryPlaceholder": "Detailed memory",
   "rolesTab.saveDetailMemoryButton": "Save detailed memory",
+  "rolesTab.consolidateLongTermMemoryButton": "Consolidate long-term memory",
+  "rolesTab.consolidatingLongTermMemoryLabel": "Consolidating...",
 
   // Preferences section
   "rolesTab.refreshingLabel": "Refreshing...",
@@ -59,10 +61,15 @@ export const en = {
   "rolesTab.statusMemorySaved": "MEMORY.md saved.",
   "rolesTab.statusQuickMemorySaved": "Urgent memory saved to MEMORY.md sections.",
   "rolesTab.statusDetailMemorySaved": "Detailed memory saved to memories/.",
+  "rolesTab.statusLongTermMemoryConsolidated": "Long-term memory consolidation completed.",
+  "rolesTab.statusLongTermMemoryUpToDate": "Long-term memory is already up to date.",
+  "rolesTab.statusLongTermMemoryEmpty": "No active long-term memories need consolidation.",
 
   // Error messages
   "rolesTab.errorMemoryConflict": "MEMORY.md was modified by another operation and has been reloaded. Please review and save again.",
   "rolesTab.errorMemorySectionSaveFailed": "Failed to save MEMORY.md sections",
+  "rolesTab.errorLongTermMemoryConsolidationUnavailable": "Long-term memory consolidation is unavailable.",
+  "rolesTab.errorLongTermMemoryConsolidationFailed": "Long-term memory consolidation failed.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   // Section tab labels
@@ -95,6 +102,8 @@ export const ko: Record<keyof typeof en, string> = {
   "rolesTab.detailMemoryTitlePlaceholder": "상세 기억 제목",
   "rolesTab.detailMemoryPlaceholder": "상세 기억",
   "rolesTab.saveDetailMemoryButton": "상세 기억 저장",
+  "rolesTab.consolidateLongTermMemoryButton": "장기 기억 통합",
+  "rolesTab.consolidatingLongTermMemoryLabel": "통합 중...",
 
   // Preferences section
   "rolesTab.refreshingLabel": "갱신 중...",
@@ -124,8 +133,13 @@ export const ko: Record<keyof typeof en, string> = {
   "rolesTab.statusMemorySaved": "MEMORY.md를 저장했습니다.",
   "rolesTab.statusQuickMemorySaved": "긴급 기억을 MEMORY.md 섹션에 저장했습니다.",
   "rolesTab.statusDetailMemorySaved": "상세 기억을 memories/에 저장했습니다.",
+  "rolesTab.statusLongTermMemoryConsolidated": "장기 기억 통합을 완료했습니다.",
+  "rolesTab.statusLongTermMemoryUpToDate": "장기 기억이 이미 최신 상태입니다.",
+  "rolesTab.statusLongTermMemoryEmpty": "통합할 활성 장기 기억이 없습니다.",
 
   // Error messages
   "rolesTab.errorMemoryConflict": "MEMORY.md가 다른 작업으로 변경되어 다시 읽었습니다. 확인 후 다시 저장하세요.",
   "rolesTab.errorMemorySectionSaveFailed": "MEMORY.md 섹션 저장 실패",
+  "rolesTab.errorLongTermMemoryConsolidationUnavailable": "장기 기억 통합 서비스를 사용할 수 없습니다.",
+  "rolesTab.errorLongTermMemoryConsolidationFailed": "장기 기억 통합에 실패했습니다.",
 };

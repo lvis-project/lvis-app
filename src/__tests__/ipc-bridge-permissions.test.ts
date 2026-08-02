@@ -336,9 +336,13 @@ describe("lvis:memory:entries:*", () => {
     const services = makeServices(pm);
     registerIpcHandlers(services, () => null);
 
-    await invoke("lvis:memory:entries:delete", "my-memory.md");
+    await invokeWithEvent(
+      "lvis:memory:entries:delete",
+      { senderFrame: { url: "file:///app/index.html" } },
+      "my-memory.md",
+    );
 
-    expect(services.memoryManager.deleteMemory).toHaveBeenCalledWith("my-memory.md");
+    expect(services.memoryManager.deleteMemory).toHaveBeenCalledWith("my-memory.md", {});
   });
 
   it("memory search rejects unauthorized frames", async () => {
@@ -375,6 +379,7 @@ describe("lvis:memory:entries:*", () => {
     "lvis:memory:agents-md:get",
     "lvis:memory:user-prefs:get",
     "lvis:memory:user-prefs:refresh",
+    "lvis:memory:long-term:refresh",
   ])("%s rejects unauthorized frames", async (channel) => {
     await setupHandlers();
 

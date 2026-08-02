@@ -8,6 +8,8 @@ import type { LLMProvider, StreamEvent, StreamTurnParams,
 import { ToolRegistry } from "../../tools/registry.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { LLM_VENDOR_DEFAULTS } from "../../shared/llm-vendor-defaults.js";
+import { MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT } from "../llm/output-token-limit.js";
+import { estimateTokens } from "../../shared/token-estimate.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -22,6 +24,41 @@ class FakeProvider implements LLMProvider {
 }
 class SubscriptionFakeProvider extends FakeProvider {
   readonly subscriptionRuntime = { kind: "subscription", provider: "codex" } as const;
+}
+
+class OutputCapAbortProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  lastParams: StreamTurnParams | null = null;
+  streamClosed = false;
+  observedOutputLimitAbort = false;
+
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.lastParams = params;
+    try {
+      yield { type: "text_delta", text: "bounded output ".repeat(120) };
+      yield { type: "message_complete", stopReason: "end_turn" };
+    } finally {
+      this.streamClosed = true;
+      this.observedOutputLimitAbort = params.abortSignal?.aborted === true;
+      if (this.observedOutputLimitAbort) {
+        throw new Error("transport aborted at output cap");
+      }
+    }
+  }
+}
+
+class CallerAbortProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  lastParams: StreamTurnParams | null = null;
+
+  constructor(private readonly callerAbort: AbortController) {}
+
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.lastParams = params;
+    yield { type: "text_delta", text: "first" };
+    this.callerAbort.abort();
+    yield { type: "text_delta", text: "must-not-return" };
+  }
 }
 
 
@@ -111,6 +148,47 @@ describe("ConversationLoop.generateText", () => {
 
     await loop.generateText("prompt", "system", controller.signal);
     expect(provider.lastParams?.abortSignal).toBe(controller.signal);
+    expect(provider.lastParams).not.toHaveProperty("outputTokenLimit");
+  });
+
+  it("clamps a requested host output cap before the provider stream request", async () => {
+    const provider = new FakeProvider([
+      { type: "text_delta", text: "small response" },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider);
+
+    await loop.generateText("prompt", "system", undefined, {
+      outputTokenLimit: MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT * 2,
+    });
+
+    expect(provider.lastParams?.outputTokenLimit).toBe(MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT);
+  });
+
+  it("bounds a non-Vercel stream and treats its own output-cap abort as completion", async () => {
+    const provider = new OutputCapAbortProvider();
+    const loop = buildLoop(provider);
+
+    const result = await loop.generateText("prompt", "system", undefined, {
+      outputTokenLimit: 12,
+    });
+
+    expect(provider.lastParams?.outputTokenLimit).toBe(12);
+    expect(provider.streamClosed).toBe(true);
+    expect(provider.observedOutputLimitAbort).toBe(true);
+    expect(estimateTokens(result)).toBeLessThanOrEqual(12);
+  });
+
+  it("still throws when the caller-owned signal aborts a capped generation", async () => {
+    const controller = new AbortController();
+    const provider = new CallerAbortProvider(controller);
+    const loop = buildLoop(provider);
+
+    await expect(loop.generateText("prompt", "system", controller.signal, {
+      outputTokenLimit: 64,
+    })).rejects.toThrow("LLM generation aborted");
+    expect(provider.lastParams?.abortSignal).not.toBe(controller.signal);
+    expect(provider.lastParams?.abortSignal?.aborted).toBe(true);
   });
 
   it("pre-aborted generateText는 provider 호출 전에 중단한다", async () => {

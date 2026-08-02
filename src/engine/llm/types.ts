@@ -332,12 +332,19 @@ export type StreamSmoothing = "none" | "word" | "char";
  * (GPT-5+, Claude 4+) deprecate fine-grained sampling — the vendor SDK
  * defaults are the policy. Re-introducing any of these requires a
  * documented architectural reason.
+ *
+ * `outputTokenLimit` below is deliberately not a sampling control: it is a
+ * host-owned ceiling used only by bounded background one-shot generation.
+ * API-key transports map it to their native request limit, while the engine
+ * enforces the same ceiling for transports that cannot do so natively.
  */
 export interface StreamTurnParams {
   model: string;
   systemPrompt: string;
   messages: GenericMessage[];
   tools?: ToolSchema[];
+  /** Host-owned bounded output ceiling for background one-shot calls only. */
+  outputTokenLimit?: number;
   /** Client-side stream smoothing (word/char chunking via Vercel smoothStream). */
   streamSmoothing?: StreamSmoothing;
   /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */

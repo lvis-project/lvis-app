@@ -13,9 +13,13 @@ import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
 import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../lib/chat-stream-state.js";
-import { t } from "../i18n/index.js";
 import { getLlmVendorSettings } from "../shared/llm-vendor-defaults.js";
 import type { SubscriptionUsageTelemetry } from "../shared/subscription-runtime.js";
+import type { ChatInputOrigin } from "../shared/chat-origin.js";
+import type {
+  AutomaticMemoryCaptureSubmitter,
+  MemoryCaptureTaintReason,
+} from "../memory/memory-capture-service.js";
 const log = createLogger("post-turn");
 
 export interface PostTurnHookContext {
@@ -25,6 +29,9 @@ export interface PostTurnHookContext {
 
   messages: GenericMessage[];
   input: string;
+  /** Provenance is supplied by runTurn; absence fails closed for capture. */
+  inputOrigin?: ChatInputOrigin;
+  memoryCaptureTaint?: readonly MemoryCaptureTaintReason[];
   output: string;
   toolCalls: Array<{ name: string; isError: boolean }>;
   /**
@@ -63,6 +70,8 @@ export interface PostTurnHookContext {
    */
   vendorProvider?: string;
   vendorModel?: string;
+  /** A natural completion is required before automatic capture is eligible. */
+  stopReason?: string;
 }
 
 export interface PostTurnHookChainDeps {
@@ -70,6 +79,7 @@ export interface PostTurnHookChainDeps {
   auditLogger?: AuditLogger;
   idleScheduler?: IdleSchedulerService;
   settingsService?: SettingsService;
+  memoryCaptureService?: AutomaticMemoryCaptureSubmitter;
   /**
    * Optional callback invoked when a [checkpoint] marker is detected.
    * Caller (typically conversation-loop or IPC bridge) can trigger summary handling.
@@ -162,30 +172,24 @@ export class PostTurnHookChain {
       log.warn("saveSession failed: %s", err);
     }
 
-    // Memory Extraction — "기억해" 패턴 감지 시 memories/ 자동 저장
+    // Automatic capture is queued only after the durable session projection.
+    // It never consumes the assistant response: a separate model reviews the
+    // bounded user-authored input later, and the host remains the writer.
     try {
-      if (this.deps.memoryManager) {
-        const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget/i;
-        if (memoryPatterns.test(ctx.input)) {
-          const confirmPatterns = /기억하겠|기억.*저장|기록.*했|noted|remembered|saved/i;
-          if (confirmPatterns.test(outputForHooks)) {
-            const title = ctx.input.slice(0, 40).replace(/\n/g, " ").trim();
-            if (title.length >= 3) {
-              await this.deps.memoryManager.saveMemory(
-                t("be_postTurnHookChain.autoMemoryTitle", { title }),
-                t("be_postTurnHookChain.autoMemoryBody", { input: ctx.input, output: outputForHooks.slice(0, 500) }),
-                {
-                  ...(ctx.projectRoot ? { projectRoot: ctx.projectRoot } : {}),
-                  ...(ctx.projectName ? { projectName: ctx.projectName } : {}),
-                },
-              );
-              log.info(`memory-extraction: auto-saved note "${title}"`);
-            }
-          }
-        }
+      if (ctx.inputOrigin) {
+        this.deps.memoryCaptureService?.enqueueAutomatic({
+          sessionId: ctx.sessionId,
+          input: ctx.input,
+          inputOrigin: ctx.inputOrigin,
+          ...(ctx.projectRoot ? { projectRoot: ctx.projectRoot } : {}),
+          ...(ctx.projectName ? { projectName: ctx.projectName } : {}),
+          ...(ctx.stopReason ? { stopReason: ctx.stopReason } : {}),
+          ...(ctx.memoryCaptureTaint ? { taintReasons: ctx.memoryCaptureTaint } : {}),
+        });
+        if (!this.deps.idleScheduler) this.deps.memoryCaptureService?.scheduleFallbackDrain();
       }
     } catch (err) {
-      log.warn("extractMemory failed: %s", err);
+      log.warn("automatic memory capture enqueue failed: %s", err);
     }
 
     // [title] marker handling — newTitle 가 detector 에서 추출되면

@@ -11,7 +11,7 @@
  *
  * A user-typed guide must NOT trigger any of that; the control case below pins it.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -21,6 +21,7 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { formatAppMessageEnvelope } from "../../shared/mcp-app-message-source.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import type { PostTurnHookContext } from "../../hooks/post-turn-hook-chain.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -56,7 +57,20 @@ interface ExecCall {
   trustOrigin: string;
 }
 
-function makeLoop(provider: LLMProvider): { loop: ConversationLoop; execCalls: ExecCall[];
+function makePostTurnHookSpy() {
+  const run = vi.fn(async (ctx: PostTurnHookContext) => ({
+    compactedMessages: null,
+    detector: {
+      cleanedText: ctx.output,
+      newTitle: null,
+      checkpointSuggested: false,
+    },
+    messagesForPersistence: ctx.messages,
+  }));
+  return { run };
+}
+
+function makeLoop(provider: LLMProvider, overrides: Record<string, unknown> = {}): { loop: ConversationLoop; execCalls: ExecCall[];
 } {
   const toolRegistry = new ToolRegistry();
   toolRegistry.register(createDynamicTool({
@@ -76,6 +90,7 @@ function makeLoop(provider: LLMProvider): { loop: ConversationLoop; execCalls: E
     routeEngine: new RouteEngine(),
     toolRegistry,
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    ...overrides,
   } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
 
@@ -125,6 +140,27 @@ describe("MCP-app guidance downgrades the rest of the turn", () => {
     });
   });
 
+  it("passes staged app guidance taint through queryLoop into the post-turn capture boundary", async () => {
+    const postTurnHookChain = makePostTurnHookSpy();
+    const { loop } = makeLoop(twoToolRounds(), { postTurnHookChain });
+
+    const turn = loop.runTurn("사용자 질문", {}, undefined, { inputOrigin: "user-keyboard",
+    });
+    await Promise.resolve();
+    loop.queueGuidance(formatAppMessageEnvelope("open the invoice", "app:acme-cards"),
+    );
+    await turn;
+
+    expect(postTurnHookChain.run).toHaveBeenCalledOnce();
+    const context = postTurnHookChain.run.mock.calls[0]?.[0] as PostTurnHookContext;
+    expect(context.input).toBe("사용자 질문");
+    expect(context.inputOrigin).toBe("user-keyboard");
+    expect(context.stopReason).toBe("end_turn");
+    expect(context.memoryCaptureTaint).toEqual(
+      expect.arrayContaining(["staged-guidance"]),
+    );
+  });
+
   it("a user-typed guide does NOT downgrade the turn (control)", async () => {
     const { loop, execCalls } = makeLoop(twoToolRounds());
 
@@ -138,4 +174,30 @@ describe("MCP-app guidance downgrades the rest of the turn", () => {
     expect(execCalls[1]).toEqual({ overlayTriggerOrigin: null, trustOrigin: "llm-tool-arg",
     });
   });
+
+  it("preserves attachment and initial-guidance taint for a keyboard turn", async () => {
+    const postTurnHookChain = makePostTurnHookSpy();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "done" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    const { loop } = makeLoop(provider, { postTurnHookChain });
+
+    await loop.runTurn("사용자 질문", {}, undefined, {
+      inputOrigin: "user-keyboard",
+      attachments: [{ type: "text", text: "첨부된 원문" }],
+      initialGuidance: "호스트가 부가한 컨텍스트",
+    });
+
+    expect(postTurnHookChain.run).toHaveBeenCalledOnce();
+    const context = postTurnHookChain.run.mock.calls[0]?.[0] as PostTurnHookContext;
+    expect(context.input).toBe("사용자 질문");
+    expect(context.inputOrigin).toBe("user-keyboard");
+    expect(context.memoryCaptureTaint).toEqual(
+      expect.arrayContaining(["attachment", "initial-guidance"]),
+    );
+  });
+
 });

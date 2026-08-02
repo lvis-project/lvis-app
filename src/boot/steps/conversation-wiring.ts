@@ -31,6 +31,8 @@ import { readPermissionSettings } from "../../permissions/permission-settings-st
 import { retainedDescendantWorkspaceRoots } from "../../permissions/workspace-root-reconciler.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
 import { PreferenceRefreshService } from "../../memory/preference-refresh-service.js";
+import { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../../memory/memory-consolidation-service.js";
+import { MemoryReviewerService } from "../../memory/memory-reviewer-service.js";
 import { SubAgentRunner } from "../../engine/subagent-runner.js";
 import { A2ASubAgentMessageBus } from "../../engine/a2a-subagent-message-bus.js";
 import { A2AAgentMessageBus } from "../../engine/a2a-agent-message-bus.js";
@@ -180,6 +182,7 @@ export async function wireConversation(
     routeEngine,
     toolRegistry,
     memoryManager,
+    memoryCaptureService,
     permissionManager,
     approvalGate,
     hookRunner,
@@ -208,6 +211,12 @@ export async function wireConversation(
 
   const { sideChatMemoryManager, subAgentMemoryManager } = isolatedMemoryManagers;
 
+  // One host-owned, no-tool lane for every automatic memory transformation.
+  // The resolver is intentionally late: queued review work follows the current
+  // active login/model after a provider change rather than retaining a stale one.
+  const memoryReviewer = new MemoryReviewerService({
+    resolveActiveChatOneShot: () => lateBinding.llmCallerRef.fn,
+  });
 
   const routineLoopDeps = {
     settingsService,
@@ -216,6 +225,7 @@ export async function wireConversation(
     routeEngine,
     toolRegistry,
     memoryManager,
+    memoryReviewer,
     permissionManager,
     approvalGate,
     hookRunner,
@@ -268,6 +278,7 @@ export async function wireConversation(
     memoryManager,
     idleScheduler,
     settingsService,
+    memoryCaptureService,
     auditLogger: bootAuditLogger,
     sessionTodoStore,
   });
@@ -293,6 +304,8 @@ export async function wireConversation(
     toolRegistry,
     supportsA2AParentDelivery: true,
     memoryManager,
+    memoryCaptureService,
+    memoryReviewer,
     permissionManager,
     routineEngine,
     idleScheduler,
@@ -346,6 +359,7 @@ export async function wireConversation(
     routeEngine,
     toolRegistry,
     permissionManager,
+    memoryReviewer,
     approvalGate,
     hookRunner,
     scriptHookManager,
@@ -365,17 +379,33 @@ export async function wireConversation(
 
   lateBinding.conversationLoopRef.fn = conversationLoop;
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
+  memoryCaptureService.setMemoryReviewer(memoryReviewer);
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger,
   );
   log.info("boot: plugin callLlm ready (rate-limited)");
 
   const preferenceRefreshService = new PreferenceRefreshService({
     memoryManager,
-    generateText: lateBinding.llmCallerRef.fn,
-    idleScheduler,
-    isIdleRefreshEnabled: () => settingsService.get("features")?.idlePreferenceRefresh ?? true,
+    memoryReviewer,
+    isIdleRefreshEnabled: () => settingsService.get("features")?.idlePreferenceRefresh ?? false,
   });
-  preferenceRefreshService.start();
+  const memoryConsolidationService = new MemoryConsolidationService({
+    memoryManager,
+    memoryReviewer,
+    isIdleConsolidationEnabled: () => settingsService.get("features")?.idleMemoryConsolidation ?? false,
+  });
+  // This is the only IDLE_SCAN listener for provider-backed memory maintenance.
+  // It serializes preference refresh before derived long-term consolidation.
+  const memoryMaintenanceCoordinator = new MemoryMaintenanceCoordinator({
+    memoryCaptureService,
+    idleScheduler,
+    preferenceRefreshService,
+    memoryConsolidationService,
+    getCurrentProject: () => conversationLoop.getSessionProjectIsDefault?.()
+      ? undefined
+      : conversationLoop.getSessionMemoryProjectContext?.(),
+  });
+  memoryMaintenanceCoordinator.start();
 
   // Sub-agent runs persist to an ISOLATED MemoryManager rooted at
   // `~/.lvis/subagent/` (resolved via openFeatureNamespace, the storage-
@@ -445,6 +475,7 @@ export async function wireConversation(
       routeEngine,
       toolRegistry,
       memoryManager,
+      memoryReviewer,
       permissionManager,
       approvalGate,
       bashAstValidator,
@@ -525,6 +556,8 @@ export async function wireConversation(
   ctx.postTurnHookChain = postTurnHookChain;
   ctx.conversationLoop = conversationLoop;
   ctx.preferenceRefreshService = preferenceRefreshService;
+  ctx.memoryConsolidationService = memoryConsolidationService;
+  ctx.memoryMaintenanceCoordinator = memoryMaintenanceCoordinator;
   ctx.workBoardEngine = workBoardEngine;
   ctx.workBoardReporter = workBoardReporter;
 }
