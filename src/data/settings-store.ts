@@ -204,6 +204,8 @@ export interface AuditSettings {
   auditRetentionDays: number;
 }
 
+export type MemoryCaptureMode = "off" | "review" | "auto";
+
 /**
  * Experimental feature flags — UI-toggleable, persisted to settings.json.
  * All fields default to false (opt-in). Safe to add new fields without
@@ -215,6 +217,19 @@ export interface FeatureFlags {
    * configured LLM to refresh user-preferences.md. Default false: manual only.
    */
   idlePreferenceRefresh?: boolean;
+  /**
+   * When true, idle IDLE_SCAN may send eligible active global and current
+   * explicit-project raw memories to the configured LLM to update a derived
+   * long-term overview. Default false: manual consolidation remains available.
+   */
+  idleMemoryConsolidation?: boolean;
+  /**
+   * Controls LLM-reviewed capture of durable memories from trusted keyboard
+   * turns. `off` makes no background reviewer call; `review` writes only a
+   * candidate; `auto` lets a host-validated high-confidence proposal become
+   * active. Explicitly saved user notes remain user-owned exact text.
+   */
+  memoryCaptureMode?: MemoryCaptureMode;
   /**
    * When true, a queued background sub-agent Message may start a new parent
    * turn while that exact parent session is loaded and idle. Default false:

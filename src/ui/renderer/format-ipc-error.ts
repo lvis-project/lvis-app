@@ -135,6 +135,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-persona-prompt-id": "formatIpcError.invalidPersonaPromptId",
   "persona-prompt-not-found": "formatIpcError.personaPromptNotFound",
   "invalid-memory-sections": "formatIpcError.invalidMemorySections",
+  "memory-consolidation-service-unavailable": "rolesTab.errorLongTermMemoryConsolidationUnavailable",
+  "memory-consolidation-failed": "rolesTab.errorLongTermMemoryConsolidationFailed",
   "routine-not-found": "formatIpcError.routineNotFound",
   "no-user-message": "formatIpcError.noUserMessage",
   "last-message-not-user": "formatIpcError.lastMessageNotUser",

@@ -31,6 +31,7 @@ import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { t } from "../i18n/index.js";
 import { buildProvider, generateText, pingProvider, resolveVendorName, AI_PROVIDER_PING_TIMEOUT_MS } from "./turn/provider.js";
+import type { GenerateTextOptions } from "./turn/provider.js";
 import { fireLifecycleEvent, fireUserPromptSubmit } from "./turn/lifecycle-hooks.js";
 import {
   resolveToolScope,
@@ -364,8 +365,9 @@ export class ConversationLoop {
     prompt: string,
     systemPrompt = t("be_conversationLoop.generateTextSystemPrompt"),
     abortSignal?: AbortSignal,
+    options?: GenerateTextOptions,
   ): Promise<string> {
-    return generateText(this.provider, this.deps.settingsService, prompt, systemPrompt, abortSignal);
+    return generateText(this.provider, this.deps.settingsService, prompt, systemPrompt, abortSignal, options);
   }
 
   /**
@@ -387,13 +389,14 @@ export class ConversationLoop {
     originSource: string | null,
     rolePrompt?: ActiveRolePrompt,
     overlaySessionId = this.sessionId,
+    memoryQuery = "",
   ): string {
     this.deps.systemPromptBuilder.setToolScope?.(scope);
     this.deps.systemPromptBuilder.setOriginSource?.(originSource);
     this.deps.systemPromptBuilder.setActiveSessionId?.(overlaySessionId);
     this.deps.systemPromptBuilder.setActiveRolePrompt?.(rolePrompt ?? null);
     try {
-      return this.deps.systemPromptBuilder.build();
+      return this.deps.systemPromptBuilder.build({ memoryQuery });
     } finally {
       this.deps.systemPromptBuilder.setOriginSource?.(null);
       this.deps.systemPromptBuilder.setActiveSessionId?.(null);
@@ -422,12 +425,14 @@ export class ConversationLoop {
     rolePrompt: ActiveRolePrompt | undefined,
     toolSchemas: ToolSchema[],
     overlaySessionId = this.sessionId,
+    memoryQuery = "",
   ): RequestProjectionContext {
     const buildSystemPrompt = () => this.buildSystemPromptForScope(
       scope,
       originSource,
       rolePrompt,
       overlaySessionId,
+      memoryQuery,
     );
     return {
       systemPrompt: buildSystemPrompt(),

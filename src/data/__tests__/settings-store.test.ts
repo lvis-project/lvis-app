@@ -627,20 +627,62 @@ describe("SettingsService role presets", () => {
     expect(service.get("chat").autoCompact).toBe(false);
   });
 
-  it("defaults idle preference refresh on and normalizes the flag to boolean only", async () => {
+  it("defaults idle preference refresh off and normalizes the flag to boolean only", async () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
+    expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
     await service.patch({ features: { idlePreferenceRefresh: false } });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
-    // A non-boolean patch is rejected — the value stays at its current `false`,
-    // NOT silently reset to the `true` default (which would mask the rejection).
+    // A non-boolean patch is rejected — the value stays at its current `false`
+    // instead of silently changing the user's opt-in choice.
     await service.patch({ features: { idlePreferenceRefresh: "yes" } as never });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
     await service.patch({ features: { idlePreferenceRefresh: true } });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
+  });
+
+  it("defaults idle long-term-memory consolidation off and accepts booleans only", async () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.idleMemoryConsolidation).toBe(false);
+
+    await service.patch({ features: { idleMemoryConsolidation: false } });
+    expect(service.get("features")?.idleMemoryConsolidation).toBe(false);
+
+    // A non-boolean must not silently opt a user into provider-backed idle work.
+    await service.patch({ features: { idleMemoryConsolidation: "yes" } as never });
+    expect(service.get("features")?.idleMemoryConsolidation).toBe(false);
+
+    await service.patch({ features: { idleMemoryConsolidation: true } });
+    expect(service.get("features")?.idleMemoryConsolidation).toBe(true);
+  });
+
+  it("defaults LLM-reviewed memory capture off and accepts only the supported modes", async () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.memoryCaptureMode).toBe("off");
+
+    await service.patch({ features: { memoryCaptureMode: "review" } });
+    expect(service.get("features")?.memoryCaptureMode).toBe("review");
+    await service.patch({ features: { memoryCaptureMode: "auto" } });
+    expect(service.get("features")?.memoryCaptureMode).toBe("auto");
+
+    // Invalid data must not silently alter the user's provider-backed capture choice.
+    await service.patch({ features: { memoryCaptureMode: "always" as never } });
+    expect(service.get("features")?.memoryCaptureMode).toBe("auto");
+    expect(new SettingsService({ userDataPath }).get("features")?.memoryCaptureMode).toBe("auto");
+
+    const corruptPath = mkdtempSync(join(tmpdir(), "settings-memory-capture-mode-"));
+    try {
+      writeFileSync(
+        join(corruptPath, "lvis-settings.json"),
+        JSON.stringify({ features: { memoryCaptureMode: "always" } }),
+        "utf-8",
+      );
+      expect(new SettingsService({ userDataPath: corruptPath }).get("features")?.memoryCaptureMode).toBe("off");
+    } finally {
+      rmSync(corruptPath, { recursive: true, force: true });
+    }
   });
 
   it("keeps the A2A loopback server off by default and accepts booleans only", async () => {

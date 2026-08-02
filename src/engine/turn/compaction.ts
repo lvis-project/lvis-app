@@ -156,7 +156,20 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
       };
     }
 
-    const { model, preflight } = contextBudgetForCurrentRuntime(self);
+    const memoryReviewer = self.deps.memoryReviewer;
+    if (!memoryReviewer) {
+      log.warn("manualCompact skipped: common Memory Reviewer is unavailable");
+      return {
+        compacted: false,
+        compactedAt: null,
+        summary: t("be_conversationLoop.manualCompactFailed", {
+          message: "Memory reviewer is unavailable",
+        }),
+        removedMessageCount: 0,
+      };
+    }
+
+    const { preflight } = contextBudgetForCurrentRuntime(self);
     const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
 
     self.isCompacting = true;
@@ -183,8 +196,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
       const tokensBefore = requestProjection.totalTokens;
       const result = await compactWithBoundary({
         messages: messagesBefore,
-        llm: self.provider,
-        model,
+        memoryReviewer,
         preserveRecentTokens,
         preserveRecentTurns: DEFAULT_PRESERVE_RECENT_TURNS,
         compactNum: self.compactNum + 1,
@@ -457,7 +469,13 @@ export async function runPreflightGuard(
     }
     if (!self.provider) return false;
 
-    const { model, preflight, identity } = contextBudgetForCurrentRuntime(self);
+    const memoryReviewer = self.deps.memoryReviewer;
+    if (!memoryReviewer) {
+      log.warn("preflight: compact skipped because common Memory Reviewer is unavailable");
+      return false;
+    }
+
+    const { preflight, identity } = contextBudgetForCurrentRuntime(self);
     if (!forceRecover && !forceRateLimit && preflight <= 0) return false;
 
     const messagesBefore = self.history.getMessages();
@@ -531,8 +549,7 @@ export async function runPreflightGuard(
       const tokensBefore = estimated;
       const compactResult = await compactWithBoundary({
         messages: messagesBefore,
-        llm: self.provider,
-        model,
+        memoryReviewer,
         preserveRecentTokens,
         preserveRecentTurns: DEFAULT_PRESERVE_RECENT_TURNS,
         compactNum: self.compactNum + 1,

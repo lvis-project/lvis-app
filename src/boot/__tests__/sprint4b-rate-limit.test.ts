@@ -2,7 +2,7 @@
  * Sprint 4-B §B-7 — createCallLlmForPlugin per-plugin rate-limit + audit.
  */
 import { describe, expect, it, vi } from "vitest";
-import { createCallLlmForPlugin } from "../conversation.js";
+import { createCallLlm, createCallLlmForPlugin } from "../conversation.js";
 
 describe("createCallLlmForPlugin (Sprint 4-B §B-7)", () => {
   function makeFakeLoop(): { generateText: ReturnType<typeof vi.fn> } {
@@ -90,6 +90,45 @@ describe("createCallLlmForPlugin (Sprint 4-B §B-7)", () => {
       "hello",
       undefined,
       controller.signal,
+    );
+  });
+
+  it("maps plugin maxTokens only to the internal outputTokenLimit", async () => {
+    const loop = makeFakeLoop();
+    const audit = makeFakeAudit();
+    const callLlm = createCallLlmForPlugin(loop as never, audit as never);
+    const controller = new AbortController();
+
+    await callLlm("p1", "hello", {
+      maxTokens: 1400,
+      systemPrompt: "plugin system",
+      signal: controller.signal,
+    });
+
+    expect(loop.generateText).toHaveBeenCalledWith(
+      "hello",
+      "plugin system",
+      controller.signal,
+      { outputTokenLimit: 1400 },
+    );
+  });
+
+  it("maps routine maxTokens to the same internal outputTokenLimit", async () => {
+    const loop = makeFakeLoop();
+    const callLlm = createCallLlm(loop as never);
+    const controller = new AbortController();
+
+    await callLlm("hello", {
+      maxTokens: 750,
+      systemPrompt: "routine system",
+      signal: controller.signal,
+    });
+
+    expect(loop.generateText).toHaveBeenCalledWith(
+      "hello",
+      "routine system",
+      controller.signal,
+      { outputTokenLimit: 750 },
     );
   });
 });

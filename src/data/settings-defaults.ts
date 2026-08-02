@@ -112,8 +112,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   plugins: {},
   pluginConfigs: {},
   features: {
-    // Idle preference refresh runs by default; users can opt out in Settings.
-    idlePreferenceRefresh: true,
+    // Profile changes affect every future prompt, so background refresh is explicit opt-in.
+    idlePreferenceRefresh: false,
+    // Derived long-term overviews send eligible active notes to the configured model only on opt-in.
+    idleMemoryConsolidation: false,
+    // Existing installs do not start a new provider-backed capture path until
+    // the user chooses review or auto in Settings.
+    memoryCaptureMode: "off",
     // A2A child Message delivery is manual-by-default. Opt-in wake still uses
     // the normal parent runTurn path and its fail-closed UserPromptSubmit gate.
     subAgentAutonomousWake: false,

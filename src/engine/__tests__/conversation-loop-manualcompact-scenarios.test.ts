@@ -17,6 +17,7 @@ import type { GenericMessage } from "../llm/types.js";
 import {
   makeConversationLoopDeps as makeDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
+  makeConversationLoopMemoryReviewer as makeMemoryReviewer,
   makeConversationTurnProvider as makeProviderStub,
 } from "./conversation-loop-test-helpers.js";
 import { getModelPreflightThreshold } from "../auto-compact.js";
@@ -101,12 +102,15 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     }));
   });
 
-  it("compacts subscription-runtime history through the normal compaction provider", async () => {
+  it("routes subscription-runtime history through the common Memory Reviewer", async () => {
     const history: GenericMessage[] = [
       { role: "user", content: "question" },
       { role: "assistant", content: "answer" },
     ];
-    const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(history) }));
+    const memoryReviewer = makeMemoryReviewer();
+    const loop = new ConversationLoop(
+      makeDeps({ memoryManager: makeMemoryManager(history), memoryReviewer }),
+    );
     loop.resetAndResume("sess-1");
     const provider = {
       ...makeProviderStub(),
@@ -140,10 +144,12 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
 
     expect(result).toMatchObject({ compacted: true, removedMessageCount: 2 });
     expect(compactWithBoundary).toHaveBeenCalledWith(expect.objectContaining({
-      llm: provider,
-      model: "gpt-5.4-nano",
+      memoryReviewer,
       preflightTokens: getModelPreflightThreshold("openai", "gpt-5.4-nano"),
     }));
+    const compactArgs = vi.mocked(compactWithBoundary).mock.calls[0]?.[0];
+    expect(compactArgs).not.toHaveProperty("llm");
+    expect(compactArgs).not.toHaveProperty("model");
   });
 
   it("uses an independent conservative budget for ACP subscriptions without model metadata", async () => {
@@ -153,7 +159,10 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     ];
     // The helper leaves the inactive API-key provider at Claude. ACP must not
     // inherit its context window when the subscription exposes no model ID.
-    const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(history) }));
+    const memoryReviewer = makeMemoryReviewer();
+    const loop = new ConversationLoop(
+      makeDeps({ memoryManager: makeMemoryManager(history), memoryReviewer }),
+    );
     loop.resetAndResume("sess-1");
     const provider = {
       ...makeProviderStub(),
@@ -177,10 +186,12 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
       preflight: expectedPreflight,
     }));
     expect(compactWithBoundary).toHaveBeenCalledWith(expect.objectContaining({
-      llm: provider,
-      model: "default",
+      memoryReviewer,
       preflightTokens: expectedPreflight,
     }));
+    const compactArgs = vi.mocked(compactWithBoundary).mock.calls[0]?.[0];
+    expect(compactArgs).not.toHaveProperty("llm");
+    expect(compactArgs).not.toHaveProperty("model");
   });
 
   it("M3-C: successful compact returns compacted=true with removedMessageCount", async () => {
