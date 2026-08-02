@@ -189,6 +189,36 @@ export function RolesTab({ api }: { api: LvisApi }) {
     }
   };
 
+  const refreshLongTermMemory = async () => {
+    setSaving("refresh-long-term-memory");
+    setError(null);
+    try {
+      const result = await api.memoryRefreshLongTerm();
+      if (!result.ok) {
+        throw new Error(
+          result.error === "memory-consolidation-service-unavailable"
+            ? t("rolesTab.errorLongTermMemoryConsolidationUnavailable")
+            : t("rolesTab.errorLongTermMemoryConsolidationFailed"),
+        );
+      }
+      if (result.global.status === "updated" || result.project?.status === "updated") {
+        setStatus(t("rolesTab.statusLongTermMemoryConsolidated"));
+        notifySaved();
+      } else if (
+        result.global.status === "empty" &&
+        (!result.project || result.project.status === "empty")
+      ) {
+        setStatus(t("rolesTab.statusLongTermMemoryEmpty"));
+      } else {
+        setStatus(t("rolesTab.statusLongTermMemoryUpToDate"));
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(null);
+    }
+  };
+
   const refreshMemoryIndex = async () => {
     setSaving("memory-index");
     setError(null);
@@ -283,6 +313,13 @@ export function RolesTab({ api }: { api: LvisApi }) {
     }
   };
 
+  const memoryBusy =
+    saving === "memory-index" ||
+    saving === "memory-index-save" ||
+    saving === "quick-memory" ||
+    saving === "detail-memory" ||
+    saving === "refresh-long-term-memory";
+
   const preferencesBusy =
     saving === "preferences" || saving === "refresh-preferences";
 
@@ -354,22 +391,33 @@ export function RolesTab({ api }: { api: LvisApi }) {
                   size="sm"
                   variant="outline"
                   onClick={refreshMemoryIndex}
-                  disabled={saving === "memory-index"}
+                  disabled={memoryBusy}
                 >
                   {t("rolesTab.reloadButton")}
+                </Button>
+                <Button
+                  data-testid="roles-tab:refresh-long-term-memory"
+                  size="sm"
+                  variant="outline"
+                  onClick={refreshLongTermMemory}
+                  disabled={memoryBusy}
+                >
+                  {saving === "refresh-long-term-memory"
+                    ? t("rolesTab.consolidatingLongTermMemoryLabel")
+                    : t("rolesTab.consolidateLongTermMemoryButton")}
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={saveMemoryIndex}
-                  disabled={saving === "memory-index-save"}
+                  disabled={memoryBusy}
                 >
                   {t("rolesTab.saveMemoryButton")}
                 </Button>
                 <Button
                   size="sm"
                   onClick={saveQuickMemory}
-                  disabled={!quickMemory.trim() || saving === "quick-memory"}
+                  disabled={!quickMemory.trim() || memoryBusy}
                 >
                   {t("rolesTab.saveToSectionButton")}
                 </Button>
@@ -400,7 +448,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
                   disabled={
                     !detailMemoryTitle.trim() ||
                     !detailMemory.trim() ||
-                    saving === "detail-memory"
+                    memoryBusy
                   }
                 >
                   {t("rolesTab.saveDetailMemoryButton")}

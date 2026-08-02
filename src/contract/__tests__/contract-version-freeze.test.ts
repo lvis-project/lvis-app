@@ -125,6 +125,8 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "pluginRuntime",
   "pluginMarketplace",
   "settingsService",
+  "memoryConsolidationService",
+  "memoryMaintenanceCoordinator",
   "memoryManager",
   "inputClassifier",
   "routeEngine",

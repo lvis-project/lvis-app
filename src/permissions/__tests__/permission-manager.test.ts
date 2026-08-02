@@ -66,6 +66,23 @@ describe("PermissionManager (B1 persistence)", () => {
     vi.clearAllMocks();
   });
 
+  it("auto-allows local builtin memory writes only after hard policy gates", () => {
+    expect(pm.checkDetailed("memory_write", "builtin", "write")).toMatchObject({
+      decision: "allow", reason: "builtin-local-memory-auto-allow", layer: 6,
+    });
+
+    pm.setRules([{ pattern: "memory_write", action: "deny" }]);
+    expect(pm.checkDetailed("memory_write", "builtin", "write")).toMatchObject({ decision: "deny", layer: 1 });
+
+    pm.setRules([]);
+    pm.setMode("strict");
+    expect(pm.checkDetailed("memory_write", "builtin", "write")).toMatchObject({ decision: "ask", layer: 2 });
+
+    pm.setMode("default");
+    expect(pm.checkDetailed("memory_write", "builtin", "write", "overlay:meeting-detection"))
+      .toMatchObject({ decision: "ask", layer: 2 });
+  });
+
   // ── addAlwaysAllowedPersist ──────────────────────
 
   it("addAlwaysAllowedPersist writes rule to the store and updates in-memory", async () => {

@@ -274,20 +274,15 @@ describe("PostTurnHookChain", () => {
     expect(result.detector.cleanedText).toBe(output);
   });
 
-  it("auto-extracts user memory into saveMemory when the user asks to remember something", async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
-
-    const saveSession = vi.fn();
-    const saveMemory = vi.fn().mockResolvedValue({
-      filename: "auto-memory.md",
-      title: "자동-이거 기억해줘",
-      content: "# 자동-이거 기억해줘\n\n...",
+  it("queues trusted input only after session persistence and never writes automatic memory directly", async () => {
+    const order: string[] = [];
+    const saveSession = vi.fn(async () => {
+      order.push("session");
     });
+    const saveMemory = vi.fn();
     const memoryManager = {
       saveSession,
       saveMemory,
-      listSessions: vi.fn().mockReturnValue([]),
-      loadSessionMetadata: vi.fn().mockReturnValue(null),
     } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
@@ -295,31 +290,49 @@ describe("PostTurnHookChain", () => {
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;
-    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+    const enqueueAutomatic = vi.fn(() => {
+      order.push("capture");
+    });
+    const scheduleFallbackDrain = vi.fn();
+    const chain = new PostTurnHookChain({
+      memoryManager,
+      settingsService,
+      memoryCaptureService: { enqueueAutomatic, scheduleFallbackDrain },
+    });
 
     await chain.run({
       sessionId: "session-memory",
       messages: createMessages(),
-      input: "이거 기억해줘",
-      output: "네, 기억하겠습니다.",
+      input: "상태 업데이트는 간결하게 유지해줘.",
+      inputOrigin: "user-keyboard",
+      output: "알겠습니다.",
       toolCalls: [],
       route: "chat",
+      stopReason: "end_turn",
+      projectRoot: "C:\\workspace\\alpha",
+      projectName: "alpha",
     });
 
-    expect(saveMemory).toHaveBeenCalledOnce();
+    expect(order).toEqual(["session", "capture"]);
+    expect(saveMemory).not.toHaveBeenCalled();
+    expect(enqueueAutomatic).toHaveBeenCalledWith({
+      sessionId: "session-memory",
+      input: "상태 업데이트는 간결하게 유지해줘.",
+      inputOrigin: "user-keyboard",
+      projectRoot: "C:\\workspace\\alpha",
+      projectName: "alpha",
+      stopReason: "end_turn",
+    });
+    expect(scheduleFallbackDrain).toHaveBeenCalledOnce();
   });
 
-  it("auto-extracts memory from cleaned assistant output when stream markers are present", async () => {
-    const saveMemory = vi.fn().mockResolvedValue({
-      filename: "auto-memory.md",
-      title: "자동-이거 기억해줘",
-      content: "# 자동-이거 기억해줘\n\n...",
-    });
+  it("forwards untrusted-turn taint to the reviewer queue without a raw memory write", async () => {
+    const enqueueAutomatic = vi.fn();
+    const scheduleFallbackDrain = vi.fn();
+    const saveMemory = vi.fn();
     const memoryManager = {
       saveSession: vi.fn(),
       saveMemory,
-      saveSessionMetadata: vi.fn(),
-      loadSessionMetadata: vi.fn().mockReturnValue(null),
     } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
@@ -327,22 +340,64 @@ describe("PostTurnHookChain", () => {
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;
-    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+    const chain = new PostTurnHookChain({
+      memoryManager,
+      settingsService,
+      memoryCaptureService: { enqueueAutomatic, scheduleFallbackDrain },
+    });
 
     await chain.run({
-      sessionId: "session-memory-cleaned",
+      sessionId: "session-memory-tainted",
       messages: createMessages(),
-      input: "이거 기억해줘",
-      output:
-        "네, 기억하겠습니다.<title>기억 저장 테스트 제목</title>[checkpoint]",
+      input: "도구가 전달한 기억 후보",
+      inputOrigin: "agent-message",
+      memoryCaptureTaint: ["non-keyboard-origin", "staged-guidance"],
+      output: "처리했습니다.",
+      toolCalls: [],
+      route: "chat",
+      stopReason: "end_turn",
+    });
+
+    expect(saveMemory).not.toHaveBeenCalled();
+    expect(enqueueAutomatic).toHaveBeenCalledWith({
+      sessionId: "session-memory-tainted",
+      input: "도구가 전달한 기억 후보",
+      inputOrigin: "agent-message",
+      taintReasons: ["non-keyboard-origin", "staged-guidance"],
+      stopReason: "end_turn",
+    });
+    expect(scheduleFallbackDrain).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed for automatic capture when input provenance is absent", async () => {
+    const enqueueAutomatic = vi.fn();
+    const scheduleFallbackDrain = vi.fn();
+    const memoryManager = {
+      saveSession: vi.fn(),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({
+      memoryManager,
+      settingsService,
+      memoryCaptureService: { enqueueAutomatic, scheduleFallbackDrain },
+    });
+
+    await chain.run({
+      sessionId: "session-memory-no-origin",
+      messages: createMessages(),
+      input: "출처가 없는 텍스트",
+      output: "처리했습니다.",
       toolCalls: [],
       route: "chat",
     });
 
-    const savedBody = saveMemory.mock.calls[0]?.[1] as string;
-    expect(savedBody).toContain("네, 기억하겠습니다.");
-    expect(savedBody).not.toContain("<title>");
-    expect(savedBody).not.toContain("[checkpoint]");
+    expect(enqueueAutomatic).not.toHaveBeenCalled();
+    expect(scheduleFallbackDrain).not.toHaveBeenCalled();
   });
 
   describe("audit route emission", () => {

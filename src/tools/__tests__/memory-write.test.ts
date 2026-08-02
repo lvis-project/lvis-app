@@ -5,8 +5,13 @@ import {
   MEMORY_WRITE_MAX_CONTENT_CHARS,
   type MemoryWriteStore,
 } from "../memory-write.js";
+import type { ToolExecutionContext } from "../types.js";
 
-const emptyCtx = {} as never;
+const emptyCtx: ToolExecutionContext = {
+  cwd: "",
+  extraAllowedDirectories: [],
+  metadata: {},
+};
 
 function makeStore(
   saveMemory: MemoryWriteStore["saveMemory"] = vi.fn(async (title: string) => ({
@@ -21,27 +26,63 @@ function makeStore(
 async function run(
   input: unknown,
   store?: MemoryWriteStore,
+  ctx: ToolExecutionContext = emptyCtx,
 ): Promise<{ output: string; isError?: boolean }> {
   const tool = createMemoryWriteTool({ memoryManager: store ?? makeStore().store });
-  return tool.execute(input, emptyCtx);
+  return tool.execute(input, ctx);
 }
 
 describe("memory_write — happy path", () => {
-  it("persists via saveMemory and reports the filename", async () => {
+  it("saves a host-validated candidate via saveMemory and reports the filename", async () => {
     const { store, saveMemory } = makeStore();
     const result = await run({ title: "user-prefers-dark", content: "The user prefers dark mode." }, store);
     expect(result.isError).toBe(false);
     expect(saveMemory).toHaveBeenCalledTimes(1);
-    expect(saveMemory).toHaveBeenCalledWith("user-prefers-dark", "The user prefers dark mode.");
+    expect(saveMemory).toHaveBeenCalledWith("user-prefers-dark", "The user prefers dark mode.", {
+      source: "assistant",
+      state: "candidate",
+    });
     const parsed = JSON.parse(result.output);
-    expect(parsed).toMatchObject({ saved: true, title: "user-prefers-dark" });
+    expect(parsed).toMatchObject({
+      saved: true,
+      candidate: true,
+      state: "candidate",
+      title: "user-prefers-dark",
+    });
     expect(parsed.filename).toBe("user-prefers-dark.md");
+  });
+
+  it("keeps a write contract while advertising candidate-only submission", () => {
+    const tool = createMemoryWriteTool({ memoryManager: makeStore().store });
+    expect(tool.category).toBe("write");
+    expect(tool.isReadOnly({ title: "t", content: "x" })).toBe(false);
+    expect(tool.description).toContain("candidate long-term memory");
+    expect(tool.description).toContain("not active memory");
   });
 
   it("trims surrounding whitespace before persisting", async () => {
     const { store, saveMemory } = makeStore();
     await run({ title: "  spaced  ", content: "  a fact  " }, store);
-    expect(saveMemory).toHaveBeenCalledWith("spaced", "a fact");
+    expect(saveMemory).toHaveBeenCalledWith("spaced", "a fact", { source: "assistant", state: "candidate" });
+  });
+
+  it("uses the host-selected project rather than model-provided scope", async () => {
+    const { store, saveMemory } = makeStore();
+    await run(
+      { title: "project fact", content: "Alpha uses a staged rollout." },
+      store,
+      {
+        cwd: "C:\\workspace\\alpha",
+        extraAllowedDirectories: [],
+        metadata: {},
+      },
+    );
+
+    expect(saveMemory).toHaveBeenCalledWith("project fact", "Alpha uses a staged rollout.", {
+      projectRoot: "C:\\workspace\\alpha",
+      source: "assistant",
+      state: "candidate",
+    });
   });
 });
 
@@ -198,6 +239,17 @@ describe("memory_write — cross-field marker-split / control-char guard", () =>
     const result = await run({ title: "note", content: "line one" + NL + "line two" }, store);
     expect(result.isError).toBe(false);
     expect(saveMemory).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("memory_write — credential guard", () => {
+  it("rejects credential-like content before persistence", async () => {
+    const { store, saveMemory } = makeStore();
+    const result = await run({ title: "credential", content: "temporary token sk-ant-ABCDEFGH1234" }, store);
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("credentials");
+    expect(saveMemory).not.toHaveBeenCalled();
   });
 });
 
