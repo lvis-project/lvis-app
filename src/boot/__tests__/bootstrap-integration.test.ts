@@ -107,6 +107,10 @@ vi.mock("../services.js", () => ({
         deletePluginSecrets: vi.fn(async () => 0),
       },
       memoryManager: {},
+      // Core boot now owns a capture gateway whose reviewer is late-bound once
+      // the active conversation loop has been created. Keep the integration
+      // graph faithful to the production CoreServices contract.
+      memoryCaptureService: { setMemoryReviewer: vi.fn() },
       inputClassifier: {},
       toolRegistry: { setDenyRules: vi.fn(), size: 0 },
       routeEngine: {},
@@ -398,6 +402,14 @@ vi.mock("../../memory/preference-refresh-service.js", () => ({
   },
 }));
 
+
+vi.mock("../../memory/memory-consolidation-service.js", () => ({
+  MemoryConsolidationService: class {},
+  MemoryMaintenanceCoordinator: class {
+    start = vi.fn();
+    stop = vi.fn();
+  },
+}));
 vi.mock("../../engine/subagent-runner.js", () => ({
   SubAgentRunner: class {
     constructor(options: unknown) {
@@ -588,6 +600,9 @@ describe("bootstrap() integration lock", () => {
         "mcpAppModelContext",
         "mcpArtifactStore",
         "mcpManager",
+        "memoryCaptureService",
+        "memoryConsolidationService",
+        "memoryMaintenanceCoordinator",
         "memoryManager",
         "notificationService",
         "personaPromptStore",

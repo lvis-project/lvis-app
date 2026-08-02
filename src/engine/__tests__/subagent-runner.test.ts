@@ -1069,6 +1069,64 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
     }
   });
 
+  it("strips memory_write even when it is explicitly allowlisted", async () => {
+    const toolRegistry = new ToolRegistry();
+    for (const tool of [
+      createDynamicTool({
+        name: "memory_write",
+        description: "persistent write",
+        source: "builtin",
+        category: "write",
+        jsonSchema: { type: "object", properties: {} },
+        execute: async () => ({ output: "would-write-memory", isError: false }),
+      }),
+      createDynamicTool({
+        name: "noop",
+        description: "safe",
+        source: "builtin",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        execute: async () => ({ output: "ok", isError: false }),
+      }),
+    ]) toolRegistry.register(tool);
+    const provider = new ScriptedProvider([[
+      { type: "text_delta", text: "done" },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]]);
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+
+    try {
+      await runner.spawn({
+        title: "read only subagent",
+        instructions: "summarize",
+        sourceTools: ["memory_write", "noop"],
+        maxRounds: 1,
+      });
+
+      expect(provider.observedToolNames[0]).toEqual(["noop"]);
+      expect(provider.observedToolNames[0]).not.toContain("memory_write");
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+
   it("does not execute an inactive plugin's tool even when allowlisted via sourceTools", async () => {
     // The scoped view a sub-agent receives does not rebuild tools — it hands
     // out the same gated adapter objects. sourceTools is not filtered by

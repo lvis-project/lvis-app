@@ -25,7 +25,7 @@ import {
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { parseStagedEnvelope, isMissingStagedEnvelopeErrorMessage } from "../../shared/staged-origins.js";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
@@ -324,6 +324,42 @@ function parseMemoryProjectOptions(raw: unknown): MemoryProjectOptionsResolution
   };
 }
 
+type MemoryCandidateActionPayload =
+  | { ok: true; id: string; options: unknown }
+  | { ok: false };
+
+/**
+ * Candidate approval/rejection is an internal user action. Keep the payload
+ * deliberately narrow so a renderer cannot smuggle arbitrary manager options
+ * through the lifecycle boundary.
+ */
+function parseMemoryCandidateActionPayload(raw: unknown): MemoryCandidateActionPayload {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false };
+  const record = raw as Record<string, unknown>;
+  if (!hasOnlyKeys(record, ["id", "opts"])) return { ok: false };
+  if (typeof record.id !== "string" || record.id.length === 0 || record.id.length > 128) {
+    return { ok: false };
+  }
+  if (record.opts !== undefined) {
+    if (!record.opts || typeof record.opts !== "object" || Array.isArray(record.opts)) {
+      return { ok: false };
+    }
+    if (!hasOnlyKeys(record.opts as Record<string, unknown>, ["projectRoot", "projectName", "includeUnscoped"])) {
+      return { ok: false };
+    }
+  }
+  return { ok: true, id: record.id, options: record.opts };
+}
+
+function candidateMemoryActionFailure(error: unknown): { ok: false; error: "invalid-input" | "not-found" | "write-failed" } {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("invalid memory id")) return { ok: false, error: "invalid-input" };
+  // Scope misses intentionally share this result with absent candidates, so a
+  // caller cannot probe whether another project's candidate exists.
+  if (message.includes("candidate not found")) return { ok: false, error: "not-found" };
+  return { ok: false, error: "write-failed" };
+}
+
 /**
  * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable
  * by vendor id). Mirrors the helper in settings.ts; kept local to avoid a
@@ -382,11 +418,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
     conversationLoop,
     settingsService,
     memoryManager,
+    memoryCaptureService,
     starredStore,
     feedbackStore,
     auditLogger,
     askUserQuestionGate,
     preferenceRefreshService,
+    memoryConsolidationService,
     personaPromptStore,
     getMainWindow,
   } = deps;
@@ -1092,16 +1130,72 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!project.ok) return [];
     return memoryManager.listMemoryEntries(project.options);
   });
+  ipcMain.handle(CHANNELS.memory.candidatesList, (e, opts?: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.candidatesList, e); return UNAUTHORIZED_FRAME; }
+    const project = parseMemoryProjectOptions(opts);
+    if (!project.ok) return [];
+    return memoryManager.listMemoryCandidates(project.options);
+  });
   ipcMain.handle(CHANNELS.memory.entriesSave, async (e, title: string, content: string, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesSave, e); return UNAUTHORIZED_FRAME; }
     const project = parseMemoryProjectOptions(opts);
     if (!project.ok) return PROJECT_NOT_ALLOWED;
-    return memoryManager.saveMemory(title, content, project.options);
+    if (!memoryCaptureService) {
+      throw new Error("memory-reviewer-unavailable");
+    }
+    try {
+      const result = await memoryCaptureService.captureExplicit({
+        title,
+        content,
+        ...project.options,
+      });
+      if (result.status === "skipped") {
+        throw new Error("memory-review-not-saved");
+      }
+      return result.entry;
+    } catch {
+      // Never fall back to a raw renderer-provided memory write.
+      throw new Error("memory-review-not-saved");
+    }
   });
-  ipcMain.handle(CHANNELS.memory.entriesDelete, async (e, filename: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesDelete, e); return UNAUTHORIZED_FRAME; }
-    await memoryManager.deleteMemory(filename);
-    return undefined;
+  ipcMain.handle(CHANNELS.memory.entriesDelete, async (e, filename: unknown, opts?: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesDelete, e); return UNAUTHORIZED_FRAME; }
+    if (typeof filename !== "string") return { ok: false, error: "invalid-input" };
+    const project = parseMemoryProjectOptions(opts);
+    if (!project.ok) return PROJECT_NOT_ALLOWED;
+    try {
+      await memoryManager.deleteMemory(filename, project.options);
+      return { ok: true };
+    } catch {
+      // Do not disclose a path, title, or another project's memory scope to the renderer.
+      return { ok: false, error: "write-failed" };
+    }
+  });
+  ipcMain.handle(CHANNELS.memory.candidateActivate, async (e, raw: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.candidateActivate, e); return UNAUTHORIZED_FRAME; }
+    const candidate = parseMemoryCandidateActionPayload(raw);
+    if (!candidate.ok) return { ok: false, error: "invalid-input" };
+    const project = parseMemoryProjectOptions(candidate.options);
+    if (!project.ok) return PROJECT_NOT_ALLOWED;
+    try {
+      const entry = await memoryManager.activateMemoryCandidate(candidate.id, project.options);
+      return { ok: true, entry };
+    } catch (error) {
+      return candidateMemoryActionFailure(error);
+    }
+  });
+  ipcMain.handle(CHANNELS.memory.candidateDelete, async (e, raw: unknown) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.candidateDelete, e); return UNAUTHORIZED_FRAME; }
+    const candidate = parseMemoryCandidateActionPayload(raw);
+    if (!candidate.ok) return { ok: false, error: "invalid-input" };
+    const project = parseMemoryProjectOptions(candidate.options);
+    if (!project.ok) return PROJECT_NOT_ALLOWED;
+    try {
+      await memoryManager.deleteMemoryCandidate(candidate.id, project.options);
+      return { ok: true };
+    } catch (error) {
+      return candidateMemoryActionFailure(error);
+    }
   });
   ipcMain.handle(CHANNELS.memory.entriesSearch, (e, query: string, opts?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesSearch, e); return UNAUTHORIZED_FRAME; }
@@ -1188,6 +1282,33 @@ export function registerChatHandlers(deps: IpcDeps): void {
       };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.memory.longTermRefresh, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.memory.longTermRefresh, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!memoryConsolidationService) {
+      return { ok: false, error: "memory-consolidation-service-unavailable" };
+    }
+    try {
+      // The default workspace is the app's unscoped global context, not a user
+      // selected project. Never create a project overview for it.
+      const project = conversationLoop.getSessionProjectIsDefault?.()
+        ? undefined
+        : conversationLoop.getSessionMemoryProjectContext?.();
+      const result = await memoryConsolidationService.refresh({
+        reason: "manual",
+        ...(project ? { project } : {}),
+      });
+      return { ok: true, ...result };
+    } catch (error) {
+      // Provider and source details are host-only; renderer callers receive a
+      // stable envelope regardless of the failing adapter or source state.
+      log.warn("manual long-term memory consolidation failed: %s", error instanceof Error ? error.message : String(error));
+      return { ok: false, error: "memory-consolidation-failed" };
     }
   });
 

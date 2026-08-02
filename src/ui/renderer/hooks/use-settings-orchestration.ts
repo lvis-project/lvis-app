@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isIpcErrorResult, type AppSettings, type DeepPartial, type LvisApi } from "../types.js";
+import {
+  isIpcErrorResult,
+  type AppSettings,
+  type DeepPartial,
+  type LvisApi,
+  type MemoryCaptureMode,
+} from "../types.js";
 import { ALL_VENDORS, getVendorOption, type VendorOption } from "../constants.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import type { FallbackEntry } from "../tabs/LlmTab.js";
@@ -70,6 +76,10 @@ export interface SettingsOrchestrationState {
   // Experimental feature flags
   idlePreferenceRefresh: boolean;
   setIdlePreferenceRefresh: (v: boolean) => void;
+  idleMemoryConsolidation: boolean;
+  setIdleMemoryConsolidation: (v: boolean) => void;
+  memoryCaptureMode: MemoryCaptureMode;
+  setMemoryCaptureMode: (v: MemoryCaptureMode) => void;
   subAgentAutonomousWake: boolean;
   setSubAgentAutonomousWake: (v: boolean) => void;
   // Marketplace
@@ -147,7 +157,9 @@ export function useSettingsOrchestration(
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
-  const [idlePreferenceRefresh, setIdlePreferenceRefresh] = useState(true);
+  const [idlePreferenceRefresh, setIdlePreferenceRefresh] = useState(false);
+  const [idleMemoryConsolidation, setIdleMemoryConsolidation] = useState(false);
+  const [memoryCaptureMode, setMemoryCaptureMode] = useState<MemoryCaptureMode>("off");
   const [subAgentAutonomousWake, setSubAgentAutonomousWake] = useState(false);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
@@ -203,7 +215,9 @@ export function useSettingsOrchestration(
       setWebProvider(s.webSearch.provider);
       setHasWebKey(webApiKeySet);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
-      setIdlePreferenceRefresh(s.features?.idlePreferenceRefresh ?? true);
+      setIdlePreferenceRefresh(s.features?.idlePreferenceRefresh ?? false);
+      setIdleMemoryConsolidation(s.features?.idleMemoryConsolidation ?? false);
+      setMemoryCaptureMode(s.features?.memoryCaptureMode ?? "off");
       setSubAgentAutonomousWake(s.features?.subAgentAutonomousWake ?? false);
       setMarketplaceBaseUrl(s.marketplace?.cloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.cloudAllowPrivateNetwork ?? false);
@@ -222,7 +236,9 @@ export function useSettingsOrchestration(
   useEffect(() => {
     return api.onSettingsUpdated((next) => {
       setSettingsSnapshot(next);
-      setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? true);
+      setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? false);
+      setIdleMemoryConsolidation(next.features?.idleMemoryConsolidation ?? false);
+      setMemoryCaptureMode(next.features?.memoryCaptureMode ?? "off");
       setSubAgentAutonomousWake(next.features?.subAgentAutonomousWake ?? false);
       const nextProvider = isLLMVendor(next.llm.provider)
         ? next.llm.provider
@@ -465,6 +481,38 @@ export function useSettingsOrchestration(
       });
   }, [api, idlePreferenceRefresh, onSaved, settingsLoaded]);
 
+  const setIdleMemoryConsolidationLive = useCallback((next: boolean) => {
+    const previous = idleMemoryConsolidation;
+    setIdleMemoryConsolidation(next);
+    if (!settingsLoaded) return;
+    void api
+      .updateSettings({ features: { idleMemoryConsolidation: next } })
+      .then((updated) => {
+        if (isIpcErrorResult(updated)) throw new Error(updated.message ?? updated.error);
+        setSettingsSnapshot(updated);
+        onSaved();
+      })
+      .catch(() => {
+        setIdleMemoryConsolidation(previous);
+      });
+  }, [api, idleMemoryConsolidation, onSaved, settingsLoaded]);
+
+  const setMemoryCaptureModeLive = useCallback((next: MemoryCaptureMode) => {
+    const previous = memoryCaptureMode;
+    setMemoryCaptureMode(next);
+    if (!settingsLoaded) return;
+    void api
+      .updateSettings({ features: { memoryCaptureMode: next } })
+      .then((updated) => {
+        if (isIpcErrorResult(updated)) throw new Error(updated.message ?? updated.error);
+        setSettingsSnapshot(updated);
+        onSaved();
+      })
+      .catch(() => {
+        setMemoryCaptureMode(previous);
+      });
+  }, [api, memoryCaptureMode, onSaved, settingsLoaded]);
+
   const setSubAgentAutonomousWakeLive = useCallback((next: boolean) => {
     const previous = subAgentAutonomousWake;
     setSubAgentAutonomousWake(next);
@@ -504,6 +552,8 @@ export function useSettingsOrchestration(
     hasWebKey, setHasWebKey,
     piiRedactEnabled, setPiiRedactEnabled,
     idlePreferenceRefresh, setIdlePreferenceRefresh: setIdlePreferenceRefreshLive,
+    idleMemoryConsolidation, setIdleMemoryConsolidation: setIdleMemoryConsolidationLive,
+    memoryCaptureMode, setMemoryCaptureMode: setMemoryCaptureModeLive,
     subAgentAutonomousWake, setSubAgentAutonomousWake: setSubAgentAutonomousWakeLive,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,

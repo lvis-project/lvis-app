@@ -12,15 +12,29 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
+import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
 import { getModelPreflightThreshold, estimateMessagesTokens } from "../auto-compact.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import {
-  makeConversationLoopDeps as makeDeps,
+  makeConversationLoopDeps as makeBaseDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
   makeConversationLoopSettings as makeSettings,
   makeConversationTurnProvider as makeTurnProvider,
 } from "./conversation-loop-test-helpers.js";
+
+function makeMemoryReviewer(): NonNullable<ConversationLoopDeps["memoryReviewer"]> {
+  return {
+    review: async () => "reviewed recap",
+  };
+}
+
+/** Supplies the boot-owned reviewer dependency required by compaction. */
+function makeDeps(
+  overrides: Partial<ConversationLoopDeps> = {},
+): ConversationLoopDeps {
+  return makeBaseDeps({ memoryReviewer: makeMemoryReviewer(), ...overrides });
+}
 
 // ─── Module mock — intercept compactWithBoundary ──────────────────────────────
 //
@@ -139,7 +153,10 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     expect(estimated).toBeGreaterThanOrEqual(threshold);
 
     const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    const memoryReviewer = makeMemoryReviewer();
+    const loop = new ConversationLoop(
+      makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
+    );
     loop.resetAndResume("sess-1");
 
     const fakeProvider = makeTurnProvider();
@@ -158,6 +175,13 @@ describe("runPreflightGuard — estimate-based trigger", () => {
 
     // compactWithBoundary must have been called (estimate exceeded threshold).
     expect(compactWithBoundary).toHaveBeenCalled();
+    expect(compactWithBoundary).toHaveBeenCalledWith(expect.objectContaining({
+      memoryReviewer,
+      preflightTokens: threshold,
+    }));
+    const compactArgs = vi.mocked(compactWithBoundary).mock.calls[0]?.[0];
+    expect(compactArgs).not.toHaveProperty("llm");
+    expect(compactArgs).not.toHaveProperty("model");
     // onCompactOccurred emitted from applyBoundaryToSession.
     expect(compactOccurredCb).toHaveBeenCalled();
   });

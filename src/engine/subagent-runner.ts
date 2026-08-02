@@ -29,6 +29,7 @@
 import { createHash } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
+import { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type {
   TurnInputRequired,
   TurnStopReason,
@@ -579,6 +580,7 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
   "agent_spawn",
   "agent_status",
   "agent_interrupt",
+  "memory_write",
 ]);
 
 /**
@@ -1805,9 +1807,37 @@ export class SubAgentRunner {
       subscriptionRuntime,
     );
 
+    // A builder carries mutable project/session overlay state. Never share it
+    // with a child: doing so can make the child read the parent's project
+    // memory, or leave child state behind for the next parent turn.
+    const parentPromptBuilder = this.deps.parentDeps.systemPromptBuilder;
+    const childSystemPromptBuilder = typeof parentPromptBuilder.createIsolated === "function"
+      ? parentPromptBuilder.createIsolated({
+          memoryManager: this.deps.subAgentMemoryManager,
+          toolRegistry: scopedRegistry,
+        })
+      // Test/minimal hosts that do not implement the concrete builder must
+      // still fail closed: create a fresh minimal builder, never reuse parent.
+      : new SystemPromptBuilder({
+          // Minimal test/host doubles sometimes implement persistence only.
+          // Supply empty prompt readers rather than falling back to the parent
+          // builder (which would reintroduce the cross-agent leak).
+          memoryManager: {
+            getAgentsMd: () => this.deps.subAgentMemoryManager.getAgentsMd?.() ?? "",
+            getMemoryIndex: (options) => this.deps.subAgentMemoryManager.getMemoryIndex?.(options) ?? "",
+            getPromptMemoryIndex: () => this.deps.subAgentMemoryManager.getPromptMemoryIndex?.() ?? "",
+            getUserPreferences: () => this.deps.subAgentMemoryManager.getUserPreferences?.() ?? "",
+            getMemoryContext: (options) => this.deps.subAgentMemoryManager.getMemoryContext?.(options) ?? "",
+            getProjectAgentsMd: (projectRoot) => this.deps.subAgentMemoryManager.getProjectAgentsMd?.(projectRoot)
+              ?? { projectRoot, layers: [], totalBytes: 0 },
+          } as MemoryManager,
+          toolRegistry: scopedRegistry,
+        });
+
     const childDeps: ConversationLoopDeps = {
       ...this.deps.parentDeps,
       toolRegistry: scopedRegistry,
+      systemPromptBuilder: childSystemPromptBuilder,
       // Route the child's session persistence to the ISOLATED subagent store
       // (`~/.lvis/subagent/`), never the parent's main-chat MemoryManager.
       // Reusing the parent store is what leaked orphan sub-agent JSONL into
