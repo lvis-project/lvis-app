@@ -11,15 +11,7 @@ import type {
   NoteEntry,
   ProjectScopedMemoryOptions,
 } from "../memory-manager.js";
-import type { MemoryReviewerService } from "../memory-reviewer-service.js";
-
-type MemoryReviewer = Pick<MemoryReviewerService, "review">;
-
-function createMemoryReviewer(implementation: MemoryReviewer["review"]) {
-  return {
-    review: vi.fn<MemoryReviewer["review"]>(implementation),
-  };
-}
+import { createMemoryReviewer } from "./memory-reviewer-test-helpers.js";
 
 function snapshot(scope: MemoryScope, sources: readonly NoteEntry[]): MemoryConsolidationSnapshot {
   return {

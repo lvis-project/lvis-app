@@ -62,6 +62,13 @@ export function makeConversationLoopLongHistory(count = 20): GenericMessage[] {
   return messages;
 }
 
+/** Supplies the boot-owned reviewer required by normal ConversationLoop fixtures. */
+export function makeConversationLoopMemoryReviewer(): NonNullable<ConversationLoopDeps["memoryReviewer"]> {
+  return {
+    review: async () => "reviewed recap",
+  };
+}
+
 export function makeConversationLoopDeps(
   overrides: Partial<ConversationLoopDeps> = {},
 ): ConversationLoopDeps {
@@ -91,6 +98,7 @@ export function makeConversationLoopDeps(
       getModelVisibleTools: () => [],
     } as unknown as ConversationLoopDeps["toolRegistry"],
     memoryManager: makeConversationLoopMemoryManager(),
+    memoryReviewer: makeConversationLoopMemoryReviewer(),
     ...overrides,
   };
 }
