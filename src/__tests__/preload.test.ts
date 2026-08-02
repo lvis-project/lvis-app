@@ -505,6 +505,25 @@ describe("preload — plugin webview asset URLs", () => {
     expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:index:get");
   });
 
+  it("bridges candidate review actions with immutable ids and optional project scope", async () => {
+    const api = await loadLvisApi();
+    const candidateId = "ce882fc4-19c5-4e9e-98cd-6405a608b73f";
+    const project = { projectRoot: "/workspace/project", projectName: "project" };
+
+    await (api["memoryListCandidates"] as () => Promise<unknown>)();
+    await (api["memoryActivateCandidate"] as (id: string, opts?: typeof project) => Promise<unknown>)(candidateId);
+    await (api["memoryDeleteCandidate"] as (id: string, opts?: typeof project) => Promise<unknown>)(candidateId, project);
+    await (api["memoryDeleteEntry"] as (filename: string, opts?: typeof project) => Promise<unknown>)("note.md", project);
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:candidates:list");
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:candidates:activate", { id: candidateId });
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:candidates:delete", {
+      id: candidateId,
+      opts: project,
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:memory:entries:delete", "note.md", project);
+  });
+
   it.each([
     ["memoryGetAgentsMd", "lvis:memory:agents-md:get"],
     ["memoryUpdateAgentsMd", "lvis:memory:agents-md:update", "# Agents"],
@@ -512,6 +531,7 @@ describe("preload — plugin webview asset URLs", () => {
     ["memoryGetUserPrefs", "lvis:memory:user-prefs:get"],
     ["memoryUpdateUserPrefs", "lvis:memory:user-prefs:update", "# Preferences"],
     ["memoryRefreshUserPrefs", "lvis:memory:user-prefs:refresh"],
+    ["memoryRefreshLongTerm", "lvis:memory:long-term:refresh"],
   ])("exposes %s and invokes %s", async (apiKey, channel, payload) => {
     const api = await loadLvisApi();
 

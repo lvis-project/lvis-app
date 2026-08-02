@@ -171,6 +171,7 @@ export async function bootstrap(
     auditService,
     settingsService,
     memoryManager,
+    memoryCaptureService,
     inputClassifier,
     toolRegistry,
     routeEngine,
@@ -181,6 +182,7 @@ export async function bootstrap(
   ctx.auditService = auditService;
   ctx.settingsService = settingsService;
   ctx.memoryManager = memoryManager;
+  ctx.memoryCaptureService = memoryCaptureService;
   ctx.inputClassifier = inputClassifier;
   ctx.toolRegistry = toolRegistry;
   ctx.routeEngine = routeEngine;

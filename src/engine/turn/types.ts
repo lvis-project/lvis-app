@@ -32,6 +32,8 @@ import type { InputClassifier } from "../../core/input-classifier.js";
 import type { RouteEngine } from "../../core/route-engine.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
+import type { MemoryCaptureService } from "../../memory/memory-capture-service.js";
+import type { MemoryReviewerService } from "../../memory/memory-reviewer-service.js";
 import type { RoutineEngine } from "../../core/routine-engine.js";
 import type { IdleSchedulerService } from "../../main/idle-scheduler.js";
 import type { PostTurnHookChain } from "../../hooks/post-turn-hook-chain.js";
@@ -274,6 +276,10 @@ export interface ConversationLoopDeps {
   /** Host-owned capability; omitted/false surfaces cannot accept background parent delivery. */
   supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;
+  /** Explicit user memory writes must go through this host-owned LLM review gate. */
+  memoryCaptureService?: Pick<MemoryCaptureService, "captureExplicit">;
+  /** Recap compaction shares the host-owned, no-tool Memory Reviewer lane. */
+  memoryReviewer?: Pick<MemoryReviewerService, "review">;
   /**
    * Notify all renderer windows that the directory config mutated.
    * Wired by boot from `ipc/domains/permissions.ts`. Called by

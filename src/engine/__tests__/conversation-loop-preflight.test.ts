@@ -18,6 +18,7 @@ import { estimateRequestInputProjection } from "../request-input-projection.js";
 import {
   makeConversationLoopDeps as makeDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
+  makeConversationLoopMemoryReviewer as makeMemoryReviewer,
   makeConversationLoopSettings as makeSettings,
   makeConversationTurnProvider as makeTurnProvider,
 } from "./conversation-loop-test-helpers.js";
@@ -139,7 +140,10 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     expect(estimated).toBeGreaterThanOrEqual(threshold);
 
     const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    const memoryReviewer = makeMemoryReviewer();
+    const loop = new ConversationLoop(
+      makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
+    );
     loop.resetAndResume("sess-1");
 
     const fakeProvider = makeTurnProvider();
@@ -158,6 +162,13 @@ describe("runPreflightGuard — estimate-based trigger", () => {
 
     // compactWithBoundary must have been called (estimate exceeded threshold).
     expect(compactWithBoundary).toHaveBeenCalled();
+    expect(compactWithBoundary).toHaveBeenCalledWith(expect.objectContaining({
+      memoryReviewer,
+      preflightTokens: threshold,
+    }));
+    const compactArgs = vi.mocked(compactWithBoundary).mock.calls[0]?.[0];
+    expect(compactArgs).not.toHaveProperty("llm");
+    expect(compactArgs).not.toHaveProperty("model");
     // onCompactOccurred emitted from applyBoundaryToSession.
     expect(compactOccurredCb).toHaveBeenCalled();
   });

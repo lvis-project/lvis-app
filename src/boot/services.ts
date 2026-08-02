@@ -11,6 +11,8 @@ import { SettingsService } from "../data/settings-store.js";
 import { DEFAULT_LOCALE, normalizeLocale, setLocale, tryLoadLocaleMessages,
 } from "../i18n/index.js";
 import { MemoryManager } from "../memory/memory-manager.js";
+import { MemoryCaptureService } from "../memory/memory-capture-service.js";
+import { getDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
 import { InputClassifier } from "../core/input-classifier.js";
 import { RouteEngine } from "../core/route-engine.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -59,6 +61,7 @@ export interface CoreServices {
   auditService: AuditService;
   settingsService: SettingsService;
   memoryManager: MemoryManager;
+  memoryCaptureService: MemoryCaptureService;
   inputClassifier: InputClassifier;
   toolRegistry: ToolRegistry;
   routeEngine: RouteEngine;
@@ -142,7 +145,9 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
   }
 
   // §4.2 Step 5: Core Engines
-  const memoryManager = new MemoryManager();
+  const memoryManager = new MemoryManager({
+    defaultWorkspaceRoot: getDefaultWorkspaceRoot(),
+  });
   memoryManager.load();
   memoryManager.startPersistentContextWatcher();
   app.once("before-quit", () => {
@@ -157,6 +162,10 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
     log.warn("boot: search index verify/rebuild failed: %s", (err as Error).message,
     );
   });
+  const memoryCaptureService = new MemoryCaptureService({
+    memoryManager,
+    getMode: () => settingsService.get("features")?.memoryCaptureMode,
+  });
 
   const inputClassifier = new InputClassifier();
   const toolRegistry = new ToolRegistry();
@@ -170,9 +179,9 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
   for (const tool of createFileTools()) {
     toolRegistry.register(tool);
   }
-  // memory_write: model-directed long-term memory. Not read-only + not
-  // auto-approved, so each write flows through the permission chokepoint
-  // (user / auto-mode reviewer sees title+content) before it persists.
+  // memory_write: model-directed local long-term memory. Its narrowly scoped
+  // built-in policy auto-allows ordinary local saves while retaining explicit
+  // deny, strict-mode, and staged-origin gates in PermissionManager.
   toolRegistry.register(createMemoryWriteTool({ memoryManager }));
   // Background-shell companions to `bash` (run_in_background): read incremental
   // output and terminate by shell id. The shell registry is a module singleton
@@ -189,6 +198,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
     auditService,
     settingsService,
     memoryManager,
+    memoryCaptureService,
     inputClassifier,
     toolRegistry,
     routeEngine,

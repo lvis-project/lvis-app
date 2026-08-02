@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/runtime.js";
-import type { LvisApi } from "../types.js";
+import type { LvisApi, MemoryCandidate } from "../types.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 
 export interface NoteResult {
@@ -10,6 +10,8 @@ export interface NoteResult {
   filename?: string;
 }
 
+export type MemoryCandidateResult = Omit<MemoryCandidate, "content"> & { excerpt: string };
+
 export interface SessionResult {
   sessionId: string;
   title?: string;
@@ -17,7 +19,7 @@ export interface SessionResult {
   timestamp: string;
 }
 
-function memoryProjectOptions(project: ProjectIdentity | undefined) {
+export function memoryProjectOptions(project: ProjectIdentity | undefined) {
   if (!project?.projectRoot) return undefined;
   return {
     projectRoot: project.projectRoot,
@@ -66,6 +68,27 @@ function memorySearchSessions(api: LvisApi, query: string, project: ProjectIdent
   return opts ? api.memorySearchSessions(query, opts) : api.memorySearchSessions(query);
 }
 
+
+type MemoryCandidateApi = {
+  memoryListCandidates?: (opts?: ReturnType<typeof memoryProjectOptions>) => Promise<Array<{
+    id: string;
+    filename: string;
+    title: string;
+    content: string;
+    updatedAt?: string;
+    createdAt?: string;
+    projectRoot?: string;
+    projectName?: string;
+    source?: "user" | "assistant" | "import";
+  }>>;
+};
+
+function memoryListCandidates(api: LvisApi, project: ProjectIdentity | undefined) {
+  const listCandidates = (api as LvisApi & MemoryCandidateApi).memoryListCandidates;
+  if (!listCandidates) return Promise.resolve([]);
+  const opts = memoryProjectOptions(project);
+  return opts ? listCandidates(opts) : listCandidates();
+}
 /**
  * Memory search hook.
  *
@@ -89,38 +112,40 @@ export function useMemorySearch(api: LvisApi, project?: ProjectIdentity) {
     };
   }, []);
 
-  useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      try {
-        const [memoryIndex, notes, sessions] = await Promise.all([
-          memoryGetIndex(api, project),
-          memoryListEntries(api, project),
-          memoryListSessions(api, project),
-        ]);
-        if (!aliveRef.current) return;
-        const mappedNotes = (notes ?? []).map((note) => ({
-          filename: note.filename,
-          title: note.title,
-          excerpt: stripTopHeading(note.content),
-          updatedAt: note.updatedAt,
-        }));
-        const mappedMemory = [...memoryIndexResult(memoryIndex), ...mappedNotes];
-        setNoteCatalog(mappedMemory);
-        setSessionCatalog(sessions ?? []);
-        setNoteResults(mappedMemory);
-        setSessionResults(sessions ?? []);
-      } catch {
-        if (!aliveRef.current) return;
-        setNoteCatalog([]);
-        setSessionCatalog([]);
-        setNoteResults([]);
-        setSessionResults([]);
-      } finally {
-        if (aliveRef.current) setLoading(false);
-      }
-    })();
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [memoryIndex, notes, sessions] = await Promise.all([
+        memoryGetIndex(api, project),
+        memoryListEntries(api, project),
+        memoryListSessions(api, project),
+      ]);
+      if (!aliveRef.current) return;
+      const mappedNotes = (notes ?? []).map((note) => ({
+        filename: note.filename,
+        title: note.title,
+        excerpt: stripTopHeading(note.content),
+        updatedAt: note.updatedAt,
+      }));
+      const mappedMemory = [...memoryIndexResult(memoryIndex), ...mappedNotes];
+      setNoteCatalog(mappedMemory);
+      setSessionCatalog(sessions ?? []);
+      setNoteResults(mappedMemory);
+      setSessionResults(sessions ?? []);
+    } catch {
+      if (!aliveRef.current) return;
+      setNoteCatalog([]);
+      setSessionCatalog([]);
+      setNoteResults([]);
+      setSessionResults([]);
+    } finally {
+      if (aliveRef.current) setLoading(false);
+    }
   }, [api, project, projectKey]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
     if (query.trim() === "") {
@@ -161,5 +186,42 @@ export function useMemorySearch(api: LvisApi, project?: ProjectIdentity) {
     setSessionResults([]);
   }, []);
 
-  return { query, setQuery, noteResults, sessionResults, loading, reset };
+  return { query, setQuery, noteResults, sessionResults, loading, refresh, reset };
+}
+
+/** Loads proposals separately so they never appear in active memory search results. */
+export function useMemoryCandidates(api: LvisApi, project?: ProjectIdentity) {
+  const [candidates, setCandidates] = useState<MemoryCandidateResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const aliveRef = useRef(true);
+  const projectKey = `${project?.projectRoot ?? ""}\0${project?.projectName ?? ""}\0${project?.isDefault === true ? "default" : ""}`;
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const entries = await memoryListCandidates(api, project);
+      if (!aliveRef.current) return;
+      setCandidates((entries ?? []).map((entry) => ({
+        ...entry,
+        excerpt: stripTopHeading(entry.content),
+      })));
+    } catch {
+      if (aliveRef.current) setCandidates([]);
+    } finally {
+      if (aliveRef.current) setLoading(false);
+    }
+  }, [api, project, projectKey]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return { candidates, loading, refresh };
 }

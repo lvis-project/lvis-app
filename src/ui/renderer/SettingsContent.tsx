@@ -595,6 +595,10 @@ export function SettingsContent({
               setStreamSmoothing={s.setStreamSmoothing}
               idlePreferenceRefresh={s.idlePreferenceRefresh}
               setIdlePreferenceRefresh={s.setIdlePreferenceRefresh}
+              idleMemoryConsolidation={s.idleMemoryConsolidation}
+              setIdleMemoryConsolidation={s.setIdleMemoryConsolidation}
+              memoryCaptureMode={s.memoryCaptureMode}
+              setMemoryCaptureMode={s.setMemoryCaptureMode}
               subAgentAutonomousWake={s.subAgentAutonomousWake}
               setSubAgentAutonomousWake={s.setSubAgentAutonomousWake}
               piiRedactEnabled={s.piiRedactEnabled}

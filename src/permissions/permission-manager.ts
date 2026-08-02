@@ -46,6 +46,14 @@ import { isPathAllowed } from "./allowed-directories.js";
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
 
+
+// This deliberately names one host-owned operation instead of weakening the
+// write category globally. It is evaluated only after deny rules, per-tool
+// strict mode, staged-origin protection, and global strict mode.
+const AUTO_APPROVED_LOCAL_BUILTIN_WRITES = new Set([
+  "memory_write",
+]);
+
 /**
  * P2 graduated grant tier. A persisted "Allow always" grant carries a tier so
  * a grant made on a read tool ("read") does NOT silently authorize a later
@@ -1133,6 +1141,22 @@ export class PermissionManager {
         ...(context.headless === true && isMutating
           ? { reviewer: { route: "headless" as const } }
           : {}),
+      };
+    }
+
+    // Local durable memory is an app-owned, user-requested capability. It
+    // needs no normal approval dialog, but the hard gates above must still
+    // win so an explicit deny, strict session, or staged/untrusted origin
+    // cannot silently persist data.
+    if (
+      source === "builtin"
+      && resolvedCategory === "write"
+      && AUTO_APPROVED_LOCAL_BUILTIN_WRITES.has(toolName)
+    ) {
+      return {
+        decision: "allow",
+        reason: "builtin-local-memory-auto-allow",
+        layer: 6,
       };
     }
 
