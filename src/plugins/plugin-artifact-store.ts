@@ -162,6 +162,10 @@ export interface CoordinatedArtifactCommit<T> {
   result: T;
   /** Predecessor resources must drain before recovery backup cleanup. */
   retirement?: Promise<void>;
+  /** Host lifecycle completion propagated for admitted self-updates. */
+  completion?: Promise<void>;
+  /** The caller owns the predecessor lease and must not await retirement inline. */
+  retirementDeferred?: boolean;
 }
 
 export interface RequiredMarketplaceRootTextFile {
@@ -228,6 +232,7 @@ export class PluginArtifactStore {
   private readonly publicKeys: Record<string, PublicKeyInput>;
   private readonly tarballCacheBase: string | null;
   private readonly artifactLimits: Readonly<MarketplaceArtifactLimits>;
+  private readonly deferredCommitCleanups = new Set<Promise<void>>();
 
   constructor(options: ArtifactStoreOptions) {
     this.installRoot = options.installRoot;
@@ -577,19 +582,8 @@ export class PluginArtifactStore {
       if (!durableCommitCompleted) {
         throw new Error(`artifact commit coordinator returned before durable commit: ${safeSlug}`);
       }
-      let predecessorRetired = true;
-      if (coordinated.retirement) {
-        try {
-          await coordinated.retirement;
-        } catch (error) {
-          predecessorRetired = false;
-          log.error(
-            { safeSlug, oldDir, err: error },
-            "predecessor generation retirement failed; retaining recovery backup",
-          );
-        }
-      }
-      if (hadOldDir && predecessorRetired) {
+      const cleanupCommittedBackup = async (): Promise<void> => {
+        if (!hadOldDir) return;
         let cleanupResolved = false;
         try {
           await retryOnTransientFsLock(() => this.removeCommittedBackup(oldDir));
@@ -618,7 +612,34 @@ export class PluginArtifactStore {
             log.warn({ safeSlug, oldDir, err }, "obsolete artifact cleanup ownership remains for boot retry");
           });
         }
+      };
+      let predecessorRetired = true;
+      if (coordinated.retirement) {
+        if (coordinated.retirementDeferred) {
+          predecessorRetired = false;
+          const deferredCleanup = coordinated.retirement.then(cleanupCommittedBackup);
+          this.deferredCommitCleanups.add(deferredCleanup);
+          void deferredCleanup.finally(() => {
+            this.deferredCommitCleanups.delete(deferredCleanup);
+          }).catch((error) => {
+            log.error(
+              { safeSlug, oldDir, err: error },
+              "deferred predecessor retirement failed; retaining recovery backup",
+            );
+          });
+        } else {
+          try {
+            await coordinated.retirement;
+          } catch (error) {
+            predecessorRetired = false;
+            log.error(
+              { safeSlug, oldDir, err: error },
+              "predecessor generation retirement failed; retaining recovery backup",
+            );
+          }
+        }
       }
+      if (predecessorRetired) await cleanupCommittedBackup();
       return { files, result: coordinated.result, predecessorRetired };
     } catch (err) {
       if (existsSync(stageDir)) {

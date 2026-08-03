@@ -1,7 +1,7 @@
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdmZip from "adm-zip";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
 import { isAbsolute, join, resolve } from "node:path";
@@ -24,6 +24,7 @@ import { setCachedCatalog } from "../offline-cache.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import {
   makeTestPluginPaths,
+  preparedActivationOptionsForTest,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
@@ -201,6 +202,87 @@ describe("PluginMarketplaceService install()", () => {
     ) as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
+  });
+
+  it("returns a self-admitted marketplace update before retirement and defers backup cleanup", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const catalogItem = (version: string): PluginMarketplaceItem => ({
+      id: "self-update-plugin",
+      slug: "self-update-plugin",
+      name: "Self Update Plugin",
+      description: "self-admitted artifact transaction fixture",
+      version,
+      packageSpec: `@lvis/self-update-plugin@${version}`,
+      packageName: "@lvis/self-update-plugin",
+    });
+    let current = catalogItem("1.0.0");
+    const zips = new Map([
+      ["1.0.0", makePluginZip({ ...current, entry: "./dist/hostPlugin.js" })],
+      ["2.0.0", makePluginZip({ ...catalogItem("2.0.0"), entry: "./dist/hostPlugin.js" })],
+    ]);
+    const fetcher = {
+      listPlugins: async () => [current],
+      getPluginDetail: async () => current,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async (_id: string, version: string) => {
+        const body = zips.get(version);
+        if (!body) throw new Error(`missing fixture zip ${version}`);
+        return {
+          body,
+          sha256Header: createHash("sha256").update(body).digest("hex"),
+          status: 200,
+        };
+      },
+      fetchSignatureEnvelope: async (_id: string, version: string) => {
+        const body = zips.get(version);
+        if (!body) throw new Error(`missing fixture zip ${version}`);
+        return makeEnvelope(body, signingKey.privateKey);
+      },
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(current.id, undefined, preparedActivationOptionsForTest);
+    const removeCommittedBackup = vi.spyOn(
+      (service as unknown as {
+        artifactStore: { removeCommittedBackup(path: string): Promise<void> };
+      }).artifactStore,
+      "removeCommittedBackup",
+    );
+
+    current = catalogItem("2.0.0");
+    let releaseRetirement!: () => void;
+    const retirement = new Promise<void>((resolveRetirement) => {
+      releaseRetirement = resolveRetirement;
+    });
+    const update = service.install(current.id, undefined, {
+      activatePreparedArtifact: async (prepared) => ({
+        result: await prepared.durableCommit(),
+        retirement,
+        completion: retirement,
+        retirementDeferred: true,
+      }),
+    });
+
+    await expect(update).resolves.toEqual({
+      pluginId: current.id,
+      installed: true,
+    });
+    expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
+      .toMatchObject({ version: "2.0.0" });
+    expect((await readdir(installedDir)).some((name) =>
+      name.startsWith(`.${current.id}.old-`)
+    )).toBe(true);
+
+    releaseRetirement();
+    await vi.waitFor(async () => {
+      expect((await readdir(installedDir)).some((name) =>
+        name.startsWith(`.${current.id}.old-`)
+      )).toBe(false);
+    });
+    expect(removeCommittedBackup).toHaveBeenCalledOnce();
   });
 
   it("rejects and rolls back an artifact whose declared Skill is absent", async () => {

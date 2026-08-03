@@ -45,17 +45,26 @@ function projectionSnapshot(generation: ActivePluginGeneration<GenerationState>)
   ].join("|");
 }
 
+async function publishReady<TState>(
+  coordinator: PluginGenerationCoordinator<TState>,
+  candidate: ActivePluginGeneration<TState>,
+) {
+  const transition = await coordinator.commit(candidate, async () => undefined);
+  await transition.markDispatchReady();
+  return transition;
+}
+
 describe("PluginGenerationCoordinator", () => {
   it("publishes only after durable commit and preserves predecessor on failure", async () => {
     const coordinator = new PluginGenerationCoordinator<{ label: string }>();
-    await coordinator.commit(generation("g1"), async () => undefined);
+    await publishReady(coordinator, generation("g1"));
     await expect(coordinator.commit(generation("g2"), async () => { throw new Error("disk full"); })).rejects.toThrow("disk full");
     expect(coordinator.getActive("bundle-host-test")?.generationId).toBe("g1");
   });
 
   it("blocks new leases during commit and retires only after predecessor leases drain", async () => {
     const coordinator = new PluginGenerationCoordinator<{ label: string }>();
-    await coordinator.commit(generation("g1"), async () => undefined);
+    await publishReady(coordinator, generation("g1"));
     const oldLease = await coordinator.acquire("bundle-host-test");
     let finishCommit!: () => void;
     const durable = new Promise<void>((resolve) => { finishCommit = resolve; });
@@ -73,7 +82,7 @@ describe("PluginGenerationCoordinator", () => {
     expect(retire).not.toHaveBeenCalled();
     oldLease.release();
     await published.retired;
-    published.markDispatchReady();
+    await published.markDispatchReady();
     const newLease = await waitingLease;
     expect(newLease.generation.generationId).toBe("g2");
     expect(retire).toHaveBeenCalledWith(expect.objectContaining({ generationId: "g1" }));
@@ -82,7 +91,7 @@ describe("PluginGenerationCoordinator", () => {
 
   it("publishes without waiting for predecessor retirement and rejects stale exact leases", async () => {
     const coordinator = new PluginGenerationCoordinator<{ label: string }>();
-    await coordinator.commit(generation("g1"), async () => undefined);
+    await publishReady(coordinator, generation("g1"));
     const oldLease = await coordinator.acquireExact("bundle-host-test", "g1");
     const retire = vi.fn(async () => undefined);
     const published = await coordinator.commit(generation("g2"), async () => undefined, retire);
@@ -96,14 +105,14 @@ describe("PluginGenerationCoordinator", () => {
     expect(candidateAdmitted).toBe(false);
     oldLease.release();
     await published.retired;
-    published.markDispatchReady();
+    await published.markDispatchReady();
     (await candidateLease).release();
     expect(retire).toHaveBeenCalledTimes(1);
   });
 
   it("supports an inactive pointer transition without admitting new invocations", async () => {
     const coordinator = new PluginGenerationCoordinator();
-    await coordinator.commit(generation("g1"), async () => undefined);
+    await publishReady(coordinator, generation("g1"));
     await coordinator.commit(undefined, async () => undefined, undefined, "bundle-host-test");
     expect(coordinator.getActive("bundle-host-test")).toBeUndefined();
     await expect(coordinator.acquire("bundle-host-test")).rejects.toThrow(/no active generation/);
@@ -111,7 +120,7 @@ describe("PluginGenerationCoordinator", () => {
 
   it("makes lease release idempotent", async () => {
     const coordinator = new PluginGenerationCoordinator();
-    await coordinator.commit(generation("g1"), async () => undefined);
+    await publishReady(coordinator, generation("g1"));
     const lease = await coordinator.acquire("bundle-host-test");
     lease.release();
     lease.release();
@@ -121,7 +130,7 @@ describe("PluginGenerationCoordinator", () => {
 
   it("expires detached async admission when the owning lease is released", async () => {
     const coordinator = new PluginGenerationCoordinator();
-    await coordinator.commit(generation("g1"), async () => undefined);
+    await publishReady(coordinator, generation("g1"));
     const lease = await coordinator.acquire("bundle-host-test");
     let continueDetached!: () => void;
     const detachedBarrier = new Promise<void>((resolve) => {
@@ -148,9 +157,85 @@ describe("PluginGenerationCoordinator", () => {
     expect(coordinator.isExactAdmitted("bundle-host-test", "g1")).toBe(false);
   });
 
+  it("does not open replacement dispatch when readiness is marked before retirement", async () => {
+    const coordinator = new PluginGenerationCoordinator<GenerationState>();
+    await publishReady(coordinator, generation("g1"));
+    const predecessorLease = await coordinator.acquire("bundle-host-test");
+    let releaseRetirement!: () => void;
+    const retirementGate = new Promise<void>((resolve) => {
+      releaseRetirement = resolve;
+    });
+    const published = await coordinator.commit(
+      generation("g2"),
+      async () => undefined,
+      async () => retirementGate,
+    );
+    let ready = false;
+    const readiness = published.markDispatchReady().then(() => {
+      ready = true;
+    });
+    await Promise.resolve();
+    expect(ready).toBe(false);
+    predecessorLease.release();
+    await Promise.resolve();
+    expect(ready).toBe(false);
+    releaseRetirement();
+    await readiness;
+    const candidateLease = await coordinator.acquire("bundle-host-test");
+    expect(candidateLease.generation.generationId).toBe("g2");
+    candidateLease.release();
+  });
+
+  it("runs detached post-commit startup under the candidate admission instead of stale predecessor ALS", async () => {
+    const coordinator = new PluginGenerationCoordinator<GenerationState>();
+    await publishReady(coordinator, generation("g1"));
+    const predecessorLease = await coordinator.acquire("bundle-host-test");
+    let published!: Awaited<ReturnType<typeof coordinator.commit>>;
+    let detached!: Promise<string>;
+    await coordinator.runWithLease(predecessorLease, async () => {
+      published = await coordinator.commit(generation("g2"), async () => undefined);
+      detached = (async () => {
+        await published.retired;
+        return coordinator.runPostCommitWithGeneration(
+          "bundle-host-test",
+          "g2",
+          async () => {
+            const nested = await coordinator.acquireExact("bundle-host-test", "g2");
+            nested.release();
+            return "g2";
+          },
+        );
+      })();
+    });
+    predecessorLease.release();
+    await expect(detached).resolves.toBe("g2");
+    await published.markDispatchReady();
+  });
+
+  it.each(["initial", "replacement"] as const)(
+    "keeps %s publication failures permanently unavailable",
+    async (kind) => {
+      const coordinator = new PluginGenerationCoordinator<GenerationState>();
+      if (kind === "replacement") await publishReady(coordinator, generation("g1"));
+      await expect(coordinator.commit(
+        generation(kind === "initial" ? "g1" : "g2"),
+        async () => undefined,
+        async () => undefined,
+        "bundle-host-test",
+        () => {
+          throw new Error(`${kind} publish failed`);
+        },
+      )).rejects.toThrow(`${kind} publish failed`);
+      await expect(coordinator.acquire("bundle-host-test")).rejects.toThrow(
+        /dispatch blocked by publication failure/,
+      );
+      await expect(coordinator.waitForRetirements()).resolves.toBeUndefined();
+    },
+  );
+
   it("quiesces existing leases before an in-place projection transition", async () => {
     const coordinator = new PluginGenerationCoordinator<{ label: string }>();
-    await coordinator.commit(generation("g1"), async () => undefined);
+    await publishReady(coordinator, generation("g1"));
     const oldLease = await coordinator.acquire("bundle-host-test");
     const publish = vi.fn();
     const transition = coordinator.quiesce(
@@ -173,7 +258,7 @@ describe("PluginGenerationCoordinator", () => {
   it("keeps every high-contention invocation pinned to one generation across replace and disable", async () => {
     const coordinator = new PluginGenerationCoordinator<GenerationState>();
     const g1 = generation("g1");
-    await coordinator.commit(g1, async () => undefined);
+    await publishReady(coordinator, g1);
     const predecessorLeases = await Promise.all(
       Array.from({ length: 32 }, () => coordinator.acquire("bundle-host-test")),
     );
@@ -214,7 +299,7 @@ describe("PluginGenerationCoordinator", () => {
     expect(retireG1).not.toHaveBeenCalled();
     for (const lease of predecessorLeases) lease.release();
     await publishedReplacement.retired;
-    publishedReplacement.markDispatchReady();
+    await publishedReplacement.markDispatchReady();
     const replacementLeases = await Promise.all(waiting);
     expect(new Set(replacementLeases.map((lease) => projectionSnapshot(lease.generation))))
       .toEqual(new Set(["g2|instruction:g2|hook:g2|mcp:g2|audit:g2|false"]));
