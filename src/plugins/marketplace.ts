@@ -284,7 +284,7 @@ function assertNetworkAccessAcknowledgement(options: {
 function serializeNetworkAccessAcknowledgement(
   acknowledgement: NetworkAccessAcknowledgement | undefined,
 ): string {
-  return JSON.stringify(acknowledgement ?? null);
+  return JSON.stringify(buildNetworkAccessAcknowledgement(acknowledgement) ?? null);
 }
 
 function resolveRollbackInstallSource(
