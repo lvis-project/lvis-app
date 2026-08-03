@@ -32,7 +32,8 @@ export interface UpdateInfo {
 
 export type PluginUpdateCheckResult =
   | { status: "success"; updates: UpdateInfo[] }
-  | { status: "catalog-unavailable" };
+  | { status: "catalog-unavailable" }
+  | { status: "error"; error: unknown };
 
 /**
  * Returns true when the update-check feature flag is enabled.
@@ -120,7 +121,7 @@ export class PluginUpdateDetector {
       return { status: "success", updates };
     } catch (err) {
       log.warn("checkForUpdates failed: %s", (err as Error).message);
-      return { status: "success", updates: [] };
+      return { status: "error", error: err };
     }
   }
 
@@ -136,15 +137,19 @@ export class PluginUpdateDetector {
     // `<pluginsRoot>/<id>/plugin.json`). A crafted registry entry like
     // "../../etc/passwd" is rejected.
     if (!isWithin(registryDir, abs)) {
-      log.warn("manifestPath escapes allowed roots, skipping: %s", manifestPath);
-      return null;
+      throw new Error(`installed plugin manifest escapes registry root: ${manifestPath}`);
     }
     try {
       const raw = await readFile(abs, "utf-8");
       const parsed = JSON.parse(raw) as { version?: string };
-      return parsed.version ?? null;
-    } catch {
-      return null;
+      if (typeof parsed.version !== "string" || parsed.version.trim().length === 0) {
+        throw new Error(`installed plugin manifest has no version: ${manifestPath}`);
+      }
+      return parsed.version;
+    } catch (error) {
+      throw new Error(`installed plugin manifest unreadable: ${manifestPath}`, {
+        cause: error,
+      });
     }
   }
 }

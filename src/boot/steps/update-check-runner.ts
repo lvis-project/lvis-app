@@ -22,9 +22,19 @@ export function createUpdateCheckRunner(input: UpdateCheckRunnerInput): () => Pr
     const run = (async () => {
       try {
         const result = await input.check();
-        if (result.status === "catalog-unavailable") {
-          input.onCatalogUnavailable?.();
-          return;
+        switch (result.status) {
+          case "catalog-unavailable":
+            input.onCatalogUnavailable?.();
+            return;
+          case "error":
+            input.onError?.(result.error);
+            return;
+          case "success":
+            break;
+          default: {
+            const exhaustive: never = result;
+            return exhaustive;
+          }
         }
         const updates = input.filter(result.updates);
         const key = updates
@@ -37,8 +47,8 @@ export function createUpdateCheckRunner(input: UpdateCheckRunnerInput): () => Pr
           input.onNoChange?.(updates.length);
           return;
         }
-        lastBroadcastKey = key;
         input.broadcast(updates);
+        lastBroadcastKey = key;
       } catch (error) {
         input.onError?.(error);
       }

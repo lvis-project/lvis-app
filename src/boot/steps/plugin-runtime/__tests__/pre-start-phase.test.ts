@@ -126,4 +126,52 @@ describe("PluginRuntimePreStartPhase", () => {
       "incumbent:start",
     ]);
   });
+
+  it("continues the admitted tail after rollback failure settlement before startup", async () => {
+    const phase = new PluginRuntimePreStartPhase();
+    const events: string[] = [];
+    const first = phase.admit(async () => {
+      events.push("first:failed");
+      try {
+        throw new Error("first commit failed");
+      } finally {
+        events.push("first:rollback");
+      }
+    });
+    const second = phase.admit(async () => {
+      events.push("second:commit");
+    });
+    const start = phase.start(async () => {
+      events.push("incumbent:start");
+    });
+
+    await expect(first).rejects.toThrow("first commit failed");
+    await Promise.all([second, start]);
+    expect(events).toEqual([
+      "first:failed",
+      "first:rollback",
+      "second:commit",
+      "incumbent:start",
+    ]);
+  });
+
+  it("keeps startup sealed and exactly-once when startAll rejects", async () => {
+    const phase = new PluginRuntimePreStartPhase();
+    const startFailure = new Error("startAll failed");
+    const startAll = vi.fn(async () => {
+      throw startFailure;
+    });
+
+    const first = phase.start(startAll);
+    const repeated = phase.start(startAll);
+
+    expect(repeated).toBe(first);
+    await expect(first).rejects.toBe(startFailure);
+    await expect(repeated).rejects.toBe(startFailure);
+    expect(startAll).toHaveBeenCalledOnce();
+    expect(phase.getState()).toBe("starting");
+    await expect(phase.admit(vi.fn(async () => undefined))).rejects.toThrow(
+      "plugin runtime no longer accepts pre-start operations",
+    );
+  });
 });

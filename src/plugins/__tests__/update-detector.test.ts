@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
-import { writeFile, mkdir, symlink } from "node:fs/promises";
+import { writeFile, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {resolve, join} from "node:path";
 import { PluginUpdateDetector, isNewer, isUpdateCheckEnabled } from "../update-detector.js";
@@ -330,6 +330,23 @@ describe("PluginUpdateDetector", () => {
     await expect(detector.checkForUpdatesResult()).resolves.toEqual({
       status: "catalog-unavailable",
     });
+  });
+
+  it("surfaces an installed-manifest read failure without publishing an empty snapshot", async () => {
+    const registryPath = await setupRegistry([{ id: "calendar", version: "1.0.0" }]);
+    await rm(resolve(tmpDir, "installed", "calendar", "plugin.json"));
+    const detector = new PluginUpdateDetector(
+      registryPath,
+      makeFetcher([makeCatalogPlugin("calendar", "2.0.0")]),
+    );
+
+    const result = await detector.checkForUpdatesResult();
+    expect(result.status).toBe("error");
+    if (result.status === "error") {
+      expect(result.error).toBeInstanceOf(Error);
+      expect((result.error as Error).message).toContain("calendar/plugin.json");
+    }
+    await expect(detector.checkForUpdates()).resolves.toEqual([]);
   });
 
   it("skips canary catalog entries by default (stable rollout only)", async () => {

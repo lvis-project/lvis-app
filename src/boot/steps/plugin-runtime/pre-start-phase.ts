@@ -6,7 +6,9 @@ export type PluginRuntimeStartupState =
 /**
  * Serializes boot-only durable plugin operations ahead of the one runtime start.
  * Admission is intentionally synchronous: once start() is called, no later
- * operation can enter the tail or touch durable plugin state.
+ * operation can enter the tail or touch durable plugin state. A failed start
+ * remains sealed in `starting` and all callers receive the same rejection;
+ * startup is never retried implicitly or reported as started.
  */
 export class PluginRuntimePreStartPhase {
   private state: PluginRuntimeStartupState = "accepting_pre_start_operations";
