@@ -85,13 +85,15 @@ async function publish(
     candidateRuntime,
     predecessor?.generationId,
   );
-  return coordinator.commit(
+  const transition = await coordinator.commit(
     generation(candidateRuntime, digest),
     async () => undefined,
     retire,
     candidateRuntime.manifest.id,
     prepared.publish,
   );
+  if (!predecessor) await transition.markDispatchReady();
+  return transition;
 }
 
 function runtimeFixture() {
@@ -119,15 +121,25 @@ function runtimeFixture() {
     runWithLease: (lease, operation) => coordinator.runWithLease(lease, operation),
     runInLifecycleQueue: (_pluginId, operation) => operation(),
     replaceRuntime: async () => undefined,
-    replaceRuntimeWithCommit: async (_candidate, _receiptRaw, durableCommit) => ({
-      result: await durableCommit(),
-      retirement: Promise.resolve(),
-    }),
+    replaceRuntimeWithCommit: async (_candidate, _receiptRaw, durableCommit) => {
+      const completion = Promise.resolve();
+      return {
+        result: await durableCommit(),
+        retirement: completion,
+        completion,
+        retirementDeferred: false,
+      };
+    },
     deactivate: async () => undefined,
-    deactivateWithCommit: async (_pluginId, durableCommit) => ({
-      result: await durableCommit(),
-      retirement: Promise.resolve(),
-    }),
+    deactivateWithCommit: async (_pluginId, durableCommit) => {
+      const completion = Promise.resolve();
+      return {
+        result: await durableCommit(),
+        retirement: completion,
+        completion,
+        retirementDeferred: false,
+      };
+    },
     recoverRetirements: async () => undefined,
     waitForRetirements: async () => undefined,
   };
@@ -150,7 +162,94 @@ function targetManifest(version: string): PluginManifest {
   ]);
 }
 
-describe("replacement generation dispatch readiness", () => {
+describe("generation dispatch readiness", () => {
+  it("holds every initial dispatch route until post-publication readiness succeeds", async () => {
+    const { coordinator, runtime } = runtimeFixture();
+    const caller = projection({
+      activationId: "7".repeat(64),
+      manifest: manifest(CALLER_ID, "1.0.0", [{
+        name: CALLER_TOOL,
+        inputSchema: { type: "object", properties: {} },
+        _meta: { ui: { visibility: ["model"] } },
+      }]),
+      instance: { handlers: {} },
+      methods: new Map([[CALLER_TOOL, async () => runtime.call(MODEL_TOOL)]]),
+    });
+    await publish(runtime, coordinator, caller, "7");
+
+    const start = vi.fn(async () => undefined);
+    const ensureStarted = vi.fn(async () => start());
+    const candidate = projection({
+      activationId: "8".repeat(64),
+      manifest: targetManifest("1.0.0"),
+      instance: { handlers: {}, start },
+      methods: new Map([
+        [MODEL_TOOL, async () => ensureStarted().then(() => "initial:model")],
+        [APP_TOOL, async () => ensureStarted().then(() => "initial:app")],
+      ]),
+    });
+    const prepared = runtime.prepareRuntimeGeneration(candidate, undefined);
+    const transition = await coordinator.commit(
+      generation(candidate, "8"),
+      async () => undefined,
+      undefined,
+      TARGET_ID,
+      prepared.publish,
+    );
+
+    const dispatches = [
+      runtime.call(MODEL_TOOL),
+      runtime.callDeclaredAppOnlyTool(APP_TOOL),
+      runtime.call(CALLER_TOOL),
+    ];
+    await Promise.resolve();
+    expect(ensureStarted).not.toHaveBeenCalled();
+    await transition.markDispatchReady();
+    await expect(Promise.all(dispatches)).resolves.toEqual([
+      "initial:model",
+      "initial:app",
+      "initial:model",
+    ]);
+    expect(start).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps every initial dispatch route unavailable after readiness failure", async () => {
+    const { coordinator, runtime } = runtimeFixture();
+    const caller = projection({
+      activationId: "9".repeat(64),
+      manifest: manifest(CALLER_ID, "1.0.0", [{
+        name: CALLER_TOOL,
+        inputSchema: { type: "object", properties: {} },
+        _meta: { ui: { visibility: ["model"] } },
+      }]),
+      instance: { handlers: {} },
+      methods: new Map([[CALLER_TOOL, async () => runtime.call(MODEL_TOOL)]]),
+    });
+    await publish(runtime, coordinator, caller, "9");
+    const candidate = projection({
+      activationId: "a".repeat(64),
+      manifest: targetManifest("1.0.0"),
+      instance: { handlers: {} },
+      methods: new Map([
+        [MODEL_TOOL, async () => "must-not-run"],
+        [APP_TOOL, async () => "must-not-run"],
+      ]),
+    });
+    const prepared = runtime.prepareRuntimeGeneration(candidate, undefined);
+    const transition = await coordinator.commit(
+      generation(candidate, "a"),
+      async () => undefined,
+      undefined,
+      TARGET_ID,
+      prepared.publish,
+    );
+    transition.markDispatchUnavailable(new Error("initial readiness failed"));
+
+    await expect(runtime.call(MODEL_TOOL)).rejects.toThrow(/dispatch blocked/);
+    await expect(runtime.callDeclaredAppOnlyTool(APP_TOOL)).rejects.toThrow(/dispatch blocked/);
+    await expect(runtime.call(CALLER_TOOL)).rejects.toThrow(/dispatch blocked/);
+  });
+
   it("holds model, app-only, and plugin-to-plugin dispatch until predecessor retirement", async () => {
     const { coordinator, runtime } = runtimeFixture();
     const predecessor = projection({
@@ -220,7 +319,7 @@ describe("replacement generation dispatch readiness", () => {
 
     releaseRetirement();
     await published.retired;
-    published.markDispatchReady();
+    await published.markDispatchReady();
     await expect(Promise.all([modelDispatch, appDispatch, pluginDispatch])).resolves.toEqual([
       "candidate:model",
       "candidate:app",

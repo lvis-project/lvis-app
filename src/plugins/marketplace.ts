@@ -5,6 +5,7 @@ import { dirname, isAbsolute, posix, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
+import type { CommittedPluginGeneration } from "./plugin-host-generation.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
@@ -164,13 +165,19 @@ interface MarketplaceInstallAdmissionRecord {
 
 export type PreparedMarketplacePluginActivation = (
   prepared: PreparedMarketplacePluginArtifact,
-) => Promise<{ result: string; retirement: Promise<void> }>;
+) => Promise<CommittedPluginGeneration<string>>;
 
 async function commitPreparedArtifactWithoutPublication(
   prepared: PreparedMarketplacePluginArtifact,
-): Promise<{ result: string; retirement: Promise<void> }> {
+): Promise<CommittedPluginGeneration<string>> {
   const result = await prepared.durableCommit();
-  return { result, retirement: Promise.resolve() };
+  const completion = Promise.resolve();
+  return {
+    result,
+    retirement: completion,
+    completion,
+    retirementDeferred: false,
+  };
 }
 
 function requirePreparedMarketplacePluginActivation(
@@ -539,6 +546,7 @@ export class PluginMarketplaceService {
   private readonly installReceiptValidationCache = new Map<string, InstallReceiptValidation>();
   private readonly installFailureDiagnostics = new Map<string, MarketplaceInstallFailureDiagnostic>();
   private readonly installAdmissions = new WeakMap<object, MarketplaceInstallAdmissionRecord>();
+  private readonly deferredLifecycleCleanups = new Set<Promise<void>>();
   /** Optional diagnostic logger. Injected in tests; no-op in production. */
   readonly log?: (message: string, ...args: unknown[]) => void;
 
@@ -2678,7 +2686,6 @@ export class PluginMarketplaceService {
           return commitAttempt;
         };
 
-        let predecessorRetired = true;
         const activated = await activatePreparedArtifact({
           installId: pluginId,
           pluginRoot: stagingDir,
@@ -2694,16 +2701,27 @@ export class PluginMarketplaceService {
         if (!durableCommitted) {
           throw new Error(`local plugin activation returned before durable commit: ${pluginId}`);
         }
-        try {
+        const finalizeCommittedLocalUpdate = async (): Promise<void> => {
           await activated.retirement;
-        } catch (error) {
-          predecessorRetired = false;
-          log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
-        }
-
-        if (rollbackSnapshot) await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);
-        if (!existingEntry?.pendingUpdate && predecessorRetired) {
-          await this.discardSupersededPendingBackup(existingEntry ?? null);
+          if (rollbackSnapshot) await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);
+          if (!existingEntry?.pendingUpdate) {
+            await this.discardSupersededPendingBackup(existingEntry ?? null);
+          }
+        };
+        if (activated.retirementDeferred) {
+          const deferredCleanup = finalizeCommittedLocalUpdate();
+          this.deferredLifecycleCleanups.add(deferredCleanup);
+          void deferredCleanup.finally(() => {
+            this.deferredLifecycleCleanups.delete(deferredCleanup);
+          }).catch((error) => {
+            log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
+          });
+        } else {
+          try {
+            await finalizeCommittedLocalUpdate();
+          } catch (error) {
+            log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
+          }
         }
         return { pluginId, installed: true as const };
       } catch (err) {

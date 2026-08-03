@@ -46,10 +46,15 @@ export async function makeTestTreeWritable(root: string): Promise<void> {
  * unit fixtures honest about crossing the same mandatory coordination seam.
  */
 export const activateAndCommitPreparedPluginForTest: PreparedMarketplacePluginActivation =
-  async (prepared) => ({
-    result: await prepared.durableCommit(),
-    retirement: Promise.resolve(),
-  });
+  async (prepared) => {
+    const completion = Promise.resolve();
+    return {
+      result: await prepared.durableCommit(),
+      retirement: completion,
+      completion,
+      retirementDeferred: false,
+    };
+  };
 
 export const preparedActivationOptionsForTest = Object.freeze({
   activatePreparedArtifact: activateAndCommitPreparedPluginForTest,
@@ -507,7 +512,12 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
       const commit = async () => {
         const result = await durableCommit();
         const { retirement } = await publish(projection);
-        return { result, retirement };
+        return {
+          result,
+          retirement,
+          completion: retirement,
+          retirementDeferred: false,
+        };
       };
       return commitScope ? commitScope(commit) : commit();
     }),
@@ -523,7 +533,12 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
         const commit = async () => {
           const result = await durableCommit();
           const { retirement } = await deactivate(pluginId);
-          return { result, retirement };
+          return {
+            result,
+            retirement,
+            completion: retirement,
+            retirementDeferred: false,
+          };
         };
         return commitScope ? commitScope(commit) : commit();
       }),
