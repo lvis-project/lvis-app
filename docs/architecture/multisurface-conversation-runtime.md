@@ -1,7 +1,7 @@
 # Multi-surface conversation runtime
 
-Status: Implemented foundation — canonical protocol, local adapters, default-OFF Tailnet observer/controller, P2 owner pairing/share / same-origin Web, P3 paired turn control/bounded image staging, and a default-OFF restricted external-platform inbound core
-Last updated: 2026-08-03
+Status: Implemented foundation — canonical protocol, local adapters, default-OFF Tailnet observer/controller, P2 owner pairing/share / same-origin Web, P3 paired turn control/bounded image staging, restricted external-platform inbound core, and an opt-in Telegram v1 private-DM adapter
+Last updated: 2026-08-04
 
 This document defines how one active main conversation is shared across many
 display and command surfaces without creating a second model turn or bypassing
@@ -293,17 +293,66 @@ Tailscale Serve protects Tailnet/LAN ingress only. Any local process able to
 reach loopback can forge these headers, so host/OS isolation remains a
 deployment prerequisite.
 
+## Telegram v1 private-DM adapter
+
+Telegram v1 is independently default OFF. It is enabled only from the main
+process launch environment with an owner-supplied bot token, Telegram webhook
+secret, a fixed loopback port/path, and exact numeric owner Telegram user IDs.
+It has no renderer configuration surface, no automatic `setWebhook` side
+effect, and no Marketplace/Oracle deployment dependency. A deployment owner
+must operate a dedicated trusted HTTPS terminator/tunnel that forwards only the
+Telegram path to literal `127.0.0.1`; it must never expose `/v1`, A2A, or
+Tailnet routes through that public ingress.
+
+The provider edge verifies the Telegram secret header before JSON parsing, then
+accepts only a private text `message` from an allowed non-bot sender whose chat
+and sender identifiers match exactly. It rejects groups, media, callbacks,
+replies/forwards, web-app payloads, edits, slash commands, and every remote
+session/approval/cancel claim. Telegram has no request-body HMAC or timestamp;
+therefore the provider header secret plus an isolated seven-day durable receipt
+store keyed by opaque host digests supplies its authenticated replay fence.
+
+V1's explicit pairing source of truth is the boot-time owner allowlist. Each
+route is bound to the one active main conversation captured at boot; a session
+switch, shutdown, route-epoch change, or configuration change/restart revokes
+it. A bot cannot initiate a chat, so a paired user must send a normal text
+message before the host attaches that route to the bounded safe projection.
+Outbound delivery uses plain Bot API `sendMessage` only and consumes no raw
+timeline content. It compacts only safe queued projection messages, paces each
+DM to one launch per second, and also paces the bot globally to one launch per
+34 ms (about 29 per second, below Telegram's approximate free 30-per-second
+guidance). Revocation fences queued and not-yet-launched deliveries, but cannot
+recall a request that has already been handed to the Telegram Bot API. The
+bridge guard fences entry to `ConversationLoop.runTurn`, but cannot cancel or
+recall a provider/model turn already executing inside it. The host retains
+`platform-bridge` provenance and local one-shot approval for every tool
+invocation.
+
+The public terminator is a fixed-port safety boundary, not merely a TLS detail.
+Its forwarding lifecycle must stop before or with the desktop bridge. A
+persistent proxy/tunnel left forwarding to the configured `LVIS_TELEGRAM_PORT`
+loopback target (default `127.0.0.1:46175`) after LVIS exits could deliver
+webhook bodies and Telegram secret headers to another local process that later
+binds that configured port. Deployment therefore requires that lifecycle
+interlock, or an OS account/socket ACL that prevents another local process from
+receiving the forwarded traffic, or an authenticated local relay with a
+bridge-bound backend. Without one of those controls, a fixed-port public
+terminator is not an acceptable deployment.
+
+See [Telegram bridge](../guides/telegram-bridge.md) for owner deployment and
+webhook-registration steps.
+
 ## Deliberately deferred
 
 P3 does not enable arbitrary remote files, cross-restart turn cancellation,
 remote conversation/session selection, or independent concurrent
-`ConversationLoop` instances. It ships a provider-neutral restricted inbound
-core, but does not configure Discord, Telegram, or any other provider credential,
-webhook listener, public endpoint, or automatic delivery. A concrete provider
-adapter must supply raw-body signature/timestamp/replay verification and an
-explicit account/channel pairing before it can invoke the core; it must never
-reuse `user-keyboard`, `/v1`, A2A, or a human Tailnet controller authority.
-
+`ConversationLoop` instances. Telegram group/media/callback support, dynamic
+owner pairing controls, route sharing across session changes, a durable outbound
+outbox, and every other provider (including Discord) remain deferred. A concrete
+provider adapter must supply the provider's applicable raw-body
+signature/secret/replay verification and explicit account/channel pairing before
+it can invoke the core; it must never reuse `user-keyboard`, `/v1`, A2A, or a
+human Tailnet controller authority.
 ## Local compatibility adapters
 
 The Electron main-process composition creates one `ConversationSurfaceRuntime`

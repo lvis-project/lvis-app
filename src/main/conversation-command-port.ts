@@ -20,6 +20,7 @@ import {
   type ChatSendContext,
 } from "../ipc/handlers/chat.js";
 import type { IpcDeps } from "../ipc/types.js";
+import { isRemoteControllerAuthorityCurrent } from "../shared/chat-origin.js";
 import type {
   PlatformBridgeBinding,
   PlatformBridgeGuard,
@@ -227,6 +228,13 @@ export function createConversationCommandPort(
     switch (command.kind) {
       case "message.send": {
         const remoteControllerAuthority = remoteControllerAuthorityFor(actor);
+        // `submit()` reserves the shared lease before its deferred factory runs.
+        // Pairing/route state can therefore change after ingress admission but
+        // before this command reaches the chat executor. Fence that gap here;
+        // `handleChatSend` repeats the check at its async/effect boundaries.
+        if (!isRemoteControllerAuthorityCurrent(remoteControllerAuthority)) {
+          return Promise.resolve({ ok: false, error: "remote-controller-revoked" });
+        }
         const publicTurn = publicTurnControlFor(actor, command);
         const abortableContext = publicTurn === undefined
           ? commandContext
