@@ -356,15 +356,13 @@ export class PluginGenerationCoordinator<TState = unknown> {
         try {
           await retired;
         } catch (error) {
-          if (!dispatchSettled) {
-            dispatchSettled = true;
-            rejectDispatch?.(
-              new Error(
-                `plugin '${pluginId}' generation '${candidateReadiness.generationId}' dispatch blocked by predecessor retirement failure`,
-                { cause: error },
-              ),
-            );
-          }
+          dispatchSettled = true;
+          rejectDispatch?.(
+            new Error(
+              `plugin '${pluginId}' generation '${candidateReadiness.generationId}' dispatch blocked by predecessor retirement failure`,
+              { cause: error },
+            ),
+          );
           throw error;
         }
         if (state.active?.generationId !== candidateReadiness.generationId) {
