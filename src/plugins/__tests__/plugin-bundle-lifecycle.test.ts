@@ -12,6 +12,7 @@ import {
   type PluginBundleLifecycleDeps,
 } from "../plugin-bundle-lifecycle.js";
 import { hashReceiptFiles } from "../plugin-install-receipt.js";
+import type { PluginRuntimeGenerationProjection } from "../plugin-host-generation.js";
 import { makeTestTreeWritable } from "./test-helpers.js";
 
 const roots: string[] = [];
@@ -94,6 +95,7 @@ async function fixture(hookContent = JSON.stringify({ hooks: { PreToolUse: [] } 
 function runtimeProjection(manifest: PluginManifest, pluginRoot: string) {
   return {
     activationId: "test-activation",
+    installId: manifest.id,
     manifest,
     pluginRoot,
     instance: { handlers: {} },
@@ -255,6 +257,89 @@ describe("PluginBundleLifecycle", () => {
     expect(publishBundledGeneration).toHaveBeenCalledTimes(3);
     expect(skillStore.listCatalogSync()).toEqual([]);
     expect(disconnectBundledGeneration).toHaveBeenCalledWith("ep-api", generationId);
+  });
+
+  it("retires the predecessor before replacement post-publish startup", async () => {
+    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
+    const events: string[] = [];
+    let activationId = "test-activation-1";
+    let releaseRetirement!: () => void;
+    let reportRetirementStarted!: () => void;
+    const retirementGate = new Promise<void>((resolve) => {
+      releaseRetirement = resolve;
+    });
+    const retirementStarted = new Promise<void>((resolve) => {
+      reportRetirementStarted = resolve;
+    });
+    const postPublishRuntimeGeneration = vi.fn(async (
+      runtime: PluginRuntimeGenerationProjection,
+    ) => {
+      events.push(`published:${runtime.activationId}`);
+    });
+    const lifecycle = makeLifecycle({
+      pluginRuntime: {
+        getPluginManifest: () => manifest,
+        getPluginRoot: () => pluginRoot,
+        getRuntimeGenerationProjection: () => ({
+          ...runtimeProjection(manifest, pluginRoot),
+          activationId,
+        }),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        postPublishRuntimeGeneration,
+        publishRuntimeGeneration: vi.fn(),
+        unpublishRuntimeGeneration: vi.fn(),
+        prepareRuntimeRetirement: vi.fn((
+          runtime: PluginRuntimeGenerationProjection,
+        ) => [{
+          phase: "runtime.stop" as const,
+          run: async () => {
+            events.push(`retiring:${runtime.activationId}`);
+            reportRetirementStarted();
+            await retirementGate;
+            events.push(`retired:${runtime.activationId}`);
+          },
+        }]),
+      },
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration: vi.fn(async () => ({
+          predecessorServerIds: [],
+          predecessorToolNames: [],
+          records: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+        })),
+        publishBundledGeneration: vi.fn((prepared) => { prepared.published = true; }),
+        discardBundledGeneration: vi.fn(async () => undefined),
+        retirePublishedMcpReplacement: vi.fn(async () => undefined),
+        disconnectBundledGeneration: vi.fn(async () => undefined),
+      } as never,
+    });
+
+    await lifecycle.activate("ep-api");
+    expect(events).toEqual(["published:test-activation-1"]);
+
+    activationId = "test-activation-2";
+    const replacement = lifecycle.activate("ep-api");
+    await retirementStarted;
+    expect(events).toEqual([
+      "published:test-activation-1",
+      "retiring:test-activation-1",
+    ]);
+    expect(postPublishRuntimeGeneration).toHaveBeenCalledTimes(1);
+
+    releaseRetirement();
+    await replacement;
+    expect(events).toEqual([
+      "published:test-activation-1",
+      "retiring:test-activation-1",
+      "retired:test-activation-1",
+      "published:test-activation-2",
+    ]);
   });
 
   it("restores MCP approval after a same-artifact reinstall refreshes installedAt", async () => {
