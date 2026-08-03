@@ -9,6 +9,9 @@ import type { McpManager, PreparedBundledMcpGeneration } from "../mcp/mcp-manage
 import type { PluginLoopbackManager } from "../mcp/plugin-loopback-manager.js";
 import { PluginMcpTrustStore, preparePluginMcpGeneration } from "../mcp/plugin-mcp-projection.js";
 import { pluginArtifactGenerationId } from "./plugin-artifact-identity.js";
+import {
+  isCommittedPluginGenerationPublicationError,
+} from "./committed-generation-publication-error.js";
 import { installReceiptPath } from "./plugin-install-receipt.js";
 import {
   materializePluginContributions,
@@ -393,15 +396,36 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     operation: () => Promise<CommittedPluginGeneration<T>>,
   ): Promise<CommittedPluginGeneration<T>> {
     return this.serialize(pluginId, async () => {
-      const committed = await operation();
       const token = this.lifecycleQueueContext.getStore()?.get(pluginId);
       if (!token || !this.activeLifecycleQueueTokens.has(token)) {
         throw new Error(`plugin '${pluginId}' committed outside its lifecycle queue`);
       }
-      if (committed.retirementDeferred) token.completions.push(committed.completion);
-      else await committed.completion;
-      return committed;
+      try {
+        const committed = await operation();
+        await this.holdCommittedCompletion(token, committed);
+        return committed;
+      } catch (error) {
+        if (isCommittedPluginGenerationPublicationError(error) && error.committed) {
+          try {
+            await this.holdCommittedCompletion(token, error.committed);
+          } catch {
+            // The typed publication failure remains the primary post-linearization
+            // outcome. Its committed completion retains the retirement failure
+            // for storage cleanup/recovery ownership without disguising the
+            // original synchronous publication cause.
+          }
+        }
+        throw error;
+      }
     });
+  }
+
+  private async holdCommittedCompletion(
+    token: LifecycleQueueToken,
+    committed: CommittedPluginGeneration<unknown>,
+  ): Promise<void> {
+    if (committed.retirementDeferred) token.completions.push(committed.completion);
+    else await committed.completion;
   }
 
   private serialize<T>(pluginId: string, operation: () => Promise<T>): Promise<T> {
@@ -613,6 +637,26 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     } catch (error) {
       const activeGenerationId = this.coordinator.getActive(pluginId)?.generationId;
       if (activeGenerationId === candidate.generationId) {
+        if (isCommittedPluginGenerationPublicationError(error)) {
+          const retirement = this.trackRetirement(error.transition.retired);
+          const committed = Object.freeze({
+            result,
+            retirement,
+            completion: retirement,
+            retirementDeferred: Boolean(
+              predecessor &&
+              this.coordinator.isExactAdmitted(pluginId, predecessor.generationId),
+            ),
+          });
+          const committedError = error.withCommitted(committed);
+          this.recordPostCommitFault(
+            pluginId,
+            candidate.generationId,
+            "runtime-post-publish",
+            committedError,
+          );
+          throw committedError;
+        }
         this.recordPostCommitFault(
           pluginId,
           candidate.generationId,

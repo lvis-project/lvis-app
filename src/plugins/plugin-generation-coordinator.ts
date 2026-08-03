@@ -1,5 +1,6 @@
 import type { MaterializedPluginContribution } from "./plugin-contributions.js";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { CommittedPluginGenerationPublicationError } from "./committed-generation-publication-error.js";
 
 interface PluginGenerationIdentity {
   pluginId: string;
@@ -388,7 +389,14 @@ export class PluginGenerationCoordinator<TState = unknown> {
         );
       },
     });
-    if (publishError !== undefined) throw publishError;
+    if (publishError !== undefined && prepared) {
+      throw new CommittedPluginGenerationPublicationError(
+        pluginId,
+        prepared.generationId,
+        publishError,
+        transition,
+      );
+    }
     return transition;
   }
 
