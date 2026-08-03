@@ -54,6 +54,7 @@ import {
   resolveTailnetObserverConfig,
 } from "./main/tailnet-surface-server.js";
 import { createTailnetPairedSharingRuntime } from "./main/tailnet-paired-sharing-runtime.js";
+import { maybeStartTelegramBridgeServer } from "./main/telegram-bridge-server.js";
 import { createTailnetSharingOwnerService } from "./main/tailnet-sharing-owner-service.js";
 import { getLvisAppVersion } from "./shared/app-version.js";
 import { installNativeEditContextMenu } from "./main/native-edit-context-menu.js";
@@ -274,7 +275,26 @@ async function main() {
     log.error({ err }, "tailnet observer failed to start (continuing boot)");
   }
 
-  // P4-5 receiver ingress has an independent immutable gate and listener. It
+  // Telegram is a separately configured external-platform adapter. It remains
+  // OFF unless the owner provides the explicit boot-only route and credential
+  // configuration; it neither changes Telegram's webhook configuration nor
+  // shares Tailnet, Local API, or A2A authority.
+  try {
+    const telegram = await maybeStartTelegramBridgeServer({
+      conversationSurfaceRuntime,
+      conversationCommandPort,
+      getCurrentConversationId,
+      getCurrentConversationEpoch: () => services.conversationLoop.getSessionEpoch(),
+      log: (message) => log.info(message),
+    });
+    if (telegram) {
+      log.info("telegram bridge listening on 127.0.0.1:" + telegram.port);
+    }
+  } catch (err) {
+    log.error({ err }, "telegram bridge failed to start (continuing boot)");
+  }
+
+  // P4-5 receiver ingress has an independent immutable gate and listener.
   // never widens or reuses the ph3/local API route family. The app binds only
   // loopback; a separately trusted HTTPS tunnel/terminator owns public ingress.
   try {
