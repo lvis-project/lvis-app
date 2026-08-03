@@ -148,6 +148,20 @@ interface ManualInstallCondition {
   readonly installedVersion?: string;
 }
 
+export interface MarketplaceInstallAdmission {
+  readonly pluginId: string;
+  readonly catalogVersion: string | null;
+  readonly installed: boolean;
+}
+
+interface MarketplaceInstallAdmissionRecord {
+  readonly requestedPluginId: string;
+  readonly catalogSnapshot: readonly PluginMarketplaceItem[];
+  readonly catalogItem: PluginMarketplaceItem;
+  readonly networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+  consumed: boolean;
+}
+
 export type PreparedMarketplacePluginActivation = (
   prepared: PreparedMarketplacePluginArtifact,
 ) => Promise<{ result: string; retirement: Promise<void> }>;
@@ -171,6 +185,16 @@ function normalizeInstallPolicy(source: {
     return "admin";
   }
   return "user";
+}
+
+function deepFreezeValue<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      deepFreezeValue(nested);
+    }
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function normalizePluginLookupKey(value: string | null | undefined): string {
@@ -501,6 +525,7 @@ export class PluginMarketplaceService {
   private readonly locks = new Map<string, Promise<void>>();
   private readonly installReceiptValidationCache = new Map<string, InstallReceiptValidation>();
   private readonly installFailureDiagnostics = new Map<string, MarketplaceInstallFailureDiagnostic>();
+  private readonly installAdmissions = new WeakMap<object, MarketplaceInstallAdmissionRecord>();
   /** Optional diagnostic logger. Injected in tests; no-op in production. */
   readonly log?: (message: string, ...args: unknown[]) => void;
 
@@ -716,6 +741,7 @@ export class PluginMarketplaceService {
     options: {
       networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
       activatePreparedArtifact: PreparedMarketplacePluginActivation;
+      admission?: MarketplaceInstallAdmission;
       signal?: AbortSignal;
     },
   ): Promise<{ pluginId: string; installed: true }> {
@@ -732,20 +758,22 @@ export class PluginMarketplaceService {
     // The snapshot is now REQUIRED for the whole install (not just an optional
     // policy lookup), so a fetch failure is fatal — let the original error
     // propagate instead of swallowing it and masking it as "Plugin not found".
-    const catalogSnapshot = await this.fetcher.listPlugins();
-    const catalogItem = catalogSnapshot.find(
-      (x) => x.id === pluginId || x.slug === pluginId,
-    );
-    const canonicalPluginId = catalogItem?.id ?? pluginId;
+    const admission = options.admission ?? await this.preflightInstall(pluginId, {
+      networkAccessAcknowledgement: options.networkAccessAcknowledgement,
+    });
+    const admissionRecord = this.requireInstallAdmission(admission, pluginId);
+    const catalogSnapshot = admissionRecord.catalogSnapshot as PluginMarketplaceItem[];
+    const catalogItem = admissionRecord.catalogItem;
+    const canonicalPluginId = admission.pluginId;
     return this.withPluginLock(canonicalPluginId, async () => {
-      if (!catalogItem) {
-        throw new Error(`Plugin not found in marketplace: ${pluginId}`);
+      const currentRecord = this.requireInstallAdmission(admission, pluginId);
+      const manualCondition = await this.resolveManualInstallCondition(currentRecord.catalogItem);
+      this.assertManualInstallCondition(currentRecord.catalogItem, manualCondition);
+      if (JSON.stringify(options.networkAccessAcknowledgement ?? null)
+          !== JSON.stringify(currentRecord.networkAccessAcknowledgement ?? null)) {
+        throw new Error("marketplace install admission request does not match network acknowledgement");
       }
-      await this.preflightInstall(pluginId, catalogSnapshot);
-      assertNetworkAccessAcknowledgement({
-        plugin: catalogItem,
-        acknowledgement: options?.networkAccessAcknowledgement,
-      });
+      currentRecord.consumed = true;
 
       const actor: "user" | "it-admin" =
         normalizeInstallPolicy(catalogItem) === "admin" ? "it-admin" : "user";
@@ -807,24 +835,54 @@ export class PluginMarketplaceService {
   /** Read-only eligibility gate shared by lifecycle and direct install callers. */
   async preflightInstall(
     pluginId: string,
-    catalogSnapshot?: readonly PluginMarketplaceItem[],
-  ): Promise<void> {
-    const plugins = catalogSnapshot ?? await this.fetcher.listPlugins();
+    options: {
+      expectedVersion?: string;
+      networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+    } = {},
+  ): Promise<MarketplaceInstallAdmission> {
+    const fetched = await this.fetcher.listPlugins();
+    const plugins = deepFreezeValue(structuredClone(fetched)) as readonly PluginMarketplaceItem[];
     const catalogItem = plugins.find((item) => item.id === pluginId || item.slug === pluginId);
     const canonicalPluginId = catalogItem?.id ?? pluginId;
-    const preflight = async () => {
+    return this.withPluginLock(canonicalPluginId, async () => {
       if (!catalogItem) {
         throw new Error(`Plugin not found in marketplace: ${pluginId}`);
       }
       const manualCondition = await this.resolveManualInstallCondition(catalogItem);
       this.assertManualInstallCondition(catalogItem, manualCondition);
-    };
-    if (catalogSnapshot) {
-      // install() already owns the marketplace plugin lock and supplies the
-      // exact catalog snapshot used by the remaining transaction.
-      return preflight();
-    }
-    return this.withPluginLock(canonicalPluginId, preflight);
+      const expectedVersion = options.expectedVersion?.trim();
+      if (expectedVersion && catalogItem.version !== expectedVersion) {
+        throw new Error(
+          `requested plugin '${catalogItem.id}' version is stale: expected '${expectedVersion}', marketplace has '${catalogItem.version ?? "unknown"}'`,
+        );
+      }
+      assertNetworkAccessAcknowledgement({
+        plugin: catalogItem,
+        acknowledgement: options.networkAccessAcknowledgement,
+      });
+      const admission = Object.freeze({
+        pluginId: catalogItem.id,
+        catalogVersion: catalogItem.version ?? null,
+        installed: manualCondition.installedVersion !== undefined,
+      });
+      this.installAdmissions.set(admission, {
+        requestedPluginId: pluginId,
+        catalogSnapshot: plugins,
+        catalogItem,
+        networkAccessAcknowledgement: options.networkAccessAcknowledgement,
+        consumed: false,
+      });
+      return admission;
+    });
+  }
+
+  async revalidateInstallAdmission(admission: MarketplaceInstallAdmission): Promise<void> {
+    this.requireInstallAdmission(admission);
+    return this.withPluginLock(admission.pluginId, async () => {
+      const current = this.requireInstallAdmission(admission);
+      const condition = await this.resolveManualInstallCondition(current.catalogItem);
+      this.assertManualInstallCondition(current.catalogItem, condition);
+    });
   }
 
   /**
@@ -1103,9 +1161,15 @@ export class PluginMarketplaceService {
           plugin.id,
           async (): Promise<"installed" | "updated" | "skipped"> => {
             const currentRegistry = await readPluginRegistry(this.registryPath);
-            const installedIds = await this.resolveInstalledIds(currentRegistry.plugins);
+            const registryEntry = currentRegistry.plugins.find((entry) => entry.id === plugin.id);
             let condition;
-            if (installedIds.has(plugin.id)) {
+            if (registryEntry?.pendingUpdate) {
+              condition = resolvePluginUpdateCondition({
+                appVersion: getLvisAppVersion(),
+                installed: { presence: "present", transactionPending: true },
+                candidate: plugin,
+              });
+            } else if (registryEntry) {
               let installedVersion: string | null;
               try {
                 installedVersion = await this.readInstalledVersionFromRegistry(currentRegistry, plugin.id);
@@ -1115,12 +1179,20 @@ export class PluginMarketplaceService {
                 );
                 return "skipped";
               }
-              if (!installedVersion) {
-                return "skipped";
-              }
+              const manifestPath = isAbsolute(registryEntry.manifestPath)
+                ? registryEntry.manifestPath
+                : resolve(dirname(this.registryPath), registryEntry.manifestPath);
+              const receiptValidation = installedVersion
+                ? await this.getInstallReceiptValidation(plugin.id, manifestPath)
+                : null;
               condition = resolvePluginUpdateCondition({
                 appVersion: getLvisAppVersion(),
-                installed: { presence: "present", version: installedVersion },
+                installed: {
+                  presence: "present",
+                  ...(installedVersion && receiptValidation?.ok
+                    ? { version: installedVersion }
+                    : {}),
+                },
                 candidate: plugin,
               });
               if (condition.kind === "eligible_managed_boot_update") {
@@ -1129,6 +1201,12 @@ export class PluginMarketplaceService {
                   `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
                 );
               }
+            } else if (existsSync(resolve(this.pluginsRoot, plugin.id))) {
+              condition = resolvePluginUpdateCondition({
+                appVersion: getLvisAppVersion(),
+                installed: { presence: "present" },
+                candidate: plugin,
+              });
             } else {
               condition = resolvePluginUpdateCondition({
                 appVersion: getLvisAppVersion(),
@@ -1638,6 +1716,23 @@ export class PluginMarketplaceService {
       candidate: plugin,
     });
     return { condition, installedVersion };
+  }
+
+  private requireInstallAdmission(
+    admission: MarketplaceInstallAdmission,
+    requestedPluginId?: string,
+  ): MarketplaceInstallAdmissionRecord {
+    const record = this.installAdmissions.get(admission);
+    if (!record) {
+      throw new Error("marketplace install admission is invalid or fabricated");
+    }
+    if (record.consumed) {
+      throw new Error("marketplace install admission has already been consumed");
+    }
+    if (requestedPluginId !== undefined && record.requestedPluginId !== requestedPluginId) {
+      throw new Error("marketplace install admission does not match requested plugin");
+    }
+    return record;
   }
 
   private assertManualInstallCondition(
@@ -2290,34 +2385,6 @@ export class PluginMarketplaceService {
       await rm(pluginDir, { recursive: true, force: true });
       throw err;
     }
-  }
-
-  private async resolveInstalledIds(
-    entries: PluginRegistryEntry[],
-  ): Promise<Set<string>> {
-    const installedIds = new Set<string>();
-    for (const entry of entries) {
-      if (entry.pendingUpdate) continue;
-      const manifestPath = isAbsolute(entry.manifestPath)
-        ? entry.manifestPath
-        : resolve(dirname(this.registryPath), entry.manifestPath);
-      try {
-        await readFile(manifestPath, "utf-8");
-        const receiptValidation = await this.getInstallReceiptValidation(entry.id, manifestPath);
-        if (receiptValidation.ok) {
-          installedIds.add(entry.id);
-        } else {
-          log.warn(
-            `installed plugin '${entry.id}' ignored during managed bootstrap: invalid install receipt (${receiptValidation.reason ?? "unknown"})`,
-          );
-        }
-      } catch {
-        log.warn(
-          `stale registry entry ignored during managed bootstrap: ${entry.id}`,
-        );
-      }
-    }
-    return installedIds;
   }
 
   private async getInstallReceiptValidation(
