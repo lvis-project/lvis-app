@@ -466,11 +466,11 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
           operationError = error;
           rejectResult(error);
         }
-        try {
-          await Promise.all(token.completions);
-        } catch (completionError) {
-          if (!operationFailed) throw completionError;
-        }
+        const completionResults = await Promise.allSettled(token.completions);
+        const failedCompletion = completionResults.find(
+          (completion): completion is PromiseRejectedResult => completion.status === "rejected",
+        );
+        if (failedCompletion && !operationFailed) throw failedCompletion.reason;
         if (operationFailed) throw operationError;
       } finally {
         this.activeLifecycleQueueTokens.delete(token);
