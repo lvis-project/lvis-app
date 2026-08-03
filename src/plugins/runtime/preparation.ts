@@ -16,7 +16,12 @@
  */
 import { dirname } from "node:path";
 import type { PluginAccessSpec, PluginManifest } from "../types.js";
-import type { ManifestLoadPlan, SinglePluginStartResult } from "./types.js";
+import type {
+  ManifestLoadPlan,
+  PluginStartPreparationOutcome,
+  PluginStartPreparationReturn,
+  SinglePluginStartResult,
+} from "./types.js";
 import type {
   PluginPreparationProgressInput,
   PluginPreparationStatus,
@@ -36,7 +41,11 @@ interface PendingPreparedStart {
 interface PreparationTrackerDeps {
   preparePluginStart?: (
     context: PluginStartPreparationContext,
-  ) => Promise<void> | void | null | undefined;
+  ) => PluginStartPreparationReturn;
+  applyConfigOverride: (
+    pluginId: string,
+    configOverride: Record<string, unknown>,
+  ) => void;
   instantiateAndStartSinglePlugin: (
     plan: ManifestLoadPlan,
     manifest: PluginManifest,
@@ -78,7 +87,7 @@ export class PreparationTracker {
     const pluginRoot = dirname(plan.manifestPath);
     const generation = ++this.nextPreparationGeneration;
     this.preparationGenerations.set(manifest.id, generation);
-    let result: Promise<void> | void | null | undefined;
+    let result: PluginStartPreparationReturn;
     try {
       result = this.deps.preparePluginStart({
         pluginId: manifest.id,
@@ -92,6 +101,10 @@ export class PreparationTracker {
       return true;
     }
     if (!result || typeof (result as Promise<void>).then !== "function") {
+      this.applyPreparationResult(
+        manifest.id,
+        result as PluginStartPreparationOutcome,
+      );
       this.preparationStatuses.delete(manifest.id);
       return false;
     }
@@ -112,8 +125,9 @@ export class PreparationTracker {
       rejectReady = reject;
     });
     const task = Promise.resolve(result)
-      .then(async () => {
+      .then(async (preparationResult) => {
         if (this.preparationGenerations.get(manifest.id) !== generation) return;
+        this.applyPreparationResult(manifest.id, preparationResult);
         const startResult = await this.deps.instantiateAndStartSinglePlugin(plan, manifest, approvedPluginAccess, {
           skipPreparation: true,
           cacheBust: startOpts.cacheBust,
@@ -148,6 +162,14 @@ export class PreparationTracker {
     this.pendingPreparedStarts.set(manifest.id, { generation, task, ready, resolveReady, rejectReady });
     void ready.catch(() => {});
     return true;
+  }
+
+  private applyPreparationResult(
+    pluginId: string,
+    result: PluginStartPreparationOutcome,
+  ): void {
+    if (!result || typeof result !== "object" || !result.configOverride) return;
+    this.deps.applyConfigOverride(pluginId, result.configOverride);
   }
 
   private setStatus(pluginId: string, status: PluginPreparationProgressInput, generation: number): void {
