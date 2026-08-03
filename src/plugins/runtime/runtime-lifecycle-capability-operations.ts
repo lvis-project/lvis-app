@@ -1342,6 +1342,20 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
     );
     return this.withPreparedInstallIdentity(manifest.id, input.installId, async (installId) => {
     const candidateRegistryEntry = this.validatePreparedRegistryEntry(manifest, input.registryEntry);
+    // Marketplace activation builds and starts the candidate directly from the
+    // verified staging tree, so it does not pass through restartPlugin's
+    // dependency-preparation gate. Prepare declared host-managed runtimes here
+    // before the factory snapshots configOverrides; otherwise Python-backed
+    // candidates start without the injected pythonExecutable and the atomic
+    // update rolls back even though ordinary boot/restart can prepare them.
+    if (this.preparePluginStart) {
+      await this.preparePluginStart({
+        pluginId: manifest.id,
+        manifest,
+        manifestPath: resolve(input.pluginRoot, "plugin.json"),
+        pluginRoot: input.pluginRoot,
+      });
+    }
     const activationId = randomUUID();
     const artifactGenerationId = pluginArtifactGenerationId(manifestRaw, input.receiptRaw);
     const generationId = createHash("sha256")
@@ -1393,6 +1407,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
         hostEffects,
         installId,
         candidateRegistryEntry,
+        input.approvedPluginAccess ?? null,
       );
     } catch (error) {
       hostEffects.discard();

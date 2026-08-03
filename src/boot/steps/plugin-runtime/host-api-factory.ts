@@ -25,7 +25,7 @@ import { instrumentEffectsByPath } from "../../../permissions/hostapi-effect-rec
 import { enforceMutatingEffects, gateMutatingEffect } from "../../../permissions/effect-enforcement.js";
 import { recordEffect } from "../../../permissions/effect-ledger.js";
 import { methodEffect } from "../../../permissions/effect-kind.js";
-import type { PluginRegistryEntry } from "../../../plugins/types.js";
+import type { PluginAccessSpec, PluginRegistryEntry } from "../../../plugins/types.js";
 import type { PluginHostApiIncarnation } from "../../../plugins/runtime/index.js";
 import { createPluginStorage } from "../../../plugins/storage.js";
 import {
@@ -190,6 +190,7 @@ export function createHostApiFactory(
   candidateRegistryEntry?: Readonly<
     Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
   >,
+  candidateApprovedPluginAccess?: PluginAccessSpec | null,
 ) => PluginHostApi {
   const {
     getPluginRuntime,
@@ -221,12 +222,17 @@ export function createHostApiFactory(
     candidateRegistryEntry?: Readonly<
       Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
     >,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ): PluginHostApi => {
     // Lazy binding — resolve the eventual `pluginRuntime` assignment (this
     // closure only runs during startAll, after the barrel assigns it). All
     // body references below read this single resolved value; `pluginRuntime` is
     // assigned exactly once so this is byte-identical to a per-reference read.
     const pluginRuntime = getPluginRuntime();
+    const getApprovedPluginAccess = (): PluginAccessSpec | undefined =>
+      candidateApprovedPluginAccess === undefined
+        ? pluginRuntime.getApprovedPluginAccess(pluginId)
+        : candidateApprovedPluginAccess ?? undefined;
     if (installPluginId === undefined) {
       throw new Error(`HostApi install provenance missing: ${pluginId}`);
     }
@@ -494,7 +500,11 @@ export function createHostApiFactory(
         emitEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });
       },
       onEvent: (type, handler) => {
-        pluginRuntime.assertPluginEventAccess(pluginId, type);
+        pluginRuntime.assertPluginEventAccess(
+          pluginId,
+          type,
+          candidateApprovedPluginAccess,
+        );
         const dispatch = (data: unknown) => {
           if (hostIncarnation.isActive()) handler(data);
         };
@@ -1246,7 +1256,7 @@ export function createHostApiFactory(
           reason: string;
           scope: string;
         }): Promise<ApprovalChoice> => {
-          const approvedAccess = pluginRuntime.getApprovedPluginAccess(pluginId);
+          const approvedAccess = getApprovedPluginAccess();
           const allowedScopes: string[] =
             Array.isArray(approvedAccess?.agentApprovalScopes)
               ? approvedAccess.agentApprovalScopes
@@ -1279,7 +1289,7 @@ export function createHostApiFactory(
           nonce?: string,
           hmac?: string,
         ): Promise<void> => {
-          const approvedAccess = pluginRuntime.getApprovedPluginAccess(pluginId);
+          const approvedAccess = getApprovedPluginAccess();
           const allowedScopes: string[] =
             Array.isArray(approvedAccess?.agentApprovalScopes)
               ? approvedAccess.agentApprovalScopes
