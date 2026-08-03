@@ -591,10 +591,36 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       }
       throw error;
     }
-    try {
-      await this.deps.pluginRuntime.postPublishRuntimeGeneration(candidate.state.runtime);
-    } catch (error) {
-      this.recordPostCommitFault(pluginId, candidate.generationId, "runtime-post-publish", error);
+    const retirement = predecessor && predecessor.generationId !== candidate.generationId
+      ? this.trackRetirement(predecessor, published.retired)
+      : Promise.resolve();
+    let predecessorRetired = true;
+    if (predecessor && predecessor.generationId !== candidate.generationId) {
+      try {
+        // A replacement's onPublished hook may start write-capable workers.
+        // Do not overlap those effects with the predecessor: its graceful
+        // stop must release sockets, sandbox markers, and shared durable state
+        // before the new generation begins externally observable startup.
+        await retirement;
+      } catch (error) {
+        predecessorRetired = false;
+        this.recordPostCommitFault(
+          pluginId,
+          candidate.generationId,
+          "runtime-post-publish",
+          new AggregateError(
+            [error],
+            `plugin '${pluginId}' post-publish startup blocked by predecessor retirement`,
+          ),
+        );
+      }
+    }
+    if (predecessorRetired) {
+      try {
+        await this.deps.pluginRuntime.postPublishRuntimeGeneration(candidate.state.runtime);
+      } catch (error) {
+        this.recordPostCommitFault(pluginId, candidate.generationId, "runtime-post-publish", error);
+      }
     }
     try {
       this.deps.loopbackManager.postPublishGeneration(preparedLoopback);
@@ -609,9 +635,6 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     } catch (error) {
       this.recordPostCommitFault(pluginId, candidate.generationId, "mcp-publication", error);
     }
-    const retirement = predecessor && predecessor.generationId !== candidate.generationId
-      ? this.trackRetirement(predecessor, published.retired)
-      : Promise.resolve();
     return Object.freeze({ result, retirement });
   }
 
