@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import {
+  activateAndCommitPreparedPluginForTest,
   makeTestPluginPaths,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
@@ -301,9 +302,14 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     );
     const service = makeManagedService(testDir, marketplacePath);
     const installSpy = spyInstalledAtVersion(service, "0.5.31");
+    const cleanupGate = vi.fn(async () => undefined);
 
-    const result = await service.ensureManagedInstalled();
+    const result = await service.ensureManagedInstalled({
+      activatePreparedArtifact: activateAndCommitPreparedPluginForTest,
+      ensurePluginStateReadyForInstall: cleanupGate,
+    });
 
+    expect(cleanupGate).not.toHaveBeenCalled();
     expect(installSpy).not.toHaveBeenCalled();
     expect(result).toEqual({ installed: [], updated: [], failed: [] });
   });
