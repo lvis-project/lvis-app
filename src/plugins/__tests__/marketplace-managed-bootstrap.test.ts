@@ -276,6 +276,38 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.failed).toEqual([]);
   });
 
+  it("does not enter the managed install path for an app-incompatible update", async () => {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "meeting",
+          name: "Meeting",
+          description: "fixture",
+          packageSpec: "",
+          packageName: "",
+          tools: [],
+          installPolicy: "admin",
+          version: "0.5.32",
+          upgradeRequired: {
+            code: "upgrade_required",
+            minAppVersion: "0.5.12",
+            message: "LVIS 0.5.12+ is required.",
+          },
+        }],
+      }),
+      "utf-8",
+    );
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = spyInstalledAtVersion(service, "0.5.31");
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({ installed: [], updated: [], failed: [] });
+  });
+
   it("auto-migrates a legacy-`_meta` managed plugin: catalog advertises the migrated version → update-first, no user action", async () => {
     // The recovery ladder's tier-1 (≡ tier-2) rung for the `_meta` rename. The only
     // plugin that ever used the legacy `xyz.lvis/pathFields` key — local-indexer — is
