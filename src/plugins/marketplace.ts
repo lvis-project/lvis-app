@@ -112,6 +112,37 @@ export class ManagedPluginUpdateRequiresRestartError extends Error {
   }
 }
 
+export class PluginDowngradeRejectedError extends Error {
+  constructor(
+    readonly pluginId: string,
+    readonly installedVersion: string,
+    readonly candidateVersion: string,
+  ) {
+    super(
+      `plugin downgrade is not allowed: "${pluginId}" has ${installedVersion}, catalog offers ${candidateVersion}`,
+    );
+    this.name = "PluginDowngradeRejectedError";
+  }
+}
+
+export class PluginInstalledStateUnreadableError extends Error {
+  constructor(readonly pluginId: string) {
+    super(
+      `plugin "${pluginId}" has installed state but its version is unreadable; refusing replacement`,
+    );
+    this.name = "PluginInstalledStateUnreadableError";
+  }
+}
+
+export class PluginUpdateRecoveryRequiredError extends Error {
+  constructor(readonly pluginId: string) {
+    super(
+      `plugin "${pluginId}" has a pending update transaction; recovery is required before retry`,
+    );
+    this.name = "PluginUpdateRecoveryRequiredError";
+  }
+}
+
 interface ManualInstallCondition {
   readonly condition: PluginUpdateCondition;
   readonly installedVersion?: string;
@@ -710,36 +741,7 @@ export class PluginMarketplaceService {
       if (!catalogItem) {
         throw new Error(`Plugin not found in marketplace: ${pluginId}`);
       }
-      const manualCondition = await this.resolveManualInstallCondition(catalogItem);
-      const condition = manualCondition.condition;
-      switch (condition.kind) {
-        case "eligible_managed_boot_update":
-          throw new ManagedPluginUpdateRequiresRestartError(
-            catalogItem.id,
-            manualCondition.installedVersion ?? "unknown",
-            catalogItem.version ?? "latest",
-          );
-        case "blocked_by_app":
-          assertPluginCandidateAppCompatible(catalogItem, getLvisAppVersion());
-          throw new Error(`plugin "${catalogItem.id}" is incompatible with this LVIS version`);
-        case "transaction_pending":
-          // The existing install transaction owns verified supersession and
-          // idempotent pending-row recovery. Keep routing through it.
-          break;
-        case "catalog_unavailable":
-        case "no_candidate":
-        case "blocked_by_channel":
-          throw new Error(`plugin "${catalogItem.id}" is not installable from this catalog`);
-        case "current":
-        case "eligible_user_install":
-        case "eligible_user_update":
-        case "eligible_managed_install":
-          break;
-        default: {
-          const exhaustive: never = condition;
-          return exhaustive;
-        }
-      }
+      await this.preflightInstall(pluginId, catalogSnapshot);
       assertNetworkAccessAcknowledgement({
         plugin: catalogItem,
         acknowledgement: options?.networkAccessAcknowledgement,
@@ -800,6 +802,29 @@ export class PluginMarketplaceService {
         throw error;
       }
     });
+  }
+
+  /** Read-only eligibility gate shared by lifecycle and direct install callers. */
+  async preflightInstall(
+    pluginId: string,
+    catalogSnapshot?: readonly PluginMarketplaceItem[],
+  ): Promise<void> {
+    const plugins = catalogSnapshot ?? await this.fetcher.listPlugins();
+    const catalogItem = plugins.find((item) => item.id === pluginId || item.slug === pluginId);
+    const canonicalPluginId = catalogItem?.id ?? pluginId;
+    const preflight = async () => {
+      if (!catalogItem) {
+        throw new Error(`Plugin not found in marketplace: ${pluginId}`);
+      }
+      const manualCondition = await this.resolveManualInstallCondition(catalogItem);
+      this.assertManualInstallCondition(catalogItem, manualCondition);
+    };
+    if (catalogSnapshot) {
+      // install() already owns the marketplace plugin lock and supplies the
+      // exact catalog snapshot used by the remaining transaction.
+      return preflight();
+    }
+    return this.withPluginLock(canonicalPluginId, preflight);
   }
 
   /**
@@ -1046,6 +1071,7 @@ export class PluginMarketplaceService {
             break;
           case "catalog_unavailable":
           case "no_candidate":
+          case "installed_state_unreadable":
           case "current":
           case "blocked_by_app":
           case "blocked_by_channel":
@@ -1116,6 +1142,7 @@ export class PluginMarketplaceService {
                 break;
               case "catalog_unavailable":
               case "no_candidate":
+              case "installed_state_unreadable":
               case "current":
               case "blocked_by_app":
               case "blocked_by_channel":
@@ -1599,7 +1626,7 @@ export class PluginMarketplaceService {
         condition: resolvePluginUpdateCondition({
           appVersion: getLvisAppVersion(),
           canaryOptIn: true,
-          installed: { presence: "absent" },
+          installed: { presence: "present" },
           candidate: plugin,
         }),
       };
@@ -1611,6 +1638,56 @@ export class PluginMarketplaceService {
       candidate: plugin,
     });
     return { condition, installedVersion };
+  }
+
+  private assertManualInstallCondition(
+    catalogItem: PluginMarketplaceItem,
+    manualCondition: ManualInstallCondition,
+  ): void {
+    const condition = manualCondition.condition;
+    switch (condition.kind) {
+      case "eligible_managed_boot_update":
+        throw new ManagedPluginUpdateRequiresRestartError(
+          catalogItem.id,
+          manualCondition.installedVersion ?? "unknown",
+          catalogItem.version ?? "latest",
+        );
+      case "blocked_by_app":
+        assertPluginCandidateAppCompatible(catalogItem, getLvisAppVersion());
+        throw new Error(`plugin "${catalogItem.id}" is incompatible with this LVIS version`);
+      case "transaction_pending":
+        // The existing install transaction owns verified supersession and
+        // idempotent pending-row recovery for user-policy repairs. Managed
+        // updates must never use that live replacement path.
+        if (normalizeInstallPolicy(catalogItem) === "admin") {
+          throw new PluginUpdateRecoveryRequiredError(catalogItem.id);
+        }
+        return;
+      case "installed_state_unreadable":
+        throw new PluginInstalledStateUnreadableError(catalogItem.id);
+      case "no_candidate":
+        throw new Error(`plugin "${catalogItem.id}" is not installable from this catalog`);
+      case "catalog_unavailable":
+      case "blocked_by_channel":
+        throw new Error(`plugin "${catalogItem.id}" is not installable from this catalog`);
+      case "current":
+        if (condition.relation === "installed_newer") {
+          throw new PluginDowngradeRejectedError(
+            catalogItem.id,
+            manualCondition.installedVersion ?? "unknown",
+            catalogItem.version ?? "unknown",
+          );
+        }
+        return;
+      case "eligible_user_install":
+      case "eligible_user_update":
+      case "eligible_managed_install":
+        return;
+      default: {
+        const exhaustive: never = condition;
+        return exhaustive;
+      }
+    }
   }
 
   /** Returns the version string from the currently-installed manifest, or null. */

@@ -5,7 +5,8 @@ import type { InstallPolicy, PluginMarketplaceItem } from "./types.js";
 export type PluginUpdateCondition =
   | Readonly<{ kind: "catalog_unavailable" }>
   | Readonly<{ kind: "no_candidate" }>
-  | Readonly<{ kind: "current" }>
+  | Readonly<{ kind: "installed_state_unreadable" }>
+  | Readonly<{ kind: "current"; relation: "equal" | "installed_newer" }>
   | Readonly<{
       kind: "blocked_by_app";
       currentAppVersion: string;
@@ -25,7 +26,7 @@ export interface PluginUpdateConditionInput {
   readonly canaryOptIn?: boolean;
   readonly installed: Readonly<
     | { presence: "absent" }
-    | { presence: "present"; version: string; transactionPending?: boolean }
+    | { presence: "present"; version?: string; transactionPending?: boolean }
   >;
   readonly candidate?: Readonly<
     Pick<
@@ -37,8 +38,6 @@ export interface PluginUpdateConditionInput {
 
 const CONDITIONS = {
   catalogUnavailable: Object.freeze({ kind: "catalog_unavailable" } as const),
-  noCandidate: Object.freeze({ kind: "no_candidate" } as const),
-  current: Object.freeze({ kind: "current" } as const),
   blockedByChannel: Object.freeze({ kind: "blocked_by_channel" } as const),
   transactionPending: Object.freeze({ kind: "transaction_pending" } as const),
   eligibleUserInstall: Object.freeze({ kind: "eligible_user_install" } as const),
@@ -60,7 +59,7 @@ export function resolvePluginUpdateCondition(
   }
 
   const candidate = input.candidate;
-  if (!candidate) return CONDITIONS.noCandidate;
+  if (!candidate) return Object.freeze({ kind: "no_candidate" });
 
   const upgradeRequired = candidate.upgradeRequired;
   if (upgradeRequired) {
@@ -91,9 +90,16 @@ export function resolvePluginUpdateCondition(
   if (input.installed.presence === "absent") {
     return managed ? CONDITIONS.eligibleManagedInstall : CONDITIONS.eligibleUserInstall;
   }
-  if (!candidate.version) return CONDITIONS.noCandidate;
-  if (compareSemver(candidate.version, input.installed.version) <= 0) {
-    return CONDITIONS.current;
+  if (!input.installed.version) {
+    return Object.freeze({ kind: "installed_state_unreadable" });
+  }
+  if (!candidate.version) return Object.freeze({ kind: "no_candidate" });
+  const versionComparison = compareSemver(candidate.version, input.installed.version);
+  if (versionComparison <= 0) {
+    return Object.freeze({
+      kind: "current",
+      relation: versionComparison === 0 ? "equal" : "installed_newer",
+    });
   }
   return managed
     ? CONDITIONS.eligibleManagedBootUpdate
