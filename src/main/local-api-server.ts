@@ -4,7 +4,7 @@
  * This module owns the MAIN-PROCESS lifecycle of the shared loopback surface:
  * it snapshots the independently opt-in local API and A2A route families,
  * generates a fresh per-boot bearer secret, builds the same `IpcDeps` the IPC
- * registrars receive plus a server-owned {@link ChatSendContext}, starts the
+ * registrars receive plus the shared {@link ConversationCommandPort}, starts the
  * transport (`src/api/http-server.ts`), and persists a small discovery file so
  * a CLI companion can find the port + secret. It also tears everything down on
  * app shutdown.
@@ -33,8 +33,14 @@ import type { BrowserWindow } from "electron";
 import type { AppServices } from "../boot.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { IpcDeps } from "../ipc/types.js";
-import type { ChatSendContext } from "../ipc/handlers/chat.js";
-import type { TurnResult } from "../engine/conversation-loop.js";
+import {
+  createConversationCommandPort,
+  type ConversationCommandPort,
+} from "./conversation-command-port.js";
+import {
+  createConversationSurfaceRuntime,
+  type ConversationSurfaceRuntime,
+} from "../engine/conversation-surface-runtime.js";
 import { createLocalApi, type ExternalMutationApprover } from "../api/local-api.js";
 import type { A2AHttpRouter } from "../api/a2a-router.js";
 import { A2A_PROTOCOL_VERSION } from "../shared/a2a-wire.js";
@@ -43,7 +49,7 @@ import {
   type LocalApiHttpServer,
   type LoopbackRouteFamilies,
 } from "../api/http-server.js";
-import { createStreamBroadcaster } from "../api/stream-broadcaster.js";
+import { createPlatformConversationLegacyStreamAdapter } from "../api/platform-conversation-legacy-adapter.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import {
   buildSingleFlightAgentActionApprover,
@@ -252,26 +258,6 @@ async function initializeA2ARouter(
 }
 
 /**
- * Build the server-owned {@link ChatSendContext}. Mirrors the registrar-owned
- * state in `src/ipc/domains/chat.ts` (nextStreamId allocator + in-flight turn
- * tracker) but scoped to this transport: the sink is the broadcaster's fan-out
- * so SSE subscribers receive the exact same frames the renderer would.
- */
-function buildChatSendContext(sink: ChatSendContext["sink"]): ChatSendContext {
-  let nextStreamId = 0;
-  const allocateStreamId = () => ++nextStreamId;
-  let activeStreamTurn: Promise<TurnResult> | null = null;
-  const trackStreamTurn = (factory: () => Promise<TurnResult>) => {
-    const turnPromise = factory().finally(() => {
-      if (activeStreamTurn === turnPromise) activeStreamTurn = null;
-    });
-    activeStreamTurn = turnPromise;
-    return turnPromise;
-  };
-  return { sink, allocateStreamId, trackStreamTurn };
-}
-
-/**
  * Build the #1409 approval-mediated external-mutation approver over the live
  * {@link ApprovalGate}. Returns `undefined` when no gate is available (boot
  * without a conversation surface) — the dispatcher then keeps its byte-identical
@@ -369,8 +355,10 @@ interface LocalApiStartInput {
   services: AppServices;
   getMainWindow: () => BrowserWindow | null;
   getAppWindows: () => Array<BrowserWindow | null | undefined>;
+  conversationSurfaceRuntime?: ConversationSurfaceRuntime;
   createA2ARouter?: A2ARouterFactory;
   log?: (message: string) => void;
+  conversationCommandPort?: ConversationCommandPort;
 }
 
 async function startLocalApiServerForBoot(
@@ -378,7 +366,11 @@ async function startLocalApiServerForBoot(
   generation: number,
   cancellation: Promise<void>,
 ): Promise<{ port: number } | null> {
-  const { services, getMainWindow, getAppWindows } = input;
+  const {
+    services, getMainWindow, getAppWindows,
+    conversationSurfaceRuntime: suppliedSurfaceRuntime,
+    conversationCommandPort: suppliedConversationCommandPort,
+  } = input;
   const emit = input.log ?? ((m: string) => log.info(m));
 
   bootRouteFamilies ??= resolveLoopbackRouteFamilies(services.settingsService);
@@ -386,6 +378,7 @@ async function startLocalApiServerForBoot(
     return null;
   }
   const approveAgentAction = getBootAgentActionApprover(services.approvalGate, emit);
+  const conversationSurfaceRuntime = suppliedSurfaceRuntime ?? createConversationSurfaceRuntime();
   const a2aRuntime = bootRouteFamilies.a2a
     ? await Promise.race([
       initializeA2ARouter(input.createA2ARouter, services, emit, approveAgentAction),
@@ -409,19 +402,27 @@ async function startLocalApiServerForBoot(
   let secret = "";
   try {
     // Same DI bag the IPC registrars receive (see registerIpcHandlers).
-    const ipc: IpcDeps = { ...services, getMainWindow, getAppWindows };
+    const ipc: IpcDeps = {
+      ...services,
+      getMainWindow,
+      getAppWindows,
+      conversationSurfaceRuntime,
+    };
 
-    // Server-owned stream plumbing: the broadcaster's sink fans `chat send`
-    // frames out to every SSE subscriber (byte-identical to the renderer's).
-    const broadcaster = createStreamBroadcaster();
-    const chatSendContext = buildChatSendContext(broadcaster.sink);
+    // SSE is a compatibility adapter over the same Runtime Electron publishes
+    // to; it no longer owns a second stream id or turn lease.
+    const broadcaster = createPlatformConversationLegacyStreamAdapter(
+      conversationSurfaceRuntime.timeline,
+    );
+    const conversationCommandPort = suppliedConversationCommandPort
+      ?? createConversationCommandPort(ipc, conversationSurfaceRuntime);
 
     // #1409 approval-mediated external-mutation gate. Undefined when no
     // ApprovalGate is available → the dispatcher keeps its fail-closed default.
     const externalMutationApprover = buildExternalMutationApproverFromAgentAction(
       approveAgentAction,
     );
-    const api = createLocalApi({ ipc, chatSendContext, externalMutationApprover });
+    const api = createLocalApi({ ipc, conversationCommandPort, externalMutationApprover });
 
     // Fresh per-boot bearer secret (64 hex chars). Never logged.
     secret = randomBytes(32).toString("hex");

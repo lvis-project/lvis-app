@@ -12,6 +12,7 @@ import { createLogger, closeFileLogSink } from "../lib/logger.js";
 import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
 import { stopLocalApiServer } from "./local-api-server.js";
+import { stopTailnetObserverServer } from "./tailnet-surface-server.js";
 import { stopRemoteA2AReceiverServer } from "./a2a-remote-receiver-server.js";
 import { stopSubscriptionRuntimes } from "./subscription-runtime-service.js";
 import { unregisterAllGlobalShortcuts } from "./global-shortcuts.js";
@@ -109,6 +110,11 @@ export async function runAppShutdownCleanup(options: {
       // when the gate was off this boot.
       await stopLocalApiServer();
       if (signal.aborted) return;
+      // Tailnet observer is a separate listener over the shared projection.
+      // Close its SSE streams before the host conversation runtime is disposed.
+      await stopTailnetObserverServer();
+      if (signal.aborted) return;
+
       // Independent P4-5 listener: close it before the owning remote runtime
       // is disposed by services.shutdown(). This is a no-op when its gate was
       // OFF and is idempotent on repeated cleanup attempts.

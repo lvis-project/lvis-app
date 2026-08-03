@@ -157,6 +157,20 @@ export const CHANNELS = {
     task: "lvis:a2a-remote:task",
     action: "lvis:a2a-remote:action",
   },
+  // Local-owner-only Tailnet pairing/share administration. These are INTERNAL:
+  // never add them to PUBLIC_CHANNELS or EXTERNAL_MUTATION_CHANNELS. A pairing
+  // invite is not access, and every mutation requires a fresh local keyboard
+  // intent in addition to the host-renderer sender guard.
+  tailnetSharing: {
+    snapshot: "lvis:tailnet-sharing:snapshot",
+    createInvitation: "lvis:tailnet-sharing:create-invitation",
+    activatePairing: "lvis:tailnet-sharing:activate-pairing",
+    createCurrentConversationShare: "lvis:tailnet-sharing:create-current-conversation-share",
+    revokeShare: "lvis:tailnet-sharing:revoke-share",
+    revokePairing: "lvis:tailnet-sharing:revoke-pairing",
+    // Main → renderer only. Carries no data; consumers pull a fresh safe snapshot.
+    changed: "lvis:tailnet-sharing:changed",
+  },
   marketplace: {
     ping: "lvis:marketplace:ping",
     /** Legacy main-to-renderer update notification; kept byte-identical on wire. */
@@ -623,6 +637,14 @@ export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
   [PERMISSIONS.userApprovalRecord]: "required",
   [PERMISSIONS.userApprovalRevoke]: "required",
   [PERMISSIONS.sandboxWindowsInstall]: "required",
+  // Local-owner Tailnet sharing: all mutations are host-renderer-only and
+  // require a current keyboard intent. The snapshot and change hint carry no
+  // externally callable mutation capability, so they are deliberately omitted.
+  [CHANNELS.tailnetSharing.createInvitation]: "required",
+  [CHANNELS.tailnetSharing.activatePairing]: "required",
+  [CHANNELS.tailnetSharing.createCurrentConversationShare]: "required",
+  [CHANNELS.tailnetSharing.revokeShare]: "required",
+  [CHANNELS.tailnetSharing.revokePairing]: "required",
 };
 
 // ─── Approval-mediated external mutation ─────────────────────────────────────
