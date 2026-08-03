@@ -548,6 +548,59 @@ describe("PluginBundleLifecycle", () => {
     await lifecycle.waitForRetirements();
   });
 
+  it("keeps the lifecycle tail closed until every deferred completion settles", async () => {
+    const lifecycle = new PluginBundleLifecycle({
+      receiptCacheRoot: join(tmpdir(), "lvis-deferred-completion-test"),
+      loopbackManager: { prepareGeneration: vi.fn() },
+      revokeOperationGeneration: vi.fn(),
+    } as never);
+    type SyntheticCommit = {
+      result: undefined;
+      retirement: Promise<void>;
+      completion: Promise<void>;
+      retirementDeferred: true;
+    };
+    const serializeCommitted = (
+      lifecycle as unknown as {
+        serializeCommitted(
+          pluginId: string,
+          operation: () => Promise<SyntheticCommit>,
+        ): Promise<SyntheticCommit>;
+      }
+    ).serializeCommitted.bind(lifecycle);
+    let rejectFirstCompletion!: (error: Error) => void;
+    const firstCompletion = new Promise<void>((_resolve, reject) => {
+      rejectFirstCompletion = reject;
+    });
+    let resolveSecondCompletion!: () => void;
+    const secondCompletion = new Promise<void>((resolve) => {
+      resolveSecondCompletion = resolve;
+    });
+    const committed = (completion: Promise<void>): SyntheticCommit => Object.freeze({
+      result: undefined,
+      retirement: completion,
+      completion,
+      retirementDeferred: true,
+    });
+
+    await lifecycle.runInLifecycleQueue("ep-api", async () => {
+      await serializeCommitted("ep-api", async () => committed(firstCompletion));
+      await serializeCommitted("ep-api", async () => committed(secondCompletion));
+    });
+    let nextMutationStarted = false;
+    const nextMutation = lifecycle.runInLifecycleQueue("ep-api", async () => {
+      nextMutationStarted = true;
+    });
+
+    rejectFirstCompletion(new Error("first completion failed"));
+    await Promise.resolve();
+    expect(nextMutationStarted).toBe(false);
+
+    resolveSecondCompletion();
+    await nextMutation;
+    expect(nextMutationStarted).toBe(true);
+  });
+
   it("reports a committed inactive outcome when removal projection publication fails", async () => {
     const { root, pluginRoot, cacheRoot, manifest } = await fixture();
     const publicationCause = new Error("removal projection publish failed");
