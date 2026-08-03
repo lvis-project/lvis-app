@@ -486,8 +486,8 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     await writeFile(marketplacePath, JSON.stringify(raw));
     const service = makeService();
     const acknowledgement = {
-      allowedDomains: ["api.example.com", "sync.example.com"],
       allowPrivateNetworks: true as const,
+      allowedDomains: ["sync.example.com", "api.example.com"],
     };
     const admission = await service.preflightInstall("mp-test", {
       networkAccessAcknowledgement: acknowledgement,
@@ -510,8 +510,8 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     await expect(service.install("mp-test", undefined, {
       admission,
       networkAccessAcknowledgement: {
+        allowedDomains: ["api.example.com", "sync.example.com"],
         allowPrivateNetworks: true,
-        allowedDomains: ["sync.example.com", "api.example.com"],
       },
       activatePreparedArtifact: vi.fn() as never,
     })).resolves.toEqual({ pluginId: "mp-test", installed: true });
