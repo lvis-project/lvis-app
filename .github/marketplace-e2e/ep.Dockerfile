@@ -9,10 +9,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 lvis \
     && useradd --create-home --uid 10001 --gid 10001 --shell /bin/bash lvis \
-    && mkdir -p /workspace/lvis-plugin-lge-api /out \
+    && mkdir -p /workspace/lvis-plugin-ep /out \
     && chown -R 10001:10001 /workspace /out
 
-COPY --chown=10001:10001 lvis-plugin-lge-api/ /workspace/lvis-plugin-lge-api/
+COPY --chown=10001:10001 lvis-plugin-ep/ /workspace/lvis-plugin-ep/
 
 ARG E2E_NONCE
 ARG HOST_SHA
@@ -27,7 +27,7 @@ LABEL org.lvis.marketplace-e2e.nonce="${E2E_NONCE}" \
 
 USER 10001:10001
 ENV HOME=/home/lvis
-WORKDIR /workspace/lvis-plugin-lge-api
+WORKDIR /workspace/lvis-plugin-ep
 RUN bun install --frozen-lockfile \
     && bun run build \
     && test -f dist/hostPlugin.js \

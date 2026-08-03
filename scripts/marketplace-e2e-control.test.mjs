@@ -231,7 +231,7 @@ test("stage CLI binds clean exact checkouts and contract identity into separate 
   const hostRoot = join(root, "lvis-app");
   const sdkRoot = join(root, "lvis-plugin-sdk");
   const marketplaceRoot = join(root, "lvis-marketplace");
-  const epRoot = join(root, "lvis-plugin-lge-api");
+  const epRoot = join(root, "lvis-plugin-ep");
   const hostSha = makeRepo(hostRoot, {
     "schemas/plugin-manifest.schema.json": schema,
   });
