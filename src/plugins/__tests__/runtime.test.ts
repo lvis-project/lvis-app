@@ -979,6 +979,25 @@ describe("PluginRuntime.disable", () => {
     expect(() =>
       runtime.assertPluginEventAccess("calendar", "email.action.needed"),
     ).toThrow(/not allowed/i);
+    expect(() =>
+      runtime.assertPluginEventAccess(
+        "calendar",
+        "work_assistant.snapshot.requested",
+        {
+          plugins: [{
+            pluginId: "work-assistant",
+            events: ["work_assistant.snapshot.requested"],
+          }],
+        },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventAccess(
+        "ms-graph",
+        "work_assistant.snapshot.requested",
+        null,
+      ),
+    ).toThrow(/not allowed/i);
   });
 
   it("allows work-assistant to subscribe to granted calendar events (P4 detector grants)", async () => {

@@ -275,9 +275,8 @@ export interface PluginRuntimeOptions {
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
     installPluginId: string | null,
-    candidateRegistryEntry?: Readonly<
-      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
-    >,
+    candidateRegistryEntry?: Readonly<Pick<PluginRegistryEntry, "installSource" | "manifestSha256">>,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
@@ -358,12 +357,13 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     return this.methodMap.get(method)?.pluginId ?? this.knownToolOwners.get(method);
   }
 
-  assertPluginEventAccess(callerPluginId: string, eventType: string): void {
+  assertPluginEventAccess(callerPluginId: string, eventType: string, candidateApprovedPluginAccess?: PluginAccessSpec | null): void {
     assertEventSubscribeAccess({
       callerPluginId,
       eventType,
       targetPluginId: this.inferEventOwner(eventType),
-      getAccessGrant: () => this.getPluginAccessGrant(callerPluginId),
+      getAccessGrant: () => candidateApprovedPluginAccess === undefined
+        ? this.getPluginAccessGrant(callerPluginId) : candidateApprovedPluginAccess ?? undefined,
       auditLog: this.auditLog,
     });
   }

@@ -110,6 +110,7 @@ export abstract class PluginRuntimeState {
     candidateRegistryEntry?: Readonly<
       Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
     >,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ) => PluginHostApi;
   protected readonly deploymentGuard?: PluginDeploymentGuard;
   protected readonly installReceiptCacheRoot?: string;
@@ -418,6 +419,7 @@ export abstract class PluginRuntimeState {
     candidateRegistryEntry?: Readonly<
       Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
     >,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ): {
     hostApi: PluginHostApi;
     disposers: Array<() => void>;
@@ -491,6 +493,7 @@ export abstract class PluginRuntimeState {
         incarnation,
         installPluginId,
         candidateRegistryEntry,
+        candidateApprovedPluginAccess,
       );
       const hostApi = hostEffects ? hostEffects.wrapHostApi(rawHostApi) : rawHostApi;
       // Defence-in-depth: PluginHostApi.storage is required but partial hostApi

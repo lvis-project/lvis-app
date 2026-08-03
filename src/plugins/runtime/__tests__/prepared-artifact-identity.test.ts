@@ -31,6 +31,7 @@ async function writePreparedPlugin(
   manifestId: string,
   installId: string,
   entrySource?: (toolName: string) => string,
+  manifestOverrides: Partial<PluginManifest> = {},
 ): Promise<{
   pluginRoot: string;
   manifest: PluginManifest;
@@ -56,6 +57,7 @@ async function writePreparedPlugin(
       inputSchema: { type: "object", properties: {} },
       _meta: { ui: { visibility: ["model"] } },
     }],
+    ...manifestOverrides,
   };
   await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
   await writeFile(
@@ -89,6 +91,56 @@ async function writePreparedPlugin(
 }
 
 describe("prepared artifact install identity", () => {
+  it("prepares host-managed runtime config before starting a marketplace candidate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lvis-prepared-python-runtime-"));
+    roots.push(root);
+    const pluginId = "python-candidate";
+    const installId = "catalog-python-candidate";
+    const pythonExecutable = join(root, "managed-python");
+    const prepared = await writePreparedPlugin(
+      root,
+      pluginId,
+      installId,
+      (toolName) => `export default async function createPlugin(context) {
+  if (context.config.pythonExecutable !== ${JSON.stringify(pythonExecutable)}) {
+    throw new Error("python runtime was not prepared before candidate factory");
+  }
+  return { handlers: { ${toolName}: async () => "pong" } };
+}
+`,
+      { python: { managedBy: "lvis-app" } },
+    );
+    let runtime!: ReturnType<typeof makeTestPluginRuntime>;
+    const preparePluginStart: NonNullable<PluginRuntimeOptions["preparePluginStart"]> =
+      vi.fn(async ({ pluginId: preparedPluginId, manifestPath, pluginRoot }) => {
+        expect(preparedPluginId).toBe(pluginId);
+        expect(manifestPath).toBe(join(prepared.pluginRoot, "plugin.json"));
+        expect(pluginRoot).toBe(prepared.pluginRoot);
+        runtime.mergeConfigOverride(preparedPluginId, { pythonExecutable });
+      });
+    runtime = makeTestPluginRuntime(
+      {
+        rootDir: root,
+        registryPath: join(root, "plugins", "registry.json"),
+        pluginsRoot: join(root, "plugins"),
+      },
+      {
+        installReceiptCacheRoot: join(root, "cache"),
+        preparePluginStart,
+      },
+    );
+
+    const activated = await runtime.activatePreparedArtifact({
+      installId,
+      ...prepared,
+      durableCommit: async () => "committed",
+    });
+    await activated.retirement;
+
+    expect(preparePluginStart).toHaveBeenCalledOnce();
+    await expect(runtime.call("python_candidate_ping")).resolves.toBe("pong");
+  });
+
   it("passes fresh provenance into production-shaped HostApi creation and publishes it after commit", async () => {
     const root = await mkdtemp(join(tmpdir(), "lvis-prepared-identity-"));
     roots.push(root);
@@ -97,6 +149,13 @@ describe("prepared artifact install identity", () => {
     const prepared = await writePreparedPlugin(root, canonicalId, installId);
     const observedInstallIds: Array<string | null> = [];
     const observedRegistryEntries: unknown[] = [];
+    const observedAccessGrants: unknown[] = [];
+    const approvedPluginAccess = {
+      plugins: [{
+        pluginId: "work-assistant",
+        events: ["work_assistant.snapshot.requested"],
+      }],
+    };
     const createHostApi: PluginRuntimeOptions["createHostApi"] = (
       pluginId,
       manifest,
@@ -104,9 +163,11 @@ describe("prepared artifact install identity", () => {
       _incarnation,
       candidateInstallId,
       candidateRegistryEntry,
+      candidateApprovedPluginAccess,
     ) => {
       observedInstallIds.push(candidateInstallId);
       observedRegistryEntries.push(candidateRegistryEntry);
+      observedAccessGrants.push(candidateApprovedPluginAccess);
       return createNoopHostApiForTests(pluginId, manifest, dataDir);
     };
     const runtime = makeTestPluginRuntime(
@@ -125,6 +186,7 @@ describe("prepared artifact install identity", () => {
     const activated = await runtime.activatePreparedArtifact({
       installId,
       ...prepared,
+      approvedPluginAccess,
       durableCommit,
     });
     await activated.retirement;
@@ -133,6 +195,7 @@ describe("prepared artifact install identity", () => {
     expect(durableCommit).toHaveBeenCalledOnce();
     expect(observedInstallIds).toEqual([installId]);
     expect(observedRegistryEntries).toEqual([prepared.registryEntry]);
+    expect(observedAccessGrants).toEqual([approvedPluginAccess]);
     expect(runtime.resolvePluginInstallId(canonicalId)).toBe(installId);
     await expect(runtime.call("manifest_fresh_ping")).resolves.toBe("pong");
   });
