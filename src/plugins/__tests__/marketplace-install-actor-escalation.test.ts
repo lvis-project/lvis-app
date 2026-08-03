@@ -417,6 +417,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       pluginsRoot: paths.pluginsRoot,
     });
     const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const listSpy = vi.spyOn(fetcher, "listPlugins");
     const detailSpy = vi.spyOn(fetcher, "getPluginDetail");
     const service = new TestPluginMarketplaceService(
       paths,
@@ -430,6 +431,47 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     // getPluginDetail is no longer part of the install path — the snapshot is
     // the listPlugins() result, shared by escalation + guard + artifact.
     expect(detailSpy).not.toHaveBeenCalled();
+    expect(listSpy).toHaveBeenCalledTimes(1);
     expect(findEscalation(audit.entries)?.pluginInstall?.catalogSnapshotHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("consumes the admitted catalog snapshot even if the catalog changes afterward", async () => {
+    await writeCatalog("user");
+    const service = makeService();
+    const admission = await service.preflightInstall("mp-test");
+    await writeCatalog("admin");
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    ).mockResolvedValue({ pluginId: "mp-test", installed: true });
+
+    await expect(service.install("mp-test", undefined, {
+      admission,
+      activatePreparedArtifact: vi.fn() as never,
+    })).resolves.toEqual({ pluginId: "mp-test", installed: true });
+
+    const [, actor, snapshot] = installSpy.mock.calls[0]!;
+    expect(actor).toBe("user");
+    expect((snapshot as Array<{ installPolicy?: string }>)[0]?.installPolicy).toBe("user");
+    await expect(service.install("mp-test", undefined, {
+      admission,
+      activatePreparedArtifact: vi.fn() as never,
+    })).rejects.toThrow(/already been consumed/);
+  });
+
+  it("rejects fabricated admissions", async () => {
+    await writeCatalog("user");
+    const service = makeService();
+
+    await expect(service.install("mp-test", undefined, {
+      admission: Object.freeze({
+        pluginId: "mp-test",
+        catalogVersion: null,
+        installed: false,
+      }),
+      activatePreparedArtifact: vi.fn() as never,
+    })).rejects.toThrow(/invalid or fabricated/);
   });
 });
