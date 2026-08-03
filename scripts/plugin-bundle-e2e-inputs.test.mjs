@@ -41,7 +41,7 @@ function fixture() {
   const hostRoot = join(root, "lvis-app");
   const sdkRoot = join(root, "lvis-plugin-sdk");
   const marketplaceRoot = join(root, "lvis-marketplace");
-  const epApiRoot = join(root, "lvis-plugin-lge-api");
+  const epApiRoot = join(root, "lvis-plugin-ep");
   const hostSha = makeRepo(hostRoot, { "schemas/plugin-manifest.schema.json": schema });
   const sdkSha = makeRepo(sdkRoot, { "schemas/plugin-manifest.schema.json": schema });
   const marketplaceSha = makeRepo(marketplaceRoot, {
@@ -55,7 +55,7 @@ function fixture() {
     })}\n`,
     "bun.lock": `"@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#${sdkSha.slice(0, 12)}"]\n`,
   });
-  return { hostRoot, sdkRoot, marketplaceRoot, epApiRoot, hostSha, sdkSha, marketplaceSha, epApiSha };
+  return { root, hostRoot, sdkRoot, marketplaceRoot, epApiRoot, hostSha, sdkSha, marketplaceSha, epApiSha };
 }
 
 test("rejects mutable or abbreviated workflow refs", () => {
@@ -122,6 +122,31 @@ test("CLI honors explicit checkout roots without appending repository names", ()
         EP_API_SHA: f.epApiSha,
         // The workflow itself writes consolidated evidence. This child test
         // proves stdout mode and must not inherit the parent's evidence sink.
+        BUNDLE_E2E_EVIDENCE_PATH: "",
+      },
+    },
+  );
+  assert.equal(JSON.parse(output).refs.epApi, f.epApiSha);
+});
+
+test("CLI defaults to the canonical lvis-plugin-ep workspace directory", () => {
+  const f = fixture();
+  const output = execFileSync(
+    process.execPath,
+    [fileURLToPath(new URL("./plugin-bundle-e2e-inputs.mjs", import.meta.url))],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        BUNDLE_E2E_WORKSPACE: f.root,
+        HOST_ROOT: f.hostRoot,
+        SDK_ROOT: "",
+        MARKETPLACE_ROOT: "",
+        EP_API_ROOT: "",
+        HOST_SHA: f.hostSha,
+        SDK_SHA: f.sdkSha,
+        MARKETPLACE_SHA: f.marketplaceSha,
+        EP_API_SHA: f.epApiSha,
         BUNDLE_E2E_EVIDENCE_PATH: "",
       },
     },
