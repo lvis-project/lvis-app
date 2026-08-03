@@ -30,6 +30,8 @@ import type {
   LoadedPlugin,
   ManifestLoadPlan,
   ManifestSnapshot,
+  PluginStartPreparationOutcome,
+  PluginStartPreparationReturn,
 } from "./types.js";
 import {
   buildMethodMap,
@@ -913,9 +915,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       approvedPluginAccess,
     };
 
+    let preparationResult: PluginStartPreparationOutcome = undefined;
     if (!opts.skipPreparation && this.preparePluginStart) {
       const pluginRootForPreparation = dirname(restartPlan.manifestPath);
-      let result: Promise<void> | void | null | undefined;
+      let result: PluginStartPreparationReturn;
       let preparation = this.pendingRestartPreparations.get(pluginId);
       if (!preparation) {
         try {
@@ -929,7 +932,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
           plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
           return "failed";
         }
-        if (result && typeof (result as Promise<void>).then === "function") {
+        if (result && typeof (result as Promise<PluginStartPreparationOutcome>).then === "function") {
           preparation = Promise.resolve(result);
           this.pendingRestartPreparations.set(pluginId, preparation);
           void preparation.finally(() => {
@@ -937,15 +940,18 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
               this.pendingRestartPreparations.delete(pluginId);
             }
           }).catch(() => {});
+        } else {
+          preparationResult = result as PluginStartPreparationOutcome;
         }
       }
       if (preparation) {
         try {
           const outcome = await Promise.race([
-            preparation.then(() => "prepared" as const),
-            cancellation.promise.then(() => "cancelled" as const),
+            preparation.then((result) => ({ status: "prepared" as const, result })),
+            cancellation.promise.then(() => ({ status: "cancelled" as const })),
           ]);
-          if (outcome === "cancelled") return "failed";
+          if (outcome.status === "cancelled") return "failed";
+          preparationResult = outcome.result;
         } catch (err) {
           plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
           return "failed";
@@ -954,6 +960,13 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
     }
 
     if (!isCurrent()) return "failed";
+    if (
+      preparationResult
+      && typeof preparationResult === "object"
+      && preparationResult.configOverride
+    ) {
+      this.mergeConfigOverride(pluginId, preparationResult.configOverride);
+    }
     const activationId = randomUUID();
     const runtimeRoot = await this.materializeImmutableRuntimeRoot(
       pluginId,

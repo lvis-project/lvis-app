@@ -420,7 +420,6 @@ export async function initPluginRuntime(
   });
   const { preparePluginStart, onDisable, onActiveStateChange, onEnable } =
     createLifecycleCallbacks({
-      getPluginRuntime: () => pluginRuntime,
       lateBinding,
       getMainWindow,
       mainWindow,
