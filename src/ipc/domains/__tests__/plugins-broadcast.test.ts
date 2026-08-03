@@ -82,6 +82,12 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
       ]),
       getLiveCatalogVersion: vi.fn(async () => "1.0.0"),
       getInstalledVersion: vi.fn(async () => "1.0.0"),
+      preflightInstall: vi.fn(async (requestedPluginId: string) => ({
+        pluginId: requestedPluginId === "lvis-plugin-meeting" ? "meeting" : requestedPluginId,
+        catalogVersion: "1.0.0",
+        installed: false,
+      })),
+      revalidateInstallAdmission: vi.fn(async () => undefined),
       install: vi.fn(),
       uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
       getInstallFailureDiagnostics: vi.fn(() => []),

@@ -469,6 +469,7 @@ export async function bootstrap(
     loopbackManager,
     setBundleLifecycleHandler,
     startPlugins,
+    admitPreStartOperation,
   } = await initPluginRuntime({
     projectRoot,
     settingsService,
@@ -628,16 +629,15 @@ export async function bootstrap(
   ctx.mcpManager.setPluginGenerationAccess(pluginBundleLifecycle);
   ctx.scriptHookManager.setPluginGenerationAccess(pluginBundleLifecycle);
   setBundleLifecycleHandler?.(pluginBundleLifecycle);
-  await startPlugins();
   await pluginBundleLifecycle.recoverRetirements();
 
-  // Managed installs/updates must run only after the full Skill/Hook/MCP
-  // generation lifecycle is bound.  This lets signed boot-time candidates be
-  // imported and started before their bytes, receipt, registry, and pointer
-  // become durable, preserving a valid predecessor on candidate failure.
-  await runManagedBootstrap({
+  // The lifecycle and its retirement journal are recovered before managed
+  // durable sync. The sync is admitted into the boot-local promise tail and
+  // commits verified bytes/receipt/registry only: it never publishes or starts
+  // a candidate. startPlugins() seals admission synchronously, waits for the
+  // tail (including rollback), then loads the one committed registry snapshot.
+  const managedPreStartSync = runManagedBootstrap({
     pluginMarketplace: ctx.pluginMarketplace,
-    pluginRuntime,
     ensurePluginStateReadyForInstall: (pluginId) =>
       ensurePluginStateReadyForInstall(pluginId, {
         pluginMarketplace: ctx.pluginMarketplace,
@@ -654,7 +654,11 @@ export async function bootstrap(
       }),
     mainWindow,
     marketplace: ctx.settingsService.get("marketplace"),
+    mode: "pre-start-sync",
+    admitPreStartOperation,
   });
+  const sealedPluginStart = startPlugins();
+  await Promise.all([managedPreStartSync, sealedPluginStart]);
 
   // §691: OS-level tool sandbox — decided exactly once here at boot.
   await initSandboxGate(ctx);

@@ -321,6 +321,17 @@ describe("PluginUpdateDetector", () => {
     expect(updates).toEqual([]);
   });
 
+  it("surfaces catalog unavailability to polling without treating it as an empty snapshot", async () => {
+    const registryPath = await setupRegistry([{ id: "calendar", version: "1.0.0" }]);
+    const fetcher = makeFetcher([]);
+    vi.mocked(fetcher.listPlugins).mockRejectedValueOnce(new Error("offline"));
+    const detector = new PluginUpdateDetector(registryPath, fetcher);
+
+    await expect(detector.checkForUpdatesResult()).resolves.toEqual({
+      status: "catalog-unavailable",
+    });
+  });
+
   it("skips canary catalog entries by default (stable rollout only)", async () => {
     const registryPath = await setupRegistry([{ id: "local-indexer", version: "1.0.0" }]);
     const canaryPlugin = { ...makeCatalogPlugin("local-indexer", "2.0.0"), channel: "canary" as const };

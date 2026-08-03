@@ -210,6 +210,14 @@ Key boundaries:
   staging succeeds. Direct and bundle uninstall stage the live directory plus
   all recovery/cleanup-owned paths before deleting the row; unresolved recovery
   backups are never handled by the orphan tombstone sweeper.
+- managed boot synchronization uses one boot-local promise tail. Recovery
+  journals and retirement state are bound first; compatible managed artifacts
+  then commit durable bytes, receipt, and registry state without candidate
+  publication or execution. Admitting runtime start synchronously seals the
+  tail before awaiting it, so later managed commits reject before mutation and
+  `startAll` runs exactly once against the final committed snapshot. Renderer
+  retry is missing-only: any registry row or owned artifact counts as installed,
+  regardless of enabled or runtime-start state.
 - a plugin artifact may declare plugin-owned `skills`, `hooks`, and `mcpServers`
   as `{id,path}` entries. IDs are local to the tuple `(plugin id, plugin version,
   contribution kind)` and paths are normalized relative to the verified plugin
