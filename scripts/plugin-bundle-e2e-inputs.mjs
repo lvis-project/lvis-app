@@ -127,7 +127,7 @@ function fromEnvironment() {
       : resolve(workspaceRoot, "lvis-marketplace"),
     epApiRoot: process.env.EP_API_ROOT
       ? resolve(process.env.EP_API_ROOT)
-      : resolve(workspaceRoot, "lvis-plugin-lge-api"),
+      : resolve(workspaceRoot, "lvis-plugin-ep"),
     hostSha: process.env.HOST_SHA,
     sdkSha: process.env.SDK_SHA,
     marketplaceSha: process.env.MARKETPLACE_SHA,

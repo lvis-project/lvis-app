@@ -238,11 +238,11 @@ jobs:
           submodules: false
           persist-credentials: false
 
-      - name: Checkout lvis-plugin-lge-api
+      - name: Checkout lvis-plugin-ep
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: lvis-project/lvis-plugin-ep
-          path: candidates/lvis-plugin-lge-api
+          path: candidates/lvis-plugin-ep
           ref: ${{ steps.resolve-candidate-refs.outputs.ep_api_sha }}
           token: ${{ secrets.M4_MARKETPLACE_CHECKOUT_TOKEN }}
           fetch-depth: 0
@@ -274,7 +274,7 @@ jobs:
             "candidates/lvis-app:$HOST_SHA:$HOST_SELECTOR_KIND" \
             "candidates/lvis-marketplace:$MARKETPLACE_SHA:$MARKETPLACE_SELECTOR_KIND" \
             "candidates/lvis-plugin-sdk:$SDK_SHA:$SDK_SELECTOR_KIND" \
-            "candidates/lvis-plugin-lge-api:$EP_API_SHA:$EP_API_SELECTOR_KIND"; do
+            "candidates/lvis-plugin-ep:$EP_API_SHA:$EP_API_SELECTOR_KIND"; do
             repo="${spec%%:*}"
             remainder="${spec#*:}"
             expected="${remainder%%:*}"
@@ -308,7 +308,7 @@ jobs:
             --host-root candidates/lvis-app \
             --marketplace-root candidates/lvis-marketplace \
             --sdk-root candidates/lvis-plugin-sdk \
-            --ep-root candidates/lvis-plugin-lge-api \
+            --ep-root candidates/lvis-plugin-ep \
             --output-dir staged
 
       - name: Bind downstream jobs to nonce and manifest digest
@@ -508,7 +508,7 @@ jobs:
             --manifest inputs/input-manifest.json \
             --source ep \
             --archive inputs/ep-source.tar \
-            --destination candidate/lvis-plugin-lge-api
+            --destination candidate/lvis-plugin-ep
 
       - name: Build EP inside an unmounted container image
         env:
