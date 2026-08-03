@@ -98,6 +98,7 @@ vi.mock("../../../plugins/registry.js", () => ({
 
 import { initPluginRuntime } from "../plugin-runtime.js";
 import { withPluginInstallLock } from "../../../plugins/install-lifecycle.js";
+import type { PluginAccessSpec } from "../../../plugins/types.js";
 import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 
 type ConfigHostApi = {
@@ -157,9 +158,7 @@ type CreateHostApi = (
     installSource?: "admin" | "user" | "local-dev";
     manifestSha256?: string;
   },
-  candidateApprovedPluginAccess?: {
-    plugins: Array<{ pluginId: string; events?: string[] }>;
-  } | null,
+  candidateApprovedPluginAccess?: PluginAccessSpec | null,
 ) => ConfigHostApi;
 
 async function initAndGetFactory(

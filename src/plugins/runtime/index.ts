@@ -46,7 +46,7 @@ import {
   readEnabledManifestSnapshots,
   resolveManifestLoadPlan,
 } from "./snapshots.js";
-import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot } from "./types.js";
+import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot, PluginStartPreparationReturn } from "./types.js";
 import { buildPluginCard } from "./cards.js";
 import type { PluginPerfStats } from "./perf-stats.js";
 import {
@@ -317,7 +317,7 @@ export interface PluginRuntimeOptions {
    * loading/start is deferred without blocking app boot; calls into the
    * plugin fail with a clear "preparing" message until the Promise resolves.
    */
-  preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
+  preparePluginStart?: (context: PluginStartPreparationContext) => PluginStartPreparationReturn;
 }
 
 export class PluginRuntime extends PluginRuntimeLifecycle {
