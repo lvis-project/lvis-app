@@ -18,6 +18,7 @@ import { MARKETPLACE } from "../../shared/ipc-channels.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { PluginPaths } from "../../plugins/plugin-paths.js";
 import { PluginUpdateDetector, isUpdateCheckEnabled } from "../../plugins/update-detector.js";
+import { createUpdateCheckRunner } from "./update-check-runner.js";
 import { createAutoUpdater } from "../../main/auto-updater.js";
 import { startCrashReporter } from "../../main/crash-reporter.js";
 import { TelemetryService } from "../../main/telemetry.js";
@@ -187,34 +188,29 @@ export function wireUpdateCheck(input: UpdateCheckInput): void {
   });
   const DEFAULT_UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
-  let lastBroadcastKey = "";
-  const runUpdateCheck = async () => {
-    try {
+  const runUpdateCheck = createUpdateCheckRunner({
+    check: () => updateDetector.checkForUpdatesResult(),
+    filter: (updates) => {
       const skippedPluginUpdates = readSkippedPluginUpdates(
         settingsService.get("marketplace")?.skippedPluginUpdates,
       );
-      const updates = (await updateDetector.checkForUpdates()).filter(
+      return updates.filter(
         (update) => !isSkippedPluginUpdate(update, skippedPluginUpdates),
       );
-      const key = updates
-        .map((u) => `${u.pluginId}@${u.installedVersion}->${u.latestVersion}`)
-        .sort()
-        .join("|");
-      if (key === lastBroadcastKey) {
-        log.debug("update-check: no change (%d)", updates.length);
-        return;
-      }
-      lastBroadcastKey = key;
+    },
+    broadcast: (updates) => {
       mainWindow?.webContents?.send(CHANNELS.marketplace.updatesAvailable, updates);
       if (updates.length > 0) {
         log.info("update-check: %d plugin update(s) available", updates.length);
       } else {
         log.debug("update-check: cleared previous updates");
       }
-    } catch (err) {
-      log.warn("update-check: error: %s", (err as Error).message);
-    }
-  };
+    },
+    onNoChange: (count) => log.debug("update-check: no change (%d)", count),
+    onCatalogUnavailable: () =>
+      log.warn("update-check: catalog unavailable; preserving last successful broadcast"),
+    onError: (err) => log.warn("update-check: error: %s", (err as Error).message),
+  });
 
   void runUpdateCheck();
 

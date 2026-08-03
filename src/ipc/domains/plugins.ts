@@ -428,10 +428,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const marketplace = settingsService.get("marketplace");
     await runManagedBootstrap({
       pluginMarketplace,
-      pluginRuntime,
       ensurePluginStateReadyForInstall: ensureInstallStateReady,
       mainWindow: getMainWindow(),
       marketplace,
+      mode: "repair-missing-only",
+      activatePreparedArtifact: (prepared) =>
+        pluginRuntime.activatePreparedArtifact(prepared),
     });
     return { ok: true } as const;
   });

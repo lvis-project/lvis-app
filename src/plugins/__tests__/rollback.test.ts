@@ -274,7 +274,21 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     fetcher.item = { ...SAMPLE_ITEM, version: "1.0.0", installPolicy: "admin" };
     await svc.install("example-sample");
     fetcher.item = { ...SAMPLE_ITEM, version: "1.1.0", installPolicy: "admin" };
-    await svc.install("example-sample");
+    await expect(svc.install("example-sample")).rejects.toMatchObject({
+      name: "ManagedPluginUpdateRequiresRestartError",
+      pluginId: "example-sample",
+      installedVersion: "1.0.0",
+      candidateVersion: "1.1.0",
+    });
+    vi.spyOn(svc as unknown as {
+      getInstallReceiptValidation: () => Promise<{ ok: true }>;
+    }, "getInstallReceiptValidation").mockResolvedValue({ ok: true });
+    await expect(svc.ensureManagedInstalled({
+      mode: "pre-start-sync",
+      ensurePluginStateReadyForInstall: async () => undefined,
+    })).resolves.toMatchObject({
+      updated: ["example-sample"],
+    });
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins[0].installSource).toBe("admin");
