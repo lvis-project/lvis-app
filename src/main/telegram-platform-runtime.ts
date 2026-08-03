@@ -1,0 +1,459 @@
+/**
+ * Host-only route authority for the Telegram platform bridge.
+ *
+ * Telegram user and private-chat identifiers stay only in this short-lived
+ * main-process runtime.  The only durable value created here is a random
+ * domain-specific HMAC key stored through Electron safeStorage; it contains
+ * no provider identity, bot token, chat id, or conversation id.
+ */
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { safeStorage } from "electron";
+import {
+  SafeStorageSecretStore,
+  type SafeStorageLike,
+  type SecretStore,
+} from "../audit/hmac-chain.js";
+import type {
+  PlatformBridgeInboundAuthorization,
+  PlatformBridgeInboundAuthorizer,
+  PlatformBridgeVerifiedEnvelope,
+} from "./platform-bridge-inbound.js";
+import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
+
+export const TELEGRAM_PLATFORM_ACTOR_SECRET_NAME = "telegram-platform-bridge-actor-v1.key";
+
+const ACTOR_SECRET_BYTES = 32;
+const ACTOR_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const BOT_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
+const TELEGRAM_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
+
+const MAX_ALLOWED_ROUTES = 128;
+const MAX_CONVERSATION_CHARS = 4_096;
+const MAX_DELIVERY_ID_CHARS = 256;
+const MAX_TEXT_CHARS = 24_000;
+const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
+const ACTOR_HMAC_DOMAIN = "lvis/telegram-platform-bridge/actor/v1\0";
+const BINDING_HMAC_DOMAIN = "lvis/telegram-platform-bridge/binding/v1\0";
+const CONVERSATION_HASH_DOMAIN = "lvis/telegram-platform-bridge/conversation/v1\0";
+
+/**
+ * A single static owner-configured private-DM route. `chatId` is intentionally
+ * runtime-only so the outbound Telegram transport can select its destination;
+ * it is never written to a receipt, feature namespace, log, or secret store.
+ */
+export interface TelegramPlatformRoute {
+  readonly chatId: string;
+  /** Main-process-only target for the safe projection delivery adapter. */
+  readonly conversationId: string;
+  readonly actorDigest: string;
+  /** Preferred route binding field for new lifecycle composition. */
+  readonly binding: PlatformBridgeBinding;
+  /** Compatibility alias for the bridge core's authorization terminology. */
+  readonly bridgeBinding: PlatformBridgeBinding;
+}
+
+export interface TelegramPlatformRuntime {
+  /** Pass directly to `createPlatformBridgeInboundGateway({ authorize })`. */
+  readonly authorize: PlatformBridgeInboundAuthorizer;
+  /** Main-process-only target captured at start; never provider-visible or persisted. */
+  readonly conversationId: string;
+  /** Frozen, main-process-only routes for safe outbound delivery registration. */
+  readonly routes: readonly TelegramPlatformRoute[];
+  /** Resolve a verified private-DM envelope without mutating route authority. */
+  routeForEnvelope(envelope: Readonly<PlatformBridgeVerifiedEnvelope>): TelegramPlatformRoute | null;
+  /** Egress fence for a route before opening/sending on its delivery channel. */
+  isRouteCurrent(route: TelegramPlatformRoute): boolean;
+  /** Revoke every route and every already-admitted bridge guard. */
+  dispose(): void;
+}
+
+export interface CreateTelegramPlatformRuntimeOptions {
+  /** Explicit owner Telegram user ids. Each authorizes only its private DM. */
+  readonly allowedUserIds: readonly string[];
+  /** SHA-256 fingerprint supplied by lifecycle code; never the bot token. */
+  readonly botFingerprint: string;
+  /** Host reader for the currently selected private conversation. */
+  readonly getCurrentConversationId: () => string;
+  /** Host-owned monotonically increasing active-conversation generation. */
+  readonly getCurrentConversationEpoch: () => number;
+  /** Test-only injection; production uses Electron OS-encrypted safeStorage. */
+  readonly secretStore?: SecretStore;
+  /** Test-only Electron safeStorage injection. */
+  readonly encryption?: SafeStorageLike;
+  /** Owner-configured route generation; changing it fences prior deliveries. */
+  readonly routeEpoch?: number;
+}
+
+/**
+ * Load or mint the sole durable value used by this runtime. A corrupted value
+ * is a boot failure rather than an identity rotation that could revive a
+ * stale configured route under a new opaque actor.
+ */
+export function ensureTelegramPlatformActorSecret(secretStore: SecretStore): string {
+  if (!isSecretStore(secretStore)) {
+    throw new Error("telegram-platform-runtime-secret-store-invalid");
+  }
+  const existing = secretStore.read(TELEGRAM_PLATFORM_ACTOR_SECRET_NAME, 128);
+  if (existing !== null) {
+    if (!ACTOR_SECRET_PATTERN.test(existing)) {
+      throw new Error("telegram-platform-runtime-actor-secret-invalid");
+    }
+    return existing;
+  }
+  const generated = randomBytes(ACTOR_SECRET_BYTES).toString("base64url");
+  if (!ACTOR_SECRET_PATTERN.test(generated)) {
+    throw new Error("telegram-platform-runtime-actor-secret-generation-invalid");
+  }
+  secretStore.write(TELEGRAM_PLATFORM_ACTOR_SECRET_NAME, generated);
+  return generated;
+}
+
+/**
+ * Build fixed personal-DM routes for one bot identity and one currently active
+ * host conversation. There is no persisted pairing registry: owner allowlist
+ * changes take effect on restart, and dispose() revokes all in-flight routes.
+ */
+export function createTelegramPlatformRuntime(
+  options: CreateTelegramPlatformRuntimeOptions,
+): TelegramPlatformRuntime {
+  const validated = validateOptions(options);
+  const currentConversationId = captureConversationId(validated.getCurrentConversationId);
+  const currentConversationEpoch = captureConversationEpoch(validated.getCurrentConversationEpoch);
+  const secretStore = validated.secretStore
+    ?? new SafeStorageSecretStore(validated.encryption ?? safeStorage);
+  const actorSecret = ensureTelegramPlatformActorSecret(secretStore);
+  const conversationDigest = hashConversation(validated.botFingerprint, currentConversationId);
+
+  const bridgeId = deterministicUuid(actorSecret, "bridge", [validated.botFingerprint]);
+  const routesByChatId = new Map<string, TelegramPlatformRoute>();
+  const routeSet = new Set<TelegramPlatformRoute>();
+  const guardsByRoute = new Map<TelegramPlatformRoute, PlatformBridgeGuard>();
+  let disposed = false;
+
+  const routes = validated.allowedUserIds.map((chatId) => {
+    const bridgeBinding = Object.freeze({
+      bridgeId,
+      bridgeEpoch: 1,
+      routeId: deterministicUuid(actorSecret, "route", [
+        validated.botFingerprint,
+        chatId,
+        String(validated.routeEpoch),
+      ]),
+      routeEpoch: validated.routeEpoch,
+      scope: deterministicUuid(actorSecret, "scope", [
+        validated.botFingerprint,
+        chatId,
+        conversationDigest,
+        String(validated.routeEpoch),
+      ]),
+    } satisfies PlatformBridgeBinding);
+    const route = Object.freeze({
+      chatId,
+      conversationId: currentConversationId,
+      actorDigest: actorDigestFor(actorSecret, validated.botFingerprint, chatId),
+      binding: bridgeBinding,
+      bridgeBinding,
+    } satisfies TelegramPlatformRoute);
+    routesByChatId.set(chatId, route);
+    routeSet.add(route);
+    return route;
+  });
+  const frozenRoutes = Object.freeze([...routes]) as readonly TelegramPlatformRoute[];
+
+  const isRouteCurrent = (route: TelegramPlatformRoute): boolean => {
+    if (disposed || !routeSet.has(route)) return false;
+    return currentConversationEpochMatches(
+      validated.getCurrentConversationEpoch,
+      currentConversationEpoch,
+    ) && currentConversationMatches(validated.getCurrentConversationId, currentConversationId);
+  };
+
+  for (const route of frozenRoutes) {
+    const guard: PlatformBridgeGuard = Object.freeze({
+      isCurrent(candidate: PlatformBridgeBinding): boolean {
+        try {
+          return isRouteCurrent(route)
+            && sameBinding(candidate, route.binding)
+            && routesByChatId.get(route.chatId) === route;
+        } catch {
+          return false;
+        }
+      },
+    });
+    guardsByRoute.set(route, guard);
+  }
+
+  const routeForEnvelope = (
+    envelope: Readonly<PlatformBridgeVerifiedEnvelope>,
+  ): TelegramPlatformRoute | null => {
+    const verified = normalizeTelegramEnvelope(envelope);
+    if (verified === null || disposed) return null;
+    if (verified.channelId !== verified.senderId) return null;
+    const route = routesByChatId.get(verified.channelId);
+    return route !== undefined && isRouteCurrent(route) ? route : null;
+  };
+
+  const authorize: PlatformBridgeInboundAuthorizer = (envelope) => {
+    const route = routeForEnvelope(envelope);
+    if (route === null) return null;
+    const bridgeGuard = guardsByRoute.get(route);
+    if (bridgeGuard === undefined) return null;
+    const authorization: PlatformBridgeInboundAuthorization = Object.freeze({
+      actorDigest: route.actorDigest,
+      conversationDigest,
+      bridgeBinding: route.binding,
+      bridgeGuard,
+    });
+    return authorization;
+  };
+
+  return Object.freeze({
+    authorize,
+    conversationId: currentConversationId,
+    routes: frozenRoutes,
+    routeForEnvelope,
+    isRouteCurrent,
+    dispose: () => {
+      disposed = true;
+    },
+  });
+}
+
+function validateOptions(
+  value: CreateTelegramPlatformRuntimeOptions,
+): Readonly<{
+  allowedUserIds: readonly string[];
+  botFingerprint: string;
+  getCurrentConversationId: () => string;
+  getCurrentConversationEpoch: () => number;
+  secretStore: SecretStore | undefined;
+  encryption: SafeStorageLike | undefined;
+  routeEpoch: number;
+}> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("telegram-platform-runtime-invalid");
+  }
+  try {
+    if (!Array.isArray(value.allowedUserIds)
+      || value.allowedUserIds.length === 0
+      || value.allowedUserIds.length > MAX_ALLOWED_ROUTES
+      || !BOT_FINGERPRINT_PATTERN.test(value.botFingerprint)
+      || typeof value.getCurrentConversationId !== "function"
+      || typeof value.getCurrentConversationEpoch !== "function"
+      || (value.secretStore !== undefined && !isSecretStore(value.secretStore))
+      || (value.encryption !== undefined && !isSafeStorageLike(value.encryption))) {
+      throw new Error("telegram-platform-runtime-invalid");
+    }
+    const seen = new Set<string>();
+    const allowedUserIds: string[] = [];
+    for (const userId of value.allowedUserIds) {
+      if (!isCanonicalTelegramId(userId) || seen.has(userId)) {
+        throw new Error("telegram-platform-runtime-invalid");
+      }
+      seen.add(userId);
+      allowedUserIds.push(userId);
+    }
+    const routeEpoch = value.routeEpoch ?? 1;
+    if (!positiveInteger(routeEpoch)) {
+      throw new Error("telegram-platform-runtime-invalid");
+    }
+    return Object.freeze({
+      allowedUserIds: Object.freeze(allowedUserIds),
+      botFingerprint: value.botFingerprint,
+      getCurrentConversationId: value.getCurrentConversationId,
+      getCurrentConversationEpoch: value.getCurrentConversationEpoch,
+      secretStore: value.secretStore,
+      encryption: value.encryption,
+      routeEpoch,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "telegram-platform-runtime-invalid") {
+      throw error;
+    }
+    throw new Error("telegram-platform-runtime-invalid");
+  }
+}
+
+function captureConversationId(reader: () => string): string {
+  try {
+    const current = reader();
+    if (!isConversationId(current)) {
+      throw new Error("telegram-platform-runtime-current-conversation-unavailable");
+    }
+    return current;
+  } catch (error) {
+    if (error instanceof Error && error.message === "telegram-platform-runtime-current-conversation-unavailable") {
+      throw error;
+    }
+    throw new Error("telegram-platform-runtime-current-conversation-unavailable");
+  }
+}
+
+function captureConversationEpoch(reader: () => number): number {
+  try {
+    const current = reader();
+    if (!isConversationEpoch(current)) {
+      throw new Error("telegram-platform-runtime-current-conversation-epoch-unavailable");
+    }
+    return current;
+  } catch (error) {
+    if (error instanceof Error && error.message === "telegram-platform-runtime-current-conversation-epoch-unavailable") {
+      throw error;
+    }
+    throw new Error("telegram-platform-runtime-current-conversation-epoch-unavailable");
+  }
+}
+
+function currentConversationEpochMatches(reader: () => number, captured: number): boolean {
+  try {
+    return reader() === captured;
+  } catch {
+    return false;
+  }
+}
+
+function isConversationEpoch(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function currentConversationMatches(reader: () => string, captured: string): boolean {
+  try {
+    return reader() === captured;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeTelegramEnvelope(value: unknown): PlatformBridgeVerifiedEnvelope | null {
+  const record = exactDataRecord(value, ["provider", "deliveryId", "channelId", "senderId", "text"]);
+  if (record === null
+    || record.provider !== "telegram"
+    || !isOpaqueIdentifier(record.deliveryId)
+    || !isCanonicalTelegramId(record.channelId)
+    || !isCanonicalTelegramId(record.senderId)
+    || !isSafeText(record.text)) {
+    return null;
+  }
+  return Object.freeze({
+    provider: "telegram",
+    deliveryId: record.deliveryId,
+    channelId: record.channelId,
+    senderId: record.senderId,
+    text: record.text,
+  });
+}
+
+function exactDataRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+): Readonly<Record<string, unknown>> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const ownKeys = Reflect.ownKeys(value);
+    if (ownKeys.length !== expectedKeys.length || !expectedKeys.every((key) => ownKeys.includes(key))) {
+      return null;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const normalized: Record<string, unknown> = {};
+    for (const key of expectedKeys) {
+      const descriptor = descriptors[key];
+      if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) {
+        return null;
+      }
+      normalized[key] = descriptor.value;
+    }
+    return Object.freeze(normalized);
+  } catch {
+    return null;
+  }
+}
+
+function isCanonicalTelegramId(value: unknown): value is string {
+  if (typeof value !== "string" || !TELEGRAM_ID_PATTERN.test(value)) return false;
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric > 0 && String(numeric) === value;
+}
+
+function isOpaqueIdentifier(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_DELIVERY_ID_CHARS
+    && value.trim().length > 0
+    && !UNSAFE_CONTROL_CHARACTERS.test(value);
+}
+
+function isSafeText(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_TEXT_CHARS
+    && value.trim().length > 0
+    && !UNSAFE_CONTROL_CHARACTERS.test(value);
+}
+
+function isConversationId(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_CONVERSATION_CHARS
+    && value.trim().length > 0
+    && !UNSAFE_CONTROL_CHARACTERS.test(value);
+}
+
+function actorDigestFor(actorSecret: string, botFingerprint: string, userId: string): string {
+  return createHmac("sha256", actorSecret)
+    .update(ACTOR_HMAC_DOMAIN, "utf8")
+    .update(botFingerprint, "utf8")
+    .update("\0", "utf8")
+    .update(userId, "utf8")
+    .digest("hex");
+}
+
+function hashConversation(botFingerprint: string, conversationId: string): string {
+  return createHash("sha256")
+    .update(CONVERSATION_HASH_DOMAIN, "utf8")
+    .update(botFingerprint, "utf8")
+    .update("\0", "utf8")
+    .update(conversationId, "utf8")
+    .digest("hex");
+}
+
+function deterministicUuid(actorSecret: string, purpose: string, fields: readonly string[]): string {
+  const digest = createHmac("sha256", actorSecret)
+    .update(BINDING_HMAC_DOMAIN, "utf8")
+    .update(purpose, "utf8");
+  for (const field of fields) {
+    digest.update("\0", "utf8").update(field, "utf8");
+  }
+  const bytes = digest.digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function sameBinding(left: PlatformBridgeBinding, right: PlatformBridgeBinding): boolean {
+  return left.bridgeId === right.bridgeId
+    && left.bridgeEpoch === right.bridgeEpoch
+    && left.routeId === right.routeId
+    && left.routeEpoch === right.routeEpoch
+    && left.scope === right.scope;
+}
+
+function positiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isSecretStore(value: unknown): value is SecretStore {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as { read?: unknown }).read === "function"
+    && typeof (value as { write?: unknown }).write === "function";
+}
+
+function isSafeStorageLike(value: unknown): value is SafeStorageLike {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as { isEncryptionAvailable?: unknown }).isEncryptionAvailable === "function"
+    && typeof (value as { encryptString?: unknown }).encryptString === "function"
+    && typeof (value as { decryptString?: unknown }).decryptString === "function";
+}

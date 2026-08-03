@@ -127,6 +127,82 @@ describe("PlatformBridgeDeliveryAdapter", () => {
     expect(channel.state()).toEqual({ lastAcceptedCursor: 2, pendingMessages: 0, closed: false });
   });
 
+  it("lets a provider compact only queued safe messages and retain split current-cursor chunks", async () => {
+    const firstSend = deferred();
+    const sent: PlatformBridgeOutboundMessage[] = [];
+    const queuedCursors: number[][] = [];
+    const adapter = createPlatformBridgeDeliveryAdapter({
+      transport: {
+        send: async (_channel: string, message) => {
+          sent.push(message);
+          if (message.kind === "snapshot") await firstSend.promise;
+        },
+      },
+      maxPendingMessagesPerChannel: 3,
+      coalesceQueuedMessages: (queued, incoming) => {
+        queuedCursors.push(queued.map((entry) => entry.cursor));
+        if (incoming.cursor === 2) {
+          return [{
+            cursor: 2,
+            message: { kind: "text", cursor: 2, text: "merged latest text" },
+          }];
+        }
+        if (incoming.cursor === 3) {
+          return [
+            { cursor: 3, message: { kind: "text", cursor: 3, text: "chunk one" } },
+            { cursor: 3, message: { kind: "text", cursor: 3, text: "chunk two" } },
+          ];
+        }
+        return [...queued, incoming];
+      },
+    });
+    const channel = adapter.openChannel("telegram:coalesced", CONVERSATION_ID);
+
+    expect(channel.enqueueSnapshot(snapshot())).toBe("accepted");
+    expect(channel.enqueueEvent(event(1, { kind: "assistant.text.delta", text: "first" }))).toBe("accepted");
+    expect(channel.enqueueEvent(event(2, { kind: "assistant.text.delta", text: "second" }))).toBe("accepted");
+    expect(channel.enqueueEvent(event(3, { kind: "assistant.text.delta", text: "third" }))).toBe("accepted");
+    // Cursor 0 is in flight and therefore never reaches provider compaction.
+    expect(queuedCursors[2]).toEqual([1]);
+    expect(channel.state().pendingMessages).toBe(3);
+
+    firstSend.resolve();
+    await channel.waitForIdle();
+
+    expect(sent).toEqual([
+      { kind: "snapshot", cursor: 0, status: "idle", text: "" },
+      { kind: "text", cursor: 3, text: "chunk one" },
+      { kind: "text", cursor: 3, text: "chunk two" },
+    ]);
+  });
+
+  it("contains a malformed provider coalescer result without throwing into the projection producer", () => {
+    const onDeliveryFailure = vi.fn();
+    const adapter = createPlatformBridgeDeliveryAdapter({
+      transport: { send: async () => undefined },
+      onDeliveryFailure,
+      coalesceQueuedMessages: (_queued, incoming) => {
+        const valid = [{
+          cursor: incoming.cursor,
+          message: incoming.message,
+        }];
+        // Validation can read this array safely, but normalization must also be
+        // guarded because provider code is an extension boundary.
+        return new Proxy(valid, {
+          get(target, property, receiver) {
+            if (property === "map") throw new Error("provider-map-failure");
+            return Reflect.get(target, property, receiver);
+          },
+        }) as unknown as readonly typeof incoming[];
+      },
+    });
+    const channel = adapter.openChannel("telegram:bad-coalescer", CONVERSATION_ID);
+
+    expect(channel.enqueueSnapshot(snapshot())).toBe("closed");
+    expect(channel.state().closed).toBe(true);
+    expect(onDeliveryFailure).toHaveBeenCalledOnce();
+  });
+
   it("closes only a slow channel when its bounded pending queue fills", async () => {
     const firstSend = deferred();
     const onBackpressure = vi.fn();

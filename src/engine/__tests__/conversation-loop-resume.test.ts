@@ -135,13 +135,35 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(loop.getSessionId()).toBe("test-session-id");
   });
 
+  it("advances the session epoch for A → B → A, even when the session id repeats", () => {
+    const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
+    const loop = new ConversationLoop(resumeDeps({
+      memoryManager: {
+        ...resumeMemory(history),
+        saveSession: vi.fn(async () => {}),
+      } as unknown as ConversationLoopDeps["memoryManager"],
+    }));
+    const initialEpoch = loop.getSessionEpoch();
+
+    expect(initialEpoch).toBe(0);
+
+    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(loop.getSessionEpoch()).toBe(initialEpoch + 1);
+
+    loop.newConversation();
+    expect(loop.getSessionEpoch()).toBe(initialEpoch + 2);
+
+    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(loop.getSessionEpoch()).toBe(initialEpoch + 3);
+  });
+
   it("clears prior carried-forward plugin scope when loading or creating a session", () => {
     const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
     const loop = new ConversationLoop(resumeDeps({
       memoryManager: {
         ...resumeMemory(history),
         saveSession: vi.fn(async () => {}),
-      },
+      } as unknown as ConversationLoopDeps["memoryManager"],
     }));
     const state = loop as unknown as { lastTurnScope: Set<string> | null };
 

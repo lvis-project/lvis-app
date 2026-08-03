@@ -16,7 +16,6 @@ import type {
 const DEFAULT_MAX_CHANNELS = 128;
 const DEFAULT_MAX_PENDING_MESSAGES_PER_CHANNEL = 64;
 const DEFAULT_MAX_TEXT_CHARS = 4_096;
-const UNSAFE_TEXT_CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
 /** The only coarse status values a bridge provider may render. */
 export type PlatformBridgeOutboundStatus =
@@ -130,24 +129,48 @@ export interface PlatformBridgeDeliveryAdapter<TChannel> {
   channelCount(): number;
 }
 
+/**
+ * One already-safe projection message waiting for a provider transport.
+ *
+ * A provider may compact only this bounded, safe representation; it never
+ * receives the owner timeline or a private conversation id.
+ */
+export interface PlatformBridgeDeliveryQueuedMessage {
+  readonly cursor: number;
+  readonly message: PlatformBridgeOutboundMessage;
+}
+
+/**
+ * Provider-specific compaction for messages that have not been handed to the
+ * transport yet. The currently in-flight message is deliberately excluded.
+ */
+type PlatformBridgeDeliveryQueueCoalescer = (
+  queued: readonly PlatformBridgeDeliveryQueuedMessage[],
+  incoming: PlatformBridgeDeliveryQueuedMessage,
+  maxTextChars: number,
+) => readonly PlatformBridgeDeliveryQueuedMessage[];
+
 export interface CreatePlatformBridgeDeliveryAdapterOptions<TChannel> {
   readonly transport: PlatformBridgeDeliveryTransport<TChannel>;
   /** Bound active destinations as well as queues; defaults to 128. */
   readonly maxChannels?: number;
   /** Bound undelivered messages per channel, including an in-flight send; defaults to 64. */
   readonly maxPendingMessagesPerChannel?: number;
-  /** Bound each outgoing text chunk independently of projection retention; defaults to 4 KiB. */
+  /** Bound each outgoing text chunk independently of projection retention; defaults to 4,096 Unicode code points. */
   readonly maxTextChars?: number;
+  /**
+   * Optional provider-owned compaction of not-yet-sent safe messages. It is
+   * invoked before the queue capacity check so a rate-limited transport can
+   * retain a bounded, latest-safe view without changing the canonical stream.
+   */
+  readonly coalesceQueuedMessages?: PlatformBridgeDeliveryQueueCoalescer;
   /** A slow channel is closed rather than silently dropping a partial transcript. */
   readonly onBackpressure?: (channel: TChannel) => void;
   /** A provider failure closes only its channel and never throws into the projection producer. */
   readonly onDeliveryFailure?: (channel: TChannel) => void;
 }
 
-type PendingMessage = {
-  readonly cursor: number;
-  readonly message: PlatformBridgeOutboundMessage;
-};
+type PendingMessage = PlatformBridgeDeliveryQueuedMessage;
 
 type ChannelRecord<TChannel> = {
   readonly channel: TChannel;
@@ -250,6 +273,40 @@ export function createPlatformBridgeDeliveryAdapter<TChannel>(
     entry: PendingMessage,
   ): PlatformBridgeDeliveryEnqueueResult => {
     if (!isCurrent(record)) return "closed";
+    if (options.coalesceQueuedMessages !== undefined) {
+      const inFlight = record.sending ? record.queue[0] : undefined;
+      const queued = record.queue.slice(inFlight === undefined ? 0 : 1);
+      let compacted: readonly PlatformBridgeDeliveryQueuedMessage[];
+      let normalized: PendingMessage[];
+      try {
+        compacted = options.coalesceQueuedMessages(
+          queued.map(copyQueuedMessage),
+          copyQueuedMessage(entry),
+          maxTextChars,
+        );
+        if (Array.isArray(compacted) && compacted.length + (inFlight === undefined ? 0 : 1) > maxPendingMessages) {
+          closeRecord(record);
+          reportBackpressure(record.channel);
+          return "backpressure";
+        }
+        if (!isValidCompactedQueue(compacted, inFlight, entry.cursor, maxTextChars)) {
+          throw new Error("platform-bridge-delivery-coalescer-invalid-output");
+        }
+        normalized = compacted.map((candidate) => normalizeQueuedMessage(candidate, maxTextChars));
+      } catch {
+        closeRecord(record);
+        reportDeliveryFailure(record.channel);
+        return "closed";
+      }
+      record.queue = inFlight === undefined ? normalized : [inFlight, ...normalized];
+      if (record.queue.length > maxPendingMessages) {
+        closeRecord(record);
+        reportBackpressure(record.channel);
+        return "backpressure";
+      }
+      startDrain(record);
+      return "accepted";
+    }
     if (record.queue.length >= maxPendingMessages) {
       closeRecord(record);
       reportBackpressure(record.channel);
@@ -392,6 +449,125 @@ export function createPlatformBridgeDeliveryAdapter<TChannel>(
   };
 }
 
+function copyQueuedMessage(
+  entry: PlatformBridgeDeliveryQueuedMessage,
+): PlatformBridgeDeliveryQueuedMessage {
+  return {
+    cursor: entry.cursor,
+    message: copyOutboundMessage(entry.message),
+  };
+}
+
+function normalizeQueuedMessage(
+  entry: PlatformBridgeDeliveryQueuedMessage,
+  maxTextChars: number,
+): PendingMessage {
+  return {
+    cursor: entry.cursor,
+    message: normalizeOutboundMessage(entry.message, maxTextChars),
+  };
+}
+
+function copyOutboundMessage(message: PlatformBridgeOutboundMessage): PlatformBridgeOutboundMessage {
+  switch (message.kind) {
+    case "snapshot":
+      return { kind: "snapshot", cursor: message.cursor, status: message.status, text: message.text };
+    case "text":
+      return { kind: "text", cursor: message.cursor, text: message.text };
+    case "status":
+      return { kind: "status", cursor: message.cursor, status: message.status };
+  }
+}
+
+function normalizeOutboundMessage(
+  message: PlatformBridgeOutboundMessage,
+  maxTextChars: number,
+): PlatformBridgeOutboundMessage {
+  switch (message.kind) {
+    case "snapshot":
+      return {
+        kind: "snapshot",
+        cursor: message.cursor,
+        status: message.status,
+        text: safeText(message.text, maxTextChars),
+      };
+    case "text":
+      return { kind: "text", cursor: message.cursor, text: safeText(message.text, maxTextChars) };
+    case "status":
+      return { kind: "status", cursor: message.cursor, status: message.status };
+  }
+}
+
+function isValidCompactedQueue(
+  value: unknown,
+  inFlight: PendingMessage | undefined,
+  incomingCursor: number,
+  maxTextChars: number,
+): value is readonly PlatformBridgeDeliveryQueuedMessage[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  let previousCursor = inFlight?.cursor ?? -1;
+  for (const entry of value) {
+    if (!isValidQueuedMessage(entry, previousCursor, incomingCursor, maxTextChars)) return false;
+    previousCursor = entry.cursor;
+  }
+  return previousCursor === incomingCursor;
+}
+
+function isValidQueuedMessage(
+  value: unknown,
+  previousCursor: number,
+  incomingCursor: number,
+  maxTextChars: number,
+): value is PlatformBridgeDeliveryQueuedMessage {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as { cursor?: unknown; message?: unknown };
+  return typeof entry.cursor === "number"
+    && validCursor(entry.cursor)
+    && entry.cursor >= previousCursor
+    && entry.cursor <= incomingCursor
+    && isValidOutboundMessage(entry.message, entry.cursor, maxTextChars);
+}
+
+function isValidOutboundMessage(
+  value: unknown,
+  cursor: number,
+  maxTextChars: number,
+): value is PlatformBridgeOutboundMessage {
+  if (!value || typeof value !== "object") return false;
+  const message = value as { kind?: unknown; cursor?: unknown; status?: unknown; text?: unknown };
+  if (message.cursor !== cursor) return false;
+  switch (message.kind) {
+    case "snapshot":
+      return isSnapshotStatus(message.status) && isSafeOutboundText(message.text, maxTextChars);
+    case "text":
+      return isSafeOutboundText(message.text, maxTextChars);
+    case "status":
+      return isEventStatus(message.status);
+    default:
+      return false;
+  }
+}
+
+function isSafeOutboundText(value: unknown, maxTextChars: number): value is string {
+  return typeof value === "string" && value === safeText(value, maxTextChars);
+}
+
+function isSnapshotStatus(value: unknown): value is "idle" | "running" | "awaiting-local-approval" {
+  return value === "idle" || value === "running" || value === "awaiting-local-approval";
+}
+
+function isEventStatus(value: unknown): value is Exclude<PlatformBridgeOutboundStatus, "idle" | "running"> {
+  return value === "awaiting-local-approval"
+    || value === "turn-started"
+    || value === "tool-running"
+    || value === "tool-completed"
+    || value === "tool-failed"
+    || value === "compaction-started"
+    || value === "compaction-completed"
+    || value === "turn-failed"
+    || value === "turn-completed";
+}
+
 function toSnapshotMessage(
   snapshot: SharedConversationSnapshot,
   maxTextChars: number,
@@ -457,7 +633,27 @@ function discardQueuedAtOrBefore<TChannel>(record: ChannelRecord<TChannel>, curs
 }
 
 function safeText(value: string, maxTextChars: number): string {
-  return value.replace(UNSAFE_TEXT_CONTROL_CHARACTERS, "").slice(0, maxTextChars);
+  let output = "";
+  let codePointCount = 0;
+  for (let index = 0; index < value.length && codePointCount < maxTextChars;) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint === undefined) break;
+    const width = codePoint > 0xffff ? 2 : 1;
+    if (!isUnsafeSharedTextCodePoint(codePoint) && !(codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+      output += value.slice(index, index + width);
+      codePointCount += 1;
+    }
+    index += width;
+  }
+  return output;
+}
+
+function isUnsafeSharedTextCodePoint(codePoint: number): boolean {
+  return (codePoint >= 0 && codePoint <= 0x08)
+    || codePoint === 0x0b
+    || codePoint === 0x0c
+    || (codePoint >= 0x0e && codePoint <= 0x1f)
+    || codePoint === 0x7f;
 }
 
 function validCursor(value: number): boolean {

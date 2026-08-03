@@ -103,6 +103,8 @@ export class ConversationLoop {
   readonly auditLogger: AuditLogger;
   provider: LLMProvider | null = null;
   sessionId: string = createDlpSafeUuid();
+  /** Monotonic host generation; increments on every active-session replacement. */
+  sessionEpoch = 0;
   sessionKind: SessionKind = "main";
   sessionRoutineId: string | null = null;
   sessionRoutineTitle: string | null = null;
@@ -568,6 +570,11 @@ export class ConversationLoop {
 
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /** Changes even when a user leaves and later returns to the same session id. */
+  getSessionEpoch(): number {
+    return this.sessionEpoch;
   }
 
   getSessionKind(): SessionKind {
