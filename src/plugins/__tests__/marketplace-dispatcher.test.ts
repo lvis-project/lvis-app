@@ -368,24 +368,29 @@ describe("PluginMarketplaceService install()", () => {
         ["1.0.0", makePluginZip({ ...current, entry: "./dist/hostPlugin.js" })],
         ["2.0.0", makePluginZip({ ...catalogItem("2.0.0"), entry: "./dist/hostPlugin.js" })],
       ]);
-      const fetcher: MarketplaceFetcher = {
+      const downloadArtifact = async (_id: string, version: string) => {
+        const body = zips.get(version);
+        if (!body) throw new Error(`missing fixture zip ${version}`);
+        return {
+          body,
+          sha256Header: createHash("sha256").update(body).digest("hex"),
+          status: 200,
+        };
+      };
+      const fetchSignatureEnvelope = async (_id: string, version: string) => {
+        const body = zips.get(version);
+        if (!body) throw new Error(`missing fixture zip ${version}`);
+        return makeEnvelope(body, signingKey.privateKey);
+      };
+      const fetcher: MarketplaceFetcher & {
+        downloadArtifact: typeof downloadArtifact;
+        fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+      } = {
         listPlugins: async () => [current],
         getPluginDetail: async () => current,
         downloadVersion: async () => { throw new Error("unexpected legacy download"); },
-        downloadArtifact: async (_id, version) => {
-          const body = zips.get(version);
-          if (!body) throw new Error(`missing fixture zip ${version}`);
-          return {
-            body,
-            sha256Header: createHash("sha256").update(body).digest("hex"),
-            status: 200,
-          };
-        },
-        fetchSignatureEnvelope: async (_id, version) => {
-          const body = zips.get(version);
-          if (!body) throw new Error(`missing fixture zip ${version}`);
-          return makeEnvelope(body, signingKey.privateKey);
-        },
+        downloadArtifact,
+        fetchSignatureEnvelope,
         listAnnouncements: async () => [],
       };
       const { service } = makeService(fetcher);
@@ -450,6 +455,47 @@ describe("PluginMarketplaceService install()", () => {
       });
       expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
         .toMatchObject({ version: current.version });
+
+      const persistedManifest = JSON.parse(
+        await readFile(join(installedDir, current.id, "plugin.json"), "utf-8"),
+      );
+      const persistedReceipt = await readFile(
+        join(cacheRoot, current.id, "install-receipt.json"),
+        "utf-8",
+      );
+      const persistedEntry = (JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: PluginRegistryEntry[];
+      }).plugins[0]!;
+      const restarted = makeProductionActivationRuntime();
+      const restartPublicationCause = new Error("restart projection publish failed");
+      const restartPrepareRuntimeGeneration =
+        restarted.runtime.prepareRuntimeGeneration.bind(restarted.runtime);
+      vi.spyOn(restarted.runtime, "prepareRuntimeGeneration")
+        .mockImplementation((projection, predecessor) => {
+          const prepared = restartPrepareRuntimeGeneration(projection, predecessor);
+          return { ...prepared, publish: () => { throw restartPublicationCause; } };
+        });
+      const restartFailure = await restarted.runtime.activatePreparedArtifact({
+        installId: current.id,
+        pluginRoot: join(installedDir, current.id),
+        manifest: persistedManifest,
+        receiptRaw: persistedReceipt,
+        registryEntry: {
+          installSource: persistedEntry.installSource,
+          manifestSha256: persistedEntry.manifestSha256,
+        },
+        durableCommit: async () => persistedEntry.manifestPath,
+      }).catch((error: unknown) => error);
+      expect(restartFailure).toBeInstanceOf(CommittedPluginGenerationPublicationError);
+      expect(restartFailure).toMatchObject({
+        publicationCause: restartPublicationCause,
+        outcome: { state: "active" },
+        committed: { result: persistedEntry.manifestPath },
+      });
+      expect(restarted.lifecycle.getActive(current.id)?.manifest.version).toBe(current.version);
+      await expect(restarted.lifecycle.acquire(current.id)).rejects.toThrow(
+        /dispatch blocked by publication failure/,
+      );
     },
   );
 
