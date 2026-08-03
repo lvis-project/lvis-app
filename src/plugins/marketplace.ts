@@ -87,7 +87,7 @@ export interface MarketplaceInstallFailureDiagnostic {
   publisher?: string;
 }
 
-export interface PreparedMarketplacePluginArtifact {
+interface PreparedMarketplacePluginArtifact {
   readonly installId: string;
   readonly pluginRoot: string;
   readonly manifest: PluginManifest;
@@ -99,7 +99,7 @@ export interface PreparedMarketplacePluginArtifact {
   durableCommit(): Promise<string>;
 }
 
-export class ManagedPluginUpdateRequiresRestartError extends Error {
+class ManagedPluginUpdateRequiresRestartError extends Error {
   constructor(
     readonly pluginId: string,
     readonly installedVersion: string,
@@ -112,7 +112,7 @@ export class ManagedPluginUpdateRequiresRestartError extends Error {
   }
 }
 
-export class PluginDowngradeRejectedError extends Error {
+class PluginDowngradeRejectedError extends Error {
   constructor(
     readonly pluginId: string,
     readonly installedVersion: string,
