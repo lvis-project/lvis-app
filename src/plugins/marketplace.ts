@@ -12,7 +12,11 @@ import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginReg
 import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { resolveDependencies } from "./dependency-resolver.js";
-import { resolvePluginUpdateCondition } from "./update-condition.js";
+import {
+  assertPluginCandidateAppCompatible,
+  resolvePluginUpdateCondition,
+  type PluginUpdateCondition,
+} from "./update-condition.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
@@ -93,6 +97,24 @@ export interface PreparedMarketplacePluginArtifact {
   >;
   readonly approvedPluginAccess?: PluginAccessSpec;
   durableCommit(): Promise<string>;
+}
+
+export class ManagedPluginUpdateRequiresRestartError extends Error {
+  constructor(
+    readonly pluginId: string,
+    readonly installedVersion: string,
+    readonly candidateVersion: string,
+  ) {
+    super(
+      `managed plugin update "${pluginId}" ${installedVersion} → ${candidateVersion} is deferred until LVIS restarts`,
+    );
+    this.name = "ManagedPluginUpdateRequiresRestartError";
+  }
+}
+
+interface ManualInstallCondition {
+  readonly condition: PluginUpdateCondition;
+  readonly installedVersion?: string;
 }
 
 export type PreparedMarketplacePluginActivation = (
@@ -680,43 +702,74 @@ export class PluginMarketplaceService {
     // policy lookup), so a fetch failure is fatal — let the original error
     // propagate instead of swallowing it and masking it as "Plugin not found".
     const catalogSnapshot = await this.fetcher.listPlugins();
-    let actor: "user" | "it-admin" = "user";
     const catalogItem = catalogSnapshot.find(
       (x) => x.id === pluginId || x.slug === pluginId,
     );
-    if (catalogItem) {
-      assertMarketplaceAppUpgradeNotRequired(catalogItem);
+    const canonicalPluginId = catalogItem?.id ?? pluginId;
+    return this.withPluginLock(canonicalPluginId, async () => {
+      if (!catalogItem) {
+        throw new Error(`Plugin not found in marketplace: ${pluginId}`);
+      }
+      const manualCondition = await this.resolveManualInstallCondition(catalogItem);
+      const condition = manualCondition.condition;
+      switch (condition.kind) {
+        case "eligible_managed_boot_update":
+          throw new ManagedPluginUpdateRequiresRestartError(
+            catalogItem.id,
+            manualCondition.installedVersion ?? "unknown",
+            catalogItem.version ?? "latest",
+          );
+        case "blocked_by_app":
+          assertPluginCandidateAppCompatible(catalogItem, getLvisAppVersion());
+          throw new Error(`plugin "${catalogItem.id}" is incompatible with this LVIS version`);
+        case "transaction_pending":
+          // The existing install transaction owns verified supersession and
+          // idempotent pending-row recovery. Keep routing through it.
+          break;
+        case "catalog_unavailable":
+        case "no_candidate":
+        case "blocked_by_channel":
+          throw new Error(`plugin "${catalogItem.id}" is not installable from this catalog`);
+        case "current":
+        case "eligible_user_install":
+        case "eligible_user_update":
+        case "eligible_managed_install":
+          break;
+        default: {
+          const exhaustive: never = condition;
+          return exhaustive;
+        }
+      }
       assertNetworkAccessAcknowledgement({
         plugin: catalogItem,
         acknowledgement: options?.networkAccessAcknowledgement,
       });
-    }
-    if (catalogItem && normalizeInstallPolicy(catalogItem) === "admin") {
-      actor = "it-admin";
-      try {
-        // Record the canonical catalog `id` (not the caller-supplied id/slug)
-        // so the audit row correlates with what the registry ultimately stores.
-        this.auditLogger?.log({
-          timestamp: new Date().toISOString(),
-          sessionId: "marketplace-install",
-          type: "info",
-          input: `plugin-install-escalation: ${catalogItem.id} (user→it-admin, catalog installPolicy=admin)`,
-          pluginInstall: {
-            event: "plugin-install-escalation",
-            pluginId: catalogItem.id,
-            catalogPolicy: "admin",
-            actorOriginal: "user",
-            actorEscalated: "it-admin",
-            location: "marketplace.install",
-            catalogSnapshotHash: shaOfCatalogItem(catalogItem),
-          },
-        });
-      } catch {
-        // Audit failure must never block install.
+
+      const actor: "user" | "it-admin" =
+        normalizeInstallPolicy(catalogItem) === "admin" ? "it-admin" : "user";
+      if (actor === "it-admin") {
+        try {
+          // Record the canonical catalog `id` (not the caller-supplied id/slug)
+          // so the audit row correlates with what the registry ultimately stores.
+          this.auditLogger?.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "marketplace-install",
+            type: "info",
+            input: `plugin-install-escalation: ${catalogItem.id} (user→it-admin, catalog installPolicy=admin)`,
+            pluginInstall: {
+              event: "plugin-install-escalation",
+              pluginId: catalogItem.id,
+              catalogPolicy: "admin",
+              actorOriginal: "user",
+              actorEscalated: "it-admin",
+              location: "marketplace.install",
+              catalogSnapshotHash: shaOfCatalogItem(catalogItem),
+            },
+          });
+        } catch {
+          // Audit failure must never block install.
+        }
       }
-    }
-    const canonicalPluginId = catalogItem?.id ?? pluginId;
-    return this.withPluginLock(canonicalPluginId, async () => {
       const state: InstallOperationState = {
         installedPluginIds: [],
         touchedEntries: new Map(),
@@ -983,6 +1036,30 @@ export class PluginMarketplaceService {
     for (const plugin of managed) {
       let isUpdate = false;
       try {
+        const candidateCondition = resolvePluginUpdateCondition({
+          appVersion: getLvisAppVersion(),
+          installed: { presence: "absent" },
+          candidate: plugin,
+        });
+        switch (candidateCondition.kind) {
+          case "eligible_managed_install":
+            break;
+          case "catalog_unavailable":
+          case "no_candidate":
+          case "current":
+          case "blocked_by_app":
+          case "blocked_by_channel":
+          case "transaction_pending":
+          case "eligible_user_install":
+          case "eligible_user_update":
+          case "eligible_managed_boot_update":
+            continue;
+          default: {
+            const exhaustive: never = candidateCondition;
+            void exhaustive;
+            continue;
+          }
+        }
         // Boot-time managed bootstrap is an internal, trusted flow —
         // bypass the public `install()` entry (which derives actor from
         // catalog) and drive `installWithDependencies` directly with
@@ -999,7 +1076,6 @@ export class PluginMarketplaceService {
         const installKind = await this.withPluginLock(
           plugin.id,
           async (): Promise<"installed" | "updated" | "skipped"> => {
-            await ensurePluginStateReadyForInstall(plugin.id);
             const currentRegistry = await readPluginRegistry(this.registryPath);
             const installedIds = await this.resolveInstalledIds(currentRegistry.plugins);
             let condition;
@@ -1052,6 +1128,7 @@ export class PluginMarketplaceService {
                 return exhaustive;
               }
             }
+            await ensurePluginStateReadyForInstall(plugin.id);
             try {
               await this.installWithDependencies(
                 plugin.id,
@@ -1490,6 +1567,50 @@ export class PluginMarketplaceService {
     const registry = await readPluginRegistry(this.registryPath);
     const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
     return entry ? this.cloneRegistryEntry(entry) : null;
+  }
+
+  private async resolveManualInstallCondition(
+    plugin: PluginMarketplaceItem,
+  ): Promise<ManualInstallCondition> {
+    const entry = await this.getRawRegistryEntry(plugin.id);
+    if (!entry) {
+      return {
+        condition: resolvePluginUpdateCondition({
+          appVersion: getLvisAppVersion(),
+          canaryOptIn: true,
+          installed: { presence: "absent" },
+          candidate: plugin,
+        }),
+      };
+    }
+    if (entry.pendingUpdate) {
+      return {
+        condition: resolvePluginUpdateCondition({
+          appVersion: getLvisAppVersion(),
+          canaryOptIn: true,
+          installed: { presence: "present", version: "", transactionPending: true },
+          candidate: plugin,
+        }),
+      };
+    }
+    const installedVersion = await this.readInstalledManifestVersion(entry);
+    if (!installedVersion) {
+      return {
+        condition: resolvePluginUpdateCondition({
+          appVersion: getLvisAppVersion(),
+          canaryOptIn: true,
+          installed: { presence: "absent" },
+          candidate: plugin,
+        }),
+      };
+    }
+    const condition = resolvePluginUpdateCondition({
+      appVersion: getLvisAppVersion(),
+      canaryOptIn: true,
+      installed: { presence: "present", version: installedVersion },
+      candidate: plugin,
+    });
+    return { condition, installedVersion };
   }
 
   /** Returns the version string from the currently-installed manifest, or null. */

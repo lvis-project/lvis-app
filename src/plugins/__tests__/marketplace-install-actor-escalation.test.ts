@@ -15,7 +15,7 @@
  * marketplace API, isolated from IPC wiring.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -105,6 +105,33 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     );
   }
 
+  async function writeInstalled(version: string, installSource: "admin" | "user") {
+    const pluginDir = join(pluginsDir, "mp-test");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      join(pluginDir, "plugin.json"),
+      JSON.stringify({
+        id: "mp-test",
+        name: "Marketplace Test",
+        version,
+        entry: "dist/index.js",
+        tools: [],
+      }),
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "mp-test",
+          manifestPath: "mp-test/plugin.json",
+          enabled: true,
+          installSource,
+        }],
+      }),
+    );
+  }
+
   function makeService(auditLogger?: { log: (e: CapturedAuditEntry) => void }) {
     const paths = makeTestPluginPaths({ rootDir: testDir, pluginsRoot: pluginsDir });
     const guard = new PluginDeploymentGuard({
@@ -175,6 +202,69 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     await writeCatalog("admin");
     const service = makeService();
     await expect(service.install("mp-test")).rejects.not.toThrow(/installed by user/);
+  });
+
+  it("defers an installed older admin plugin update until app restart", async () => {
+    await writeCatalog("admin");
+    const raw = JSON.parse(await readFile(marketplacePath, "utf-8"));
+    raw.plugins[0].version = "2.0.0";
+    await writeFile(marketplacePath, JSON.stringify(raw));
+    await writeInstalled("1.0.0", "admin");
+    const service = makeService();
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    );
+    const activatePreparedArtifact = vi.fn();
+
+    await expect(service.install("mp-test", undefined, {
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    })).rejects.toThrow(/managed plugin update.*restart/i);
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
+  });
+
+  it("keeps compatible missing admin plugins on the trusted install path", async () => {
+    await writeCatalog("admin");
+    const service = makeService();
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    ).mockResolvedValue({ pluginId: "mp-test", installed: true });
+
+    await expect(service.install("mp-test")).resolves.toEqual({
+      pluginId: "mp-test",
+      installed: true,
+    });
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    expect(installSpy.mock.calls[0]?.[1]).toBe("it-admin");
+  });
+
+  it("keeps compatible installed user updates on the live install path", async () => {
+    await writeCatalog("user");
+    const raw = JSON.parse(await readFile(marketplacePath, "utf-8"));
+    raw.plugins[0].version = "2.0.0";
+    await writeFile(marketplacePath, JSON.stringify(raw));
+    await writeInstalled("1.0.0", "user");
+    const service = makeService();
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    ).mockResolvedValue({ pluginId: "mp-test", installed: true });
+
+    await expect(service.install("mp-test")).resolves.toEqual({
+      pluginId: "mp-test",
+      installed: true,
+    });
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    expect(installSpy.mock.calls[0]?.[1]).toBe("user");
   });
 
   it("fails fast with the original error when the catalog snapshot fetch throws (no masking)", async () => {
