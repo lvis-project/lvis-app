@@ -130,6 +130,29 @@ describe("ConversationCommandPort", () => {
     expect(turnOptions(runTurn)).not.toHaveProperty("rolePrompt");
   });
 
+  it("fences a revoked platform bridge before its deferred turn can reach the model", async () => {
+    const { port, runTurn } = makeFixture();
+    const bridgeBinding = Object.freeze({
+      bridgeId: "11111111-1111-4111-8111-111111111111",
+      bridgeEpoch: 1,
+      routeId: "22222222-2222-4222-8222-222222222222",
+      routeEpoch: 2,
+      scope: "33333333-3333-4333-8333-333333333333",
+    });
+    let checks = 0;
+    // The final check inside the deferred lease factory must still run after
+    // command admission and persona resolution have both succeeded.
+    const bridgeGuard = Object.freeze({ isCurrent: vi.fn(() => ++checks < 6) });
+    const actor = createPlatformBridgeActor("d".repeat(64), { bridgeBinding, bridgeGuard });
+
+    await expect(port.execute(actor, {
+      kind: "message.send",
+      payload: { input: "do not start after revocation" },
+    })).resolves.toEqual({ ok: false, error: "remote-controller-revoked" });
+
+    expect(bridgeGuard.isCurrent).toHaveBeenCalledTimes(6);
+    expect(runTurn).not.toHaveBeenCalled();
+  });
 
   it("preserves a host-minted paired share binding and guard through the command boundary", async () => {
     const { port, runTurn } = makeFixture();
