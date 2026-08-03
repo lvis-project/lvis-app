@@ -474,4 +474,61 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       activatePreparedArtifact: vi.fn() as never,
     })).rejects.toThrow(/invalid or fabricated/);
   });
+
+  it("binds network acknowledgement by admitted value rather than caller object identity", async () => {
+    await writeCatalog("user");
+    const raw = JSON.parse(await readFile(marketplacePath, "utf-8"));
+    raw.plugins[0].networkAccess = {
+      allowedDomains: ["api.example.com"],
+      reasoning: "Sync fixture",
+    };
+    await writeFile(marketplacePath, JSON.stringify(raw));
+    const service = makeService();
+    const acknowledgement = { allowedDomains: ["api.example.com"] };
+    const admission = await service.preflightInstall("mp-test", {
+      networkAccessAcknowledgement: acknowledgement,
+    });
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    ).mockResolvedValue({ pluginId: "mp-test", installed: true });
+
+    acknowledgement.allowedDomains.push("evil.example.com");
+    await expect(service.install("mp-test", undefined, {
+      admission,
+      networkAccessAcknowledgement: acknowledgement,
+      activatePreparedArtifact: vi.fn() as never,
+    })).rejects.toThrow(/does not match network acknowledgement/);
+    expect(installSpy).not.toHaveBeenCalled();
+
+    await expect(service.install("mp-test", undefined, {
+      admission,
+      networkAccessAcknowledgement: { allowedDomains: ["api.example.com"] },
+      activatePreparedArtifact: vi.fn() as never,
+    })).resolves.toEqual({ pluginId: "mp-test", installed: true });
+    expect(installSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects using a valid admission for another requested plugin identity", async () => {
+    await writeCatalog("user");
+    const service = makeService();
+    const admission = await service.preflightInstall("mp-test");
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    );
+    const activatePreparedArtifact = vi.fn();
+
+    await expect(service.install("another-plugin", undefined, {
+      admission,
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    })).rejects.toThrow(/does not match requested plugin/);
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
+  });
 });
