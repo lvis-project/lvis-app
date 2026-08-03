@@ -3,6 +3,7 @@ import {
   PluginGenerationCoordinator,
   type ActivePluginGeneration,
 } from "../plugin-generation-coordinator.js";
+import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 
 interface GenerationState {
   label: string;
@@ -217,15 +218,24 @@ describe("PluginGenerationCoordinator", () => {
     async (kind) => {
       const coordinator = new PluginGenerationCoordinator<GenerationState>();
       if (kind === "replacement") await publishReady(coordinator, generation("g1"));
-      await expect(coordinator.commit(
+      const publicationCause = new Error(`${kind} publish failed`);
+      const failure = await coordinator.commit(
         generation(kind === "initial" ? "g1" : "g2"),
         async () => undefined,
         async () => undefined,
         "bundle-host-test",
         () => {
-          throw new Error(`${kind} publish failed`);
+          throw publicationCause;
         },
-      )).rejects.toThrow(`${kind} publish failed`);
+      ).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(CommittedPluginGenerationPublicationError);
+      expect(failure).toMatchObject({
+        pluginId: "bundle-host-test",
+        generationId: kind === "initial" ? "g1" : "g2",
+        publicationCause,
+        committed: undefined,
+      });
+      expect((failure as Error).cause).toBe(publicationCause);
       await expect(coordinator.acquire("bundle-host-test")).rejects.toThrow(
         /dispatch blocked by publication failure/,
       );
