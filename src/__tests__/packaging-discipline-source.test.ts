@@ -49,7 +49,7 @@ describe("installer smoke and packaging discipline", () => {
       "lvis-app",
       "lvis-marketplace",
       "lvis-plugin-sdk",
-      "lvis-plugin-ep-api",
+      "lvis-plugin-ep",
     ];
 
     for (const name of checkoutNames) {
