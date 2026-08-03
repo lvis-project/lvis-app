@@ -398,8 +398,8 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       if (!token || !this.activeLifecycleQueueTokens.has(token)) {
         throw new Error(`plugin '${pluginId}' committed outside its lifecycle queue`);
       }
-      token.completions.push(committed.completion);
-      if (!committed.retirementDeferred) await committed.completion;
+      if (committed.retirementDeferred) token.completions.push(committed.completion);
+      else await committed.completion;
       return committed;
     });
   }
