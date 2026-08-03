@@ -339,6 +339,11 @@
     },
     {
       "type": "exports",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PLATFORM_CONVERSATION_PROTOCOL_VERSION"
+    },
+    {
+      "type": "exports",
       "file": "src/engine/turn/knowledge-cap.ts",
       "name": "KNOWLEDGE_DEPTH_CAP"
     },
@@ -570,17 +575,7 @@
     {
       "type": "exports",
       "file": "src/main/subscription-attachment-input.ts",
-      "name": "MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS"
-    },
-    {
-      "type": "exports",
-      "file": "src/main/subscription-attachment-input.ts",
       "name": "normalizeInlineLocalDataUrl"
-    },
-    {
-      "type": "exports",
-      "file": "src/main/subscription-attachment-input.ts",
-      "name": "subscriptionAttachmentByteLength"
     },
     {
       "type": "exports",
@@ -1474,6 +1469,41 @@
     },
     {
       "type": "types",
+      "file": "src/api/tailnet-attachment-staging-store.ts",
+      "name": "TailnetAttachmentClaim"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-attachment-staging-store.ts",
+      "name": "TailnetAttachmentStageInput"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-attachment-staging-store.ts",
+      "name": "TailnetAttachmentStageResult"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-surface-server.ts",
+      "name": "TailnetControllerOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-surface-server.ts",
+      "name": "TailnetObserverEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-surface-server.ts",
+      "name": "TailnetObserverSnapshot"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-web-session-store.ts",
+      "name": "TailnetWebIssuedSession"
+    },
+    {
+      "type": "types",
       "file": "src/audit/audit-logger.ts",
       "name": "PluginInstallEscalationAudit"
     },
@@ -1699,8 +1729,98 @@
     },
     {
       "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventInput"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventListener"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventPayload"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventProtocolVersion"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventSubscription"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationAssistantRound"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationPermissionReview"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationToolEndOwnerDetail"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationToolReference"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationToolStartOwnerDetail"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationUsageReport"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationEventInput"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationEventListener"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationProtocolVersion"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationReplay"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationSubscription"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationSubscriptionOptions"
+    },
+    {
+      "type": "types",
       "file": "src/engine/llm/types.ts",
       "name": "StreamSmoothing"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/shared-conversation-projection.ts",
+      "name": "SharedConversationReplay"
     },
     {
       "type": "types",
@@ -1949,6 +2069,26 @@
     },
     {
       "type": "types",
+      "file": "src/main/conversation-command-port.ts",
+      "name": "ConversationCommand"
+    },
+    {
+      "type": "types",
+      "file": "src/main/conversation-command-port.ts",
+      "name": "ConversationCommandResult"
+    },
+    {
+      "type": "types",
+      "file": "src/main/conversation-command-port.ts",
+      "name": "ConversationCommandSubmission"
+    },
+    {
+      "type": "types",
+      "file": "src/main/conversation-command-port.ts",
+      "name": "HostOwnedPublicTurn"
+    },
+    {
+      "type": "types",
       "file": "src/main/crash-reporter.ts",
       "name": "SentryLike"
     },
@@ -1999,6 +2139,51 @@
     },
     {
       "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryChannel"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryChannelState"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryEnqueueResult"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryTransport"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryTransportSendOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeOutboundStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-inbound.ts",
+      "name": "PlatformBridgeInboundAuthorizer"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-inbound.ts",
+      "name": "PlatformBridgeReceiptStore"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-inbound.ts",
+      "name": "PlatformBridgeWebhookVerifier"
+    },
+    {
+      "type": "types",
       "file": "src/main/python-runtime.ts",
       "name": "BootstrapPhase"
     },
@@ -2041,6 +2226,16 @@
       "type": "types",
       "file": "src/main/skill-approvals-store.ts",
       "name": "SkillApprovalsFile"
+    },
+    {
+      "type": "types",
+      "file": "src/main/tailnet-pairing-share-store.ts",
+      "name": "TailnetOwnerPairingSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/main/tailnet-pairing-share-store.ts",
+      "name": "TailnetOwnerShareSummary"
     },
     {
       "type": "types",
@@ -2569,6 +2764,11 @@
     },
     {
       "type": "types",
+      "file": "src/shared/chat-origin.ts",
+      "name": "PlatformBridgeAuthority"
+    },
+    {
+      "type": "types",
       "file": "src/shared/llm-model-list.ts",
       "name": "LlmModelListError"
     },
@@ -2661,6 +2861,26 @@
       "type": "types",
       "file": "src/shared/routines-types.ts",
       "name": "RoutinePluginScope"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/tailnet-sharing.ts",
+      "name": "TailnetSharingFailure"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/tailnet-sharing.ts",
+      "name": "TailnetSharingInvitationSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/tailnet-sharing.ts",
+      "name": "TailnetSharingPairingSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/tailnet-sharing.ts",
+      "name": "TailnetSharingShareSummary"
     },
     {
       "type": "types",

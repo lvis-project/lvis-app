@@ -4,6 +4,7 @@
 
 import { resolve } from "node:path";
 import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
+import type { RemoteControllerAuthority } from "../shared/chat-origin.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import type { ReviewerInteractiveAutoApprove } from "./permission-settings-store.js";
@@ -53,6 +54,29 @@ export type ExecutionMode = "default" | "strict" | "auto" | "allow";
 const AUTO_APPROVED_LOCAL_BUILTIN_WRITES = new Set([
   "memory_write",
 ]);
+
+
+/**
+ * The first Tailnet-controller release intentionally excludes tools that either
+ * create work beyond the current turn or expand the tool/instruction surface.
+ * This is a host-owned P1 boundary; it is evaluated before any local permission
+ * memory, allow rule, reviewer, or global allow-mode decision.
+ */
+const TAILNET_CONTROLLER_P1_BLOCKED_TOOLS = new Set([
+  "bash",
+  "bash_kill",
+  "bash_output",
+  "powershell",
+  "request_plugin",
+  "routine_schedule",
+  "skill_load",
+  "tool_search",
+]);
+
+/** Shared fail-closed P1 check for the executor fallback when no manager is wired. */
+export function isTailnetControllerP1BlockedTool(toolName: string): boolean {
+  return TAILNET_CONTROLLER_P1_BLOCKED_TOOLS.has(toolName);
+}
 
 /**
  * P2 graduated grant tier. A persisted "Allow always" grant carries a tier so
@@ -213,6 +237,8 @@ export interface PermissionCheckContext {
    * authorize a later call with a broader argument scope.
    */
   approvalCacheKey?: string;
+  /** Host-owned remote-controller provenance; bypasses every remembered allow. */
+  remoteControllerAuthority?: RemoteControllerAuthority;
   /**
    * Tool-author `decisionOverride` for `meta`-category builtin tools, carried
    * from the executor so the post-computation guard owns re-elevation (V1 SOT).
@@ -1114,6 +1140,39 @@ export class PermissionManager {
       }
     }
 
+
+    // A native Tailnet controller may request a turn but never receives a
+    // reusable tool capability. This hard gate runs before local-memory
+    // exceptions, allow rules, global allow mode, reviewer auto-allow, and
+    // approval-memory lookup. Every ToolExecutor invocation — including a
+    // declared read — is an exact local one-shot decision: third-party tool
+    // declarations are not a sufficient authority boundary for remote control.
+    // Deferred and capability-expanding operations are not part of this P1.
+    if (context.remoteControllerAuthority !== undefined) {
+      if (resolvedCategory === "meta") {
+        // Meta tools can create or continue child/agent execution outside the
+        // original controller turn. That cross-turn authority propagation is a
+        // deliberate later protocol, not something a P1 controller may infer.
+        return {
+          decision: "deny",
+          reason: "Remote controller meta operations are not enabled",
+          layer: 2,
+        };
+      }
+      if (isTailnetControllerP1BlockedTool(toolName)) {
+        return {
+          decision: "deny",
+          reason: "Remote controller deferred or capability-expanding operations are not enabled",
+          layer: 2,
+        };
+      }
+      return {
+        decision: "ask",
+        reason: "Remote controller request requires local allow-once approval",
+        layer: 2,
+        forceModal: true,
+      };
+    }
     const toolModeOverride = this.toolModeOverrides.get(toolName);
     if (toolModeOverride === "strict") {
       return { decision: "ask", reason: t("be_permissionManager.mcpServerStrictMode"), layer: 2 };

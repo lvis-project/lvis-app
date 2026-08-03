@@ -30,7 +30,7 @@ import {
   PERMISSIONS,
 } from "../contract/app-contract.js";
 import type { ExternalOrigin } from "../contract/trust-origin.js";
-import type { ChatSendPayload } from "../shared/chat-origin.js";
+import type { ExternalChatSendPayload } from "../shared/chat-origin.js";
 import type { LocalApi } from "../api/local-api.js";
 import type {
   handleChatSessions,
@@ -99,7 +99,7 @@ export interface LvisClient {
    */
   getHistory(sessionId?: string): Promise<ActiveHistoryResult | SessionHistoryResult>;
   /** Send one chat message and drive a streamed turn. */
-  sendMessage(payload: ChatSendPayload): Promise<SendMessageResult>;
+  sendMessage(payload: ExternalChatSendPayload): Promise<SendMessageResult>;
   /** List installed plugin cards. */
   listPlugins(): Promise<ListPluginsResult>;
   /** List the marketplace catalog. */

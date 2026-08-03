@@ -1302,7 +1302,9 @@ lvis-app/src/
 │   ├── http-server.ts       # node:http loopback (127.0.0.1) transport: Bearer-secret
 │   │                        #  auth on every route (timingSafeEqual), POST /v1/dispatch,
 │   │                        #  GET /v1/events (SSE), GET /v1/health
-│   └── stream-broadcaster.ts # ChatStreamSink fan-out feeding the SSE endpoint
+│   ├── platform-conversation-legacy-adapter.ts
+│   │                        #  typed platform timeline → Electron/loopback SSE compatibility projection
+│   └── stream-broadcaster.ts # isolated A2A legacy-frame fan-out only
 ├── sdk/           # #1409 narrow typed LvisClient facade over any LocalApi
 │   └── index.ts      # read+send only; mutating gesture-gated ops omitted;
 │                     #  accepts LocalApi<string> (in-process or HTTP transport)
@@ -1324,11 +1326,17 @@ is opt-in (Settings `system.localApiServer` or `LVIS_LOCAL_API=1`, default OFF;
 lifecycle in `src/main/local-api-server.ts`): it binds 127.0.0.1 only, requires
 a per-boot Bearer secret on every route (persisted with the bound port to
 `~/.lvis/local-api/server.json` via `openFeatureNamespace`, 0o600), exposes
-`POST /v1/dispatch` + `GET /v1/events` (SSE mirror of the chat stream frames) +
+`POST /v1/dispatch` + `GET /v1/events` (typed platform timeline의 SSE 호환 projection) +
 `GET /v1/health`, and is closed in the app-shutdown path. `sdk/index.ts` is a
 narrow typed `LvisClient` (read+send only) over any `LocalApi<string>`;
 `cli/http-client.ts` + `scripts/lvis-cli.ts` make the CLI a thin HTTP client of
 the same server (`bun run cli -- session:list` 등).
+
+`chat.send`는 HTTP body가 origin 또는 사용자 활성화를 주장할 수 없는
+host-owned `ConversationCommandPort`를 거친다. Loopback 입력은 언제나
+`surface-user`로 mint되며, canonical event source는 `PlatformConversationTimeline`이다.
+다중 표면, 기본 OFF Tailnet observer, native controller P1 계약은
+[`multisurface-conversation-runtime.md`](../../architecture/multisurface-conversation-runtime.md)를 따른다.
 
 **Approval-gate-mediated external mutation (#1409 follow-up, landed).** The
 Bearer secret authenticates the CALLER (loopback, per-boot, constant-time

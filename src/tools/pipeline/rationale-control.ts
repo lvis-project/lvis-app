@@ -130,7 +130,10 @@ export type RationaleTaint =
   | "plugin-emitted"
   | "mcp-prompt-emitted"
   | "agent-message"
-  | "queue-auto";
+  | "queue-auto"
+  | "surface-user"
+  | "tailnet-surface"
+  | "platform-bridge";
 
 export interface RationaleEligibilityProvenance {
   startedFromUserKeyboard: boolean;
@@ -773,11 +776,11 @@ function normalizeAndSealRiskVerdict(
 
 const TOOL_TRUST_ORIGINS: readonly string[] = [
   "user-keyboard", "plugin-emitted", "app-emitted", "mcp-prompt-emitted",
-  "llm-tool-arg", "agent-message", "file-content", "queue-auto",
+  "llm-tool-arg", "agent-message", "file-content", "queue-auto", "surface-user", "tailnet-surface", "platform-bridge",
 ];
 const RATIONALE_TAINTS: readonly string[] = [
   "none", "file-content", "app-emitted", "plugin-emitted",
-  "mcp-prompt-emitted", "agent-message", "queue-auto",
+  "mcp-prompt-emitted", "agent-message", "queue-auto", "surface-user", "tailnet-surface", "platform-bridge",
 ];
 
 function assertExactOwnKeys(value: object, expected: readonly string[], label: string): void {

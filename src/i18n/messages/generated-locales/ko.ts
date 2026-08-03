@@ -158,6 +158,7 @@ import { ko as ko_subscriptionProvidersSection } from "../generated/subscription
 import { ko as ko_suggestedRepliesChipRow } from "../generated/suggestedRepliesChipRow.js";
 import { ko as ko_suggestedRepliesGhost } from "../generated/suggestedRepliesGhost.js";
 import { ko as ko_summaryToast } from "../generated/summaryToast.js";
+import { ko as ko_tailnetAccessTab } from "../generated/tailnetAccessTab.js";
 import { ko as ko_tokenCostBadge } from "../generated/tokenCostBadge.js";
 import { ko as ko_tokenProgressRing } from "../generated/tokenProgressRing.js";
 import { ko as ko_tokyoNight } from "../generated/tokyoNight.js";
@@ -343,6 +344,7 @@ export const koMessages: Record<string, string> = {
   ...ko_suggestedRepliesChipRow,
   ...ko_suggestedRepliesGhost,
   ...ko_summaryToast,
+  ...ko_tailnetAccessTab,
   ...ko_tokenCostBadge,
   ...ko_tokenProgressRing,
   ...ko_tokyoNight,

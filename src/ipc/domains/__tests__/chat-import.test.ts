@@ -10,7 +10,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
-import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../../main/subscription-attachment-input.js";
+import {
+  MAX_LOCAL_USER_CONTENT_PARTS,
+  MAX_LOCAL_USER_CONTENT_TEXT_CHARS,
+  MAX_LOCAL_USER_CONTENT_TEXT_PARTS,
+} from "../../../main/subscription-attachment-input.js";
 
 const CHANNEL = "lvis:chat:import";
 const MAX_SESSION_FILE_BYTES = 5_000_000;
@@ -306,6 +310,39 @@ describe("lvis:chat:import — rejection branches (fail-closed)", () => {
     expect(await invoke()).toEqual({ ok: false, error: "invalid-message-shape" });
     expect(deps.memoryManager.saveImportedSession).not.toHaveBeenCalled();
   });
+
+  it("rejects multipart user text over the part or aggregate-character cap", async () => {
+    const deps = await setup();
+    setFile({
+      ...validExport,
+      messages: [{
+        role: "user",
+        content: Array.from(
+          { length: MAX_LOCAL_USER_CONTENT_TEXT_PARTS + 1 },
+          (_, index) => ({ type: "text", text: `part ${index}` }),
+        ),
+      }],
+    });
+    expect(await invoke()).toEqual({ ok: false, error: "invalid-message-shape" });
+
+    setFile({
+      ...validExport,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "x".repeat(MAX_LOCAL_USER_CONTENT_TEXT_CHARS) },
+          { type: "text", text: "x" },
+        ],
+      }],
+    });
+    // The real file-size gate rejects this payload first because JSON framing
+    // makes it larger than 5 MB. Keep the mock fstat below that independent
+    // gate so this test reaches the composition validator itself.
+    fsState.size = MAX_SESSION_FILE_BYTES;
+    expect(await invoke()).toEqual({ ok: false, error: "invalid-message-shape" });
+    expect(deps.memoryManager.saveImportedSession).not.toHaveBeenCalled();
+  });
+
   it("rejects a message with an unknown role (whole import fails, no partial)", async () => {
     const deps = await setup();
     setFile({

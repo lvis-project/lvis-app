@@ -500,6 +500,15 @@ describe("preload contextBridge world shape lock", () => {
           "subscriptionUseApiForChat": "function",
           "subscriptionUseForChat": "function",
           "subscriptionVerifyRuntime": "function",
+          "tailnetSharing": [
+            "activatePairing",
+            "createCurrentConversationShare",
+            "createInvitation",
+            "onChanged",
+            "revokePairing",
+            "revokeShare",
+            "snapshot",
+          ],
           "terminal": [
             "input",
             "kill",

@@ -14,7 +14,7 @@ import {
 } from "../index.js";
 import type { LocalApi, LocalApiRequest, LocalApiResult } from "../../api/local-api.js";
 import { createLocalApi, type LocalApiDeps } from "../../api/local-api.js";
-import type { ChatSendContext } from "../../ipc/handlers/chat.js";
+import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import type { IpcDeps } from "../../ipc/types.js";
 import { CHANNELS, PERMISSIONS } from "../../contract/app-contract.js";
 
@@ -118,17 +118,15 @@ describe("LvisClient — setPermissionMode (approval-mediated external mutation)
 });
 
 describe("LvisClient — integration over a real local-api (cli origin)", () => {
-  const chatSendContext: ChatSendContext = {
-    sink: () => {},
-    allocateStreamId: () => 1,
-    trackStreamTurn: (factory) => factory(),
+  const conversationCommandPort: ConversationCommandPort = {
+    execute: async () => ({ ok: false, error: "not-exercised" }),
   };
 
   function realDeps(): LocalApiDeps {
     const ipc = {
       conversationLoop: { getSessionId: () => "s", permissionManager: { getMode: () => "acceptEdits" } },
     } as unknown as IpcDeps;
-    return { ipc, chatSendContext };
+    return { ipc, conversationCommandPort };
   }
 
   it("flows a public read (permission mode) through cli → dispatcher → handler", async () => {
