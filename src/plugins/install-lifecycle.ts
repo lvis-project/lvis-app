@@ -177,7 +177,11 @@ interface PluginLifecycleMarketplace {
 
 interface PluginInstallMarketplace extends PluginLifecycleMarketplace {
   list(): Promise<MarketplaceLifecycleCatalogItem[]>;
-  preflightInstall(pluginId: string): Promise<void>;
+  preflightInstall(pluginId: string, options?: {
+    expectedVersion?: string;
+    networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+  }): Promise<MarketplaceInstallAdmission>;
+  revalidateInstallAdmission(admission: MarketplaceInstallAdmission): Promise<void>;
   getLiveCatalogVersion(pluginId: string): Promise<string | null>;
   getInstalledVersion(pluginId: string): Promise<string | null>;
   quarantinePlugin(pluginId: string, reason: string): Promise<unknown>;
@@ -186,8 +190,15 @@ interface PluginInstallMarketplace extends PluginLifecycleMarketplace {
     onProgress?: (event: MarketplaceInstallerProgressEvent) => void,
     options?: PreparedActivationOptions & {
       networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+      admission?: MarketplaceInstallAdmission;
     },
   ): Promise<{ pluginId: string; installed: true }>;
+}
+
+interface MarketplaceInstallAdmission {
+  readonly pluginId: string;
+  readonly catalogVersion: string | null;
+  readonly installed: boolean;
 }
 
 export async function rollbackMarketplacePluginWithLifecycle(options: {
@@ -925,9 +936,13 @@ export async function installMarketplacePluginWithLifecycle(options: {
     refreshPluginNotifications,
   } = options;
   assertAppUpdateInstallNotRequested();
-  const catalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
+  const expectedVersionForGuard = expectedVersion?.trim();
+  const admission = await pluginMarketplace.preflightInstall(requestedPluginId, {
+    expectedVersion: expectedVersionForGuard,
+    networkAccessAcknowledgement,
+  });
   const resolvedLifecyclePluginId = pluginRuntime.resolvePluginId(
-    lifecyclePluginId ?? catalogState.pluginId,
+    lifecyclePluginId ?? admission.pluginId,
   );
   if (
     pluginRuntime.resolvePluginInstallIdIfKnown(resolvedLifecyclePluginId)
@@ -939,16 +954,23 @@ export async function installMarketplacePluginWithLifecycle(options: {
   }
   const progressSlug = eventSlug ?? resolvedLifecyclePluginId;
 
+  // Only an admitted request may cancel a restart that could otherwise hold
+  // the lifecycle lock indefinitely while waiting on preparation.
+  pluginRuntime.cancelPendingRestart(resolvedLifecyclePluginId);
+  if (resolvedLifecyclePluginId !== admission.pluginId) {
+    pluginRuntime.cancelPendingRestart(admission.pluginId);
+  }
+
   return withResolvedPluginInstallLocks(
     () => [
-      catalogState.pluginId,
+      admission.pluginId,
       pluginRuntime.resolvePluginId(
-        lifecyclePluginId ?? catalogState.pluginId,
+        lifecyclePluginId ?? admission.pluginId,
       ),
     ],
     async () => {
-    const currentCatalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
-    const currentRuntimePluginId = pluginRuntime.resolvePluginId(currentCatalogState.pluginId);
+    await pluginMarketplace.revalidateInstallAdmission(admission);
+    const currentRuntimePluginId = pluginRuntime.resolvePluginId(admission.pluginId);
     if (
       pluginRuntime.resolvePluginInstallIdIfKnown(currentRuntimePluginId)
       === null
@@ -957,22 +979,12 @@ export async function installMarketplacePluginWithLifecycle(options: {
         `Statically configured plugin cannot be replaced from the marketplace: ${currentRuntimePluginId}`,
       );
     }
-    await pluginMarketplace.preflightInstall(requestedPluginId);
-    pluginRuntime.cancelPendingRestart(currentRuntimePluginId);
-    await ensurePluginStateReadyForInstall(currentCatalogState.pluginId);
-    if (currentRuntimePluginId !== currentCatalogState.pluginId) {
+    await ensurePluginStateReadyForInstall(admission.pluginId);
+    if (currentRuntimePluginId !== admission.pluginId) {
       await ensurePluginStateReadyForInstall(currentRuntimePluginId);
     }
-    const expectedVersionForGuard = expectedVersion?.trim();
-    if (expectedVersionForGuard) {
-      assertExpectedVersionMatchesTrustedCatalog({
-        pluginId: currentCatalogState.pluginId,
-        expectedVersion: expectedVersionForGuard,
-        catalogVersion: await pluginMarketplace.getLiveCatalogVersion(requestedPluginId),
-      });
-    }
     const hadExistingInstall =
-      currentCatalogState.installed === true ||
+      admission.installed ||
       pluginRuntime.listPluginIds().includes(currentRuntimePluginId);
     if (hadExistingInstall) {
       broadcastInstallProgress?.({ slug: progressSlug, phase: "restarting" });
@@ -992,6 +1004,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
         }
     }, {
       networkAccessAcknowledgement,
+      admission,
       activatePreparedArtifact: async (prepared) => {
         if (
           expectedVersionForGuard
@@ -1024,36 +1037,4 @@ export async function installMarketplacePluginWithLifecycle(options: {
       }
     },
   );
-}
-
-function assertExpectedVersionMatchesTrustedCatalog(options: {
-  pluginId: string;
-  expectedVersion?: string;
-  catalogVersion: string | null;
-}): void {
-  const expectedVersion = options.expectedVersion?.trim();
-  if (!expectedVersion) return;
-  const catalogVersion = options.catalogVersion?.trim();
-  if (!catalogVersion) {
-    throw new Error(
-      `cannot verify requested install version for '${options.pluginId}': marketplace catalog has no version`,
-    );
-  }
-  if (catalogVersion === expectedVersion) return;
-  throw new Error(
-    `requested plugin '${options.pluginId}' version is stale: expected '${expectedVersion}', marketplace has '${catalogVersion}'`,
-  );
-}
-
-async function resolveMarketplaceLifecycleState(
-  pluginMarketplace: Pick<PluginInstallMarketplace, "list">,
-  requestedPluginId: string,
-): Promise<{ pluginId: string; installed: boolean | undefined; version: string | undefined }> {
-  const catalogItems = await pluginMarketplace.list();
-  const item = catalogItems.find((candidate) => candidate.id === requestedPluginId || candidate.slug === requestedPluginId);
-  return {
-    pluginId: item?.id ?? requestedPluginId,
-    installed: item?.installed,
-    version: item?.version,
-  };
 }
