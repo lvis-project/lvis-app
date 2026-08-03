@@ -97,6 +97,23 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     }
   });
 
+  it("uses the canonical lvis-plugin-ep directory through every EP stage", () => {
+    const staging = job("stage-inputs", "build-marketplace");
+    expect(staging).toContain("name: Checkout lvis-plugin-ep");
+    expect(staging).toContain("path: candidates/lvis-plugin-ep");
+    expect(staging).toContain(
+      '"candidates/lvis-plugin-ep:$EP_API_SHA:$EP_API_SELECTOR_KIND"',
+    );
+    expect(staging).toContain("--ep-root candidates/lvis-plugin-ep");
+
+    const epBuild = job("build-ep", "marketplace-e2e");
+    expect(epBuild).toContain("--destination candidate/lvis-plugin-ep");
+    expect(epDockerfile).toContain(
+      "COPY --chown=10001:10001 lvis-plugin-ep/ /workspace/lvis-plugin-ep/",
+    );
+    expect(epDockerfile).toContain("WORKDIR /workspace/lvis-plugin-ep");
+  });
+
   it("never transfers EP source to the final runner", () => {
     const finalJob = job("marketplace-e2e");
     expect(finalJob).toContain("name: m4-ep-bundle");
@@ -332,7 +349,7 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     }
     expect(hostDockerfile).toContain("COPY --chown=10001:10001 lvis-app/");
     expect(epDockerfile).toContain(
-      "COPY --chown=10001:10001 lvis-plugin-lge-api/",
+      "COPY --chown=10001:10001 lvis-plugin-ep/",
     );
   });
 
