@@ -1348,14 +1348,25 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
     // before the factory snapshots configOverrides; otherwise Python-backed
     // candidates start without the injected pythonExecutable and the atomic
     // update rolls back even though ordinary boot/restart can prepare them.
-    if (this.preparePluginStart) {
-      await this.preparePluginStart({
+    const preparationResult = await this.preparePluginStart?.({
         pluginId: manifest.id,
         manifest,
         manifestPath: resolve(input.pluginRoot, "plugin.json"),
         pluginRoot: input.pluginRoot,
       });
-    }
+    const candidateConfigOverride =
+      preparationResult && typeof preparationResult === "object"
+        ? preparationResult.configOverride
+        : undefined;
+    const candidateConfigOverrides = candidateConfigOverride
+      ? {
+          ...this.configOverrides,
+          [manifest.id]: {
+            ...(this.configOverrides[manifest.id] ?? {}),
+            ...candidateConfigOverride,
+          },
+        }
+      : this.configOverrides;
     const activationId = randomUUID();
     const artifactGenerationId = pluginArtifactGenerationId(manifestRaw, input.receiptRaw);
     const generationId = createHash("sha256")
@@ -1437,7 +1448,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
             hostRoot: this.hostRoot,
             pluginDataDir,
             manifest,
-            configOverrides: this.configOverrides,
+            configOverrides: candidateConfigOverrides,
             hostApi,
           })),
         ),
@@ -1511,6 +1522,9 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
             commit();
           }),
         );
+        if (candidateConfigOverride) {
+          this.mergeConfigOverride(manifest.id, candidateConfigOverride);
+        }
 
         // The durable commit and pointer publication have succeeded. Only now
         // may a blocked incumbent lose its readiness/retry state; durable
