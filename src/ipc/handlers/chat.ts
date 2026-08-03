@@ -13,7 +13,11 @@
  * re-deriving them.
  */
 import type { ChatInputOrigin, ChatSendPayload, RemoteControllerAuthority } from "../../shared/chat-origin.js";
-import { isChatSendInputOrigin, isUserKeyboardOrigin } from "../../shared/chat-origin.js";
+import {
+  isChatSendInputOrigin,
+  isRemoteControllerAuthorityCurrent,
+  isUserKeyboardOrigin,
+} from "../../shared/chat-origin.js";
 import { normalizeLocalUserContentParts } from "../../main/subscription-attachment-input.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import { PERSONA_PROMPT_ID_ALLOWLIST } from "../../main/persona-prompt-store.js";
@@ -452,20 +456,25 @@ export interface ChatSendContext {
   /** Allocates the next host-runtime-owned stream correlation id. */
   allocateStreamId: () => number;
   /** Tracks the host-runtime-owned active turn for every attached surface. */
-  trackStreamTurn: (factory: () => Promise<TurnResult>) => Promise<TurnResult>;
+  trackStreamTurn: (factory: () => Promise<ChatSendResult>) => Promise<ChatSendResult>;
   /** Host-owned remote-controller authority; external payloads cannot supply it. */
   remoteControllerAuthority?: RemoteControllerAuthority;
   /** Host-owned cancellation signal for a registered public remote turn. */
   abortSignal?: AbortSignal;
 }
 
+export type ChatSendResult = TurnResult | { ok: false; error: string };
+
 /** PUBLIC `lvis:chat:send` — parse + sanitize + stream one conversation turn. */
 export async function handleChatSend(
   deps: IpcDeps,
   payload: unknown,
   ctx: ChatSendContext,
-): Promise<TurnResult | { ok: false; error: string }> {
+): Promise<ChatSendResult> {
   const { conversationLoop, settingsService, auditLogger, personaPromptStore } = deps;
+  if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+    return { ok: false, error: "remote-controller-revoked" };
+  }
   const expectedSessionId = conversationLoop.getSessionId();
   const parsed = parseChatSendPayload(payload, {
     allowStagedEnvelopeAsRawText: ctx.remoteControllerAuthority !== undefined,
@@ -473,6 +482,11 @@ export async function handleChatSend(
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const { input, attachments, inputOrigin, userActivation, personaPromptId } = parsed.payload;
   const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId);
+  // Persona resolution is asynchronous. A remote route may be revoked while it
+  // is pending, so do not let a previously-admitted command continue.
+  if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+    return { ok: false, error: "remote-controller-revoked" };
+  }
   if (conversationLoop.getSessionId() !== expectedSessionId) {
     return { ok: false, error: "session-mismatch" };
   }
@@ -497,16 +511,29 @@ export async function handleChatSend(
   const streamId = ctx.allocateStreamId();
   const sink = ctx.createStreamEventSink(streamId);
   return ctx.trackStreamTurn(async () => {
+    // `trackStreamTurn` deliberately defers its factory after acquiring the
+    // lease. This is the effect-entry fence for a revoked remote authority.
+    if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+      return { ok: false, error: "remote-controller-revoked" };
+    }
     // The mailbox snapshot belongs to the same lease as the receiving turn.
     // Taking it before trackStreamTurn allowed session mutation (new/resume/
     // fork) to switch the loop while durable child guidance was being read.
     const mailboxTurn = inputOrigin === "user-keyboard" || inputOrigin === "queue-auto"
       ? await prepareParentMailboxTurn(deps)
       : null;
+    if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+      return { ok: false, error: "remote-controller-revoked" };
+    }
     // Redaction is inside the accepted turn lease: an overlapping send rejected
     // as `streaming-active` must not create a notice or DLP audit record for a
     // turn that never reaches the provider.
     const sanitized = sanitizeOutgoingTurnContent(settingsService, sink, input, validated);
+    // Keep the last guard recheck adjacent to the model/loop effect. There is
+    // intentionally no await between this check and `runStreamedTurn`.
+    if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+      return { ok: false, error: "remote-controller-revoked" };
+    }
     const result = await runStreamedTurn(
       conversationLoop,
       sanitized.input,

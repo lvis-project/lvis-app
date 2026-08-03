@@ -13,6 +13,7 @@ import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
 import { stopLocalApiServer } from "./local-api-server.js";
 import { stopTailnetObserverServer } from "./tailnet-surface-server.js";
+import { stopTelegramBridgeServer } from "./telegram-bridge-server.js";
 import { stopRemoteA2AReceiverServer } from "./a2a-remote-receiver-server.js";
 import { stopSubscriptionRuntimes } from "./subscription-runtime-service.js";
 import { unregisterAllGlobalShortcuts } from "./global-shortcuts.js";
@@ -113,6 +114,12 @@ export async function runAppShutdownCleanup(options: {
       // Tailnet observer is a separate listener over the shared projection.
       // Close its SSE streams before the host conversation runtime is disposed.
       await stopTailnetObserverServer();
+      if (signal.aborted) return;
+
+      // Telegram is a distinct external-platform ingress/egress adapter. Its
+      // runtime guard is revoked before the shared conversation services go
+      // down, so a late webhook or queued delivery cannot outlive shutdown.
+      await stopTelegramBridgeServer();
       if (signal.aborted) return;
 
       // Independent P4-5 listener: close it before the owning remote runtime
