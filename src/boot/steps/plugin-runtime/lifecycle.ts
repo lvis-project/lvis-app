@@ -14,7 +14,7 @@ import { t } from "../../../i18n/index.js";
 import { createLogger } from "../../../lib/logger.js";
 import { sendToWindow } from "../../../ipc/safe-send.js";
 import { declaresHostManagedPythonRuntime } from "./manifest.js";
-import type { PluginRuntime, PluginRuntimeOptions,
+import type { PluginRuntimeOptions,
 } from "../../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../../main/python-runtime.js";
 import type { LateBindingRefs } from "../plugin-runtime.js";
@@ -24,7 +24,6 @@ const log = createLogger("lvis");
 
 /** Explicit deps for the lifecycle callbacks. Lazy bindings arrive as getters. */
 export interface LifecycleDeps {
-  getPluginRuntime: () => PluginRuntime;
   lateBinding: LateBindingRefs;
   getMainWindow?: () => BrowserWindow | null;
   mainWindow: BrowserWindow;
@@ -42,7 +41,6 @@ export function createLifecycleCallbacks(
   deps: LifecycleDeps,
 ): Pick<PluginRuntimeOptions, "preparePluginStart" | "onDisable" | "onActiveStateChange" | "onEnable"> {
   const {
-    getPluginRuntime,
     lateBinding,
     getMainWindow,
     mainWindow,
@@ -78,11 +76,9 @@ export function createLifecycleCallbacks(
           message: t("be_pluginRuntime.pluginRuntimeReady"),
           progressPct: 100,
         });
-        const pluginRuntime = getPluginRuntime();
-        pluginRuntime.mergeConfigOverride(pluginId, { pythonExecutable: runtime.pythonPath,
-        });
         log.info("plugin dependency runtime ready: %s -> %s", pluginId, runtime.pythonPath,
         );
+        return { configOverride: { pythonExecutable: runtime.pythonPath } };
       })();
     },
     onDisable: (pluginId) => {

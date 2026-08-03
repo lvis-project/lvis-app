@@ -1,6 +1,6 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, win32 } from "node:path";
 import { PassThrough } from "node:stream";
@@ -459,7 +459,9 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
       writeFileSync(executable, "");
       writeFileSync(wrapper, "");
 
-      await expect(resolveAcpSubscriptionExecutable(executable, "win32")).resolves.toBe(resolve(executable));
+      await expect(resolveAcpSubscriptionExecutable(executable, "win32")).resolves.toBe(
+        realpathSync(resolve(executable)),
+      );
       await expect(resolveAcpSubscriptionExecutable(wrapper, "win32")).rejects.toMatchObject({
         code: "acp-runtime-invalid-executable",
       });
