@@ -55,7 +55,7 @@ export const preparedActivationOptionsForTest = Object.freeze({
   activatePreparedArtifact: activateAndCommitPreparedPluginForTest,
 });
 export const preparedManagedActivationOptionsForTest = Object.freeze({
-  ...preparedActivationOptionsForTest,
+  mode: "pre-start-sync" as const,
   ensurePluginStateReadyForInstall: async (_pluginId: string) => undefined,
 });
 

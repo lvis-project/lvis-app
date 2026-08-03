@@ -2,10 +2,7 @@ import type { BrowserWindow } from "electron";
 import type { MarketplaceSettings } from "../data/settings-store.js";
 import type {
   PluginMarketplaceService,
-  PreparedMarketplacePluginArtifact,
-  PreparedMarketplacePluginActivation,
 } from "../plugins/marketplace.js";
-import type { PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
 import { withAllPluginInstallLocks } from "../plugins/install-lifecycle.js";
@@ -35,13 +32,20 @@ export function resolveManagedPluginBootstrap(input: {
   };
 }
 
-export interface RunManagedBootstrapInput {
+interface RunManagedBootstrapBaseInput {
   pluginMarketplace: PluginMarketplaceService;
-  pluginRuntime: PluginRuntime;
   ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
   mainWindow: BrowserWindow | null | undefined;
   marketplace: Pick<MarketplaceSettings, "backend" | "cloudBaseUrl">;
 }
+
+export type RunManagedBootstrapInput = RunManagedBootstrapBaseInput & (
+  | {
+      mode: "pre-start-sync";
+      admitPreStartOperation: <T>(operation: () => Promise<T>) => Promise<T>;
+    }
+  | { mode: "repair-missing-only"; admitPreStartOperation?: never }
+);
 
 /**
  * In-flight bootstrap promise. The first-boot caller and the renderer-driven
@@ -79,7 +83,10 @@ export function _resetBootstrapInFlightForTest(): void {
  */
 export function runManagedBootstrap(input: RunManagedBootstrapInput): Promise<void> {
   if (bootstrapInFlight) return bootstrapInFlight;
-  const promise = doRunManagedBootstrap(input).finally(() => {
+  const operation = input.mode === "pre-start-sync"
+    ? requirePreStartAdmission(input.admitPreStartOperation)(() => doRunManagedBootstrap(input))
+    : doRunManagedBootstrap(input);
+  const promise = operation.finally(() => {
     // The .finally chain becomes the in-flight promise itself, so we clear
     // the singleton after it resolves regardless of identity comparison.
     bootstrapInFlight = null;
@@ -88,10 +95,18 @@ export function runManagedBootstrap(input: RunManagedBootstrapInput): Promise<vo
   return promise;
 }
 
+function requirePreStartAdmission(
+  admission: RunManagedBootstrapInput["admitPreStartOperation"],
+): NonNullable<RunManagedBootstrapInput["admitPreStartOperation"]> {
+  if (typeof admission !== "function") {
+    throw new Error("managed pre-start sync requires boot phase admission");
+  }
+  return admission;
+}
+
 async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<void> {
   const {
     pluginMarketplace,
-    pluginRuntime,
     ensurePluginStateReadyForInstall,
     mainWindow,
     marketplace,
@@ -112,15 +127,12 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   }
   notifyBootstrapStatus(mainWindow, { phase: "start" });
   try {
-    const activatePreparedArtifact: PreparedMarketplacePluginActivation =
-      (prepared: PreparedMarketplacePluginArtifact) =>
-        pluginRuntime.activatePreparedArtifact<string>(prepared);
-    // A dependency preparation can hold a per-plugin lifecycle lock forever.
-    // Cancellation must happen before the outer all-plugin lock queues.
-    pluginRuntime.cancelAllPendingRestarts();
+    // The all-plugin lock remains the durable transaction boundary. Runtime
+    // restart cancellation is unnecessary because this phase runs before the
+    // one sealed start and never publishes or starts a candidate generation.
     const ensureResult = await withAllPluginInstallLocks(async () => {
       return pluginMarketplace.ensureManagedInstalled({
-        activatePreparedArtifact,
+        mode: input.mode,
         ensurePluginStateReadyForInstall,
       });
     });

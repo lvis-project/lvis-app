@@ -189,7 +189,9 @@ vi.mock("../plugins.js", () => ({
 }));
 
 vi.mock("../managed-marketplace.js", () => ({
-  runManagedBootstrap: vi.fn(async () => {}),
+  runManagedBootstrap: vi.fn(async () => {
+    h.rec("managedPreStartSync");
+  }),
 }));
 
 vi.mock("../steps/plugin-runtime.js", () => ({
@@ -225,10 +227,17 @@ vi.mock("../steps/plugin-runtime.js", () => ({
         discardGeneration: vi.fn(async () => {}),
         retireGeneration: vi.fn(async () => {}),
       },
-      setBundleLifecycleHandler: vi.fn(),
-      startPlugins: vi.fn(async () => {}),
+      setBundleLifecycleHandler: vi.fn(() => h.rec("lifecycleBound")),
+      startPlugins: vi.fn(async () => h.rec("startPlugins")),
+      admitPreStartOperation: vi.fn(async (operation) => operation()),
     };
   }),
+}));
+
+vi.mock("../../plugins/plugin-bundle-lifecycle.js", () => ({
+  PluginBundleLifecycle: class {
+    recoverRetirements = vi.fn(async () => h.rec("retirementsRecovered"));
+  },
 }));
 
 vi.mock("../steps/whitelist-bootstrap.js", () => ({
@@ -667,6 +676,9 @@ describe("bootstrap() integration lock", () => {
     // The ConversationLoop is built before the late-bound SubAgentRunner, which
     // reuses the loop's dep set.
     assertBefore("conversationLoop", "subAgentRunner");
+    assertBefore("lifecycleBound", "retirementsRecovered");
+    assertBefore("retirementsRecovered", "managedPreStartSync");
+    assertBefore("managedPreStartSync", "startPlugins");
   });
 
   it("exposes the deferred lifecycle handles main.ts drives after boot", () => {
