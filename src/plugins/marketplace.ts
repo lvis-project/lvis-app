@@ -5,15 +5,22 @@ import { dirname, isAbsolute, posix, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
+import type { CommittedPluginGeneration } from "./plugin-host-generation.js";
+import {
+  isCommittedPluginGenerationPublicationError,
+} from "./committed-generation-publication-error.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
-import { IncompatibleAppVersionError, MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
-import { appVersionSatisfiesMin } from "../shared/semver-compare.js";
+import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { resolveDependencies } from "./dependency-resolver.js";
-import { isNewer } from "./update-detector.js";
+import {
+  assertPluginCandidateAppCompatible,
+  resolvePluginUpdateCondition,
+  type PluginUpdateCondition,
+} from "./update-condition.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
@@ -84,7 +91,7 @@ export interface MarketplaceInstallFailureDiagnostic {
   publisher?: string;
 }
 
-export interface PreparedMarketplacePluginArtifact {
+interface PreparedMarketplacePluginArtifact {
   readonly installId: string;
   readonly pluginRoot: string;
   readonly manifest: PluginManifest;
@@ -96,9 +103,85 @@ export interface PreparedMarketplacePluginArtifact {
   durableCommit(): Promise<string>;
 }
 
+class ManagedPluginUpdateRequiresRestartError extends Error {
+  constructor(
+    readonly pluginId: string,
+    readonly installedVersion: string,
+    readonly candidateVersion: string,
+  ) {
+    super(
+      `managed plugin update "${pluginId}" ${installedVersion} → ${candidateVersion} is deferred until LVIS restarts`,
+    );
+    this.name = "ManagedPluginUpdateRequiresRestartError";
+  }
+}
+
+class PluginDowngradeRejectedError extends Error {
+  constructor(
+    readonly pluginId: string,
+    readonly installedVersion: string,
+    readonly candidateVersion: string,
+  ) {
+    super(
+      `plugin downgrade is not allowed: "${pluginId}" has ${installedVersion}, catalog offers ${candidateVersion}`,
+    );
+    this.name = "PluginDowngradeRejectedError";
+  }
+}
+
+export class PluginInstalledStateUnreadableError extends Error {
+  constructor(readonly pluginId: string) {
+    super(
+      `plugin "${pluginId}" has installed state but its version is unreadable; refusing replacement`,
+    );
+    this.name = "PluginInstalledStateUnreadableError";
+  }
+}
+
+export class PluginUpdateRecoveryRequiredError extends Error {
+  constructor(readonly pluginId: string) {
+    super(
+      `plugin "${pluginId}" has a pending update transaction; recovery is required before retry`,
+    );
+    this.name = "PluginUpdateRecoveryRequiredError";
+  }
+}
+
+interface ManualInstallCondition {
+  readonly condition: PluginUpdateCondition;
+  readonly installedVersion?: string;
+}
+
+export interface MarketplaceInstallAdmission {
+  readonly pluginId: string;
+  readonly catalogVersion: string | null;
+  readonly installed: boolean;
+}
+
+interface MarketplaceInstallAdmissionRecord {
+  readonly requestedPluginId: string;
+  readonly catalogSnapshot: readonly PluginMarketplaceItem[];
+  readonly catalogItem: PluginMarketplaceItem;
+  readonly networkAccessAcknowledgementJson: string;
+  consumed: boolean;
+}
+
 export type PreparedMarketplacePluginActivation = (
   prepared: PreparedMarketplacePluginArtifact,
-) => Promise<{ result: string; retirement: Promise<void> }>;
+) => Promise<CommittedPluginGeneration<string>>;
+
+async function commitPreparedArtifactWithoutPublication(
+  prepared: PreparedMarketplacePluginArtifact,
+): Promise<CommittedPluginGeneration<string>> {
+  const result = await prepared.durableCommit();
+  const completion = Promise.resolve();
+  return {
+    result,
+    retirement: completion,
+    completion,
+    retirementDeferred: false,
+  };
+}
 
 function requirePreparedMarketplacePluginActivation(
   activation: PreparedMarketplacePluginActivation | undefined,
@@ -119,6 +202,16 @@ function normalizeInstallPolicy(source: {
     return "admin";
   }
   return "user";
+}
+
+function deepFreezeValue<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      deepFreezeValue(nested);
+    }
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function normalizePluginLookupKey(value: string | null | undefined): string {
@@ -199,10 +292,16 @@ function assertNetworkAccessAcknowledgement(options: {
 }): void {
   const expected = buildNetworkAccessAcknowledgement(options.plugin.networkAccess);
   if (!expected) return;
-  if (JSON.stringify(options.acknowledgement ?? null) === JSON.stringify(expected)) return;
+  if (networkAccessGrantsEqual(expected, options.acknowledgement)) return;
   throw new Error(
     `plugin "${options.plugin.id}" networkAccess grant must be acknowledged before install`,
   );
+}
+
+function serializeNetworkAccessAcknowledgement(
+  acknowledgement: NetworkAccessAcknowledgement | undefined,
+): string {
+  return JSON.stringify(buildNetworkAccessAcknowledgement(acknowledgement) ?? null);
 }
 
 function resolveRollbackInstallSource(
@@ -449,6 +548,8 @@ export class PluginMarketplaceService {
   private readonly locks = new Map<string, Promise<void>>();
   private readonly installReceiptValidationCache = new Map<string, InstallReceiptValidation>();
   private readonly installFailureDiagnostics = new Map<string, MarketplaceInstallFailureDiagnostic>();
+  private readonly installAdmissions = new WeakMap<object, MarketplaceInstallAdmissionRecord>();
+  private readonly deferredLifecycleCleanups = new Set<Promise<void>>();
   /** Optional diagnostic logger. Injected in tests; no-op in production. */
   readonly log?: (message: string, ...args: unknown[]) => void;
 
@@ -664,6 +765,7 @@ export class PluginMarketplaceService {
     options: {
       networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
       activatePreparedArtifact: PreparedMarketplacePluginActivation;
+      admission?: MarketplaceInstallAdmission;
       signal?: AbortSignal;
     },
   ): Promise<{ pluginId: string; installed: true }> {
@@ -680,44 +782,48 @@ export class PluginMarketplaceService {
     // The snapshot is now REQUIRED for the whole install (not just an optional
     // policy lookup), so a fetch failure is fatal — let the original error
     // propagate instead of swallowing it and masking it as "Plugin not found".
-    const catalogSnapshot = await this.fetcher.listPlugins();
-    let actor: "user" | "it-admin" = "user";
-    const catalogItem = catalogSnapshot.find(
-      (x) => x.id === pluginId || x.slug === pluginId,
-    );
-    if (catalogItem) {
-      assertMarketplaceAppUpgradeNotRequired(catalogItem);
-      assertNetworkAccessAcknowledgement({
-        plugin: catalogItem,
-        acknowledgement: options?.networkAccessAcknowledgement,
-      });
-    }
-    if (catalogItem && normalizeInstallPolicy(catalogItem) === "admin") {
-      actor = "it-admin";
-      try {
-        // Record the canonical catalog `id` (not the caller-supplied id/slug)
-        // so the audit row correlates with what the registry ultimately stores.
-        this.auditLogger?.log({
-          timestamp: new Date().toISOString(),
-          sessionId: "marketplace-install",
-          type: "info",
-          input: `plugin-install-escalation: ${catalogItem.id} (user→it-admin, catalog installPolicy=admin)`,
-          pluginInstall: {
-            event: "plugin-install-escalation",
-            pluginId: catalogItem.id,
-            catalogPolicy: "admin",
-            actorOriginal: "user",
-            actorEscalated: "it-admin",
-            location: "marketplace.install",
-            catalogSnapshotHash: shaOfCatalogItem(catalogItem),
-          },
-        });
-      } catch {
-        // Audit failure must never block install.
-      }
-    }
-    const canonicalPluginId = catalogItem?.id ?? pluginId;
+    const admission = options.admission ?? await this.preflightInstall(pluginId, {
+      networkAccessAcknowledgement: options.networkAccessAcknowledgement,
+    });
+    const admissionRecord = this.requireInstallAdmission(admission, pluginId);
+    const catalogSnapshot = admissionRecord.catalogSnapshot as PluginMarketplaceItem[];
+    const catalogItem = admissionRecord.catalogItem;
+    const canonicalPluginId = admission.pluginId;
     return this.withPluginLock(canonicalPluginId, async () => {
+      const currentRecord = this.requireInstallAdmission(admission, pluginId);
+      const manualCondition = await this.resolveManualInstallCondition(currentRecord.catalogItem);
+      this.assertManualInstallCondition(currentRecord.catalogItem, manualCondition);
+      if (serializeNetworkAccessAcknowledgement(options.networkAccessAcknowledgement)
+          !== currentRecord.networkAccessAcknowledgementJson) {
+        throw new Error("marketplace install admission request does not match network acknowledgement");
+      }
+      currentRecord.consumed = true;
+
+      const actor: "user" | "it-admin" =
+        normalizeInstallPolicy(catalogItem) === "admin" ? "it-admin" : "user";
+      if (actor === "it-admin") {
+        try {
+          // Record the canonical catalog `id` (not the caller-supplied id/slug)
+          // so the audit row correlates with what the registry ultimately stores.
+          this.auditLogger?.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "marketplace-install",
+            type: "info",
+            input: `plugin-install-escalation: ${catalogItem.id} (user→it-admin, catalog installPolicy=admin)`,
+            pluginInstall: {
+              event: "plugin-install-escalation",
+              pluginId: catalogItem.id,
+              catalogPolicy: "admin",
+              actorOriginal: "user",
+              actorEscalated: "it-admin",
+              location: "marketplace.install",
+              catalogSnapshotHash: shaOfCatalogItem(catalogItem),
+            },
+          });
+        } catch {
+          // Audit failure must never block install.
+        }
+      }
       const state: InstallOperationState = {
         installedPluginIds: [],
         touchedEntries: new Map(),
@@ -747,6 +853,61 @@ export class PluginMarketplaceService {
         }
         throw error;
       }
+    });
+  }
+
+  /** Read-only eligibility gate shared by lifecycle and direct install callers. */
+  async preflightInstall(
+    pluginId: string,
+    options: {
+      expectedVersion?: string;
+      networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+    } = {},
+  ): Promise<MarketplaceInstallAdmission> {
+    const fetched = await this.fetcher.listPlugins();
+    const plugins = deepFreezeValue(structuredClone(fetched)) as readonly PluginMarketplaceItem[];
+    const catalogItem = plugins.find((item) => item.id === pluginId || item.slug === pluginId);
+    const canonicalPluginId = catalogItem?.id ?? pluginId;
+    return this.withPluginLock(canonicalPluginId, async () => {
+      if (!catalogItem) {
+        throw new Error(`Plugin not found in marketplace: ${pluginId}`);
+      }
+      const manualCondition = await this.resolveManualInstallCondition(catalogItem);
+      this.assertManualInstallCondition(catalogItem, manualCondition);
+      const expectedVersion = options.expectedVersion?.trim();
+      if (expectedVersion && catalogItem.version !== expectedVersion) {
+        throw new Error(
+          `requested plugin '${catalogItem.id}' version is stale: expected '${expectedVersion}', marketplace has '${catalogItem.version ?? "unknown"}'`,
+        );
+      }
+      assertNetworkAccessAcknowledgement({
+        plugin: catalogItem,
+        acknowledgement: options.networkAccessAcknowledgement,
+      });
+      const admission = Object.freeze({
+        pluginId: catalogItem.id,
+        catalogVersion: catalogItem.version ?? null,
+        installed: manualCondition.installedVersion !== undefined,
+      });
+      this.installAdmissions.set(admission, {
+        requestedPluginId: pluginId,
+        catalogSnapshot: plugins,
+        catalogItem,
+        networkAccessAcknowledgementJson: serializeNetworkAccessAcknowledgement(
+          options.networkAccessAcknowledgement,
+        ),
+        consumed: false,
+      });
+      return admission;
+    });
+  }
+
+  async revalidateInstallAdmission(admission: MarketplaceInstallAdmission): Promise<void> {
+    this.requireInstallAdmission(admission);
+    return this.withPluginLock(admission.pluginId, async () => {
+      const current = this.requireInstallAdmission(admission);
+      const condition = await this.resolveManualInstallCondition(current.catalogItem);
+      this.assertManualInstallCondition(current.catalogItem, condition);
     });
   }
 
@@ -865,19 +1026,6 @@ export class PluginMarketplaceService {
       }
     }
 
-    // Plugin↔app minimum-version gate — HARD BLOCK before downloading the
-    // artifact. When the plugin declares `requires.minAppVersion` higher than
-    // the running LVIS app, refuse the install and direct the user to update
-    // the app. Absent = compatible with all (purely additive). Fail-closed:
-    // an unresolvable app version ("unknown" sentinel) also blocks.
-    const minAppVersion = plugin.requires?.minAppVersion;
-    if (minAppVersion) {
-      const currentAppVersion = getLvisAppVersion();
-      if (!appVersionSatisfiesMin(currentAppVersion, minAppVersion)) {
-        throw new IncompatibleAppVersionError(minAppVersion, currentAppVersion);
-      }
-    }
-
     // S14 — capability preflight. `requires.capabilities[]` is a separate
     // contract from plugin-id `dependencies[]`: any installed plugin that
     // advertises a matching `capabilities[]` tag satisfies the requirement.
@@ -938,9 +1086,11 @@ export class PluginMarketplaceService {
   /**
    * Boot-time admin plugin bootstrap. Queries the marketplace catalog for
    * every admin-policy plugin and:
-   *  - **force-installs** any that are missing from the local registry, and
-   *  - **auto-updates** any installed one whose catalog version is strictly
-   *    newer than the installed version.
+   * In `pre-start-sync` mode, installs structurally missing managed plugins and
+   * updates compatible managed plugins before the runtime is sealed. In
+   * `repair-missing-only` mode, only a plugin with neither a registry row nor
+   * an owned artifact directory is repaired; all other installed/runtime
+   * states are preserved for the next ordinary restart.
    * Runs as actor="it-admin" so the install-policy guard permits the install.
    *
    * Auto-update rationale: admin-policy plugins are IT-managed, so the signed
@@ -955,17 +1105,37 @@ export class PluginMarketplaceService {
    * and the app continues without the failed plugins.
    */
   async ensureManagedInstalled(options: {
-    activatePreparedArtifact: PreparedMarketplacePluginActivation;
+    mode: "pre-start-sync";
     ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+    activatePreparedArtifact?: never;
+  } | {
+    mode: "repair-missing-only";
+    ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+    activatePreparedArtifact: PreparedMarketplacePluginActivation;
   }): Promise<{
     installed: string[];
     updated: string[];
     failed: Array<{ id: string; error: string }>;
   }> {
-    const activatePreparedArtifact = requirePreparedMarketplacePluginActivation(
-      options?.activatePreparedArtifact,
-      "managed marketplace install",
-    );
+    if (
+      options?.mode !== "pre-start-sync" &&
+      options?.mode !== "repair-missing-only"
+    ) {
+      throw new Error("managed marketplace install requires an explicit sync mode");
+    }
+    if (
+      options.mode === "pre-start-sync" &&
+      "activatePreparedArtifact" in options &&
+      options.activatePreparedArtifact !== undefined
+    ) {
+      throw new Error("managed pre-start sync forbids runtime activation");
+    }
+    const activatePreparedArtifact = options.mode === "repair-missing-only"
+      ? requirePreparedMarketplacePluginActivation(
+          options.activatePreparedArtifact,
+          "managed missing-plugin repair",
+        )
+      : commitPreparedArtifactWithoutPublication;
     if (typeof options?.ensurePluginStateReadyForInstall !== "function") {
       throw new Error(
         "managed marketplace install requires pending-cleanup reconciliation",
@@ -997,6 +1167,31 @@ export class PluginMarketplaceService {
     for (const plugin of managed) {
       let isUpdate = false;
       try {
+        const candidateCondition = resolvePluginUpdateCondition({
+          appVersion: getLvisAppVersion(),
+          installed: { presence: "absent" },
+          candidate: plugin,
+        });
+        switch (candidateCondition.kind) {
+          case "eligible_managed_install":
+            break;
+          case "catalog_unavailable":
+          case "no_candidate":
+          case "installed_state_unreadable":
+          case "current":
+          case "blocked_by_app":
+          case "blocked_by_channel":
+          case "transaction_pending":
+          case "eligible_user_install":
+          case "eligible_user_update":
+          case "eligible_managed_boot_update":
+            continue;
+          default: {
+            const exhaustive: never = candidateCondition;
+            void exhaustive;
+            continue;
+          }
+        }
         // Boot-time managed bootstrap is an internal, trusted flow —
         // bypass the public `install()` entry (which derives actor from
         // catalog) and drive `installWithDependencies` directly with
@@ -1013,10 +1208,23 @@ export class PluginMarketplaceService {
         const installKind = await this.withPluginLock(
           plugin.id,
           async (): Promise<"installed" | "updated" | "skipped"> => {
-            await ensurePluginStateReadyForInstall(plugin.id);
             const currentRegistry = await readPluginRegistry(this.registryPath);
-            const installedIds = await this.resolveInstalledIds(currentRegistry.plugins);
-            if (installedIds.has(plugin.id)) {
+            const registryEntry = currentRegistry.plugins.find((entry) => entry.id === plugin.id);
+            const ownedArtifactExists = existsSync(resolve(this.pluginsRoot, plugin.id));
+            if (
+              options.mode === "repair-missing-only" &&
+              (registryEntry !== undefined || ownedArtifactExists)
+            ) {
+              return "skipped";
+            }
+            let condition;
+            if (registryEntry?.pendingUpdate) {
+              condition = resolvePluginUpdateCondition({
+                appVersion: getLvisAppVersion(),
+                installed: { presence: "present", transactionPending: true },
+                candidate: plugin,
+              });
+            } else if (registryEntry) {
               let installedVersion: string | null;
               try {
                 installedVersion = await this.readInstalledVersionFromRegistry(currentRegistry, plugin.id);
@@ -1026,14 +1234,61 @@ export class PluginMarketplaceService {
                 );
                 return "skipped";
               }
-              if (!plugin.version || !installedVersion || !isNewer(plugin.version, installedVersion)) {
-                return "skipped";
+              const manifestPath = isAbsolute(registryEntry.manifestPath)
+                ? registryEntry.manifestPath
+                : resolve(dirname(this.registryPath), registryEntry.manifestPath);
+              const receiptValidation = installedVersion
+                ? await this.getInstallReceiptValidation(plugin.id, manifestPath)
+                : null;
+              condition = resolvePluginUpdateCondition({
+                appVersion: getLvisAppVersion(),
+                installed: {
+                  presence: "present",
+                  ...(installedVersion && receiptValidation?.ok
+                    ? { version: installedVersion }
+                    : {}),
+                },
+                candidate: plugin,
+              });
+              if (condition.kind === "eligible_managed_boot_update") {
+                isUpdate = true;
+                log.info(
+                  `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
+                );
               }
-              isUpdate = true;
-              log.info(
-                `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
-              );
+            } else if (ownedArtifactExists) {
+              condition = resolvePluginUpdateCondition({
+                appVersion: getLvisAppVersion(),
+                installed: { presence: "present" },
+                candidate: plugin,
+              });
+            } else {
+              condition = resolvePluginUpdateCondition({
+                appVersion: getLvisAppVersion(),
+                installed: { presence: "absent" },
+                candidate: plugin,
+              });
             }
+            switch (condition.kind) {
+              case "eligible_managed_install":
+              case "eligible_managed_boot_update":
+                break;
+              case "catalog_unavailable":
+              case "no_candidate":
+              case "installed_state_unreadable":
+              case "current":
+              case "blocked_by_app":
+              case "blocked_by_channel":
+              case "transaction_pending":
+              case "eligible_user_install":
+              case "eligible_user_update":
+                return "skipped";
+              default: {
+                const exhaustive: never = condition;
+                return exhaustive;
+              }
+            }
+            await ensurePluginStateReadyForInstall(plugin.id);
             try {
               await this.installWithDependencies(
                 plugin.id,
@@ -1474,6 +1729,117 @@ export class PluginMarketplaceService {
     return entry ? this.cloneRegistryEntry(entry) : null;
   }
 
+  private async resolveManualInstallCondition(
+    plugin: PluginMarketplaceItem,
+  ): Promise<ManualInstallCondition> {
+    const entry = await this.getRawRegistryEntry(plugin.id);
+    if (!entry) {
+      return {
+        condition: resolvePluginUpdateCondition({
+          appVersion: getLvisAppVersion(),
+          canaryOptIn: true,
+          installed: { presence: "absent" },
+          candidate: plugin,
+        }),
+      };
+    }
+    if (entry.pendingUpdate) {
+      return {
+        condition: resolvePluginUpdateCondition({
+          appVersion: getLvisAppVersion(),
+          canaryOptIn: true,
+          installed: { presence: "present", version: "", transactionPending: true },
+          candidate: plugin,
+        }),
+      };
+    }
+    const installedVersion = await this.readInstalledManifestVersion(entry);
+    if (!installedVersion) {
+      return {
+        condition: resolvePluginUpdateCondition({
+          appVersion: getLvisAppVersion(),
+          canaryOptIn: true,
+          installed: { presence: "present" },
+          candidate: plugin,
+        }),
+      };
+    }
+    const condition = resolvePluginUpdateCondition({
+      appVersion: getLvisAppVersion(),
+      canaryOptIn: true,
+      installed: { presence: "present", version: installedVersion },
+      candidate: plugin,
+    });
+    return { condition, installedVersion };
+  }
+
+  private requireInstallAdmission(
+    admission: MarketplaceInstallAdmission,
+    requestedPluginId?: string,
+  ): MarketplaceInstallAdmissionRecord {
+    const record = this.installAdmissions.get(admission);
+    if (!record) {
+      throw new Error("marketplace install admission is invalid or fabricated");
+    }
+    if (record.consumed) {
+      throw new Error("marketplace install admission has already been consumed");
+    }
+    if (requestedPluginId !== undefined && record.requestedPluginId !== requestedPluginId) {
+      throw new Error("marketplace install admission does not match requested plugin");
+    }
+    return record;
+  }
+
+  private assertManualInstallCondition(
+    catalogItem: PluginMarketplaceItem,
+    manualCondition: ManualInstallCondition,
+  ): void {
+    const condition = manualCondition.condition;
+    switch (condition.kind) {
+      case "eligible_managed_boot_update":
+        throw new ManagedPluginUpdateRequiresRestartError(
+          catalogItem.id,
+          manualCondition.installedVersion ?? "unknown",
+          catalogItem.version ?? "latest",
+        );
+      case "blocked_by_app":
+        assertPluginCandidateAppCompatible(catalogItem, getLvisAppVersion());
+        throw new Error(`plugin "${catalogItem.id}" is incompatible with this LVIS version`);
+      case "transaction_pending":
+        // The existing install transaction owns verified supersession and
+        // idempotent pending-row recovery for user-policy repairs. Managed
+        // updates must never use that live replacement path.
+        if (normalizeInstallPolicy(catalogItem) === "admin") {
+          throw new PluginUpdateRecoveryRequiredError(catalogItem.id);
+        }
+        return;
+      case "installed_state_unreadable":
+        throw new PluginInstalledStateUnreadableError(catalogItem.id);
+      case "no_candidate":
+        throw new Error(`plugin "${catalogItem.id}" is not installable from this catalog`);
+      case "catalog_unavailable":
+      case "blocked_by_channel":
+        throw new Error(`plugin "${catalogItem.id}" is not installable from this catalog`);
+      case "current":
+        if (condition.relation === "installed_newer") {
+          throw new PluginDowngradeRejectedError(
+            catalogItem.id,
+            manualCondition.installedVersion ?? "unknown",
+            catalogItem.version ?? "unknown",
+          );
+        }
+        return;
+      case "eligible_user_install":
+      case "eligible_user_update":
+      case "eligible_managed_install":
+        return;
+      default: {
+        const exhaustive: never = condition;
+        return exhaustive;
+      }
+    }
+  }
+
   /** Returns the version string from the currently-installed manifest, or null. */
   async getInstalledVersion(pluginId: string): Promise<string | null> {
     // Round-3 §6: registry read errors propagate; only the manifest-missing
@@ -1871,6 +2237,7 @@ export class PluginMarketplaceService {
             predecessorRetired: transaction.predecessorRetired,
           };
         } catch (err) {
+          if (isCommittedPluginGenerationPublicationError(err)) throw err;
           if (!receiptCommitted) throw err;
           if (err instanceof ArtifactRollbackError) throw err;
           try {
@@ -1942,6 +2309,9 @@ export class PluginMarketplaceService {
     previousEntry: PluginRegistryEntry | null,
     installError: unknown,
   ): Promise<never> {
+    if (isCommittedPluginGenerationPublicationError(installError)) {
+      throw installError;
+    }
     if (!pendingEntry) {
       throw installError;
     }
@@ -2074,34 +2444,6 @@ export class PluginMarketplaceService {
       await rm(pluginDir, { recursive: true, force: true });
       throw err;
     }
-  }
-
-  private async resolveInstalledIds(
-    entries: PluginRegistryEntry[],
-  ): Promise<Set<string>> {
-    const installedIds = new Set<string>();
-    for (const entry of entries) {
-      if (entry.pendingUpdate) continue;
-      const manifestPath = isAbsolute(entry.manifestPath)
-        ? entry.manifestPath
-        : resolve(dirname(this.registryPath), entry.manifestPath);
-      try {
-        await readFile(manifestPath, "utf-8");
-        const receiptValidation = await this.getInstallReceiptValidation(entry.id, manifestPath);
-        if (receiptValidation.ok) {
-          installedIds.add(entry.id);
-        } else {
-          log.warn(
-            `installed plugin '${entry.id}' ignored during managed bootstrap: invalid install receipt (${receiptValidation.reason ?? "unknown"})`,
-          );
-        }
-      } catch {
-        log.warn(
-          `stale registry entry ignored during managed bootstrap: ${entry.id}`,
-        );
-      }
-    }
-    return installedIds;
   }
 
   private async getInstallReceiptValidation(
@@ -2283,6 +2625,32 @@ export class PluginMarketplaceService {
       const stagingDir = resolve(userPluginsRoot, `${pluginId}.tmp-${process.pid}-${Date.now()}`);
       let durableCommitted = false;
       let commitAttempt: Promise<string> | undefined;
+      const settleCommittedLocalUpdate = async (
+        committed: CommittedPluginGeneration<string>,
+      ): Promise<void> => {
+        const finalize = async (): Promise<void> => {
+          await committed.retirement;
+          if (rollbackSnapshot) await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);
+          if (!existingEntry?.pendingUpdate) {
+            await this.discardSupersededPendingBackup(existingEntry ?? null);
+          }
+        };
+        if (committed.retirementDeferred) {
+          const deferredCleanup = finalize();
+          this.deferredLifecycleCleanups.add(deferredCleanup);
+          void deferredCleanup.finally(() => {
+            this.deferredLifecycleCleanups.delete(deferredCleanup);
+          }).catch((error) => {
+            log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
+          });
+          return;
+        }
+        try {
+          await finalize();
+        } catch (error) {
+          log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
+        }
+      };
       try {
         // Copy and validate the complete candidate before touching live bytes,
         // receipt, registry, runtime, or any generation pointer.
@@ -2351,7 +2719,6 @@ export class PluginMarketplaceService {
           return commitAttempt;
         };
 
-        let predecessorRetired = true;
         const activated = await activatePreparedArtifact({
           installId: pluginId,
           pluginRoot: stagingDir,
@@ -2367,24 +2734,21 @@ export class PluginMarketplaceService {
         if (!durableCommitted) {
           throw new Error(`local plugin activation returned before durable commit: ${pluginId}`);
         }
-        try {
-          await activated.retirement;
-        } catch (error) {
-          predecessorRetired = false;
-          log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
-        }
-
-        if (rollbackSnapshot) await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);
-        if (!existingEntry?.pendingUpdate && predecessorRetired) {
-          await this.discardSupersededPendingBackup(existingEntry ?? null);
-        }
+        await settleCommittedLocalUpdate(activated);
         return { pluginId, installed: true as const };
       } catch (err) {
         await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
         // A generation callback must never trigger compensating rollback after
         // the durable pointer commit. Post-commit health is journaled by the
         // lifecycle; this branch is only candidate/durable-commit failure.
-        if (durableCommitted) throw err;
+        if (durableCommitted) {
+          if (isCommittedPluginGenerationPublicationError(err) && err.committed) {
+            await settleCommittedLocalUpdate(
+              err.committed as CommittedPluginGeneration<string>,
+            );
+          }
+          throw err;
+        }
         if (!commitAttempt) {
           if (rollbackSnapshot) {
             await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);

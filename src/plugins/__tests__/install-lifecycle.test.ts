@@ -24,10 +24,9 @@ function makeRuntime(initialPluginIds: string[] = []) {
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
     cancelPendingRestart: vi.fn(),
-    activatePreparedArtifact: vi.fn(async (input: {
-      installId: string;
+    activatePreparedArtifact: vi.fn(async <T>(input: {
       manifest: { id: string };
-      durableCommit(): Promise<string>;
+      durableCommit(): Promise<T>;
     }) => {
       const result = await input.durableCommit();
       if (!pluginIds.includes(input.manifest.id)) pluginIds.push(input.manifest.id);
@@ -48,12 +47,21 @@ function makeRuntime(initialPluginIds: string[] = []) {
 }
 
 function makeMarketplace() {
+  type CatalogItem = {
+    id: string;
+    slug: string;
+    version: string;
+    installed?: boolean;
+    networkAccess?: { allowedDomains: string[]; reasoning: string };
+  };
   let candidateVersion = "2.0.0";
-  return {
-    list: vi.fn(async () => [
+  const list = vi.fn(async (): Promise<CatalogItem[]> => [
       { id: "p", slug: "lvis-plugin-p", version: "2.0.0" },
       { id: "meeting", slug: "lvis-plugin-meeting", version: "2.0.0" },
-    ]),
+    ]);
+  const getLiveCatalogVersion = vi.fn(async (_pluginId: string) => "2.0.0");
+  return {
+    list,
     install: vi.fn(async (pluginId: string, _onProgress, options) => {
       const canonicalPluginId = pluginId.replace(/^lvis-plugin-/, "");
       await options?.activatePreparedArtifact?.({
@@ -65,14 +73,39 @@ function makeMarketplace() {
       });
       return { pluginId: canonicalPluginId, installed: true as const };
     }),
+    preflightInstall: vi.fn(async (pluginId: string, options?: {
+      expectedVersion?: string;
+      networkAccessAcknowledgement?: { allowedDomains: string[] };
+    }) => {
+      const item = (await list()).find((candidate) =>
+        candidate.id === pluginId || candidate.slug === pluginId,
+      );
+      if (!item) throw new Error("Plugin not found");
+      if (options?.expectedVersion) {
+        const live = await getLiveCatalogVersion(pluginId);
+        if (live !== options.expectedVersion) throw new Error("version is stale");
+      }
+      if ("networkAccess" in item && item.networkAccess) {
+        const expected = { allowedDomains: item.networkAccess.allowedDomains };
+        if (JSON.stringify(options?.networkAccessAcknowledgement) !== JSON.stringify(expected)) {
+          throw new Error("networkAccess grant must be acknowledged");
+        }
+      }
+      return Object.freeze({
+        pluginId: item.id,
+        catalogVersion: item.version ?? null,
+        installed: "installed" in item && item.installed === true,
+      });
+    }),
+    revalidateInstallAdmission: vi.fn(async () => undefined),
     setCandidateVersion(version: string) {
       candidateVersion = version;
     },
-    getLiveCatalogVersion: vi.fn(async () => "2.0.0"),
+    getLiveCatalogVersion,
     getInstalledVersion: vi.fn(async () => "1.0.0"),
     quarantinePlugin: vi.fn(async (pluginId: string, reason: string) => ({ pluginId, reason, quarantined: true as const })),
     uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true as const })),
-    rollbackPlugin: vi.fn(async (pluginId: string) => ({
+    rollbackPlugin: vi.fn(async (pluginId: string, _options?: unknown) => ({
       pluginId,
       rolledBackTo: "1.0.0",
     })),
@@ -136,6 +169,61 @@ describe("installMarketplacePluginWithLifecycle", () => {
 
     expect(ensurePluginStateReadyForInstall).toHaveBeenCalledWith("p");
     expect(marketplace.install).not.toHaveBeenCalled();
+  });
+
+  it("runs read-only eligibility preflight before restart cancellation, cleanup, runtime, or progress", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    const progress = vi.fn();
+    const rejection = new Error("managed plugin update requires restart");
+    marketplace.preflightInstall.mockRejectedValueOnce(rejection);
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
+        broadcastInstallProgress: progress,
+      }),
+    ).rejects.toBe(rejection);
+
+    expect(runtime.cancelPendingRestart).not.toHaveBeenCalled();
+    expect(ensurePluginStateReadyForInstall).not.toHaveBeenCalled();
+    expect(runtime.activatePreparedArtifact).not.toHaveBeenCalled();
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+    expect(marketplace.install).not.toHaveBeenCalled();
+  });
+
+  it("cancels an admitted pending restart before waiting for the lifecycle lock, then revalidates", async () => {
+    const order: string[] = [];
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    marketplace.preflightInstall.mockImplementationOnce(async () => {
+      order.push("admit");
+      return { pluginId: "p", catalogVersion: "2.0.0", installed: true };
+    });
+    runtime.cancelPendingRestart.mockImplementation(() => { order.push("cancel"); });
+    marketplace.revalidateInstallAdmission.mockImplementationOnce(async () => {
+      order.push("revalidate");
+    });
+    ensurePluginStateReadyForInstall.mockImplementationOnce(async () => {
+      order.push("cleanup");
+    });
+    marketplace.install.mockImplementationOnce(async () => {
+      order.push("install");
+      return { pluginId: "p", installed: true };
+    });
+
+    await installMarketplacePluginWithLifecycle({
+      requestedPluginId: "p",
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
+    });
+
+    expect(order.slice(0, 4)).toEqual(["admit", "cancel", "revalidate", "cleanup"]);
   });
 
   it("allows a same-plugin lifecycle hook to re-enter its owned lock", async () => {
@@ -464,6 +552,31 @@ describe("installMarketplacePluginWithLifecycle", () => {
     );
   });
 
+  it("rejects missing network acknowledgement before cancellation or lifecycle effects", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    const progress = vi.fn();
+    marketplace.list.mockResolvedValue([{
+      id: "p",
+      slug: "lvis-plugin-p",
+      version: "2.0.0",
+      networkAccess: { allowedDomains: ["api.example.com"], reasoning: "Sync" },
+    }]);
+
+    await expect(installMarketplacePluginWithLifecycle({
+      requestedPluginId: "p",
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+      ensurePluginStateReadyForInstall,
+      broadcastInstallProgress: progress,
+    })).rejects.toThrow("must be acknowledged");
+
+    expect(runtime.cancelPendingRestart).not.toHaveBeenCalled();
+    expect(ensurePluginStateReadyForInstall).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+    expect(marketplace.install).not.toHaveBeenCalled();
+  });
+
   it("does not manufacture a pre-stop for an installed plugin that is not loaded", async () => {
     const runtime = makeRuntime();
     const marketplace = makeMarketplace();
@@ -499,6 +612,8 @@ describe("installMarketplacePluginWithLifecycle", () => {
     ).rejects.toThrow("version is stale");
 
     expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(runtime.cancelPendingRestart).not.toHaveBeenCalled();
+    expect(ensurePluginStateReadyForInstall).not.toHaveBeenCalled();
     expect(marketplace.install).not.toHaveBeenCalled();
     expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
     expect(marketplace.uninstall).not.toHaveBeenCalled();

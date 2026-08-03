@@ -1548,11 +1548,19 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
           : Promise.resolve();
         const retirement = Promise.all([result.retirement, displacedRetirement])
           .then(() => undefined);
+        const completion = Promise.all([result.completion, displacedRetirement])
+          .then(() => undefined);
         // Consumers may await the returned retirement; attaching this observer
         // simply prevents an unobserved async cleanup failure from becoming an
         // unhandled rejection before that happens.
         void retirement.catch(() => undefined);
-        return Object.freeze({ result: result.result, retirement });
+        void completion.catch(() => undefined);
+        return Object.freeze({
+          result: result.result,
+          retirement,
+          completion,
+          retirementDeferred: result.retirementDeferred,
+        });
       });
     } catch (error) {
       if (

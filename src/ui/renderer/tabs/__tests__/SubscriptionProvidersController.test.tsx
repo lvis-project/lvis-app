@@ -240,7 +240,12 @@ describe("SubscriptionProvidersController", () => {
     } as unknown as LvisApi;
 
     render(<SubscriptionProvidersController api={api} />);
-    fireEvent.click(await screen.findByTestId("subscription-providers:use-api-for-chat"));
+    const useApiForChat = await screen.findByTestId("subscription-providers:use-api-for-chat");
+    // Wait for the initial subscription setting to land. Clicking while the
+    // controller still has its default API projection races the initial
+    // refresh, which legitimately clears the newly rendered API error.
+    await waitFor(() => expect(useApiForChat).not.toBeDisabled());
+    fireEvent.click(useApiForChat);
     await waitFor(() => {
       expect(screen.getByTestId("subscription-providers:api-chat-error")).toBeTruthy();
     });

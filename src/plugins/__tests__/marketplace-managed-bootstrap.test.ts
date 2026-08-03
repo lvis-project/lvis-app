@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 
 import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
@@ -48,7 +48,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     _resetForTest();
   });
 
-  it("reinstalls managed plugins when registry entry is stale", async () => {
+  it("fails closed when a managed registry row points to a missing manifest", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -99,19 +99,12 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
     const result = await service.ensureManagedInstalled();
 
-    expect(installSpy).toHaveBeenCalled();
-    const [pluginId, actor, catalogSnapshot] = installSpy.mock.calls[0]!;
-    expect(pluginId).toBe("meeting");
-    expect(actor).toBe("it-admin");
-    // #1098 — the managed path passes the catalog snapshot it already fetched
-    // so the worker installs from one consistent snapshot (no re-fetch).
-    expect(Array.isArray(catalogSnapshot)).toBe(true);
-    expect((catalogSnapshot as Array<{ id: string }>).some((p) => p.id === "meeting")).toBe(true);
-    expect(result.installed).toEqual(["meeting"]);
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result.installed).toEqual([]);
     expect(result.failed).toEqual([]);
   });
 
-  it("reinstalls managed plugins when manifest exists but install receipt is missing", async () => {
+  it("fails closed when a managed manifest exists but its install receipt is missing", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -174,16 +167,111 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
     const result = await service.ensureManagedInstalled();
 
-    expect(installSpy).toHaveBeenCalled();
-    const [pluginId, actor, catalogSnapshot] = installSpy.mock.calls[0]!;
-    expect(pluginId).toBe("meeting");
-    expect(actor).toBe("it-admin");
-    // #1098 — the managed path passes the catalog snapshot it already fetched
-    // so the worker installs from one consistent snapshot (no re-fetch).
-    expect(Array.isArray(catalogSnapshot)).toBe(true);
-    expect((catalogSnapshot as Array<{ id: string }>).some((p) => p.id === "meeting")).toBe(true);
-    expect(result.installed).toEqual(["meeting"]);
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result.installed).toEqual([]);
     expect(result.failed).toEqual([]);
+  });
+
+  it("does not treat an owned artifact directory without a registry row as structurally missing", async () => {
+    await writeAdminCatalog("1.0.0");
+    await mkdir(join(pluginsDir, "meeting"), { recursive: true });
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }));
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    );
+    const cleanupGate = vi.fn(async () => undefined);
+    const activatePreparedArtifact = vi.fn();
+    const result = await service.ensureManagedInstalled({
+      mode: "repair-missing-only",
+      ensurePluginStateReadyForInstall: cleanupGate,
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    });
+
+    expect(cleanupGate).not.toHaveBeenCalled();
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
+    expect(result).toEqual({ installed: [], updated: [], failed: [] });
+  });
+
+  it("repair-missing-only preserves an older disabled registry row without touching storage", async () => {
+    await writeAdminCatalog("2.0.0");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "meeting",
+          manifestPath: "meeting/plugin.json",
+          enabled: false,
+          installSource: "admin",
+        }],
+      }),
+      "utf-8",
+    );
+    const beforeRegistry = await readFile(registryPath, "utf-8");
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<unknown>;
+      },
+      "installWithDependencies",
+    );
+    const cleanupGate = vi.fn(async () => undefined);
+    const activatePreparedArtifact = vi.fn();
+
+    const result = await service.ensureManagedInstalled({
+      mode: "repair-missing-only",
+      ensurePluginStateReadyForInstall: cleanupGate,
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    });
+
+    expect(result).toEqual({ installed: [], updated: [], failed: [] });
+    expect(cleanupGate).not.toHaveBeenCalled();
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
+    expect(await readFile(registryPath, "utf-8")).toBe(beforeRegistry);
+    expect(existsSync(join(pluginsDir, "meeting"))).toBe(false);
+  });
+
+  it("repair-missing-only live-activates a true structural missing install once", async () => {
+    await writeAdminCatalog("1.0.0");
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
+    const service = makeManagedService(testDir, marketplacePath);
+    const durableCommit = vi.fn(async () => "meeting/plugin.json");
+    vi.spyOn(
+      service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
+      "installWithDependencies",
+    ).mockImplementation(async (...args: unknown[]) => {
+      const activate = args[5] as ((prepared: unknown) => Promise<unknown>) | undefined;
+      if (!activate) throw new Error("missing repair activation seam");
+      await activate({
+        installId: "meeting",
+        pluginRoot: join(testDir, "staged-meeting"),
+        manifest: { id: "meeting", version: "1.0.0" },
+        receiptRaw: "{}",
+        registryEntry: { installSource: "admin" },
+        durableCommit,
+      });
+      return { pluginId: "meeting", installed: true };
+    });
+    const activatePreparedArtifact = vi.fn(async (prepared: { durableCommit(): Promise<string> }) => ({
+      result: await prepared.durableCommit(),
+      retirement: Promise.resolve(),
+    }));
+
+    const result = await service.ensureManagedInstalled({
+      mode: "repair-missing-only",
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    });
+
+    expect(result).toEqual({ installed: ["meeting"], updated: [], failed: [] });
+    expect(activatePreparedArtifact).toHaveBeenCalledOnce();
+    expect(durableCommit).toHaveBeenCalledOnce();
   });
 
   async function writeAdminCatalog(version: string) {
@@ -228,7 +316,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     });
 
     const result = await service.ensureManagedInstalled({
-      activatePreparedArtifact: vi.fn() as never,
+      mode: "pre-start-sync",
       ensurePluginStateReadyForInstall: cleanupGate,
     });
 
@@ -241,15 +329,37 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     });
   });
 
-  function spyInstalledAtVersion(service: PluginMarketplaceService, installedVersion: string) {
-    vi.spyOn(
-      service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
-      "resolveInstalledIds",
-    ).mockResolvedValue(new Set(["meeting"]));
+  function spyInstalledAtVersion(
+    service: PluginMarketplaceService,
+    installedVersion: string,
+    pluginId = "meeting",
+  ) {
+    const pluginDir = join(pluginsDir, pluginId);
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, "plugin.json"), JSON.stringify({
+      id: pluginId,
+      name: pluginId,
+      version: installedVersion,
+      entry: "dist/index.js",
+      tools: [],
+    }));
+    writeFileSync(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{
+        id: pluginId,
+        manifestPath: `${pluginId}/plugin.json`,
+        enabled: true,
+        installSource: "admin",
+      }],
+    }));
     vi.spyOn(
       service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
       "readInstalledVersionFromRegistry",
     ).mockResolvedValue(installedVersion);
+    vi.spyOn(
+      service as unknown as { getInstallReceiptValidation: (...args: unknown[]) => Promise<{ ok: boolean }> },
+      "getInstallReceiptValidation",
+    ).mockResolvedValue({ ok: true });
     return vi
       .spyOn(
         service as unknown as {
@@ -257,7 +367,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         },
         "installWithDependencies",
       )
-      .mockResolvedValue({ pluginId: "meeting", installed: true });
+      .mockResolvedValue({ pluginId, installed: true });
   }
 
   it("auto-updates an installed managed plugin when the catalog version is strictly newer", async () => {
@@ -274,6 +384,43 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.updated).toEqual(["meeting"]);
     expect(result.installed).toEqual([]);
     expect(result.failed).toEqual([]);
+  });
+
+  it("does not enter the managed install path for an app-incompatible update", async () => {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "meeting",
+          name: "Meeting",
+          description: "fixture",
+          packageSpec: "",
+          packageName: "",
+          tools: [],
+          installPolicy: "admin",
+          version: "0.5.32",
+          upgradeRequired: {
+            code: "upgrade_required",
+            minAppVersion: "0.5.12",
+            message: "LVIS 0.5.12+ is required.",
+          },
+        }],
+      }),
+      "utf-8",
+    );
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = spyInstalledAtVersion(service, "0.5.31");
+    const cleanupGate = vi.fn(async () => undefined);
+
+    const result = await service.ensureManagedInstalled({
+      mode: "pre-start-sync",
+      ensurePluginStateReadyForInstall: cleanupGate,
+    });
+
+    expect(cleanupGate).not.toHaveBeenCalled();
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({ installed: [], updated: [], failed: [] });
   });
 
   it("auto-migrates a legacy-`_meta` managed plugin: catalog advertises the migrated version → update-first, no user action", async () => {
@@ -308,22 +455,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
     const service = makeManagedService(testDir, marketplacePath);
-    vi.spyOn(
-      service as unknown as { resolveInstalledIds: (e: unknown) => Promise<Set<string>> },
-      "resolveInstalledIds",
-    ).mockResolvedValue(new Set(["local-indexer"]));
-    vi.spyOn(
-      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
-      "readInstalledVersionFromRegistry",
-    ).mockResolvedValue("0.5.19");
-    const installSpy = vi
-      .spyOn(
-        service as unknown as {
-          installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
-        },
-        "installWithDependencies",
-      )
-      .mockResolvedValue({ pluginId: "local-indexer", installed: true });
+    const installSpy = spyInstalledAtVersion(service, "0.5.19", "local-indexer");
 
     const result = await service.ensureManagedInstalled();
 
@@ -362,18 +494,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   it("isolates a failed auto-update into result.failed without throwing", async () => {
     await writeAdminCatalog("2.0.0");
     const service = makeManagedService(testDir, marketplacePath);
-    vi.spyOn(
-      service as unknown as { resolveInstalledIds: (e: unknown) => Promise<Set<string>> },
-      "resolveInstalledIds",
-    ).mockResolvedValue(new Set(["meeting"]));
-    vi.spyOn(
-      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
-      "readInstalledVersionFromRegistry",
-    ).mockResolvedValue("1.0.0");
-    vi.spyOn(
-      service as unknown as { installWithDependencies: (...a: unknown[]) => Promise<unknown> },
-      "installWithDependencies",
-    ).mockRejectedValue(new Error("download failed"));
+    const installSpy = spyInstalledAtVersion(service, "1.0.0");
+    installSpy.mockRejectedValue(new Error("download failed"));
 
     const result = await service.ensureManagedInstalled();
 
@@ -382,7 +504,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.installed).toEqual([]);
   });
 
-  it("preserves managed durable state when staged candidate activation fails", async () => {
+  it("commits a pre-start managed artifact without publishing or starting a candidate", async () => {
     await writeAdminCatalog("2.0.0");
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
     const beforeRegistry = await readFile(registryPath, "utf-8");
@@ -402,22 +524,13 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       });
       return { pluginId: "meeting", installed: true };
     });
-    const activatePreparedArtifact = vi.fn(async () => {
-      throw new Error("managed candidate start failed");
-    });
-
     const result = await service.ensureManagedInstalled({
-      activatePreparedArtifact: activatePreparedArtifact as never,
+      mode: "pre-start-sync",
       ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
     });
 
-    expect(result).toMatchObject({
-      installed: [],
-      updated: [],
-      failed: [{ id: "meeting", error: "managed candidate start failed" }],
-    });
-    expect(activatePreparedArtifact).toHaveBeenCalledOnce();
-    expect(durableCommit).not.toHaveBeenCalled();
+    expect(result).toEqual({ installed: ["meeting"], updated: [], failed: [] });
+    expect(durableCommit).toHaveBeenCalledOnce();
     expect(await readFile(registryPath, "utf-8")).toBe(beforeRegistry);
   });
 
@@ -515,10 +628,10 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
     const service = makeManagedService(testDir, marketplacePath);
-    vi.spyOn(
-      service as unknown as { resolveInstalledIds: (e: unknown) => Promise<Set<string>> },
-      "resolveInstalledIds",
-    ).mockResolvedValue(new Set(["alpha"]));
+    writeFileSync(registryPath, JSON.stringify({
+      version: 1,
+      plugins: [{ id: "alpha", manifestPath: "alpha/plugin.json", enabled: true, installSource: "admin" }],
+    }));
     vi.spyOn(
       service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
       "readInstalledVersionFromRegistry",

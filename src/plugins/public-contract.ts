@@ -1540,7 +1540,8 @@ export interface RuntimePlugin {
   start?: () => Promise<void> | void;
   /**
    * Runs only after this plugin's immutable Host generation is the active
-   * pointer. Network discovery, persisted-session recovery, timers, and other
+   * pointer and any predecessor has completed retirement. Network discovery,
+   * persisted-session recovery, write-capable workers, timers, and other
    * externally observable startup work belong here rather than in `start`,
    * which may execute while a replacement candidate is still hidden.
    * Failures are reported as degraded post-publish startup and never roll the
