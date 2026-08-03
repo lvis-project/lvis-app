@@ -17,7 +17,6 @@ import { createLogger } from "../lib/logger.js";
 import type { NetworkAccessGrant } from "../shared/network-access.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import {
-  isNewerPluginVersion,
   resolvePluginUpdateCondition,
 } from "./update-condition.js";
 const log = createLogger("update-detector");
@@ -63,16 +62,6 @@ export class PluginUpdateDetector {
   ) {
     this.canaryOptIn = options.canaryOptIn ?? false;
     this.appVersion = options.appVersion ?? getLvisAppVersion();
-  }
-
-  /**
-   * Checks every installed plugin against the catalog.
-   * Returns an array of plugins that have a newer version available.
-   * Never throws — errors are logged and an empty array is returned.
-   */
-  async checkForUpdates(): Promise<UpdateInfo[]> {
-    const result = await this.checkForUpdatesResult();
-    return result.status === "success" ? result.updates : [];
   }
 
   /** Distinguishes catalog failure from a successful empty snapshot. */
@@ -186,21 +175,4 @@ function canonicalizeExistingPath(path: string): string {
 function isWithin(basePath: string, targetPath: string): boolean {
   const rel = relative(basePath, targetPath);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
-
-/**
- * Semver comparison: returns true when `candidate` > `installed`.
- *
- * Honors the semver precedence rule that a version with a pre-release tag
- * has LOWER precedence than the same version without one
- * (e.g. `1.0.0-beta.1` < `1.0.0`). Pre-release identifiers themselves are
- * compared field-by-field: numeric identifiers compared numerically, non-
- * numeric compared lexically, numeric always lower than non-numeric, and a
- * shorter prerelease chain is lower when all preceding fields are equal
- * (per semver.org §11).
- *
- * Falls back to string comparison for fully non-semver inputs.
- */
-export function isNewer(candidate: string, installed: string): boolean {
-  return isNewerPluginVersion(candidate, installed);
 }
