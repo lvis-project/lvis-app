@@ -29,9 +29,9 @@ export interface PluginGenerationLease<TState = unknown> {
 export interface PublishedPluginGenerationTransition {
   /** Completes after predecessor leases drain and exact-generation cleanup finishes. */
   readonly retired: Promise<void>;
-  /** Open replacement dispatch only after host-owned post-publication readiness completes. */
+  /** Open candidate dispatch only after host-owned post-publication readiness completes. */
   markDispatchReady(): Promise<void>;
-  /** Keep replacement dispatch unavailable after retirement or readiness failure. */
+  /** Keep candidate dispatch unavailable after retirement or readiness failure. */
   markDispatchUnavailable(error: unknown): void;
 }
 
@@ -294,7 +294,7 @@ export class PluginGenerationCoordinator<TState = unknown> {
     let openDispatch: (() => void) | undefined;
     let rejectDispatch: ((error: unknown) => void) | undefined;
     let dispatchSettled = false;
-    let replacementReadiness: GenerationState<TState>["dispatchReadiness"];
+    let candidateReadiness: GenerationState<TState>["dispatchReadiness"];
     let publishError: unknown;
     try {
       try {
@@ -305,7 +305,7 @@ export class PluginGenerationCoordinator<TState = unknown> {
             rejectDispatch = reject;
           });
           void promise.catch(() => undefined);
-          replacementReadiness = Object.freeze({
+          candidateReadiness = Object.freeze({
             generationId: prepared.generationId,
             promise,
           });
@@ -314,7 +314,7 @@ export class PluginGenerationCoordinator<TState = unknown> {
         // Linearization point: durable state and the immutable generation
         // pointer are now inseparable. No projection work may be inserted here.
         state.active = prepared;
-        state.dispatchReadiness = replacementReadiness;
+        state.dispatchReadiness = candidateReadiness;
         // Synchronous in-process projections publish in the same turn as the
         // pointer assignment. Every publication closure was fully prepared and
         // is assignment-only; the admission barrier remains closed throughout.
@@ -325,7 +325,7 @@ export class PluginGenerationCoordinator<TState = unknown> {
           dispatchSettled = true;
           rejectDispatch?.(
             new Error(
-              `plugin '${pluginId}' generation '${replacementReadiness?.generationId ?? "unknown"}' dispatch blocked by publication failure`,
+              `plugin '${pluginId}' generation '${candidateReadiness?.generationId ?? "unknown"}' dispatch blocked by publication failure`,
               { cause: error },
             ),
           );
@@ -351,7 +351,7 @@ export class PluginGenerationCoordinator<TState = unknown> {
     const transition = Object.freeze({
       retired,
       markDispatchReady: async () => {
-        if (!replacementReadiness || dispatchSettled) return;
+        if (!candidateReadiness || dispatchSettled) return;
         try {
           await retired;
         } catch (error) {
@@ -359,16 +359,16 @@ export class PluginGenerationCoordinator<TState = unknown> {
             dispatchSettled = true;
             rejectDispatch?.(
               new Error(
-                `plugin '${pluginId}' generation '${replacementReadiness.generationId}' dispatch blocked by predecessor retirement failure`,
+                `plugin '${pluginId}' generation '${candidateReadiness.generationId}' dispatch blocked by predecessor retirement failure`,
                 { cause: error },
               ),
             );
           }
           throw error;
         }
-        if (state.active?.generationId !== replacementReadiness.generationId) {
+        if (state.active?.generationId !== candidateReadiness.generationId) {
           const error = new Error(
-            `plugin '${pluginId}' generation '${replacementReadiness.generationId}' is no longer active at dispatch readiness`,
+            `plugin '${pluginId}' generation '${candidateReadiness.generationId}' is no longer active at dispatch readiness`,
           );
           dispatchSettled = true;
           rejectDispatch?.(error);
@@ -378,11 +378,11 @@ export class PluginGenerationCoordinator<TState = unknown> {
         openDispatch?.();
       },
       markDispatchUnavailable: (error: unknown) => {
-        if (!replacementReadiness || dispatchSettled) return;
+        if (!candidateReadiness || dispatchSettled) return;
         dispatchSettled = true;
         rejectDispatch?.(
           new Error(
-            `plugin '${pluginId}' generation '${replacementReadiness.generationId}' dispatch blocked by post-commit readiness failure`,
+            `plugin '${pluginId}' generation '${candidateReadiness.generationId}' dispatch blocked by post-commit readiness failure`,
             { cause: error },
           ),
         );
