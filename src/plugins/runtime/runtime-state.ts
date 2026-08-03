@@ -51,6 +51,8 @@ import type {
   ManifestLoadPlan,
   ManifestSnapshot,
   PluginLifecycleHookScope,
+  PluginStartPreparationOutcome,
+  PluginStartPreparationReturn,
   SinglePluginStartResult,
 } from "./types.js";
 import { PerfStatsTracker } from "./perf-stats.js";
@@ -110,6 +112,7 @@ export abstract class PluginRuntimeState {
     candidateRegistryEntry?: Readonly<
       Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
     >,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ) => PluginHostApi;
   protected readonly deploymentGuard?: PluginDeploymentGuard;
   protected readonly installReceiptCacheRoot?: string;
@@ -121,7 +124,7 @@ export abstract class PluginRuntimeState {
     pluginId: string,
     enabled: boolean,
   ) => Promise<void> | void;
-  protected readonly preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
+  protected readonly preparePluginStart?: (context: PluginStartPreparationContext) => PluginStartPreparationReturn;
   protected plugins = new Map<string, LoadedPlugin>();
   protected methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   protected readonly perf = new PerfStatsTracker();
@@ -160,7 +163,10 @@ export abstract class PluginRuntimeState {
   /** Loaded or requested consumers waiting for a preparing capability provider. */
   protected readonly capabilityBlockedPluginIds = new Set<string>();
   protected readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
-  protected readonly pendingRestartPreparations = new Map<string, Promise<void>>();
+  protected readonly pendingRestartPreparations = new Map<
+    string,
+    Promise<PluginStartPreparationOutcome>
+  >();
   /**
    * Hash-only authenticated session state. The principal hash includes a
    * per-login nonce so a later login to the same account cannot revive grants
@@ -287,6 +293,8 @@ export abstract class PluginRuntimeState {
     this.preparePluginStart = options.preparePluginStart;
     this.preparation = new PreparationTracker({
       preparePluginStart: options.preparePluginStart,
+      applyConfigOverride: (pluginId, configOverride) =>
+        this.mergeConfigOverride(pluginId, configOverride),
       instantiateAndStartSinglePlugin: (plan, manifest, approvedPluginAccess, opts) =>
         this.instantiateAndStartSinglePlugin(plan, manifest, approvedPluginAccess, opts),
       markFailed: (pluginId, stub) => this.markFailed(pluginId, stub),
@@ -418,6 +426,7 @@ export abstract class PluginRuntimeState {
     candidateRegistryEntry?: Readonly<
       Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
     >,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ): {
     hostApi: PluginHostApi;
     disposers: Array<() => void>;
@@ -491,6 +500,7 @@ export abstract class PluginRuntimeState {
         incarnation,
         installPluginId,
         candidateRegistryEntry,
+        candidateApprovedPluginAccess,
       );
       const hostApi = hostEffects ? hostEffects.wrapHostApi(rawHostApi) : rawHostApi;
       // Defence-in-depth: PluginHostApi.storage is required but partial hostApi

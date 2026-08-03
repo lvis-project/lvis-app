@@ -46,7 +46,7 @@ import {
   readEnabledManifestSnapshots,
   resolveManifestLoadPlan,
 } from "./snapshots.js";
-import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot } from "./types.js";
+import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot, PluginStartPreparationReturn } from "./types.js";
 import { buildPluginCard } from "./cards.js";
 import type { PluginPerfStats } from "./perf-stats.js";
 import {
@@ -275,9 +275,8 @@ export interface PluginRuntimeOptions {
     pluginDataDir: string,
     incarnation: PluginHostApiIncarnation,
     installPluginId: string | null,
-    candidateRegistryEntry?: Readonly<
-      Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
-    >,
+    candidateRegistryEntry?: Readonly<Pick<PluginRegistryEntry, "installSource" | "manifestSha256">>,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ) => PluginHostApi;
   deploymentGuard?: PluginDeploymentGuard;
   installReceiptCacheRoot?: string;
@@ -318,7 +317,7 @@ export interface PluginRuntimeOptions {
    * loading/start is deferred without blocking app boot; calls into the
    * plugin fail with a clear "preparing" message until the Promise resolves.
    */
-  preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
+  preparePluginStart?: (context: PluginStartPreparationContext) => PluginStartPreparationReturn;
 }
 
 export class PluginRuntime extends PluginRuntimeLifecycle {
@@ -358,12 +357,13 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     return this.methodMap.get(method)?.pluginId ?? this.knownToolOwners.get(method);
   }
 
-  assertPluginEventAccess(callerPluginId: string, eventType: string): void {
+  assertPluginEventAccess(callerPluginId: string, eventType: string, candidateApprovedPluginAccess?: PluginAccessSpec | null): void {
     assertEventSubscribeAccess({
       callerPluginId,
       eventType,
       targetPluginId: this.inferEventOwner(eventType),
-      getAccessGrant: () => this.getPluginAccessGrant(callerPluginId),
+      getAccessGrant: () => candidateApprovedPluginAccess === undefined
+        ? this.getPluginAccessGrant(callerPluginId) : candidateApprovedPluginAccess ?? undefined,
       auditLog: this.auditLog,
     });
   }
