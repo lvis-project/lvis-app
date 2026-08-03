@@ -275,7 +275,7 @@ function assertNetworkAccessAcknowledgement(options: {
 }): void {
   const expected = buildNetworkAccessAcknowledgement(options.plugin.networkAccess);
   if (!expected) return;
-  if (JSON.stringify(options.acknowledgement ?? null) === JSON.stringify(expected)) return;
+  if (networkAccessGrantsEqual(expected, options.acknowledgement)) return;
   throw new Error(
     `plugin "${options.plugin.id}" networkAccess grant must be acknowledged before install`,
   );
