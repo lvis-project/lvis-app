@@ -19,19 +19,24 @@ describe("PluginMarketplaceService generation coordination boundary", () => {
 
   it.each([
     ["marketplace install", (service: PluginMarketplaceService) =>
-      (service.install as unknown as (pluginId: string) => Promise<unknown>)("acme")],
+      (service.install as unknown as (pluginId: string) => Promise<unknown>)("acme"),
+      "[plugin-generation] marketplace install requires coordinated generation activation"],
     ["managed marketplace install", (service: PluginMarketplaceService) =>
-      (service.ensureManagedInstalled as unknown as () => Promise<unknown>)()],
+      (service.ensureManagedInstalled as unknown as () => Promise<unknown>)(),
+      "managed marketplace install requires an explicit sync mode"],
     ["versioned marketplace install", (service: PluginMarketplaceService) =>
       (service.installPlugin as unknown as (
         pluginId: string,
         version: string,
-      ) => Promise<unknown>)("acme", "1.0.0")],
+      ) => Promise<unknown>)("acme", "1.0.0"),
+      "[plugin-generation] versioned marketplace install requires coordinated generation activation"],
     ["marketplace rollback", (service: PluginMarketplaceService) =>
-      (service.rollbackPlugin as unknown as (pluginId: string) => Promise<unknown>)("acme")],
+      (service.rollbackPlugin as unknown as (pluginId: string) => Promise<unknown>)("acme"),
+      "[plugin-generation] marketplace rollback requires coordinated generation activation"],
     ["local plugin install", (service: PluginMarketplaceService) =>
-      (service.installLocal as unknown as (sourcePath: string) => Promise<unknown>)("/unused")],
-  ])("fails closed before %s can touch external or durable state", async (operation, invoke) => {
+      (service.installLocal as unknown as (sourcePath: string) => Promise<unknown>)("/unused"),
+      "[plugin-generation] local plugin install requires coordinated generation activation"],
+  ])("fails closed before %s can touch external or durable state", async (_operation, invoke, expectedError) => {
     const root = mkdtempSync(join(tmpdir(), "lvis-generation-coordination-"));
     roots.push(root);
     const pluginsRoot = join(root, "plugins");
@@ -48,9 +53,7 @@ describe("PluginMarketplaceService generation coordination boundary", () => {
       fetcher,
     );
 
-    await expect(invoke(service)).rejects.toThrow(
-      `[plugin-generation] ${operation} requires coordinated generation activation`,
-    );
+    await expect(invoke(service)).rejects.toThrow(expectedError);
     expect(fetcher.listPlugins).not.toHaveBeenCalled();
     expect(fetcher.getPluginDetail).not.toHaveBeenCalled();
     expect(fetcher.downloadVersion).not.toHaveBeenCalled();

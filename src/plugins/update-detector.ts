@@ -30,6 +30,10 @@ export interface UpdateInfo {
   networkAccess?: NetworkAccessGrant;
 }
 
+export type PluginUpdateCheckResult =
+  | { status: "success"; updates: UpdateInfo[] }
+  | { status: "catalog-unavailable" };
+
 /**
  * Returns true when the update-check feature flag is enabled.
  * Default ON — set LVIS_MARKETPLACE_UPDATE_CHECK=0 to opt out.
@@ -66,12 +70,22 @@ export class PluginUpdateDetector {
    * Never throws — errors are logged and an empty array is returned.
    */
   async checkForUpdates(): Promise<UpdateInfo[]> {
-    try {
-      const [registry, catalogPlugins] = await Promise.all([
-        readPluginRegistry(this.registryPath),
-        this.fetcher.listPlugins(),
-      ]);
+    const result = await this.checkForUpdatesResult();
+    return result.status === "success" ? result.updates : [];
+  }
 
+  /** Distinguishes catalog failure from a successful empty snapshot. */
+  async checkForUpdatesResult(): Promise<PluginUpdateCheckResult> {
+    let catalogPlugins: Awaited<ReturnType<MarketplaceFetcher["listPlugins"]>>;
+    try {
+      catalogPlugins = await this.fetcher.listPlugins();
+    } catch (err) {
+      log.warn("checkForUpdates catalog unavailable: %s", (err as Error).message);
+      return { status: "catalog-unavailable" };
+    }
+
+    try {
+      const registry = await readPluginRegistry(this.registryPath);
       const updates: UpdateInfo[] = [];
 
       // Build an O(1) lookup map to avoid O(n*m) catalog scans when many
@@ -103,10 +117,10 @@ export class PluginUpdateDetector {
         }
       }
 
-      return updates;
+      return { status: "success", updates };
     } catch (err) {
       log.warn("checkForUpdates failed: %s", (err as Error).message);
-      return [];
+      return { status: "success", updates: [] };
     }
   }
 

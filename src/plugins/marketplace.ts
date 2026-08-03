@@ -166,6 +166,13 @@ export type PreparedMarketplacePluginActivation = (
   prepared: PreparedMarketplacePluginArtifact,
 ) => Promise<{ result: string; retirement: Promise<void> }>;
 
+async function commitPreparedArtifactWithoutPublication(
+  prepared: PreparedMarketplacePluginArtifact,
+): Promise<{ result: string; retirement: Promise<void> }> {
+  const result = await prepared.durableCommit();
+  return { result, retirement: Promise.resolve() };
+}
+
 function requirePreparedMarketplacePluginActivation(
   activation: PreparedMarketplacePluginActivation | undefined,
   operation: string,
@@ -1068,9 +1075,11 @@ export class PluginMarketplaceService {
   /**
    * Boot-time admin plugin bootstrap. Queries the marketplace catalog for
    * every admin-policy plugin and:
-   *  - **force-installs** any that are missing from the local registry, and
-   *  - **auto-updates** any installed one whose catalog version is strictly
-   *    newer than the installed version.
+   * In `pre-start-sync` mode, installs structurally missing managed plugins and
+   * updates compatible managed plugins before the runtime is sealed. In
+   * `repair-missing-only` mode, only a plugin with neither a registry row nor
+   * an owned artifact directory is repaired; all other installed/runtime
+   * states are preserved for the next ordinary restart.
    * Runs as actor="it-admin" so the install-policy guard permits the install.
    *
    * Auto-update rationale: admin-policy plugins are IT-managed, so the signed
@@ -1085,17 +1094,19 @@ export class PluginMarketplaceService {
    * and the app continues without the failed plugins.
    */
   async ensureManagedInstalled(options: {
-    activatePreparedArtifact: PreparedMarketplacePluginActivation;
+    mode: "pre-start-sync" | "repair-missing-only";
     ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
   }): Promise<{
     installed: string[];
     updated: string[];
     failed: Array<{ id: string; error: string }>;
   }> {
-    const activatePreparedArtifact = requirePreparedMarketplacePluginActivation(
-      options?.activatePreparedArtifact,
-      "managed marketplace install",
-    );
+    if (
+      options?.mode !== "pre-start-sync" &&
+      options?.mode !== "repair-missing-only"
+    ) {
+      throw new Error("managed marketplace install requires an explicit sync mode");
+    }
     if (typeof options?.ensurePluginStateReadyForInstall !== "function") {
       throw new Error(
         "managed marketplace install requires pending-cleanup reconciliation",
@@ -1170,6 +1181,13 @@ export class PluginMarketplaceService {
           async (): Promise<"installed" | "updated" | "skipped"> => {
             const currentRegistry = await readPluginRegistry(this.registryPath);
             const registryEntry = currentRegistry.plugins.find((entry) => entry.id === plugin.id);
+            const ownedArtifactExists = existsSync(resolve(this.pluginsRoot, plugin.id));
+            if (
+              options.mode === "repair-missing-only" &&
+              (registryEntry !== undefined || ownedArtifactExists)
+            ) {
+              return "skipped";
+            }
             let condition;
             if (registryEntry?.pendingUpdate) {
               condition = resolvePluginUpdateCondition({
@@ -1209,7 +1227,7 @@ export class PluginMarketplaceService {
                   `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
                 );
               }
-            } else if (existsSync(resolve(this.pluginsRoot, plugin.id))) {
+            } else if (ownedArtifactExists) {
               condition = resolvePluginUpdateCondition({
                 appVersion: getLvisAppVersion(),
                 installed: { presence: "present" },
@@ -1249,7 +1267,7 @@ export class PluginMarketplaceService {
                 plugins,
                 new Set<string>(),
                 state,
-                activatePreparedArtifact,
+                commitPreparedArtifactWithoutPublication,
                 undefined,
               );
             } catch (innerErr) {

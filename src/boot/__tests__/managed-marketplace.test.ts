@@ -5,7 +5,7 @@ import {
   runManagedBootstrap,
 } from "../managed-marketplace.js";
 import type { PluginMarketplaceService } from "../../plugins/marketplace.js";
-import type { PluginRuntime } from "../../plugins/runtime.js";
+import { PluginRuntimePreStartPhase } from "../steps/plugin-runtime/pre-start-phase.js";
 
 describe("resolveManagedPluginBootstrap", () => {
   it("disables network-managed bootstrap in isolated E2E test mode", () => {
@@ -49,17 +49,11 @@ describe("runManagedBootstrap concurrency", () => {
         }),
     );
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const activatePreparedArtifact = vi.fn();
-    const pluginRuntime = {
-      activatePreparedArtifact,
-      cancelAllPendingRestarts: vi.fn(),
-    } as unknown as PluginRuntime;
-
     const input = {
       pluginMarketplace,
-      pluginRuntime,
       ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
       mainWindow: null,
+      mode: "repair-missing-only" as const,
       marketplace: {
         backend: "real-cloud" as const,
         cloudBaseUrl: "https://marketplace.example.com",
@@ -81,26 +75,27 @@ describe("runManagedBootstrap concurrency", () => {
 
     expect(ensureManagedInstalled).toHaveBeenCalledTimes(1);
     expect(ensureManagedInstalled).toHaveBeenCalledWith({
-      activatePreparedArtifact: expect.any(Function),
+      mode: "repair-missing-only",
       ensurePluginStateReadyForInstall: expect.any(Function),
     });
   });
 
-  it("passes the atomic activation seam when a managed plugin is auto-updated", async () => {
+  it("admits explicit durable-only sync without invoking live runtime activation", async () => {
     const ensureResult = { installed: [], updated: ["meeting"], failed: [] };
     const ensureManagedInstalled = vi.fn(async () => ensureResult);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const activatePreparedArtifact = vi.fn();
-    const pluginRuntime = {
-      activatePreparedArtifact,
-      cancelAllPendingRestarts: vi.fn(),
-    } as unknown as PluginRuntime;
+    const admissionSpy = vi.fn();
+    const admitPreStartOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+      admissionSpy();
+      return operation();
+    };
 
     await runManagedBootstrap({
       pluginMarketplace,
-      pluginRuntime,
       ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
       mainWindow: null,
+      mode: "pre-start-sync",
+      admitPreStartOperation,
       marketplace: {
         backend: "real-cloud" as const,
         cloudBaseUrl: "https://marketplace.example.com",
@@ -108,26 +103,21 @@ describe("runManagedBootstrap concurrency", () => {
     });
 
     expect(ensureManagedInstalled).toHaveBeenCalledWith({
-      activatePreparedArtifact: expect.any(Function),
+      mode: "pre-start-sync",
       ensurePluginStateReadyForInstall: expect.any(Function),
     });
-    expect(activatePreparedArtifact).not.toHaveBeenCalled();
+    expect(admissionSpy).toHaveBeenCalledOnce();
   });
 
   it("a fresh call after the in-flight settles starts a new run", async () => {
     const ensureResult = { installed: [], failed: [] };
     const ensureManagedInstalled = vi.fn(async () => ensureResult);
     const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
-    const pluginRuntime = {
-      activatePreparedArtifact: vi.fn(),
-      cancelAllPendingRestarts: vi.fn(),
-    } as unknown as PluginRuntime;
-
     const input = {
       pluginMarketplace,
-      pluginRuntime,
       ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
       mainWindow: null,
+      mode: "repair-missing-only" as const,
       marketplace: {
         backend: "real-cloud" as const,
         cloudBaseUrl: "https://marketplace.example.com",
@@ -137,5 +127,38 @@ describe("runManagedBootstrap concurrency", () => {
     await runManagedBootstrap(input);
     await runManagedBootstrap(input);
     expect(ensureManagedInstalled).toHaveBeenCalledTimes(2);
+  });
+
+  it("boots the incumbent after managed sync failure without running a mutation seam", async () => {
+    const events: string[] = [];
+    const mutation = vi.fn();
+    const phase = new PluginRuntimePreStartPhase();
+    const pluginMarketplace = {
+      ensureManagedInstalled: vi.fn(async () => {
+        events.push("sync:failed");
+        throw new Error("catalog unavailable");
+      }),
+    } as unknown as PluginMarketplaceService;
+
+    const sync = runManagedBootstrap({
+      pluginMarketplace,
+      ensurePluginStateReadyForInstall: vi.fn(async () => {
+        mutation();
+      }),
+      mainWindow: null,
+      marketplace: {
+        backend: "real-cloud",
+        cloudBaseUrl: "https://marketplace.example.com",
+      },
+      mode: "pre-start-sync",
+      admitPreStartOperation: (operation) => phase.admit(operation),
+    });
+    const start = phase.start(async () => {
+      events.push("incumbent:start");
+    });
+
+    await Promise.all([sync, start]);
+    expect(events).toEqual(["sync:failed", "incumbent:start"]);
+    expect(mutation).not.toHaveBeenCalled();
   });
 });
