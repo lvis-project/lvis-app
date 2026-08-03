@@ -112,6 +112,7 @@ export async function queryLoop(
       sessionIdOverride?: string;
       spawnDepth?: number;
       approvalReasonPrefix?: string;
+      remoteControllerAuthority?: import("../../shared/chat-origin.js").RemoteControllerAuthority;
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
@@ -359,7 +360,6 @@ export async function queryLoop(
         len: delivery.joined.length,
       });
     };
-
     try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // C3(a): hard guard between rounds — if we have already executed
@@ -367,8 +367,6 @@ export async function queryLoop(
       // last text. This is the loop-boundary defense for agent_spawn
       // turn caps; abortCurrentTurn remains the user-cancel path.
       if (assistantRoundsRun >= effectiveMaxRounds) {
-
-
         log.warn(
           `queryLoop: EARLY-EXIT(round-cap) — assistantRoundsRun=${assistantRoundsRun} effectiveMaxRounds=${effectiveMaxRounds} totalToolCalls=${allToolCalls.length}`,
         );
@@ -1014,6 +1012,7 @@ export async function queryLoop(
         activeApprovalReasonPrefix,
         toolTrustOrigin,
         effectiveSessionId,
+        bounds.remoteControllerAuthority,
       );
       for (const denied of interceptedMetaGate.denied) {
         self.history.append({
@@ -1224,6 +1223,9 @@ export async function queryLoop(
             additionalDirectories: self.getTurnAdditionalDirectories(),
             getAdditionalDirectories: () => self.getTurnAdditionalDirectories(),
             trustOrigin: toolTrustOrigin,
+            ...(bounds.remoteControllerAuthority
+              ? { remoteControllerAuthority: bounds.remoteControllerAuthority }
+              : {}),
             ...(bounds.requestAnchor
               ? {
                   requestAnchor: bounds.requestAnchor,
@@ -1244,6 +1246,7 @@ export async function queryLoop(
                 activeApprovalReasonPrefix,
                 toolTrustOrigin,
                 effectiveSessionId,
+                bounds.remoteControllerAuthority,
               );
               const denied = gated.denied[0];
               if (denied) {

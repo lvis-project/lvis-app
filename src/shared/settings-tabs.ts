@@ -5,6 +5,7 @@ export const SETTINGS_TABS = [
   "web",
   "startup",
   "permissions",
+  "tailnet-access",
   "roles",
   "usage",
   "audit",

@@ -7,28 +7,37 @@
  * C10 (#1409): the PUBLIC chat channels (send / sessions / get-history /
  * session-history) delegate to transport-agnostic pure handlers in
  * `../handlers/chat.ts`; this module keeps only the thin `ipcMain.handle`
- * wrappers (trust boundary + webContents sink construction) and the
- * internal / session-scoped handlers inline. The `lvis:chat:stream` fan-out is
- * published through a {@link ChatStreamSink} so a future in-process api/cli/sdk
- * can subscribe to the exact same frames the renderer receives.
+ * wrappers (trust boundary + semantic-event sink construction) and the
+ * internal / session-scoped handlers inline. The common platform timeline is
+ * canonical; this Electron adapter performs the one-way `lvis:chat:stream`
+ * compatibility projection at the display edge.
  */
 import { ipcMain } from "electron";
-import type { WebContents } from "electron";
 import { t } from "../../i18n/index.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
 import {
   MAX_LOCAL_USER_CONTENT_PARTS,
+  MAX_LOCAL_USER_CONTENT_TEXT_CHARS,
+  MAX_LOCAL_USER_CONTENT_TEXT_PARTS,
   normalizeLocalUserContentParts,
 } from "../../main/subscription-attachment-input.js";
-import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { parseStagedEnvelope, isMissingStagedEnvelopeErrorMessage } from "../../shared/staged-origins.js";
 import { validateHostRendererSender, validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
+import {
+  createPlatformConversationLegacyStreamAdapter,
+  createPlatformTurnId,
+} from "../../api/platform-conversation-legacy-adapter.js";
+import { createPlatformConversationEventSink } from "../../engine/conversation-platform-protocol.js";
+import {
+  createConversationCommandPort,
+  DESKTOP_CONVERSATION_ACTOR,
+} from "../../main/conversation-command-port.js";
 import { createLogger } from "../../lib/logger.js";
 import { readDiffSidecar, isSafeId } from "../../tools/write-diff-cache.js";
 import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
@@ -37,10 +46,9 @@ import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
-  type ChatStreamSink,
+  type ConversationStreamEventSink,
 } from "../handlers/chat-stream.js";
 import {
-  handleChatSend,
   handleChatSessions,
   handleChatGetHistory,
   handleChatSessionHistory,
@@ -57,6 +65,7 @@ import {
 import { getDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import { resolveAuthorizedWorkspaceProject } from "../../main/project-root-authorization.js";
 import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
+import { createConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
 const log = createLogger("chat");
 const MAX_MEMORY_PROJECT_ROOT_CHARS = 2_048;
 const MAX_MEMORY_PROJECT_NAME_CHARS = 120;
@@ -86,8 +95,26 @@ const USER_CONTENT_PART_KEYS: Record<string, readonly string[]> = {
   file: ["type", "data", "mimeType"],
 };
 
+const UNREADABLE_FIELD = Symbol("unreadable-field");
+
 function hasOnlyKeys(obj: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(obj).every((k) => allowed.includes(k));
+  try {
+    const keys = Object.keys(obj);
+    for (let index = 0; index < keys.length; index += 1) {
+      if (!allowed.includes(keys[index])) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ownField(obj: Record<string, unknown>, key: string): unknown {
+  try {
+    return Object.hasOwn(obj, key) ? obj[key] : undefined;
+  } catch {
+    return UNREADABLE_FIELD;
+  }
 }
 
 function isOptionalNonNegativeSafeInteger(value: unknown): boolean {
@@ -98,19 +125,75 @@ function isOptionalNonNegativeSafeInteger(value: unknown): boolean {
 function isValidUserContentPart(part: unknown): boolean {
   if (!part || typeof part !== "object" || Array.isArray(part)) return false;
   const p = part as Record<string, unknown>;
-  const type = p.type;
+  const type = ownField(p, "type");
   if (typeof type !== "string" || !Object.hasOwn(USER_CONTENT_PART_KEYS, type)) return false;
   if (!hasOnlyKeys(p, USER_CONTENT_PART_KEYS[type])) return false;
-  if (type === "text") return typeof p.text === "string";
-  if (type === "image") return (
-    typeof p.image === "string"
-    && (p.mimeType === undefined || typeof p.mimeType === "string")
-    && isOptionalNonNegativeSafeInteger(p.width)
-    && isOptionalNonNegativeSafeInteger(p.height)
-    && isOptionalNonNegativeSafeInteger(p.bytes)
-  );
-  if (type === "file") return typeof p.data === "string" && typeof p.mimeType === "string";
+
+  if (type === "text") return typeof ownField(p, "text") === "string";
+
+  if (type === "image") {
+    const image = ownField(p, "image");
+    const mimeType = ownField(p, "mimeType");
+    const width = ownField(p, "width");
+    const height = ownField(p, "height");
+    const bytes = ownField(p, "bytes");
+    return typeof image === "string"
+      && (mimeType === undefined || typeof mimeType === "string")
+      && isOptionalNonNegativeSafeInteger(width)
+      && isOptionalNonNegativeSafeInteger(height)
+      && isOptionalNonNegativeSafeInteger(bytes);
+  }
+
+  if (type === "file") {
+    return typeof ownField(p, "data") === "string" && typeof ownField(p, "mimeType") === "string";
+  }
   return false;
+}
+
+/**
+ * Imported multipart records use the same bounded composition as live IPC.
+ * Iterate by owned index instead of caller-provided iteration helpers:
+ * holes, unreadable properties, and overridden iteration helpers fail closed.
+ */
+function hasValidUserContentPartComposition(raw: unknown): boolean {
+  if (!Array.isArray(raw)) return false;
+
+  let length: number;
+  try {
+    length = raw.length;
+  } catch {
+    return false;
+  }
+  if (
+    !Number.isSafeInteger(length)
+    || length < 0
+    || length > MAX_LOCAL_USER_CONTENT_PARTS
+  ) {
+    return false;
+  }
+
+  let textPartCount = 0;
+  let textChars = 0;
+  for (let index = 0; index < length; index += 1) {
+    let part: unknown;
+    try {
+      if (!Object.hasOwn(raw, index)) return false;
+      part = raw[index];
+    } catch {
+      return false;
+    }
+    if (!isValidUserContentPart(part)) return false;
+
+    const record = part as Record<string, unknown>;
+    if (ownField(record, "type") !== "text") continue;
+    const text = ownField(record, "text");
+    if (typeof text !== "string") return false;
+    if (textPartCount >= MAX_LOCAL_USER_CONTENT_TEXT_PARTS) return false;
+    if (text.length > MAX_LOCAL_USER_CONTENT_TEXT_CHARS - textChars) return false;
+    textPartCount += 1;
+    textChars += text.length;
+  }
+  return true;
 }
 
 function isValidToolCallBlock(call: unknown): boolean {
@@ -142,10 +225,10 @@ function isValidImportedMessage(raw: unknown): raw is GenericMessage {
   switch (m.role) {
     case "user": {
       if (!hasOnlyKeys(m, ["role", "content"])) return false;
-      if (typeof m.content === "string") return true;
-      return Array.isArray(m.content)
-        && m.content.length <= MAX_LOCAL_USER_CONTENT_PARTS
-        && m.content.every(isValidUserContentPart);
+      const content = ownField(m, "content");
+      if (content === UNREADABLE_FIELD) return false;
+      if (typeof content === "string") return true;
+      return hasValidUserContentPartComposition(content);
     }
     case "assistant": {
       if (!hasOnlyKeys(m, ["role", "content", "thought", "toolCalls"])) return false;
@@ -429,11 +512,26 @@ export function registerChatHandlers(deps: IpcDeps): void {
     getMainWindow,
   } = deps;
 
-  // Build a ChatStreamSink bound to a specific webContents. The IPC sink is a
-  // byte-identical wrapper over the pre-C10 `sendToWebContents` fan-out; a
-  // future api/cli surface supplies its own sink over the same frames.
-  const buildSink = (wc: WebContents | undefined): ChatStreamSink =>
-    (channel, payload) => sendToWebContents(wc, channel, payload, log);
+  // This single host-owned runtime outlives individual transports. Direct
+  // registrar tests deliberately receive a private instance, while production
+  // main-process composition injects the same one into Local API and IPC.
+  const conversationSurfaceRuntime = deps.conversationSurfaceRuntime
+    ?? createConversationSurfaceRuntime();
+  const conversationCommandPort = deps.conversationCommandPort
+    ?? createConversationCommandPort(deps, conversationSurfaceRuntime);
+  const legacyStreamAdapter = createPlatformConversationLegacyStreamAdapter(
+    conversationSurfaceRuntime.timeline,
+  );
+  // Electron is the first owner-surface adapter. It receives a compatibility
+  // projection only; the semantic timeline remains the producer source.
+  legacyStreamAdapter.subscribe((channel, payload) => {
+    sendToWebContents(getMainWindow()?.webContents, channel, payload, log);
+  });
+  const buildSink = (streamId?: number): ConversationStreamEventSink =>
+    createPlatformConversationEventSink(conversationSurfaceRuntime.timeline, {
+      conversationId: conversationLoop.getSessionId(),
+      ...(streamId === undefined ? {} : { turnId: createPlatformTurnId(streamId) }),
+    });
 
   // read-only, sender guard optional
   ipcMain.handle(CHANNELS.chat.hasProvider, () => conversationLoop.hasProvider());
@@ -446,73 +544,61 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
 
   const STREAMING_ACTIVE = "streaming-active" as const;
-  let activeStreamTurn: Promise<TurnResult> | null = null;
-  let activeSessionMutation: Promise<unknown> | null = null;
-  let nextStreamId = 0;
-  const trackStreamTurn = (factory: () => Promise<TurnResult>) => {
-    if (activeStreamTurn !== null || activeSessionMutation !== null) {
-      return Promise.reject(new Error(STREAMING_ACTIVE));
-    }
-    // Publish the lease before factory code can run. Promise.resolve().then()
-    // defers even a synchronously-entering factory (for example mailbox peek),
-    // closing the re-entrant new/resume/fork TOCTOU window.
-    const turnPromise = Promise.resolve().then(factory).finally(() => {
-      if (activeStreamTurn === turnPromise) activeStreamTurn = null;
-    });
-    activeStreamTurn = turnPromise;
-    return turnPromise;
+  const trackStreamTurn = <T>(factory: () => Promise<T>): Promise<T> =>
+    conversationSurfaceRuntime.activity.trackTurn(factory);
+  const tryTrackStreamTurn = <T>(factory: () => Promise<T>): Promise<T> | null =>
+    conversationSurfaceRuntime.activity.tryTrackTurn(factory);
+  const trackSessionMutation = <T>(factory: () => Promise<T>): Promise<T> | null =>
+    conversationSurfaceRuntime.activity.trackMutation(factory);
+  const allocateStreamId = () => conversationSurfaceRuntime.activity.allocateStreamId();
+  type StreamTurnTransport = {
+    readonly sink: ConversationStreamEventSink;
   };
-  const trackSessionMutation = <T>(factory: () => Promise<T>): Promise<T> | null => {
-    if (activeStreamTurn !== null || activeSessionMutation !== null) return null;
-    // Acquire synchronously and execute after the lease is visible. The lease
-    // spans every await in fork/checkpoint persistence.
-    const mutationPromise = Promise.resolve().then(factory).finally(() => {
-      if (activeSessionMutation === mutationPromise) activeSessionMutation = null;
-    });
-    activeSessionMutation = mutationPromise;
-    return mutationPromise;
+  const createStreamTurnTransport = (): StreamTurnTransport => {
+    const streamId = allocateStreamId();
+    return { sink: buildSink(streamId) };
   };
-  const allocateStreamId = () => ++nextStreamId;
-  const streamTurn = async (
+  const runStreamTurn = async (
+    { sink }: StreamTurnTransport,
     input: string,
     attachments?: import("../../engine/llm/types.js").UserContentPart[],
     rolePrompt?: ActiveRolePrompt,
     displayText?: string,
   ) => {
-    const win = getMainWindow();
-    const sink = buildSink(win?.webContents);
-    const streamId = allocateStreamId();
-    return trackStreamTurn(async () => {
-      // Edit/resend and history replay reach the provider through this separate
-      // main-chat path. Keep their input (including folded text attachments)
-      // under the same DLP boundary as a normal `chat:send` turn while
-      // preserving non-text attachments.
-      //
-      // Keep only the fixed staged-origin enum before DLP can rewrite a source
-      // header into a non-parseable placeholder. Passing that enum as the
-      // claim below lets runStreamedTurn fail closed rather than downgrade a
-      // replayed staged turn to user-keyboard; the raw source never crosses
-      // this boundary.
-      const replayStagedInputOrigin = parseStagedEnvelope(input)?.kind.inputOrigin;
-      const sanitized = sanitizeOutgoingTurnContent(settingsService, sink, input, attachments);
-      const result = await runStreamedTurn(
-        conversationLoop,
-        sanitized.input,
-        sink,
-        streamId,
-        {
-          ...STREAM_TURN_OPTIONS,
-          ...(replayStagedInputOrigin ? { inputOrigin: replayStagedInputOrigin } : {}),
-          ...(sanitized.attachments && sanitized.attachments.length > 0
-            ? { attachments: sanitized.attachments }
-            : {}),
-          ...(rolePrompt ? { rolePrompt } : {}),
-          ...(displayText !== undefined ? { displayText } : {}),
-        },
-      );
-      await markMainActiveAfterTurn(deps, sanitized.input);
-      return result;
-    });
+    // Edit/resend and history replay reach the provider through this separate
+    // main-chat path. Keep their input (including folded text attachments)
+    // under the same DLP boundary as a normal `chat:send` turn while
+    // preserving non-text attachments.
+    //
+    // Keep only the fixed staged-origin enum before DLP can rewrite a source
+    // header into a non-parseable placeholder. Passing that enum as the
+    // claim below lets runStreamedTurn fail closed rather than downgrade a
+    // replayed staged turn to user-keyboard; the raw source never crosses
+    // this boundary.
+    const replayStagedInputOrigin = parseStagedEnvelope(input)?.kind.inputOrigin;
+    const sanitized = sanitizeOutgoingTurnContent(settingsService, sink, input, attachments);
+    const result = await runStreamedTurn(
+      conversationLoop,
+      sanitized.input,
+      sink,
+      {
+        ...STREAM_TURN_OPTIONS,
+        ...(replayStagedInputOrigin ? { inputOrigin: replayStagedInputOrigin } : {}),
+        ...(sanitized.attachments && sanitized.attachments.length > 0
+          ? { attachments: sanitized.attachments }
+          : {}),
+        ...(rolePrompt ? { rolePrompt } : {}),
+        ...(displayText !== undefined ? { displayText } : {}),
+      },
+    );
+    await markMainActiveAfterTurn(deps, sanitized.input);
+    return result;
+  };
+  const tryStreamTurn = <T>(
+    factory: (transport: StreamTurnTransport) => Promise<T>,
+  ): Promise<T> | null => {
+    const transport = createStreamTurnTransport();
+    return tryTrackStreamTurn(() => factory(transport));
   };
 
   // D3 opt-in wake is registered once the parent stream coordinator exists.
@@ -529,7 +615,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // once. The bus invokes this handler from a detached side promise, so a
       // synchronous onDropped callback never waits on its own active turn.
       // There is deliberately no timer, polling, or parking loop.
-      const leaseAtRequest = activeStreamTurn ?? activeSessionMutation;
+      const leaseAtRequest = conversationSurfaceRuntime.activity.activeTurn()
+        ?? conversationSurfaceRuntime.activity.activeMutation();
       if (leaseAtRequest !== null) {
         try {
           await leaseAtRequest;
@@ -542,16 +629,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
       if (
         conversationLoop.getSessionKind() !== "main"
         || conversationLoop.getSessionId() !== parentSessionId
-        || activeStreamTurn !== null
-        || activeSessionMutation !== null
+        || conversationSurfaceRuntime.activity.isBusy()
         || conversationLoop.hasActiveTurn()
       ) {
         return;
       }
 
-      const win = getMainWindow();
-      const sink = buildSink(win?.webContents);
       const streamId = allocateStreamId();
+      const sink = buildSink(streamId);
       await trackStreamTurn(async () => {
         // Snapshot only after the turn lease is visible. A concurrent manual
         // send or session mutation then fails closed before it can switch the
@@ -569,7 +654,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
           conversationLoop,
           mailboxTurn.initialGuidance,
           sink,
-          streamId,
           {
             ...STREAM_TURN_OPTIONS,
             inputOrigin: "agent-message",
@@ -584,17 +668,15 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
   }
   // PUBLIC lvis:chat:send — thin wrapper: trust boundary + sink construction,
-  // logic in handlers/chat.ts. The stream/redact/fallback frames the renderer
-  // receives are byte-identical to the pre-C10 fan-out.
+  // logic in handlers/chat.ts. The common semantic timeline is canonical; the
+  // renderer receives its existing frame shape only through the owner adapter.
   ipcMain.handle(CHANNELS.chat.send, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.send, e); return UNAUTHORIZED_FRAME; }
-    if (activeStreamTurn !== null || activeSessionMutation !== null) {
-      return { error: STREAMING_ACTIVE };
-    }
-    const win = getMainWindow();
-    const sink = buildSink(win?.webContents);
     try {
-      return await handleChatSend(deps, payload, { sink, allocateStreamId, trackStreamTurn });
+      return await conversationCommandPort.execute(DESKTOP_CONVERSATION_ACTOR, {
+        kind: "message.send",
+        payload,
+      });
     } catch (error) {
       if (error instanceof Error && error.message === STREAMING_ACTIVE) {
         return { error: STREAMING_ACTIVE };
@@ -628,10 +710,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
     // PII redaction applies to guide input too — same trust origin
     // (user-keyboard) and same downstream LLM consumption as chatSend.
     // The `redact_notice` stream event uses the active turn's streamId
-    // implicitly (sanitizeOutgoingInput sends to the host webContents
-    // directly — renderer surfaces under the current streaming context).
-    const win = getMainWindow();
-    const effective = sanitizeOutgoingInput(settingsService, buildSink(win?.webContents), input);
+    // implicitly and travels through the shared surface adapter so every
+    // attached display sees the same current streaming context.
+    const effective = sanitizeOutgoingInput(settingsService, buildSink(), input);
     const queueResult = conversationLoop.queueGuidance(effective);
     if (queueResult === "queued") {
       // Audit successful guide as a mutating state transition (parity with
@@ -656,6 +737,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.chat.abort, async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.abort, e); return UNAUTHORIZED_FRAME; }
     conversationLoop.abortCurrentTurn();
+    const activeStreamTurn = conversationSurfaceRuntime.activity.activeTurn();
     if (activeStreamTurn) {
       try {
         await activeStreamTurn;
@@ -714,22 +796,33 @@ export function registerChatHandlers(deps: IpcDeps): void {
     // the "자동 압축 중..." StatusBar indicator (parity with token preflight
     // path which gets it via runStreamedTurn callbacks). streamId is omitted
     // because manualCompact runs outside the per-turn stream.
-    return conversationLoop.manualCompact({
-      onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
-        sendToWebContents(e.sender, CHANNELS.chat.stream, { type: "compact_started", triggerSource, estimatedBefore, preflight }, log),
-      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, trigger, summary, compactNum, compactStatus, truncatedDir }) =>
-        sendToWebContents(e.sender, CHANNELS.chat.stream, {
-          type: "compact_notice",
-          removedMessages,
-          freedTokens,
-          estimatedAfter,
-          ...(trigger !== undefined ? { trigger } : {}),
-          ...(summary !== undefined ? { summary } : {}),
-          ...(compactNum !== undefined ? { compactNum } : {}),
-          ...(compactStatus !== undefined ? { compactStatus } : {}),
-          ...(truncatedDir !== undefined ? { truncatedDir } : {}),
-        }, log),
+    const mutation = trackSessionMutation(async () => {
+      const sink = buildSink();
+      return conversationLoop.manualCompact({
+        onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
+          sink({
+            kind: "compaction.started",
+            triggerSource,
+            estimatedBefore,
+            preflight,
+          }),
+        onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, trigger, summary, compactNum, compactStatus, truncatedDir }) =>
+          sink({
+            kind: "compaction.completed",
+            removedMessages,
+            freedTokens,
+            estimatedAfter,
+            ...(trigger !== undefined ? { trigger } : {}),
+            ...(compactNum !== undefined ? { compactNum } : {}),
+            ...(compactStatus !== undefined ? { compactStatus } : {}),
+            ownerDetail: {
+              ...(summary === undefined ? {} : { summary }),
+              ...(truncatedDir === undefined ? {} : { truncatedDir }),
+            },
+          }),
+      });
     });
+    return mutation ?? { error: STREAMING_ACTIVE };
   });
 
   ipcMain.handle(CHANNELS.chat.sessionResume, async (e, sessionId: string) => {
@@ -785,27 +878,33 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.editResend, e); return UNAUTHORIZED_FRAME; }
     if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
     if (typeof newText !== "string" || newText.trim().length === 0) return { ok: false, error: "empty-text" };
-    const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
-    const historyIndex = entryOrdinalToHistoryIndex(history, messageIndex);
-    if (historyIndex < 0) return { ok: false, error: "index-out-of-range" };
-    const personaPromptId = personaPromptIdFromUserMessage(history[historyIndex]);
-    if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
-    const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
-    if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
-    const messages = [...history];
-    conversationLoop.getHistory().truncate(historyIndex);
-    try {
-      const result = await streamTurn(newText, undefined, personaPrompt.rolePrompt);
-      return { ok: true, result };
-    } catch (err) {
-      // A provider-bound replay can fail closed before runTurn (for example
-      // when DLP redacts a staged provenance header). Keep the original
-      // conversation intact instead of turning a safe rejection into data loss.
-      if (isMissingStagedEnvelopeError(err)) {
-        conversationLoop.getHistory().restore(messages);
+    const turn = tryStreamTurn(async (transport) => {
+      // Read, persona-resolve, and truncate only after the exclusive lease is
+      // visible. A Local API/CLI turn cannot leave this replay with a partial
+      // history when it wins the race.
+      const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
+      const historyIndex = entryOrdinalToHistoryIndex(history, messageIndex);
+      if (historyIndex < 0) return { ok: false, error: "index-out-of-range" };
+      const personaPromptId = personaPromptIdFromUserMessage(history[historyIndex]);
+      if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
+      const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
+      if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
+      const messages = [...history];
+      conversationLoop.getHistory().truncate(historyIndex);
+      try {
+        const result = await runStreamTurn(transport, newText, undefined, personaPrompt.rolePrompt);
+        return { ok: true, result };
+      } catch (err) {
+        // A provider-bound replay can fail closed before runTurn (for example
+        // when DLP redacts a staged provenance header). Keep the original
+        // conversation intact instead of turning a safe rejection into data loss.
+        if (isMissingStagedEnvelopeError(err)) {
+          conversationLoop.getHistory().restore(messages);
+        }
+        throw err;
       }
-      throw err;
-    }
+    });
+    return turn ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
   ipcMain.handle(CHANNELS.chat.fork, async (e, messageIndex: number) => {
@@ -846,10 +945,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
     return mutation ?? { ok: false, sessionId: null, error: STREAMING_ACTIVE };
   });
-  const continueFromLastUserTurn = async (opts: {
-    requireTerminalUser: boolean;
-    restoreOnFailure: boolean;
-  }) => {
+  const continueFromLastUserTurnWithinLease = async (
+    opts: { requireTerminalUser: boolean; restoreOnFailure: boolean },
+    transport: StreamTurnTransport,
+  ) => {
     const messages = [...(conversationLoop.getHistory().getMessages() as GenericMessage[])];
     if (messages.length === 0) return { ok: false, error: "no-user-message" };
     let lastUserIdx = messages.length - 1;
@@ -896,7 +995,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const priorDisplayText = (lastUser.meta as { displayText?: unknown } | undefined)?.displayText;
     conversationLoop.getHistory().truncate(lastUserIdx);
     try {
-      const result = await streamTurn(
+      const result = await runStreamTurn(
+        transport,
         lastUserText,
         lastUserAttachments,
         personaPrompt.rolePrompt,
@@ -913,13 +1013,25 @@ export function registerChatHandlers(deps: IpcDeps): void {
       throw err;
     }
   };
+  const continueFromLastUserTurn = async (
+    opts: { requireTerminalUser: boolean; restoreOnFailure: boolean },
+    expectedSessionId?: string,
+  ) => {
+    const turn = tryStreamTurn(async (transport) => {
+      if (expectedSessionId !== undefined && expectedSessionId !== conversationLoop.getSessionId()) {
+        return { ok: false, error: "session-mismatch" };
+      }
+      return continueFromLastUserTurnWithinLease(opts, transport);
+    });
+    return turn ?? { ok: false, error: STREAMING_ACTIVE };
+  };
 
   ipcMain.handle(CHANNELS.chat.continueLastUser, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.continueLastUser, e); return UNAUTHORIZED_FRAME; }
     const p = payload as { sessionId?: unknown };
     if (typeof p?.sessionId !== "string") return { ok: false, error: "invalid-args" };
     if (p.sessionId !== conversationLoop.getSessionId()) return { ok: false, error: "session-mismatch" };
-    return continueFromLastUserTurn({ requireTerminalUser: true, restoreOnFailure: true });
+    return continueFromLastUserTurn({ requireTerminalUser: true, restoreOnFailure: true }, p.sessionId);
   });
 
   ipcMain.handle(CHANNELS.chat.retryEffort, async (
@@ -927,42 +1039,48 @@ export function registerChatHandlers(deps: IpcDeps): void {
     opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean },
   ) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.retryEffort, e); return UNAUTHORIZED_FRAME; }
-    const prevLlm = settingsService.get("llm");
-    const provider = prevLlm.provider;
-    const prevBlock = getLlmVendorSettings(prevLlm.vendors, provider);
-    const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
-    await settingsService.patch({
-      llm: {
-        vendors: {
-          [provider]: {
-            ...prevBlock,
-            enableThinking: opts?.enableThinking ?? true,
-            thinkingBudgetTokens: opts?.thinkingBudgetTokens ?? 20000,
+    const turn = tryStreamTurn(async (transport) => {
+      const prevLlm = settingsService.get("llm");
+      const provider = prevLlm.provider;
+      const prevBlock = getLlmVendorSettings(prevLlm.vendors, provider);
+      const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
+      await settingsService.patch({
+        llm: {
+          vendors: {
+            [provider]: {
+              ...prevBlock,
+              enableThinking: opts?.enableThinking ?? true,
+              thinkingBudgetTokens: opts?.thinkingBudgetTokens ?? 20000,
+            },
           },
         },
-      },
-    });
-    // ASRT choke-point: the spread includes prevBlock.baseUrl if set, so if
-    // a baseUrl was present it remains unchanged and the guard is a no-op.
-    // Included for completeness in case future patches extend this handler.
-    if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
-      deps.refreshSandboxNetworkConfig?.();
-    }
-    conversationLoop.refreshProvider();
-    try {
-      return await continueFromLastUserTurn({ requireTerminalUser: false, restoreOnFailure: false });
-    } finally {
-      await settingsService.patch({
-        llm: { vendors: { [provider]: prevBlock } },
       });
-      // Restore path: if the forward patch triggered a sandbox refresh but
-      // the restore brings baseUrl back to the same value, the guard here is
-      // also a no-op (prevBlock was the original, sig matches original).
+      // ASRT choke-point: the spread includes prevBlock.baseUrl if set, so if
+      // a baseUrl was present it remains unchanged and the guard is a no-op.
+      // Included for completeness in case future patches extend this handler.
       if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
         deps.refreshSandboxNetworkConfig?.();
       }
       conversationLoop.refreshProvider();
-    }
+      try {
+        return await continueFromLastUserTurnWithinLease(
+          { requireTerminalUser: false, restoreOnFailure: false },
+          transport,
+        );
+      } finally {
+        await settingsService.patch({
+          llm: { vendors: { [provider]: prevBlock } },
+        });
+        // Restore path: if the forward patch triggered a sandbox refresh but
+        // the restore brings baseUrl back to the same value, the guard here is
+        // also a no-op (prevBlock was the original, sig matches original).
+        if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
+          deps.refreshSandboxNetworkConfig?.();
+        }
+        conversationLoop.refreshProvider();
+      }
+    });
+    return turn ?? { ok: false, error: STREAMING_ACTIVE };
   });
 
   ipcMain.handle(CHANNELS.chat.export, async (e, format: "markdown" | "json") => {

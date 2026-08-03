@@ -32,7 +32,7 @@
  *
  * Deps are INJECTED — the dispatcher never constructs real services. The
  * caller wires the same {@link IpcDeps} the IPC registrars receive plus a
- * {@link ChatSendContext} (stream plumbing) for `chat send`.
+ * {@link ConversationCommandPort} for `chat send`.
  *
  * This module is part of the main tsc project (unlike preload): it must be
  * fully type-clean. It imports the contract SOT from `src/contract/` — wire
@@ -50,9 +50,11 @@ import {
 } from "../contract/app-contract.js";
 import { isExternalOrigin, type ExternalOrigin } from "../contract/trust-origin.js";
 import type { IpcDeps } from "../ipc/types.js";
-import type { ChatSendContext } from "../ipc/handlers/chat.js";
 import {
-  handleChatSend,
+  LOOPBACK_CONVERSATION_ACTOR,
+  type ConversationCommandPort,
+} from "../main/conversation-command-port.js";
+import {
   handleChatSessions,
   handleChatGetHistory,
   handleChatSessionHistory,
@@ -123,11 +125,10 @@ export interface LocalApiDeps {
   /** Service bag shared with the IPC domain registrars. */
   ipc: IpcDeps;
   /**
-   * Stream plumbing for `chat send`. The caller supplies its own sink (SSE /
-   * emitter) over the same frames the renderer receives, plus the per-turn
-   * stream-id allocator + in-flight turn tracker.
+   * Host-owned command entrypoint. It binds this transport to the
+   * non-privileged `surface-user` chat provenance before a turn starts.
    */
-  chatSendContext: ChatSendContext;
+  conversationCommandPort: ConversationCommandPort;
   /**
    * OPTIONAL #1409 approval-mediated external-mutation gate. When ABSENT, the
    * default posture is byte-identical to before: every gesture-gated channel
@@ -149,7 +150,7 @@ export interface LocalApi<E extends string = LocalApiErrorCode> {
 
 /**
  * Build the dispatcher over injected deps. Route logic is closed over `ipc`
- * and `chatSendContext`; no real services are constructed here.
+ * and the shared command port; no real services are constructed here.
  */
 /** Narrowing helper: is this channel an allowlisted external-mutation channel? */
 function isExternalMutationChannel(channel: string): channel is ExternalMutationChannel {
@@ -157,7 +158,7 @@ function isExternalMutationChannel(channel: string): channel is ExternalMutation
 }
 
 export function createLocalApi(deps: LocalApiDeps): LocalApi {
-  const { ipc, chatSendContext, externalMutationApprover } = deps;
+  const { ipc, conversationCommandPort, externalMutationApprover } = deps;
 
   /**
    * Route an APPROVED external-mutation channel to its mutating handler. Reached
@@ -201,7 +202,10 @@ export function createLocalApi(deps: LocalApiDeps): LocalApi {
   function route(channel: PublicChannel, args: unknown): unknown {
     switch (channel) {
       case CHANNELS.chat.send:
-        return handleChatSend(ipc, args, chatSendContext);
+        return conversationCommandPort.execute(LOOPBACK_CONVERSATION_ACTOR, {
+          kind: "message.send",
+          payload: args,
+        });
       case CHANNELS.chat.sessions:
         return handleChatSessions(ipc, args as Parameters<typeof handleChatSessions>[1]);
       case CHANNELS.chat.getHistory:
@@ -270,8 +274,21 @@ export function createLocalApi(deps: LocalApiDeps): LocalApi {
       return { ok: false, error: LOCAL_API_CHANNEL_NOT_PUBLIC };
     }
 
-    const data = await route(channel, args);
-    return { ok: true, data };
+    try {
+      const data = await route(channel, args);
+      return { ok: true, data };
+    } catch (error) {
+      // `chat.send` reports ordinary handler outcomes inside its payload. A
+      // shared Runtime lease rejects before entering the handler factory, so
+      // keep the same public shape rather than turning expected contention into
+      // a transport-level 500 (or an authorization-shaped 403).
+      if (channel === CHANNELS.chat.send
+        && error instanceof Error
+        && error.message === "streaming-active") {
+        return { ok: true, data: { error: "streaming-active" } };
+      }
+      throw error;
+    }
   }
 
   return { dispatch };

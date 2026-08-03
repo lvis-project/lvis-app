@@ -61,6 +61,7 @@ describe("single-flight agent-action approver", () => {
     ["local-api", "allow-session"],
     ["cli", "allow-always"],
     ["a2a-remote-wire", "allow-session"],
+    ["platform-bridge", "allow-always"],
   ] as const)("fails closed when %s receives a non-one-shot %s response", async (trustOrigin, choice) => {
     const requestAndWait = vi.fn(async () => ({
       requestId: "approval-1",

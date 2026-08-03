@@ -19,6 +19,12 @@ export function trustOriginLabel(origin: string | undefined): string {
       return t("trustOriginLabel.llmToolArg");
     case "file-content":
       return t("trustOriginLabel.fileContent");
+    case "surface-user":
+      return t("trustOriginLabel.surfaceUser");
+    case "tailnet-surface":
+      return t("trustOriginLabel.tailnetSurface");
+    case "platform-bridge":
+      return t("trustOriginLabel.platformBridge");
     case undefined:
       return t("trustOriginLabel.unknown");
     default:

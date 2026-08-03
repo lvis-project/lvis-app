@@ -30,6 +30,7 @@ const closeFileLogSink = vi.fn(() => calls.push("closeFileLogSink"));
 const logWarn = vi.fn();
 const logError = vi.fn();
 const stopLocalApiServer = vi.fn(async () => { calls.push("stopLocalApi"); });
+const stopTailnetObserverServer = vi.fn(async () => { calls.push("stopTailnetObserver"); });
 const stopRemoteA2AReceiverServer = vi.fn(async () => { calls.push("stopRemoteReceiver"); });
 const stopSubscriptionRuntimes = vi.fn(async () => { calls.push("stopSubscriptionRuntimes"); });
 const runShutdownRoutines = vi.fn(async () => { calls.push("shutdownRoutines"); });
@@ -46,6 +47,9 @@ vi.mock("../../lib/logger.js", () => ({
 }));
 vi.mock("../shutdown-routines.js", () => ({ runShutdownRoutines: (...a: unknown[]) => runShutdownRoutines(...a) }));
 vi.mock("../local-api-server.js", () => ({ stopLocalApiServer: (...a: unknown[]) => stopLocalApiServer(...a) }));
+vi.mock("../tailnet-surface-server.js", () => ({
+  stopTailnetObserverServer: () => stopTailnetObserverServer(),
+}));
 vi.mock("../a2a-remote-receiver-server.js", () => ({
   stopRemoteA2AReceiverServer: () => stopRemoteA2AReceiverServer(),
 }));
@@ -145,6 +149,9 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
     const { runAppShutdownCleanup } = await import("../app-shutdown.js");
     await runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false });
     expect(calls.indexOf("stopLocalApi")).toBeLessThan(calls.indexOf("stopRemoteReceiver"));
+    expect(calls.indexOf("stopLocalApi")).toBeLessThan(calls.indexOf("stopTailnetObserver"));
+    expect(calls.indexOf("stopTailnetObserver")).toBeLessThan(calls.indexOf("stopRemoteReceiver"));
+    expect(calls.indexOf("stopTailnetObserver")).toBeLessThan(calls.indexOf("servicesShutdown"));
     expect(calls.indexOf("stopRemoteReceiver")).toBeLessThan(calls.indexOf("servicesShutdown"));
     expect(calls.indexOf("pluginShutdownHandlers")).toBeLessThan(calls.indexOf("shutdownRoutines"));
     expect(calls.indexOf("shutdownRoutines")).toBeLessThan(calls.indexOf("stopSubscriptionRuntimes"));
