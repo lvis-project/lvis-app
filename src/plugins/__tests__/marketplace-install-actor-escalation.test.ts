@@ -29,6 +29,7 @@ import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import {
   makeTestPluginPaths,
+  preparedActivationOptionsForTest,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 
@@ -64,6 +65,9 @@ function makeAuditSink() {
 // JSON.stringify blob in `input`).
 const findEscalation = (entries: CapturedAuditEntry[]) =>
   entries.find((e) => e.pluginInstall?.event === "plugin-install-escalation");
+
+const installFixture = (service: PluginMarketplaceService) =>
+  service.install("mp-test", undefined, preparedActivationOptionsForTest);
 
 describe("PluginMarketplaceService.install — actor escalation", () => {
   let testDir: string;
@@ -161,7 +165,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
 
     // Install will fail downstream (no real artifact backend in tests) but
     // the escalation audit + actor derivation happen *before* download.
-    await expect(service.install("mp-test")).rejects.toBeDefined();
+    await expect(installFixture(service)).rejects.toBeDefined();
 
     const escalation = findEscalation(audit.entries);
     expect(escalation).toBeDefined();
@@ -184,7 +188,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     const audit = makeAuditSink();
     const service = makeService(audit.logger);
 
-    await expect(service.install("mp-test")).rejects.toBeDefined();
+    await expect(installFixture(service)).rejects.toBeDefined();
 
     expect(findEscalation(audit.entries)).toBeUndefined();
   });
@@ -194,7 +198,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     const audit = makeAuditSink();
     const service = makeService(audit.logger);
 
-    await expect(service.install("mp-test")).rejects.toBeDefined();
+    await expect(installFixture(service)).rejects.toBeDefined();
 
     expect(findEscalation(audit.entries)).toBeUndefined();
   });
@@ -206,7 +210,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     // downstream artifact/install errors remain.
     await writeCatalog("admin");
     const service = makeService();
-    await expect(service.install("mp-test")).rejects.not.toThrow(/installed by user/);
+    await expect(installFixture(service)).rejects.not.toThrow(/installed by user/);
   });
 
   it("defers an installed older admin plugin update until app restart", async () => {
@@ -242,7 +246,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       "installWithDependencies",
     ).mockResolvedValue({ pluginId: "mp-test", installed: true });
 
-    await expect(service.install("mp-test")).resolves.toEqual({
+    await expect(installFixture(service)).resolves.toEqual({
       pluginId: "mp-test",
       installed: true,
     });
@@ -264,7 +268,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       "installWithDependencies",
     ).mockResolvedValue({ pluginId: "mp-test", installed: true });
 
-    await expect(service.install("mp-test")).resolves.toEqual({
+    await expect(installFixture(service)).resolves.toEqual({
       pluginId: "mp-test",
       installed: true,
     });
@@ -286,7 +290,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       "installWithDependencies",
     ).mockResolvedValue({ pluginId: "mp-test", installed: true });
 
-    await expect(service.install("mp-test")).resolves.toEqual({
+    await expect(installFixture(service)).resolves.toEqual({
       pluginId: "mp-test",
       installed: true,
     });
@@ -399,7 +403,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       audit.logger as unknown as ConstructorParameters<typeof PluginMarketplaceService>[3],
     );
 
-    await expect(service.install("mp-test")).rejects.toThrow(/network down/);
+    await expect(installFixture(service)).rejects.toThrow(/network down/);
     // No escalation emitted — fetch failed before any policy decision.
     expect(findEscalation(audit.entries)).toBeUndefined();
   });
@@ -426,7 +430,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       audit.logger as unknown as ConstructorParameters<typeof PluginMarketplaceService>[3],
     );
 
-    await expect(service.install("mp-test")).rejects.toBeDefined();
+    await expect(installFixture(service)).rejects.toBeDefined();
 
     // getPluginDetail is no longer part of the install path — the snapshot is
     // the listPlugins() result, shared by escalation + guard + artifact.

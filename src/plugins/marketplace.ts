@@ -1094,8 +1094,13 @@ export class PluginMarketplaceService {
    * and the app continues without the failed plugins.
    */
   async ensureManagedInstalled(options: {
-    mode: "pre-start-sync" | "repair-missing-only";
+    mode: "pre-start-sync";
     ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+    activatePreparedArtifact?: never;
+  } | {
+    mode: "repair-missing-only";
+    ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+    activatePreparedArtifact: PreparedMarketplacePluginActivation;
   }): Promise<{
     installed: string[];
     updated: string[];
@@ -1107,6 +1112,19 @@ export class PluginMarketplaceService {
     ) {
       throw new Error("managed marketplace install requires an explicit sync mode");
     }
+    if (
+      options.mode === "pre-start-sync" &&
+      "activatePreparedArtifact" in options &&
+      options.activatePreparedArtifact !== undefined
+    ) {
+      throw new Error("managed pre-start sync forbids runtime activation");
+    }
+    const activatePreparedArtifact = options.mode === "repair-missing-only"
+      ? requirePreparedMarketplacePluginActivation(
+          options.activatePreparedArtifact,
+          "managed missing-plugin repair",
+        )
+      : commitPreparedArtifactWithoutPublication;
     if (typeof options?.ensurePluginStateReadyForInstall !== "function") {
       throw new Error(
         "managed marketplace install requires pending-cleanup reconciliation",
@@ -1267,7 +1285,7 @@ export class PluginMarketplaceService {
                 plugins,
                 new Set<string>(),
                 state,
-                commitPreparedArtifactWithoutPublication,
+                activatePreparedArtifact,
                 undefined,
               );
             } catch (innerErr) {

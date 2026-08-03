@@ -56,4 +56,30 @@ describe("createUpdateCheckRunner", () => {
     expect(broadcast).toHaveBeenCalledOnce();
     expect(broadcast).toHaveBeenCalledWith([update("2.0.0")]);
   });
+
+  it("preserves the last successful broadcast and reports an internal failure", async () => {
+    const registryError = new Error("registry read failed");
+    const check = vi
+      .fn<() => Promise<PluginUpdateCheckResult>>()
+      .mockResolvedValueOnce({ status: "success", updates: [update("2.0.0")] })
+      .mockResolvedValueOnce({ status: "error", error: registryError })
+      .mockResolvedValueOnce({ status: "success", updates: [update("2.0.0")] });
+    const broadcast = vi.fn();
+    const onError = vi.fn();
+    const run = createUpdateCheckRunner({
+      check,
+      filter: (updates) => updates,
+      broadcast,
+      onError,
+    });
+
+    await run();
+    await run();
+    await run();
+
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(registryError);
+    expect(broadcast).toHaveBeenCalledOnce();
+    expect(broadcast).toHaveBeenCalledWith([update("2.0.0")]);
+  });
 });

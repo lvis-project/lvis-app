@@ -54,6 +54,7 @@ describe("runManagedBootstrap concurrency", () => {
       ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
       mainWindow: null,
       mode: "repair-missing-only" as const,
+      activatePreparedArtifact: vi.fn(),
       marketplace: {
         backend: "real-cloud" as const,
         cloudBaseUrl: "https://marketplace.example.com",
@@ -77,6 +78,7 @@ describe("runManagedBootstrap concurrency", () => {
     expect(ensureManagedInstalled).toHaveBeenCalledWith({
       mode: "repair-missing-only",
       ensurePluginStateReadyForInstall: expect.any(Function),
+      activatePreparedArtifact: expect.any(Function),
     });
   });
 
@@ -118,6 +120,7 @@ describe("runManagedBootstrap concurrency", () => {
       ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
       mainWindow: null,
       mode: "repair-missing-only" as const,
+      activatePreparedArtifact: vi.fn(),
       marketplace: {
         backend: "real-cloud" as const,
         cloudBaseUrl: "https://marketplace.example.com",
