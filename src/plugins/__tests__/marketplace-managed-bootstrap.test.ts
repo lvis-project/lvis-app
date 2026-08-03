@@ -173,6 +173,31 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.failed).toEqual([]);
   });
 
+  it("does not treat an owned artifact directory without a registry row as structurally missing", async () => {
+    await writeAdminCatalog("1.0.0");
+    await mkdir(join(pluginsDir, "meeting"), { recursive: true });
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }));
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    );
+    const cleanupGate = vi.fn(async () => undefined);
+    const activatePreparedArtifact = vi.fn();
+
+    const result = await service.ensureManagedInstalled({
+      activatePreparedArtifact: activatePreparedArtifact as never,
+      ensurePluginStateReadyForInstall: cleanupGate,
+    });
+
+    expect(cleanupGate).not.toHaveBeenCalled();
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
+    expect(result).toEqual({ installed: [], updated: [], failed: [] });
+  });
+
   async function writeAdminCatalog(version: string) {
     await writeFile(
       marketplacePath,

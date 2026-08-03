@@ -158,7 +158,7 @@ interface MarketplaceInstallAdmissionRecord {
   readonly requestedPluginId: string;
   readonly catalogSnapshot: readonly PluginMarketplaceItem[];
   readonly catalogItem: PluginMarketplaceItem;
-  readonly networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+  readonly networkAccessAcknowledgementJson: string;
   consumed: boolean;
 }
 
@@ -279,6 +279,12 @@ function assertNetworkAccessAcknowledgement(options: {
   throw new Error(
     `plugin "${options.plugin.id}" networkAccess grant must be acknowledged before install`,
   );
+}
+
+function serializeNetworkAccessAcknowledgement(
+  acknowledgement: NetworkAccessAcknowledgement | undefined,
+): string {
+  return JSON.stringify(acknowledgement ?? null);
 }
 
 function resolveRollbackInstallSource(
@@ -769,8 +775,8 @@ export class PluginMarketplaceService {
       const currentRecord = this.requireInstallAdmission(admission, pluginId);
       const manualCondition = await this.resolveManualInstallCondition(currentRecord.catalogItem);
       this.assertManualInstallCondition(currentRecord.catalogItem, manualCondition);
-      if (JSON.stringify(options.networkAccessAcknowledgement ?? null)
-          !== JSON.stringify(currentRecord.networkAccessAcknowledgement ?? null)) {
+      if (serializeNetworkAccessAcknowledgement(options.networkAccessAcknowledgement)
+          !== currentRecord.networkAccessAcknowledgementJson) {
         throw new Error("marketplace install admission request does not match network acknowledgement");
       }
       currentRecord.consumed = true;
@@ -869,7 +875,9 @@ export class PluginMarketplaceService {
         requestedPluginId: pluginId,
         catalogSnapshot: plugins,
         catalogItem,
-        networkAccessAcknowledgement: options.networkAccessAcknowledgement,
+        networkAccessAcknowledgementJson: serializeNetworkAccessAcknowledgement(
+          options.networkAccessAcknowledgement,
+        ),
         consumed: false,
       });
       return admission;
