@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import type { Tool } from "./base.js";
 import type { ToolCategory, ToolSource, TrustLevel } from "./types.js";
-import { requiredTier, type PermissionCheckResult,
+import {
+  isTailnetControllerP1BlockedTool, requiredTier, type PermissionCheckResult,
 } from "../permissions/permission-manager.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import type { PermissionEvaluationContext } from "../permissions/evaluation-context.js";
@@ -13,6 +14,7 @@ import type {
 import type { HostShellExecutionPermitBinding } from "../permissions/host-shell-execution-permit.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { isRemoteControllerAuthorityCurrent } from "../shared/chat-origin.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
@@ -192,12 +194,21 @@ export async function authorizeToolInvocation(
     ? tool.decisionOverride
     : undefined;
   const isAlwaysAllowMeta = metaOverride === "always-allow-with-audit";
+  // This marker is host-owned and independent of ToolTrustOrigin, which can
+  // legitimately become file-content/staged after later model rounds. A
+  // Tailnet controller never inherits global allow, reviewer, or approval
+  // memory authority for any ToolExecutor invocation. A declared read is not
+  // a remote authority boundary: plugin/MCP implementations can have effects
+  // that are not represented by their declared category.
+  const requiresRemoteLocalOneShot =
+    invocationPermissionContext.remoteControllerAuthority !== undefined;
   // Cross-agent provenance re-elevates even host-owned always-allow meta tools:
   // the receiver must authorize every tool use caused by an A2A Message.
   if (
-    (services.permissionManager && !isAlwaysAllowMeta)
+    (services.permissionManager && (!isAlwaysAllowMeta || requiresRemoteLocalOneShot))
     || approvalReasonPrefix !== undefined
     || hostShellRequiresExplicitApproval
+    || requiresRemoteLocalOneShot
   ) {
     // Permission policy V1 SOT — PermissionManager re-elevates
     // `decisionOverride="ask"` and selects either the common foreground
@@ -244,6 +255,32 @@ export async function authorizeToolInvocation(
               layer: permissionResult.layer,
               forceModal: true,
             };
+    }
+
+    // Defense in depth for test-only/no-PermissionManager wiring: the policy
+    // SOT above normally produces this exact result, but an external surface
+    // must fail closed rather than accidentally inherit a precomputed allow.
+    // Keep the P1 deny list here too: it must remain closed even when a test
+    // harness or future composition accidentally omits PermissionManager.
+    if (
+      requiresRemoteLocalOneShot &&
+      (invocationCategory === "meta" || isTailnetControllerP1BlockedTool(toolUse.name))
+    ) {
+      permissionResult = {
+        ...permissionResult,
+        decision: "deny",
+        reason: invocationCategory === "meta"
+          ? "Remote controller meta operations are not enabled"
+          : "Remote controller deferred or capability-expanding operations are not enabled",
+        forceModal: undefined,
+      };
+    } else if (requiresRemoteLocalOneShot && permissionResult.decision !== "deny") {
+      permissionResult = {
+        ...permissionResult,
+        decision: "ask",
+        reason: "Remote controller request requires local allow-once approval",
+        forceModal: true,
+      };
     }
 
     // A pre-issued app mutation grant replaces only the ordinary foreground
@@ -1015,7 +1052,7 @@ export async function authorizeToolInvocation(
     // A cross-agent Message is untrusted input. Preserve any prior deny,
     // but force every otherwise-allowed tool through the receiver's own
     // ApprovalGate with the DLP-masked Sub-Agent provenance label.
-    if (approvalReasonPrefix && permissionResult.decision !== "deny") {
+    if ((approvalReasonPrefix || requiresRemoteLocalOneShot) && permissionResult.decision !== "deny") {
       permissionResult = {
         ...permissionResult,
         decision: "ask",
@@ -1127,10 +1164,10 @@ export async function authorizeToolInvocation(
         // the exact invocation shown to the user.
         const approvalRequest = {
           id: randomUUID(),
-          ...(hostShellRequiresExplicitApproval
+          ...(hostShellRequiresExplicitApproval || requiresRemoteLocalOneShot
             ? {
-                // This route intentionally has no durable approval record:
-                // its substrate is an honest plain host child for this call only.
+                // Plain host-shell and remote-controller approvals are both
+                // exact, local one-shot decisions: neither can mint a cache.
                 allowedChoices: ["allow-once", "deny-once"] as const,
                 durableApprovalRecordAllowed: false as const,
                 forceExplicit: true as const,
@@ -1154,7 +1191,7 @@ export async function authorizeToolInvocation(
           source: source as "builtin" | "plugin" | "mcp",
           createdAt: Date.now(),
           ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
-          isReadOnly: approvalReasonPrefix
+          isReadOnly: approvalReasonPrefix || requiresRemoteLocalOneShot
             ? false
             : invocationCategory === "read",
           mode: currentApprovalMode(services.permissionManager),
@@ -1304,9 +1341,43 @@ export async function authorizeToolInvocation(
           });
         }
 
-        if (decision.choice.startsWith("deny")) {
+
+        // This is intentionally immediately after the local decision. A P2
+        // share revoke that won while the modal was visible must beat the
+        // newly returned allow-once before it can reach the execution stage.
+        if (!isRemoteControllerAuthorityCurrent(invocationPermissionContext.remoteControllerAuthority)) {
+          const reason = "remote-controller-revoked";
+          const msg = t("be_executor.permBlockDeny", {
+            name: toolUse.name,
+            source,
+            trust,
+            reason,
+          });
+          const durationMs = Date.now() - startTime;
+          const revokedPermission: PermissionCheckResult = {
+            decision: "deny",
+            reason,
+            layer: 2,
+          };
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, revokedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          return withHostShellExecutionPlan({
+            tool_use_id: toolUse.id,
+            content: msg,
+            is_error: true,
+            durationMs,
+          });
+        }
+        const remoteOneShotRejected =
+          requiresRemoteLocalOneShot && decision.choice !== "allow-once";
+        if (decision.choice.startsWith("deny") || remoteOneShotRejected) {
           // deny-always: 영구 거부 규칙 추가
-          if (decision.choice === "deny-always" && services.permissionManager) {
+          if (
+            !requiresRemoteLocalOneShot &&
+            decision.choice === "deny-always" &&
+            services.permissionManager
+          ) {
             const pattern =
               approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
             await services.permissionManager.addAlwaysDeniedPersist(pattern);
@@ -1354,7 +1425,7 @@ export async function authorizeToolInvocation(
         }
 
         // allow-always: 영구 허용 규칙 추가
-        if (decision.choice === "allow-always" && services.permissionManager) {
+        if (decision.choice === "allow-always" && !requiresRemoteLocalOneShot && services.permissionManager) {
           const pattern =
             approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
           // P2 — stamp the grant tier from the final resolved category so an

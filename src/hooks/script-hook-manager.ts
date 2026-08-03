@@ -48,11 +48,20 @@ import {
 } from "./script-hook-types.js";
 import { redactForLLM } from "../audit/dlp-filter.js";
 import { createLogger } from "../lib/logger.js";
+import { areExternalTurnHooksAllowed } from "../shared/turn-extension-policy.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { PluginHookTrustStore, PreparedPluginHookProjection } from "./plugin-hook-projection.js";
 import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
 
 const log = createLogger("script-hook-manager");
+
+function externalHooksSuppressed(): HookDispatchResult {
+  return {
+    decision: "allow",
+    reason: "external hooks disabled for remote-controller turn",
+    results: [],
+  };
+}
 
 /**
  * Inputs the manager needs to dispatch a hook. The caller (executor /
@@ -288,6 +297,7 @@ export class ScriptHookManager {
     payload: HookDispatchPayload,
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
+    if (!areExternalTurnHooksAllowed()) return externalHooksSuppressed();
     return this.runForType("pre", payload, options);
   }
 
@@ -298,6 +308,7 @@ export class ScriptHookManager {
     payload: HookDispatchPayload,
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
+    if (!areExternalTurnHooksAllowed()) return externalHooksSuppressed();
     return this.runForType("post", payload, options);
   }
 
@@ -308,6 +319,7 @@ export class ScriptHookManager {
     payload: HookDispatchPayload,
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
+    if (!areExternalTurnHooksAllowed()) return externalHooksSuppressed();
     return this.runForType("perm", payload, options);
   }
 
@@ -329,6 +341,7 @@ export class ScriptHookManager {
     payload: LifecycleEventPayload = {},
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
+    if (!areExternalTurnHooksAllowed()) return externalHooksSuppressed();
     // Misroute guard: the BLOCKING event must NEVER run through this observe-only
     // path (it would swallow a deny and let a refused prompt through). Route it
     // to {@link runUserPromptSubmit} instead. Fail closed — return a deny so a
@@ -422,6 +435,7 @@ export class ScriptHookManager {
     payload: UserPromptSubmitPayload,
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
+    if (!areExternalTurnHooksAllowed()) return externalHooksSuppressed();
     try {
       // Matcher subject = the prompt text (design §5). Reuse the same glob as
       // tool-use / lifecycle matchers (`'*'` / absent matcher ⇒ match every prompt).

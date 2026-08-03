@@ -28,7 +28,7 @@ import {
 import { createStreamBroadcaster } from "../../api/stream-broadcaster.js";
 import { createLocalApi } from "../../api/local-api.js";
 import type { LocalApi, LocalApiRequest, LocalApiResult } from "../../api/local-api.js";
-import type { ChatSendContext } from "../../ipc/handlers/chat.js";
+import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import type { IpcDeps } from "../../ipc/types.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { LOCAL_API_INFO_FILE, type LocalApiServerInfoFile } from "../../main/local-api-server.js";
@@ -166,12 +166,9 @@ describe("readLocalApiConnection — discovery via LVIS_HOME override", () => {
 });
 
 describe("runCommand over the real transport (cli origin, end-to-end)", () => {
-  // A minimal, non-electron ChatSendContext — `permission:mode` never streams,
-  // so the sink/allocator/tracker are inert stubs just to satisfy the type.
-  const inertChatContext: ChatSendContext = {
-    sink: () => undefined,
-    allocateStreamId: () => 0,
-    trackStreamTurn: (make) => make(),
+  // `permission:mode` never sends chat; keep the command port inert.
+  const inertConversationCommandPort: ConversationCommandPort = {
+    execute: async () => ({ ok: false, error: "not-exercised" }),
   };
 
   it("dispatches permission:mode through cli → http → dispatcher → handler", async () => {
@@ -187,7 +184,7 @@ describe("runCommand over the real transport (cli origin, end-to-end)", () => {
       },
     }) as unknown as IpcDeps;
 
-    const conn = await bootServer(createLocalApi({ ipc, chatSendContext: inertChatContext }));
+    const conn = await bootServer(createLocalApi({ ipc, conversationCommandPort: inertConversationCommandPort }));
     const client = createLvisClient(createHttpLocalApi(conn), "cli");
 
     const { runCommand } = await import("../commands.js");
@@ -199,10 +196,8 @@ describe("runCommand over the real transport (cli origin, end-to-end)", () => {
 // ── US-104: permission:set-mode over the real transport ─────────────────────
 
 describe("permission:set-mode over the real transport (approval-mediated external mutation)", () => {
-  const inertChatContext: ChatSendContext = {
-    sink: () => undefined,
-    allocateStreamId: () => 0,
-    trackStreamTurn: (make) => make(),
+  const inertConversationCommandPort: ConversationCommandPort = {
+    execute: async () => ({ ok: false, error: "not-exercised" }),
   };
 
   /**
@@ -239,7 +234,7 @@ describe("permission:set-mode over the real transport (approval-mediated externa
     const conn = await bootServer(
       createLocalApi({
         ipc: mutationIpc(),
-        chatSendContext: inertChatContext,
+        conversationCommandPort: inertConversationCommandPort,
         externalMutationApprover: async () => true,
       }),
     );
@@ -258,7 +253,7 @@ describe("permission:set-mode over the real transport (approval-mediated externa
     const conn = await bootServer(
       createLocalApi({
         ipc: mutationIpc(),
-        chatSendContext: inertChatContext,
+        conversationCommandPort: inertConversationCommandPort,
         externalMutationApprover: async () => false,
       }),
     );
@@ -278,7 +273,7 @@ describe("permission:set-mode over the real transport (approval-mediated externa
     const conn = await bootServer(
       createLocalApi({
         ipc: mutationIpc(),
-        chatSendContext: inertChatContext,
+        conversationCommandPort: inertConversationCommandPort,
         externalMutationApprover: async () => false,
       }),
     );

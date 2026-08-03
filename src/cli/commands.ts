@@ -14,7 +14,7 @@
  * never satisfy the user-keyboard gesture (the dispatcher fails them closed).
  */
 import type { LvisClient } from "../sdk/index.js";
-import type { ChatSendPayload } from "../shared/chat-origin.js";
+import type { ExternalChatSendPayload } from "../shared/chat-origin.js";
 
 /** One CLI command: a name, a one-line summary, and a client-bound runner. */
 export interface CliCommand {
@@ -46,11 +46,9 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     name: "chat:send",
     summary: "Send a chat message: chat:send <text...>",
     run: (client, args) => {
-      // `queue-auto` is the only ChatSendInputOrigin that passes handler
-      // validation without a user-keyboard gesture token or a plugin envelope.
-      // A dedicated external chat origin is part of the #1409 authenticated-authz
-      // follow-up; the scaffold reuses this non-gesture path.
-      const payload: ChatSendPayload = { input: args.join(" "), inputOrigin: "queue-auto" };
+      // The transport cannot select chat provenance; the host mints
+      // `surface-user` in the shared conversation command port.
+      const payload: ExternalChatSendPayload = { input: args.join(" ") };
       return client.sendMessage(payload);
     },
   },

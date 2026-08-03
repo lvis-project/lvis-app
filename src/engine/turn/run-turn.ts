@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
 import type { TurnCallbacks, TurnResult, TurnStopReason } from "./types.js";
-import type { ChatInputOrigin } from "../../shared/chat-origin.js";
+import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { MessageMeta } from "../llm/types.js";
 import { queryLoop } from "./query-loop.js";
@@ -78,6 +78,8 @@ export async function runTurn(
     spawnDepth?: number;
       /** Internal provenance label prepended to ApprovalGate reasons. */
       approvalReasonPrefix?: string;
+      /** Host-owned remote-controller authority, independent of changing tool taint. */
+      remoteControllerAuthority?: RemoteControllerAuthority;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
       initialGuidance?: string;
       /** Host-owned causal hop inherited from durable A2A guidance. */
@@ -101,6 +103,7 @@ export async function runTurn(
     );
     }
     const inputOrigin: ChatInputOrigin = options.inputOrigin;
+    const isRemoteControllerTurn = options.remoteControllerAuthority !== undefined;
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const attachmentParts = options.attachments ?? [];
     const memoryCaptureTaint = new Set<MemoryCaptureTaintReason>();
@@ -207,7 +210,7 @@ export async function runTurn(
     // command-route short-circuit). OBSERVE-ONLY — the dispatch result is
     // discarded. The once-per-session guard keeps "SessionStart" semantics even
     // though runTurn runs every turn.
-    if (self.sessionStartFiredFor !== effectiveSessionId) {
+    if (!isRemoteControllerTurn && self.sessionStartFiredFor !== effectiveSessionId) {
       self.sessionStartFiredFor = effectiveSessionId;
       await self.fireLifecycleEvent(
         "SessionStart",
@@ -222,18 +225,19 @@ export async function runTurn(
     // (or a fail-closed timeout/error/bad-json/spawn-error) the turn is refused
     // and queryLoop NEVER runs. With NO matching trusted hook the dispatch
     // returns `allow` and the turn proceeds byte-identically to today.
-    const promptGateInput = options?.initialGuidance
-      ? `${turnInput}\n\n${options.initialGuidance}`
-      : turnInput;
-    const promptGate = await self.fireUserPromptSubmit(
-      {
-        inputText: promptGateInput,
-        inputOrigin,
-        route: routeResult.route,
-        classification: classification.type,
-      },
-      effectiveSessionId,
-    );
+    const promptGate = isRemoteControllerTurn
+      ? { decision: "allow" as const, reason: "Remote-controller pre-approval prompt hook disabled" }
+      : await self.fireUserPromptSubmit(
+          {
+            inputText: options?.initialGuidance
+              ? `${turnInput}\n\n${options.initialGuidance}`
+              : turnInput,
+            inputOrigin,
+            route: routeResult.route,
+            classification: classification.type,
+          },
+          effectiveSessionId,
+        );
     if (promptGate.decision === "deny") {
       // Refuse the turn. Mirror handleCommand's blocked return: surface the
       // refusal text to the renderer, append nothing to history (the prompt
@@ -467,6 +471,7 @@ export async function runTurn(
           sessionIdOverride: options?.sessionIdOverride,
           spawnDepth: options?.spawnDepth,
           approvalReasonPrefix: options?.approvalReasonPrefix,
+          remoteControllerAuthority: options?.remoteControllerAuthority,
           inputOrigin,
           a2aCausalContext: options?.a2aCausalContext,
           toolTrustOrigin,

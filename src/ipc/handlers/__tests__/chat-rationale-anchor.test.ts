@@ -30,7 +30,7 @@ function makeFixture() {
     auditLogger: { log: vi.fn() },
   } as unknown as IpcDeps;
   const context: ChatSendContext = {
-    sink,
+    createStreamEventSink: () => sink,
     allocateStreamId: () => 41,
     trackStreamTurn: (factory) => factory(),
   };
@@ -63,8 +63,7 @@ describe("chat RequestAnchor trust boundary", () => {
       requestAnchorRawIntent: rawInput,
     });
     expect(fixture.sink).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ type: "redact_notice", count: 1 }),
+      expect.objectContaining({ kind: "privacy.redacted", count: 1 }),
     );
   });
 

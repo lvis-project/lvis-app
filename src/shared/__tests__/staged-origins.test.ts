@@ -119,6 +119,9 @@ describe("staged-origin registry", () => {
     // Non-staged send origins must still pass the gate.
     expect(isChatSendInputOrigin("user-keyboard")).toBe(true);
     expect(isChatSendInputOrigin("queue-auto")).toBe(true);
+    expect(isChatSendInputOrigin("surface-user")).toBe(true);
+    expect(isChatSendInputOrigin("tailnet-surface")).toBe(true);
+    expect(isChatSendInputOrigin("platform-bridge")).toBe(true);
     expect(isChatSendInputOrigin("llm-tool-arg")).toBe(false);
   });
 

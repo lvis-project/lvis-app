@@ -13,6 +13,7 @@ import type { HostShellExecutionPermitBinding } from "../permissions/host-shell-
 import { mintHostShellExecutionPermit } from "../permissions/host-shell-execution-permit.js";
 import { runWithCeiling } from "./executor-ceiling.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { isRemoteControllerAuthorityCurrent } from "../shared/chat-origin.js";
 import {
   A2A_CAUSAL_CONTEXT_METADATA_KEY,
   isA2AAgentCausalContext,
@@ -700,6 +701,14 @@ export async function executeAuthorizedToolInvocation(
                   pluginOperationPrincipal,
                   operationExecutionDomain,
                 );
+              }
+              // No await may separate the paired-share check from handler
+              // entry. A local owner revoke that wins after approval therefore
+              // prevents the effectful tool adapter from receiving dispatch.
+              if (!isRemoteControllerAuthorityCurrent(
+                invocationPermissionContext.remoteControllerAuthority,
+              )) {
+                throw new Error("remote-controller-revoked");
               }
               return tool.execute(finalInput, ctx);
             },

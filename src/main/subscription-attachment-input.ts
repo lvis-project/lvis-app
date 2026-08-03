@@ -42,6 +42,15 @@ export const MAX_SUBSCRIPTION_PROMPT_ATTACHMENTS = MAX_COMPOSER_ATTACHMENT_COUNT
  */
 export const MAX_LOCAL_USER_CONTENT_PARTS =
   1 + MAX_COMPOSER_ATTACHMENT_COUNT + MCP_RESOURCE_ATTACHMENTS_PER_TURN;
+/** Multipart user content has one authored text part plus at most one part per host-attached MCP resource. */
+export const MAX_LOCAL_USER_CONTENT_TEXT_PARTS =
+  1 + MCP_RESOURCE_ATTACHMENTS_PER_TURN;
+/**
+ * Aggregate text cap for one multipart user turn. It matches the existing
+ * imported-session file gate, closing raw IPC text multiplication without
+ * narrowing normal exported-session input.
+ */
+export const MAX_LOCAL_USER_CONTENT_TEXT_CHARS = 5_000_000;
 export const MAX_SUBSCRIPTION_ATTACHMENT_BYTES = MAX_COMPOSER_IMAGE_BYTES;
 /** Default Codex/native transport budget, derived from composer input limits. */
 export const DEFAULT_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS: SubscriptionImageAttachmentLimits = Object.freeze({
@@ -209,6 +218,31 @@ export function normalizeSubscriptionImageAttachment(
 }
 
 /**
+ * Normalize already-streamed image bytes at a host transport boundary.
+ * The output uses the same canonical data representation as local composer
+ * images, so remote staging never has a second provider input format.
+ */
+export function normalizeSubscriptionImageBytes(
+  mimeType: unknown,
+  bytes: unknown,
+): SubscriptionPromptAttachment | null {
+  const normalizedMime = normalizedMimeType(mimeType);
+  if (
+    normalizedMime === null
+    || !Buffer.isBuffer(bytes)
+    || bytes.length === 0
+    || bytes.length > MAX_SUBSCRIPTION_ATTACHMENT_BYTES
+  ) {
+    return null;
+  }
+  const copy = Buffer.from(bytes);
+  return normalizedImageAttachment(
+    normalizedMime,
+    Object.freeze({ data: copy.toString("base64"), bytes: copy }),
+  );
+}
+
+/**
  * Normalize renderer/imported user content before it reaches an API-key
  * provider. Binary parts must be canonical inline local data URLs: URL-shaped
  * strings are rejected instead of being delegated to the AI SDK fetch path.
@@ -222,9 +256,15 @@ export function normalizeLocalUserContentParts(raw: unknown): UserContentPart[] 
   } catch {
     return undefined;
   }
-  if (!Number.isSafeInteger(rawLength) || rawLength > MAX_LOCAL_USER_CONTENT_PARTS) return undefined;
+  if (
+    !Number.isSafeInteger(rawLength)
+    || rawLength < 0
+    || rawLength > MAX_LOCAL_USER_CONTENT_PARTS
+  ) return undefined;
   const out: UserContentPart[] = [];
   let inspectedBinaryCandidateCount = 0;
+  let normalizedTextPartCount = 0;
+  let normalizedTextChars = 0;
 
   for (let index = 0; index < rawLength; index += 1) {
     let item: unknown;
@@ -243,7 +283,14 @@ export function normalizeLocalUserContentParts(raw: unknown): UserContentPart[] 
 
     if (type === "text") {
       const text = ownField(item, "text");
-      if (typeof text === "string") out.push({ type: "text", text });
+      if (typeof text !== "string") continue;
+      if (normalizedTextPartCount >= MAX_LOCAL_USER_CONTENT_TEXT_PARTS) return undefined;
+      if (text.length > MAX_LOCAL_USER_CONTENT_TEXT_CHARS - normalizedTextChars) {
+        return undefined;
+      }
+      normalizedTextPartCount += 1;
+      normalizedTextChars += text.length;
+      out.push({ type: "text", text });
       continue;
     }
 

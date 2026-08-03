@@ -45,8 +45,16 @@ import { readStartupLaunchState } from "./main/startup-launch.js";
 import { reconcileOsIntegrationOnBoot } from "./main/reconcile-os-integration.js";
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
 import { maybeStartLocalApiServer } from "./main/local-api-server.js";
+import { createConversationSurfaceRuntime } from "./engine/conversation-surface-runtime.js";
+import { createConversationCommandPort } from "./main/conversation-command-port.js";
 import { createA2ALoopbackRuntime } from "./main/a2a-loopback-runtime.js";
 import { maybeStartRemoteA2AReceiverServer } from "./main/a2a-remote-receiver-server.js";
+import {
+  maybeStartTailnetObserverServer,
+  resolveTailnetObserverConfig,
+} from "./main/tailnet-surface-server.js";
+import { createTailnetPairedSharingRuntime } from "./main/tailnet-paired-sharing-runtime.js";
+import { createTailnetSharingOwnerService } from "./main/tailnet-sharing-owner-service.js";
 import { getLvisAppVersion } from "./shared/app-version.js";
 import { installNativeEditContextMenu } from "./main/native-edit-context-menu.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
@@ -158,11 +166,61 @@ async function main() {
   // for validateSender + viewKey security guards added in PR #354 follow-up.
   windowManager.registerIpc(services.auditLogger);
 
+  // One host-owned source for every main-conversation surface. It outlives the
+  // opt-in Local API transport so Electron remains the canonical producer.
+  const conversationSurfaceRuntime = createConversationSurfaceRuntime();
+
+  // Commands, like events, have one host-owned entrypoint. Surface adapters
+  // receive this instance rather than recreating their own send path.
+  const conversationCommandPort = createConversationCommandPort(
+    {
+      ...services,
+      getMainWindow: () => getMainWindow(),
+      getAppWindows,
+      conversationSurfaceRuntime,
+    },
+    conversationSurfaceRuntime,
+  );
+  // Pairing/share state is created once at boot and injected into both local
+  // owner controls and the Tailnet listener. A failed OS-encrypted setup never
+  // falls back to a second runtime or a plaintext identity secret.
+  const getCurrentConversationId = () => services.conversationLoop.getSessionId();
+  let tailnetPairedSharingRuntime:
+    | Awaited<ReturnType<typeof createTailnetPairedSharingRuntime>>
+    | undefined;
+  let tailnetPairedSharingBootstrapUnavailable = false;
+  let tailnetSharingOwnerService:
+    | ReturnType<typeof createTailnetSharingOwnerService>
+    | undefined;
+  try {
+    const tailnetConfig = resolveTailnetObserverConfig();
+    if (tailnetConfig?.pairedSharingEnabled) {
+      tailnetPairedSharingRuntime = await createTailnetPairedSharingRuntime({
+        getCurrentConversationId,
+      });
+      tailnetSharingOwnerService = createTailnetSharingOwnerService({
+        runtime: tailnetPairedSharingRuntime,
+        getCurrentConversationId,
+      });
+    }
+  } catch (err) {
+    tailnetPairedSharingBootstrapUnavailable = true;
+    log.error(
+      { err },
+      "tailnet paired sharing failed to initialize; owner controls and listener stay unavailable",
+    );
+  }
+
+
+
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(
     services,
     () => getMainWindow(),
     getAppWindows,
+    conversationSurfaceRuntime,
+    conversationCommandPort,
+    tailnetSharingOwnerService,
   );
   registerSettingsWindowHandlers(services.auditLogger);
 
@@ -175,6 +233,8 @@ async function main() {
       services,
       getMainWindow: () => getMainWindow(),
       getAppWindows,
+      conversationCommandPort,
+      conversationSurfaceRuntime,
       createA2ARouter: ({ approveAgentAction }) => {
         const project = services.conversationLoop.getSessionProjectContext();
         return createA2ALoopbackRuntime({
@@ -192,6 +252,26 @@ async function main() {
     if (localApi) log.info(`local API server listening on 127.0.0.1:${localApi.port}`);
   } catch (err) {
     log.error({ err }, "local API server failed to start (continuing boot)");
+  }
+
+  // Tailnet is a separate, default-OFF ingress. Its observer is always
+  // read-only unless the boot environment explicitly enables the narrow
+  // controller capability; it never exposes Local API/A2A or configures Serve.
+  try {
+    const observer = await maybeStartTailnetObserverServer({
+      conversationSurfaceRuntime,
+      conversationCommandPort,
+      getCurrentConversationId,
+      tailnetPairedSharingRuntime: tailnetPairedSharingBootstrapUnavailable
+        ? null : tailnetPairedSharingRuntime,
+      isConversationBusy: () => conversationSurfaceRuntime.activity.isBusy(),
+      log: (message) => log.info(message),
+    });
+    if (observer) {
+      log.info("tailnet observer listening on 127.0.0.1:" + observer.port);
+    }
+  } catch (err) {
+    log.error({ err }, "tailnet observer failed to start (continuing boot)");
   }
 
   // P4-5 receiver ingress has an independent immutable gate and listener. It

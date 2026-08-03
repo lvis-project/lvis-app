@@ -33,6 +33,10 @@ const requestedLocales = new Set(
 const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
   zh: {
     "be_conversationLoop.cmdHelp": "LVIS 命令：\n/new — 开始新对话\n/sessions — 已保存会话列表\n/load <ID> — 恢复会话\n/compact — 压缩对话历史\n/remember <content> — 保存记忆\n/memory — 用户记忆列表\n/vendor — 当前供应商/令牌信息\n/tools — 已注册工具列表\n/permission — 当前权限模式\n/permission mode <strict|default|auto|allow> --durable — 更改权限模式\n/permission dir <list|allow|deny> [path] — 管理允许目录\n/permission reviewer <show|mode|fallback|interactive> [value] — 审核器设置\n/permission audit <show|verify> — 权限审计查询/验证\n/permission hooks <list|accept|disable|reject> [name] — 脚本钩子信任管理\n/help — 此帮助",
+    "formatIpcError.tailnetSharingDisabled": "此应用程序配置中已关闭 Tailnet 共享。",
+    "formatIpcError.tailnetSharingInputInvalid": "Tailnet 共享请求无效。",
+    "formatIpcError.tailnetSharingOperationRejected": "无法完成 Tailnet 共享操作。",
+    "formatIpcError.tailnetSharingUnavailable": "Tailnet 共享当前不可用。",
   },
   es: {
     "auditPanel.integrityChainBroken": "Cadena de auditoría rota: {file}{lineHint}",
@@ -43,6 +47,10 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "overlayCard.minutesAgo": "hace {count} min",
     "overlayCard.hoursAgo": "hace {count} h",
     "overlayCard.daysAgo": "hace {count} d",
+    "formatIpcError.tailnetSharingDisabled": "La compartición de Tailnet está desactivada en esta configuración de la aplicación.",
+    "formatIpcError.tailnetSharingInputInvalid": "La solicitud de compartición de Tailnet no es válida.",
+    "formatIpcError.tailnetSharingOperationRejected": "No se pudo completar la operación de compartición de Tailnet.",
+    "formatIpcError.tailnetSharingUnavailable": "La compartición de Tailnet no está disponible actualmente.",
   },
   fr: {
     "auditPanel.integrityChainBroken": "Chaine d'audit rompue : {file}{lineHint}",
@@ -53,6 +61,10 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "overlayCard.minutesAgo": "il y a {count} min",
     "overlayCard.hoursAgo": "il y a {count} h",
     "overlayCard.daysAgo": "il y a {count} j",
+    "formatIpcError.tailnetSharingDisabled": "Le partage Tailnet est désactivé dans cette configuration de l’application.",
+    "formatIpcError.tailnetSharingInputInvalid": "La demande de partage Tailnet n’est pas valide.",
+    "formatIpcError.tailnetSharingOperationRejected": "L’opération de partage Tailnet n’a pas pu être effectuée.",
+    "formatIpcError.tailnetSharingUnavailable": "Le partage Tailnet est actuellement indisponible.",
   },
   de: {
     "auditPanel.integrityChainBroken": "Audit-Kette unterbrochen: {file}{lineHint}",
@@ -63,6 +75,16 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "overlayCard.minutesAgo": "vor {count} Min.",
     "overlayCard.hoursAgo": "vor {count} Std.",
     "overlayCard.daysAgo": "vor {count} Tg.",
+    "formatIpcError.tailnetSharingDisabled": "Die Tailnet-Freigabe ist in dieser App-Konfiguration deaktiviert.",
+    "formatIpcError.tailnetSharingInputInvalid": "Die Tailnet-Freigabeanfrage ist ungültig.",
+    "formatIpcError.tailnetSharingOperationRejected": "Der Tailnet-Freigabevorgang konnte nicht abgeschlossen werden.",
+    "formatIpcError.tailnetSharingUnavailable": "Die Tailnet-Freigabe ist derzeit nicht verfügbar.",
+  },
+  ja: {
+    "formatIpcError.tailnetSharingDisabled": "このアプリ構成では Tailnet 共有がオフになっています。",
+    "formatIpcError.tailnetSharingInputInvalid": "Tailnet 共有リクエストが無効です。",
+    "formatIpcError.tailnetSharingOperationRejected": "Tailnet 共有操作を完了できませんでした。",
+    "formatIpcError.tailnetSharingUnavailable": "Tailnet 共有は現在利用できません。",
   },
 };
 
