@@ -19,7 +19,12 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
+import {
+  MockMarketplaceFetcher,
+  PluginInstalledStateUnreadableError,
+  PluginMarketplaceService,
+  PluginUpdateRecoveryRequiredError,
+} from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import {
@@ -265,6 +270,113 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     });
     expect(installSpy).toHaveBeenCalledTimes(1);
     expect(installSpy.mock.calls[0]?.[1]).toBe("user");
+  });
+
+  it("keeps an equal version on the existing integrity-check install path", async () => {
+    await writeCatalog("user");
+    const raw = JSON.parse(await readFile(marketplacePath, "utf-8"));
+    raw.plugins[0].version = "1.0.0";
+    await writeFile(marketplacePath, JSON.stringify(raw));
+    await writeInstalled("1.0.0", "user");
+    const service = makeService();
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    ).mockResolvedValue({ pluginId: "mp-test", installed: true });
+
+    await expect(service.install("mp-test")).resolves.toEqual({
+      pluginId: "mp-test",
+      installed: true,
+    });
+    expect(installSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an older catalog version before downgrade side effects", async () => {
+    await writeCatalog("user");
+    const raw = JSON.parse(await readFile(marketplacePath, "utf-8"));
+    raw.plugins[0].version = "1.0.0";
+    await writeFile(marketplacePath, JSON.stringify(raw));
+    await writeInstalled("2.0.0", "user");
+    const audit = makeAuditSink();
+    const service = makeService(audit.logger);
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    );
+    const activatePreparedArtifact = vi.fn();
+
+    await expect(service.install("mp-test", undefined, {
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    })).rejects.toThrow(/downgrade.*not allowed/i);
+
+    expect(findEscalation(audit.entries)).toBeUndefined();
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a registry row exists but its manifest version is unreadable", async () => {
+    await writeCatalog("user");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{
+          id: "mp-test",
+          manifestPath: "mp-test/missing-plugin.json",
+          enabled: true,
+          installSource: "user",
+        }],
+      }),
+    );
+    const service = makeService();
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    );
+    const activatePreparedArtifact = vi.fn();
+
+    await expect(service.install("mp-test", undefined, {
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    })).rejects.toBeInstanceOf(PluginInstalledStateUnreadableError);
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
+  });
+
+  it("requires recovery for a pending managed update instead of replacing it live", async () => {
+    await writeCatalog("admin");
+    const raw = JSON.parse(await readFile(marketplacePath, "utf-8"));
+    raw.plugins[0].version = "2.0.0";
+    await writeFile(marketplacePath, JSON.stringify(raw));
+    await writeInstalled("1.0.0", "admin");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    registry.plugins[0].pendingUpdate = {
+      kind: "marketplace",
+      previousManifestFileSha256: "a".repeat(64),
+      previousReceiptRaw: "{}",
+    };
+    await writeFile(registryPath, JSON.stringify(registry));
+    const service = makeService();
+    const installSpy = vi.spyOn(
+      service as unknown as {
+        installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+      },
+      "installWithDependencies",
+    );
+    const activatePreparedArtifact = vi.fn();
+
+    await expect(service.install("mp-test", undefined, {
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    })).rejects.toBeInstanceOf(PluginUpdateRecoveryRequiredError);
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
   });
 
   it("fails fast with the original error when the catalog snapshot fetch throws (no masking)", async () => {

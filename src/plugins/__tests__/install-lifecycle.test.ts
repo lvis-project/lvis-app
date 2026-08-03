@@ -65,6 +65,7 @@ function makeMarketplace() {
       });
       return { pluginId: canonicalPluginId, installed: true as const };
     }),
+    preflightInstall: vi.fn(async () => undefined),
     setCandidateVersion(version: string) {
       candidateVersion = version;
     },
@@ -135,6 +136,31 @@ describe("installMarketplacePluginWithLifecycle", () => {
     ).rejects.toBe(pendingCleanup);
 
     expect(ensurePluginStateReadyForInstall).toHaveBeenCalledWith("p");
+    expect(marketplace.install).not.toHaveBeenCalled();
+  });
+
+  it("runs read-only eligibility preflight before restart cancellation, cleanup, runtime, or progress", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    const progress = vi.fn();
+    const rejection = new Error("managed plugin update requires restart");
+    marketplace.preflightInstall.mockRejectedValueOnce(rejection);
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+        ensurePluginStateReadyForInstall,
+        broadcastInstallProgress: progress,
+      }),
+    ).rejects.toBe(rejection);
+
+    expect(runtime.cancelPendingRestart).not.toHaveBeenCalled();
+    expect(ensurePluginStateReadyForInstall).not.toHaveBeenCalled();
+    expect(runtime.activatePreparedArtifact).not.toHaveBeenCalled();
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
     expect(marketplace.install).not.toHaveBeenCalled();
   });
 

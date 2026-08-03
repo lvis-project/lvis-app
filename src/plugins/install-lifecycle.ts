@@ -177,6 +177,7 @@ interface PluginLifecycleMarketplace {
 
 interface PluginInstallMarketplace extends PluginLifecycleMarketplace {
   list(): Promise<MarketplaceLifecycleCatalogItem[]>;
+  preflightInstall(pluginId: string): Promise<void>;
   getLiveCatalogVersion(pluginId: string): Promise<string | null>;
   getInstalledVersion(pluginId: string): Promise<string | null>;
   quarantinePlugin(pluginId: string, reason: string): Promise<unknown>;
@@ -938,10 +939,6 @@ export async function installMarketplacePluginWithLifecycle(options: {
   }
   const progressSlug = eventSlug ?? resolvedLifecyclePluginId;
 
-  // A pending restart can own this lifecycle lock while waiting on dependency
-  // preparation. Cancel it before this outer lock queues; removePlugin cannot
-  // reach its own cancellation boundary until after this callback starts.
-  pluginRuntime.cancelPendingRestart(resolvedLifecyclePluginId);
   return withResolvedPluginInstallLocks(
     () => [
       catalogState.pluginId,
@@ -960,6 +957,8 @@ export async function installMarketplacePluginWithLifecycle(options: {
         `Statically configured plugin cannot be replaced from the marketplace: ${currentRuntimePluginId}`,
       );
     }
+    await pluginMarketplace.preflightInstall(requestedPluginId);
+    pluginRuntime.cancelPendingRestart(currentRuntimePluginId);
     await ensurePluginStateReadyForInstall(currentCatalogState.pluginId);
     if (currentRuntimePluginId !== currentCatalogState.pluginId) {
       await ensurePluginStateReadyForInstall(currentRuntimePluginId);

@@ -14,7 +14,10 @@ vi.mock("../publisher-keys.js", () => ({
   getBundledPublicKeys: mockedPublisherKeys.getBundledPublicKeys,
 }));
 
-import { PluginMarketplaceService } from "../marketplace.js";
+import {
+  PluginInstalledStateUnreadableError,
+  PluginMarketplaceService,
+} from "../marketplace.js";
 import { ArtifactRollbackError, PluginArtifactStore } from "../plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem, PluginRegistryEntry } from "../types.js";
@@ -348,7 +351,7 @@ describe("PluginMarketplaceService install()", () => {
     await replacement;
   });
 
-  it("marks a raw stale-manifest row pending before promotion and preserves its bundle graph", async () => {
+  it("fails closed on a raw stale-manifest row before download or registry mutation", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
     const plugin: PluginMarketplaceItem = {
@@ -369,15 +372,16 @@ describe("PluginMarketplaceService install()", () => {
       entry: "./dist/hostPlugin.js",
       tools: [],
     });
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
     const fetcher: MarketplaceFetcher = {
       listPlugins: async () => [plugin],
       getPluginDetail: async () => plugin,
       downloadVersion: async () => { throw new Error("unexpected legacy download"); },
-      downloadArtifact: async () => ({
-        body: zipBuffer,
-        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
-        status: 200,
-      }),
+      downloadArtifact,
       fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
       listAnnouncements: async () => [],
     };
@@ -393,38 +397,21 @@ describe("PluginMarketplaceService install()", () => {
       }],
     }));
     const { service } = makeService(fetcher);
-    const target = service as unknown as {
+    const markPending = vi.spyOn(service as unknown as {
       markMarketplaceRegistryEntryPending: (
         entry: PluginRegistryEntry | null,
         backupDir: string,
       ) => Promise<PluginRegistryEntry | null>;
-    };
-    const originalMark = target.markMarketplaceRegistryEntryPending.bind(service);
-    vi.spyOn(target, "markMarketplaceRegistryEntryPending").mockImplementation(async (...args) => {
-      const result = await originalMark(...args);
-      const pendingRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-        plugins: Array<{ id: string; pendingUpdate?: unknown; bundleRefs?: string[]; approvedPluginAccess?: unknown }>;
-      };
-      expect(pendingRegistry.plugins).toEqual([
-        expect.objectContaining({
-          id: plugin.id,
-          pendingUpdate: expect.objectContaining({ kind: "marketplace" }),
-          bundleRefs: ["bundle-root"],
-          approvedPluginAccess: expect.any(Object),
-        }),
-      ]);
-      return result;
-    });
+    }, "markMarketplaceRegistryEntryPending");
+    const originalRegistry = await readFile(registryPath, "utf-8");
 
-    await service.install(plugin.slug);
+    await expect(service.install(plugin.slug)).rejects.toBeInstanceOf(
+      PluginInstalledStateUnreadableError,
+    );
 
-    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ id: string; pendingUpdate?: unknown; bundleRefs?: string[] }>;
-    };
-    expect(registry.plugins).toEqual([
-      expect.objectContaining({ id: plugin.id, bundleRefs: ["bundle-root"] }),
-    ]);
-    expect(registry.plugins[0]?.pendingUpdate).toBeUndefined();
+    expect(downloadArtifact).not.toHaveBeenCalled();
+    expect(markPending).not.toHaveBeenCalled();
+    expect(await readFile(registryPath, "utf-8")).toBe(originalRegistry);
   });
 
   it("keeps a pending member in the bundle plan when root uninstall starts after member replacement", async () => {

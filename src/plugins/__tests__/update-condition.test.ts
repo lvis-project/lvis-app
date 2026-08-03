@@ -44,4 +44,34 @@ describe("resolvePluginUpdateCondition", () => {
       },
     })).toEqual({ kind: "eligible_managed_boot_update" });
   });
+
+  it("distinguishes equal versions from an installed version newer than catalog", () => {
+    const base = {
+      appVersion: "0.5.12",
+      candidate: { version: "1.0.0", installPolicy: "user" as const },
+    };
+
+    expect(resolvePluginUpdateCondition({
+      ...base,
+      installed: { presence: "present", version: "1.0.0" },
+    })).toEqual({ kind: "current", relation: "equal" });
+    expect(resolvePluginUpdateCondition({
+      ...base,
+      installed: { presence: "present", version: "2.0.0" },
+    })).toEqual({ kind: "current", relation: "installed_newer" });
+  });
+
+  it("keeps unreadable durable installed state distinct from catalog absence", () => {
+    expect(resolvePluginUpdateCondition({
+      appVersion: "0.5.12",
+      installed: { presence: "present" },
+      candidate: { version: "2.0.0", installPolicy: "user" },
+    })).toEqual({ kind: "installed_state_unreadable" });
+
+    expect(resolvePluginUpdateCondition({
+      appVersion: "0.5.12",
+      installed: { presence: "absent" },
+      candidate: null,
+    })).toEqual({ kind: "no_candidate" });
+  });
 });
