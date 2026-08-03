@@ -143,6 +143,7 @@ function shouldAdvertisePluginUpdate(
       return true;
     case "catalog_unavailable":
     case "no_candidate":
+    case "installed_state_unreadable":
     case "current":
     case "blocked_by_app":
     case "blocked_by_channel":
