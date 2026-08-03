@@ -345,8 +345,20 @@ describe("PluginBundleLifecycle", () => {
   it("returns from a self-admitted replacement so its predecessor lease can drain", async () => {
     const { root, pluginRoot, cacheRoot, manifest } = await fixture();
     let activationId = "test-activation-1";
-    const postPublishRuntimeGeneration = vi.fn();
-    const lifecycle = makeLifecycle({
+    const events: string[] = [];
+    let lifecycle!: PluginBundleLifecycle;
+    const postPublishRuntimeGeneration = vi.fn(async (
+      runtime: PluginRuntimeGenerationProjection,
+    ) => {
+      events.push(`published:${runtime.activationId}`);
+      if (runtime.activationId === "test-activation-2") {
+        const generationId = lifecycle.getActive(manifest.id)?.generationId;
+        if (!generationId) throw new Error("candidate generation is not active");
+        const nested = await lifecycle.acquireExact(manifest.id, generationId);
+        nested.release();
+      }
+    });
+    lifecycle = makeLifecycle({
       pluginRuntime: {
         getPluginManifest: () => manifest,
         getPluginRoot: () => pluginRoot,
@@ -359,7 +371,12 @@ describe("PluginBundleLifecycle", () => {
         postPublishRuntimeGeneration,
         publishRuntimeGeneration: vi.fn(),
         unpublishRuntimeGeneration: vi.fn(),
-        prepareRuntimeRetirement: vi.fn(() => []),
+        prepareRuntimeRetirement: vi.fn((runtime: PluginRuntimeGenerationProjection) => [{
+          phase: "runtime.stop" as const,
+          run: async () => {
+            events.push(`retired:${runtime.activationId}`);
+          },
+        }]),
       },
       receiptCacheRoot: cacheRoot,
       skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
@@ -395,26 +412,41 @@ describe("PluginBundleLifecycle", () => {
       const predecessorOperation = lifecycle.runWithLease(predecessorLease, async () => {
         activationId = "test-activation-2";
         await lifecycle.activate("ep-api");
+        await expect(lifecycle.activate("ep-api")).rejects.toThrow(
+          /cannot start another lifecycle mutation/,
+        );
         reportReplacementReturned();
         await predecessorOperationGate;
       });
       await replacementReturned;
+      let disableReturned = false;
+      const disable = lifecycle.deactivate("ep-api").then(() => {
+        disableReturned = true;
+      });
       const candidateLease = lifecycle.acquire("ep-api");
       let admitted = false;
       void candidateLease.then(() => { admitted = true; });
       await Promise.resolve();
       expect(admitted).toBe(false);
+      expect(disableReturned).toBe(false);
       releasePredecessorOperation();
       await predecessorOperation;
       predecessorLease.release();
-      await lifecycle.waitForRetirements();
       const admittedCandidate = await candidateLease;
       expect(admittedCandidate.generation.generationId).not.toBe(predecessorId);
       admittedCandidate.release();
+      await disable;
+      await lifecycle.waitForRetirements();
     } finally {
       predecessorLease.release();
     }
     expect(postPublishRuntimeGeneration).toHaveBeenCalledTimes(2);
+    expect(events).toEqual([
+      "published:test-activation-1",
+      "retired:test-activation-1",
+      "published:test-activation-2",
+      "retired:test-activation-2",
+    ]);
   });
 
   it("keeps replacement dispatch closed after predecessor retirement retries exhaust", async () => {
@@ -517,6 +549,47 @@ describe("PluginBundleLifecycle", () => {
     await lifecycle.activate("ep-api");
 
     expect(postPublishRuntimeGeneration).toHaveBeenCalledTimes(2);
+    await expect(lifecycle.acquire("ep-api")).rejects.toThrow(/dispatch blocked/);
+    await expect(lifecycle.deactivate("ep-api")).resolves.toBeUndefined();
+    await expect(lifecycle.waitForRetirements()).resolves.toBeUndefined();
+  });
+
+  it("keeps an initial generation unavailable when runtime post-publish readiness fails", async () => {
+    const { root, pluginRoot, cacheRoot, manifest } = await fixture();
+    const lifecycle = makeLifecycle({
+      pluginRuntime: {
+        getPluginManifest: () => manifest,
+        getPluginRoot: () => pluginRoot,
+        getRuntimeGenerationProjection: () => runtimeProjection(manifest, pluginRoot),
+        prepareRuntimeGeneration: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        prepareRuntimeRemoval: vi.fn(() => ({ pluginId: manifest.id, publish: vi.fn() })),
+        postPublishRuntimeGeneration: vi.fn(async () => {
+          throw new Error("initial runtime readiness failed");
+        }),
+        publishRuntimeGeneration: vi.fn(),
+        unpublishRuntimeGeneration: vi.fn(),
+        prepareRuntimeRetirement: vi.fn(() => []),
+      },
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(root, "user-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration: vi.fn(async () => ({
+          predecessorServerIds: [],
+          predecessorToolNames: [],
+          records: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+        })),
+        publishBundledGeneration: vi.fn((prepared) => { prepared.published = true; }),
+        discardBundledGeneration: vi.fn(async () => undefined),
+        retirePublishedMcpReplacement: vi.fn(async () => undefined),
+        disconnectBundledGeneration: vi.fn(async () => undefined),
+      } as never,
+    });
+
+    await expect(lifecycle.activate("ep-api")).resolves.toBeUndefined();
     await expect(lifecycle.acquire("ep-api")).rejects.toThrow(/dispatch blocked/);
   });
 

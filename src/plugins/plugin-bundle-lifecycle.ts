@@ -42,6 +42,9 @@ const log = createLogger("plugin-bundle-lifecycle");
 const MAX_RETIREMENT_ATTEMPTS = 3;
 /** Internal runtime-only guard around a prepared generation's pointer commit. */
 type GenerationCommitScope = <T>(operation: () => Promise<T>) => Promise<T>;
+interface LifecycleQueueToken {
+  readonly completions: Promise<void>[];
+}
 type RetirementPhase =
   | "operation-authority"
   | "skills"
@@ -125,8 +128,8 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   readonly mcpTrust: PluginMcpTrustStore;
   private readonly coordinator = new PluginGenerationCoordinator<HostPluginGenerationState>();
   private readonly tails = new Map<string, Promise<void>>();
-  private readonly lifecycleQueueContext = new AsyncLocalStorage<ReadonlyMap<string, object>>();
-  private readonly activeLifecycleQueueTokens = new WeakSet<object>();
+  private readonly lifecycleQueueContext = new AsyncLocalStorage<ReadonlyMap<string, LifecycleQueueToken>>();
+  private readonly activeLifecycleQueueTokens = new WeakSet<LifecycleQueueToken>();
   private readonly retirementJournal: PluginRetirementJournal;
   private readonly healthJournal: PluginGenerationHealthJournal;
   private readonly retirementTasks = new Set<Promise<void>>();
@@ -155,7 +158,10 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
   }
 
   activate(pluginId: string): Promise<void> {
-    return this.serialize(pluginId, () => this.activateNow(pluginId));
+    return this.serializeCommitted(pluginId, async () => {
+      const committed = await this.activateNow(pluginId);
+      return Object.freeze({ ...committed, result: undefined });
+    }).then(() => undefined);
   }
 
   runInLifecycleQueue<T>(pluginId: string, operation: () => Promise<T>): Promise<T> {
@@ -166,9 +172,10 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     runtime: PluginRuntimeGenerationProjection,
     commitScope?: GenerationCommitScope,
   ): Promise<void> {
-    return this.serialize(runtime.manifest.id, async () => {
-      await this.replaceRuntimeNow(runtime, undefined, undefined, commitScope);
-    });
+    return this.serializeCommitted(runtime.manifest.id, async () => {
+      const committed = await this.replaceRuntimeNow(runtime, undefined, undefined, commitScope);
+      return Object.freeze({ ...committed, result: undefined });
+    }).then(() => undefined);
   }
 
   async replaceRuntimeWithCommit<T>(
@@ -177,16 +184,17 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     durableCommit: () => Promise<T>,
     commitScope?: GenerationCommitScope,
   ): Promise<CommittedPluginGeneration<T>> {
-    return this.serialize(
+    return this.serializeCommitted(
       runtime.manifest.id,
       () => this.replaceRuntimeNow(runtime, receiptRaw, durableCommit, commitScope),
     );
   }
 
   deactivate(pluginId: string): Promise<void> {
-    return this.serialize(pluginId, async () => {
-      await this.deactivateNow(pluginId);
-    });
+    return this.serializeCommitted(pluginId, async () => {
+      const committed = await this.deactivateNow(pluginId);
+      return Object.freeze({ ...committed, result: undefined });
+    }).then(() => undefined);
   }
 
   async deactivateWithCommit<T>(
@@ -194,7 +202,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     durableCommit: () => Promise<T>,
     commitScope?: GenerationCommitScope,
   ): Promise<CommittedPluginGeneration<T>> {
-    return this.serialize(
+    return this.serializeCommitted(
       pluginId,
       () => this.deactivateNow(pluginId, durableCommit, commitScope),
     );
@@ -380,34 +388,77 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     return generation;
   }
 
+  private serializeCommitted<T>(
+    pluginId: string,
+    operation: () => Promise<CommittedPluginGeneration<T>>,
+  ): Promise<CommittedPluginGeneration<T>> {
+    return this.serialize(pluginId, async () => {
+      const committed = await operation();
+      const token = this.lifecycleQueueContext.getStore()?.get(pluginId);
+      if (!token || !this.activeLifecycleQueueTokens.has(token)) {
+        throw new Error(`plugin '${pluginId}' committed outside its lifecycle queue`);
+      }
+      token.completions.push(committed.completion);
+      if (!committed.retirementDeferred) await committed.completion;
+      return committed;
+    });
+  }
+
   private serialize<T>(pluginId: string, operation: () => Promise<T>): Promise<T> {
     const current = this.lifecycleQueueContext.getStore();
     const currentToken = current?.get(pluginId);
     if (currentToken && this.activeLifecycleQueueTokens.has(currentToken)) return operation();
+    const admittedGenerationId = this.coordinator.currentAdmissionGenerationId(pluginId);
+    if (
+      this.tails.has(pluginId) &&
+      admittedGenerationId &&
+      this.coordinator.getActive(pluginId)?.generationId !== admittedGenerationId
+    ) {
+      return Promise.reject(new Error(
+        `plugin '${pluginId}' cannot start another lifecycle mutation before its admitted transition completes`,
+      ));
+    }
 
     const prior = this.tails.get(pluginId) ?? Promise.resolve();
+    let resolveResult!: (result: T) => void;
+    let rejectResult!: (error: unknown) => void;
+    let resultSettled = false;
+    const result = new Promise<T>((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
     const next = prior.then(async () => {
-      const token = {};
+      const token: LifecycleQueueToken = { completions: [] };
       const inherited = new Map(this.lifecycleQueueContext.getStore() ?? current ?? []);
       inherited.set(pluginId, token);
       this.activeLifecycleQueueTokens.add(token);
       try {
-        return await this.lifecycleQueueContext.run(inherited, operation);
+        const value = await this.lifecycleQueueContext.run(inherited, operation);
+        resultSettled = true;
+        resolveResult(value);
+        await Promise.all(token.completions);
+      } catch (error) {
+        if (!resultSettled) {
+          resultSettled = true;
+          rejectResult(error);
+        }
+        throw error;
       } finally {
         this.activeLifecycleQueueTokens.delete(token);
       }
     });
     const tail = next.then(() => undefined, () => undefined);
     this.tails.set(pluginId, tail);
-    return next.finally(() => {
+    void tail.finally(() => {
       if (this.tails.get(pluginId) === tail) this.tails.delete(pluginId);
     });
+    return result;
   }
 
-  private async activateNow(pluginId: string): Promise<void> {
+  private async activateNow(pluginId: string): Promise<CommittedPluginGeneration<void>> {
     const runtime = this.deps.pluginRuntime.getRuntimeGenerationProjection(pluginId);
     if (!runtime) throw new Error(`plugin '${pluginId}' is not loaded`);
-    await this.replaceRuntimeNow(runtime);
+    return this.replaceRuntimeNow(runtime);
   }
 
   private async replaceRuntimeNow<T = void>(
@@ -560,6 +611,16 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       );
       published = commitScope ? await commitScope(publish) : await publish();
     } catch (error) {
+      const activeGenerationId = this.coordinator.getActive(pluginId)?.generationId;
+      if (activeGenerationId === candidate.generationId) {
+        this.recordPostCommitFault(
+          pluginId,
+          candidate.generationId,
+          "runtime-post-publish",
+          error,
+        );
+        throw error;
+      }
       candidate.state.runtime.hostEffects?.discard();
       const cleanupErrors: unknown[] = [];
       try {
@@ -567,8 +628,6 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       } catch (cleanupError) {
         cleanupErrors.push(cleanupError);
       }
-      const activeGenerationId =
-        this.coordinator.getActive(pluginId)?.generationId;
       if (
         !activeBeforePreparation
         && activeGenerationId !== candidate.generationId
@@ -620,7 +679,11 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       }
       if (dispatchReady) {
         try {
-          await this.deps.pluginRuntime.postPublishRuntimeGeneration(candidate.state.runtime);
+          await this.coordinator.runPostCommitWithGeneration(
+            pluginId,
+            candidate.generationId,
+            () => this.deps.pluginRuntime.postPublishRuntimeGeneration(candidate.state.runtime),
+          );
         } catch (error) {
           dispatchReady = false;
           published.markDispatchUnavailable(error);
@@ -640,15 +703,21 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       } catch (error) {
         this.recordPostCommitFault(pluginId, candidate.generationId, "mcp-publication", error);
       }
-      if (dispatchReady) published.markDispatchReady();
+      if (dispatchReady) {
+        try {
+          await published.markDispatchReady();
+        } catch (error) {
+          published.markDispatchUnavailable(error);
+          this.recordPostCommitFault(pluginId, candidate.generationId, "runtime-post-publish", error);
+        }
+      }
     };
     const completion = this.trackRetirement(finalizePostCommit());
-    const holdsPredecessorAdmission = Boolean(
+    const retirementDeferred = Boolean(
       predecessor &&
       this.coordinator.isExactAdmitted(pluginId, predecessor.generationId),
     );
-    if (!holdsPredecessorAdmission) await completion;
-    return Object.freeze({ result, retirement });
+    return Object.freeze({ result, retirement, completion, retirementDeferred });
   }
 
   private async deactivateNow<T = void>(
@@ -664,7 +733,13 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
         throw new Error(`plugin '${pluginId}' has live projections without an active bundle generation`);
       }
       if (durableCommit) result = await durableCommit();
-      return Object.freeze({ result, retirement: Promise.resolve() });
+      const completion = Promise.resolve();
+      return Object.freeze({
+        result,
+        retirement: completion,
+        completion,
+        retirementDeferred: false,
+      });
     }
     const preparedLoopback = this.deps.loopbackManager.prepareRemoval(
       pluginId,
@@ -704,7 +779,16 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     }
     this.deps.loopbackManager.postPublishGeneration(preparedLoopback);
     const retirement = this.trackRetirement(published.retired);
-    return Object.freeze({ result, retirement });
+    const retirementDeferred = this.coordinator.isExactAdmitted(
+      pluginId,
+      active.generationId,
+    );
+    return Object.freeze({
+      result,
+      retirement,
+      completion: retirement,
+      retirementDeferred,
+    });
   }
 
   /**
