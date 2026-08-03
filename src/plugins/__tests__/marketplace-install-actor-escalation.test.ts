@@ -479,12 +479,16 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     await writeCatalog("user");
     const raw = JSON.parse(await readFile(marketplacePath, "utf-8"));
     raw.plugins[0].networkAccess = {
-      allowedDomains: ["api.example.com"],
+      allowedDomains: ["sync.example.com", "api.example.com"],
       reasoning: "Sync fixture",
+      allowPrivateNetworks: true,
     };
     await writeFile(marketplacePath, JSON.stringify(raw));
     const service = makeService();
-    const acknowledgement = { allowedDomains: ["api.example.com"] };
+    const acknowledgement = {
+      allowedDomains: ["api.example.com", "sync.example.com"],
+      allowPrivateNetworks: true as const,
+    };
     const admission = await service.preflightInstall("mp-test", {
       networkAccessAcknowledgement: acknowledgement,
     });
@@ -505,7 +509,10 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
 
     await expect(service.install("mp-test", undefined, {
       admission,
-      networkAccessAcknowledgement: { allowedDomains: ["api.example.com"] },
+      networkAccessAcknowledgement: {
+        allowPrivateNetworks: true,
+        allowedDomains: ["sync.example.com", "api.example.com"],
+      },
       activatePreparedArtifact: vi.fn() as never,
     })).resolves.toEqual({ pluginId: "mp-test", installed: true });
     expect(installSpy).toHaveBeenCalledTimes(1);
