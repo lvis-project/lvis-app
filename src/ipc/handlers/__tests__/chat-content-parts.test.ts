@@ -4,7 +4,11 @@ import {
   MAX_COMPOSER_ATTACHMENT_COUNT,
   MAX_COMPOSER_IMAGE_DATA_URL_CHARS,
 } from "../../../shared/composer-image-input.js";
-import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../../main/subscription-attachment-input.js";
+import {
+  MAX_LOCAL_USER_CONTENT_PARTS,
+  MAX_LOCAL_USER_CONTENT_TEXT_CHARS,
+  MAX_LOCAL_USER_CONTENT_TEXT_PARTS,
+} from "../../../main/subscription-attachment-input.js";
 import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../../shared/mcp-resource-bounds.js";
 import { validateUserContentParts } from "../chat.js";
 
@@ -66,6 +70,31 @@ describe("validateUserContentParts attachment IPC boundary", () => {
 
     expect(content).toHaveLength(MAX_LOCAL_USER_CONTENT_PARTS);
     expect(validateUserContentParts(content)).toEqual(content);
+  });
+
+  it("rejects text compositions over their part and aggregate-character caps", () => {
+    const tooManyTextParts = Array.from(
+      { length: MAX_LOCAL_USER_CONTENT_TEXT_PARTS + 1 },
+      (_, index) => ({ type: "text" as const, text: `text ${index}` }),
+    );
+    expect(tooManyTextParts.length).toBeLessThanOrEqual(MAX_LOCAL_USER_CONTENT_PARTS);
+    expect(validateUserContentParts(tooManyTextParts)).toBeUndefined();
+
+    expect(validateUserContentParts([
+      { type: "text", text: "x".repeat(MAX_LOCAL_USER_CONTENT_TEXT_CHARS) },
+      { type: "text", text: "x" },
+    ])).toBeUndefined();
+  });
+
+  it("uses owned indexed parts instead of a custom array iterator", () => {
+    const raw = [{ type: "text", text: "indexed input" }];
+    Object.defineProperty(raw, Symbol.iterator, {
+      value(): never {
+        throw new Error("custom iterator must not be invoked");
+      },
+    });
+
+    expect(validateUserContentParts(raw)).toEqual([{ type: "text", text: "indexed input" }]);
   });
 
   it("accepts verified local data URLs and projects their MIME types canonically", () => {

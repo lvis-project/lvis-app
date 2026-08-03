@@ -18,7 +18,8 @@ import type {
   ToolCategory,
 } from "./types.js";
 import { trustFromSource } from "./types.js";
-import { PermissionManager, type PermissionCheckResult } from "../permissions/permission-manager.js";
+import { PermissionManager, isTailnetControllerP1BlockedTool, type PermissionCheckResult } from "../permissions/permission-manager.js";
+import { isRemoteControllerAuthorityCurrent } from "../shared/chat-origin.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import {
   buildPermissionEvaluationContext,
@@ -444,13 +445,67 @@ export async function runToolInvocation(
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
     }
 
+
+    // A P2 paired share is revocable independently of the active Tailnet
+    // connection. Recheck before any pre-hook, path prompt, or approval can
+    // retain authority after the owner has removed that specific share.
+    if (!isRemoteControllerAuthorityCurrent(permissionContext.remoteControllerAuthority)) {
+      const reason = "remote-controller-revoked";
+      const msg = t("be_executor.permBlockDeny", {
+        name: toolUse.name,
+        source,
+        trust,
+        reason,
+      });
+      const durationMs = Date.now() - startTime;
+      const blockedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason,
+        layer: 2,
+      };
+      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+    }
+    // Deny P1-excluded remote operations before any path-policy prompt can
+    // mint a directory grant. The PermissionManager repeats this policy at
+    // authorization time; this earlier boundary keeps a blocked command from
+    // producing a misleading local approval or authority residue at all.
+    if (
+      permissionContext.remoteControllerAuthority !== undefined
+      && (
+        invocationCategory === "meta"
+        || isTailnetControllerP1BlockedTool(toolUse.name)
+      )
+    ) {
+      const reason = invocationCategory === "meta"
+        ? "Remote controller meta operations are not enabled"
+        : "Remote controller deferred or capability-expanding operations are not enabled";
+      const msg = t("be_executor.permBlockDeny", {
+        name: toolUse.name,
+        source,
+        trust,
+        reason,
+      });
+      const durationMs = Date.now() - startTime;
+      const blockedPermission: PermissionCheckResult = { decision: "deny", reason, layer: 2 };
+      emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, blockedPermission, Infinity, permissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+    }
+
     // ── Step 2: PreToolUse Hook ─────────────────────
     // Governed plugin operations never dispatch effect-capable extension
     // hooks. Their provider state is protected by a Host-owned serialized
     // account scope; arbitrary hook code cannot participate in that proof or
-    // be made crash-contained on every supported OS.
+    // be made crash-contained on every supported OS. A Tailnet controller
+    // likewise never runs pre-approval extension hooks: its only permitted
+    // side-effect boundary is the following exact local allow-once modal.
     const preResult: Awaited<ReturnType<HookRunner["runPreHooks"]>> =
-      tool.operationPolicy
+      tool.operationPolicy ||
+      permissionContext?.remoteControllerAuthority !== undefined
         ? { action: "allow" }
         : await services.hookRunner.runPreHooks({
             toolName: toolUse.name,
@@ -710,6 +765,10 @@ export async function runToolInvocation(
     > => {
       const headless = invocationPermissionContext.headless === true;
       const trustOrigin = invocationPermissionContext.trustOrigin;
+      // A directory grant is itself an authority expansion, even when the
+      // underlying tool is read-only. Tailnet may never make it session-wide.
+      const requiresRemoteDirectoryOneShot =
+        invocationPermissionContext.remoteControllerAuthority !== undefined;
       const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
       if (!validation.ok) {
         const msg = t("be_executor.dirPolicyBlock", { name: toolUse.name, reason: validation.reason, filePath: outOfAllowedTarget.filePath });
@@ -741,6 +800,13 @@ export async function runToolInvocation(
       if (services.approvalGate && !headless) {
         const approvalRequest = {
           id: randomUUID(),
+          ...(requiresRemoteDirectoryOneShot
+            ? {
+                allowedChoices: ["allow-once", "deny-once"] as const,
+                durableApprovalRecordAllowed: false as const,
+                forceExplicit: true as const,
+              }
+            : {}),
           category: "tool" as const,
           kind: "out-of-allowed-dir" as const,
           toolName: toolUse.name,
@@ -807,7 +873,31 @@ export async function runToolInvocation(
           return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
         }
 
-        if (decision.choice.startsWith("deny")) {
+
+        // The directory prompt is also a local approval boundary. A revoked
+        // paired share may not retain even this invocation-scoped expansion.
+        if (!isRemoteControllerAuthorityCurrent(invocationPermissionContext.remoteControllerAuthority)) {
+          const reason = "remote-controller-revoked";
+          const msg = t("be_executor.permBlockDeny", {
+            name: toolUse.name,
+            source,
+            trust,
+            reason,
+          });
+          const durationMs = Date.now() - startTime;
+          const blockedPermission: PermissionCheckResult = {
+            decision: "deny",
+            reason,
+            layer: 2,
+          };
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, blockedPermission, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+          return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
+        }
+        const remoteOneShotRejected =
+          requiresRemoteDirectoryOneShot && decision.choice !== "allow-once";
+        if (decision.choice.startsWith("deny") || remoteOneShotRejected) {
           const msg = t("be_executor.dirPolicyUserDenied", { name: toolUse.name, filePath: outOfAllowedTarget.filePath });
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);

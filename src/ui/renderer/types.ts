@@ -36,6 +36,7 @@ import type {
   SubscriptionRuntimeStatusUpdatedEvent,
 } from "../../shared/subscription-runtime.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
+import type { TailnetSharingOwnerApi } from "../../shared/tailnet-sharing.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
 import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
@@ -554,6 +555,7 @@ export type LvisApi = {
     task: (taskHandle: string) => Promise<RemoteA2AStatusResult>;
     action: RemoteA2AActionCall;
   };
+  tailnetSharing: TailnetSharingOwnerApi;
   /**
    * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same
    * stability guarantee as `pluginPreloadUrl` — read directly from the host

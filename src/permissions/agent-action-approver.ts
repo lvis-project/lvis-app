@@ -64,6 +64,8 @@ export function buildSingleFlightAgentActionApprover(
         options.allowOnceOnly === true ||
         trustOrigin === "local-api" ||
         trustOrigin === "cli" ||
+        trustOrigin === "tailnet-surface" ||
+        trustOrigin === "platform-bridge" ||
         trustOrigin === "a2a-remote-wire";
       const decision = await approvalGate.requestAndWait({
         id: randomUUID(),

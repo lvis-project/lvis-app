@@ -4474,3 +4474,239 @@ describe("ToolExecutor — host-classifies-risk enforcement scope", () => {
     expect(await enforcedCategoryFor("plugin")).toBe("network");
   });
 });
+
+describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
+  const authority = Object.freeze({
+    kind: "tailnet-controller" as const,
+    actorId: "tailnet:controller-digest" as `tailnet:${string}`,
+  });
+
+  function buildReadExecutor(choice: import("../../permissions/approval-gate.js").ApprovalChoice) {
+    const executed = vi.fn(async () => "ran");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "tailnet_read_probe",
+      description: "Tailnet local approval regression probe.",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object" },
+      execute: async () => ({ output: await executed(), isError: false }),
+    }));
+    const permissions = new PermissionManager("/tmp/nonexistent-tailnet-executor-permissions.json");
+    permissions.setMode("allow");
+    const requestAndWait = vi.fn(async (request: { id: string }) => ({
+      requestId: request.id,
+      choice,
+    }));
+    return {
+      executed,
+      requestAndWait,
+      executor: new ToolExecutor(
+        registry,
+        undefined,
+        permissions,
+        undefined,
+        { requestAndWait } as never,
+      ),
+    };
+  }
+
+  const tailnetContext = () => userPermissionContext({
+    trustOrigin: "tailnet-surface",
+    remoteControllerAuthority: authority,
+  });
+
+
+  const pairedShare = Object.freeze({
+    pairingId: "11111111-1111-4111-8111-111111111111",
+    pairingEpoch: 1,
+    shareId: "22222222-2222-4222-8222-222222222222",
+    shareEpoch: 1,
+    scope: "33333333-3333-4333-8333-333333333333",
+  });
+
+  const pairedTailnetContext = (pairedShareGuard: { isCurrent: () => boolean }) => userPermissionContext({
+    trustOrigin: "tailnet-surface",
+    remoteControllerAuthority: Object.freeze({
+      ...authority,
+      pairedShare,
+      pairedShareGuard,
+    }),
+  });
+  it("does not let allow mode or a forged durable approval response execute a declared read", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-session");
+
+    const result = await executor.executeAll(
+      [{ id: "tailnet-read-durable-response", name: "tailnet_read_probe", input: {} }],
+      { sessionId: "tailnet-read-durable-response", permissionContext: tailnetContext() },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChoices: ["allow-once", "deny-once"],
+      durableApprovalRecordAllowed: false,
+      forceExplicit: true,
+      isReadOnly: false,
+      trustOrigin: "tailnet-surface",
+    }));
+    expect(executed).not.toHaveBeenCalled();
+    expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  it("accepts only allow-once and asks again for the next remote tool invocation", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
+
+    for (const id of ["tailnet-read-once-1", "tailnet-read-once-2"]) {
+      const result = await executor.executeAll(
+        [{ id, name: "tailnet_read_probe", input: {} }],
+        { sessionId: id, permissionContext: tailnetContext() },
+      );
+      expect(result[0].is_error).toBeUndefined();
+    }
+
+    expect(executed).toHaveBeenCalledTimes(2);
+    expect(requestAndWait).toHaveBeenCalledTimes(2);
+  });
+
+
+  it("fails closed before a local approval when a paired share is already revoked", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
+    const pairedShareGuard = { isCurrent: vi.fn(() => false) };
+
+    const result = await executor.executeAll(
+      [{ id: "paired-revoked-start", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "paired-revoked-start",
+        permissionContext: pairedTailnetContext(pairedShareGuard),
+      },
+    );
+
+    expect(requestAndWait).not.toHaveBeenCalled();
+    expect(executed).not.toHaveBeenCalled();
+    expect(pairedShareGuard.isCurrent).toHaveBeenCalledTimes(1);
+    expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  it("rechecks a paired share immediately after the local approval returns", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
+    let current = true;
+    const pairedShareGuard = { isCurrent: vi.fn(() => current) };
+    requestAndWait.mockImplementation(async (request: { id: string }) => {
+      current = false;
+      return { requestId: request.id, choice: "allow-once" as const };
+    });
+
+    const result = await executor.executeAll(
+      [{ id: "paired-revoked-after-approval", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "paired-revoked-after-approval",
+        permissionContext: pairedTailnetContext(pairedShareGuard),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledOnce();
+    expect(executed).not.toHaveBeenCalled();
+    expect(pairedShareGuard.isCurrent).toHaveBeenCalledTimes(2);
+    expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  it("rechecks a paired share at the final no-await tool boundary", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
+    let checks = 0;
+    const pairedShareGuard = {
+      isCurrent: vi.fn(() => {
+        checks += 1;
+        return checks < 3;
+      }),
+    };
+
+    const result = await executor.executeAll(
+      [{ id: "paired-revoked-final-boundary", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "paired-revoked-final-boundary",
+        permissionContext: pairedTailnetContext(pairedShareGuard),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledOnce();
+    expect(executed).not.toHaveBeenCalled();
+    expect(pairedShareGuard.isCurrent).toHaveBeenCalledTimes(3);
+    expect(result[0]).toMatchObject({
+      content: "remote-controller-revoked",
+      is_error: true,
+    });
+  });
+  it("keeps P1-blocked tools closed when a test-only executor omits PermissionManager", async () => {
+    const executed = vi.fn(async () => "ran");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "routine_schedule",
+      description: "Tailnet P1 fallback regression probe.",
+      source: "builtin",
+      category: "write",
+      jsonSchema: { type: "object" },
+      execute: async () => ({ output: await executed(), isError: false }),
+    }));
+    const requestAndWait = vi.fn();
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      undefined,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tailnet-unwired-routine", name: "routine_schedule", input: {} }],
+      { sessionId: "tailnet-unwired-routine", permissionContext: tailnetContext() },
+    );
+
+    expect(requestAndWait).not.toHaveBeenCalled();
+    expect(executed).not.toHaveBeenCalled();
+    expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  it("does not create a directory grant prompt for a P1-blocked remote tool", async () => {
+    const executed = vi.fn(async () => "ran");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "routine_schedule",
+      description: "P1 path-policy ordering regression probe.",
+      source: "builtin",
+      category: "write",
+      pathFields: ["path"],
+      jsonSchema: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+      execute: async () => ({ output: await executed(), isError: false }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-tailnet-p1-path-"));
+    try {
+      const permissions = new PermissionManager(join(dir, "permissions.json"));
+      permissions.setMode("allow");
+      const requestAndWait = vi.fn(async (request: { id: string }) => ({
+        requestId: request.id,
+        choice: "allow-once" as const,
+      }));
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permissions,
+        undefined,
+        { requestAndWait } as never,
+      );
+      const result = await executor.executeAll(
+        [{ id: "tailnet-p1-dir", name: "routine_schedule", input: { path: join(dir, "outside.txt") } }],
+        { sessionId: "tailnet-p1-dir", permissionContext: tailnetContext() },
+      );
+
+      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(executed).not.toHaveBeenCalled();
+      expect(result[0]).toMatchObject({ is_error: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
