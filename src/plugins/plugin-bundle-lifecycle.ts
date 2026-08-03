@@ -446,7 +446,6 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     const prior = this.tails.get(pluginId) ?? Promise.resolve();
     let resolveResult!: (result: T) => void;
     let rejectResult!: (error: unknown) => void;
-    let resultSettled = false;
     const result = new Promise<T>((resolve, reject) => {
       resolveResult = resolve;
       rejectResult = reject;
@@ -456,17 +455,23 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       const inherited = new Map(this.lifecycleQueueContext.getStore() ?? current ?? []);
       inherited.set(pluginId, token);
       this.activeLifecycleQueueTokens.add(token);
+      let operationError: unknown;
+      let operationFailed = false;
       try {
-        const value = await this.lifecycleQueueContext.run(inherited, operation);
-        resultSettled = true;
-        resolveResult(value);
-        await Promise.all(token.completions);
-      } catch (error) {
-        if (!resultSettled) {
-          resultSettled = true;
+        try {
+          const value = await this.lifecycleQueueContext.run(inherited, operation);
+          resolveResult(value);
+        } catch (error) {
+          operationFailed = true;
+          operationError = error;
           rejectResult(error);
         }
-        throw error;
+        try {
+          await Promise.all(token.completions);
+        } catch (completionError) {
+          if (!operationFailed) throw completionError;
+        }
+        if (operationFailed) throw operationError;
       } finally {
         this.activeLifecycleQueueTokens.delete(token);
       }
@@ -818,6 +823,26 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       );
       published = commitScope ? await commitScope(publish) : await publish();
     } catch (error) {
+      if (isCommittedPluginGenerationPublicationError(error)) {
+        const retirement = this.trackRetirement(error.transition.retired);
+        const committed = Object.freeze({
+          result,
+          retirement,
+          completion: retirement,
+          retirementDeferred: this.coordinator.isExactAdmitted(
+            pluginId,
+            active.generationId,
+          ),
+        });
+        const committedError = error.withCommitted(committed);
+        this.recordPostCommitFault(
+          pluginId,
+          active.generationId,
+          "runtime-post-publish",
+          committedError,
+        );
+        throw committedError;
+      }
       await this.deps.loopbackManager.discardGeneration(preparedLoopback);
       throw error;
     }

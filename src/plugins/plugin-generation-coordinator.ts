@@ -389,10 +389,10 @@ export class PluginGenerationCoordinator<TState = unknown> {
         );
       },
     });
-    if (publishError !== undefined && prepared) {
+    if (publishError !== undefined) {
       throw new CommittedPluginGenerationPublicationError(
         pluginId,
-        prepared.generationId,
+        prepared?.generationId,
         publishError,
         transition,
       );
