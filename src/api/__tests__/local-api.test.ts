@@ -19,7 +19,7 @@ import {
   type LocalApiDeps,
   type ExternalMutationApprover,
 } from "../local-api.js";
-import type { ChatSendContext } from "../../ipc/handlers/chat.js";
+import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import type { IpcDeps } from "../../ipc/types.js";
 import {
   CHANNELS,
@@ -27,11 +27,9 @@ import {
   EXTERNAL_MUTATION_DENIED,
 } from "../../contract/app-contract.js";
 
-// Stub stream plumbing — no real webContents; `chat send` is not exercised here.
-const chatSendContext: ChatSendContext = {
-  sink: () => {},
-  allocateStreamId: () => 1,
-  trackStreamTurn: (factory) => factory(),
+// Stub command entrypoint — chat send is exercised in its own port tests.
+const conversationCommandPort: ConversationCommandPort = {
+  execute: async () => ({ ok: false, error: "not-exercised" }),
 };
 
 function makeDeps(overrides: Partial<Record<string, unknown>> = {}): LocalApiDeps {
@@ -45,7 +43,7 @@ function makeDeps(overrides: Partial<Record<string, unknown>> = {}): LocalApiDep
     },
     ...overrides,
   } as unknown as IpcDeps;
-  return { ipc, chatSendContext };
+  return { ipc, conversationCommandPort };
 }
 
 describe("local-api dispatch — public read routing", () => {
@@ -214,7 +212,7 @@ function makeMutationDeps(
     },
     getMainWindow: () => fakeWin.win,
   } as unknown as IpcDeps;
-  return { ipc, chatSendContext, externalMutationApprover: approver };
+  return { ipc, conversationCommandPort, externalMutationApprover: approver };
 }
 
 describe("local-api dispatch — external mutation default posture (no approver)", () => {
@@ -308,5 +306,27 @@ describe("local-api dispatch — external mutation with approver wired", () => {
     expect(result).toEqual({ ok: false, error: LOCAL_API_GESTURE_REQUIRED });
     // The approver was never consulted for a non-allowlisted channel.
     expect(approver).not.toHaveBeenCalled();
+  });
+});
+
+describe("local-api dispatch — shared conversation lease", () => {
+  it("returns the normal chat busy result instead of rejecting the transport", async () => {
+    const execute = vi.fn(async () => {
+      throw new Error("streaming-active");
+    });
+    const busyConversationCommandPort: ConversationCommandPort = {
+      execute,
+    };
+    const api = createLocalApi({
+      ...makeDeps(),
+      conversationCommandPort: busyConversationCommandPort,
+    });
+
+    await expect(api.dispatch({
+      channel: CHANNELS.chat.send,
+      args: { input: "overlap", inputOrigin: "user-keyboard", userActivation: true },
+      origin: "local-api",
+    })).resolves.toEqual({ ok: true, data: { error: "streaming-active" } });
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 });

@@ -78,6 +78,44 @@ describe("http-server — loopback binding", () => {
       }),
     ).rejects.toThrow(/blocked by Fetch clients/);
   });
+
+  it.each([
+    "0.0.0.0",
+    "::",
+    "100.64.0.1",
+    "fd7a:115c:a1e0::1",
+    "localhost",
+  ])("rejects a non-loopback bind host (%s)", async (host) => {
+    await expect(
+      startLocalApiHttpServer({
+        api: stubApi(() => ({ ok: true, data: {} })),
+        secret: SECRET,
+        broadcaster: createStreamBroadcaster(),
+        host,
+        port: 0,
+      }),
+    ).rejects.toThrow("literal loopback address");
+  });
+
+  it.each([
+    "127.0.0.1",
+    "127.0.0.2",
+    "::1",
+    "0:0:0:0:0:0:0:1",
+  ])("accepts an explicit loopback literal (%s)", async (host) => {
+    // A Fetch-blocked port is rejected only after the host allowlist. This
+    // proves both IPv4 and equivalent IPv6 loopback spellings pass validation
+    // without depending on IPv6 availability in the test runner.
+    await expect(
+      startLocalApiHttpServer({
+        api: stubApi(() => ({ ok: true, data: {} })),
+        secret: SECRET,
+        broadcaster: createStreamBroadcaster(),
+        host,
+        port: 6000,
+      }),
+    ).rejects.toThrow(/blocked by Fetch clients/);
+  });
 });
 
 describe("http-server — route families", () => {
@@ -500,6 +538,37 @@ describe("http-server — GET /v1/events (SSE)", () => {
     c2.abort();
     await r1.cancel().catch(() => {});
     await r2.cancel().catch(() => {});
+  });
+
+  it("drops a saturated client instead of buffering stream frames or blocking the producer", async () => {
+    const { server, broadcaster } = await startWithBroadcaster(stubApi(() => ({ ok: true, data: {} })));
+    const controller = new AbortController();
+    const res = await fetch(url(server, "/v1/events"), {
+      headers: authHeaders(),
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    await readUntil(reader, (b) => b.includes(": connected"));
+    expect(await poll(() => broadcaster.subscriberCount() === 1)).toBe(true);
+
+    // This is much larger than node's ServerResponse high-water mark. A slow
+    // subscriber must be dropped synchronously instead of making the model
+    // producer wait for `drain` or retaining a per-client event queue.
+    expect(() => {
+      broadcaster.sink(CHANNELS.chat.stream, {
+        streamId: 8,
+        type: "text_delta",
+        text: "x".repeat(128 * 1024),
+      });
+    }).not.toThrow();
+    expect(await poll(() => broadcaster.subscriberCount() === 0)).toBe(true);
+
+    // No detached subscription remains to receive later frames.
+    expect(() => broadcaster.sink(CHANNELS.chat.stream, { streamId: 8, type: "done" })).not.toThrow();
+    expect(broadcaster.subscriberCount()).toBe(0);
+
+    controller.abort();
+    await reader.cancel().catch(() => {});
   });
 
   it("client disconnect unsubscribes from the broadcaster (count → 0)", async () => {

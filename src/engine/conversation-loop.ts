@@ -24,7 +24,11 @@ import type { ReadableToolResult } from "../tools/tool-result-chunk.js";
 import type { SessionKind } from "../memory/memory-manager.js";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
 import { AuditLogger } from "../audit/audit-logger.js";
-import type { ChatInputOrigin } from "../shared/chat-origin.js";
+import type { ChatInputOrigin, RemoteControllerAuthority } from "../shared/chat-origin.js";
+import {
+  resolveTurnExtensionPolicy,
+  turnExtensionPolicyContext,
+} from "../shared/turn-extension-policy.js";
 import type { AiProviderPingResult } from "../shared/ai-provider-ping.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
@@ -816,6 +820,8 @@ export class ConversationLoop {
       spawnDepth?: number;
       /** Internal provenance label prepended to ApprovalGate reasons. */
       approvalReasonPrefix?: string;
+      /** Host-owned remote-controller authority, never parsed from chat input. */
+      remoteControllerAuthority?: RemoteControllerAuthority;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
       initialGuidance?: string;
       /** Host-owned causal hop inherited from durable A2A guidance. */
@@ -833,7 +839,10 @@ export class ConversationLoop {
       displayText?: string;
     },
   ): Promise<TurnResult> {
-    return runTurn(this, input, callbacks, abortSignal, options);
+    return turnExtensionPolicyContext.run(
+      resolveTurnExtensionPolicy(options?.remoteControllerAuthority),
+      () => runTurn(this, input, callbacks, abortSignal, options),
+    );
   }
 
   rebuildToolSchemas(scope: ToolScope): ToolSchema[] {

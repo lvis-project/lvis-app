@@ -1,4 +1,5 @@
 import type { A2AAgentCausalContext } from "../engine/a2a-agent-message-envelope.js";
+import type { RemoteControllerAuthority } from "../shared/chat-origin.js";
 import type { McpUiPayload } from "../mcp/types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
 import type { PluginOperationPrincipal } from "../permissions/plugin-operation-grant.js";
@@ -75,6 +76,8 @@ export interface ToolPermissionContext {
   getAdditionalDirectories?: () => readonly string[];
   /** Audited trust origin for this invocation. */
   trustOrigin: ToolTrustOrigin;
+  /** Immutable host-owned remote-controller authority; never a tool or wire field. */
+  remoteControllerAuthority?: RemoteControllerAuthority;
   /** Direct plugin panel/renderer user activation marker. */
   pluginPanelUserAction?: boolean;
   /** Host-derived app identity and optional opaque one-shot grant. Never copied into tool metadata. */

@@ -26,11 +26,17 @@ describe("trustOriginLabel", () => {
   });
 
   it("labels the non-staged origins the table does not own", () => {
-    for (const origin of ["user-keyboard", "llm-tool-arg", "file-content", undefined]) {
+    for (const origin of ["user-keyboard", "llm-tool-arg", "file-content", "surface-user", "tailnet-surface", "platform-bridge"]) {
       const label = trustOriginLabel(origin);
       expect(label.length).toBeGreaterThan(0);
       expect(label).not.toBe(origin);
     }
+    // A missing provenance must stay visibly unknown; never silently inherit a
+    // newly added external-surface label.
+    expect(trustOriginLabel(undefined)).not.toBe(trustOriginLabel("surface-user"));
+    expect(trustOriginLabel(undefined)).not.toBe("surface-user");
+    expect(trustOriginLabel("tailnet-surface")).not.toBe(trustOriginLabel("surface-user"));
+    expect(trustOriginLabel("platform-bridge")).not.toBe(trustOriginLabel("surface-user"));
   });
 
   it("shows an unknown origin verbatim rather than blank", () => {
@@ -44,5 +50,7 @@ describe("trustOriginLabel", () => {
       expect(isNonUserTrustOrigin(kind.inputOrigin)).toBe(true);
     }
     expect(isNonUserTrustOrigin(undefined)).toBe(true);
+    expect(isNonUserTrustOrigin("surface-user")).toBe(true);
+    expect(isNonUserTrustOrigin("tailnet-surface")).toBe(true);
   });
 });

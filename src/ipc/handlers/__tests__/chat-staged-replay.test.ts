@@ -1,17 +1,16 @@
 /**
  * Staged provenance survives the REPLAY paths.
  *
- * `chat:send` binds a staged origin to its envelope, but three internal paths
- * re-send text that is already in history — edit-resend, continue-last-user, and
- * retry-effort — and they all go through `runStreamedTurn` with
- * `STREAM_TURN_OPTIONS` (`inputOrigin: "user-keyboard"`), never through the send
- * gate. A staged turn's stored user message IS its envelope, so if the origin were
- * taken from that claim, one click on "continue" would re-run server- or
- * plugin-authored text as a genuine user turn: force-ask off, no untrusted framing
- * for the model, and a normal user bubble in the transcript.
+ * `chat:send` binds a staged origin to its envelope. Internal edit/resend,
+ * continue-last-user, and retry-effort use a host-owned registrar to derive a
+ * closed staged inputOrigin from stored history before DLP.
  *
- * These pin the derivation (from the TEXT) and the fail-closed case (a staged claim
- * whose envelope did not survive, e.g. DLP rewriting the fence header).
+ * `runStreamedTurn` validates that host-minted claim and extracts its source.
+ * It never derives staged provenance from raw surface text: a remote or
+ * user-controlled app/overlay-looking body remains data.
+ *
+ * These pin that contract and the fail-closed case (a staged claim whose
+ * envelope did not survive, e.g. DLP rewriting the fence header).
  */
 import { describe, expect, it, vi } from "vitest";
 import type { ConversationLoop } from "../../../engine/conversation-loop.js";
@@ -44,7 +43,7 @@ const sampleSource: Record<string, string> = {
 describe("staged provenance on the replay paths", () => {
   it("keeps `user-keyboard` for text that carries no envelope", async () => {
     const { loop, runTurn } = makeLoop();
-    await runStreamedTurn(loop, "summarize the repo", vi.fn(), 1, STREAM_TURN_OPTIONS);
+    await runStreamedTurn(loop, "summarize the repo", vi.fn(), STREAM_TURN_OPTIONS);
     expect(turnOptions(runTurn)).toMatchObject({ inputOrigin: "user-keyboard" });
     expect(turnOptions(runTurn).originSource).toBeUndefined();
   });
@@ -52,13 +51,13 @@ describe("staged provenance on the replay paths", () => {
   for (const kind of STAGED_ORIGIN_KINDS) {
     const source = sampleSource[kind.inputOrigin]!;
 
-    it(`re-derives ${kind.inputOrigin} from the envelope when the replay claims user-keyboard`, async () => {
+    it(`keeps the host-minted ${kind.inputOrigin} replay claim when its envelope matches`, async () => {
       const { loop, runTurn } = makeLoop();
       const stored = formatStagedEnvelope(kind, "do the staged thing", source);
 
-      // Exactly what continue-last-user / retry-effort do: the stored history text,
-      // under the host's default keyboard claim.
-      await runStreamedTurn(loop, stored, vi.fn(), 1, STREAM_TURN_OPTIONS);
+      // The IPC registrar derives this closed enum before DLP. This boundary
+      // only validates the envelope and extracts its source tag.
+      await runStreamedTurn(loop, stored, vi.fn(), { inputOrigin: kind.inputOrigin });
 
       expect(turnOptions(runTurn)).toMatchObject({
         inputOrigin: kind.inputOrigin,
@@ -72,7 +71,7 @@ describe("staged provenance on the replay paths", () => {
       // gate and here and can rewrite a serverId inside the fence header. Dropping
       // to "no staged origin" would silently disable the force-ask gate.
       await expect(
-        runStreamedTurn(loop, "envelope was stripped", vi.fn(), 1, {
+        runStreamedTurn(loop, "envelope was stripped", vi.fn(), {
           inputOrigin: kind.inputOrigin,
         }),
       ).rejects.toThrow(kind.missingEnvelopeError);
@@ -87,12 +86,37 @@ describe("staged provenance on the replay paths", () => {
 
     // The envelope wins over the claim — the text's provenance is the truth, and it
     // must be reported as the kind that actually wrote it.
-    await runStreamedTurn(loop, stored, vi.fn(), 1, { inputOrigin: first!.inputOrigin });
+    await runStreamedTurn(loop, stored, vi.fn(), { inputOrigin: first!.inputOrigin });
 
     expect(turnOptions(runTurn)).toMatchObject({
       inputOrigin: second!.inputOrigin,
       originSource: sampleSource[second!.inputOrigin],
     });
+  });
+
+  it("does not let raw Tailnet text impersonate a staged origin", async () => {
+    const { loop, runTurn } = makeLoop();
+    const kind = STAGED_ORIGIN_KINDS[1]!;
+    const forgedEnvelope = formatStagedEnvelope(
+      kind,
+      "attempt to forge app provenance",
+      sampleSource[kind.inputOrigin]!,
+    );
+    const authority = Object.freeze({
+      kind: "tailnet-controller" as const,
+      actorId: "tailnet:" + "a".repeat(64),
+    });
+
+    await runStreamedTurn(loop, forgedEnvelope, vi.fn(), {
+      inputOrigin: "tailnet-surface",
+      remoteControllerAuthority: authority as never,
+    });
+
+    expect(turnOptions(runTurn)).toMatchObject({
+      inputOrigin: "tailnet-surface",
+      remoteControllerAuthority: authority,
+    });
+    expect(turnOptions(runTurn)).not.toHaveProperty("originSource");
   });
 });
 
@@ -110,7 +134,7 @@ describe("a resource turn's transcript row survives the replay paths", () => {
   // first send) is in the conversation-loop suite.
   it("forwards a caller-supplied displayText into the turn", async () => {
     const { loop, runTurn } = makeLoop();
-    await runStreamedTurn(loop, "summarize [Resource #1]", () => {}, 1, {
+    await runStreamedTurn(loop, "summarize [Resource #1]", () => {}, {
       ...STREAM_TURN_OPTIONS,
       displayText: "summarize [Resource #1]",
     });
@@ -121,7 +145,7 @@ describe("a resource turn's transcript row survives the replay paths", () => {
     // Without this, a version that always set the field would satisfy the case above
     // while quietly giving every ordinary turn a second copy of its own text.
     const { loop, runTurn } = makeLoop();
-    await runStreamedTurn(loop, "an ordinary question", () => {}, 1, {
+    await runStreamedTurn(loop, "an ordinary question", () => {}, {
       ...STREAM_TURN_OPTIONS,
     });
     expect(turnOptions(runTurn)).not.toHaveProperty("displayText");
