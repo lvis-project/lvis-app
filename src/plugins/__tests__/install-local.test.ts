@@ -377,7 +377,7 @@ describe("PluginMarketplaceService.installLocal", () => {
 
   it("does not restore a predecessor after committed local publication failure", async () => {
     const service = makeService();
-    await service.installLocal(sourceDir);
+    await service.installLocal(sourceDir, preparedActivationOptionsForTest);
     await writeFile(
       join(sourceDir, "plugin.json"),
       JSON.stringify({
