@@ -161,6 +161,33 @@ describe("PluginUpdateDetector", () => {
     });
   });
 
+  it("does not advertise an app-incompatible newer plugin", async () => {
+    const registryPath = await setupRegistry([{ id: "local-indexer", version: "0.5.31" }]);
+    const fetcher = makeFetcher([
+      makeCatalogPlugin("local-indexer", "0.5.32", {
+        installPolicy: "user",
+        requires: { minAppVersion: "0.5.12" },
+      }),
+    ]);
+    const detector = new PluginUpdateDetector(registryPath, fetcher, {
+      appVersion: "0.5.11",
+    });
+
+    expect(await detector.checkForUpdates()).toEqual([]);
+  });
+
+  it("does not advertise admin-managed plugin updates", async () => {
+    const registryPath = await setupRegistry([{ id: "meeting", version: "1.0.0" }]);
+    const fetcher = makeFetcher([
+      makeCatalogPlugin("meeting", "1.1.0", { installPolicy: "admin" }),
+    ]);
+    const detector = new PluginUpdateDetector(registryPath, fetcher, {
+      appVersion: "0.5.12",
+    });
+
+    expect(await detector.checkForUpdates()).toEqual([]);
+  });
+
   it("includes networkAccess metadata for update disclosure", async () => {
     const registryPath = await setupRegistry([{ id: "network-plug", version: "1.0.0" }]);
     const fetcher = makeFetcher([

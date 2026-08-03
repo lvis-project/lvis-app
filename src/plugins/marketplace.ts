@@ -9,11 +9,10 @@ import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
-import { IncompatibleAppVersionError, MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
-import { appVersionSatisfiesMin } from "../shared/semver-compare.js";
+import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { resolveDependencies } from "./dependency-resolver.js";
-import { isNewer } from "./update-detector.js";
+import { resolvePluginUpdateCondition } from "./update-condition.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
@@ -865,19 +864,6 @@ export class PluginMarketplaceService {
       }
     }
 
-    // Plugin↔app minimum-version gate — HARD BLOCK before downloading the
-    // artifact. When the plugin declares `requires.minAppVersion` higher than
-    // the running LVIS app, refuse the install and direct the user to update
-    // the app. Absent = compatible with all (purely additive). Fail-closed:
-    // an unresolvable app version ("unknown" sentinel) also blocks.
-    const minAppVersion = plugin.requires?.minAppVersion;
-    if (minAppVersion) {
-      const currentAppVersion = getLvisAppVersion();
-      if (!appVersionSatisfiesMin(currentAppVersion, minAppVersion)) {
-        throw new IncompatibleAppVersionError(minAppVersion, currentAppVersion);
-      }
-    }
-
     // S14 — capability preflight. `requires.capabilities[]` is a separate
     // contract from plugin-id `dependencies[]`: any installed plugin that
     // advertises a matching `capabilities[]` tag satisfies the requirement.
@@ -1016,6 +1002,7 @@ export class PluginMarketplaceService {
             await ensurePluginStateReadyForInstall(plugin.id);
             const currentRegistry = await readPluginRegistry(this.registryPath);
             const installedIds = await this.resolveInstalledIds(currentRegistry.plugins);
+            let condition;
             if (installedIds.has(plugin.id)) {
               let installedVersion: string | null;
               try {
@@ -1026,13 +1013,44 @@ export class PluginMarketplaceService {
                 );
                 return "skipped";
               }
-              if (!plugin.version || !installedVersion || !isNewer(plugin.version, installedVersion)) {
+              if (!installedVersion) {
                 return "skipped";
               }
-              isUpdate = true;
-              log.info(
-                `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
-              );
+              condition = resolvePluginUpdateCondition({
+                appVersion: getLvisAppVersion(),
+                installed: { presence: "present", version: installedVersion },
+                candidate: plugin,
+              });
+              if (condition.kind === "eligible_managed_boot_update") {
+                isUpdate = true;
+                log.info(
+                  `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
+                );
+              }
+            } else {
+              condition = resolvePluginUpdateCondition({
+                appVersion: getLvisAppVersion(),
+                installed: { presence: "absent" },
+                candidate: plugin,
+              });
+            }
+            switch (condition.kind) {
+              case "eligible_managed_install":
+              case "eligible_managed_boot_update":
+                break;
+              case "catalog_unavailable":
+              case "no_candidate":
+              case "current":
+              case "blocked_by_app":
+              case "blocked_by_channel":
+              case "transaction_pending":
+              case "eligible_user_install":
+              case "eligible_user_update":
+                return "skipped";
+              default: {
+                const exhaustive: never = condition;
+                return exhaustive;
+              }
             }
             try {
               await this.installWithDependencies(

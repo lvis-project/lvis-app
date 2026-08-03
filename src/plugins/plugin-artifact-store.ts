@@ -46,7 +46,6 @@ import {
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PublicKeyInput } from "./envelope-verifier.js";
 import {
-  IncompatibleAppVersionError,
   type PluginAccessSpec,
   type PluginMarketplaceItem,
   type PluginRegistryEntryInstallSource,
@@ -69,22 +68,14 @@ import {
 } from "./marketplace-artifact-limits.js";
 import { withMarketplaceArtifactResourceSlot } from "./marketplace-artifact-resource-gate.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
+import { assertPluginCandidateAppCompatible } from "./update-condition.js";
 export { assertSafeArtifactSlug, SAFE_ARTIFACT_SLUG_RE } from "./plugin-id.js";
 
 /** Shared last-line defense for every marketplace artifact consumer. */
 export function assertMarketplaceAppUpgradeNotRequired(
-  plugin: Pick<PluginMarketplaceItem, "upgradeRequired">,
+  plugin: Pick<PluginMarketplaceItem, "version" | "requires" | "upgradeRequired">,
 ): void {
-  const upgradeRequired = plugin.upgradeRequired;
-  if (upgradeRequired) {
-    if (upgradeRequired.minAppVersion) {
-      throw new IncompatibleAppVersionError(
-        upgradeRequired.minAppVersion,
-        getLvisAppVersion(),
-      );
-    }
-    throw new Error(upgradeRequired.message);
-  }
+  assertPluginCandidateAppCompatible(plugin, getLvisAppVersion());
 }
 const log = createLogger("plugin-artifact-store");
 

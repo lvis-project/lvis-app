@@ -15,6 +15,11 @@ import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
 import { createLogger } from "../lib/logger.js";
 import type { NetworkAccessGrant } from "../shared/network-access.js";
+import { getLvisAppVersion } from "../shared/app-version.js";
+import {
+  isNewerPluginVersion,
+  resolvePluginUpdateCondition,
+} from "./update-condition.js";
 const log = createLogger("update-detector");
 
 export interface UpdateInfo {
@@ -38,10 +43,13 @@ export function isUpdateCheckEnabled(env: NodeJS.ProcessEnv = process.env): bool
 export interface UpdateDetectorOptions {
   /** When true, canary catalog entries are included in update notifications. Default false. */
   canaryOptIn?: boolean;
+  /** Running app version. Injectable for deterministic compatibility tests. */
+  appVersion?: string;
 }
 
 export class PluginUpdateDetector {
   private readonly canaryOptIn: boolean;
+  private readonly appVersion: string;
 
   constructor(
     private readonly registryPath: string,
@@ -49,6 +57,7 @@ export class PluginUpdateDetector {
     options: UpdateDetectorOptions = {},
   ) {
     this.canaryOptIn = options.canaryOptIn ?? false;
+    this.appVersion = options.appVersion ?? getLvisAppVersion();
   }
 
   /**
@@ -77,10 +86,13 @@ export class PluginUpdateDetector {
         const catalogEntry = catalogById.get(entry.id);
         if (!catalogEntry?.version) continue;
 
-        // Skip canary entries unless user opted in
-        if (catalogEntry.channel === "canary" && !this.canaryOptIn) continue;
-
-        if (isNewer(catalogEntry.version, installedVersion)) {
+        const condition = resolvePluginUpdateCondition({
+          appVersion: this.appVersion,
+          canaryOptIn: this.canaryOptIn,
+          installed: { presence: "present", version: installedVersion },
+          candidate: catalogEntry,
+        });
+        if (shouldAdvertisePluginUpdate(condition)) {
           updates.push({
             pluginId: entry.id,
             pluginName: catalogEntry.name || entry.id,
@@ -123,6 +135,29 @@ export class PluginUpdateDetector {
   }
 }
 
+function shouldAdvertisePluginUpdate(
+  condition: ReturnType<typeof resolvePluginUpdateCondition>,
+): boolean {
+  switch (condition.kind) {
+    case "eligible_user_update":
+      return true;
+    case "catalog_unavailable":
+    case "no_candidate":
+    case "current":
+    case "blocked_by_app":
+    case "blocked_by_channel":
+    case "transaction_pending":
+    case "eligible_user_install":
+    case "eligible_managed_install":
+    case "eligible_managed_boot_update":
+      return false;
+    default: {
+      const exhaustive: never = condition;
+      return exhaustive;
+    }
+  }
+}
+
 function canonicalizeExistingPath(path: string): string {
   const absolute = resolve(path);
   return existsSync(absolute) ? realpathSync(absolute) : absolute;
@@ -147,53 +182,5 @@ function isWithin(basePath: string, targetPath: string): boolean {
  * Falls back to string comparison for fully non-semver inputs.
  */
 export function isNewer(candidate: string, installed: string): boolean {
-  const split = (v: string): { main: number[]; pre: string[] | null } => {
-    const stripped = v.replace(/^v/, "");
-    const [core, preTag] = stripped.split("-", 2);
-    const main = core.split(".").map((n) => parseInt(n, 10));
-    const pre = preTag ? preTag.split(".") : null;
-    return { main, pre };
-  };
-
-  const a = split(candidate);
-  const b = split(installed);
-  const len = Math.max(a.main.length, b.main.length);
-
-  for (let i = 0; i < len; i++) {
-    const ai = a.main[i] ?? 0;
-    const bi = b.main[i] ?? 0;
-    if (Number.isNaN(ai) || Number.isNaN(bi)) return candidate > installed;
-    if (ai !== bi) return ai > bi;
-  }
-
-  // Main versions equal — apply pre-release precedence.
-  // A version WITHOUT a prerelease outranks one WITH a prerelease.
-  if (a.pre === null && b.pre === null) return false;
-  if (a.pre === null && b.pre !== null) return true;   // candidate is stable, installed is pre
-  if (a.pre !== null && b.pre === null) return false;  // candidate is pre, installed is stable
-
-  // Both have prereleases — compare field-by-field.
-  const aPre = a.pre as string[];
-  const bPre = b.pre as string[];
-  const preLen = Math.max(aPre.length, bPre.length);
-  for (let i = 0; i < preLen; i++) {
-    const ax = aPre[i];
-    const bx = bPre[i];
-    // Shorter prerelease chain has lower precedence when all preceding fields match.
-    if (ax === undefined) return false;
-    if (bx === undefined) return true;
-    const aNum = /^\d+$/.test(ax);
-    const bNum = /^\d+$/.test(bx);
-    if (aNum && bNum) {
-      const an = parseInt(ax, 10);
-      const bn = parseInt(bx, 10);
-      if (an !== bn) return an > bn;
-    } else if (aNum !== bNum) {
-      // Numeric identifiers always have lower precedence than non-numeric.
-      return !aNum;
-    } else {
-      if (ax !== bx) return ax > bx;
-    }
-  }
-  return false;
+  return isNewerPluginVersion(candidate, installed);
 }
