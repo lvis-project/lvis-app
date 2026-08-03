@@ -29,10 +29,18 @@ export interface PluginGenerationLease<TState = unknown> {
 export interface PublishedPluginGenerationTransition {
   /** Completes after predecessor leases drain and exact-generation cleanup finishes. */
   readonly retired: Promise<void>;
+  /** Open replacement dispatch only after host-owned post-publication readiness completes. */
+  markDispatchReady(): void;
+  /** Keep replacement dispatch unavailable after retirement or readiness failure. */
+  markDispatchUnavailable(error: unknown): void;
 }
 
 interface GenerationState<TState> {
   active?: ActivePluginGeneration<TState>;
+  dispatchReadiness?: {
+    readonly generationId: string;
+    readonly promise: Promise<void>;
+  };
   pendingTransitions: number;
   transitionWaiters: Array<() => void>;
   leaseCounts: Map<string, number>;
@@ -117,11 +125,22 @@ export class PluginGenerationCoordinator<TState = unknown> {
       return this.createNestedLease(admitted);
     }
     const state = this.stateFor(pluginId);
-    while (state.pendingTransitions > 0) {
-      await new Promise<void>((resolve) => state.transitionWaiters.push(resolve));
+    let generation: ActivePluginGeneration<TState> | undefined;
+    while (!generation) {
+      while (state.pendingTransitions > 0) {
+        await new Promise<void>((resolve) => state.transitionWaiters.push(resolve));
+      }
+      const candidate = state.active;
+      if (!candidate) throw new Error(`plugin '${pluginId}' has no active generation`);
+      const readiness = state.dispatchReadiness;
+      if (readiness?.generationId === candidate.generationId) {
+        await readiness.promise;
+      }
+      if (state.pendingTransitions > 0 || state.active?.generationId !== candidate.generationId) {
+        continue;
+      }
+      generation = candidate;
     }
-    const generation = state.active;
-    if (!generation) throw new Error(`plugin '${pluginId}' has no active generation`);
     state.leaseCounts.set(generation.generationId, (state.leaseCounts.get(generation.generationId) ?? 0) + 1);
     let released = false;
     const admission: GenerationAdmission<TState> = Object.freeze({
@@ -157,6 +176,13 @@ export class PluginGenerationCoordinator<TState = unknown> {
         throw new Error(`plugin '${pluginId}' generation '${generationId}' is not admitted`);
       }
       return this.createNestedLease(admitted);
+    }
+    const state = this.stateFor(pluginId);
+    while (state.pendingTransitions > 0) {
+      await new Promise<void>((resolve) => state.transitionWaiters.push(resolve));
+    }
+    if (state.active?.generationId !== generationId) {
+      throw new Error(`plugin '${pluginId}' generation '${generationId}' is not active`);
     }
     const lease = await this.acquire(pluginId);
     if (lease.generation.generationId === generationId) return lease;
@@ -229,13 +255,33 @@ export class PluginGenerationCoordinator<TState = unknown> {
     await priorTail;
 
     let predecessor: ActivePluginGeneration<TState> | undefined;
+    let openDispatch: (() => void) | undefined;
+    let rejectDispatch: ((error: unknown) => void) | undefined;
+    let dispatchSettled = false;
+    let replacementReadiness: GenerationState<TState>["dispatchReadiness"];
     try {
       try {
         predecessor = state.active;
+        if (
+          prepared &&
+          predecessor &&
+          predecessor.generationId !== prepared.generationId
+        ) {
+          const promise = new Promise<void>((resolve, reject) => {
+            openDispatch = resolve;
+            rejectDispatch = reject;
+          });
+          void promise.catch(() => undefined);
+          replacementReadiness = Object.freeze({
+            generationId: prepared.generationId,
+            promise,
+          });
+        }
         await durableCommit();
         // Linearization point: durable state and the immutable generation
         // pointer are now inseparable. No projection work may be inserted here.
         state.active = prepared;
+        state.dispatchReadiness = replacementReadiness;
         // Synchronous in-process projections publish in the same turn as the
         // pointer assignment. Every publication closure was fully prepared and
         // is assignment-only; the admission barrier remains closed throughout.
@@ -258,7 +304,24 @@ export class PluginGenerationCoordinator<TState = unknown> {
       : Promise.resolve();
     this.retirements.add(retired);
     void retired.finally(() => this.retirements.delete(retired)).catch(() => undefined);
-    return Object.freeze({ retired });
+    return Object.freeze({
+      retired,
+      markDispatchReady: () => {
+        if (!replacementReadiness || dispatchSettled) return;
+        dispatchSettled = true;
+        openDispatch?.();
+      },
+      markDispatchUnavailable: (error: unknown) => {
+        if (!replacementReadiness || dispatchSettled) return;
+        dispatchSettled = true;
+        rejectDispatch?.(
+          new Error(
+            `plugin '${pluginId}' generation '${replacementReadiness.generationId}' dispatch blocked by post-commit readiness failure`,
+            { cause: error },
+          ),
+        );
+      },
+    });
   }
 
   /**

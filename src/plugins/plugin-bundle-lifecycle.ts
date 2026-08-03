@@ -549,7 +549,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
         async () => {
           if (durableCommit) result = await durableCommit();
         },
-        (predecessor) => this.retire(predecessor),
+        (predecessor) => this.retireWithRetries(predecessor),
         pluginId,
         () => {
           this.deps.loopbackManager.publishGeneration(preparedLoopback);
@@ -591,50 +591,63 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       }
       throw error;
     }
-    const retirement = predecessor && predecessor.generationId !== candidate.generationId
-      ? this.trackRetirement(predecessor, published.retired)
-      : Promise.resolve();
-    let predecessorRetired = true;
-    if (predecessor && predecessor.generationId !== candidate.generationId) {
-      try {
-        // A replacement's onPublished hook may start write-capable workers.
-        // Do not overlap those effects with the predecessor: its graceful
-        // stop must release sockets, sandbox markers, and shared durable state
-        // before the new generation begins externally observable startup.
-        await retirement;
-      } catch (error) {
-        predecessorRetired = false;
-        this.recordPostCommitFault(
-          pluginId,
-          candidate.generationId,
-          "runtime-post-publish",
-          new AggregateError(
-            [error],
-            `plugin '${pluginId}' post-publish startup blocked by predecessor retirement`,
-          ),
-        );
+    const hasPredecessor = Boolean(
+      predecessor && predecessor.generationId !== candidate.generationId,
+    );
+    const retirement = hasPredecessor ? published.retired : Promise.resolve();
+    const finalizePostCommit = async (): Promise<void> => {
+      let dispatchReady = true;
+      if (hasPredecessor) {
+        try {
+          // A replacement's onPublished hook may start write-capable workers.
+          // Do not overlap those effects with the predecessor: its graceful
+          // stop must release sockets, sandbox markers, and shared durable state
+          // before the new generation begins externally observable startup.
+          await retirement;
+        } catch (error) {
+          dispatchReady = false;
+          published.markDispatchUnavailable(error);
+          this.recordPostCommitFault(
+            pluginId,
+            candidate.generationId,
+            "runtime-post-publish",
+            new AggregateError(
+              [error],
+              `plugin '${pluginId}' post-publish startup blocked by predecessor retirement`,
+            ),
+          );
+        }
       }
-    }
-    if (predecessorRetired) {
-      try {
-        await this.deps.pluginRuntime.postPublishRuntimeGeneration(candidate.state.runtime);
-      } catch (error) {
-        this.recordPostCommitFault(pluginId, candidate.generationId, "runtime-post-publish", error);
+      if (dispatchReady) {
+        try {
+          await this.deps.pluginRuntime.postPublishRuntimeGeneration(candidate.state.runtime);
+        } catch (error) {
+          dispatchReady = false;
+          published.markDispatchUnavailable(error);
+          this.recordPostCommitFault(pluginId, candidate.generationId, "runtime-post-publish", error);
+        }
       }
-    }
-    try {
-      this.deps.loopbackManager.postPublishGeneration(preparedLoopback);
-    } catch (error) {
-      this.recordPostCommitFault(pluginId, candidate.generationId, "loopback-post-publish", error);
-    }
-    try {
-      // Provider/connect failures are already represented by McpManager as a
-      // typed same-generation degraded record. Reaching this catch is an
-      // internal publication/contract fault and receives durable health state.
-      await this.projectApprovedMcp(candidate);
-    } catch (error) {
-      this.recordPostCommitFault(pluginId, candidate.generationId, "mcp-publication", error);
-    }
+      try {
+        this.deps.loopbackManager.postPublishGeneration(preparedLoopback);
+      } catch (error) {
+        this.recordPostCommitFault(pluginId, candidate.generationId, "loopback-post-publish", error);
+      }
+      try {
+        // Provider/connect failures are already represented by McpManager as a
+        // typed same-generation degraded record. Reaching this catch is an
+        // internal publication/contract fault and receives durable health state.
+        await this.projectApprovedMcp(candidate);
+      } catch (error) {
+        this.recordPostCommitFault(pluginId, candidate.generationId, "mcp-publication", error);
+      }
+      if (dispatchReady) published.markDispatchReady();
+    };
+    const completion = this.trackRetirement(finalizePostCommit());
+    const holdsPredecessorAdmission = Boolean(
+      predecessor &&
+      this.coordinator.isExactAdmitted(pluginId, predecessor.generationId),
+    );
+    if (!holdsPredecessorAdmission) await completion;
     return Object.freeze({ result, retirement });
   }
 
@@ -675,7 +688,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
         async () => {
           if (durableCommit) result = await durableCommit();
         },
-        (predecessor) => this.retire(predecessor),
+        (predecessor) => this.retireWithRetries(predecessor),
         pluginId,
         () => {
           this.deps.loopbackManager.publishGeneration(preparedLoopback);
@@ -690,7 +703,7 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       throw error;
     }
     this.deps.loopbackManager.postPublishGeneration(preparedLoopback);
-    const retirement = this.trackRetirement(active, published.retired);
+    const retirement = this.trackRetirement(published.retired);
     return Object.freeze({ result, retirement });
   }
 
@@ -828,29 +841,25 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
     );
   }
 
-  private trackRetirement(
+  private async retireWithRetries(
     generation: ActivePluginGeneration<HostPluginGenerationState>,
-    initial: Promise<void>,
   ): Promise<void> {
-    const task = (async () => {
-      let attempt = 1;
-      let current = initial;
-      while (true) {
-        try {
-          await current;
-          return;
-        } catch (error) {
-          log.error(
-            `plugin generation retirement failed (${generation.pluginId}:${generation.generationId}, attempt ${attempt}): %s`,
-            error instanceof Error ? error.message : String(error),
-          );
-          if (attempt >= MAX_RETIREMENT_ATTEMPTS) throw error;
-          await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, attempt * 100));
-          attempt += 1;
-          current = this.retire(generation);
-        }
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await this.retire(generation);
+        return;
+      } catch (error) {
+        log.error(
+          `plugin generation retirement failed (${generation.pluginId}:${generation.generationId}, attempt ${attempt}): %s`,
+          error instanceof Error ? error.message : String(error),
+        );
+        if (attempt >= MAX_RETIREMENT_ATTEMPTS) throw error;
+        await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, attempt * 100));
       }
-    })();
+    }
+  }
+
+  private trackRetirement(task: Promise<void>): Promise<void> {
     this.retirementTasks.add(task);
     void task.finally(() => this.retirementTasks.delete(task)).catch(() => undefined);
     return task;

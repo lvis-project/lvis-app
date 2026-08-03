@@ -16,7 +16,6 @@ vi.mock("../publisher-keys.js", () => ({
 
 import {
   PluginInstalledStateUnreadableError,
-  PluginMarketplaceService,
 } from "../marketplace.js";
 import { ArtifactRollbackError, PluginArtifactStore } from "../plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";

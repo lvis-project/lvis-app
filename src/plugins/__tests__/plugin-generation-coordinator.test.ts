@@ -65,12 +65,17 @@ describe("PluginGenerationCoordinator", () => {
     await Promise.resolve();
     expect(coordinator.getActive("bundle-host-test")?.generationId).toBe("g1");
     finishCommit();
-    const newLease = await waitingLease;
-    expect(newLease.generation.generationId).toBe("g2");
+    const published = await transition;
+    let candidateAdmitted = false;
+    void waitingLease.then(() => { candidateAdmitted = true; });
+    await Promise.resolve();
+    expect(candidateAdmitted).toBe(false);
     expect(retire).not.toHaveBeenCalled();
     oldLease.release();
-    const published = await transition;
     await published.retired;
+    published.markDispatchReady();
+    const newLease = await waitingLease;
+    expect(newLease.generation.generationId).toBe("g2");
     expect(retire).toHaveBeenCalledWith(expect.objectContaining({ generationId: "g1" }));
     newLease.release();
   });
@@ -84,8 +89,15 @@ describe("PluginGenerationCoordinator", () => {
     expect(coordinator.getActive("bundle-host-test")?.generationId).toBe("g2");
     expect(retire).not.toHaveBeenCalled();
     await expect(coordinator.acquireExact("bundle-host-test", "g1")).rejects.toThrow(/not active/);
+    const candidateLease = coordinator.acquireExact("bundle-host-test", "g2");
+    let candidateAdmitted = false;
+    void candidateLease.then(() => { candidateAdmitted = true; });
+    await Promise.resolve();
+    expect(candidateAdmitted).toBe(false);
     oldLease.release();
     await published.retired;
+    published.markDispatchReady();
+    (await candidateLease).release();
     expect(retire).toHaveBeenCalledTimes(1);
   });
 
@@ -199,12 +211,13 @@ describe("PluginGenerationCoordinator", () => {
     const predecessorResults = await Promise.all(predecessorRuns);
     expect(new Set(predecessorResults.flatMap(({ before, after }) => [before, after])))
       .toEqual(new Set(["g1|instruction:g1|hook:g1|mcp:g1|audit:g1|false"]));
-    const replacementLeases = await Promise.all(waiting);
-    expect(new Set(replacementLeases.map((lease) => projectionSnapshot(lease.generation))))
-      .toEqual(new Set(["g2|instruction:g2|hook:g2|mcp:g2|audit:g2|false"]));
     expect(retireG1).not.toHaveBeenCalled();
     for (const lease of predecessorLeases) lease.release();
     await publishedReplacement.retired;
+    publishedReplacement.markDispatchReady();
+    const replacementLeases = await Promise.all(waiting);
+    expect(new Set(replacementLeases.map((lease) => projectionSnapshot(lease.generation))))
+      .toEqual(new Set(["g2|instruction:g2|hook:g2|mcp:g2|audit:g2|false"]));
     expect(retireG1).toHaveBeenCalledTimes(1);
     expect(g1.state.disposed).toBe(true);
     for (const lease of replacementLeases) lease.release();

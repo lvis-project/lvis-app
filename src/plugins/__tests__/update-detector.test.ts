@@ -1,7 +1,7 @@
 /**
  * S8 — PluginUpdateDetector tests.
  *
- * Verifies that checkForUpdates() returns the correct delta between
+ * Verifies that checkForUpdatesResult() returns the correct typed delta between
  * installed plugin versions (from the registry manifests) and the
  * latest versions in the catalog.
  */
@@ -10,7 +10,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { writeFile, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {resolve, join} from "node:path";
-import { PluginUpdateDetector, isNewer, isUpdateCheckEnabled } from "../update-detector.js";
+import { PluginUpdateDetector, isUpdateCheckEnabled } from "../update-detector.js";
+import { isNewerPluginVersion } from "../update-condition.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
 
@@ -43,48 +44,48 @@ function makeCatalogPlugin(
   };
 }
 
-// ─── isNewer ────────────────────────────────────────────────────────────────
+// ─── isNewerPluginVersion ───────────────────────────────────────────────────
 
-describe("isNewer", () => {
+describe("isNewerPluginVersion", () => {
   it("returns true when candidate has higher patch", () => {
-    expect(isNewer("1.0.1", "1.0.0")).toBe(true);
+    expect(isNewerPluginVersion("1.0.1", "1.0.0")).toBe(true);
   });
   it("returns true when candidate has higher minor", () => {
-    expect(isNewer("1.1.0", "1.0.9")).toBe(true);
+    expect(isNewerPluginVersion("1.1.0", "1.0.9")).toBe(true);
   });
   it("returns true when candidate has higher major", () => {
-    expect(isNewer("2.0.0", "1.9.9")).toBe(true);
+    expect(isNewerPluginVersion("2.0.0", "1.9.9")).toBe(true);
   });
   it("returns false when versions are equal", () => {
-    expect(isNewer("1.0.0", "1.0.0")).toBe(false);
+    expect(isNewerPluginVersion("1.0.0", "1.0.0")).toBe(false);
   });
   it("returns false when candidate is older", () => {
-    expect(isNewer("1.0.0", "1.0.1")).toBe(false);
+    expect(isNewerPluginVersion("1.0.0", "1.0.1")).toBe(false);
   });
   it("handles v-prefix", () => {
-    expect(isNewer("v1.1.0", "v1.0.0")).toBe(true);
+    expect(isNewerPluginVersion("v1.1.0", "v1.0.0")).toBe(true);
   });
   // S8 FU1 — semver pre-release precedence (semver.org §11)
   it("treats stable as newer than same-version prerelease (1.0.0 > 1.0.0-beta.1)", () => {
-    expect(isNewer("1.0.0", "1.0.0-beta.1")).toBe(true);
+    expect(isNewerPluginVersion("1.0.0", "1.0.0-beta.1")).toBe(true);
   });
   it("treats prerelease as older than same-version stable (1.0.0-beta.1 < 1.0.0)", () => {
-    expect(isNewer("1.0.0-beta.1", "1.0.0")).toBe(false);
+    expect(isNewerPluginVersion("1.0.0-beta.1", "1.0.0")).toBe(false);
   });
   it("compares prerelease numeric identifiers numerically (1.0.0-beta.2 > 1.0.0-beta.1)", () => {
-    expect(isNewer("1.0.0-beta.2", "1.0.0-beta.1")).toBe(true);
-    expect(isNewer("1.0.0-beta.10", "1.0.0-beta.2")).toBe(true);
+    expect(isNewerPluginVersion("1.0.0-beta.2", "1.0.0-beta.1")).toBe(true);
+    expect(isNewerPluginVersion("1.0.0-beta.10", "1.0.0-beta.2")).toBe(true);
   });
   it("orders alpha < beta lexically when non-numeric", () => {
-    expect(isNewer("1.0.0-beta.1", "1.0.0-alpha.1")).toBe(true);
-    expect(isNewer("1.0.0-alpha.1", "1.0.0-beta.1")).toBe(false);
+    expect(isNewerPluginVersion("1.0.0-beta.1", "1.0.0-alpha.1")).toBe(true);
+    expect(isNewerPluginVersion("1.0.0-alpha.1", "1.0.0-beta.1")).toBe(false);
   });
   it("shorter prerelease chain has lower precedence (1.0.0-alpha.1 > 1.0.0-alpha)", () => {
-    expect(isNewer("1.0.0-alpha.1", "1.0.0-alpha")).toBe(true);
+    expect(isNewerPluginVersion("1.0.0-alpha.1", "1.0.0-alpha")).toBe(true);
   });
   it("numeric identifiers have lower precedence than non-numeric", () => {
-    expect(isNewer("1.0.0-beta", "1.0.0-1")).toBe(true);
-    expect(isNewer("1.0.0-1", "1.0.0-beta")).toBe(false);
+    expect(isNewerPluginVersion("1.0.0-beta", "1.0.0-1")).toBe(true);
+    expect(isNewerPluginVersion("1.0.0-1", "1.0.0-beta")).toBe(false);
   });
 });
 
@@ -118,6 +119,12 @@ describe("PluginUpdateDetector", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  async function successfulUpdates(detector: PluginUpdateDetector) {
+    const result = await detector.checkForUpdatesResult();
+    expect(result.status).toBe("success");
+    return result.status === "success" ? result.updates : [];
+  }
+
   async function setupRegistry(
     plugins: Array<{ id: string; version: string }>,
   ): Promise<string> {
@@ -150,7 +157,7 @@ describe("PluginUpdateDetector", () => {
     const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toHaveLength(1);
     expect(updates[0]).toEqual({
@@ -173,7 +180,7 @@ describe("PluginUpdateDetector", () => {
       appVersion: "0.5.11",
     });
 
-    expect(await detector.checkForUpdates()).toEqual([]);
+    expect(await successfulUpdates(detector)).toEqual([]);
   });
 
   it("does not advertise admin-managed plugin updates", async () => {
@@ -185,7 +192,7 @@ describe("PluginUpdateDetector", () => {
       appVersion: "0.5.12",
     });
 
-    expect(await detector.checkForUpdates()).toEqual([]);
+    expect(await successfulUpdates(detector)).toEqual([]);
   });
 
   it("includes networkAccess metadata for update disclosure", async () => {
@@ -200,7 +207,7 @@ describe("PluginUpdateDetector", () => {
     ]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates[0]).toMatchObject({
       pluginId: "network-plug",
@@ -217,7 +224,7 @@ describe("PluginUpdateDetector", () => {
     const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toEqual([]);
   });
@@ -227,7 +234,7 @@ describe("PluginUpdateDetector", () => {
     const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toHaveLength(0);
   });
@@ -243,7 +250,7 @@ describe("PluginUpdateDetector", () => {
     ]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toHaveLength(1);
     expect(updates[0].pluginId).toBe("email");
@@ -254,7 +261,7 @@ describe("PluginUpdateDetector", () => {
     const fetcher = makeFetcher([]); // empty catalog
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toHaveLength(0);
   });
@@ -289,7 +296,7 @@ describe("PluginUpdateDetector", () => {
     const fetcher = makeFetcher([makeCatalogPlugin("agent-hub", "9.9.9")]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     // The catalog reports a newer version, so the entry now appears as an
     // available update (no dev-link skip).
@@ -306,17 +313,17 @@ describe("PluginUpdateDetector", () => {
     const fetcher = makeFetcher([catalogPlugin]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toHaveLength(0);
   });
 
-  it("returns empty array (never throws) when registry is missing", async () => {
+  it("returns a successful empty snapshot when registry is missing", async () => {
     const missingRegistry = resolve(tmpDir, "does-not-exist.json");
     const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "2.0.0")]);
     const detector = new PluginUpdateDetector(missingRegistry, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toEqual([]);
   });
@@ -346,7 +353,6 @@ describe("PluginUpdateDetector", () => {
       expect(result.error).toBeInstanceOf(Error);
       expect((result.error as Error).message).toContain("calendar/plugin.json");
     }
-    await expect(detector.checkForUpdates()).resolves.toEqual([]);
   });
 
   it("skips canary catalog entries by default (stable rollout only)", async () => {
@@ -355,7 +361,7 @@ describe("PluginUpdateDetector", () => {
     const fetcher = makeFetcher([canaryPlugin]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toHaveLength(0);
   });
@@ -366,7 +372,7 @@ describe("PluginUpdateDetector", () => {
     const fetcher = makeFetcher([canaryPlugin]);
     const detector = new PluginUpdateDetector(registryPath, fetcher, { canaryOptIn: true });
 
-    const updates = await detector.checkForUpdates();
+    const updates = await successfulUpdates(detector);
 
     expect(updates).toHaveLength(1);
     expect(updates[0].latestVersion).toBe("2.0.0");
@@ -404,6 +410,8 @@ describe("PluginUpdateDetector", () => {
       makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]),
     );
 
-    await expect(detector.checkForUpdates()).resolves.toEqual([]);
+    await expect(detector.checkForUpdatesResult()).resolves.toMatchObject({
+      status: "error",
+    });
   });
 });
