@@ -57,6 +57,7 @@ import { buildAppPreferenceReader } from "./plugin-runtime/app-preference.js";
 import { createHostApiFactory } from "./plugin-runtime/host-api-factory.js";
 import { createLifecycleCallbacks } from "./plugin-runtime/lifecycle.js";
 import { createRegistryEntryCache } from "./plugin-runtime/registry-cache.js";
+import { PluginRuntimePreStartPhase } from "./plugin-runtime/pre-start-phase.js";
 const log = createLogger("lvis");
 
 // ── C5 re-exports — preserve this module path's public export contract. ──────
@@ -228,6 +229,8 @@ export interface InitPluginRuntimeOutput {
   setBundleLifecycleHandler: (handler: PluginBundleLifecycleHandler) => void;
   /** Idempotent cold-start entrypoint used after bundle lifecycle wiring. */
   startPlugins: () => Promise<void>;
+  /** Admit one durable managed operation while the boot runtime is unsealed. */
+  admitPreStartOperation: <T>(operation: () => Promise<T>) => Promise<T>;
 }
 
 /**
@@ -488,10 +491,12 @@ export async function initPluginRuntime(
   // starts (startAll fires onEnable, whose closures use it).
   loopbackManager = new PluginLoopbackManager(pluginRuntime, toolRegistry);
 
-  let pluginsStarted = false;
-  const startPlugins = async (): Promise<void> => {
-    if (pluginsStarted) return;
-    pluginsStarted = true;
+  const preStartPhase = new PluginRuntimePreStartPhase();
+  const startPluginsOnce = async (): Promise<void> => {
+    // Managed pre-start sync may have committed registry rows after the cache
+    // was first constructed. Refresh from the final durable snapshot before
+    // startAll creates HostApi instances and trust decisions for those rows.
+    if (input.deferStart) await refreshRegistryEntryCache();
     await pluginRuntime.startAll();
     log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 
@@ -511,6 +516,7 @@ export async function initPluginRuntime(
       installLoadedPluginPartitionPolicy(pluginId);
     }
   };
+  const startPlugins = (): Promise<void> => preStartPhase.start(startPluginsOnce);
   if (!input.deferStart) await startPlugins();
   // Cover plugins added AFTER startAll() — deep-link install
   // (`lvis://install/<slug>` → `addPlugin`), dev hot-reload watcher
@@ -571,6 +577,7 @@ export async function initPluginRuntime(
       bundleLifecycle = handler;
     },
     startPlugins,
+    admitPreStartOperation: (operation) => preStartPhase.admit(operation),
   };
 }
 

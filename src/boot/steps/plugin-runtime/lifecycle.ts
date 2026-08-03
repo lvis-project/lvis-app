@@ -99,11 +99,8 @@ export function createLifecycleCallbacks(
     // `도구를 찾을 수 없습니다` post-restart (see PR #760). Non-fatal:
     // a sync exception is logged but does not become `runtime reload failed`.
     onEnable: (pluginId) => {
-      // `restartAll()` is also the managed-marketplace first-sync path:
-      // ensureManagedInstalled() writes the registry, then restartAll() loads
-      // the new plugin without emitting plugin.installed. Register the
-      // partition preload here so freshly managed plugin UIs get
-      // window.lvisPlugin immediately instead of only after app restart.
+      // Register the partition preload on every live enable/reload path so the
+      // refreshed plugin UI receives window.lvisPlugin immediately.
       installLoadedPluginPartitionPolicy(pluginId);
       // legacy-removal flag-day: ALL plugins register through the loopback manager
       // (server/discover → tools/list → reverse projection from `_meta`) — the

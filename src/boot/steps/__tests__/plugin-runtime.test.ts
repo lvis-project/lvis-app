@@ -402,7 +402,7 @@ describe("initPluginRuntime partition policy", () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
-  it("registers plugin webview preload policy from onEnable after managed bootstrap restartAll", async () => {
+  it("registers plugin webview preload policy from onEnable after a live reload", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     runtimeTestState.runtime.listPluginIds.mockReturnValue([]);
     runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);

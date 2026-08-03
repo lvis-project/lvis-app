@@ -60,6 +60,10 @@ export interface CommittedPluginGeneration<T> {
   readonly result: T;
   /** Settles only after every predecessor lease drains and retirement finishes. */
   readonly retirement: Promise<void>;
+  /** Host-owned post-commit work that keeps the per-plugin lifecycle queue occupied. */
+  readonly completion: Promise<void>;
+  /** True when the caller owns the predecessor admission and must return before retirement. */
+  readonly retirementDeferred: boolean;
 }
 
 /** Immutable Host view shared by runtime, Skill, Hook, MCP and operation policy. */
