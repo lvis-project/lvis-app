@@ -59,4 +59,28 @@ describe("PluginMarketplaceService generation coordination boundary", () => {
     expect(fetcher.downloadVersion).not.toHaveBeenCalled();
     expect(existsSync(pluginsRoot)).toBe(false);
   });
+
+  it("rejects a runtime activation seam in pre-start mode before external or durable state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-generation-coordination-"));
+    roots.push(root);
+    const pluginsRoot = join(root, "plugins");
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: vi.fn(async () => []),
+      getPluginDetail: vi.fn(async () => null),
+      downloadVersion: vi.fn(async () => { throw new Error("unexpected download"); }),
+      listAnnouncements: vi.fn(async () => []),
+    };
+    const service = new PluginMarketplaceService(
+      makeTestPluginPaths({ rootDir: root, pluginsRoot }),
+      fetcher,
+    );
+
+    await expect((service.ensureManagedInstalled as unknown as (options: unknown) => Promise<unknown>)({
+      mode: "pre-start-sync",
+      ensurePluginStateReadyForInstall: vi.fn(),
+      activatePreparedArtifact: vi.fn(),
+    })).rejects.toThrow("managed pre-start sync forbids runtime activation");
+    expect(fetcher.listPlugins).not.toHaveBeenCalled();
+    expect(existsSync(pluginsRoot)).toBe(false);
+  });
 });

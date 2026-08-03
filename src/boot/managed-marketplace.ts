@@ -2,6 +2,7 @@ import type { BrowserWindow } from "electron";
 import type { MarketplaceSettings } from "../data/settings-store.js";
 import type {
   PluginMarketplaceService,
+  PreparedMarketplacePluginActivation,
 } from "../plugins/marketplace.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
@@ -43,8 +44,13 @@ export type RunManagedBootstrapInput = RunManagedBootstrapBaseInput & (
   | {
       mode: "pre-start-sync";
       admitPreStartOperation: <T>(operation: () => Promise<T>) => Promise<T>;
+      activatePreparedArtifact?: never;
     }
-  | { mode: "repair-missing-only"; admitPreStartOperation?: never }
+  | {
+      mode: "repair-missing-only";
+      admitPreStartOperation?: never;
+      activatePreparedArtifact: PreparedMarketplacePluginActivation;
+    }
 );
 
 /**
@@ -71,7 +77,8 @@ export function _resetBootstrapInFlightForTest(): void {
  * renderer. Shared between the first-boot call in `boot()` and the
  * `lvis:bootstrap:retry` IPC handler so the retry path is bug-for-bug
  * identical to the original — same skip-reason resolution and status payload
- * shape, with successful artifacts activated through the generation lifecycle.
+ * shape. Pre-start sync is durable-only; true missing-only repair activates
+ * through the already-running generation lifecycle before reporting success.
  *
  * Concurrent calls are coalesced via {@link bootstrapInFlight}: if a run is
  * already underway, the new caller awaits the same promise instead of
@@ -131,8 +138,15 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     // restart cancellation is unnecessary because this phase runs before the
     // one sealed start and never publishes or starts a candidate generation.
     const ensureResult = await withAllPluginInstallLocks(async () => {
+      if (input.mode === "repair-missing-only") {
+        return pluginMarketplace.ensureManagedInstalled({
+          mode: "repair-missing-only",
+          ensurePluginStateReadyForInstall,
+          activatePreparedArtifact: input.activatePreparedArtifact,
+        });
+      }
       return pluginMarketplace.ensureManagedInstalled({
-        mode: input.mode,
+        mode: "pre-start-sync",
         ensurePluginStateReadyForInstall,
       });
     });

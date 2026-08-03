@@ -432,6 +432,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       mainWindow: getMainWindow(),
       marketplace,
       mode: "repair-missing-only",
+      activatePreparedArtifact: (prepared) =>
+        pluginRuntime.activatePreparedArtifact(prepared),
     });
     return { ok: true } as const;
   });

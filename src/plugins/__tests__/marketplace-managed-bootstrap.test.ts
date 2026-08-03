@@ -184,13 +184,16 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "installWithDependencies",
     );
     const cleanupGate = vi.fn(async () => undefined);
+    const activatePreparedArtifact = vi.fn();
     const result = await service.ensureManagedInstalled({
-      mode: "pre-start-sync",
+      mode: "repair-missing-only",
       ensurePluginStateReadyForInstall: cleanupGate,
+      activatePreparedArtifact: activatePreparedArtifact as never,
     });
 
     expect(cleanupGate).not.toHaveBeenCalled();
     expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
     expect(result).toEqual({ installed: [], updated: [], failed: [] });
   });
 
@@ -218,17 +221,57 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "installWithDependencies",
     );
     const cleanupGate = vi.fn(async () => undefined);
+    const activatePreparedArtifact = vi.fn();
 
     const result = await service.ensureManagedInstalled({
       mode: "repair-missing-only",
       ensurePluginStateReadyForInstall: cleanupGate,
+      activatePreparedArtifact: activatePreparedArtifact as never,
     });
 
     expect(result).toEqual({ installed: [], updated: [], failed: [] });
     expect(cleanupGate).not.toHaveBeenCalled();
     expect(installSpy).not.toHaveBeenCalled();
+    expect(activatePreparedArtifact).not.toHaveBeenCalled();
     expect(await readFile(registryPath, "utf-8")).toBe(beforeRegistry);
     expect(existsSync(join(pluginsDir, "meeting"))).toBe(false);
+  });
+
+  it("repair-missing-only live-activates a true structural missing install once", async () => {
+    await writeAdminCatalog("1.0.0");
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
+    const service = makeManagedService(testDir, marketplacePath);
+    const durableCommit = vi.fn(async () => "meeting/plugin.json");
+    vi.spyOn(
+      service as unknown as { installWithDependencies: (...args: unknown[]) => Promise<unknown> },
+      "installWithDependencies",
+    ).mockImplementation(async (...args: unknown[]) => {
+      const activate = args[5] as ((prepared: unknown) => Promise<unknown>) | undefined;
+      if (!activate) throw new Error("missing repair activation seam");
+      await activate({
+        installId: "meeting",
+        pluginRoot: join(testDir, "staged-meeting"),
+        manifest: { id: "meeting", version: "1.0.0" },
+        receiptRaw: "{}",
+        registryEntry: { installSource: "admin" },
+        durableCommit,
+      });
+      return { pluginId: "meeting", installed: true };
+    });
+    const activatePreparedArtifact = vi.fn(async (prepared: { durableCommit(): Promise<string> }) => ({
+      result: await prepared.durableCommit(),
+      retirement: Promise.resolve(),
+    }));
+
+    const result = await service.ensureManagedInstalled({
+      mode: "repair-missing-only",
+      ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      activatePreparedArtifact: activatePreparedArtifact as never,
+    });
+
+    expect(result).toEqual({ installed: ["meeting"], updated: [], failed: [] });
+    expect(activatePreparedArtifact).toHaveBeenCalledOnce();
+    expect(durableCommit).toHaveBeenCalledOnce();
   });
 
   async function writeAdminCatalog(version: string) {

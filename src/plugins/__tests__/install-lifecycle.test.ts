@@ -24,10 +24,9 @@ function makeRuntime(initialPluginIds: string[] = []) {
     resolvePluginInstallId: vi.fn((pluginId: string) => pluginId),
     resolvePluginInstallIdIfKnown: vi.fn((pluginId: string) => pluginId),
     cancelPendingRestart: vi.fn(),
-    activatePreparedArtifact: vi.fn(async (input: {
-      installId: string;
+    activatePreparedArtifact: vi.fn(async <T>(input: {
       manifest: { id: string };
-      durableCommit(): Promise<string>;
+      durableCommit(): Promise<T>;
     }) => {
       const result = await input.durableCommit();
       if (!pluginIds.includes(input.manifest.id)) pluginIds.push(input.manifest.id);
@@ -48,12 +47,19 @@ function makeRuntime(initialPluginIds: string[] = []) {
 }
 
 function makeMarketplace() {
+  type CatalogItem = {
+    id: string;
+    slug: string;
+    version: string;
+    installed?: boolean;
+    networkAccess?: { allowedDomains: string[]; reasoning: string };
+  };
   let candidateVersion = "2.0.0";
-  const list = vi.fn(async () => [
+  const list = vi.fn(async (): Promise<CatalogItem[]> => [
       { id: "p", slug: "lvis-plugin-p", version: "2.0.0" },
       { id: "meeting", slug: "lvis-plugin-meeting", version: "2.0.0" },
     ]);
-  const getLiveCatalogVersion = vi.fn(async () => "2.0.0");
+  const getLiveCatalogVersion = vi.fn(async (_pluginId: string) => "2.0.0");
   return {
     list,
     install: vi.fn(async (pluginId: string, _onProgress, options) => {
@@ -99,7 +105,7 @@ function makeMarketplace() {
     getInstalledVersion: vi.fn(async () => "1.0.0"),
     quarantinePlugin: vi.fn(async (pluginId: string, reason: string) => ({ pluginId, reason, quarantined: true as const })),
     uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true as const })),
-    rollbackPlugin: vi.fn(async (pluginId: string) => ({
+    rollbackPlugin: vi.fn(async (pluginId: string, _options?: unknown) => ({
       pluginId,
       rolledBackTo: "1.0.0",
     })),

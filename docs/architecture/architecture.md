@@ -217,7 +217,10 @@ Key boundaries:
   tail before awaiting it, so later managed commits reject before mutation and
   `startAll` runs exactly once against the final committed snapshot. Renderer
   retry is missing-only: any registry row or owned artifact counts as installed,
-  regardless of enabled or runtime-start state.
+  regardless of enabled or runtime-start state. Only a truly structural missing
+  repair may use the generic generation lifecycle to activate the new artifact
+  before reporting retry success. A failed runtime start remains sealed and is
+  never retried or reported as started implicitly.
 - a plugin artifact may declare plugin-owned `skills`, `hooks`, and `mcpServers`
   as `{id,path}` entries. IDs are local to the tuple `(plugin id, plugin version,
   contribution kind)` and paths are normalized relative to the verified plugin
