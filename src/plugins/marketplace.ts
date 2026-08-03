@@ -6,6 +6,9 @@ import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "./sideload-filt
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { CommittedPluginGeneration } from "./plugin-host-generation.js";
+import {
+  isCommittedPluginGenerationPublicationError,
+} from "./committed-generation-publication-error.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
@@ -2234,6 +2237,7 @@ export class PluginMarketplaceService {
             predecessorRetired: transaction.predecessorRetired,
           };
         } catch (err) {
+          if (isCommittedPluginGenerationPublicationError(err)) throw err;
           if (!receiptCommitted) throw err;
           if (err instanceof ArtifactRollbackError) throw err;
           try {
@@ -2305,6 +2309,9 @@ export class PluginMarketplaceService {
     previousEntry: PluginRegistryEntry | null,
     installError: unknown,
   ): Promise<never> {
+    if (isCommittedPluginGenerationPublicationError(installError)) {
+      throw installError;
+    }
     if (!pendingEntry) {
       throw installError;
     }
@@ -2618,6 +2625,32 @@ export class PluginMarketplaceService {
       const stagingDir = resolve(userPluginsRoot, `${pluginId}.tmp-${process.pid}-${Date.now()}`);
       let durableCommitted = false;
       let commitAttempt: Promise<string> | undefined;
+      const settleCommittedLocalUpdate = async (
+        committed: CommittedPluginGeneration<string>,
+      ): Promise<void> => {
+        const finalize = async (): Promise<void> => {
+          await committed.retirement;
+          if (rollbackSnapshot) await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);
+          if (!existingEntry?.pendingUpdate) {
+            await this.discardSupersededPendingBackup(existingEntry ?? null);
+          }
+        };
+        if (committed.retirementDeferred) {
+          const deferredCleanup = finalize();
+          this.deferredLifecycleCleanups.add(deferredCleanup);
+          void deferredCleanup.finally(() => {
+            this.deferredLifecycleCleanups.delete(deferredCleanup);
+          }).catch((error) => {
+            log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
+          });
+          return;
+        }
+        try {
+          await finalize();
+        } catch (error) {
+          log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
+        }
+      };
       try {
         // Copy and validate the complete candidate before touching live bytes,
         // receipt, registry, runtime, or any generation pointer.
@@ -2701,35 +2734,21 @@ export class PluginMarketplaceService {
         if (!durableCommitted) {
           throw new Error(`local plugin activation returned before durable commit: ${pluginId}`);
         }
-        const finalizeCommittedLocalUpdate = async (): Promise<void> => {
-          await activated.retirement;
-          if (rollbackSnapshot) await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);
-          if (!existingEntry?.pendingUpdate) {
-            await this.discardSupersededPendingBackup(existingEntry ?? null);
-          }
-        };
-        if (activated.retirementDeferred) {
-          const deferredCleanup = finalizeCommittedLocalUpdate();
-          this.deferredLifecycleCleanups.add(deferredCleanup);
-          void deferredCleanup.finally(() => {
-            this.deferredLifecycleCleanups.delete(deferredCleanup);
-          }).catch((error) => {
-            log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
-          });
-        } else {
-          try {
-            await finalizeCommittedLocalUpdate();
-          } catch (error) {
-            log.warn({ pluginId, err: error }, "local plugin predecessor retirement deferred");
-          }
-        }
+        await settleCommittedLocalUpdate(activated);
         return { pluginId, installed: true as const };
       } catch (err) {
         await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
         // A generation callback must never trigger compensating rollback after
         // the durable pointer commit. Post-commit health is journaled by the
         // lifecycle; this branch is only candidate/durable-commit failure.
-        if (durableCommitted) throw err;
+        if (durableCommitted) {
+          if (isCommittedPluginGenerationPublicationError(err) && err.committed) {
+            await settleCommittedLocalUpdate(
+              err.committed as CommittedPluginGeneration<string>,
+            );
+          }
+          throw err;
+        }
         if (!commitAttempt) {
           if (rollbackSnapshot) {
             await this.discardLocalInstallRollbackSnapshot(rollbackSnapshot);

@@ -69,6 +69,10 @@ import {
 import { withMarketplaceArtifactResourceSlot } from "./marketplace-artifact-resource-gate.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { assertPluginCandidateAppCompatible } from "./update-condition.js";
+import {
+  isCommittedPluginGenerationPublicationError,
+  type CommittedPluginGenerationPublicationError,
+} from "./committed-generation-publication-error.js";
 export { assertSafeArtifactSlug, SAFE_ARTIFACT_SLUG_RE } from "./plugin-id.js";
 
 /** Shared last-line defense for every marketplace artifact consumer. */
@@ -572,13 +576,23 @@ export class PluginArtifactStore {
           throw commitErr;
         }
       };
-      const coordinated = options.coordinateCommit
-        ? await options.coordinateCommit(Object.freeze({
-            pluginRoot: stageDir,
-            files: Object.freeze([...files]),
-            durableCommit,
-          }))
-        : { result: await durableCommit() };
+      let committedPublicationError: CommittedPluginGenerationPublicationError | undefined;
+      let coordinated: CoordinatedArtifactCommit<T>;
+      try {
+        coordinated = options.coordinateCommit
+          ? await options.coordinateCommit(Object.freeze({
+              pluginRoot: stageDir,
+              files: Object.freeze([...files]),
+              durableCommit,
+            }))
+          : { result: await durableCommit() };
+      } catch (error) {
+        if (!isCommittedPluginGenerationPublicationError(error) || !error.committed) {
+          throw error;
+        }
+        committedPublicationError = error;
+        coordinated = error.committed as CoordinatedArtifactCommit<T>;
+      }
       if (!durableCommitCompleted) {
         throw new Error(`artifact commit coordinator returned before durable commit: ${safeSlug}`);
       }
@@ -640,6 +654,7 @@ export class PluginArtifactStore {
         }
       }
       if (predecessorRetired) await cleanupCommittedBackup();
+      if (committedPublicationError) throw committedPublicationError;
       return { files, result: coordinated.result, predecessorRetired };
     } catch (err) {
       if (existsSync(stageDir)) {

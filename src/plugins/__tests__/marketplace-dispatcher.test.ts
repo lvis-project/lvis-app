@@ -18,12 +18,18 @@ import {
   PluginInstalledStateUnreadableError,
 } from "../marketplace.js";
 import { ArtifactRollbackError, PluginArtifactStore } from "../plugin-artifact-store.js";
+import { PluginBundleLifecycle } from "../plugin-bundle-lifecycle.js";
+import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem, PluginRegistryEntry } from "../types.js";
 import { setCachedCatalog } from "../offline-cache.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
+import { SkillStore } from "../../main/skill-store.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import {
   makeTestPluginPaths,
+  makeTestTreeWritable,
   preparedActivationOptionsForTest,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
@@ -99,6 +105,7 @@ describe("PluginMarketplaceService install()", () => {
   afterEach(async () => {
     delete process.env.LVIS_DEV;
     vi.restoreAllMocks();
+    await makeTestTreeWritable(testDir);
     await rm(testDir, { recursive: true, force: true });
     _resetForTest();
   });
@@ -122,6 +129,61 @@ describe("PluginMarketplaceService install()", () => {
     // assertions `expect(npmInstallMock).not.toHaveBeenCalled()` pass.
     const npmInstallMock = vi.fn(async () => {});
     return { service, npmInstallMock };
+  }
+
+  function makeProductionActivationRuntime() {
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      installReceiptCacheRoot: cacheRoot,
+      createHostApi: createNoopHostApiForTests,
+    });
+    const lifecycle = new PluginBundleLifecycle({
+      pluginRuntime: runtime,
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(testDir, "runtime-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration: vi.fn(async () => ({
+          predecessorServerIds: [],
+          predecessorToolNames: [],
+          records: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+        })),
+        publishBundledGeneration: vi.fn((prepared) => { prepared.published = true; }),
+        discardBundledGeneration: vi.fn(async () => undefined),
+        retirePublishedMcpReplacement: vi.fn(async () => undefined),
+        disconnectBundledGeneration: vi.fn(async () => undefined),
+      } as never,
+      loopbackManager: {
+        prepareGeneration: vi.fn(async (manifest, generationId) => ({
+          pluginId: manifest.id,
+          generationId,
+          tools: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+          disconnectPredecessor: false,
+        })),
+        prepareRemoval: vi.fn((pluginId, generationId) => ({
+          pluginId,
+          generationId,
+          tools: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+          disconnectPredecessor: false,
+        })),
+        publishGeneration: vi.fn((prepared) => { prepared.published = true; }),
+        postPublishGeneration: vi.fn(),
+        discardGeneration: vi.fn(async () => undefined),
+        retireGeneration: vi.fn(async () => undefined),
+      } as never,
+      revokeOperationGeneration: vi.fn(),
+    });
+    runtime.setGenerationAccess(lifecycle);
+    return { runtime, lifecycle };
   }
 
   it("downloads and extracts a marketplace zip without using npm", async () => {
@@ -284,6 +346,112 @@ describe("PluginMarketplaceService install()", () => {
     });
     expect(removeCommittedBackup).toHaveBeenCalledOnce();
   });
+
+  it.each(["initial", "replacement"] as const)(
+    "keeps the committed marketplace candidate after %s projection publication failure",
+    async (kind) => {
+      const signingKey = freshEd25519();
+      mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+        "test-v1": signingKey.publicKey,
+      });
+      const catalogItem = (version: string): PluginMarketplaceItem => ({
+        id: `committed-publication-${kind}`,
+        slug: `committed-publication-${kind}`,
+        name: `Committed Publication ${kind}`,
+        description: "post-linearization publication failure fixture",
+        version,
+        packageSpec: `@lvis/committed-publication-${kind}@${version}`,
+        packageName: `@lvis/committed-publication-${kind}`,
+      });
+      let current = catalogItem("1.0.0");
+      const zips = new Map([
+        ["1.0.0", makePluginZip({ ...current, entry: "./dist/hostPlugin.js" })],
+        ["2.0.0", makePluginZip({ ...catalogItem("2.0.0"), entry: "./dist/hostPlugin.js" })],
+      ]);
+      const fetcher: MarketplaceFetcher = {
+        listPlugins: async () => [current],
+        getPluginDetail: async () => current,
+        downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+        downloadArtifact: async (_id, version) => {
+          const body = zips.get(version);
+          if (!body) throw new Error(`missing fixture zip ${version}`);
+          return {
+            body,
+            sha256Header: createHash("sha256").update(body).digest("hex"),
+            status: 200,
+          };
+        },
+        fetchSignatureEnvelope: async (_id, version) => {
+          const body = zips.get(version);
+          if (!body) throw new Error(`missing fixture zip ${version}`);
+          return makeEnvelope(body, signingKey.privateKey);
+        },
+        listAnnouncements: async () => [],
+      };
+      const { service } = makeService(fetcher);
+      const { runtime, lifecycle } = makeProductionActivationRuntime();
+      const activatePreparedArtifact = runtime.activatePreparedArtifact.bind(runtime);
+      if (kind === "replacement") {
+        await service.install(current.id, undefined, { activatePreparedArtifact });
+        current = catalogItem("2.0.0");
+      }
+      const store = (service as unknown as { artifactStore: PluginArtifactStore }).artifactStore;
+      const removeCommittedBackup = vi.spyOn(
+        store as unknown as { removeCommittedBackup(path: string): Promise<void> },
+        "removeCommittedBackup",
+      );
+      const failingVersion = current.version;
+      const publicationCause = new Error(`${kind} projection publish failed`);
+      const prepareRuntimeGeneration = runtime.prepareRuntimeGeneration.bind(runtime);
+      vi.spyOn(runtime, "prepareRuntimeGeneration").mockImplementation((projection, predecessor) => {
+        const prepared = prepareRuntimeGeneration(projection, predecessor);
+        return projection.manifest.version === failingVersion
+          ? { ...prepared, publish: () => { throw publicationCause; } }
+          : prepared;
+      });
+
+      const failure = await service.install(current.id, undefined, {
+        activatePreparedArtifact,
+      }).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(CommittedPluginGenerationPublicationError);
+      expect(failure).toMatchObject({
+        pluginId: current.id,
+        publicationCause,
+        committed: { result: `${current.id}/plugin.json`, retirementDeferred: false },
+      });
+      expect((failure as Error).cause).toBe(publicationCause);
+      const active = lifecycle.getActive(current.id);
+      expect(active?.manifest.version).toBe(current.version);
+      await expect(lifecycle.acquire(current.id)).rejects.toThrow(
+        /dispatch blocked by publication failure/,
+      );
+      expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
+        .toMatchObject({ version: current.version });
+      const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: PluginRegistryEntry[];
+      };
+      expect(registry.plugins[0]).toMatchObject({
+        id: current.id,
+        manifestPath: `${current.id}/plugin.json`,
+        manifestSha256: manifestSha({ ...current, entry: "./dist/hostPlugin.js" }),
+      });
+      expect(registry.plugins[0]?.pendingUpdate).toBeUndefined();
+      expect(registry.plugins[0]?.pendingCleanup).toBeUndefined();
+      expect(JSON.parse(await readFile(join(cacheRoot, current.id, "install-receipt.json"), "utf-8")))
+        .toMatchObject({ pluginId: current.id, version: current.version });
+      expect((await readdir(installedDir)).some((name) =>
+        name.startsWith(`.${current.id}.old-`)
+      )).toBe(false);
+      expect(removeCommittedBackup).toHaveBeenCalledOnce();
+      await expect(service.recoverInterruptedUpdates()).resolves.toEqual({
+        recovered: [],
+        unresolved: [],
+      });
+      expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
+        .toMatchObject({ version: current.version });
+    },
+  );
 
   it("rejects and rolls back an artifact whose declared Skill is absent", async () => {
     const signingKey = freshEd25519();
