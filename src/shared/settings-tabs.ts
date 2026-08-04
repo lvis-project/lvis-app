@@ -5,7 +5,7 @@ export const SETTINGS_TABS = [
   "web",
   "startup",
   "permissions",
-  "tailnet-access",
+  "remote-surfaces",
   "roles",
   "usage",
   "audit",
@@ -28,6 +28,10 @@ export function normalizeSettingsTab(tab: unknown): SettingsTab {
   // land on the new default landing surface, the Model tab that now hosts the
   // account section.
   if (tab === "general") return "llm";
+  // Tailnet is one remote surface among several rather than a tab of its own,
+  // so its page became the Remote surfaces tab. Old persisted/deep-link ids
+  // still resolve to the page that hosts the Tailnet section.
+  if (tab === "tailnet-access") return "remote-surfaces";
   return typeof tab === "string" && (SETTINGS_TABS as readonly string[]).includes(tab)
     ? (tab as SettingsTab)
     : "llm";

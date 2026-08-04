@@ -1,6 +1,5 @@
 // P2 local-owner Tailnet pairing/share controls.
 export const en = {
-  "settingsContent.tabTailnetAccess": "Tailnet access",
   "tailnetAccessTab.pageDescription": "Pair a Tailnet account, then grant a separate, time-limited share for the current conversation.",
   "tailnetAccessTab.disabled": "Tailnet sharing is not enabled on this desktop.",
   "tailnetAccessTab.loading": "Checking local Tailnet sharing…",
@@ -43,7 +42,6 @@ export const en = {
 } as const;
 
 export const ko: Record<keyof typeof en, string> = {
-  "settingsContent.tabTailnetAccess": "Tailnet 접근",
   "tailnetAccessTab.pageDescription": "Tailnet 계정을 페어링한 뒤, 현재 대화에 대해서만 별도의 시간 제한 공유를 부여합니다.",
   "tailnetAccessTab.disabled": "이 데스크톱에서는 Tailnet 공유가 활성화되어 있지 않습니다.",
   "tailnetAccessTab.loading": "로컬 Tailnet 공유 상태를 확인하는 중…",

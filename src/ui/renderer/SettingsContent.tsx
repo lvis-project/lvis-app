@@ -29,7 +29,7 @@ import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
 import { AuditTab } from "./tabs/AuditTab.js";
-import { TailnetAccessTab } from "./tabs/TailnetAccessTab.js";
+import { RemoteSurfacesTab } from "./tabs/RemoteSurfacesTab.js";
 import { UsageDashboard } from "./components/UsageDashboard.js";
 import { LlmTab } from "./tabs/LlmTab.js";
 import { AppearanceTab } from "./tabs/AppearanceTab.js";
@@ -72,10 +72,15 @@ const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
     ],
   },
   {
+    group: "settingsContent.groupConnections",
+    items: [
+      { value: "remote-surfaces", icon: Network, labelKey: "settingsContent.tabRemoteSurfaces" },
+    ],
+  },
+  {
     group: "settingsContent.groupPermRoles",
     items: [
       { value: "permissions", icon: Shield, labelKey: "settingsContent.tabPermissions" },
-      { value: "tailnet-access", icon: Network, labelKey: "settingsContent.tabTailnetAccess" },
       { value: "roles", icon: UserCog, labelKey: "settingsContent.tabRoles" },
     ],
   },
@@ -639,7 +644,7 @@ export function SettingsContent({
 
           <TabsContent value="startup" className={tabContentCls}><StartupTab /></TabsContent>
           <TabsContent value="permissions" className={tabContentCls}><PermissionsTab /></TabsContent>
-          <TabsContent value="tailnet-access" className={tabContentCls}><TailnetAccessTab api={api} /></TabsContent>
+          <TabsContent value="remote-surfaces" className={tabContentCls}><RemoteSurfacesTab api={api} /></TabsContent>
           <TabsContent value="roles" className={tabContentCls}><RolesTab api={api} /></TabsContent>
           <TabsContent value="usage" className={tabContentCls}>
             <UsageDashboard
