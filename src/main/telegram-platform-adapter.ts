@@ -119,6 +119,28 @@ export function createTelegramWebhookVerifier(
   });
 }
 
+/**
+ * Verify one Telegram Update that THIS host already fetched over its own
+ * authenticated outbound `getUpdates` call.
+ *
+ * Authenticity here comes from TLS to api.telegram.org plus the bot token on
+ * that outbound request — not from a signature over these bytes, because the
+ * bytes are host-produced rather than attacker-presented. This is a separate
+ * factory on purpose: adding a "skip the header when none is present" branch
+ * to `createTelegramWebhookVerifier` would make the loopback webhook listener
+ * forgeable by any local process. The shape allow-list is still applied, so a
+ * compromised or unexpected Bot API response cannot widen the envelope.
+ */
+export function createTelegramPollingVerifier(): PlatformBridgeWebhookVerifier {
+  return Object.freeze({
+    verify(request: Readonly<unknown>): PlatformBridgeVerifiedEnvelope | undefined {
+      const rawBody = readRawBody(request);
+      if (rawBody === undefined) return undefined;
+      return parseTelegramTextUpdate(rawBody);
+    },
+  });
+}
+
 /** A Telegram Bot API destination already paired by the host. */
 export interface TelegramDeliveryChannel {
   /** Canonical decimal positive safe integer, never a group/channel id. */
@@ -439,7 +461,15 @@ function readRawBody(request: unknown): Uint8Array | undefined {
   return rawBody instanceof Uint8Array ? rawBody : undefined;
 }
 
-function parseTelegramTextUpdate(rawBody: Uint8Array): PlatformBridgeVerifiedEnvelope | undefined {
+/**
+ * Decode one Telegram Update into the exact envelope the shared ingress core
+ * admits, or `undefined` for anything else. Exported so the polling ingress
+ * uses the same definition of "a safe Telegram text message" as the webhook
+ * path; forking it would let the two ingresses drift.
+ */
+export function parseTelegramTextUpdate(
+  rawBody: Uint8Array,
+): PlatformBridgeVerifiedEnvelope | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(Buffer.from(rawBody).toString("utf8"));

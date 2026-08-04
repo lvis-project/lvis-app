@@ -168,6 +168,7 @@ import { en as en_suggestedRepliesChipRow } from "./suggestedRepliesChipRow.js";
 import { en as en_suggestedRepliesGhost } from "./suggestedRepliesGhost.js";
 import { en as en_summaryToast } from "./summaryToast.js";
 import { en as en_remoteSurfacesTab } from "./remoteSurfacesTab.js";
+import { en as en_telegramConnection } from "./telegramConnection.js";
 import { en as en_tailnetAccessTab } from "./tailnetAccessTab.js";
 import { en as en_tokenCostBadge } from "./tokenCostBadge.js";
 import { en as en_tokenProgressRing } from "./tokenProgressRing.js";
@@ -355,6 +356,7 @@ export const generatedEn: Record<string, string> = {
   ...en_suggestedRepliesGhost,
   ...en_summaryToast,
   ...en_remoteSurfacesTab,
+  ...en_telegramConnection,
   ...en_tailnetAccessTab,
   ...en_tokenCostBadge,
   ...en_tokenProgressRing,

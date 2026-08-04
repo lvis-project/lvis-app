@@ -509,6 +509,18 @@ describe("preload contextBridge world shape lock", () => {
             "revokeShare",
             "snapshot",
           ],
+          "telegramConnection": [
+            "approveCurrentConversation",
+            "connect",
+            "createPairingCode",
+            "disconnect",
+            "onChanged",
+            "pause",
+            "resume",
+            "revokeApproval",
+            "revokePairing",
+            "snapshot",
+          ],
           "terminal": [
             "input",
             "kill",

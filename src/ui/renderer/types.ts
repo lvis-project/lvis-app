@@ -37,6 +37,7 @@ import type {
 } from "../../shared/subscription-runtime.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { TailnetSharingOwnerApi } from "../../shared/tailnet-sharing.js";
+import type { TelegramConnectionOwnerApi } from "../../shared/telegram-connection.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
 import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
@@ -556,6 +557,7 @@ export type LvisApi = {
     action: RemoteA2AActionCall;
   };
   tailnetSharing: TailnetSharingOwnerApi;
+  telegramConnection: TelegramConnectionOwnerApi;
   /**
    * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same
    * stability guarantee as `pluginPreloadUrl` — read directly from the host
