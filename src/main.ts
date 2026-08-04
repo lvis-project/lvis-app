@@ -61,6 +61,7 @@ import {
 } from "./main/telegram-bridge-server.js";
 import { createTelegramConnectionStore } from "./main/telegram-connection-store.js";
 import { createTelegramConnectionService } from "./main/telegram-connection-service.js";
+import { createTelegramShareChangeWatcher } from "./main/telegram-share-identity.js";
 import {
   startTelegramConnectionActivation,
   telegramConversationDigest,
@@ -276,6 +277,28 @@ async function main() {
         services.memoryManager.hasSessionTranscript(conversationId),
       envManaged: telegramEnvManaged,
     });
+    // Any change to the paired share retires an armed Away Authority grant.
+    //
+    // The grant is a desk gesture about the share that existed when it was
+    // made. A revoke, re-share, pause, disconnect or re-pair replaces that
+    // share with a different one, and the per-call authority re-check cannot
+    // see the difference: a re-pair mints a fresh authority that is perfectly
+    // current.
+    //
+    // The subscription is the store's single mutation chokepoint, but the raw
+    // signal is far too broad to act on: the poll offset lives in the same
+    // document and advances after every inbound message, so retiring on "the
+    // document changed" would retire the grant on the exact traffic it exists
+    // to answer. `createTelegramShareChangeWatcher` keeps the chokepoint and
+    // compares the share's identity instead.
+    telegramConnectionService.subscribe(
+      createTelegramShareChangeWatcher({
+        readOwnerSnapshot: () => telegramStore.ownerSnapshot(),
+        onShareChanged: () => {
+          services.approvalGate?.retireAwayAuthority("share-lifecycle");
+        },
+      }),
+    );
   } catch (err) {
     log.error({ err }, "telegram connection service failed to initialize (continuing boot)");
   }

@@ -25,7 +25,7 @@ import {
   buildHostShellExecutionPlan,
   getHostShellExecutionPlanAuditProjection,
 } from "../host-shell-execution-plan.js";
-import { makeTestPolicy } from "./test-helpers.js";
+import { makePlatformBridgeAuthority, makeTestPolicy } from "./test-helpers.js";
 
 // ─── Mock WebContents ─────────────────────────────────
 
@@ -2044,10 +2044,10 @@ describe("ApprovalGate", () => {
   // ── Answerer attribution ──────────────────────────────
   //
   // `sessionId` names the conversation that was blocked; `answeredBy` names who
-  // ended the block. Today the desk is the only answerer, so every assertion
-  // below is about the shape of the record rather than about a choice between
-  // answerers: the field is present with a real value on the row that records
-  // an answer, absent everywhere else, host-derived, and closed.
+  // ended the block. The assertions below are about the shape of the record:
+  // the field is present with a real value on the row that records an answer,
+  // absent everywhere else, host-derived, and closed. The choice BETWEEN
+  // answerers is exercised in the away-authority block further down.
   describe("approval answerer", () => {
     /** Read the row's answerer, so a test asserts its value and not merely that the word appears. */
     function answererOf(row: string): string | undefined {
@@ -2149,11 +2149,12 @@ describe("ApprovalGate", () => {
     });
 
     it("closes the union: a non-member answerer is an anomaly, not the desk", () => {
-      // @ts-expect-error — "remote" is not an ApprovalAnswerer. This directive
-      // is the type-level half of the assertion: when a second answerer joins
-      // the union it will suppress nothing, which `check:typecheck-tests`
-      // reports as a new error in this file until the test is updated on
-      // purpose.
+      // @ts-expect-error — "remote" is not an ApprovalAnswerer, and the away
+      // answerer joining the union did not make it one. That is the point of
+      // this row: the union is closed against the value a relay design would
+      // have needed, not merely small. The directive is the type-level half —
+      // it suppresses an error today, and `check:typecheck-tests` reports it as
+      // unused the moment an answerer named "remote" is added.
       const widened: ApprovalAnswerer = "remote";
       expect(approvalAnswererAuditToken(widened)).toBe("unrecognized-answerer");
       // The runtime half: the guarantee has to survive a caller that casts past
@@ -2161,7 +2162,13 @@ describe("ApprovalGate", () => {
       expect(approvalAnswererAuditToken("toString" as never)).toBe(
         "unrecognized-answerer",
       );
+      // Every member renders as itself. A new member that forgot its token
+      // would fail to compile in the audit table; one that mistyped it fails
+      // here.
       expect(approvalAnswererAuditToken("desk")).toBe("desk");
+      expect(approvalAnswererAuditToken("away-authority")).toBe(
+        "away-authority",
+      );
     });
   });
 
@@ -2377,6 +2384,369 @@ describe("ApprovalGate", () => {
       expect(signApprovalRequest(key, withMarker)).toBe(
         signApprovalRequest(key, signed),
       );
+    });
+  });
+
+  // ── Away Authority ────────────────────────────────────
+  //
+  // The desk-armed second answerer, exercised through the gate. Two things are
+  // being proved here and nothing else: that an away answer is reachable and
+  // fully recorded, and that its position in `requestAndWait` leaves every hard
+  // gate above it intact. Per-condition eligibility lives in
+  // `away-authority.test.ts`, which drives the answerer directly.
+  describe("away authority", () => {
+    const AWAY_CONVERSATION = "conv-away";
+    const AWAY_DIR = "/srv/away-gate-scope";
+    const AWAY_FILE = "/srv/away-gate-scope/report.md";
+
+    /** A request the armed grant below would answer, before any test flips it. */
+    function makeAwayRequest(overrides?: Partial<RequestInput>): RequestInput {
+      return makeRequest({
+        id: "away-1",
+        toolName: "fs_write",
+        toolCategory: "write",
+        sessionId: AWAY_CONVERSATION,
+        source: "builtin",
+        allowedChoices: ["allow-once", "deny-once"],
+        durableApprovalRecordAllowed: false,
+        forceExplicit: true,
+        remoteControllerOrigin: "platform-bridge",
+        remoteControllerAuthority: makePlatformBridgeAuthority(),
+        target: { filePath: AWAY_FILE },
+        isReadOnly: false,
+        ...overrides,
+      });
+    }
+
+    function armedGate(
+      overrides: Partial<Parameters<ApprovalGate["armAwayAuthority"]>[0]> = {},
+    ): ReturnType<typeof makeAuditingGate> {
+      const harness = makeAuditingGate();
+      const armed = harness.gate.armAwayAuthority({
+        conversationId: AWAY_CONVERSATION,
+        categories: ["read", "write"],
+        directories: [AWAY_DIR],
+        ttlMs: 60 * 60 * 1000,
+        budget: 5,
+        ...overrides,
+      });
+      expect(armed).toBe(true);
+      return harness;
+    }
+
+    function rowFor(
+      auditLogger: { log: ReturnType<typeof vi.fn> },
+      marker: string,
+    ): string | undefined {
+      return auditRowTexts(auditLogger).find((row) => row.startsWith(marker));
+    }
+
+    it("answers an armed, in-scope paired-platform write without a modal", async () => {
+      const { wc, auditLogger, gate } = armedGate();
+
+      await expect(gate.requestAndWait(makeAwayRequest())).resolves.toEqual({
+        requestId: "away-1",
+        choice: "allow-once",
+      });
+
+      // Nobody was asked. No modal, and no OS toast to wake a room the owner
+      // is not in — the answer is the whole point.
+      expect(wc.send).not.toHaveBeenCalled();
+      const answered = rowFor(auditLogger, "[approval:away-answered]");
+      expect(answered).toContain("away-1");
+      expect(answered).toContain("answeredBy=away-authority");
+      expect(answered).toContain("remoteControllerOrigin=platform-bridge");
+      expect(answered).toContain("toolName=fs_write");
+      // Below the requested row, so an away-answered call still has the full
+      // pair a reviewer replays.
+      expect(rowFor(auditLogger, "[approval:requested]")).toContain("away-1");
+    });
+
+    it("leaves nothing an answer could be widened through", async () => {
+      const { gate } = armedGate();
+
+      await expect(gate.requestAndWait(makeAwayRequest())).resolves.toMatchObject(
+        { choice: "allow-once" },
+      );
+
+      // It returns before a pending entry exists. There is no entry for
+      // `resolve` to accept a later `allow-always` against, and none for
+      // `getRequestSnapshot` to bind a user-approval record to.
+      expect(gate.pendingCount).toBe(0);
+      expect(gate.getRequestSnapshot("away-1")).toBeNull();
+      expect(
+        gate.resolve("away-1", {
+          requestId: "away-1",
+          choice: "allow-always",
+          nonce: "x",
+          hmac: "y",
+        }),
+      ).toBeNull();
+    });
+
+    it("spends the grant it answered from", async () => {
+      const { auditLogger, gate } = armedGate({ budget: 1 });
+
+      await expect(gate.requestAndWait(makeAwayRequest())).resolves.toMatchObject(
+        { choice: "allow-once" },
+      );
+      // Spent in the same step that answered. The row says so, because from
+      // the next call on there is no grant left to explain the silence.
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toContain(
+        "remaining=0",
+      );
+      expect(rowFor(auditLogger, "[approval:away-retired]")).toContain(
+        "reason=budget-spent",
+      );
+      expect(gate.awayAuthoritySnapshot()).toBeNull();
+
+      // The second call finds no grant and falls through to a desk nobody is
+      // at, exactly as it would have before anything was ever armed.
+      const second = gate.requestAndWait(makeAwayRequest({ id: "away-2" }));
+      expect(auditRowTexts(auditLogger).filter((row) =>
+        row.startsWith("[approval:away-answered]"),
+      )).toHaveLength(1);
+      expect(gate.pendingCount).toBe(1);
+      gate.disposeAll();
+      await expect(second).resolves.toMatchObject({ choice: "deny-once" });
+    });
+
+    it("keeps answering while budget remains", async () => {
+      const { auditLogger, gate } = armedGate({ budget: 2 });
+
+      await expect(gate.requestAndWait(makeAwayRequest())).resolves.toMatchObject(
+        { choice: "allow-once" },
+      );
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toContain(
+        "remaining=1",
+      );
+      // Non-vacuous companion to the test above: with budget left, the grant
+      // survives and no retirement row is written.
+      expect(gate.awayAuthoritySnapshot()?.remaining).toBe(1);
+      expect(rowFor(auditLogger, "[approval:away-retired]")).toBeUndefined();
+    });
+
+    it("re-checks the controller authority at the moment it answers", async () => {
+      const { wc, auditLogger, gate } = armedGate();
+
+      // Same grant, same conversation, same scope — only the live guard has
+      // gone stale, which is what a revoke mid-turn looks like.
+      const promise = gate.requestAndWait(
+        makeAwayRequest({ remoteControllerAuthority: makePlatformBridgeAuthority(false) }),
+      );
+
+      expect(rowFor(auditLogger, "[approval:away-declined]")).toContain(
+        "reason=authority-not-current",
+      );
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      // It fell through to the desk rather than being denied outright: the
+      // answerer declining is not a decision about the request.
+      expect(wc.send).toHaveBeenCalledTimes(1);
+      gate.disposeAll();
+      await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+    });
+
+    it("retires the grant when the share lifecycle changes", async () => {
+      const { auditLogger, gate } = armedGate();
+
+      expect(gate.retireAwayAuthority("share-lifecycle")).toBe(true);
+      expect(gate.awayAuthoritySnapshot()).toBeNull();
+      expect(rowFor(auditLogger, "[approval:away-retired]")).toContain(
+        "reason=share-lifecycle",
+      );
+
+      const promise = gate.requestAndWait(makeAwayRequest());
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      // A retired grant is not this answerer's business any more, so it is also
+      // not worth a declined row on every later approval.
+      expect(rowFor(auditLogger, "[approval:away-declined]")).toBeUndefined();
+      gate.disposeAll();
+      await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+    });
+
+    it("stays quiet about approvals that were never its business", async () => {
+      const { auditLogger, gate } = armedGate();
+
+      // An ordinary desk approval while armed. If this wrote a declined row,
+      // every approval in the app would write one.
+      const promise = gate.requestAndWait(
+        makeRequest({ id: "desk-while-armed", sessionId: AWAY_CONVERSATION }),
+      );
+      expect(rowFor(auditLogger, "[approval:away-declined]")).toBeUndefined();
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      gate.disposeAll();
+      await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+    });
+
+    it("refuses to arm a gesture outside the grant bounds", () => {
+      const { auditLogger, gate } = makeAuditingGate();
+
+      expect(
+        gate.armAwayAuthority({
+          conversationId: AWAY_CONVERSATION,
+          // Arming shell would make an away answer arbitrary code execution.
+          categories: ["shell"],
+          directories: [AWAY_DIR],
+          ttlMs: 60 * 60 * 1000,
+          budget: 5,
+        }),
+      ).toBe(false);
+      expect(gate.awayAuthoritySnapshot()).toBeNull();
+      expect(rowFor(auditLogger, "[approval:away-armed]")).toBeUndefined();
+    });
+
+    it("keeps local paths out of the armed row", () => {
+      const { auditLogger } = armedGate();
+
+      const armedRow = rowFor(auditLogger, "[approval:away-armed]") as string;
+      expect(armedRow).toContain("categories=read,write");
+      expect(armedRow).toContain("directories=1");
+      expect(armedRow).toContain("budget=5");
+      // The count, not the paths. Keeping local paths off a remote transport is
+      // the reason this feature is a desk gesture rather than a relay; an audit
+      // row is not an exception to it.
+      expect(armedRow).not.toContain("away-gate-scope");
+    });
+
+    it("never sends the authority object to the renderer", async () => {
+      const { wc, gate } = armedGate();
+
+      // Declined (wrong conversation) so the request actually reaches the send.
+      const promise = gate.requestAndWait(
+        makeAwayRequest({ id: "away-not-sent", sessionId: "conv-other" }),
+      );
+
+      const [, sent] = wc.send.mock.calls[0] as unknown as [
+        string,
+        ApprovalRequest,
+      ];
+      expect(sent.id).toBe("away-not-sent");
+      expect(sent.nonce).toEqual(expect.any(String));
+      expect(sent).not.toHaveProperty("remoteControllerAuthority");
+      expect(sent).not.toHaveProperty("remoteControllerOrigin");
+      gate.disposeAll();
+      await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+    });
+
+    // ── Hard gates above the injection point ────────────
+    //
+    // Each row below is an otherwise-eligible away request that one hard gate
+    // rejects first. They are the reason the answerer sits where it does: move
+    // its block above any of these and the matching row fails.
+    it("cannot re-open the sensitive-path hard block", async () => {
+      const { wc, auditLogger, gate } = armedGate();
+
+      await expect(
+        gate.requestAndWait(
+          makeAwayRequest({ target: { filePath: `${AWAY_DIR}/.ssh/id_rsa` } }),
+        ),
+      ).resolves.toMatchObject({ choice: "deny-once" });
+
+      expect(rowFor(auditLogger, "[approval:sensitive-path-blocked]")).toContain(
+        "away-1",
+      );
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+      // Not even a declined row: the request never reached the answerer.
+      expect(rowFor(auditLogger, "[approval:away-declined]")).toBeUndefined();
+      expect(wc.send).not.toHaveBeenCalled();
+    });
+
+    it("cannot re-open a host-shell binding mismatch", async () => {
+      const { auditLogger, gate } = armedGate();
+      const plan = buildHostShellExecutionPlan({
+        platform: "linux",
+        requestedSandbox: false,
+        activeCapability: {
+          kind: "none",
+          confidence: "verified",
+          platform: "linux",
+          reason: "test-only",
+        },
+      });
+
+      await expect(
+        gate.requestAndWait(
+          makeAwayRequest({
+            // A binding that does not describe the displayed request — the
+            // request is an `fs_write`, the binding a shell spawn. The gate
+            // rejects it before the answerer is consulted.
+            hostShellExecutionPermitBinding: Object.freeze({
+              plan,
+              planIdentity: plan.identity,
+              toolName: "bash",
+              toolUseId: "away-binding",
+              command: "echo away",
+              requestedCwd: undefined,
+              executionCwd: "/repo",
+              resolvedCwd: "/repo",
+              timeoutSeconds: 30,
+              allowedDirectories: Object.freeze([AWAY_DIR]),
+            }) satisfies HostShellExecutionPermitBinding,
+          }),
+        ),
+      ).resolves.toMatchObject({ choice: "deny-once" });
+
+      expect(
+        rowFor(auditLogger, "[approval:host-shell-binding-mismatch]"),
+      ).toContain("away-1");
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+    });
+
+    it("cannot re-open an unissued execution plan", async () => {
+      const { auditLogger, gate } = armedGate();
+
+      await expect(
+        gate.requestAndWait(
+          makeAwayRequest({
+            executionPlan: { version: 1 } as never,
+          }),
+        ),
+      ).resolves.toMatchObject({ choice: "deny-once" });
+
+      expect(rowFor(auditLogger, "[approval:execution-plan-invalid]")).toContain(
+        "away-1",
+      );
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+    });
+
+    it("cannot answer for a destroyed window", async () => {
+      const wc = makeMockWebContents({ isDestroyed: true });
+      const auditLogger = { log: vi.fn() };
+      const gate = new ApprovalGate(wc as never, undefined, 1_000, auditLogger as never);
+      expect(
+        gate.armAwayAuthority({
+          conversationId: AWAY_CONVERSATION,
+          categories: ["read", "write"],
+          directories: [AWAY_DIR],
+          ttlMs: 60 * 60 * 1000,
+          budget: 5,
+        }),
+      ).toBe(true);
+
+      await expect(gate.requestAndWait(makeAwayRequest())).resolves.toMatchObject(
+        { choice: "deny-once" },
+      );
+
+      expect(rowFor(auditLogger, "[approval:send-failed]")).toContain("away-1");
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
+    });
+
+    it("does not reach the read-only fail-open", async () => {
+      const { auditLogger, gate } = armedGate();
+
+      // A read-only request short-circuits above the answerer. The point is
+      // that the away answerer is not the thing that approved it: the row names
+      // no answerer at all, because the host reached that outcome on its own.
+      await expect(
+        gate.requestAndWait(
+          makeAwayRequest({ toolCategory: "read", isReadOnly: true }),
+        ),
+      ).resolves.toMatchObject({ choice: "allow-once" });
+
+      const autoApproved = rowFor(auditLogger, "[approval:read-only-auto-approve]");
+      expect(autoApproved).toContain("away-1");
+      expect(autoApproved).not.toContain("answeredBy=");
+      expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
     });
   });
 });
