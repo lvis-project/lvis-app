@@ -25,6 +25,12 @@ export interface StartTelegramConnectionActivationOptions {
   readonly conversationSurfaceRuntime: ConversationSurfaceRuntime;
   readonly conversationCommandPort: ConversationCommandPort;
   readonly getCurrentConversationId: () => string;
+  /**
+   * Stops this activation. Wired to the same owner-initiated teardown the
+   * settings surface uses, so a fatal poll outcome and a manual disconnect
+   * converge on one path.
+   */
+  readonly stopBridge: () => Promise<void>;
   /** Test-only injection; production reads Electron's OS-encrypted store. */
   readonly secretStore?: SecretStore;
   readonly log?: (message: string) => void;
@@ -68,6 +74,7 @@ export async function startTelegramConnectionActivation(
     getCurrentConversationId: options.getCurrentConversationId,
     botToken,
     botFingerprint,
+    ...(options.secretStore ? { secretStore: options.secretStore } : {}),
     authority: {
       activePairingActorDigest: () => store.activePairingActorDigest(),
       resolveActiveApproval: (actorDigest, conversationDigest) =>
@@ -82,9 +89,6 @@ export async function startTelegramConnectionActivation(
       if (actorDigest === null) return false;
       return await store.completePairing({ codeDigest, actorDigest }) !== null;
     },
-    consumePairingAttempt: async () => {
-      await store.consumePendingCodeAttempt();
-    },
     isPairedOwner: (senderId) => {
       const actorDigest = digestActor.digestFor(senderId);
       return actorDigest !== null && store.activePairingActorDigest() === actorDigest;
@@ -94,6 +98,17 @@ export async function startTelegramConnectionActivation(
     },
     onFatal: async (code) => {
       await store.setLastError(code);
+      // A fatal poll outcome ends ingress but left egress attached, so a bridge
+      // showing an error badge kept streaming assistant text to the phone.
+      // Tear the activation down: a surface that cannot receive must not send.
+      //
+      // Deliberately not awaited. This handler runs inside the poll loop and the
+      // teardown waits for that loop to finish, so awaiting here would leave each
+      // side waiting on the other. Starting it and returning lets the loop unwind
+      // into the stop that is already in flight.
+      void options.stopBridge().catch(() => {
+        options.log?.("[telegram-activation] teardown after a fatal poll failed");
+      });
     },
     ...(options.log ? { log: options.log } : {}),
   });
