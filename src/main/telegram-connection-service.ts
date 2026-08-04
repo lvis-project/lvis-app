@@ -216,6 +216,13 @@ function projectApproval(
  * The binding is durable, so "you are looking elsewhere" is a property of the
  * approval, not a state of the connection — it does not survive a restart as a
  * state, and it never described anything the owner had to repair.
+ *
+ * A pairing retired by an actor-key rotation is the opposite: it IS something
+ * the owner has to repair, it survives a restart, and it ends only when a new
+ * pairing exists. That is why it is a state and not a `lastErrorCode` note —
+ * an error code would be answered above as `error`, which withholds the very
+ * affordance the owner needs, and `setConnected` clears the note on the next
+ * reconnect while the pairing stays gone.
  */
 function deriveState(
   owner: TelegramOwnerConnectionSnapshot,
@@ -225,7 +232,10 @@ function deriveState(
   if (owner.desiredState === "paused") return "paused-by-owner";
   if (owner.lastErrorCode !== null) return "error";
   if (owner.pairing === null) {
-    return owner.pendingCode === null ? "connected-unpaired" : "pairing-pending";
+    // A code already minted is the repair in progress; say so rather than
+    // repeating the loss the owner is in the middle of fixing.
+    if (owner.pendingCode !== null) return "pairing-pending";
+    return owner.pairingUnrecognized ? "pairing-unrecognized" : "connected-unpaired";
   }
   return approval === null ? "paired-unapproved" : "active";
 }

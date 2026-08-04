@@ -29,6 +29,15 @@ const TELEGRAM_CONNECTION_STATES = [
   "env-managed",
   "disconnected",
   "connected-unpaired",
+  /**
+   * There was a pairing, and this machine can no longer recognise the account
+   * it named: the local key its digest was derived under is gone, which an OS
+   * keychain reset or a restore onto another machine both cause. Separate from
+   * `connected-unpaired` because the owner lost something and has to act, and
+   * separate from `error` because the bot connection itself is fine — the one
+   * repair is to pair again, so this state carries the pairing affordance.
+   */
+  "pairing-unrecognized",
   "pairing-pending",
   "paired-unapproved",
   /**
