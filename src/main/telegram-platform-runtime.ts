@@ -231,6 +231,260 @@ export function createTelegramPlatformRuntime(
   });
 }
 
+/**
+ * Durable pairing/approval authority for the owner-driven runtime.
+ *
+ * `resolveActiveApproval` is deliberately synchronous. It sits on the egress
+ * fence, which runs between the authorization decision and the delivery bind;
+ * an await there would let the owner switch conversations in between.
+ */
+export interface TelegramPairedRouteAuthority {
+  /** Opaque digest of the currently paired Telegram account, if any. */
+  activePairingActorDigest(): string | null;
+  /** Non-null only while a live approval binds this actor to this conversation. */
+  resolveActiveApproval(
+    actorDigest: string,
+    conversationDigest: string,
+  ): { readonly scope: string } | null;
+}
+
+/**
+ * Derive the opaque conversation digest an approval is stored under.
+ *
+ * The owner service persists this when a conversation is shared and the paired
+ * runtime recomputes it on every egress check, so both must use this one
+ * derivation. It is bot-scoped on purpose: an approval must not survive being
+ * re-pointed at a different bot.
+ */
+export function telegramConversationDigest(
+  botFingerprint: string,
+  conversationId: string,
+): string {
+  if (!BOT_FINGERPRINT_PATTERN.test(botFingerprint) || !isConversationId(conversationId)) {
+    throw new Error("telegram-conversation-digest-invalid");
+  }
+  return hashConversation(botFingerprint, conversationId);
+}
+
+/**
+ * Derive the opaque account digest for a Telegram sender id.
+ *
+ * Pairing redemption stores this digest, and the paired runtime recomputes it
+ * on every inbound envelope. Exporting one derivation keeps those two from
+ * drifting; a second copy would make a correct pairing unresolvable.
+ */
+export function createTelegramActorDigester(options: {
+  readonly botFingerprint: string;
+  readonly secretStore?: SecretStore;
+  readonly encryption?: SafeStorageLike;
+}): (senderId: string) => string | null {
+  if (!options || !BOT_FINGERPRINT_PATTERN.test(options.botFingerprint)) {
+    throw new Error("telegram-actor-digester-invalid");
+  }
+  const secretStore = options.secretStore
+    ?? new SafeStorageSecretStore(options.encryption ?? safeStorage);
+  const actorSecret = ensureTelegramPlatformActorSecret(secretStore);
+  return (senderId: string): string | null =>
+    isCanonicalTelegramId(senderId)
+      ? actorDigestFor(actorSecret, options.botFingerprint, senderId)
+      : null;
+}
+
+export interface CreateTelegramPairedPlatformRuntimeOptions {
+  readonly botFingerprint: string;
+  readonly authority: TelegramPairedRouteAuthority;
+  readonly getCurrentConversationId: () => string;
+  readonly activationEpoch: number;
+  readonly secretStore?: SecretStore;
+  readonly encryption?: SafeStorageLike;
+}
+
+/**
+ * Owner-driven variant of the platform runtime.
+ *
+ * Unlike the environment-configured runtime, this one holds no allow-list and
+ * captures no conversation at construction. Routes are minted lazily from a
+ * verified inbound envelope, which is what keeps the raw Telegram chat id off
+ * disk: a bot cannot open a chat, so the paired owner always re-supplies it.
+ *
+ * Currency requires BOTH that the route's own bound conversation still has a
+ * live approval AND that this bound conversation is the one on screen. Checking
+ * only the second — or resolving approval against the *current* conversation
+ * rather than the bound one — leaks the safe projection of a conversation the
+ * owner never approved.
+ */
+export function createTelegramPairedPlatformRuntime(
+  options: CreateTelegramPairedPlatformRuntimeOptions,
+): TelegramPlatformRuntime {
+  if (!options
+    || typeof options !== "object"
+    || !BOT_FINGERPRINT_PATTERN.test(options.botFingerprint)
+    || typeof options.getCurrentConversationId !== "function"
+    || !positiveInteger(options.activationEpoch)
+    || !isRouteAuthority(options.authority)) {
+    throw new Error("telegram-paired-platform-runtime-invalid");
+  }
+  const { authority, botFingerprint, activationEpoch } = options;
+  const secretStore = options.secretStore
+    ?? new SafeStorageSecretStore(options.encryption ?? safeStorage);
+  const actorSecret = ensureTelegramPlatformActorSecret(secretStore);
+  const bridgeId = deterministicUuid(actorSecret, "bridge", [botFingerprint]);
+  const routesByChatId = new Map<string, TelegramPlatformRoute>();
+  const guardsByRoute = new Map<TelegramPlatformRoute, PlatformBridgeGuard>();
+  let disposed = false;
+
+  const currentConversationId = (): string | null => {
+    try {
+      const candidate = options.getCurrentConversationId();
+      return isConversationId(candidate) ? candidate : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const approvalFor = (
+    actorDigest: string,
+    conversationId: string,
+  ): { readonly scope: string } | null => {
+    try {
+      return authority.resolveActiveApproval(
+        actorDigest,
+        hashConversation(botFingerprint, conversationId),
+      );
+    } catch {
+      return null;
+    }
+  };
+
+  // The approval's own scope participates, so revoking and re-approving
+  // produces a binding the previous one cannot satisfy.
+  const scopeUuid = (chatId: string, approvalScope: string): string =>
+    deterministicUuid(actorSecret, "scope", [botFingerprint, chatId, approvalScope]);
+
+  /**
+   * Three conditions, each catching a different transition:
+   *
+   * - the BOUND conversation still has a live approval — revoking the share
+   *   stops delivery even while the owner is still looking at that
+   *   conversation;
+   * - the approval is the same one this route was minted under — revoke and
+   *   re-approve must retire the earlier binding rather than let it inherit
+   *   the new authority;
+   * - the bound conversation is the one on screen — the host runs a single
+   *   active session, so anything else is a pause, never a re-point.
+   *
+   * The first is keyed on `route.conversationId` rather than the active id
+   * because that is what the fence means. Today the third condition makes the
+   * two equivalent, so no test can separate them; keeping the honest key means
+   * this stays correct if background-conversation execution ever relaxes it.
+   */
+  const isRouteCurrent = (route: TelegramPlatformRoute): boolean => {
+    if (disposed || routesByChatId.get(route.chatId) !== route) return false;
+    const approval = approvalFor(route.actorDigest, route.conversationId);
+    if (approval === null) return false;
+    if (scopeUuid(route.chatId, approval.scope) !== route.binding.scope) return false;
+    return currentConversationId() === route.conversationId;
+  };
+
+  const mintRoute = (chatId: string, conversationId: string, scope: string): TelegramPlatformRoute => {
+    const bridgeBinding = Object.freeze({
+      bridgeId,
+      bridgeEpoch: activationEpoch,
+      routeId: deterministicUuid(actorSecret, "route", [botFingerprint, chatId]),
+      routeEpoch: 1,
+      scope: scopeUuid(chatId, scope),
+    } satisfies PlatformBridgeBinding);
+    const route = Object.freeze({
+      chatId,
+      conversationId,
+      actorDigest: actorDigestFor(actorSecret, botFingerprint, chatId),
+      binding: bridgeBinding,
+      bridgeBinding,
+    } satisfies TelegramPlatformRoute);
+    routesByChatId.set(chatId, route);
+    guardsByRoute.set(route, Object.freeze({
+      isCurrent(candidate: PlatformBridgeBinding): boolean {
+        try {
+          return isRouteCurrent(route) && sameBinding(candidate, route.binding);
+        } catch {
+          return false;
+        }
+      },
+    }));
+    return route;
+  };
+
+  const routeForEnvelope = (
+    envelope: Readonly<PlatformBridgeVerifiedEnvelope>,
+  ): TelegramPlatformRoute | null => {
+    const verified = normalizeTelegramEnvelope(envelope);
+    if (verified === null || disposed) return null;
+    if (verified.channelId !== verified.senderId) return null;
+
+    const actorDigest = actorDigestFor(actorSecret, botFingerprint, verified.senderId);
+    let pairedDigest: string | null;
+    try {
+      pairedDigest = authority.activePairingActorDigest();
+    } catch {
+      return null;
+    }
+    if (pairedDigest === null || pairedDigest !== actorDigest) return null;
+
+    const conversationId = currentConversationId();
+    if (conversationId === null) return null;
+    const approval = approvalFor(actorDigest, conversationId);
+    if (approval === null) return null;
+
+    const existing = routesByChatId.get(verified.senderId);
+    if (existing !== undefined
+      && existing.conversationId === conversationId
+      && isRouteCurrent(existing)) {
+      return existing;
+    }
+    // A different bound conversation or a superseded approval must never reuse
+    // the previous route object; the caller closes the stale channel.
+    return mintRoute(verified.senderId, conversationId, approval.scope);
+  };
+
+  const authorize: PlatformBridgeInboundAuthorizer = (envelope) => {
+    const route = routeForEnvelope(envelope);
+    if (route === null) return null;
+    const bridgeGuard = guardsByRoute.get(route);
+    if (bridgeGuard === undefined) return null;
+    return Object.freeze({
+      actorDigest: route.actorDigest,
+      conversationDigest: hashConversation(botFingerprint, route.conversationId),
+      bridgeBinding: route.binding,
+      bridgeGuard,
+    } satisfies PlatformBridgeInboundAuthorization);
+  };
+
+  return Object.freeze({
+    authorize,
+    // No conversation is captured up front; the paired owner's first message
+    // decides it, and it is re-verified on every send.
+    get conversationId(): string {
+      return currentConversationId() ?? "";
+    },
+    get routes(): readonly TelegramPlatformRoute[] {
+      return Object.freeze([...routesByChatId.values()]);
+    },
+    routeForEnvelope,
+    isRouteCurrent,
+    dispose: () => {
+      disposed = true;
+      routesByChatId.clear();
+    },
+  });
+}
+
+function isRouteAuthority(value: unknown): value is TelegramPairedRouteAuthority {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as TelegramPairedRouteAuthority).activePairingActorDigest === "function"
+    && typeof (value as TelegramPairedRouteAuthority).resolveActiveApproval === "function";
+}
+
 function validateOptions(
   value: CreateTelegramPlatformRuntimeOptions,
 ): Readonly<{

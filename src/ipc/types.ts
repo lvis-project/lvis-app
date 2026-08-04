@@ -7,6 +7,7 @@ import type { PermissionDirectoryLifecycle } from "../permissions/permission-sla
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import type { ConversationCommandPort } from "../main/conversation-command-port.js";
 import type { TailnetSharingOwnerService } from "../main/tailnet-sharing-owner-service.js";
+import type { TelegramConnectionService } from "../main/telegram-connection-service.js";
 
 export type IpcDeps = AppServices & {
   getMainWindow: () => BrowserWindow | null;
@@ -34,4 +35,10 @@ export type IpcDeps = AppServices & {
    * sharing. It is absent unless the immutable P2 boot gate is enabled.
    */
   tailnetSharingOwnerService?: TailnetSharingOwnerService;
+  /**
+   * Main-only owner facade for the Telegram private-DM connection. Absent
+   * unless main composition built it, in which case every channel answers
+   * `telegram-connection-disabled`.
+   */
+  telegramConnectionService?: TelegramConnectionService;
 };

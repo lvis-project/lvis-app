@@ -54,7 +54,17 @@ import {
   resolveTailnetObserverConfig,
 } from "./main/tailnet-surface-server.js";
 import { createTailnetPairedSharingRuntime } from "./main/tailnet-paired-sharing-runtime.js";
-import { maybeStartTelegramBridgeServer } from "./main/telegram-bridge-server.js";
+import {
+  maybeStartTelegramBridgeServer,
+  resolveTelegramBridgeConfig,
+  stopTelegramBridgeServer,
+} from "./main/telegram-bridge-server.js";
+import { createTelegramConnectionStore } from "./main/telegram-connection-store.js";
+import { createTelegramConnectionService } from "./main/telegram-connection-service.js";
+import {
+  startTelegramConnectionActivation,
+  telegramConversationDigestFor,
+} from "./main/telegram-connection-activation.js";
 import { createTailnetSharingOwnerService } from "./main/tailnet-sharing-owner-service.js";
 import { getLvisAppVersion } from "./shared/app-version.js";
 import { installNativeEditContextMenu } from "./main/native-edit-context-menu.js";
@@ -214,6 +224,52 @@ async function main() {
 
 
 
+  // Telegram is a separately configured external-platform adapter with two
+  // mutually exclusive paths. When the launch environment configures it, that
+  // configuration wins and the owner surface is read-only; a leftover env var
+  // must never be silently overridden by stored state.
+  const telegramEnvManaged = (() => {
+    try {
+      return resolveTelegramBridgeConfig(process.env) !== null;
+    } catch {
+      // A malformed enabled configuration still means the environment owns it.
+      return true;
+    }
+  })();
+  let telegramConnectionService:
+    | ReturnType<typeof createTelegramConnectionService>
+    | undefined;
+  try {
+    const telegramStore = createTelegramConnectionStore();
+    await telegramStore.open();
+    telegramConnectionService = createTelegramConnectionService({
+      store: telegramStore,
+      settingsService: services.settingsService,
+      bridgeControl: {
+        start: () => startTelegramConnectionActivation({
+          store: telegramStore,
+          settingsService: services.settingsService,
+          conversationSurfaceRuntime,
+          conversationCommandPort,
+          getCurrentConversationId,
+          log: (message: string) => log.info(message),
+        }),
+        stop: (reason: "shutdown" | "user") => stopTelegramBridgeServer(reason),
+      },
+      getCurrentConversationId,
+      conversationDigestFor: (conversationId: string) => {
+        const digest = telegramConversationDigestFor(telegramStore, conversationId);
+        // The service treats a throw here as "no digest available", which is
+        // the correct answer before a bot has been verified.
+        if (digest === null) throw new Error("telegram-conversation-digest-unavailable");
+        return digest;
+      },
+      envManaged: telegramEnvManaged,
+    });
+  } catch (err) {
+    log.error({ err }, "telegram connection service failed to initialize (continuing boot)");
+  }
+
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(
     services,
@@ -222,6 +278,7 @@ async function main() {
     conversationSurfaceRuntime,
     conversationCommandPort,
     tailnetSharingOwnerService,
+    telegramConnectionService,
   );
   registerSettingsWindowHandlers(services.auditLogger);
 
@@ -280,15 +337,21 @@ async function main() {
   // configuration; it neither changes Telegram's webhook configuration nor
   // shares Tailnet, Local API, or A2A authority.
   try {
-    const telegram = await maybeStartTelegramBridgeServer({
-      conversationSurfaceRuntime,
-      conversationCommandPort,
-      getCurrentConversationId,
-      getCurrentConversationEpoch: () => services.conversationLoop.getSessionEpoch(),
-      log: (message) => log.info(message),
-    });
-    if (telegram) {
-      log.info("telegram bridge listening on 127.0.0.1:" + telegram.port);
+    if (telegramEnvManaged) {
+      const telegram = await maybeStartTelegramBridgeServer({
+        conversationSurfaceRuntime,
+        conversationCommandPort,
+        getCurrentConversationId,
+        getCurrentConversationEpoch: () => services.conversationLoop.getSessionEpoch(),
+        log: (message) => log.info(message),
+      });
+      if (telegram) {
+        log.info("telegram bridge listening on 127.0.0.1:" + telegram.port);
+      }
+    } else if (telegramConnectionService) {
+      // Resume whatever the owner left connected. A paused or disconnected
+      // store is a no-op, so nothing reaches Telegram until they ask for it.
+      await telegramConnectionService.resumeStoredConnection();
     }
   } catch (err) {
     log.error({ err }, "telegram bridge failed to start (continuing boot)");
