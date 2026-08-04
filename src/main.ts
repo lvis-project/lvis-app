@@ -276,6 +276,19 @@ async function main() {
         services.memoryManager.hasSessionTranscript(conversationId),
       envManaged: telegramEnvManaged,
     });
+    // Any change to the paired share retires an armed Away Authority grant.
+    //
+    // The grant is a desk gesture about the share that existed when it was
+    // made. A revoke, re-share, pause, disconnect or re-pair replaces that
+    // share with a different one, and the per-call authority re-check cannot
+    // see the difference: a re-pair mints a fresh authority that is perfectly
+    // current. This subscription is the store's single mutation chokepoint, so
+    // it fires on every lifecycle step — and on a few unrelated store writes
+    // too, which retires a grant that did not have to be retired. That is the
+    // safe direction, and re-arming is one gesture.
+    telegramConnectionService.subscribe(() => {
+      services.approvalGate?.retireAwayAuthority("share-lifecycle");
+    });
   } catch (err) {
     log.error({ err }, "telegram connection service failed to initialize (continuing boot)");
   }
