@@ -4526,6 +4526,22 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     remoteControllerAuthority: authority,
   });
 
+  const platformBridgeContext = () => userPermissionContext({
+    trustOrigin: "platform-bridge",
+    remoteControllerAuthority: Object.freeze({
+      kind: "platform-bridge" as const,
+      actorId: "bridge-actor-digest",
+      bridgeBinding: Object.freeze({
+        bridgeId: "44444444-4444-4444-8444-444444444444",
+        bridgeEpoch: 1,
+        routeId: "55555555-5555-4555-8555-555555555555",
+        routeEpoch: 1,
+        scope: "66666666-6666-4666-8666-666666666666",
+      }),
+      bridgeGuard: { isCurrent: () => true },
+    }),
+  });
+
 
   const pairedShare = Object.freeze({
     pairingId: "11111111-1111-4111-8111-111111111111",
@@ -4560,6 +4576,118 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     }));
     expect(executed).not.toHaveBeenCalled();
     expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  // The approval also records WHICH controller's turn raised it, as a marker the
+  // host sets from the authority it already holds. Sub-agent provenance travels
+  // in the free-text `reason` today; a fact recovered from a display string is
+  // not evidence of where a request came from, so the marker is never read from
+  // there — see the local-turn case below.
+  it("marks the approval with the controller the host admitted", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+
+    await executor.executeAll(
+      [{ id: "tailnet-origin-marker", name: "tailnet_read_probe", input: {} }],
+      { sessionId: "tailnet-origin-marker", permissionContext: tailnetContext() },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+      remoteControllerOrigin: "tailnet-controller",
+    }));
+  });
+
+  it("marks a bridged turn as the bridge rather than as remote-in-general", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+
+    await executor.executeAll(
+      [{ id: "bridge-origin-marker", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "bridge-origin-marker",
+        permissionContext: platformBridgeContext(),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+      remoteControllerOrigin: "platform-bridge",
+    }));
+  });
+
+  it("marks the directory-confirm modal a remote turn triggers", async () => {
+    // A directory grant is an approval too. It is raised by a different
+    // emitter, so the marker has to be set there as well — otherwise its
+    // absence would mean "the desk asked" on one surface and "nobody wired it"
+    // on the other.
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(
+      wc as never,
+      undefined,
+      5_000,
+      auditLogger as never,
+    );
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      undefined,
+      undefined,
+      gate,
+    );
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-remote-dir",
+        name: "read_file",
+        input: { path: "/var/tmp/some-random-area/file.txt" },
+      }],
+      { sessionId: "sess-remote-dir", permissionContext: tailnetContext() },
+    );
+    const sent = await waitForApprovalPayload<{
+      id: string;
+      nonce: string;
+      hmac: string;
+      kind?: string;
+    }>(wc);
+    // The row asserted below belongs to the directory ask, not to a later
+    // Layer 3 tool ask — the denial ends the invocation here.
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "deny-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+    await callPromise;
+
+    expect(auditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      input: expect.stringContaining(
+        "remoteControllerOrigin=tailnet-controller",
+      ),
+    }));
+  });
+
+  it("leaves a local turn unmarked even when its reason names a controller", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+
+    await executor.executeAll(
+      [{ id: "subagent-origin-marker", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "subagent-origin-marker",
+        approvalReasonPrefix: "[Sub-Agent: tailnet-controller]",
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    const request = requestAndWait.mock.calls[0]?.[0] as unknown as {
+      reason: string;
+    };
+    // Non-vacuous: attribution really is sitting in the reason string, spelled
+    // exactly like a controller — which is the reason the marker may not be
+    // recovered from it.
+    expect(request.reason).toContain("[Sub-Agent: tailnet-controller]");
+    expect(request).not.toHaveProperty("remoteControllerOrigin");
   });
 
   it("tells the remote surface it is waiting, instead of going silent for the whole timeout", async () => {
