@@ -254,6 +254,14 @@ export interface ApprovalSignatureFields {
  * stripped. There is no legacy preimage: the signing key is 32 random bytes
  * minted per {@link ApprovalGate}, so every signature is created and verified
  * inside one gate lifetime and no mixed-version window can exist.
+ *
+ * {@link ApprovalAnswerer} deliberately does NOT belong here. The signature is
+ * minted when the request is emitted, and who answers is not known until the
+ * answer arrives; signing that field would mean either freezing it to a guess
+ * at emit time or re-signing the request at answer time, and a signature the
+ * host re-issues over its own later choice proves nothing. The answerer is
+ * host-derived at the point the answer is received instead — see
+ * {@link ApprovalGate.resolve}.
  */
 export function signApprovalRequest(
   sessionKey: Buffer,
@@ -482,6 +490,61 @@ interface PendingEntry {
   expectedHmac: string;
 }
 
+/**
+ * Audit vocabulary for who answered an approval, and the closed set of
+ * answerers itself: {@link ApprovalAnswerer} is `keyof` this table, so the type
+ * cannot gain a member without that member also declaring the token it writes
+ * to the audit row. This table is the single authority; there is no path that
+ * widens one without the other.
+ *
+ * Today `desk` is the only answerer — every approval is answered in the app
+ * window the user is sitting in front of. The dimension is recorded now, while
+ * that is still true, because an audit that cannot name the answerer cannot
+ * support a review of what happened while nobody was watching.
+ */
+const APPROVAL_ANSWERER_AUDIT_TOKENS = {
+  /** The app window: a renderer response to the approval modal. */
+  desk: "desk",
+} as const;
+
+/**
+ * Who answered an approval.
+ *
+ * Host-derived at answer time from the code path that received the answer. It
+ * is never read out of the {@link ApprovalDecision} payload, out of the request,
+ * out of a provider's output, or inferred from the localizable free-text
+ * `reason` — a value any of those can influence is not attribution.
+ */
+export type ApprovalAnswerer = keyof typeof APPROVAL_ANSWERER_AUDIT_TOKENS;
+
+/** Audit token for a value that is not a known {@link ApprovalAnswerer}. */
+const UNRECOGNIZED_APPROVAL_ANSWERER = "unrecognized-answerer";
+
+/**
+ * Render an answerer for the audit row, failing closed on anything the host
+ * does not recognise.
+ *
+ * The type already closes the set; this check exists at runtime because this is
+ * the boundary where the value becomes a durable record. A future caller with
+ * an `as never` cast, or an unchecked value crossing a boundary, must not be
+ * able to file an answer under a name the host never defined. Such a value
+ * renders as {@link UNRECOGNIZED_APPROVAL_ANSWERER} rather than `desk`: an
+ * unrecognised answerer is an audit anomaly to investigate, and recording it as
+ * the default would erase the one fact the reviewer came for.
+ *
+ * The raw value is deliberately not echoed. Audit rows are space-delimited
+ * `key=value` pairs, so an arbitrary string could otherwise forge the fields
+ * that follow it, such as `choice=allow-always`. `Object.hasOwn` rather than
+ * `in`, so inherited members like `toString` are not mistaken for answerers.
+ */
+export function approvalAnswererAuditToken(
+  answeredBy: ApprovalAnswerer,
+): string {
+  return Object.hasOwn(APPROVAL_ANSWERER_AUDIT_TOKENS, answeredBy)
+    ? APPROVAL_ANSWERER_AUDIT_TOKENS[answeredBy]
+    : UNRECOGNIZED_APPROVAL_ANSWERER;
+}
+
 function formatApprovalAuditFields(fields: {
   toolName: string;
   category: "tool" | "agent-action";
@@ -491,6 +554,14 @@ function formatApprovalAuditFields(fields: {
   sourcePluginId?: string;
   approvalScope?: string;
   trustOrigin?: string;
+  /**
+   * Set only on a row that records an actual answer. Rows for outcomes the
+   * host reached on its own — timeout, sensitive-path hard-block, send
+   * failure, cancellation, read-only auto-approve — leave it undefined,
+   * because "nobody answered" is a different fact from "the desk answered"
+   * and the row marker already names which host outcome it was.
+   */
+  answeredBy?: ApprovalAnswerer;
 }, executionPlan?: HostShellExecutionPlanAuditProjection): string {
   return [
     `toolName=${fields.toolName}`,
@@ -501,6 +572,9 @@ function formatApprovalAuditFields(fields: {
     `sourcePluginId=${fields.sourcePluginId ?? "none"}`,
     `approvalScope=${fields.approvalScope ?? "none"}`,
     `trustOrigin=${fields.trustOrigin ?? "unknown"}`,
+    ...(fields.answeredBy === undefined
+      ? []
+      : [`answeredBy=${approvalAnswererAuditToken(fields.answeredBy)}`]),
     ...(executionPlan === undefined ? [] : [
       `executionPlan.version=${executionPlan.version}`,
       `executionPlan.identity=${executionPlan.identity}`,
@@ -1147,11 +1221,22 @@ export class ApprovalGate {
       );
     }
     // §S8 phase: decided
+    //
+    // `answeredBy` is host-derived: it is fixed here and never read from
+    // `decision`, so a renderer that adds an `answeredBy` field to its response
+    // payload cannot reach this row. Two host call sites reach this method —
+    // the `lvis:approval:respond` IPC handler in `src/ipc/domains/permissions.ts`
+    // and `hostApi.agentApproval.respond` in the plugin runtime — and both
+    // answer from a surface inside the app window, so `desk` describes them
+    // both today. When a second answerer exists, the plugin host-API route is
+    // the one to look at first: it is host code relaying a plugin's response
+    // rather than a user clicking the modal, so it is the site most likely to
+    // need its own answerer rather than this default.
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
       sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
       type: "approval",
-      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
+      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields({ ...entry, answeredBy: "desk" }, entry.executionPlan)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
     });
     entry.resolve(resolvedDecision);
     return resolvedDecision;
