@@ -2,6 +2,7 @@
 import { ko as ko_actionPanel } from "../generated/actionPanel.js";
 import { ko as ko_app } from "../generated/app.js";
 import { ko as ko_appearanceTab } from "../generated/appearanceTab.js";
+import { ko as ko_approvalAttribution } from "../generated/approvalAttribution.js";
 import { ko as ko_approvalQueueStatus } from "../generated/approvalQueueStatus.js";
 import { ko as ko_askUserQuestionCard } from "../generated/askUserQuestionCard.js";
 import { ko as ko_assistantCard } from "../generated/assistantCard.js";
@@ -191,6 +192,7 @@ export const koMessages: Record<string, string> = {
   ...ko_actionPanel,
   ...ko_app,
   ...ko_appearanceTab,
+  ...ko_approvalAttribution,
   ...ko_approvalQueueStatus,
   ...ko_askUserQuestionCard,
   ...ko_assistantCard,

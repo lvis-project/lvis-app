@@ -75,6 +75,17 @@ export function ApprovalQueueStatus({
                 </Badge>
               </div>
             </div>
+            {/* Which conversation is waiting on this entry. Queued asks come
+                from side chats and sub-agents as often as from the visible
+                conversation, so the tool name alone is ambiguous. */}
+            <p
+              className="mt-1 truncate font-mono text-[10px] text-muted-foreground"
+              data-testid="approval-queue-item-conversation"
+            >
+              {req.sessionId
+                ? t("approvalAttribution.queueConversation", { sessionId: req.sessionId })
+                : t("approvalAttribution.unattributed")}
+            </p>
             <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
               {req.reason}
             </p>
