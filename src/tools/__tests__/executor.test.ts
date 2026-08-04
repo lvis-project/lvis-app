@@ -644,7 +644,12 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     expect(result[0].is_error).toBeUndefined();
     expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({ trustOrigin: "plugin-emitted" }),
+      // The Layer 3 ask carries the conversation it is blocking, so the modal
+      // and every audit row can name it.
+      expect.objectContaining({
+        trustOrigin: "plugin-emitted",
+        sessionId: "sess-origin",
+      }),
     );
     expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2563,10 +2568,14 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       kind?: string;
       outOfAllowedDir?: { candidatePath?: string; suggestedParent?: string };
       trustOrigin?: string;
+      sessionId?: string;
     }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("file.txt");
     expect(sent.trustOrigin).toBe("user-keyboard");
+    // The directory-confirm ask reaches the renderer attributed to the
+    // conversation that triggered it, through the real signing gate.
+    expect(sent.sessionId).toBe("sess-l1-out");
 
     // Renderer denies — tool must not execute.
     gate.resolve(sent.id, {

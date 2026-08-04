@@ -341,6 +341,10 @@ describe("foreground rationale real-stack integration", () => {
       });
       // Main-to-renderer rationale IPC intentionally carries only the
       // renderer-safe approval card. Execution metadata stays in the host.
+      // `sessionId` is on the card deliberately: it is the host-owned id of
+      // the conversation blocked on this modal, not execution metadata or
+      // conversation content, and the user needs it to tell a background
+      // conversation's card apart from the one they are reading.
       expect(Object.keys(modalRequests[0] ?? {}).sort()).toEqual([
         "allowedChoices",
         "args",
@@ -353,6 +357,7 @@ describe("foreground rationale real-stack integration", () => {
         "reason",
         "requireExplicit",
         "reviewerVerdict",
+        "sessionId",
         "toolName",
       ]);
       expect(modalRequests[0]?.args).toMatchObject({

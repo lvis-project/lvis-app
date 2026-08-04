@@ -408,6 +408,8 @@ describe("RationaleHostCoordinator", () => {
       kind: "rationale",
       allowedChoices: ["allow-once", "deny-once"],
       isReadOnly: false,
+      // The rationale card names the conversation the ticket belongs to.
+      sessionId: materialized.control.anchor.sessionId,
     });
     expect(state.approvalRequests[0]).not.toHaveProperty("approvalCacheKey");
     expect(JSON.stringify(state.approvalRequests[0]?.args)).not.toContain("rm -rf");
