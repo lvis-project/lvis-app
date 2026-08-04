@@ -98,6 +98,24 @@ describe("Telegram platform adapter", () => {
     expect(() => verifier.verify(signedRequest(body, { [SECRET_HEADER]: "wrong" }))).toThrow("telegram-webhook-verification-failed");
   });
 
+  it("ignores reply decoration instead of killing the message that carries it", () => {
+    const verifier = createTelegramWebhookVerifier({ secretToken: SECRET });
+    // Swipe-to-reply is Telegram's default gesture in a DM. The parser never
+    // reads these fields, so rejecting them discarded a perfectly ordinary
+    // message for HOW it was composed, with no containment gain.
+    for (const decorate of [
+      (candidate: Record<string, any>) => { candidate.message.reply_to_message = { message_id: 7 }; },
+      (candidate: Record<string, any>) => { candidate.message.quote = { text: "earlier" }; },
+    ]) {
+      const candidate = structuredClone(update()) as Record<string, any>;
+      decorate(candidate);
+      const envelope = verifier.verify(signedRequest(candidate));
+      expect(envelope).toBeDefined();
+      // The decoration is metadata only: nothing from it enters the envelope.
+      expect(JSON.stringify(envelope)).not.toContain("earlier");
+    }
+  });
+
   it("fails closed for every non-text or non-private message form", () => {
     const verifier = createTelegramWebhookVerifier({ secretToken: SECRET });
     const rejected: readonly [string, (candidate: Record<string, any>) => void][] = [
@@ -106,7 +124,6 @@ describe("Telegram platform adapter", () => {
       ["bot sender", (candidate) => { candidate.message.from.is_bot = true; }],
       ["sender chat", (candidate) => { candidate.message.sender_chat = { id: 42 }; }],
       ["forward", (candidate) => { candidate.message.forward_origin = {}; }],
-      ["reply", (candidate) => { candidate.message.reply_to_message = {}; }],
       ["web app payload", (candidate) => { candidate.message.web_app_data = {}; }],
       ["photo", (candidate) => { candidate.message.photo = []; }],
       ["document", (candidate) => { candidate.message.document = {}; }],

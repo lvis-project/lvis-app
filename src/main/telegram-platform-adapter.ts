@@ -36,9 +36,18 @@ const TELEGRAM_SECRET_TOKEN = /^[A-Za-z0-9_-]{1,256}$/;
 const TELEGRAM_BOT_TOKEN = /^[A-Za-z0-9:_-]{1,256}$/;
 
 const ALLOWED_UPDATE_KEYS = new Set(["update_id", "message"]);
-// `entities` is harmless metadata which is deliberately ignored; allowing it
-// preserves ordinary URL/formatting messages while still rejecting every
-// attachment, reply, forward, sender-chat, web-app, and other message form.
+// Metadata the parser never reads, admitted so an ordinary DM is not rejected
+// for HOW it was composed:
+//
+// - `entities` preserves ordinary URL/formatting messages;
+// - `reply_to_message` and `quote` are what Telegram's default swipe gesture
+//   attaches in a private chat. Rejecting them killed the message rather than
+//   ignoring the decoration, and admitting them changes nothing that is read:
+//   the sender, chat, and text checks below are untouched, and the quoted
+//   material never enters the envelope.
+//
+// Everything else — attachments, forwards, sender-chat, web-app, and every
+// other message form — is still rejected by omission.
 const ALLOWED_TEXT_MESSAGE_KEYS = new Set([
   "message_id",
   "date",
@@ -46,6 +55,8 @@ const ALLOWED_TEXT_MESSAGE_KEYS = new Set([
   "chat",
   "text",
   "entities",
+  "reply_to_message",
+  "quote",
 ]);
 
 const OUTBOUND_STATUS_TEXT: Readonly<Record<string, string>> = Object.freeze({

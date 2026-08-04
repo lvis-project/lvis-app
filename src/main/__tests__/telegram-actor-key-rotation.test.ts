@@ -192,6 +192,9 @@ describe("telegram actor key rotation", () => {
       conversationSurfaceRuntime: {} as never,
       conversationCommandPort: {} as never,
       getCurrentConversationId: () => CONVERSATION_ID,
+      // Never reached: this activation returns at the missing credential, well
+      // before anything that could go fatal.
+      stopBridge: async () => {},
       secretStore: secrets.store,
     });
 
