@@ -14,6 +14,7 @@ import {
   type TailnetControllerReceiptStore,
 } from "../api/tailnet-controller-receipt-store.js";
 import { startTelegramWebhookServer } from "../api/telegram-webhook-server.js";
+import type { SecretStore } from "../audit/hmac-chain.js";
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import {
   createPlatformBridgeDeliveryAdapter,
@@ -45,6 +46,7 @@ import {
   createTelegramBotApiClient,
   type TelegramBotApiClient,
 } from "./telegram-bot-api-client.js";
+import type { TelegramControlNotice } from "./telegram-control-reply.js";
 import {
   startTelegramPollingIngress,
   type TelegramPollingFatalCode,
@@ -262,16 +264,24 @@ export interface StartTelegramConnectionBridgeOptions {
   readonly recordPollOffset: (offset: number) => Promise<void>;
   readonly hasPendingPairingCode: () => boolean;
   readonly redeemPairingCode: (codeDigest: string, senderId: string) => Promise<boolean>;
-  readonly consumePairingAttempt: () => Promise<void>;
   readonly onFatal: (code: TelegramPollingFatalCode) => void | Promise<void>;
   readonly onPaired?: (senderId: string) => void | Promise<void>;
   /** Distinguishes an unshared owner from a stranger; only the former is answered. */
   readonly isPairedOwner?: (senderId: string) => boolean;
-  readonly notifyUnroutable?: (chatId: string) => void | Promise<void>;
+  readonly notifyUnroutable?: (
+    chatId: string,
+    notice: TelegramControlNotice,
+  ) => void | Promise<void>;
   readonly receiptStore?: PlatformBridgeReceiptStore;
   readonly log?: (message: string) => void;
   /** Test-only injection; production builds a real Bot API client. */
   readonly createBotApiClient?: (botToken: string) => TelegramBotApiClient;
+  /**
+   * The store the actor secret is derived from. Threaded rather than defaulted
+   * here so the caller's digester and this runtime read one secret: two
+   * independently-defaulted stores would mint actor digests that disagree.
+   */
+  readonly secretStore?: SecretStore;
 }
 
 /**
@@ -299,6 +309,7 @@ export async function maybeStartTelegramConnectionBridge(
       authority: options.authority,
       getCurrentConversationId: options.getCurrentConversationId,
       activationEpoch,
+      ...(options.secretStore ? { secretStore: options.secretStore } : {}),
     })),
     verifier: createTelegramPollingVerifier(),
     startIngress: (gateway) => {
@@ -309,7 +320,6 @@ export async function maybeStartTelegramConnectionBridge(
         recordPollOffset: options.recordPollOffset,
         hasPendingPairingCode: options.hasPendingPairingCode,
         redeemPairingCode: options.redeemPairingCode,
-        consumePairingAttempt: options.consumePairingAttempt,
         onFatal: options.onFatal,
         ...(options.onPaired ? { onPaired: options.onPaired } : {}),
         ...(options.isPairedOwner ? { isPairedOwner: options.isPairedOwner } : {}),
