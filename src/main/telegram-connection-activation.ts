@@ -6,6 +6,7 @@
  * egress authority, and so the credential is read at activation time from the
  * encrypted store rather than being held anywhere longer-lived.
  */
+import type { SecretStore } from "../audit/hmac-chain.js";
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import type { ConversationCommandPort } from "./conversation-command-port.js";
 import { createTelegramBotApiClient } from "./telegram-bot-api-client.js";
@@ -24,6 +25,8 @@ export interface StartTelegramConnectionActivationOptions {
   readonly conversationSurfaceRuntime: ConversationSurfaceRuntime;
   readonly conversationCommandPort: ConversationCommandPort;
   readonly getCurrentConversationId: () => string;
+  /** Test-only injection; production reads Electron's OS-encrypted store. */
+  readonly secretStore?: SecretStore;
   readonly log?: (message: string) => void;
 }
 
@@ -41,10 +44,19 @@ export async function startTelegramConnectionActivation(
   const botFingerprint = store.botFingerprint();
   if (botFingerprint === null) return;
 
+  // Ahead of the credential read on purpose. A rotated actor key invalidates
+  // the pairing whether or not a token is still stored, and the owner surface
+  // reads the store, not the bridge — so a machine that cannot start the bridge
+  // at all must still stop claiming to recognise the paired account.
+  const digestActor = createTelegramActorDigester({
+    botFingerprint,
+    ...(options.secretStore ? { secretStore: options.secretStore } : {}),
+  });
+  await store.reconcileActorKey(digestActor.actorKeyDigest);
+
   const botToken = settingsService.getEncryptedSecret(TELEGRAM_BOT_TOKEN_SECRET_KEY);
   if (botToken === null) return;
 
-  const digestActor = createTelegramActorDigester({ botFingerprint });
   const controlReplies = createTelegramControlReplySender({
     client: createTelegramBotApiClient({ botToken }),
     ...(options.log ? { log: options.log } : {}),
@@ -66,7 +78,7 @@ export async function startTelegramConnectionActivation(
     recordPollOffset: (offset) => store.recordPollOffset(offset),
     hasPendingPairingCode: () => store.ownerSnapshot().pendingCode !== null,
     redeemPairingCode: async (codeDigest, senderId) => {
-      const actorDigest = digestActor(senderId);
+      const actorDigest = digestActor.digestFor(senderId);
       if (actorDigest === null) return false;
       return await store.completePairing({ codeDigest, actorDigest }) !== null;
     },
@@ -74,7 +86,7 @@ export async function startTelegramConnectionActivation(
       await store.consumePendingCodeAttempt();
     },
     isPairedOwner: (senderId) => {
-      const actorDigest = digestActor(senderId);
+      const actorDigest = digestActor.digestFor(senderId);
       return actorDigest !== null && store.activePairingActorDigest() === actorDigest;
     },
     notifyUnroutable: async (chatId) => {

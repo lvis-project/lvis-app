@@ -1,10 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { MemorySecretStore, type SecretStore } from "../../audit/hmac-chain.js";
+import { createHmac } from "node:crypto";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  MemorySecretStore,
+  SafeStorageSecretStore,
+  type SafeStorageLike,
+  type SecretStore,
+} from "../../audit/hmac-chain.js";
 import type {
   PlatformBridgeInboundAuthorization,
   PlatformBridgeVerifiedEnvelope,
 } from "../platform-bridge-inbound.js";
 import {
+  createTelegramActorDigester,
   createTelegramPlatformRuntime,
   ensureTelegramPlatformActorSecret,
   TELEGRAM_PLATFORM_ACTOR_SECRET_NAME,
@@ -264,12 +274,112 @@ describe("TelegramPlatformRuntime", () => {
     })).toThrow("telegram-platform-runtime-current-conversation-unavailable");
   });
 
-  it("rejects corrupted durable actor material rather than rotating the bridge identity", () => {
+  it("rejects a stored actor secret that decrypts to the wrong shape", () => {
     const secrets = new MemorySecretStore();
     secrets.write(TELEGRAM_PLATFORM_ACTOR_SECRET_NAME, "short");
     expect(() => ensureTelegramPlatformActorSecret(secrets)).toThrow(
       "telegram-platform-runtime-actor-secret-invalid",
     );
+  });
+});
+
+/**
+ * The other corruption, and the one that actually happens: the ciphertext is
+ * intact and this machine simply cannot decrypt it any more — an OS keychain
+ * reset, or the app data restored onto a different machine.
+ *
+ * These drive the real `SafeStorageSecretStore` over a real directory with a
+ * `SafeStorageLike` whose `decryptString` throws. `MemorySecretStore` cannot
+ * express this at all: it returns whatever was written, so a suite built on it
+ * could never observe the rotation below.
+ */
+describe("actor key rotation", () => {
+  let directories: string[] = [];
+
+  afterEach(() => {
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+    directories = [];
+  });
+
+  function encryptedSecrets(): {
+    readonly store: SecretStore;
+    readonly dir: string;
+    breakDecryption: () => void;
+  } {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-telegram-actor-secret-"));
+    directories.push(dir);
+    const state = { broken: false };
+    const encryption: SafeStorageLike = {
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => Buffer.from(`enc:${value}`, "utf8"),
+      decryptString: (value: Buffer) => {
+        if (state.broken) throw new Error("safeStorage could not decrypt this ciphertext");
+        return value.toString("utf8").replace(/^enc:/, "");
+      },
+    };
+    return {
+      store: new SafeStorageSecretStore(encryption, dir),
+      dir,
+      breakDecryption: () => {
+        state.broken = true;
+      },
+    };
+  }
+
+  const digesterOver = (secretStore: SecretStore) =>
+    createTelegramActorDigester({ botFingerprint: BOT_FINGERPRINT, secretStore });
+
+  it("mints a fresh secret when the stored one can no longer be decrypted", () => {
+    const secrets = encryptedSecrets();
+    const first = ensureTelegramPlatformActorSecret(secrets.store);
+    // Positive control: while the ciphertext is readable the key is stable, so
+    // the change below is the broken decryption and nothing else.
+    expect(ensureTelegramPlatformActorSecret(secrets.store)).toBe(first);
+
+    secrets.breakDecryption();
+    const second = ensureTelegramPlatformActorSecret(secrets.store);
+
+    expect(second).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(second).not.toBe(first);
+    // Quarantined, not deleted: the unreadable ciphertext is the evidence.
+    expect(readdirSync(secrets.dir).some((name) => name.includes("quarantined"))).toBe(true);
+  });
+
+  it("renames every actor when the key rotates, so a stored pairing digest stops matching", () => {
+    const secrets = encryptedSecrets();
+    const before = digesterOver(secrets.store);
+    const pairedActorDigest = before.digestFor(OWNER_ID);
+    expect(pairedActorDigest).toMatch(/^[a-f0-9]{64}$/);
+
+    // Positive control: a second digester over the same readable key answers
+    // identically, which is what makes a persisted pairing usable at all.
+    const same = digesterOver(secrets.store);
+    expect(same.actorKeyDigest).toBe(before.actorKeyDigest);
+    expect(same.digestFor(OWNER_ID)).toBe(pairedActorDigest);
+
+    secrets.breakDecryption();
+    const after = digesterOver(secrets.store);
+
+    expect(after.actorKeyDigest).not.toBe(before.actorKeyDigest);
+    expect(after.digestFor(OWNER_ID)).not.toBe(pairedActorDigest);
+  });
+
+  it("names the key with a digest that is neither the key nor any other derivation of it", () => {
+    const secrets = encryptedSecrets();
+    const actorSecret = ensureTelegramPlatformActorSecret(secrets.store);
+    const digester = digesterOver(secrets.store);
+
+    expect(digester.actorKeyDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(digester.actorKeyDigest).not.toContain(actorSecret);
+    // Pins the domain string: this mirror is the only other copy of it.
+    expect(digester.actorKeyDigest).toBe(
+      createHmac("sha256", actorSecret)
+        .update("lvis/telegram-platform-bridge/actor-key/v1\0", "utf8")
+        .digest("hex"),
+    );
+    // Same key, different domain — the two must not be interchangeable.
+    expect(digester.actorKeyDigest).not.toBe(digester.digestFor(OWNER_ID));
+    expect(digester.digestFor("not-a-telegram-id")).toBeNull();
   });
 });
 
