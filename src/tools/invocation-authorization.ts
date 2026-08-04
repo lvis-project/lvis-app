@@ -21,6 +21,7 @@ import { createLogger } from "../lib/logger.js";
 import {
   hookChainFromDispatch } from "./pipeline/audit-entries.js";
 import {
+  emitPermissionReview,
   emitToolStart } from "./pipeline/display-mask.js";
 import { maybeMaterializeRationaleControl } from "./pipeline/rationale-orchestrator.js";
 import {
@@ -1272,6 +1273,25 @@ export async function authorizeToolInvocation(
             content: msg,
             is_error: true,
             durationMs,
+          });
+        }
+
+        // A remote-controller turn blocks here for up to the approval timeout,
+        // and its layer-2 verdict carries no `reviewer`, so the reviewer-dispatch
+        // path that normally emits this never runs. Without it the paired
+        // surface sees `working` and then, minutes later, a failure — silence
+        // that reads as a dead bridge rather than as waiting for the desk.
+        //
+        // The platform projector maps `needs_approval` to a bare
+        // `approval.waiting-local` and discards every other field, so this adds
+        // no egress beyond that one status.
+        if (requiresRemoteLocalOneShot) {
+          emitPermissionReview(callbacks, {
+            status: "needs_approval",
+            toolName: toolUse.name,
+            toolCategory: invocationCategory,
+            source: source as "builtin" | "plugin" | "mcp",
+            ...meta,
           });
         }
 
