@@ -46,12 +46,14 @@ import { registerTerminalHandlers } from "./domains/terminal.js";
 import { registerDevHandlers } from "./domains/dev.js";
 import { registerRemoteA2AHandlers } from "./domains/remote-a2a.js";
 import { registerTailnetSharingHandlers } from "./domains/tailnet-sharing.js";
+import { registerTelegramConnectionHandlers } from "./domains/telegram-connection.js";
 import type { IpcDeps } from "./types.js";
 import type { AppServices } from "../boot/types.js";
 import type { BrowserWindow } from "electron";
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import type { ConversationCommandPort } from "../main/conversation-command-port.js";
 import type { TailnetSharingOwnerService } from "../main/tailnet-sharing-owner-service.js";
+import type { TelegramConnectionService } from "../main/telegram-connection-service.js";
 
 export type { IpcDeps } from "./types.js";
 export { registerWindowEventListeners } from "./domains/window.js";
@@ -70,6 +72,7 @@ export function registerIpcHandlers(
   conversationSurfaceRuntime?: ConversationSurfaceRuntime,
   conversationCommandPort?: ConversationCommandPort,
   tailnetSharingOwnerService?: TailnetSharingOwnerService,
+  telegramConnectionService?: TelegramConnectionService,
 ): void {
   const deps: IpcDeps = {
     ...services,
@@ -78,6 +81,7 @@ export function registerIpcHandlers(
     ...(conversationSurfaceRuntime ? { conversationSurfaceRuntime } : {}),
     ...(conversationCommandPort ? { conversationCommandPort } : {}),
     ...(tailnetSharingOwnerService ? { tailnetSharingOwnerService } : {}),
+    ...(telegramConnectionService ? { telegramConnectionService } : {}),
   };
 
   // Resolve the session at each DLP hit: chat new/resume/fork can change the
@@ -104,6 +108,7 @@ export function registerIpcHandlers(
   registerTerminalHandlers(deps);
   registerRemoteA2AHandlers(deps);
   registerTailnetSharingHandlers(deps);
+  registerTelegramConnectionHandlers(deps);
   // Dev IPC is *not* registered in packaged builds — the channels never
   // exist on `ipcMain`, so a compromised renderer/preload cannot probe them.
   if (!getIsPackaged()) {
