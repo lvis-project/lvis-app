@@ -4607,6 +4607,7 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     const [request] = requestAndWait.mock.calls[0] as unknown as [{
       remoteControllerOrigin?: string;
       remoteControllerAuthority?: { kind: string };
+      scopeTargetFilePaths?: readonly string[];
     }];
     // The marker alone is not enough for anything that has to know the
     // controller is STILL current: a string cannot go stale. Away Authority
@@ -4615,6 +4616,11 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     // unit test still passes.
     expect(request.remoteControllerOrigin).toBe("platform-bridge");
     expect(request.remoteControllerAuthority?.kind).toBe("platform-bridge");
+    // The scope list rides with them, from the same context. It is what
+    // bounds an away answer to the armed directories, and a producer that
+    // omitted it would leave every away-answerable call unbounded — or,
+    // after the refusal added alongside this, silently unanswerable.
+    expect(request.scopeTargetFilePaths).toEqual([]);
   });
 
   it("marks a bridged turn as the bridge rather than as remote-in-general", async () => {

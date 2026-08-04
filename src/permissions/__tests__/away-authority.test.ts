@@ -68,7 +68,7 @@ function makeCandidate(
     allowedChoices: ["allow-once", "deny-once"],
     durableApprovalRecordAllowed: false,
     hostShellExecutionPermitBound: false,
-    targetFilePath: IN_SCOPE_FILE,
+    targetFilePaths: [IN_SCOPE_FILE],
     ...overrides,
   };
 }
@@ -193,10 +193,35 @@ describe("AwayAuthority eligibility", () => {
     });
   });
 
-  it("answers a paired-platform read with no target path", () => {
+  it("refuses a read that names no path, which no directory can bound", () => {
+    // This used to be answered. The reasoning was that a read leaving the
+    // allowed directories arrives as `out-of-allowed-dir` and is refused
+    // above — true only of tools that touch the filesystem. `web_fetch` is
+    // `category: "read"` and escalates to `network` only for private hosts,
+    // so a read-only grant auto-approved arbitrary public egress: read the
+    // secret from an armed directory, then post it out, both answered.
     expect(
       armed().consume(
-        makeCandidate({ toolCategory: "read", targetFilePath: undefined }),
+        makeCandidate({ toolCategory: "read", targetFilePaths: [] }),
+        NOW,
+      ),
+    ).toMatchObject({ answer: false, refusal: "target-unresolved" });
+  });
+
+  it("refuses when any one of several paths leaves the armed scope", () => {
+    // `move_file` declares ["sourcePath", "destinationPath"]. Binding only
+    // the first would let an in-scope source carry the destination out.
+    expect(
+      armed().consume(
+        makeCandidate({ targetFilePaths: [IN_SCOPE_FILE, OUT_OF_SCOPE_FILE] }),
+        NOW,
+      ),
+    ).toMatchObject({ answer: false, refusal: "target-out-of-scope" });
+    // Non-vacuous: the same call with both paths in scope is answered, so
+    // the refusal above is about the second path and not about plurality.
+    expect(
+      armed().consume(
+        makeCandidate({ targetFilePaths: [IN_SCOPE_FILE, `${SCOPE_DIR}/second.md`] }),
         NOW,
       ),
     ).toMatchObject({ answer: true });
@@ -283,17 +308,17 @@ describe("AwayAuthority eligibility", () => {
     ],
     [
       "shell is never armable",
-      { toolCategory: "shell", targetFilePath: undefined },
+      { toolCategory: "shell", targetFilePaths: [] },
       "category-not-armed",
     ],
     [
       "network is never armable",
-      { toolCategory: "network", targetFilePath: undefined },
+      { toolCategory: "network", targetFilePaths: [] },
       "category-not-armed",
     ],
     [
       "meta is never armable",
-      { toolCategory: "meta", targetFilePath: undefined },
+      { toolCategory: "meta", targetFilePaths: [] },
       "category-not-armed",
     ],
     [
@@ -328,22 +353,22 @@ describe("AwayAuthority eligibility", () => {
     ],
     [
       "a write with no resolvable target has an uncheckable scope",
-      { targetFilePath: undefined },
-      "write-target-unresolved",
+      { targetFilePaths: [] },
+      "target-unresolved",
     ],
     [
       "a write outside the armed directories",
-      { targetFilePath: OUT_OF_SCOPE_FILE },
+      { targetFilePaths: [OUT_OF_SCOPE_FILE] },
       "target-out-of-scope",
     ],
     [
       "a write that traverses out of the armed directories",
-      { targetFilePath: `${SCOPE_DIR}/../other-scope/notes.md` },
+      { targetFilePaths: [`${SCOPE_DIR}/../other-scope/notes.md`] },
       "target-out-of-scope",
     ],
     [
       "a read outside the armed directories",
-      { toolCategory: "read", targetFilePath: OUT_OF_SCOPE_FILE },
+      { toolCategory: "read", targetFilePaths: [OUT_OF_SCOPE_FILE] },
       "target-out-of-scope",
     ],
   ])("refuses %s", (_name, overrides, refusal) => {
