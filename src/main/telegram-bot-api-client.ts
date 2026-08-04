@@ -1,10 +1,18 @@
 /**
  * Minimal outbound Telegram Bot API client for the owner-driven bridge.
  *
- * It deliberately exposes only read/receive calls. LVIS never calls
- * `setWebhook`, `deleteWebhook`, `logOut`, or `close`: those mutate a
- * third-party production bot, and `logOut` locks it out of the cloud Bot API
- * entirely. A webhook that is already registered is reported, never removed.
+ * It exposes the receive calls plus one narrow send used for host-authored
+ * control notices. It never calls `setWebhook`, `deleteWebhook`, `logOut`, or
+ * `close`: those mutate a third-party production bot, and `logOut` locks it out
+ * of the cloud Bot API entirely. A webhook that is already registered is
+ * reported, never removed.
+ *
+ * `sendMessage` here is deliberately NOT the conversation delivery path — that
+ * one lives in the delivery adapter, is fenced by the route guard, and carries
+ * only the safe projection. This one exists so the host can say "your surface
+ * is idle" when no route is current, which by definition cannot use a
+ * route-fenced channel. Callers must keep its content free of conversation
+ * material and must rate-limit it themselves.
  *
  * The bot token is request material only. It is never logged, never returned,
  * and never placed in an error message.
@@ -26,6 +34,10 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 /** Same narrow grammar the delivery transport uses: the token is URL path material. */
 const TELEGRAM_BOT_TOKEN = /^[A-Za-z0-9:_-]{1,256}$/;
 const MAX_RETRY_AFTER_SECONDS = 3_600;
+/** Canonical positive decimal id; never a group or channel id. */
+const CANONICAL_CHAT_ID = /^[1-9][0-9]{0,15}$/;
+/** A control notice is a sentence, not a transcript. */
+const MAX_CONTROL_TEXT_CHARS = 512;
 
 export type TelegramBotApiFailureReason =
   /** 401: the token is wrong or was revoked. */
@@ -82,6 +94,12 @@ export interface TelegramBotApiClient {
   getMe(signal?: AbortSignal): Promise<TelegramBotApiResult<TelegramBotIdentity>>;
   getWebhookInfo(signal?: AbortSignal): Promise<TelegramBotApiResult<TelegramWebhookStatus>>;
   getUpdates(input?: TelegramGetUpdatesInput): Promise<TelegramBotApiResult<readonly TelegramPolledUpdate[]>>;
+  /**
+   * Send one host-authored control notice. Not the conversation path: callers
+   * must pass fixed host text, never conversation content, and must apply their
+   * own cooldown — this client does no pacing.
+   */
+  sendMessage(chatId: string, text: string): Promise<TelegramBotApiResult<true>>;
 }
 
 export interface CreateTelegramBotApiClientOptions {
@@ -206,6 +224,29 @@ export function createTelegramBotApiClient(
         updates.push(Object.freeze({ updateId: entry.update_id, rawBody }));
       }
       return { ok: true, value: Object.freeze(updates) };
+    },
+
+    async sendMessage(chatId: string, text: string): Promise<TelegramBotApiResult<true>> {
+      if (!CANONICAL_CHAT_ID.test(chatId)) {
+        throw new TypeError("telegram-bot-api-client-chat-id-invalid");
+      }
+      if (typeof text !== "string" || text.length === 0 || text.length > MAX_CONTROL_TEXT_CHARS) {
+        throw new TypeError("telegram-bot-api-client-text-invalid");
+      }
+      const result = await call(
+        "sendMessage",
+        {
+          chat_id: chatId,
+          text,
+          // Same restraint as the conversation path: no parse mode, no entities,
+          // no keyboard, no link preview.
+          link_preview_options: { is_disabled: true },
+          protect_content: true,
+        },
+        requestTimeoutMs,
+        undefined,
+      );
+      return result.ok ? { ok: true, value: true } : result;
     },
   });
 }

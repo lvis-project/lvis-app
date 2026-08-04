@@ -265,6 +265,9 @@ export interface StartTelegramConnectionBridgeOptions {
   readonly consumePairingAttempt: () => Promise<void>;
   readonly onFatal: (code: TelegramPollingFatalCode) => void | Promise<void>;
   readonly onPaired?: (senderId: string) => void | Promise<void>;
+  /** Distinguishes an unshared owner from a stranger; only the former is answered. */
+  readonly isPairedOwner?: (senderId: string) => boolean;
+  readonly notifyUnroutable?: (chatId: string) => void | Promise<void>;
   readonly receiptStore?: PlatformBridgeReceiptStore;
   readonly log?: (message: string) => void;
   /** Test-only injection; production builds a real Bot API client. */
@@ -309,6 +312,8 @@ export async function maybeStartTelegramConnectionBridge(
         consumePairingAttempt: options.consumePairingAttempt,
         onFatal: options.onFatal,
         ...(options.onPaired ? { onPaired: options.onPaired } : {}),
+        ...(options.isPairedOwner ? { isPairedOwner: options.isPairedOwner } : {}),
+        ...(options.notifyUnroutable ? { notifyUnroutable: options.notifyUnroutable } : {}),
         ...(options.log ? { log: options.log } : {}),
       });
       return Promise.resolve({
