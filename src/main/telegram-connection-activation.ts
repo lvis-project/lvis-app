@@ -60,6 +60,7 @@ export async function startTelegramConnectionActivation(
       activePairingActorDigest: () => store.activePairingActorDigest(),
       resolveActiveApproval: (actorDigest, conversationDigest) =>
         store.resolveActiveApproval(actorDigest, conversationDigest),
+      resolveBoundConversation: (actorDigest) => store.resolveBoundConversation(actorDigest),
     },
     pollOffset: () => store.pollOffset(),
     recordPollOffset: (offset) => store.recordPollOffset(offset),
@@ -85,6 +86,15 @@ export async function startTelegramConnectionActivation(
     ...(options.log ? { log: options.log } : {}),
   });
 }
+
+/**
+ * The one conversation-digest derivation for this feature, re-exported so the
+ * store and the owner service are wired from the same symbol. Two injections of
+ * the same function is deliberate: the store compares them on every write, so a
+ * future second derivation is refused instead of writing grants nothing can
+ * resolve.
+ */
+export { telegramConversationDigest };
 
 /** Re-exported so `main.ts` composes one conversation-digest derivation. */
 export function telegramConversationDigestFor(

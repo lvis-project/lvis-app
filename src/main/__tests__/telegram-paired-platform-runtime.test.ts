@@ -56,6 +56,8 @@ interface Harness {
   paired: string | null;
   /** conversationDigest → approval scope, for the paired actor only. */
   readonly approvals: Map<string, string>;
+  /** Plaintext of the shared conversation, as the durable store would answer. */
+  bound: string | null;
 }
 
 function harness(): Harness {
@@ -66,6 +68,7 @@ function harness(): Harness {
     current: CONVERSATION_A,
     paired: ownerActorDigest as string | null,
     approvals: new Map<string, string>(),
+    bound: null as string | null,
   };
   const authority: TelegramPairedRouteAuthority = {
     activePairingActorDigest: () => state.paired,
@@ -74,6 +77,8 @@ function harness(): Harness {
       const scope = state.approvals.get(conversationDigest);
       return scope === undefined ? null : { scope };
     },
+    resolveBoundConversation: (actorDigest) =>
+      state.paired !== null && actorDigest === state.paired ? state.bound : null,
   };
   const runtime = createTelegramPairedPlatformRuntime({
     botFingerprint: BOT_FINGERPRINT,
@@ -90,11 +95,24 @@ function harness(): Harness {
     get paired() { return state.paired; },
     set paired(value: string | null) { state.paired = value; },
     approvals: state.approvals,
+    get bound() { return state.bound; },
+    set bound(value: string | null) { state.bound = value; },
   };
 }
 
+/**
+ * Share one conversation, the way the durable store records it: a grant keyed
+ * by digest, plus the plaintext binding the router reads back.
+ */
 function approve(h: Harness, conversationId: string, scope: string): void {
   h.approvals.set(conversationDigestFor(conversationId), scope);
+  h.bound = conversationId;
+}
+
+/** Stop sharing whatever is shared, leaving the pairing in place. */
+function revokeShare(h: Harness): void {
+  h.approvals.clear();
+  h.bound = null;
 }
 
 describe("createTelegramPairedPlatformRuntime", () => {
@@ -110,8 +128,30 @@ describe("createTelegramPairedPlatformRuntime", () => {
     // Positive case above proves the negatives below are not vacuous.
     expect(h.runtime.routeForEnvelope(envelope(STRANGER_ID))).toBeNull();
 
+    revokeShare(h);
+    expect(h.runtime.routeForEnvelope(envelope())).toBeNull();
+
+    approve(h, CONVERSATION_A, "scope-a");
     h.paired = null;
     expect(h.runtime.routeForEnvelope(envelope())).toBeNull();
+  });
+
+  it("binds the conversation that was shared, not the one on screen", () => {
+    const h = harness();
+    approve(h, CONVERSATION_A, "scope-a");
+    // A grant left over for another conversation, and the owner looking at it.
+    // A router that asked "is the CURRENT conversation approved?" would answer
+    // yes here and re-point the surface at a conversation nobody shared last.
+    h.approvals.set(conversationDigestFor(CONVERSATION_B), "scope-b");
+    h.current = CONVERSATION_B;
+
+    expect(h.runtime.routeForEnvelope(envelope())).toBeNull();
+    // The route it did mint is bound to the share, not to the screen.
+    expect(h.runtime.routes.map((route) => route.conversationId)).toEqual([CONVERSATION_A]);
+
+    // Opening the shared conversation is what lets it run; the share never moved.
+    h.current = CONVERSATION_A;
+    expect(h.runtime.routeForEnvelope(envelope())?.conversationId).toBe(CONVERSATION_A);
   });
 
   it("binds the route to the conversation that was approved", () => {
@@ -125,19 +165,23 @@ describe("createTelegramPairedPlatformRuntime", () => {
     expect(h.runtime.isRouteCurrent(route!)).toBe(true);
   });
 
-  it("does not follow the owner into a conversation they never approved", () => {
+  it("does not run a share whose conversation is closed", () => {
     const h = harness();
     approve(h, CONVERSATION_A, "scope-a");
     const route = h.runtime.routeForEnvelope(envelope())!;
 
-    // Switching away pauses the surface rather than re-pointing it.
+    // A durable binding is still not background execution: with the shared
+    // conversation off screen nothing runs, and the caller answers the paired
+    // owner with the control notice instead.
     h.current = CONVERSATION_B;
     expect(h.runtime.isRouteCurrent(route)).toBe(false);
     expect(h.runtime.routeForEnvelope(envelope())).toBeNull();
+    expect(h.runtime.authorize(envelope())).toBeNull();
 
     // Switching back resumes the same binding.
     h.current = CONVERSATION_A;
     expect(h.runtime.isRouteCurrent(route)).toBe(true);
+    expect(h.runtime.routeForEnvelope(envelope())).toBe(route);
   });
 
   it("fences the bound conversation, not merely the active one", () => {
@@ -203,6 +247,7 @@ describe("createTelegramPairedPlatformRuntime", () => {
     const throwing: TelegramPairedRouteAuthority = {
       activePairingActorDigest: () => { throw new Error("store unavailable"); },
       resolveActiveApproval: () => { throw new Error("store unavailable"); },
+      resolveBoundConversation: () => { throw new Error("store unavailable"); },
     };
     const runtime = createTelegramPairedPlatformRuntime({
       botFingerprint: BOT_FINGERPRINT,
@@ -219,6 +264,7 @@ describe("createTelegramPairedPlatformRuntime", () => {
     const authority: TelegramPairedRouteAuthority = {
       activePairingActorDigest: () => null,
       resolveActiveApproval: () => null,
+      resolveBoundConversation: () => null,
     };
     const base = {
       botFingerprint: BOT_FINGERPRINT,
@@ -236,6 +282,15 @@ describe("createTelegramPairedPlatformRuntime", () => {
     expect(() => createTelegramPairedPlatformRuntime({
       ...base,
       authority: {} as unknown as TelegramPairedRouteAuthority,
+    })).toThrow("telegram-paired-platform-runtime-invalid");
+    // An authority that cannot name the durable binding is refused at
+    // construction rather than silently routing by whatever is on screen.
+    expect(() => createTelegramPairedPlatformRuntime({
+      ...base,
+      authority: {
+        activePairingActorDigest: authority.activePairingActorDigest,
+        resolveActiveApproval: authority.resolveActiveApproval,
+      } as unknown as TelegramPairedRouteAuthority,
     })).toThrow("telegram-paired-platform-runtime-invalid");
   });
 });

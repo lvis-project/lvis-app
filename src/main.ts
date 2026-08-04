@@ -63,6 +63,7 @@ import { createTelegramConnectionStore } from "./main/telegram-connection-store.
 import { createTelegramConnectionService } from "./main/telegram-connection-service.js";
 import {
   startTelegramConnectionActivation,
+  telegramConversationDigest,
   telegramConversationDigestFor,
 } from "./main/telegram-connection-activation.js";
 import { createTailnetSharingOwnerService } from "./main/tailnet-sharing-owner-service.js";
@@ -240,7 +241,9 @@ async function main() {
     | ReturnType<typeof createTelegramConnectionService>
     | undefined;
   try {
-    const telegramStore = createTelegramConnectionStore();
+    const telegramStore = createTelegramConnectionStore({
+      conversationDigestFor: telegramConversationDigest,
+    });
     await telegramStore.open();
     telegramConnectionService = createTelegramConnectionService({
       store: telegramStore,

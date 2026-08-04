@@ -58,6 +58,8 @@ export const en = {
   "telegramConnection.unpair": "Unpair account",
 
   "telegramConnection.stateActive": "Sharing this conversation",
+  "telegramConnection.stateSharedConversationNotOpen": "Sharing · that conversation is not open",
+  "telegramConnection.sharedConversationNotOpenBody": "The conversation you shared stays shared, including after a restart, but replies only run while it is open. Open it again to continue, or share the conversation you have open now instead.",
   "telegramConnection.sendFirstMessage": "Send a message from Telegram to start — a bot cannot open the chat itself.",
   "telegramConnection.pause": "Pause",
   "telegramConnection.resume": "Resume",
@@ -65,8 +67,6 @@ export const en = {
   "telegramConnection.disconnect": "Disconnect",
   "telegramConnection.pauseNotice": "Pausing stops queued replies and any reply not yet handed to Telegram. A reply already handed over cannot be recalled.",
 
-  "telegramConnection.statePausedConversationInactive": "Paused · shared conversation is not open",
-  "telegramConnection.pausedConversationInactiveBody": "The conversation you shared is not the one on screen. Open it again to resume, or share the current one instead.",
   "telegramConnection.statePausedByOwner": "Paused by you",
   "telegramConnection.stateError": "Connection problem",
   "telegramConnection.retry": "Try again",
@@ -132,6 +132,8 @@ export const ko = {
   "telegramConnection.unpair": "계정 페어링 해제",
 
   "telegramConnection.stateActive": "이 대화를 공유 중",
+  "telegramConnection.stateSharedConversationNotOpen": "공유 중 · 그 대화가 열려 있지 않음",
+  "telegramConnection.sharedConversationNotOpenBody": "공유한 대화는 재시작 후에도 계속 공유되지만, 답변은 그 대화가 열려 있을 때만 진행됩니다. 그 대화를 다시 열어 이어가거나, 지금 열어 둔 대화를 대신 공유하세요.",
   "telegramConnection.sendFirstMessage": "Telegram에서 메시지를 보내 시작하세요. 봇이 먼저 대화를 열 수는 없습니다.",
   "telegramConnection.pause": "일시중지",
   "telegramConnection.resume": "재개",
@@ -139,8 +141,6 @@ export const ko = {
   "telegramConnection.disconnect": "연결 해제",
   "telegramConnection.pauseNotice": "일시중지하면 대기 중인 답변과 아직 Telegram에 넘기지 않은 답변이 멈춥니다. 이미 넘긴 답변은 회수할 수 없습니다.",
 
-  "telegramConnection.statePausedConversationInactive": "일시중지 · 공유한 대화가 열려 있지 않음",
-  "telegramConnection.pausedConversationInactiveBody": "공유한 대화가 화면에 열려 있지 않습니다. 그 대화를 다시 열면 재개되고, 아니면 지금 대화를 대신 공유하세요.",
   "telegramConnection.statePausedByOwner": "직접 일시중지함",
   "telegramConnection.stateError": "연결 문제",
   "telegramConnection.retry": "다시 시도",
