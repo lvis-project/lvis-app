@@ -73,7 +73,6 @@ function harness(overrides: Partial<TelegramPollingIngressOptions> = {}) {
   );
   const recordPollOffset = vi.fn(async () => {});
   const redeemPairingCode = vi.fn(async () => false);
-  const consumePairingAttempt = vi.fn(async () => {});
   const onFatal = vi.fn();
   const onPaired = vi.fn();
   let offset: number | null = 100;
@@ -88,7 +87,6 @@ function harness(overrides: Partial<TelegramPollingIngressOptions> = {}) {
     },
     hasPendingPairingCode: () => true,
     redeemPairingCode,
-    consumePairingAttempt,
     onFatal,
     onPaired,
     wait: async () => {},
@@ -101,7 +99,6 @@ function harness(overrides: Partial<TelegramPollingIngressOptions> = {}) {
     handleWebhook,
     recordPollOffset,
     redeemPairingCode,
-    consumePairingAttempt,
     onFatal,
     onPaired,
     getUpdatesCalls,
@@ -235,15 +232,20 @@ describe("startTelegramPollingIngress", () => {
     await vi.waitFor(() => expect(h.currentOffset()).toBe(21));
   });
 
-  it("charges an attempt for a near miss and still never forwards it", async () => {
+  it("leaves the attempt budget to the store and never forwards a near miss", async () => {
     const wrong = mintTelegramPairingCode();
     const h = harness();
     h.queue({ ok: true, value: [textUpdate(30, wrong)] });
     start(h.options);
 
-    await vi.waitFor(() => expect(h.consumePairingAttempt).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(h.options.redeemPairingCode).toHaveBeenCalledOnce());
+    // Exactly one redemption call, and no second charging path: the durable
+    // store already debits the attempt when it rejects a digest, and charging
+    // from here too spent the advertised five attempts in about three.
+    expect(h.options.redeemPairingCode).toHaveBeenCalledTimes(1);
     // A code-shaped credential must not reach the transcript even when wrong.
     expect(h.handleWebhook).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(31));
   });
 
   it("stays silent when a code arrives with nothing pending", async () => {
@@ -254,7 +256,6 @@ describe("startTelegramPollingIngress", () => {
 
     await vi.waitFor(() => expect(h.currentOffset()).toBe(41));
     expect(h.options.redeemPairingCode).not.toHaveBeenCalled();
-    expect(h.consumePairingAttempt).not.toHaveBeenCalled();
     expect(h.handleWebhook).not.toHaveBeenCalled();
   });
 
@@ -265,9 +266,26 @@ describe("startTelegramPollingIngress", () => {
     h.queue({ ok: true, value: [textUpdate(50, "are you there?")] });
     start(h.options);
 
-    await vi.waitFor(() => expect(notifyUnroutable).toHaveBeenCalledWith(String(OWNER_ID)));
+    await vi.waitFor(() => expect(notifyUnroutable)
+      .toHaveBeenCalledWith(String(OWNER_ID), "conversation-not-shared"));
     // The update is still consumed — the notice replaces silence, not handling.
     await vi.waitFor(() => expect(h.currentOffset()).toBe(51));
+  });
+
+  it("answers a slash message instead of consuming it in silence", async () => {
+    const notifyUnroutable = vi.fn(async () => {});
+    const h = harness({ isPairedOwner: () => true, notifyUnroutable });
+    h.handleWebhook.mockResolvedValue("slash-command-rejected");
+    h.queue({ ok: true, value: [textUpdate(55, "/status")] });
+    start(h.options);
+
+    // The core rejects every leading-slash message by policy and the update is
+    // consumed. Without its own notice the owner typing /status saw nothing at
+    // all, which is the same dead-bot reading the shared-conversation notice
+    // was added to remove.
+    await vi.waitFor(() => expect(notifyUnroutable)
+      .toHaveBeenCalledWith(String(OWNER_ID), "commands-not-supported"));
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(56));
   });
 
   it("stays silent for a sender who is not the paired owner", async () => {

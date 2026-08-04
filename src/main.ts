@@ -255,6 +255,9 @@ async function main() {
           conversationSurfaceRuntime,
           conversationCommandPort,
           getCurrentConversationId,
+          // A fatal poll outcome tears the activation down through the same
+          // owner-initiated path a manual disconnect uses.
+          stopBridge: () => stopTelegramBridgeServer("user"),
           log: (message: string) => log.info(message),
         }),
         stop: (reason: "shutdown" | "user") => stopTelegramBridgeServer(reason),
