@@ -18,6 +18,7 @@
  *   before parsing it; this module then hands one update at a time to the
  *   shared core, so the existing per-envelope caps still apply.
  */
+import type { TelegramControlNotice } from "./telegram-control-reply.js";
 import {
   looksLikeTelegramPairingCode,
   telegramPairingCodeDigest,
@@ -70,8 +71,6 @@ export interface TelegramPollingIngressOptions {
   readonly hasPendingPairingCode: () => boolean;
   /** True only on a constant-time digest match against a live pending code. */
   readonly redeemPairingCode: (codeDigest: string, senderId: string) => Promise<boolean>;
-  /** Charges one attempt against the pending code and destroys it at zero. */
-  readonly consumePairingAttempt: () => Promise<void>;
   /** Terminal condition: the loop stops and the owner must act. */
   readonly onFatal: (code: TelegramPollingFatalCode) => void | Promise<void>;
   readonly onPaired?: (senderId: string) => void | Promise<void>;
@@ -82,7 +81,10 @@ export interface TelegramPollingIngressOptions {
    */
   readonly isPairedOwner?: (senderId: string) => boolean;
   /** Best-effort, cooldown-gated host notice. Never carries conversation data. */
-  readonly notifyUnroutable?: (chatId: string) => void | Promise<void>;
+  readonly notifyUnroutable?: (
+    chatId: string,
+    notice: TelegramControlNotice,
+  ) => void | Promise<void>;
   readonly log?: (message: string) => void;
   /** Test seam; production sleeps on a timer that the abort signal cancels. */
   readonly wait?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -105,7 +107,6 @@ export function startTelegramPollingIngress(
     "recordPollOffset",
     "hasPendingPairingCode",
     "redeemPairingCode",
-    "consumePairingAttempt",
     "onFatal",
   ] as const) {
     if (typeof options[name] !== "function") {
@@ -231,22 +232,43 @@ async function handleUpdate(
   const result = await options.gateway.handleWebhook({ rawBody: update.rawBody });
   // The update is consumed either way. Without a notice the paired owner sees
   // nothing at all, which reads as a dead bot rather than an idle surface.
-  if (result === "authorization-denied") {
-    await notifyIfPairedOwner(options, envelope.senderId);
+  //
+  // Both outcomes below are "we understood you and are deliberately not acting":
+  // an unshared conversation, and a slash message the core refuses by policy.
+  // Anything else is either handled or retried, and must stay silent.
+  if (SILENTLY_CONSUMED_RESULTS.has(result)) {
+    await notifyIfPairedOwner(options, envelope.senderId, noticeFor(result));
   }
   return ADVANCING_RESULTS.has(result) ? "advance" : "retry";
+}
+
+/**
+ * Outcomes where the paired owner's message is consumed and nothing is done
+ * with it. Each needs a different sentence, because "nothing is shared" and
+ * "commands are not supported" are different problems for the owner to fix.
+ */
+const SILENTLY_CONSUMED_RESULTS: ReadonlySet<PlatformBridgeInboundResult> = new Set([
+  "authorization-denied",
+  "slash-command-rejected",
+]);
+
+function noticeFor(result: PlatformBridgeInboundResult): TelegramControlNotice {
+  return result === "slash-command-rejected"
+    ? "commands-not-supported"
+    : "conversation-not-shared";
 }
 
 async function notifyIfPairedOwner(
   options: TelegramPollingIngressOptions,
   senderId: string,
+  notice: TelegramControlNotice,
 ): Promise<void> {
   if (options.isPairedOwner === undefined || options.notifyUnroutable === undefined) return;
   try {
     // Silence for anyone who is not the paired owner: answering a stranger
     // would confirm that this bot is attached to a live desktop.
     if (!options.isPairedOwner(senderId)) return;
-    await options.notifyUnroutable(senderId);
+    await options.notifyUnroutable(senderId, notice);
   } catch {
     options.log?.("[telegram-poll] control notice failed");
   }
@@ -272,9 +294,12 @@ async function redeemPairing(
   try {
     if (await options.redeemPairingCode(codeDigest, senderId)) {
       await options.onPaired?.(senderId);
-      return;
     }
-    await options.consumePairingAttempt();
+    // No second charge here. The durable store already debits the attempt when
+    // it rejects a digest, and it is the only place that can tell a wrong code
+    // apart from a code that expired between the check above and this call.
+    // Charging from here too spent the budget twice per wrong code, so the
+    // advertised five attempts were really about three.
   } catch {
     options.log?.("[telegram-poll] pairing redemption failed");
   }
