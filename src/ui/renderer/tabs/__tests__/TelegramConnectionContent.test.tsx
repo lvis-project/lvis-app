@@ -230,6 +230,33 @@ describe("TelegramConnectionContent", () => {
     expect(screen.getByTestId("telegram-connection-approve")).toBeTruthy();
   });
 
+  it("says the shared conversation is gone rather than telling the owner to reopen it", async () => {
+    const { api } = makeApi(snapshotOf({
+      state: "shared-conversation-missing",
+      botUsername: "my_assistant_bot",
+      pairing: { id: PAIRING_ID, accountFingerprint: "abc123def456" },
+      approval: {
+        id: APPROVAL_ID,
+        expiresAt: 1_800_000_000_000,
+        // Identical to the closed-conversation snapshot above. Only the state
+        // differs, which is the whole point: the surface must not read this
+        // flag and guess.
+        matchesCurrentConversation: false,
+      },
+    }));
+    render(<TelegramConnectionContent api={api} />);
+
+    expect(await screen.findByTestId("telegram-connection-shared-conversation-missing"))
+      .toHaveTextContent("has been deleted");
+    expect(screen.getByTestId("telegram-connection-state"))
+      .toHaveTextContent("no longer exists");
+    // The "it stays shared, reopen it" advice belongs to the other reading and
+    // would send the owner looking for something that is gone.
+    expect(screen.queryByTestId("telegram-connection-shared-conversation-closed")).toBeNull();
+    // Naming a problem without offering the repair would be worse than silence.
+    expect(screen.getByTestId("telegram-connection-approve")).toBeTruthy();
+  });
+
   it("offers no re-share while the shared conversation is the open one", async () => {
     const { api } = makeApi(snapshotOf({
       state: "active",

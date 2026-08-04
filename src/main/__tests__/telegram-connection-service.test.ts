@@ -130,12 +130,22 @@ interface Harness {
   readonly bot: ReturnType<typeof botApiFixture>;
   readonly bridge: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
   readonly conversation: { id: string };
+  /**
+   * The conversations that exist, as the app's own list would report them.
+   * A test deletes one by removing its id, which is what makes the share
+   * dangle without touching the store the share lives in.
+   */
+  readonly existingConversations: Set<string>;
   /** The store's own bot identity, so a test can name a digest the way it does. */
   digestOf(conversationId: string): string;
 }
 
 async function harness(
-  options: { readonly envManaged?: boolean; readonly encrypted?: boolean } = {},
+  options: {
+    readonly envManaged?: boolean;
+    readonly encrypted?: boolean;
+    readonly existingConversations?: readonly string[];
+  } = {},
 ): Promise<Harness> {
   const directory = mkdtempSync(join(tmpdir(), "lvis-telegram-service-"));
   directories.push(directory);
@@ -156,18 +166,24 @@ async function harness(
   const bot = botApiFixture();
   const bridge = { start: vi.fn(async () => {}), stop: vi.fn(async () => {}) };
   const conversation = { id: CONVERSATION_ID };
+  // Both by default: a test that shares the other conversation is exercising a
+  // reshare, not a deletion, and would otherwise dangle for the wrong reason.
+  const existingConversations = new Set(
+    options.existingConversations ?? [CONVERSATION_ID, OTHER_CONVERSATION_ID],
+  );
   const service = createTelegramConnectionService({
     store: tracked.store,
     settingsService: secrets.service,
     bridgeControl: bridge,
     getCurrentConversationId: () => conversation.id,
     conversationDigestFor: digestOf,
+    conversationExists: (conversationId: string) => existingConversations.has(conversationId),
     envManaged: options.envManaged ?? false,
     createBotApiClient: bot.factory,
   });
   return {
     service, store: real, directory, calls: tracked.calls,
-    secrets, bot, bridge, conversation, digestOf,
+    secrets, bot, bridge, conversation, existingConversations, digestOf,
   };
 }
 
@@ -413,6 +429,69 @@ describe("createTelegramConnectionService", () => {
     expect(switched.approval?.id).toBe(approved.approval?.id);
     // And it is still bound to the conversation that was actually shared.
     expect(h.store.resolveBoundConversation(ACTOR_DIGEST)).toBe(CONVERSATION_ID);
+  });
+
+  it("says the shared conversation is gone instead of calling it merely closed", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+    // Positive control: the same snapshot reads `active` while the conversation
+    // is there, so the assertion below is about the deletion and nothing else.
+    const live = snapshotOf(h.service);
+    expect(live.state).toBe("active");
+    expect(live.approval?.id).toBeDefined();
+
+    // Deleted from the app, not from the connection store: the share is still a
+    // live grant, which is precisely why it can dangle.
+    h.existingConversations.delete(CONVERSATION_ID);
+
+    const dangling = snapshotOf(h.service);
+    expect(dangling.state).toBe("shared-conversation-missing");
+    // The grant itself is untouched — this is a report, not a revocation. An
+    // owner who restores a backup gets their share back.
+    expect(dangling.approval?.id).toBe(live.approval?.id);
+    expect(h.store.resolveBoundConversation(ACTOR_DIGEST)).toBe(CONVERSATION_ID);
+  });
+
+  it("does not confuse a deleted share with one the owner navigated away from", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+
+    // Looking elsewhere: the conversation still exists, so the share stays
+    // active and only the approval reports the mismatch.
+    h.conversation.id = OTHER_CONVERSATION_ID;
+    const elsewhere = snapshotOf(h.service);
+    expect(elsewhere.state).toBe("active");
+    expect(elsewhere.approval?.matchesCurrentConversation).toBe(false);
+
+    // Same "not on screen" reading, different cause. Before the resolver told
+    // these apart, both produced the state above and the surface told the owner
+    // to reopen a conversation that no longer existed.
+    h.existingConversations.delete(CONVERSATION_ID);
+    const deleted = snapshotOf(h.service);
+    expect(deleted.state).toBe("shared-conversation-missing");
+    expect(deleted.approval?.matchesCurrentConversation).toBe(false);
+  });
+
+  it("treats an unanswerable existence check as missing rather than healthy", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+    expect(snapshotOf(h.service).state).toBe("active");
+
+    // A Set whose lookup throws stands in for a conversation store that cannot
+    // answer. "I could not check" is not evidence the conversation is there,
+    // and defaulting to healthy would hide the loss it was asked about.
+    const broken = h.existingConversations as unknown as { has: () => boolean };
+    const original = broken.has;
+    broken.has = () => {
+      throw new Error("conversation index unavailable");
+    };
+    try {
+      expect(snapshotOf(h.service).state).toBe("shared-conversation-missing");
+    } finally {
+      broken.has = original;
+    }
+    // And it recovers: the state is derived per snapshot, never latched.
+    expect(snapshotOf(h.service).state).toBe("active");
   });
 
   it("shares the conversation on screen, replacing the previous share", async () => {
