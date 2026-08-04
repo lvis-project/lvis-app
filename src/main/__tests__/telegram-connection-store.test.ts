@@ -55,6 +55,9 @@ const BOT_FINGERPRINT = hash("bot", RAW_BOT_TOKEN);
 const OTHER_BOT_FINGERPRINT = hash("bot", "9998887776:a-different-bot-token");
 const ACTOR = actorDigestFor(RAW_TELEGRAM_USER_ID);
 const OTHER_ACTOR = actorDigestFor("111222333444");
+/** Stands in for the platform runtime's digest of the durable actor key. */
+const ACTOR_KEY_DIGEST = hash("actor-key", "the-actor-key-this-machine-can-load");
+const OTHER_ACTOR_KEY_DIGEST = hash("actor-key", "the-key-a-restored-machine-mints-instead");
 const CODE_DIGEST = hash("code", RAW_PAIRING_CODE);
 const WRONG_CODE_DIGEST = hash("code", "lvis-tg-v1.someOtherWellFormedCandidateValue0123456789ab");
 const CONVERSATION = conversationDigestFor(BOT_FINGERPRINT, RAW_CONVERSATION_ID);
@@ -118,6 +121,7 @@ function documentWithApprovalEpoch(pairingEpoch: number): Record<string, unknown
     activationEpoch: 3,
     desiredState: "connected",
     botFingerprint: BOT_FINGERPRINT,
+    actorKeyDigest: ACTOR_KEY_DIGEST,
     pollOffset: 42,
     pendingCode: null,
     pairing: {
@@ -642,12 +646,36 @@ describe("createTelegramConnectionStore", () => {
     }
   });
 
+  it("closes the egress fence on a pairing whose actor key no longer loads", async () => {
+    const clock = { value: 1_700_000_000_000 };
+    const store = await openStore(tempDirectory(), clock);
+    await store.setConnected(BOT_FINGERPRINT);
+    await store.reconcileActorKey(ACTOR_KEY_DIGEST);
+    await connectedAndApproved(store);
+
+    // Positive control: the same key resolves the share it granted.
+    expect(await store.reconcileActorKey(ACTOR_KEY_DIGEST)).toBe(false);
+    expect(store.resolveActiveApproval(ACTOR, CONVERSATION)).not.toBeNull();
+    expect(store.resolveBoundConversation(ACTOR)).toBe(RAW_CONVERSATION_ID);
+
+    expect(await store.reconcileActorKey(OTHER_ACTOR_KEY_DIGEST)).toBe(true);
+
+    // The digest is unchanged and still names the same account — it is simply
+    // no longer derivable here, so nothing may resolve on it.
+    expect(store.resolveActiveApproval(ACTOR, CONVERSATION)).toBeNull();
+    expect(store.resolveBoundConversation(ACTOR)).toBeNull();
+    expect(store.activePairingActorDigest()).toBeNull();
+    expect(store.ownerSnapshot().pairingUnrecognized).toBe(true);
+  });
+
   it("rejects malformed digests and durations instead of storing them", async () => {
     const clock = { value: 1_700_000_000_000 };
     const store = await openStore(tempDirectory(), clock);
     await expect(store.setConnected("not-a-digest")).rejects.toThrow(
       "telegram-connection-store-input-invalid",
     );
+    await expect(store.reconcileActorKey(ACTOR_KEY_DIGEST.toUpperCase()))
+      .rejects.toThrow("telegram-connection-store-input-invalid");
     await expect(store.createPendingCode({ codeDigest: CODE_DIGEST.toUpperCase() }))
       .rejects.toThrow("telegram-connection-store-input-invalid");
     await expect(store.createPendingCode({ codeDigest: CODE_DIGEST, ttlMs: 30 * HOUR_MS }))

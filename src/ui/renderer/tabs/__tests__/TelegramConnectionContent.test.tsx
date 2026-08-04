@@ -161,6 +161,33 @@ describe("TelegramConnectionContent", () => {
     });
   });
 
+  it("stops claiming a paired account once this machine can no longer recognize it", async () => {
+    // Positive control first: the reading the owner had before the rotation.
+    const paired = makeApi(snapshotOf({
+      state: "active",
+      botUsername: "my_assistant_bot",
+      pairing: { id: PAIRING_ID, accountFingerprint: "abc123def456" },
+      approval: { id: APPROVAL_ID, expiresAt: 1_800_000_000_000, matchesCurrentConversation: true },
+    }));
+    const first = render(<TelegramConnectionContent api={paired.api} />);
+    expect(await screen.findByTestId("telegram-connection-pairing")).toHaveTextContent("abc123def456");
+    expect(screen.queryByTestId("telegram-connection-pairing-unrecognized")).toBeNull();
+    first.unmount();
+
+    const harness = makeApi(snapshotOf({
+      state: "pairing-unrecognized",
+      botUsername: "my_assistant_bot",
+    }));
+    render(<TelegramConnectionContent api={harness.api} />);
+
+    // No fingerprint, an explanation, and the one repair that works.
+    expect(await screen.findByTestId("telegram-connection-pairing-unrecognized")).toBeInTheDocument();
+    expect(screen.queryByTestId("telegram-connection-pairing")).toBeNull();
+    expect(screen.getByTestId("telegram-connection-state")).not.toHaveTextContent("abc123def456");
+    fireEvent.click(screen.getByTestId("telegram-connection-create-pairing-code"));
+    await waitFor(() => expect(harness.createPairingCode).toHaveBeenCalled());
+  });
+
   it("keeps pairing and sharing as separate owner actions", async () => {
     const harness = makeApi(snapshotOf({
       state: "paired-unapproved",
