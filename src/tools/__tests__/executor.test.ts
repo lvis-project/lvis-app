@@ -4562,6 +4562,31 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     expect(result[0]).toMatchObject({ is_error: true });
   });
 
+  it("tells the remote surface it is waiting, instead of going silent for the whole timeout", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+    const permissionReviewEvents: { status: string }[] = [];
+
+    await executor.executeAll(
+      [{ id: "tailnet-read-waiting", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "tailnet-read-waiting",
+        permissionContext: tailnetContext(),
+        callbacks: {
+          onPermissionReview: (event: { status: string }) => permissionReviewEvents.push(event),
+        },
+      } as never,
+    );
+
+    // The layer-2 remote verdict carries no reviewer, so the reviewer-dispatch
+    // path never emits. Without an explicit emit the paired surface sees
+    // `working` and then, minutes later, a failure — indistinguishable from a
+    // dead bridge. `needs_approval` is the only status the platform projector
+    // turns into `approval.waiting-local`.
+    expect(permissionReviewEvents.map((event) => event.status)).toContain("needs_approval");
+    // Non-vacuous: the wait really did reach the gate.
+    expect(requestAndWait).toHaveBeenCalledOnce();
+  });
+
   it("accepts only allow-once and asks again for the next remote tool invocation", async () => {
     const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
 
