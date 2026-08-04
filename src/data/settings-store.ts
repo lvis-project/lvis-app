@@ -1131,6 +1131,15 @@ export class SettingsService {
     await this.secretStore.delete(key);
   }
 
+  /**
+   * Whether a secret written now would actually be encrypted at rest. A
+   * surface that stores a user credential must check this before offering to,
+   * rather than discovering it as a failure after the user has committed.
+   */
+  isSecretStorageEncrypted(): boolean {
+    return this.secretStore.canStoreEncrypted();
+  }
+
   async deletePluginSecrets(pluginId: string, keys: Iterable<string>): Promise<number> {
     const safePluginId = sanitizePluginConfigPluginId(pluginId);
     const storageKeys: string[] = [];

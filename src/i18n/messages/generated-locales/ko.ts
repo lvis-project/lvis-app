@@ -159,6 +159,7 @@ import { ko as ko_suggestedRepliesChipRow } from "../generated/suggestedRepliesC
 import { ko as ko_suggestedRepliesGhost } from "../generated/suggestedRepliesGhost.js";
 import { ko as ko_summaryToast } from "../generated/summaryToast.js";
 import { ko as ko_remoteSurfacesTab } from "../generated/remoteSurfacesTab.js";
+import { ko as ko_telegramConnection } from "../generated/telegramConnection.js";
 import { ko as ko_tailnetAccessTab } from "../generated/tailnetAccessTab.js";
 import { ko as ko_tokenCostBadge } from "../generated/tokenCostBadge.js";
 import { ko as ko_tokenProgressRing } from "../generated/tokenProgressRing.js";
@@ -346,6 +347,7 @@ export const koMessages: Record<string, string> = {
   ...ko_suggestedRepliesGhost,
   ...ko_summaryToast,
   ...ko_remoteSurfacesTab,
+  ...ko_telegramConnection,
   ...ko_tailnetAccessTab,
   ...ko_tokenCostBadge,
   ...ko_tokenProgressRing,

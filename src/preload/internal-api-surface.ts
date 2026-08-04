@@ -12,6 +12,7 @@ import {
 import { t } from "../i18n/index.js";
 import { ipcUserKeyboardIntent } from "./gesture-intent.js";
 import { mcpApiSurface } from "./mcp-api-surface.js";
+import { buildTelegramConnectionApiSurface } from "./telegram-connection-api-surface.js";
 import { buildTailnetSharingApiSurface } from "./tailnet-sharing-api-surface.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "../plugins/capabilities.js";
 import type {
@@ -197,6 +198,7 @@ export function buildInternalApiSurface() {
     action: invokeRemoteA2AAction,
   },
   tailnetSharing: buildTailnetSharingApiSurface(),
+  telegramConnection: buildTelegramConnectionApiSurface(),
   onSettingsUpdated: (handler: (settings: unknown) => void) => {
     const listener = (_event: unknown, settings: unknown) => handler(settings);
     ipcRenderer.on(SETTINGS.updated, listener);
