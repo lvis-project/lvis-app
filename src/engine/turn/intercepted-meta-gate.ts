@@ -68,6 +68,8 @@ export async function gateCrossAgentInterceptedMetaTools(
           kind: "tool",
           toolName: toolUse.name,
           toolCategory: "meta",
+          // Same conversation this gate already audits under.
+          sessionId,
           args: toolUse.input,
           reason: `${approvalReasonPrefix} cross-agent message requested ${toolUse.name}`,
           source: "builtin",
