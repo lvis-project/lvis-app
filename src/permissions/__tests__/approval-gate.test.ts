@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   ApprovalGate,
+  approvalAnswererAuditToken,
   consumeHostApprovedOneShotExecutionBinding,
   isHostApprovalRejectedDecision,
   isHostApprovalTimeoutDecision,
@@ -11,6 +12,7 @@ import {
   UNATTRIBUTED_APPROVAL_SESSION_ID,
 } from "../approval-gate.js";
 import type {
+  ApprovalAnswerer,
   ApprovalDecision,
   ApprovalRequest,
   ApprovalRequestInput,
@@ -2010,6 +2012,155 @@ describe("ApprovalGate", () => {
         hmac: sent.hmac,
       });
       await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+    });
+  });
+
+  // ── Answerer attribution ──────────────────────────────
+  //
+  // `sessionId` names the conversation that was blocked; `answeredBy` names who
+  // ended the block. Today the desk is the only answerer, so every assertion
+  // below is about the shape of the record rather than about a choice between
+  // answerers: the field is present with a real value on the row that records
+  // an answer, absent everywhere else, host-derived, and closed.
+  describe("approval answerer", () => {
+    function auditRowTexts(auditLogger: {
+      log: ReturnType<typeof vi.fn>;
+    }): string[] {
+      return auditLogger.log.mock.calls.map(([entry]) => {
+        const row = entry as { input?: string; output?: string };
+        return row.input ?? row.output ?? "";
+      });
+    }
+
+    /** Read the row's answerer, so a test asserts its value and not merely that the word appears. */
+    function answererOf(row: string): string | undefined {
+      return /(?:^| )answeredBy=(\S+)/.exec(row)?.[1];
+    }
+
+    function makeAuditingGate(): {
+      wc: ReturnType<typeof makeMockWebContents>;
+      auditLogger: { log: ReturnType<typeof vi.fn> };
+      gate: ApprovalGate;
+    } {
+      const wc = makeMockWebContents();
+      const auditLogger = { log: vi.fn() };
+      const gate = new ApprovalGate(
+        wc as never,
+        undefined,
+        1_000,
+        auditLogger as never,
+      );
+      return { wc, auditLogger, gate };
+    }
+
+    it("records the desk as the answerer on the decided row", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+
+      const promise = gate.requestAndWait(makeRequest({ id: "answerer-desk" }));
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve("answerer-desk", {
+        requestId: "answerer-desk",
+        choice: "allow-once",
+        nonce,
+        hmac,
+      });
+      await expect(promise).resolves.toMatchObject({ choice: "allow-once" });
+
+      const decided = auditRowTexts(auditLogger).find((row) =>
+        row.includes("[approval:decided] answerer-desk"),
+      );
+      expect(decided).toBeDefined();
+      expect(answererOf(decided as string)).toBe("desk");
+    });
+
+    it("names an answerer on the decided row and on no other row", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+
+      const promise = gate.requestAndWait(makeRequest({ id: "answerer-scope" }));
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve("answerer-scope", {
+        requestId: "answerer-scope",
+        choice: "deny-once",
+        nonce,
+        hmac,
+      });
+      await promise;
+
+      const rows = auditRowTexts(auditLogger);
+      // The requested row is emitted for this same approval, so "only the
+      // decided row names an answerer" constrains a non-empty set of other rows
+      // rather than asserting something about nothing.
+      expect(
+        rows.some((row) => row.includes("[approval:requested] answerer-scope")),
+      ).toBe(true);
+      expect(
+        rows
+          .filter((row) => answererOf(row) !== undefined)
+          .map((row) => row.split(" ")[0]),
+      ).toEqual(["[approval:decided]"]);
+    });
+
+    it("claims no answerer when the host resolved the request itself", async () => {
+      vi.useFakeTimers();
+      try {
+        const { auditLogger, gate } = makeAuditingGate();
+
+        const promise = gate.requestAndWait(
+          makeRequest({ id: "answerer-timeout" }),
+        );
+        vi.advanceTimersByTime(1_001);
+        await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+
+        const timeout = auditRowTexts(auditLogger).find((row) =>
+          row.includes("[approval:timeout] answerer-timeout"),
+        );
+        expect(timeout).toBeDefined();
+        // Absence is the record. Nobody answered, so naming the desk here would
+        // assert a user action that never happened.
+        expect(answererOf(timeout as string)).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("ignores an answerer smuggled in the renderer's response payload", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+
+      const promise = gate.requestAndWait(makeRequest({ id: "answerer-spoof" }));
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve("answerer-spoof", {
+        requestId: "answerer-spoof",
+        choice: "allow-once",
+        nonce,
+        hmac,
+        // A hostile renderer sends whatever JSON it likes. `answeredBy` is not
+        // a field of ApprovalDecision precisely because the host never reads
+        // one — an integrity-verified response still does not get to say who
+        // sent it.
+        answeredBy: "remote",
+      } as ApprovalDecision & { answeredBy: string });
+      await expect(promise).resolves.toMatchObject({ choice: "allow-once" });
+
+      const decided = auditRowTexts(auditLogger).find((row) =>
+        row.includes("[approval:decided] answerer-spoof"),
+      );
+      expect(answererOf(decided as string)).toBe("desk");
+    });
+
+    it("closes the union: a non-member answerer is an anomaly, not the desk", () => {
+      // @ts-expect-error — "remote" is not an ApprovalAnswerer. This directive
+      // is the type-level half of the assertion: when a second answerer joins
+      // the union it will suppress nothing, which `check:typecheck-tests`
+      // reports as a new error in this file until the test is updated on
+      // purpose.
+      const widened: ApprovalAnswerer = "remote";
+      expect(approvalAnswererAuditToken(widened)).toBe("unrecognized-answerer");
+      // The runtime half: the guarantee has to survive a caller that casts past
+      // the type, and an inherited property is not an answerer.
+      expect(approvalAnswererAuditToken("toString" as never)).toBe(
+        "unrecognized-answerer",
+      );
+      expect(approvalAnswererAuditToken("desk")).toBe("desk");
     });
   });
 });
