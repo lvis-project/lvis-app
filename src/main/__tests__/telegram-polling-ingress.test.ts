@@ -258,6 +258,54 @@ describe("startTelegramPollingIngress", () => {
     expect(h.handleWebhook).not.toHaveBeenCalled();
   });
 
+  it("tells a paired owner their conversation is not shared, rather than vanishing", async () => {
+    const notifyUnroutable = vi.fn(async () => {});
+    const h = harness({ isPairedOwner: () => true, notifyUnroutable });
+    h.handleWebhook.mockResolvedValue("authorization-denied");
+    h.queue({ ok: true, value: [textUpdate(50, "are you there?")] });
+    start(h.options);
+
+    await vi.waitFor(() => expect(notifyUnroutable).toHaveBeenCalledWith(String(OWNER_ID)));
+    // The update is still consumed — the notice replaces silence, not handling.
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(51));
+  });
+
+  it("stays silent for a sender who is not the paired owner", async () => {
+    const notifyUnroutable = vi.fn(async () => {});
+    const h = harness({ isPairedOwner: () => false, notifyUnroutable });
+    h.handleWebhook.mockResolvedValue("authorization-denied");
+    h.queue({ ok: true, value: [textUpdate(60, "who is this")] });
+    start(h.options);
+
+    // Replying would confirm to a stranger that this bot is attached to a
+    // live desktop.
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(61));
+    expect(notifyUnroutable).not.toHaveBeenCalled();
+  });
+
+  it("never sends a notice for an outcome that was actually handled", async () => {
+    const notifyUnroutable = vi.fn(async () => {});
+    const h = harness({ isPairedOwner: () => true, notifyUnroutable });
+    h.handleWebhook.mockResolvedValue("accepted");
+    h.queue({ ok: true, value: [textUpdate(70, "hello")] });
+    start(h.options);
+
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(71));
+    expect(notifyUnroutable).not.toHaveBeenCalled();
+  });
+
+  it("keeps consuming updates when the notice itself fails", async () => {
+    const h = harness({
+      isPairedOwner: () => true,
+      notifyUnroutable: vi.fn(async () => { throw new Error("provider down"); }),
+    });
+    h.handleWebhook.mockResolvedValue("authorization-denied");
+    h.queue({ ok: true, value: [textUpdate(80, "still there?")] });
+    start(h.options);
+
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(81));
+  });
+
   it("stops on a rejected token instead of retrying forever", async () => {
     const h = harness();
     h.queue({ ok: false, reason: "unauthorized" });

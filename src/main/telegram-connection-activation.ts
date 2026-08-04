@@ -8,7 +8,9 @@
  */
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import type { ConversationCommandPort } from "./conversation-command-port.js";
+import { createTelegramBotApiClient } from "./telegram-bot-api-client.js";
 import { maybeStartTelegramConnectionBridge } from "./telegram-bridge-server.js";
+import { createTelegramControlReplySender } from "./telegram-control-reply.js";
 import type { TelegramConnectionStore } from "./telegram-connection-store.js";
 import { TELEGRAM_BOT_TOKEN_SECRET_KEY } from "./telegram-connection-service.js";
 import {
@@ -43,6 +45,10 @@ export async function startTelegramConnectionActivation(
   if (botToken === null) return;
 
   const digestActor = createTelegramActorDigester({ botFingerprint });
+  const controlReplies = createTelegramControlReplySender({
+    client: createTelegramBotApiClient({ botToken }),
+    ...(options.log ? { log: options.log } : {}),
+  });
 
   await maybeStartTelegramConnectionBridge({
     conversationSurfaceRuntime: options.conversationSurfaceRuntime,
@@ -65,6 +71,13 @@ export async function startTelegramConnectionActivation(
     },
     consumePairingAttempt: async () => {
       await store.consumePendingCodeAttempt();
+    },
+    isPairedOwner: (senderId) => {
+      const actorDigest = digestActor(senderId);
+      return actorDigest !== null && store.activePairingActorDigest() === actorDigest;
+    },
+    notifyUnroutable: async (chatId) => {
+      await controlReplies.notify(chatId, "conversation-not-shared");
     },
     onFatal: async (code) => {
       await store.setLastError(code);
