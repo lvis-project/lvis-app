@@ -33,6 +33,7 @@ const MAX_DELIVERY_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 24_000;
 const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 const ACTOR_HMAC_DOMAIN = "lvis/telegram-platform-bridge/actor/v1\0";
+const ACTOR_KEY_HMAC_DOMAIN = "lvis/telegram-platform-bridge/actor-key/v1\0";
 const BINDING_HMAC_DOMAIN = "lvis/telegram-platform-bridge/binding/v1\0";
 const CONVERSATION_HASH_DOMAIN = "lvis/telegram-platform-bridge/conversation/v1\0";
 
@@ -92,9 +93,25 @@ export interface CreateTelegramPlatformRuntimeOptions {
 }
 
 /**
- * Load or mint the sole durable value used by this runtime. A corrupted value
- * is a boot failure rather than an identity rotation that could revive a
- * stale configured route under a new opaque actor.
+ * Load or mint the sole durable value used by this runtime.
+ *
+ * Two different corruptions, two different outcomes, and only one of them is a
+ * boot failure:
+ *
+ * - a value that decrypts but has the wrong shape throws, because nothing can
+ *   be derived from it and guessing would be worse than refusing;
+ * - a value that cannot be decrypted at all does NOT throw. `SecretStore.read`
+ *   answers null for it — `SafeStorageSecretStore` quarantines the unreadable
+ *   ciphertext first — so this function reaches its mint branch and returns a
+ *   FRESH key.
+ *
+ * The second case is the ordinary one in the field: an OS keychain reset, or
+ * the app data restored onto another machine. Every digest derived here then
+ * changes, which silently turns a paired owner into a stranger. Callers that
+ * hold durable state keyed by these digests must therefore detect the change
+ * rather than assume this function is stable across restarts — see
+ * {@link createTelegramActorDigester}'s `actorKeyDigest` and the connection
+ * store's `reconcileActorKey`.
  */
 export function ensureTelegramPlatformActorSecret(secretStore: SecretStore): string {
   if (!isSecretStore(secretStore)) {
@@ -273,6 +290,25 @@ export function telegramConversationDigest(
 }
 
 /**
+ * One bot's account digester, plus the name of the key it derives from.
+ *
+ * The two travel together because a stored actor digest is only meaningful
+ * under the key that produced it. Handing back the digest function alone is
+ * what let a rotated key look like a working pairing.
+ */
+export interface TelegramActorDigester {
+  /**
+   * Opaque name of the durable actor key currently loadable on this machine.
+   * Callers persist it next to the digests it produced and compare on every
+   * activation; a mismatch means every digest this digester now yields names a
+   * different actor than the stored one.
+   */
+  readonly actorKeyDigest: string;
+  /** Null for anything that is not a canonical Telegram id. */
+  digestFor(senderId: string): string | null;
+}
+
+/**
  * Derive the opaque account digest for a Telegram sender id.
  *
  * Pairing redemption stores this digest, and the paired runtime recomputes it
@@ -283,17 +319,20 @@ export function createTelegramActorDigester(options: {
   readonly botFingerprint: string;
   readonly secretStore?: SecretStore;
   readonly encryption?: SafeStorageLike;
-}): (senderId: string) => string | null {
+}): TelegramActorDigester {
   if (!options || !BOT_FINGERPRINT_PATTERN.test(options.botFingerprint)) {
     throw new Error("telegram-actor-digester-invalid");
   }
   const secretStore = options.secretStore
     ?? new SafeStorageSecretStore(options.encryption ?? safeStorage);
   const actorSecret = ensureTelegramPlatformActorSecret(secretStore);
-  return (senderId: string): string | null =>
-    isCanonicalTelegramId(senderId)
-      ? actorDigestFor(actorSecret, options.botFingerprint, senderId)
-      : null;
+  return Object.freeze({
+    actorKeyDigest: actorKeyDigestFor(actorSecret),
+    digestFor: (senderId: string): string | null =>
+      isCanonicalTelegramId(senderId)
+        ? actorDigestFor(actorSecret, options.botFingerprint, senderId)
+        : null,
+  });
 }
 
 export interface CreateTelegramPairedPlatformRuntimeOptions {
@@ -693,6 +732,32 @@ function isSafeText(value: unknown): value is string {
     && value.length <= MAX_TEXT_CHARS
     && value.trim().length > 0
     && !UNSAFE_CONTROL_CHARACTERS.test(value);
+}
+
+/**
+ * Name the actor key without carrying it.
+ *
+ * HMAC-SHA256 under the key itself, over one constant domain string and
+ * nothing else. That makes it a fixed point of a PRF keyed by 32 random bytes:
+ * irreversible to the key, and with no caller-supplied input anywhere in the
+ * message, which is what lets it be persisted in the plaintext connection
+ * document beside the pairing it names.
+ *
+ * The empty message is the collision argument. `actorDigestFor` and
+ * `deterministicUuid` key their HMACs with the same secret, so the domains have
+ * to be unable to produce a shared message. None of the three is a prefix of
+ * another — "…/actor/v1\0" and "…/binding/v1\0" both diverge from
+ * "…/actor-key/v1\0" at the character after "actor" — so no concatenation of
+ * their fields can reconstruct this one.
+ *
+ * Deliberately bot-independent: a single key backs every bot identity this
+ * desktop pairs, so folding a bot fingerprint in would report a bot change as
+ * a key rotation and unpair an account that is still perfectly derivable.
+ */
+function actorKeyDigestFor(actorSecret: string): string {
+  return createHmac("sha256", actorSecret)
+    .update(ACTOR_KEY_HMAC_DOMAIN, "utf8")
+    .digest("hex");
 }
 
 function actorDigestFor(actorSecret: string, botFingerprint: string, userId: string): string {

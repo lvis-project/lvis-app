@@ -111,6 +111,14 @@ export interface TelegramOwnerConnectionSnapshot {
   readonly activationEpoch: number;
   readonly botFingerprint: string | null;
   readonly pairing: TelegramOwnerPairingSummary | null;
+  /**
+   * The last pairing this document held was retired because the actor key that
+   * minted its digest is no longer loadable on this machine, and nothing has
+   * replaced it. Distinct from "never paired": the owner had a working pairing
+   * and has to make a new one, so the surface owes them that sentence rather
+   * than silently reverting to "no account paired".
+   */
+  readonly pairingUnrecognized: boolean;
   /** The one shared conversation, or null when nothing is shared. */
   readonly approval: TelegramOwnerApprovalSummary | null;
   readonly pendingCode: TelegramPendingCodeRecord | null;
@@ -181,6 +189,21 @@ export interface TelegramConnectionStore {
   activePairingActorDigest(): string | null;
   pollOffset(): number | null;
 
+  /**
+   * Reconcile the durable pairing against the actor key that can actually be
+   * loaded on this machine right now, named by its opaque digest.
+   *
+   * The pairing's `actorDigest` is an HMAC under that key, so a key that
+   * changed makes the stored digest name an account nothing here can derive
+   * again. Rather than leave a pairing that authorizes nobody while the surface
+   * still reports it, this retires it and records why. Returns true only when
+   * that happened, so the caller can tell adoption from loss.
+   *
+   * Called on every activation, before the bridge starts: a pairing that
+   * survived a keychain reset must never get as far as an egress decision.
+   */
+  reconcileActorKey(actorKeyDigest: string): Promise<boolean>;
+
   setConnected(botFingerprint: string): Promise<void>;
   /** No-op returning false unless the bridge is currently connected. */
   setPaused(): Promise<boolean>;
@@ -223,10 +246,17 @@ interface StoredPendingCode {
   readonly attemptsRemaining: number;
 }
 
+/**
+ * `unrecognized` is a third terminal state, not a flavour of `revoked`: the
+ * owner did not stop trusting this account, the machine stopped being able to
+ * name it. Every reader that gates on `state === "active"` treats the two
+ * identically, so the distinction costs nothing at the fence and is the only
+ * thing that lets the surface explain itself.
+ */
 interface StoredPairing {
   readonly id: string;
   readonly actorDigest: string;
-  readonly state: "active" | "revoked";
+  readonly state: "active" | "revoked" | "unrecognized";
   readonly epoch: number;
   readonly createdAt: number;
 }
@@ -251,6 +281,12 @@ interface StoreDocument {
   readonly activationEpoch: number;
   readonly desiredState: TelegramDesiredState;
   readonly botFingerprint: string | null;
+  /**
+   * Opaque name of the actor key every stored `actorDigest` was derived under.
+   * A digest of the key, never the key: it is safe here for the same reason the
+   * actor digest is, and it is what makes a silent key rotation detectable.
+   */
+  readonly actorKeyDigest: string | null;
   readonly pollOffset: number | null;
   readonly pendingCode: StoredPendingCode | null;
   readonly pairing: StoredPairing | null;
@@ -354,7 +390,7 @@ function validPairing(value: unknown): value is StoredPairing {
     && exactKeys(value, ["id", "actorDigest", "state", "epoch", "createdAt"])
     && isTelegramConnectionId(value.id)
     && digest(value.actorDigest)
-    && (value.state === "active" || value.state === "revoked")
+    && (value.state === "active" || value.state === "revoked" || value.state === "unrecognized")
     && epochValue(value.epoch)
     && timestamp(value.createdAt);
 }
@@ -391,13 +427,14 @@ function validDocument(value: unknown): value is StoreDocument {
     !record(value)
     || !exactKeys(value, [
       "version", "receiptOwnerId", "activationEpoch", "desiredState", "botFingerprint",
-      "pollOffset", "pendingCode", "pairing", "approvals", "lastErrorCode",
+      "actorKeyDigest", "pollOffset", "pendingCode", "pairing", "approvals", "lastErrorCode",
     ])
     || value.version !== STORE_VERSION
     || !isTelegramConnectionId(value.receiptOwnerId)
     || !epochValue(value.activationEpoch)
     || !desiredState(value.desiredState)
     || !(value.botFingerprint === null || digest(value.botFingerprint))
+    || !(value.actorKeyDigest === null || digest(value.actorKeyDigest))
     || !(value.pollOffset === null || counter(value.pollOffset))
     || !(value.pendingCode === null || validPendingCode(value.pendingCode))
     || !(value.pairing === null || validPairing(value.pairing))
@@ -427,6 +464,7 @@ function initialDocument(receiptOwnerId: string): StoreDocument {
     activationEpoch: 1,
     desiredState: "disconnected",
     botFingerprint: null,
+    actorKeyDigest: null,
     pollOffset: null,
     pendingCode: null,
     pairing: null,
@@ -676,6 +714,44 @@ export function createTelegramConnectionStore(
     document = pruned.document;
     if (pruned.changed) await persist(pruned.document);
   });
+
+  /**
+   * Three outcomes, and only the last one costs the owner anything:
+   *
+   * - the stored name matches the key that loaded: nothing happened;
+   * - nothing is paired: adopt the name, because no stored digest could have
+   *   been minted under an older key;
+   * - a pairing is active and the name differs, or is absent: the key that
+   *   minted `pairing.actorDigest` is gone. Retire the pairing as
+   *   `unrecognized` and let prune() expire its approvals on the same pass.
+   *
+   * An absent name with an active pairing lands in the last branch on purpose.
+   * It is either a document from before this field existed or a hand-edited
+   * one, and both are cases where this store cannot show that the digests are
+   * still derivable — which is exactly what the guard is for.
+   */
+  const reconcileActorKey = async (actorKeyDigest: string): Promise<boolean> => {
+    if (!digest(actorKeyDigest)) throw inputInvalid();
+    return await mutate((current, now) => {
+      if (current.actorKeyDigest !== null && sameDigest(current.actorKeyDigest, actorKeyDigest)) {
+        return { document: current, value: false, changed: false };
+      }
+      const pairing = current.pairing;
+      if (pairing === null || pairing.state !== "active") {
+        return { document: { ...current, actorKeyDigest }, value: false, changed: true };
+      }
+      const unrecognized: StoredPairing = {
+        ...pairing,
+        state: "unrecognized",
+        epoch: nextEpoch(pairing.epoch),
+      };
+      return {
+        document: prune({ ...current, actorKeyDigest, pairing: unrecognized }, now).document,
+        value: true,
+        changed: true,
+      };
+    });
+  };
 
   const setConnected = async (fingerprint: string): Promise<void> => {
     if (!digest(fingerprint)) throw inputInvalid();
@@ -983,6 +1059,7 @@ export function createTelegramConnectionStore(
             id: pairing.id,
             accountFingerprint: pairing.actorDigest.slice(0, ACCOUNT_FINGERPRINT_CHARS),
           }),
+      pairingUnrecognized: pairing !== null && pairing.state === "unrecognized",
       approval: approval === null ? null : Object.freeze({
         id: approval.id,
         expiresAt: approval.expiresAt,
@@ -1009,6 +1086,7 @@ export function createTelegramConnectionStore(
       return pairing !== null && pairing.state === "active" ? pairing.actorDigest : null;
     },
     pollOffset: () => requireDocument().pollOffset,
+    reconcileActorKey,
     setConnected,
     setPaused,
     setDisconnected,

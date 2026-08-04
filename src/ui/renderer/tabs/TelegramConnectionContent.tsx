@@ -54,6 +54,7 @@ function stateLabel(
     case "env-managed": return t("telegramConnection.stateEnvManaged");
     case "disconnected": return t("telegramConnection.stateDisconnected");
     case "connected-unpaired": return t("telegramConnection.stateConnectedUnpaired");
+    case "pairing-unrecognized": return t("telegramConnection.statePairingUnrecognized");
     case "pairing-pending": return t("telegramConnection.statePairingPending");
     case "paired-unapproved": return t("telegramConnection.statePairedUnapproved");
     case "active":
@@ -177,7 +178,12 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
 
   const state = snapshot?.state ?? null;
   const readOnly = state === "unsupported" || state === "env-managed";
-  const canPair = state === "connected-unpaired" || state === "pairing-pending";
+  // A pairing this machine can no longer recognise is repaired the same way a
+  // missing one is: mint a code and send it. Same affordance, different reason,
+  // which the body text below supplies.
+  const canPair = state === "connected-unpaired"
+    || state === "pairing-unrecognized"
+    || state === "pairing-pending";
   // Sharing the conversation now open is offered when nothing is shared, and
   // when what is shared is some other conversation.
   const canApprove = state === "paired-unapproved"
@@ -246,6 +252,12 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
 
             {snapshot.state === "env-managed" ? (
               <p className="text-xs text-muted-foreground">{t("telegramConnection.envManagedBody")}</p>
+            ) : null}
+
+            {snapshot.state === "pairing-unrecognized" ? (
+              <p className="text-xs text-destructive" data-testid="telegram-connection-pairing-unrecognized">
+                {t("telegramConnection.pairingUnrecognizedBody")}
+              </p>
             ) : null}
 
             {!sharedConversationIsOpen(snapshot) ? (
