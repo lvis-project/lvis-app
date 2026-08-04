@@ -19,6 +19,8 @@ import type { TailnetControllerReceiptStore } from "../api/tailnet-controller-re
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
+/** Mirrors the receipt store's own owner grammar so both agree on validity. */
+const RECEIPT_OWNER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_MAX_RAW_BODY_BYTES = 64 * 1024;
 const DEFAULT_MAX_TEXT_CHARS = 24_000;
 const MAX_PROVIDER_CHARS = 64;
@@ -139,6 +141,13 @@ export interface CreatePlatformBridgeInboundGatewayOptions {
   readonly inboundRequestWindowMs?: number;
   /** Hard cap on anonymized authorized-pair buckets retained in this process. */
   readonly maxTrackedInboundAuthorizedPairs?: number;
+  /**
+   * Host-minted receipt owner identity. Supply a value that outlives a single
+   * gateway instance so a reservation made before a reconnect is still settled
+   * by its own owner afterwards; a per-instance identity would leave that
+   * record permanently `outcome-unknown`. Never provider-influenced.
+   */
+  readonly receiptOwnerId?: string;
   /** Host clock hook for deterministic embedding/tests; defaults to Date.now. */
   readonly now?: () => number;
   /** Fixed observability messages only; never receives webhook values. */
@@ -187,7 +196,7 @@ export function createPlatformBridgeInboundGateway(
     options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS,
     "max-text-chars",
   );
-  const ownerId = randomUUID();
+  const ownerId = receiptOwnerId(options.receiptOwnerId);
   const maxInboundRequestsPerWindow = positiveInteger(
     options.maxInboundRequestsPerWindow ?? DEFAULT_MAX_INBOUND_REQUESTS_PER_WINDOW,
     "max-inbound-requests-per-window",
@@ -645,6 +654,19 @@ function intentDigest(envelope: PlatformBridgeVerifiedEnvelope): string {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+/**
+ * The receipt store admits only a UUID owner, and rejects the whole file when
+ * it sees anything else. Validate here so a bad host value fails at gateway
+ * construction instead of at the first reservation.
+ */
+function receiptOwnerId(value: string | undefined): string {
+  if (value === undefined) return randomUUID();
+  if (typeof value !== "string" || !RECEIPT_OWNER_ID.test(value)) {
+    throw new TypeError("platform-bridge-inbound-receipt-owner-invalid");
+  }
+  return value;
 }
 
 function positiveInteger(value: number, name: string): number {

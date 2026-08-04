@@ -40,6 +40,7 @@ function createRuntime(
     getCurrentConversationId: () => current.value,
     getCurrentConversationEpoch: () => current.epoch,
     secretStore: new MemorySecretStore(),
+    activationEpoch: 1,
     ...overrides,
   });
   return { runtime, current };
@@ -66,6 +67,7 @@ describe("TelegramPlatformRuntime", () => {
       getCurrentConversationEpoch: () => current.epoch,
       secretStore: new MemorySecretStore(),
       routeEpoch: 7,
+      activationEpoch: 1,
     });
 
     expect(reads).toBe(1);
@@ -136,6 +138,7 @@ describe("TelegramPlatformRuntime", () => {
       getCurrentConversationId: () => current.value,
       getCurrentConversationEpoch: () => current.epoch,
       secretStore: secrets,
+      activationEpoch: 1,
     });
     const second = createTelegramPlatformRuntime({
       allowedUserIds: [OWNER_ID],
@@ -143,6 +146,7 @@ describe("TelegramPlatformRuntime", () => {
       getCurrentConversationId: () => current.value,
       getCurrentConversationEpoch: () => current.epoch,
       secretStore: secrets,
+      activationEpoch: 1,
     });
 
     const firstAuthorization = await authorize(first, envelope());
@@ -150,6 +154,34 @@ describe("TelegramPlatformRuntime", () => {
     expect(first.routes[0]?.actorDigest).not.toBe(second.routes[0]?.actorDigest);
     expect(first.routes[0]?.binding).not.toEqual(second.routes[0]?.binding);
     expect(firstAuthorization?.conversationDigest).not.toBe(secondAuthorization?.conversationDigest);
+  });
+
+  it("fences a reconnect: a later activation reuses the route key but not the binding", async () => {
+    const secrets = new MemorySecretStore();
+    const options = {
+      allowedUserIds: [OWNER_ID],
+      botFingerprint: BOT_FINGERPRINT,
+      getCurrentConversationId: () => CONVERSATION_ID,
+      getCurrentConversationEpoch: () => 0,
+      secretStore: secrets,
+    };
+    const first = createTelegramPlatformRuntime({ ...options, activationEpoch: 1 });
+    const second = createTelegramPlatformRuntime({ ...options, activationEpoch: 2 });
+
+    const before = first.routes[0]!;
+    const after = second.routes[0]!;
+    // Same owner, same bot, same conversation: the durable receipt identity and
+    // the delivery channel key must survive a reconnect...
+    expect(after.actorDigest).toBe(before.actorDigest);
+    expect(after.binding.routeId).toBe(before.binding.routeId);
+    // ...while the binding itself must not, so a binding captured before the
+    // disconnect cannot satisfy the guard afterwards.
+    expect(after.binding.bridgeEpoch).not.toBe(before.binding.bridgeEpoch);
+    expect(after.binding.scope).not.toBe(before.binding.scope);
+
+    const authorization = await authorize(second, envelope());
+    expect(authorization?.bridgeGuard.isCurrent(before.binding)).toBe(false);
+    expect(authorization?.bridgeGuard.isCurrent(after.binding)).toBe(true);
   });
 
   it("accepts only an exact configured Telegram private-DM envelope", async () => {
@@ -178,6 +210,7 @@ describe("TelegramPlatformRuntime", () => {
       getCurrentConversationId: () => privateConversation,
       getCurrentConversationEpoch: () => 0,
       secretStore: secrets,
+      activationEpoch: 1,
     });
 
     expect([...secrets.values.keys()]).toEqual([TELEGRAM_PLATFORM_ACTOR_SECRET_NAME]);
@@ -194,6 +227,7 @@ describe("TelegramPlatformRuntime", () => {
       getCurrentConversationId: () => CONVERSATION_ID,
       getCurrentConversationEpoch: () => 0,
       secretStore: new MemorySecretStore(),
+      activationEpoch: 1,
     };
     for (const allowedUserIds of [
       [],
@@ -216,6 +250,13 @@ describe("TelegramPlatformRuntime", () => {
       allowedUserIds: [OWNER_ID],
       routeEpoch: 0,
     })).toThrow("telegram-platform-runtime-invalid");
+    for (const activationEpoch of [0, -1, 1.5]) {
+      expect(() => createTelegramPlatformRuntime({
+        ...base,
+        allowedUserIds: [OWNER_ID],
+        activationEpoch,
+      })).toThrow("telegram-platform-runtime-invalid");
+    }
     expect(() => createTelegramPlatformRuntime({
       ...base,
       allowedUserIds: [OWNER_ID],
