@@ -19,6 +19,7 @@ import {
   isTelegramBotToken,
   isTelegramBotUsername,
   isTelegramConnectionId,
+  isTelegramConversationId,
   parseTelegramConnectionSnapshot,
   parseTelegramCreatedPairingCode,
   type TelegramApprovalDurationPreset,
@@ -58,8 +59,6 @@ const SECRET_KEY = TELEGRAM_BOT_TOKEN_SECRET_KEY;
  */
 const BOT_FINGERPRINT_DOMAIN = "lvis/telegram-bridge/bot-fingerprint/v1\0";
 const PAIRING_CODE_MAX_ATTEMPTS = 5;
-const MAX_CONVERSATION_CHARS = 4_096;
-const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 const APPROVAL_DURATION_MS: Readonly<Record<TelegramApprovalDurationPreset, number>> = Object.freeze({
   "1h": 60 * 60 * 1_000,
@@ -155,14 +154,6 @@ type VerifiedBot =
   | { readonly ok: true; readonly username: string }
   | TelegramConnectionFailure;
 
-function validConversationId(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= MAX_CONVERSATION_CHARS
-    && value.trim().length > 0
-    && !UNSAFE_CONTROL_CHARACTERS.test(value);
-}
-
 function isBridgeControl(value: unknown): value is TelegramConnectionBridgeControl {
   return typeof value === "object"
     && value !== null
@@ -198,23 +189,21 @@ interface ApprovalProjection {
 }
 
 /**
- * Prefer the approval for the conversation on screen so `active` is derivable,
- * and otherwise report the first live one so the owner still sees that a grant
- * exists somewhere else.
+ * Project the one live share. The store decides which grant that is; this only
+ * reports whether it happens to be the conversation on screen, which is what
+ * the owner needs to know because execution still requires it — the share
+ * itself is durable and does not lapse when they look away.
  */
 function projectApproval(
-  approvals: readonly TelegramOwnerApprovalSummary[],
+  approval: TelegramOwnerApprovalSummary | null,
   currentDigest: string | null,
 ): ApprovalProjection | null {
-  const matching = currentDigest === null
-    ? undefined
-    : approvals.find((approval) => approval.conversationDigest === currentDigest);
-  const chosen = matching ?? approvals[0];
-  if (chosen === undefined) return null;
+  if (approval === null) return null;
   return Object.freeze({
-    id: chosen.id,
-    expiresAt: chosen.expiresAt,
-    matchesCurrentConversation: matching !== undefined,
+    id: approval.id,
+    expiresAt: approval.expiresAt,
+    matchesCurrentConversation: currentDigest !== null
+      && approval.conversationDigest === currentDigest,
   });
 }
 
@@ -222,6 +211,11 @@ function projectApproval(
  * Ordered so no earlier condition can be skipped: an environment-managed or
  * unencryptable host answers before any stored state is consulted, and both
  * "paused" and "no approval" are answered before `active` can be reached.
+ *
+ * A share that exists is `active` whether or not its conversation is on screen.
+ * The binding is durable, so "you are looking elsewhere" is a property of the
+ * approval, not a state of the connection — it does not survive a restart as a
+ * state, and it never described anything the owner had to repair.
  */
 function deriveState(
   owner: TelegramOwnerConnectionSnapshot,
@@ -233,8 +227,7 @@ function deriveState(
   if (owner.pairing === null) {
     return owner.pendingCode === null ? "connected-unpaired" : "pairing-pending";
   }
-  if (approval === null) return "paired-unapproved";
-  return approval.matchesCurrentConversation ? "active" : "paused-conversation-inactive";
+  return approval === null ? "paired-unapproved" : "active";
 }
 
 /** Serialize multi-step lifecycle work so two connects cannot interleave. */
@@ -290,12 +283,17 @@ export function createTelegramConnectionService(
 
   if (!envManaged) store.subscribe(emitChange);
 
-  const currentConversationDigest = (): string | null => {
+  /**
+   * The conversation on screen, named both ways. The store persists the id so
+   * the share survives a restart and re-derives the digest to check it, so a
+   * caller that produced one without the other could not be verified.
+   */
+  const currentConversation = (): { readonly id: string; readonly digest: string } | null => {
     try {
-      const conversationId = options.getCurrentConversationId();
-      if (!validConversationId(conversationId)) return null;
-      const digest = options.conversationDigestFor(conversationId);
-      return typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest) ? digest : null;
+      const id = options.getCurrentConversationId();
+      if (!isTelegramConversationId(id)) return null;
+      const digest = options.conversationDigestFor(id);
+      return typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest) ? { id, digest } : null;
     } catch {
       return null;
     }
@@ -408,7 +406,7 @@ export function createTelegramConnectionService(
       if (envManaged) return inertSnapshot("env-managed");
       if (!settingsService.isSecretStorageEncrypted()) return inertSnapshot("unsupported");
       const owner = store.ownerSnapshot();
-      const approval = projectApproval(owner.approvals, currentConversationDigest());
+      const approval = projectApproval(owner.approval, currentConversation()?.digest ?? null);
       const projected = parseTelegramConnectionSnapshot({
         state: deriveState(owner, approval),
         botUsername,
@@ -630,11 +628,12 @@ export function createTelegramConnectionService(
     if (duration !== undefined && !isTelegramApprovalDurationPreset(duration)) return INPUT_INVALID;
     return await runExclusive(async () => {
       // Resolved here, never received: the renderer cannot name a conversation.
-      const conversationDigest = currentConversationDigest();
-      if (conversationDigest === null) return REJECTED;
+      const conversation = currentConversation();
+      if (conversation === null) return REJECTED;
       try {
         const approval = await store.createApproval({
-          conversationDigest,
+          conversationId: conversation.id,
+          conversationDigest: conversation.digest,
           ...(duration === undefined ? {} : { ttlMs: APPROVAL_DURATION_MS[duration] }),
         });
         return approval === null ? REJECTED : OK;
