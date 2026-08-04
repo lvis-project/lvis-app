@@ -107,6 +107,8 @@ function botApiFixture() {
     }) as unknown as TelegramBotApiClient["getMe"],
     getWebhookInfo: vi.fn(async () => state.webhook) as unknown as TelegramBotApiClient["getWebhookInfo"],
     getUpdates: vi.fn(async () => ({ ok: true as const, value: [] })),
+    // The owner service never sends; a call here would be a regression.
+    sendMessage: vi.fn(async () => ({ ok: true as const, value: true as const })),
   };
   const created: string[] = [];
   return {
@@ -273,8 +275,17 @@ describe("createTelegramConnectionService", () => {
     expect(h.secrets.values.size).toBe(0);
     expect(h.store.desiredState()).toBe("disconnected");
     expect(h.bridge.start).not.toHaveBeenCalled();
-    // The client exposes no webhook mutator at all, so none can be called.
-    expect(Object.keys(h.bot.client)).toEqual(["getMe", "getWebhookInfo", "getUpdates"]);
+    // Locked inventory: the client exposes no webhook mutator at all, so none
+    // can be called. `sendMessage` is a host-authored control notice, not a
+    // bot-configuration call; adding anything here must be deliberate.
+    expect(Object.keys(h.bot.client)).toEqual([
+      "getMe",
+      "getWebhookInfo",
+      "getUpdates",
+      "sendMessage",
+    ]);
+    // The owner service itself never sends — only the ingress does.
+    expect(h.bot.client.sendMessage).not.toHaveBeenCalled();
   });
 
   it("maps provider failures to stable codes and never echoes the token", async () => {
