@@ -19,6 +19,7 @@ import type {
   PlatformBridgeVerifiedEnvelope,
 } from "./platform-bridge-inbound.js";
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
+import { isTelegramConversationId } from "../shared/telegram-connection.js";
 
 export const TELEGRAM_PLATFORM_ACTOR_SECRET_NAME = "telegram-platform-bridge-actor-v1.key";
 
@@ -28,7 +29,6 @@ const BOT_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
 const TELEGRAM_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 
 const MAX_ALLOWED_ROUTES = 128;
-const MAX_CONVERSATION_CHARS = 4_096;
 const MAX_DELIVERY_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 24_000;
 const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
@@ -246,6 +246,12 @@ export interface TelegramPairedRouteAuthority {
     actorDigest: string,
     conversationDigest: string,
   ): { readonly scope: string } | null;
+  /**
+   * The conversation this actor's share is bound to, or null. Durable: it
+   * answers the same after a restart. It authorizes nothing on its own — the
+   * caller still has to clear `resolveActiveApproval` on its digest.
+   */
+  resolveBoundConversation(actorDigest: string): string | null;
 }
 
 /**
@@ -260,7 +266,7 @@ export function telegramConversationDigest(
   botFingerprint: string,
   conversationId: string,
 ): string {
-  if (!BOT_FINGERPRINT_PATTERN.test(botFingerprint) || !isConversationId(conversationId)) {
+  if (!BOT_FINGERPRINT_PATTERN.test(botFingerprint) || !isTelegramConversationId(conversationId)) {
     throw new Error("telegram-conversation-digest-invalid");
   }
   return hashConversation(botFingerprint, conversationId);
@@ -307,6 +313,12 @@ export interface CreateTelegramPairedPlatformRuntimeOptions {
  * verified inbound envelope, which is what keeps the raw Telegram chat id off
  * disk: a bot cannot open a chat, so the paired owner always re-supplies it.
  *
+ * The conversation a route binds comes from the durable share, never from
+ * whatever is on screen when a message arrives. That is the difference between
+ * "the phone talks to the conversation you shared" and a surface that follows
+ * the owner around; it also survives a restart, which is the case the feature
+ * exists for.
+ *
  * Currency requires BOTH that the route's own bound conversation still has a
  * live approval AND that this bound conversation is the one on screen. Checking
  * only the second — or resolving approval against the *current* conversation
@@ -336,7 +348,7 @@ export function createTelegramPairedPlatformRuntime(
   const currentConversationId = (): string | null => {
     try {
       const candidate = options.getCurrentConversationId();
-      return isConversationId(candidate) ? candidate : null;
+      return isTelegramConversationId(candidate) ? candidate : null;
     } catch {
       return null;
     }
@@ -351,6 +363,22 @@ export function createTelegramPairedPlatformRuntime(
         actorDigest,
         hashConversation(botFingerprint, conversationId),
       );
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * The durable share, re-read per envelope rather than captured, so revoking
+   * or re-sharing takes effect on the next message without a restart. The store
+   * hands back plaintext only after re-deriving its digest, and `approvalFor`
+   * below re-derives it again from this value, so a store that lied here would
+   * still resolve no approval.
+   */
+  const boundConversationId = (actorDigest: string): string | null => {
+    try {
+      const candidate = authority.resolveBoundConversation(actorDigest);
+      return isTelegramConversationId(candidate) ? candidate : null;
     } catch {
       return null;
     }
@@ -373,10 +401,11 @@ export function createTelegramPairedPlatformRuntime(
    * - the bound conversation is the one on screen — the host runs a single
    *   active session, so anything else is a pause, never a re-point.
    *
-   * The first is keyed on `route.conversationId` rather than the active id
-   * because that is what the fence means. Today the third condition makes the
-   * two equivalent, so no test can separate them; keeping the honest key means
-   * this stays correct if background-conversation execution ever relaxes it.
+   * The third condition is deliberately unchanged: making the binding durable
+   * does NOT enable background execution. A message that arrives while the
+   * shared conversation is closed is still refused here, and the owner is told
+   * so by the control notice; running it in a conversation nobody is watching
+   * is a separate decision with its own approval story.
    */
   const isRouteCurrent = (route: TelegramPlatformRoute): boolean => {
     if (disposed || routesByChatId.get(route.chatId) !== route) return false;
@@ -430,20 +459,26 @@ export function createTelegramPairedPlatformRuntime(
     }
     if (pairedDigest === null || pairedDigest !== actorDigest) return null;
 
-    const conversationId = currentConversationId();
+    // The share decides the conversation, not the screen. Reading the active id
+    // here instead is what made the surface follow the owner into conversations
+    // they never shared.
+    const conversationId = boundConversationId(actorDigest);
     if (conversationId === null) return null;
     const approval = approvalFor(actorDigest, conversationId);
     if (approval === null) return null;
 
     const existing = routesByChatId.get(verified.senderId);
-    if (existing !== undefined
-      && existing.conversationId === conversationId
-      && isRouteCurrent(existing)) {
-      return existing;
-    }
     // A different bound conversation or a superseded approval must never reuse
     // the previous route object; the caller closes the stale channel.
-    return mintRoute(verified.senderId, conversationId, approval.scope);
+    const route = existing !== undefined
+      && existing.conversationId === conversationId
+      && existing.binding.scope === scopeUuid(existing.chatId, approval.scope)
+      ? existing
+      : mintRoute(verified.senderId, conversationId, approval.scope);
+    // Execution semantics are untouched: a durable binding still only runs while
+    // its conversation is on screen, so this answers null and the caller sends
+    // the paired owner the control notice instead.
+    return isRouteCurrent(route) ? route : null;
   };
 
   const authorize: PlatformBridgeInboundAuthorizer = (envelope) => {
@@ -482,7 +517,8 @@ function isRouteAuthority(value: unknown): value is TelegramPairedRouteAuthority
   return typeof value === "object"
     && value !== null
     && typeof (value as TelegramPairedRouteAuthority).activePairingActorDigest === "function"
-    && typeof (value as TelegramPairedRouteAuthority).resolveActiveApproval === "function";
+    && typeof (value as TelegramPairedRouteAuthority).resolveActiveApproval === "function"
+    && typeof (value as TelegramPairedRouteAuthority).resolveBoundConversation === "function";
 }
 
 function validateOptions(
@@ -545,7 +581,7 @@ function validateOptions(
 function captureConversationId(reader: () => string): string {
   try {
     const current = reader();
-    if (!isConversationId(current)) {
+    if (!isTelegramConversationId(current)) {
       throw new Error("telegram-platform-runtime-current-conversation-unavailable");
     }
     return current;
@@ -655,14 +691,6 @@ function isSafeText(value: unknown): value is string {
   return typeof value === "string"
     && value.length > 0
     && value.length <= MAX_TEXT_CHARS
-    && value.trim().length > 0
-    && !UNSAFE_CONTROL_CHARACTERS.test(value);
-}
-
-function isConversationId(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= MAX_CONVERSATION_CHARS
     && value.trim().length > 0
     && !UNSAFE_CONTROL_CHARACTERS.test(value);
 }

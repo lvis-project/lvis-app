@@ -39,22 +39,35 @@ function durationLabel(
   }
 }
 
+/**
+ * The share is durable, so `active` is one state with two readings: replies can
+ * flow right now, or the shared conversation is closed and they resume when it
+ * is opened again. Main decides the state; only this distinction is read off
+ * the approval, and only for the label.
+ */
 function stateLabel(
-  state: TelegramConnectionSnapshot["state"],
+  snapshot: TelegramConnectionSnapshot,
   t: (key: string) => string,
 ): string {
-  switch (state) {
+  switch (snapshot.state) {
     case "unsupported": return t("telegramConnection.stateUnsupported");
     case "env-managed": return t("telegramConnection.stateEnvManaged");
     case "disconnected": return t("telegramConnection.stateDisconnected");
     case "connected-unpaired": return t("telegramConnection.stateConnectedUnpaired");
     case "pairing-pending": return t("telegramConnection.statePairingPending");
     case "paired-unapproved": return t("telegramConnection.statePairedUnapproved");
-    case "active": return t("telegramConnection.stateActive");
-    case "paused-conversation-inactive": return t("telegramConnection.statePausedConversationInactive");
+    case "active":
+      return sharedConversationIsOpen(snapshot)
+        ? t("telegramConnection.stateActive")
+        : t("telegramConnection.stateSharedConversationNotOpen");
     case "paused-by-owner": return t("telegramConnection.statePausedByOwner");
     case "error": return t("telegramConnection.stateError");
   }
+}
+
+/** False only while a share exists and its conversation is not the open one. */
+function sharedConversationIsOpen(snapshot: TelegramConnectionSnapshot): boolean {
+  return snapshot.approval === null || snapshot.approval.matchesCurrentConversation;
 }
 
 /**
@@ -165,7 +178,10 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
   const state = snapshot?.state ?? null;
   const readOnly = state === "unsupported" || state === "env-managed";
   const canPair = state === "connected-unpaired" || state === "pairing-pending";
-  const canApprove = state === "paired-unapproved" || state === "paused-conversation-inactive";
+  // Sharing the conversation now open is offered when nothing is shared, and
+  // when what is shared is some other conversation.
+  const canApprove = state === "paired-unapproved"
+    || (snapshot !== null && state === "active" && !sharedConversationIsOpen(snapshot));
   const connected = useMemo(
     () => state !== null && !readOnly && state !== "disconnected",
     [readOnly, state],
@@ -214,7 +230,7 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
         {!loading && snapshot ? (
           <>
             <p className="text-sm font-medium" data-testid="telegram-connection-state">
-              {stateLabel(snapshot.state, t)}
+              {stateLabel(snapshot, t)}
               {snapshot.botUsername === null ? "" : ` · ${t("telegramConnection.botLabel")} @${snapshot.botUsername}`}
             </p>
 
@@ -232,9 +248,9 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
               <p className="text-xs text-muted-foreground">{t("telegramConnection.envManagedBody")}</p>
             ) : null}
 
-            {snapshot.state === "paused-conversation-inactive" ? (
-              <p className="text-xs text-muted-foreground">
-                {t("telegramConnection.pausedConversationInactiveBody")}
+            {!sharedConversationIsOpen(snapshot) ? (
+              <p className="text-xs text-muted-foreground" data-testid="telegram-connection-shared-conversation-closed">
+                {t("telegramConnection.sharedConversationNotOpenBody")}
               </p>
             ) : null}
 
@@ -359,7 +375,7 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
               </p>
             ) : null}
 
-            {snapshot.state === "active" ? (
+            {snapshot.state === "active" && sharedConversationIsOpen(snapshot) ? (
               <p className="text-[11px] text-muted-foreground">{t("telegramConnection.sendFirstMessage")}</p>
             ) : null}
 
