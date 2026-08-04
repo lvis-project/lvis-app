@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getLocale, setLocale } from "../../../../i18n/runtime.js";
 import type { TailnetSharingSnapshot } from "../../../../shared/tailnet-sharing.js";
 import type { LvisApi } from "../../types.js";
-import { TailnetAccessTab } from "../TailnetAccessTab.js";
+import { TailnetAccessContent } from "../TailnetAccessContent.js";
 
 const PAIRING_ID = "11111111-1111-4111-8111-111111111111";
 const INVITATION_ID = "22222222-2222-4222-8222-222222222222";
@@ -57,10 +57,10 @@ afterEach(() => {
   setLocale(localeBeforeTest);
 });
 
-describe("TailnetAccessTab", () => {
+describe("TailnetAccessContent", () => {
   it("shows a raw invitation code only after the local owner creates it", async () => {
     const { api, createInvitation } = makeApi();
-    render(<TailnetAccessTab api={api} />);
+    render(<TailnetAccessContent api={api} />);
 
     const create = await screen.findByTestId("tailnet-access-create-invitation");
     expect(screen.queryByTestId("tailnet-access-invitation-code")).toBeNull();
@@ -75,7 +75,7 @@ describe("TailnetAccessTab", () => {
 
   it("shares only the current conversation through the selected active pairing", async () => {
     const { api, createCurrentConversationShare } = makeApi();
-    render(<TailnetAccessTab api={api} />);
+    render(<TailnetAccessContent api={api} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Share current conversation" }));
 
