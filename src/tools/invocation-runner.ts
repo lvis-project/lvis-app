@@ -19,7 +19,10 @@ import type {
 } from "./types.js";
 import { trustFromSource } from "./types.js";
 import { PermissionManager, isTailnetControllerP1BlockedTool, type PermissionCheckResult } from "../permissions/permission-manager.js";
-import { isRemoteControllerAuthorityCurrent } from "../shared/chat-origin.js";
+import {
+  isRemoteControllerAuthorityCurrent,
+  remoteControllerOriginOf,
+} from "../shared/chat-origin.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import {
   buildPermissionEvaluationContext,
@@ -769,6 +772,13 @@ export async function runToolInvocation(
       // underlying tool is read-only. Tailnet may never make it session-wide.
       const requiresRemoteDirectoryOneShot =
         invocationPermissionContext.remoteControllerAuthority !== undefined;
+      // A directory-confirm modal is an approval like any other, so it carries
+      // the same host-set origin marker. Leaving it off here would make the
+      // marker's absence mean two different things depending on which surface
+      // asked, which is exactly what a positive marker exists to avoid.
+      const remoteControllerOrigin = remoteControllerOriginOf(
+        invocationPermissionContext.remoteControllerAuthority,
+      );
       const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
       if (!validation.ok) {
         const msg = t("be_executor.dirPolicyBlock", { name: toolUse.name, reason: validation.reason, filePath: outOfAllowedTarget.filePath });
@@ -814,6 +824,10 @@ export async function runToolInvocation(
           // Same conversation attribution as the Layer 3 tool ask — a
           // directory-confirm modal blocks a specific conversation too.
           ...(sessionId === undefined ? {} : { sessionId }),
+          // Host-only; the gate keeps it out of the renderer payload.
+          ...(remoteControllerOrigin === undefined
+            ? {}
+            : { remoteControllerOrigin }),
           args: finalInput,
           reason: approvalReasonPrefix
             ? `${approvalReasonPrefix} ${dirLayerResult.reason}`

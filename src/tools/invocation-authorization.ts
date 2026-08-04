@@ -14,7 +14,10 @@ import type {
 import type { HostShellExecutionPermitBinding } from "../permissions/host-shell-execution-permit.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import { isRemoteControllerAuthorityCurrent } from "../shared/chat-origin.js";
+import {
+  isRemoteControllerAuthorityCurrent,
+  remoteControllerOriginOf,
+} from "../shared/chat-origin.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
@@ -203,6 +206,15 @@ export async function authorizeToolInvocation(
   // that are not represented by their declared category.
   const requiresRemoteLocalOneShot =
     invocationPermissionContext.remoteControllerAuthority !== undefined;
+  // Host-set marker recorded on every approval this invocation raises. It is
+  // projected from the same authority object the one-shot rule above reads, so
+  // "requires a local one-shot" and "was raised by a remote turn" cannot come
+  // apart. Attribution never travels in the approval's `reason` string: that is
+  // localizable free text assembled for a human to read, and a fact recovered
+  // from a display string is not evidence of anything.
+  const remoteControllerOrigin = remoteControllerOriginOf(
+    invocationPermissionContext.remoteControllerAuthority,
+  );
   // Cross-agent provenance re-elevates even host-owned always-allow meta tools:
   // the receiver must authorize every tool use caused by an A2A Message.
   if (
@@ -1187,6 +1199,10 @@ export async function authorizeToolInvocation(
           // turn is blocked on it. Sub-agents and side chats reach this line
           // with their own session id.
           ...(sessionId === undefined ? {} : { sessionId }),
+          // Host-only; the gate keeps it out of the renderer payload.
+          ...(remoteControllerOrigin === undefined
+            ? {}
+            : { remoteControllerOrigin }),
           reviewerVerdict: permissionResult.reviewer?.verdict,
           ...(approvalPurpose ? { approvalPurpose } : {}),
           args: finalInput,
