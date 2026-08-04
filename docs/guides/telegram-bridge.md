@@ -70,6 +70,19 @@ Unknown senders receive no reply at all. Any Telegram user can message a bot,
 and answering would confirm to a stranger that this bot is attached to a live
 desktop.
 
+The paired owner is a different case. When their message cannot be routed —
+because the conversation on the desktop is not shared — LVIS answers with a
+fixed host notice saying so. It carries no conversation material, goes only to
+the paired account, and is sent at most once every ten minutes per chat so a
+flood of unroutable messages cannot turn the bridge into a reply amplifier. A
+notice that fails to send is not retried; silence is preferable to a loop.
+
+This is deliberately a second, narrow egress path. The conversation delivery
+channel is fenced by the route guard, and that fence is precisely what is
+closed when there is nothing to say — so without this path an unroutable
+message would be consumed and answered with nothing, which is indistinguishable
+from a dead bot.
+
 ### Pairing is not access
 
 A paired account still sees nothing. Sharing is a separate, explicitly
