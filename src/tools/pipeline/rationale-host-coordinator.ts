@@ -936,6 +936,8 @@ export class RationaleHostCoordinator implements RationaleHostRuntime, Rationale
       allowedChoices: ["allow-once", "deny-once"],
       toolName: metadata.toolName,
       toolCategory: metadata.category,
+      // The ticket already belongs to a conversation; carry it onto the card.
+      sessionId: context.sessionId,
       reviewerVerdict: context.display.effectiveVerdict,
       evaluationContext: metadata.evaluationContext,
       args: context.display,
