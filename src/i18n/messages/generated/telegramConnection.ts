@@ -62,6 +62,8 @@ export const en = {
 
   "telegramConnection.stateActive": "Sharing this conversation",
   "telegramConnection.stateSharedConversationNotOpen": "Sharing · that conversation is not open",
+  "telegramConnection.stateSharedConversationMissing": "Shared conversation no longer exists · share another one",
+  "telegramConnection.sharedConversationMissingBody": "The conversation you shared has been deleted, so nothing you send from Telegram can reach it. The share is still here — open the conversation you want instead and share that one.",
   "telegramConnection.sharedConversationNotOpenBody": "The conversation you shared stays shared, including after a restart, but replies only run while it is open. Open it again to continue, or share the conversation you have open now instead.",
   "telegramConnection.sendFirstMessage": "Send a message from Telegram to start — a bot cannot open the chat itself.",
   "telegramConnection.pause": "Pause",
@@ -139,6 +141,8 @@ export const ko = {
 
   "telegramConnection.stateActive": "이 대화를 공유 중",
   "telegramConnection.stateSharedConversationNotOpen": "공유 중 · 그 대화가 열려 있지 않음",
+  "telegramConnection.stateSharedConversationMissing": "공유하던 대화가 없어졌습니다 · 다른 대화를 공유하세요",
+  "telegramConnection.sharedConversationMissingBody": "공유했던 대화가 삭제되어, 텔레그램에서 보낸 메시지가 닿을 곳이 없습니다. 공유 자체는 그대로입니다 — 원하는 대화를 열어 그 대화를 공유하세요.",
   "telegramConnection.sharedConversationNotOpenBody": "공유한 대화는 재시작 후에도 계속 공유되지만, 답변은 그 대화가 열려 있을 때만 진행됩니다. 그 대화를 다시 열어 이어가거나, 지금 열어 둔 대화를 대신 공유하세요.",
   "telegramConnection.sendFirstMessage": "Telegram에서 메시지를 보내 시작하세요. 봇이 먼저 대화를 열 수는 없습니다.",
   "telegramConnection.pause": "일시중지",

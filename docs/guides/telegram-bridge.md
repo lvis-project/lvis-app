@@ -107,15 +107,40 @@ the host notice, without dropping the share. Opening the shared conversation
 again continues it. Running a shared conversation in the background is not
 something LVIS does today.
 
+If the shared conversation is deleted, the desktop says that instead. It is a
+distinct state, not the same "not on screen" message: there is nothing to
+reopen, and the only repair is to share a different conversation. The grant
+itself is left alone, so restoring the conversation restores the share.
+
 ### What leaves this desktop
 
 Only assistant text and coarse progress, through the shared safe projection.
-Model reasoning, tool inputs and results, local paths, attachments, memory
-source text, internal identifiers, and error stacks do not.
+The host never adds model reasoning, tool inputs or results, local paths,
+attachments, memory source text, internal identifiers, or error stacks to what
+it sends.
+
+Read that as a statement about the host, not a filter on the text. Assistant
+prose is forwarded verbatim and is not redacted, and a model routinely writes a
+file path into its own reply. What the projection guarantees is that none of
+those things is attached as a structured field; it does not guarantee that a
+path never appears in a sentence the model wrote. If the assistant would say it
+on screen, assume it can be said on your phone.
 
 Tool approvals stay local. A Telegram message can start work that needs an
 approval, but the approval prompt appears only in the desktop app; Telegram
 cannot answer it.
+
+Shell is unavailable to a remote turn: `bash`, `bash_output`, `bash_kill`, and
+`powershell` are refused before any approval exists, along with the tools that
+would create work beyond the turn or widen the tool surface (`request_plugin`,
+`routine_schedule`, `skill_load`, `tool_search`).
+
+That refusal is a list of tool names, not a capability class. An MCP server or
+plugin tool that runs a command under some other name is not on the list, so it
+reaches the approval prompt instead of being refused outright. The owner is at
+the desk and sees the arguments before answering, which is why this is
+acceptable — but do not read it as "a remote turn cannot cause a command to
+run".
 
 ### Pausing and disconnecting
 

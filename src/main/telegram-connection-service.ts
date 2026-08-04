@@ -91,6 +91,12 @@ export interface CreateTelegramConnectionServiceOptions {
   /** Read at the moment of an approval; a renderer can never choose this id. */
   readonly getCurrentConversationId: () => string;
   readonly conversationDigestFor: (conversationId: string) => string;
+  /**
+   * Whether a conversation still exists. Required rather than optional: an
+   * absent check would silently make every deleted share look healthy, which
+   * is the exact failure this dependency exists to end.
+   */
+  readonly conversationExists: (conversationId: string) => boolean;
   /** True when `LVIS_TELEGRAM_BRIDGE` owns the bridge. Wins over stored state. */
   readonly envManaged: boolean;
   /** Test-only injection; production builds a real Bot API client. */
@@ -189,6 +195,23 @@ interface ApprovalProjection {
 }
 
 /**
+ * What the stored share resolves to, as three outcomes rather than two.
+ *
+ * The missing case is the reason this is not a nullable value. Collapsing it
+ * into `none` claims nothing was ever shared, and collapsing it into `resolved`
+ * makes a deleted conversation look like one the owner merely navigated away
+ * from — the surface then tells them to go open something that is gone. A
+ * saved binding that no longer resolves has to be able to say so.
+ */
+type BoundConversation =
+  | { readonly kind: "none" }
+  | { readonly kind: "missing" }
+  | { readonly kind: "resolved"; readonly id: string };
+
+const NO_BOUND_CONVERSATION: BoundConversation = Object.freeze({ kind: "none" as const });
+const MISSING_BOUND_CONVERSATION: BoundConversation = Object.freeze({ kind: "missing" as const });
+
+/**
  * Project the one live share. The store decides which grant that is; this only
  * reports whether it happens to be the conversation on screen, which is what
  * the owner needs to know because execution still requires it — the share
@@ -223,10 +246,15 @@ function projectApproval(
  * an error code would be answered above as `error`, which withholds the very
  * affordance the owner needs, and `setConnected` clears the note on the next
  * reconnect while the pairing stays gone.
+ *
+ * A share whose conversation was deleted is a third thing again: like the
+ * retired pairing it survives a restart and needs an owner action, but the
+ * connection and the pairing are both fine, so it is neither `error` nor
+ * `paired-unapproved`.
  */
 function deriveState(
   owner: TelegramOwnerConnectionSnapshot,
-  approval: ApprovalProjection | null,
+  bound: BoundConversation,
 ): TelegramConnectionState {
   if (owner.desiredState === "disconnected") return "disconnected";
   if (owner.desiredState === "paused") return "paused-by-owner";
@@ -237,7 +265,15 @@ function deriveState(
     if (owner.pendingCode !== null) return "pairing-pending";
     return owner.pairingUnrecognized ? "pairing-unrecognized" : "connected-unpaired";
   }
-  return approval === null ? "paired-unapproved" : "active";
+  // The resolver is the single authority for all three of these. Deciding
+  // "is anything shared" from `approval` and "does it resolve" from `bound`
+  // would be two sources for one question, and the case where they disagree is
+  // exactly the one that has to be reported rather than averaged.
+  switch (bound.kind) {
+    case "none": return "paired-unapproved";
+    case "missing": return "shared-conversation-missing";
+    case "resolved": return "active";
+  }
 }
 
 /** Serialize multi-step lifecycle work so two connects cannot interleave. */
@@ -306,6 +342,34 @@ export function createTelegramConnectionService(
       return typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest) ? { id, digest } : null;
     } catch {
       return null;
+    }
+  };
+
+  /**
+   * Resolve the saved binding, refusing to fall back to a default.
+   *
+   * It reads through `resolveBoundConversation`, the same function the phone's
+   * egress path uses, so the screen and the phone cannot name different
+   * conversations. That resolver returns a plaintext id only after the store
+   * has re-derived its digest and matched, so nothing hand-edited into the file
+   * can be resolved here.
+   *
+   * A throw from the existence check is `missing` rather than `resolved`: an
+   * unanswerable existence question is not evidence the conversation is there,
+   * and the state it produces asks the owner to share again, which is safe. The
+   * opposite default would hide the loss behind a healthy-looking share.
+   */
+  const boundConversation = (): BoundConversation => {
+    try {
+      const actorDigest = store.activePairingActorDigest();
+      if (actorDigest === null) return NO_BOUND_CONVERSATION;
+      const id = store.resolveBoundConversation(actorDigest);
+      if (id === null) return NO_BOUND_CONVERSATION;
+      return options.conversationExists(id)
+        ? Object.freeze({ kind: "resolved" as const, id })
+        : MISSING_BOUND_CONVERSATION;
+    } catch {
+      return MISSING_BOUND_CONVERSATION;
     }
   };
 
@@ -418,7 +482,7 @@ export function createTelegramConnectionService(
       const owner = store.ownerSnapshot();
       const approval = projectApproval(owner.approval, currentConversation()?.digest ?? null);
       const projected = parseTelegramConnectionSnapshot({
-        state: deriveState(owner, approval),
+        state: deriveState(owner, boundConversation()),
         botUsername,
         pairing: owner.pairing === null
           ? null
