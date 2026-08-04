@@ -7,6 +7,8 @@ import {
   consumeHostApprovedOneShotExecutionBinding,
   isHostApprovalRejectedDecision,
   isHostApprovalTimeoutDecision,
+  signApprovalRequest,
+  UNATTRIBUTED_APPROVAL_SESSION_ID,
 } from "../approval-gate.js";
 import type {
   ApprovalDecision,
@@ -1747,6 +1749,265 @@ describe("ApprovalGate", () => {
         choice: "deny-once",
         nonce,
         hmac,
+      });
+      await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+    });
+  });
+
+  // ── Conversation attribution ──────────────────────────
+  //
+  // `sessionId` names the conversation whose turn is blocked on the modal.
+  // It is signed, not merely carried: a request re-signed under a different
+  // conversation must not verify.
+  describe("conversation attribution", () => {
+    /**
+     * The gate's HMAC key is `private` in TypeScript only — it is an ordinary
+     * runtime property. Reading it lets a test mint the exact signature the
+     * gate would have produced for a *different* conversation, which is the
+     * only way to prove the attribution is inside the signing preimage rather
+     * than sitting beside it.
+     */
+    function gateSessionKey(gate: ApprovalGate): Buffer {
+      return (gate as unknown as { sessionKey: Buffer }).sessionKey;
+    }
+
+    function lastSentRequest(
+      wc: ReturnType<typeof makeMockWebContents>,
+    ): ApprovalRequest {
+      const calls = wc.send.mock.calls;
+      return (calls[calls.length - 1] as unknown as [string, ApprovalRequest])[1];
+    }
+
+    function auditRows(auditLogger: { log: ReturnType<typeof vi.fn> }): {
+      sessionId: string;
+      text: string;
+    }[] {
+      return auditLogger.log.mock.calls.map(([entry]) => {
+        const row = entry as {
+          sessionId: string;
+          input?: string;
+          output?: string;
+        };
+        return { sessionId: row.sessionId, text: row.input ?? row.output ?? "" };
+      });
+    }
+
+    it("signs the attribution: the echoed signature verifies for its own conversation", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = makeRequest({ id: "attr-roundtrip", sessionId: "conv-a" });
+
+      const promise = gate.requestAndWait(req);
+
+      const sent = lastSentRequest(wc);
+      expect(sent.sessionId).toBe("conv-a");
+      // The gate's own digest is exactly the signature over the attribution
+      // it emitted — binding the emit path to the shared signing function.
+      expect(sent.hmac).toBe(
+        signApprovalRequest(gateSessionKey(gate), {
+          id: "attr-roundtrip",
+          nonce: sent.nonce as string,
+          toolName: req.toolName,
+          sessionId: "conv-a",
+          args: req.args,
+        }),
+      );
+
+      gate.resolve("attr-roundtrip", {
+        requestId: "attr-roundtrip",
+        choice: "allow-always",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+      await expect(promise).resolves.toMatchObject({ choice: "allow-always" });
+    });
+
+    it("rejects a signature minted for a different conversation", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = makeRequest({ id: "attr-tampered", sessionId: "conv-a" });
+
+      const promise = gate.requestAndWait(req);
+      const sent = lastSentRequest(wc);
+
+      // Same id, nonce, tool and args — only the conversation differs. If the
+      // attribution were outside the preimage this digest would equal the one
+      // the gate issued and the allow-always below would be honored.
+      const reattributed = signApprovalRequest(gateSessionKey(gate), {
+        id: "attr-tampered",
+        nonce: sent.nonce as string,
+        toolName: req.toolName,
+        sessionId: "conv-b",
+        args: req.args,
+      });
+      expect(reattributed).not.toBe(sent.hmac);
+
+      gate.resolve("attr-tampered", {
+        requestId: "attr-tampered",
+        choice: "allow-always",
+        nonce: sent.nonce,
+        hmac: reattributed,
+      });
+
+      await expect(promise).resolves.toMatchObject({
+        choice: "deny-once",
+        rememberPattern: "approval integrity check failed",
+      });
+    });
+
+    it("does not let an unattributed request verify under an attributed signature", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = makeRequest({ id: "attr-absent" });
+
+      const promise = gate.requestAndWait(req);
+      const sent = lastSentRequest(wc);
+      expect(sent.sessionId).toBeUndefined();
+
+      // Absence is signed as an explicit null, so it is a distinct preimage
+      // from any real conversation rather than a shape a legacy signature
+      // could satisfy.
+      const asAttributed = signApprovalRequest(gateSessionKey(gate), {
+        id: "attr-absent",
+        nonce: sent.nonce as string,
+        toolName: req.toolName,
+        sessionId: "conv-a",
+        args: req.args,
+      });
+      expect(asAttributed).not.toBe(sent.hmac);
+
+      gate.resolve("attr-absent", {
+        requestId: "attr-absent",
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: asAttributed,
+      });
+      await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+    });
+
+    it("attributes requested and decided audit rows to the asking conversation", async () => {
+      const wc = makeMockWebContents();
+      const auditLogger = { log: vi.fn() };
+      const gate = new ApprovalGate(
+        wc as never,
+        undefined,
+        1_000,
+        auditLogger as never,
+      );
+
+      const promiseA = gate.requestAndWait(
+        makeRequest({ id: "attr-audit-a", sessionId: "conv-a" }),
+      );
+      const sentA = lastSentRequest(wc);
+      gate.resolve("attr-audit-a", {
+        requestId: "attr-audit-a",
+        choice: "allow-once",
+        nonce: sentA.nonce,
+        hmac: sentA.hmac,
+      });
+      await promiseA;
+
+      const promiseB = gate.requestAndWait(
+        makeRequest({ id: "attr-audit-b", sessionId: "conv-b" }),
+      );
+      const sentB = lastSentRequest(wc);
+      gate.resolve("attr-audit-b", {
+        requestId: "attr-audit-b",
+        choice: "deny-once",
+        nonce: sentB.nonce,
+        hmac: sentB.hmac,
+      });
+      await promiseB;
+
+      const rows = auditRows(auditLogger);
+      const sessionFor = (marker: string) =>
+        rows.filter((row) => row.text.includes(marker)).map((r) => r.sessionId);
+
+      expect(sessionFor("[approval:requested] attr-audit-a")).toEqual(["conv-a"]);
+      expect(sessionFor("[approval:decided] attr-audit-a")).toEqual(["conv-a"]);
+      expect(sessionFor("[approval:requested] attr-audit-b")).toEqual(["conv-b"]);
+      expect(sessionFor("[approval:decided] attr-audit-b")).toEqual(["conv-b"]);
+      // Replay can now separate the two conversations, and no row is filed
+      // under the old subsystem placeholder.
+      expect(rows.map((row) => row.sessionId)).not.toContain("approval-gate");
+    });
+
+    it("files an approval with no conversation under the unattributed sentinel", async () => {
+      const wc = makeMockWebContents();
+      const auditLogger = { log: vi.fn() };
+      const gate = new ApprovalGate(
+        wc as never,
+        undefined,
+        1_000,
+        auditLogger as never,
+      );
+
+      const promise = gate.requestAndWait(makeRequest({ id: "attr-none" }));
+      const sent = lastSentRequest(wc);
+      gate.resolve("attr-none", {
+        requestId: "attr-none",
+        choice: "allow-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
+      });
+      await promise;
+
+      const rows = auditRows(auditLogger);
+      expect(
+        rows.filter((row) => row.text.includes("attr-none")).map((r) => r.sessionId),
+      ).toEqual([
+        UNATTRIBUTED_APPROVAL_SESSION_ID,
+        UNATTRIBUTED_APPROVAL_SESSION_ID,
+      ]);
+      expect(rows.map((row) => row.sessionId)).not.toContain("approval-gate");
+    });
+
+    it("attributes a host-rejected request that never reaches the renderer", async () => {
+      const wc = makeMockWebContents();
+      const auditLogger = { log: vi.fn() };
+      const gate = new ApprovalGate(
+        wc as never,
+        undefined,
+        1_000,
+        auditLogger as never,
+      );
+
+      // Sensitive-path hard-block resolves before any nonce is minted, so its
+      // audit row is the only record that the conversation was denied.
+      await expect(
+        gate.requestAndWait(
+          makeRequest({
+            id: "attr-blocked",
+            sessionId: "conv-blocked",
+            target: { filePath: "/home/u/.ssh/id_rsa" },
+          }),
+        ),
+      ).resolves.toMatchObject({ choice: "deny-once" });
+
+      const blocked = auditRows(auditLogger).find((row) =>
+        row.text.includes("[approval:sensitive-path-blocked] attr-blocked"),
+      );
+      expect(blocked?.sessionId).toBe("conv-blocked");
+    });
+
+    it("carries the attribution onto the narrowed rationale payload", async () => {
+      const wc = makeMockWebContents();
+      const gate = new ApprovalGate(wc as never);
+      const req = makeRationaleRequest({
+        id: "attr-rationale",
+        sessionId: "conv-rationale",
+      });
+
+      const promise = gate.requestAndWait(req);
+      const sent = lastSentRequest(wc);
+      expect(sent.kind).toBe("rationale");
+      expect(sent.sessionId).toBe("conv-rationale");
+
+      gate.resolve("attr-rationale", {
+        requestId: "attr-rationale",
+        choice: "deny-once",
+        nonce: sent.nonce,
+        hmac: sent.hmac,
       });
       await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
     });

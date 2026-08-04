@@ -11,6 +11,7 @@
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
 import { en as en_appearanceTab } from "./appearanceTab.js";
+import { en as en_approvalAttribution } from "./approvalAttribution.js";
 import { en as en_approvalQueueStatus } from "./approvalQueueStatus.js";
 import { en as en_askUserQuestionCard } from "./askUserQuestionCard.js";
 import { en as en_assistantCard } from "./assistantCard.js";
@@ -199,6 +200,7 @@ export const generatedEn: Record<string, string> = {
   ...en_actionPanel,
   ...en_app,
   ...en_appearanceTab,
+  ...en_approvalAttribution,
   ...en_approvalQueueStatus,
   ...en_askUserQuestionCard,
   ...en_assistantCard,

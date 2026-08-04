@@ -811,6 +811,9 @@ export async function runToolInvocation(
           kind: "out-of-allowed-dir" as const,
           toolName: toolUse.name,
           toolCategory: invocationCategory,
+          // Same conversation attribution as the Layer 3 tool ask — a
+          // directory-confirm modal blocks a specific conversation too.
+          ...(sessionId === undefined ? {} : { sessionId }),
           args: finalInput,
           reason: approvalReasonPrefix
             ? `${approvalReasonPrefix} ${dirLayerResult.reason}`

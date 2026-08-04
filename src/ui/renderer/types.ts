@@ -1381,9 +1381,19 @@ export type ApprovalRequest = {
   target?: { filePath?: string };
   isReadOnly?: boolean;
   mode?: "default" | "ask_all" | "plan" | "full_auto";
+  /**
+   * Host-owned id of the conversation that raised this approval. Sub-agents
+   * and side chats block on modals the user is not currently looking at, so
+   * the dialog and the queue name the asking conversation. Main-process
+   * value only — the renderer displays it and never supplies it.
+   */
+  sessionId?: string;
   /** Confused-deputy nonce issued by the main process; renderer echoes verbatim. */
   nonce?: string;
-  /** HMAC over (id, nonce, toolName, args) — echoed verbatim for confused-deputy defense. */
+  /**
+   * HMAC over (id, nonce, toolName, sessionId, args) — echoed verbatim for
+   * confused-deputy defense.
+   */
   hmac?: string;
   /**
    * Permission policy — present when `kind === "out-of-allowed-dir"`. Carries

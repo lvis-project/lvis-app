@@ -679,6 +679,15 @@ export function ToolApprovalDialog({
                   </Badge>
                 )}
               </div>
+              {/* Attribution — sub-agents and side chats raise this modal from a
+                  conversation the user is not looking at. Host-owned id only;
+                  never conversation content. */}
+              <div className="mt-1 flex min-w-0 items-baseline gap-1.5 text-[11px] text-muted-foreground">
+                <span className="shrink-0">{tHook("approvalAttribution.rowConversation")}</span>
+                <code className="min-w-0 truncate font-mono" data-testid="approval-conversation">
+                  {request.sessionId ?? tHook("approvalAttribution.unattributed")}
+                </code>
+              </div>
             </div>
           </div>
 
