@@ -359,6 +359,39 @@ describe("createTelegramConnectionService", () => {
     expect(h.store.resolveBoundConversation(ACTOR_DIGEST)).toBeNull();
   });
 
+  it("reports a rotated actor key as its own state, not as paired and not as an error", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+
+    // Positive control: while the key still names the account, the surface
+    // says so — this is the reading the guard has to replace, not weaken.
+    const paired = snapshotOf(h.service);
+    expect(paired.state).toBe("active");
+    expect(paired.pairing?.accountFingerprint).toMatch(/^[a-f0-9]{12}$/);
+
+    // The activation guard, with a key this machine can no longer produce.
+    expect(await h.store.reconcileActorKey("f".repeat(64))).toBe(true);
+
+    const lost = snapshotOf(h.service);
+    expect(lost.state).toBe("pairing-unrecognized");
+    expect(lost.pairing).toBeNull();
+    expect(lost.approval).toBeNull();
+    // Nothing was recorded as a connection failure: the bot is fine, and an
+    // error code here would be answered as `error`, which withholds the
+    // pairing affordance the owner needs. The test below pins that ordering.
+    expect(lost.lastErrorCode).toBeNull();
+  });
+
+  it("answers a recorded error before any pairing state, whatever the pairing is", async () => {
+    const h = await pairedHarness();
+    expect(await h.store.reconcileActorKey("f".repeat(64))).toBe(true);
+    expect(snapshotOf(h.service).state).toBe("pairing-unrecognized");
+
+    await h.store.setLastError("telegram-poll-conflict");
+
+    expect(snapshotOf(h.service).state).toBe("error");
+  });
+
   it("keeps the share active when the owner looks at another conversation", async () => {
     const h = await pairedHarness();
 

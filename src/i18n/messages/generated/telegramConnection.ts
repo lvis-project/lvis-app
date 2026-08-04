@@ -38,6 +38,9 @@ export const en = {
   "telegramConnection.createPairingCode": "Pair my Telegram account",
   "telegramConnection.pairingIsNotAccess": "Pairing identifies your Telegram account. It does not share this conversation on its own.",
 
+  "telegramConnection.statePairingUnrecognized": "Connected · pair your account again",
+  "telegramConnection.pairingUnrecognizedBody": "This machine can no longer recognize the Telegram account you paired, so it has been unpaired and nothing is shared. That happens when this machine's encrypted credential store is reset, or when this app's data is restored onto a different machine. Your bot is unaffected — pair your account again to carry on.",
+
   "telegramConnection.statePairingPending": "Waiting for your code",
   "telegramConnection.pairingCodeTitle": "Send this code to your bot",
   "telegramConnection.pairingCodeBody": "Open the chat with your bot and send this exact code as an ordinary message. It works once, and it is not shown again after you leave this screen.",
@@ -111,6 +114,9 @@ export const ko = {
   "telegramConnection.botLabel": "봇",
   "telegramConnection.createPairingCode": "내 Telegram 계정 페어링",
   "telegramConnection.pairingIsNotAccess": "페어링은 내 Telegram 계정을 식별할 뿐입니다. 그것만으로 이 대화가 공유되지는 않습니다.",
+
+  "telegramConnection.statePairingUnrecognized": "연결됨 · 계정을 다시 페어링하세요",
+  "telegramConnection.pairingUnrecognizedBody": "이 기기가 페어링했던 Telegram 계정을 더 이상 식별할 수 없어 페어링이 해제되었고, 공유 중인 대화도 없습니다. 이 기기의 암호화 자격증명 저장소가 초기화되었거나, 이 앱의 데이터를 다른 기기로 옮겨 복원한 경우에 발생합니다. 봇은 그대로이니 계정을 다시 페어링하면 계속 사용할 수 있습니다.",
 
   "telegramConnection.statePairingPending": "코드를 기다리는 중",
   "telegramConnection.pairingCodeTitle": "이 코드를 봇에게 보내세요",
