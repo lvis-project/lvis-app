@@ -45,6 +45,17 @@ const TELEGRAM_CONNECTION_STATES = [
    * on screen is a property of the approval, not a state of the connection.
    */
   "active",
+  /**
+   * A share exists and names a conversation that no longer does. Distinct from
+   * `active`, which the surface renders as "that conversation is not open" —
+   * a deleted conversation is not one the owner can go back to, and telling
+   * them to open it sends them looking for something that is gone.
+   *
+   * It is a state rather than a flag on the approval because the repair is a
+   * connection-level action: share a different conversation. The share itself
+   * is still durable and still authorises nothing else, so this is not `error`.
+   */
+  "shared-conversation-missing",
   "paused-by-owner",
   "error",
 ] as const;

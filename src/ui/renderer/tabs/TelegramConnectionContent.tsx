@@ -61,6 +61,8 @@ function stateLabel(
       return sharedConversationIsOpen(snapshot)
         ? t("telegramConnection.stateActive")
         : t("telegramConnection.stateSharedConversationNotOpen");
+    case "shared-conversation-missing":
+      return t("telegramConnection.stateSharedConversationMissing");
     case "paused-by-owner": return t("telegramConnection.statePausedByOwner");
     case "error": return t("telegramConnection.stateError");
   }
@@ -184,9 +186,12 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
   const canPair = state === "connected-unpaired"
     || state === "pairing-unrecognized"
     || state === "pairing-pending";
-  // Sharing the conversation now open is offered when nothing is shared, and
-  // when what is shared is some other conversation.
+  // Sharing the conversation now open is offered when nothing is shared, when
+  // what is shared is some other conversation, and when what is shared no
+  // longer exists — that last one is the only repair, so withholding the button
+  // there would name a problem and offer no way out of it.
   const canApprove = state === "paired-unapproved"
+    || state === "shared-conversation-missing"
     || (snapshot !== null && state === "active" && !sharedConversationIsOpen(snapshot));
   const connected = useMemo(
     () => state !== null && !readOnly && state !== "disconnected",
@@ -260,7 +265,19 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
               </p>
             ) : null}
 
-            {!sharedConversationIsOpen(snapshot) ? (
+            {snapshot.state === "shared-conversation-missing" ? (
+              <p className="text-xs text-destructive" data-testid="telegram-connection-shared-conversation-missing">
+                {t("telegramConnection.sharedConversationMissingBody")}
+              </p>
+            ) : null}
+
+            {/*
+              Suppressed while the conversation is gone. Both readings come out
+              of the same "not on screen" observation, but this one tells the
+              owner the share is waiting for them to reopen it — advice that
+              sends them looking for something that no longer exists.
+            */}
+            {snapshot.state !== "shared-conversation-missing" && !sharedConversationIsOpen(snapshot) ? (
               <p className="text-xs text-muted-foreground" data-testid="telegram-connection-shared-conversation-closed">
                 {t("telegramConnection.sharedConversationNotOpenBody")}
               </p>

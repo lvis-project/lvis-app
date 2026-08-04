@@ -2288,6 +2288,24 @@ export class MemoryManager {
     return detachedCount;
   }
 
+  /**
+   * Whether a conversation still exists.
+   *
+   * The transcript file is the same thing `listSessions` scans for, so this
+   * answers exactly the question the conversation list answers: no caller can
+   * be told a conversation exists that the user cannot see, or the reverse.
+   * A stat rather than a read, because the question is existence.
+   *
+   * Unlike {@link hasSessionMetadataFile} this returns false for a malformed id
+   * instead of throwing. An id that is not even well-formed names no session,
+   * so false is the complete answer, and the callers are projections that must
+   * not throw into a snapshot.
+   */
+  hasSessionTranscript(sessionId: unknown): boolean {
+    if (!isValidSessionId(sessionId)) return false;
+    return statPathIfPresent(join(this.sessionsDir, `${sessionId}.jsonl`)) !== null;
+  }
+
   hasSessionMetadataFile(sessionId: string): boolean {
     if (!isValidSessionId(sessionId)) {
       throw new Error('hasSessionMetadataFile: invalid sessionId "' + sessionId + '"');
