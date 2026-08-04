@@ -369,4 +369,183 @@ describe("startTelegramPollingIngress", () => {
       onFatal: undefined as never,
     })).toThrow("telegram-polling-ingress-options-invalid");
   });
+
+  // ── Pre-envelope drop counter ─────────────────────────
+  //
+  // Updates refused before an envelope exists are the one class the notice
+  // path cannot reach: there is no verified sender to answer. Their only
+  // trace is this tally, so these tests assert what a line says, not that
+  // logging happened.
+  describe("pre-envelope drops", () => {
+    function counted(overrides: Partial<TelegramPollingIngressOptions> = {}) {
+      const lines: string[] = [];
+      return {
+        ...harness({ log: (message: string) => { lines.push(message); }, ...overrides }),
+        dropLines: () => lines.filter((line) => line.includes("pre-envelope drop")),
+      };
+    }
+
+    /** Read a line's numbers so an assertion pins values, not prose. */
+    function tally(line: string): { total: number; reasons: Record<string, number> } {
+      const reasons: Record<string, number> = {};
+      let total = -1;
+      for (const [, key, value] of line.matchAll(/([\w-]+)=(\d+)/g)) {
+        if (key === "total") total = Number(value);
+        else reasons[key as string] = Number(value);
+      }
+      return { total, reasons };
+    }
+
+    async function stopAndDrain(ingress: TelegramPollingIngress): Promise<void> {
+      ingress.stop();
+      await ingress.finished;
+      running = undefined;
+    }
+
+    it("counts an update the adapter could not turn into an envelope", async () => {
+      const h = counted();
+      h.queue({ ok: true, value: [nonMessageUpdate(300)] });
+      const ingress = start(h.options);
+
+      await vi.waitFor(() => expect(h.currentOffset()).toBe(301));
+      await stopAndDrain(ingress);
+
+      const lines = h.dropLines();
+      expect(lines).toHaveLength(2);
+      expect(tally(lines[lines.length - 1] as string)).toEqual({
+        total: 1,
+        reasons: { "unparsable-update": 1 },
+      });
+    });
+
+    it("counts each gateway outcome decided before an envelope exists", async () => {
+      for (const outcome of [
+        "invalid-request",
+        "request-too-large",
+        "verification-failed",
+        "invalid-envelope",
+      ] as PlatformBridgeInboundResult[]) {
+        const h = counted();
+        h.handleWebhook.mockResolvedValue(outcome);
+        h.queue({ ok: true, value: [textUpdate(200, "hello")] });
+        const ingress = start(h.options);
+
+        // The offset moving is what makes this a drop rather than a retry, so
+        // the tally below is counting something that was really lost.
+        await vi.waitFor(() => expect(h.currentOffset()).toBe(201));
+        await stopAndDrain(ingress);
+
+        const lines = h.dropLines();
+        expect(tally(lines[lines.length - 1] as string)).toEqual({
+          total: 1,
+          reasons: { [outcome]: 1 },
+        });
+      }
+    });
+
+    it("counts nothing for an outcome that had an envelope to refuse", async () => {
+      for (const outcome of [
+        "accepted",
+        "duplicate",
+        "slash-command-rejected",
+        "authorization-denied",
+        "idempotency-conflict",
+        "command-outcome-unknown",
+      ] as PlatformBridgeInboundResult[]) {
+        const h = counted();
+        h.handleWebhook.mockResolvedValue(outcome);
+        h.queue({ ok: true, value: [textUpdate(200, "hello")] });
+        const ingress = start(h.options);
+
+        await vi.waitFor(() => expect(h.currentOffset()).toBe(201));
+        await stopAndDrain(ingress);
+
+        expect(h.dropLines()).toEqual([]);
+      }
+    });
+
+    it("counts nothing when the core re-polls instead of consuming", async () => {
+      const h = counted();
+      // Pre-envelope like the counted four, but it releases the update for
+      // retry. Counting it would report a turned-off bridge as data loss.
+      h.handleWebhook.mockResolvedValue("disabled");
+      h.queue({ ok: true, value: [textUpdate(210, "hello")] });
+      const ingress = start(h.options);
+
+      await vi.waitFor(() => expect(h.handleWebhook).toHaveBeenCalled());
+      expect(h.currentOffset()).toBe(100);
+      await stopAndDrain(ingress);
+
+      expect(h.dropLines()).toEqual([]);
+    });
+
+    it("counts nothing for a pairing code it consumed on purpose", async () => {
+      const code = mintTelegramPairingCode();
+      const h = counted();
+      h.queue({ ok: true, value: [textUpdate(220, code)] });
+      const ingress = start(h.options);
+
+      await vi.waitFor(() => expect(h.currentOffset()).toBe(221));
+      await stopAndDrain(ingress);
+
+      // The update never reached the gateway, but it was consumed deliberately
+      // rather than lost.
+      expect(h.handleWebhook).not.toHaveBeenCalled();
+      expect(h.dropLines()).toEqual([]);
+    });
+
+    it("names each reason the first time it appears", async () => {
+      const h = counted();
+      h.handleWebhook.mockResolvedValue("verification-failed");
+      h.queue({
+        ok: true,
+        value: [nonMessageUpdate(400), textUpdate(401, "hello")],
+      });
+      const ingress = start(h.options);
+
+      await vi.waitFor(() => expect(h.currentOffset()).toBe(402));
+      await stopAndDrain(ingress);
+
+      const lines = h.dropLines();
+      expect(lines.filter((line) => line.includes("first of this kind"))).toHaveLength(2);
+      expect(tally(lines[lines.length - 1] as string)).toEqual({
+        total: 2,
+        reasons: { "unparsable-update": 1, "verification-failed": 1 },
+      });
+    });
+
+    it("reports at the first of a kind, at a power of ten, and once on exit", async () => {
+      const h = counted();
+      h.queue({
+        ok: true,
+        value: Array.from({ length: 12 }, (_, index) => nonMessageUpdate(500 + index)),
+      });
+      const ingress = start(h.options);
+
+      await vi.waitFor(() => expect(h.currentOffset()).toBe(512));
+      await stopAndDrain(ingress);
+
+      // Anyone who can message the bot can drive this count, so a line per
+      // drop would hand them the desktop log. Twelve drops, three lines.
+      expect(h.dropLines().map((line) => tally(line).total)).toEqual([1, 10, 12]);
+    });
+
+    it("starts a fresh tally for each activation", async () => {
+      const first = counted();
+      first.queue({ ok: true, value: [nonMessageUpdate(600), nonMessageUpdate(601)] });
+      const firstIngress = start(first.options);
+      await vi.waitFor(() => expect(first.currentOffset()).toBe(602));
+      await stopAndDrain(firstIngress);
+      expect(tally(first.dropLines().at(-1) as string).total).toBe(2);
+
+      const second = counted();
+      second.queue({ ok: true, value: [nonMessageUpdate(700)] });
+      const secondIngress = start(second.options);
+      await vi.waitFor(() => expect(second.currentOffset()).toBe(701));
+      await stopAndDrain(secondIngress);
+
+      // A tally that outlived its activation would read 3 here.
+      expect(tally(second.dropLines().at(-1) as string).total).toBe(1);
+    });
+  });
 });
