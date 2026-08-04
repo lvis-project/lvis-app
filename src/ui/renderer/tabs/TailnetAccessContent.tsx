@@ -16,11 +16,10 @@ import {
   type TailnetSharingMutationResult,
   type TailnetSharingSnapshot,
 } from "../../../shared/tailnet-sharing.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import type { LvisApi } from "../types.js";
 
-export interface TailnetAccessTabProps {
+export interface TailnetAccessContentProps {
   api: LvisApi;
 }
 
@@ -58,11 +57,11 @@ function errorText(error: TailnetSharingErrorCode, t: (key: string) => string): 
 }
 
 /**
- * Local-owner controls for the P2 pairing/share boundary. The renderer may
+ * Local-owner controls for the Tailnet pairing/share boundary. The renderer may
  * choose a fixed-duration preset and opaque pairing id only; main resolves the
  * current conversation and inserts fresh keyboard intent at the preload edge.
  */
-export function TailnetAccessTab({ api }: TailnetAccessTabProps) {
+export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TailnetSharingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -168,11 +167,8 @@ export function TailnetAccessTab({ api }: TailnetAccessTabProps) {
   }, [api, runMutation, shareDuration, sharePermission, t]);
 
   return (
-    <div className="space-y-6" data-testid="tailnet-access-tab">
-      <SettingsPageHeader
-        title={t("settingsContent.tabTailnetAccess")}
-        description={t("tailnetAccessTab.pageDescription")}
-      />
+    <div className="space-y-6" data-testid="tailnet-access-content">
+      <p className="text-sm text-muted-foreground">{t("tailnetAccessTab.pageDescription")}</p>
 
       {feedback ? (
         <p
@@ -194,7 +190,7 @@ export function TailnetAccessTab({ api }: TailnetAccessTabProps) {
 
       {disabled ? (
         <SettingsSection
-          title={t("settingsContent.tabTailnetAccess")}
+          title={t("remoteSurfacesTab.tailnetSectionTitle")}
           actions={<Button size="sm" variant="outline" onClick={() => void refresh()}>{t("tailnetAccessTab.refresh")}</Button>}
         >
           <p className="text-sm text-muted-foreground">{t("tailnetAccessTab.disabled")}</p>
