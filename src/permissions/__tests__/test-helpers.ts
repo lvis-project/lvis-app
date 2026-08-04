@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 
 import type { PolicyFile } from "../policy-store.js";
+import type { PlatformBridgeAuthority } from "../../shared/chat-origin.js";
 import type { ToolInvocationContext } from "../reviewer/risk-classifier.js";
 import {
   checkAsrtDependencies,
@@ -94,6 +95,33 @@ export async function asrtCanInitialize(): Promise<boolean> {
   if (deps.errors.length > 0) return false;
   if (process.platform === "win32" && !(await windowsSandboxCanSpawn())) return false;
   return true;
+}
+
+/**
+ * A paired-platform controller authority whose revocation guard answers
+ * `current`. Shared because two suites need the same fixture for opposite
+ * reasons — one drives the away answerer directly, the other drives it through
+ * `ApprovalGate` — and a second copy would let the two drift into testing
+ * different objects.
+ *
+ * The guard is the only thing that can retire an already-admitted turn, so
+ * tests control it here rather than standing up a whole platform runtime.
+ */
+export function makePlatformBridgeAuthority(
+  current = true,
+): PlatformBridgeAuthority {
+  return {
+    kind: "platform-bridge",
+    actorId: "actor-digest",
+    bridgeBinding: {
+      bridgeId: "bridge-1",
+      bridgeEpoch: 1,
+      routeId: "route-1",
+      routeEpoch: 1,
+      scope: "scope-1",
+    },
+    bridgeGuard: { isCurrent: () => current },
+  };
 }
 
 export function makeRiskClassifierContext(

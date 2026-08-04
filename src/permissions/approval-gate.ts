@@ -17,7 +17,17 @@ import {
 } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
-import type { RemoteControllerOrigin } from "../shared/chat-origin.js";
+import type {
+  RemoteControllerAuthority,
+  RemoteControllerOrigin,
+} from "../shared/chat-origin.js";
+import {
+  AwayAuthority,
+  parseAwayAuthorityGrant,
+  type AwayAuthorityArmInput,
+  type AwayAuthorityCandidate,
+  type AwayAuthoritySnapshot,
+} from "./away-authority.js";
 import {
   parseRationaleApprovalDisplay,
   type RationaleApprovalDisplay,
@@ -336,6 +346,17 @@ export type ApprovalRequestInput = Omit<
    * desk-originated approval looks like.
    */
   readonly remoteControllerOrigin?: RemoteControllerOrigin;
+  /**
+   * Host-only: the live authority object the marker above was projected from.
+   *
+   * The marker records what was true when the request was built; this is the
+   * thing that can still be asked. {@link AwayAuthority} re-checks it at the
+   * moment it answers, so a share revoked while the turn was in flight is not
+   * answered by a grant that was valid when the turn started. Nothing else in
+   * the gate reads it, and like the marker it never reaches the renderer, the
+   * audit payload, or pending state.
+   */
+  readonly remoteControllerAuthority?: RemoteControllerAuthority;
 };
 
 export type ApprovalChoice =
@@ -538,14 +559,21 @@ interface PendingEntry {
  * to the audit row. This table is the single authority; there is no path that
  * widens one without the other.
  *
- * Today `desk` is the only answerer — every approval is answered in the app
- * window the user is sitting in front of. The dimension is recorded now, while
- * that is still true, because an audit that cannot name the answerer cannot
- * support a review of what happened while nobody was watching.
+ * The dimension exists because an audit that cannot name the answerer cannot
+ * support a review of what happened while nobody was watching. It was recorded
+ * while `desk` was still the only answerer, which is what made adding the
+ * second one a one-line change here rather than a retrofit across every row.
  */
 const APPROVAL_ANSWERER_AUDIT_TOKENS = {
   /** The app window: a renderer response to the approval modal. */
   desk: "desk",
+  /**
+   * The desk-armed {@link AwayAuthority}: no window was involved, and the
+   * authorization is a local gesture the owner made in advance. Distinct from
+   * `desk` precisely so a reviewer can partition "the owner decided this call"
+   * from "the owner pre-authorized a class of calls and this was one".
+   */
+  "away-authority": "away-authority",
 } as const;
 
 /**
@@ -817,6 +845,14 @@ export class ApprovalGate {
    */
   private readonly sandboxCapabilityProvider: () => SandboxCapability;
 
+  /**
+   * The desk-armed second answerer. Owned by the gate rather than reachable
+   * beside it: an answerer that could be consulted anywhere else would be a
+   * second answer surface, and the whole argument for this feature is that
+   * there is exactly one and it sits below every hard gate.
+   */
+  private readonly awayAuthority = new AwayAuthority();
+
   constructor(
     webContents: WebContents,
     initialPolicy?: PolicyFile,
@@ -846,6 +882,58 @@ export class ApprovalGate {
   }
 
   /**
+   * Arm the away answerer from a desk gesture. Returns whether it took.
+   *
+   * The single entry point: the raw request is validated by
+   * `parseAwayAuthorityGrant`, which is where every bound on a legal grant
+   * lives, and a rejected request arms nothing. A caller cannot hand this
+   * method a pre-built grant, so there is no second place that decides what a
+   * legal grant is.
+   */
+  armAwayAuthority(input: AwayAuthorityArmInput): boolean {
+    const grant = parseAwayAuthorityGrant(input, Date.now());
+    if (grant === null) return false;
+    this.awayAuthority.arm(grant);
+    this.auditLogger?.log({
+      timestamp: new Date().toISOString(),
+      sessionId: grant.conversationId,
+      type: "approval",
+      // The directory count, not the directories: an audit row states what was
+      // armed, and local paths are exactly the material the rest of this
+      // feature exists to keep off a remote transport.
+      output: `[approval:away-armed] categories=${grant.categories.join(",")} directories=${grant.directories.length} budget=${grant.budget} expiresAt=${new Date(grant.expiresAt).toISOString()}`,
+    });
+    return true;
+  }
+
+  /**
+   * Retire any armed grant.
+   *
+   * Called for desk disarm and — the reason it is public rather than private to
+   * the answerer's own expiry logic — from the share lifecycle chokepoint. A
+   * revoke, re-share, pause, disconnect or re-pair mints a fresh authority that
+   * the per-call re-check would happily accept; the grant behind it was made
+   * for the share that no longer exists.
+   */
+  retireAwayAuthority(reason: "desk-disarm" | "share-lifecycle"): boolean {
+    const retired = this.awayAuthority.retireAll();
+    if (retired) {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:away-retired] reason=${reason}`,
+      });
+    }
+    return retired;
+  }
+
+  /** Current grant state for the desk surface that displays it. */
+  awayAuthoritySnapshot(): AwayAuthoritySnapshot | null {
+    return this.awayAuthority.snapshot();
+  }
+
+  /**
    * Send an approval request to the renderer and wait for the response.
    * ConversationLoop.executeOne() awaits this and blocks the turn.
    * The requireExplicit field controls renderer dismiss behavior.
@@ -858,17 +946,21 @@ export class ApprovalGate {
       executionPlan: requestedExecutionPlan,
       sandboxCapability: requestedSandboxCapability,
       remoteControllerOrigin,
+      remoteControllerAuthority,
       ...request
     } = req;
     // Do not forward the host-only binding to renderer or audit payloads.
     // Audit receives only its allowlist execution-plan projection.
     //
-    // `remoteControllerOrigin` is destructured out for the same reason: the
-    // renderer payload is built by spreading the request, so a host-only field
-    // left on it would be sent. Every audit row this method writes still states
-    // it, injected here in one place rather than at each row — a row that
-    // forgot it would read as desk-originated, which is the claim a reviewer
-    // must not have to second-guess.
+    // `remoteControllerOrigin` and `remoteControllerAuthority` are destructured
+    // out for the same reason: the renderer payload is built by spreading the
+    // request, so a host-only field left on it would be sent. Every audit row
+    // this method writes still states the origin, injected here in one place
+    // rather than at each row — a row that forgot it would read as
+    // desk-originated, which is the claim a reviewer must not have to
+    // second-guess. The authority object is never audited at all: it carries a
+    // live guard closure, and a row's job is to state the fact, not to hold the
+    // capability that decided it.
     const auditFieldsFor = (
       fields: ApprovalAuditFields,
       executionPlan?: HostShellExecutionPlanAuditProjection,
@@ -1127,6 +1219,79 @@ export class ApprovalGate {
       // plugin-origin agent-action request during incident replay.
       input: `[approval:requested] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)}`,
     });
+
+    // ─── Away Authority ──────────────────────────────
+    //
+    // The desk-armed second answerer. Its position is load-bearing: everything
+    // above it has already run and none of it is reachable from here. In
+    // particular the sensitive-path hard block, the host-shell binding match,
+    // the execution-plan mismatch check, the rationale-display validation and
+    // the destroyed-window deny have all either returned or passed, so an away
+    // answer cannot re-open any of them. It sits below the `[approval:requested]`
+    // row so every away-answered call has a requested row too, and above the OS
+    // notification and the renderer send so a call it answers never rings a
+    // phone or paints a modal nobody is there to see.
+    //
+    // It reads only the request and its own grant. No inbound message reaches
+    // this decision, which is the entire difference between this and a relay.
+    const away = this.awayAuthority.consume(
+      {
+        remoteControllerOrigin,
+        remoteControllerAuthority,
+        sessionId: fullReq.sessionId,
+        // The request's own field, strictly. Deliberately not
+        // `getRequestSnapshot`, which defaults a missing source to "builtin".
+        source: fullReq.source,
+        kind: fullReq.kind,
+        category: fullReq.category,
+        toolCategory: fullReq.toolCategory,
+        allowedChoices: fullReq.allowedChoices,
+        // The gate's derived value, not the caller's requested one.
+        durableApprovalRecordAllowed,
+        hostShellExecutionPermitBound:
+          hostShellExecutionPermitBinding !== undefined,
+        targetFilePath: fullReq.target?.filePath,
+      } satisfies AwayAuthorityCandidate,
+      Date.now(),
+    );
+    if (away.answer) {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:away-answered] ${fullReq.id} ${auditFieldsFor({ ...fullReq, answeredBy: "away-authority" }, executionPlanAudit)} remaining=${away.remaining} → allow-once`,
+      });
+      if (away.remaining === 0) {
+        // The grant retired itself spending its last unit. Said here because
+        // this is the only moment it can be said: from the next call on there
+        // is no grant left to explain why the away answers stopped.
+        this.auditLogger?.log({
+          timestamp: new Date().toISOString(),
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+          type: "approval",
+          output: `[approval:away-retired] reason=budget-spent`,
+        });
+      }
+      // Returning here is what makes the answer one-shot in the strongest
+      // available sense: no pending entry is created, so there is nothing for
+      // `resolve` to accept a later choice against and nothing for
+      // `getRequestSnapshot` to bind a user-approval record to.
+      //
+      // No `rememberPattern` either. Its only consumers persist it as an
+      // allow/deny pattern, and this answer must leave nothing behind.
+      return { requestId: fullReq.id, choice: "allow-once" };
+    }
+    if (away.reportable) {
+      // An armed grant saw a paired-platform ask and did not answer it. The
+      // call now falls through to a desk nobody is at, so without this row the
+      // only trace would be a timeout with no stated cause.
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:away-declined] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} reason=${away.refusal}`,
+      });
+    }
 
     // Issue #260 — surface a system notification when an approval is about
     // to block the user. Approval is the most user-visible gate; default to
