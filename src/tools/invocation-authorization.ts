@@ -1182,6 +1182,10 @@ export async function authorizeToolInvocation(
           category: "tool" as const,
           toolName: toolUse.name,
           toolCategory: invocationCategory,
+          // Attribute the modal and every audit row to the conversation whose
+          // turn is blocked on it. Sub-agents and side chats reach this line
+          // with their own session id.
+          ...(sessionId === undefined ? {} : { sessionId }),
           reviewerVerdict: permissionResult.reviewer?.verdict,
           ...(approvalPurpose ? { approvalPurpose } : {}),
           args: finalInput,

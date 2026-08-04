@@ -193,17 +193,80 @@ export interface ApprovalRequest {
    */
   approvalCacheKey?: string;
   /**
+   * Host-owned attribution: the conversation (session) whose turn raised this
+   * approval. Side chats and sub-agents block on approval modals while the
+   * user is looking at a different conversation, so the dialog and the audit
+   * trail both need to name the asking conversation.
+   *
+   * It is set by the host tool path from the session id it already carries;
+   * it is never derived from provider output and never accepted from the
+   * renderer. Absent only for approval surfaces that genuinely have no
+   * conversation (boot-time and plugin agent-action asks).
+   *
+   * Part of the {@link signApprovalRequest} preimage — see that function for
+   * why absence is signed as an explicit null.
+   */
+  sessionId?: string;
+  /**
    * Confused-deputy defense — random nonce bound to this request.
    * The renderer MUST echo this value back unchanged in the
    * {@link ApprovalDecision}. Paired with {@link hmac} for integrity.
    */
   nonce?: string;
   /**
-   * HMAC-SHA256(sessionKey, `${id}|${nonce}|${toolName}|${canonicalArgs}`)
-   * — hex encoded. The main process re-derives this from the stored pending
-   * entry on receipt of the decision and rejects on mismatch.
+   * Hex-encoded {@link signApprovalRequest} digest over the request's
+   * `(id, nonce, toolName, sessionId, args)`. The main process re-derives this
+   * from the stored pending entry on receipt of the decision and rejects on
+   * mismatch.
    */
   hmac?: string;
+}
+
+/** Audit attribution for an approval surface that has no conversation. */
+export const UNATTRIBUTED_APPROVAL_SESSION_ID = "unattributed-approval";
+
+/** Fields bound into an approval request's integrity signature. */
+export interface ApprovalSignatureFields {
+  id: string;
+  nonce: string;
+  toolName: string;
+  /** Conversation attribution; `undefined` is signed as an explicit null. */
+  sessionId: string | undefined;
+  args: unknown;
+}
+
+/**
+ * Single authority for the approval integrity signature. Both the emit path
+ * and the {@link ApprovalGate.resolve} verification derive from this function,
+ * so the signed field set cannot drift between them.
+ *
+ * The preimage used to be the delimiter-joined
+ * `${id}|${nonce}|${toolName}|${canonicalStringify(args)}`, which left the
+ * asking conversation out of the signature entirely. It is now a single
+ * canonical JSON object: every field is length-delimited by the encoder (so no
+ * field can impersonate another by embedding the `|` separator) and the
+ * conversation attribution is signed rather than merely carried alongside the
+ * request.
+ *
+ * `sessionId` is encoded as an explicit `null` when the request carries no
+ * attribution — `canonicalStringify` drops `undefined` keys, which would make
+ * an unattributed request share a preimage with one whose attribution was
+ * stripped. There is no legacy preimage: the signing key is 32 random bytes
+ * minted per {@link ApprovalGate}, so every signature is created and verified
+ * inside one gate lifetime and no mixed-version window can exist.
+ */
+export function signApprovalRequest(
+  sessionKey: Buffer,
+  fields: ApprovalSignatureFields,
+): string {
+  const preimage = canonicalStringify({
+    id: fields.id,
+    nonce: fields.nonce,
+    toolName: fields.toolName,
+    sessionId: fields.sessionId ?? null,
+    args: fields.args,
+  });
+  return createHmac("sha256", sessionKey).update(preimage).digest("hex");
 }
 
 /**
@@ -387,6 +450,12 @@ interface PendingEntry {
   timer: ReturnType<typeof setTimeout>;
   /** Permission origin captured with the approval prompt. */
   trustOrigin: string;
+  /**
+   * Conversation attribution captured with the prompt, so the decided /
+   * timeout / cancelled audit rows name the same conversation the requested
+   * row did even though the request object is long gone by then.
+   */
+  sessionId?: string;
   toolName: string;
   category: "tool" | "agent-action";
   kind?: ApprovalKind;
@@ -508,6 +577,9 @@ function createRendererSafeRationaleApprovalRequest(
     reason: RATIONALE_HOST_OWNED_REASON,
     createdAt: request.createdAt,
     requireExplicit: true,
+    // Attribution is an opaque host-owned id, not conversation content, and a
+    // rationale card blocks a conversation the same way a tool ask does.
+    ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
     nonce: request.nonce,
     hmac: request.hmac,
   };
@@ -624,7 +696,7 @@ export class ApprovalGate {
     if (req.kind === "rationale" && rationaleDisplay === null) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: req.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:rationale-display-invalid] ${req.id} ${formatApprovalAuditFields(req)} -> deny-once`,
       });
@@ -646,7 +718,7 @@ export class ApprovalGate {
       // private Plan-B binding/action context.
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: req.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:execution-plan-invalid] ${req.id} ${formatApprovalAuditFields(request)} -> deny-once`,
       });
@@ -688,7 +760,7 @@ export class ApprovalGate {
       // spawn must never mint a receipt, even after an authenticated response.
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: req.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:host-shell-binding-mismatch] ${req.id} ${formatApprovalAuditFields(request)} -> deny-once`,
       });
@@ -719,7 +791,7 @@ export class ApprovalGate {
       // make the user approve a different substrate.
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: req.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:execution-plan-mismatch] ${req.id} ${formatApprovalAuditFields(request, boundExecutionPlan)} -> deny-once`,
       });
@@ -802,7 +874,7 @@ export class ApprovalGate {
       if (matchedPattern) {
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
-          sessionId: "approval-gate",
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
           output: `[approval:sensitive-path-blocked] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
         });
@@ -831,7 +903,7 @@ export class ApprovalGate {
     ) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:read-only-auto-approve] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} mode=${fullReq.mode ?? "default"} → allow-once`,
       });
@@ -846,7 +918,7 @@ export class ApprovalGate {
     if (this.webContents.isDestroyed()) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} — webContents already destroyed → deny-once`,
       });
@@ -859,7 +931,7 @@ export class ApprovalGate {
     // §S8 phase: requested
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
-      sessionId: "approval-gate",
+      sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
       type: "approval",
       // Emit provenance fields needed to distinguish a host tool ask from a
       // plugin-origin agent-action request during incident replay.
@@ -883,11 +955,13 @@ export class ApprovalGate {
 
     // Mint nonce + HMAC, attach to outgoing request (confused-deputy defense)
     const nonce = randomBytes(16).toString("hex");
-    const canonicalArgs = canonicalStringify(fullReq.args);
-    const signingInput = `${fullReq.id}|${nonce}|${fullReq.toolName}|${canonicalArgs}`;
-    const expectedHmac = createHmac("sha256", this.sessionKey)
-      .update(signingInput)
-      .digest("hex");
+    const expectedHmac = signApprovalRequest(this.sessionKey, {
+      id: fullReq.id,
+      nonce,
+      toolName: fullReq.toolName,
+      sessionId: fullReq.sessionId,
+      args: fullReq.args,
+    });
     const signedReq: ApprovalRequest = {
       ...fullReq,
       nonce,
@@ -901,7 +975,7 @@ export class ApprovalGate {
         // §S8 phase: timeout
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
-          sessionId: "approval-gate",
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
           output: `[approval:timeout] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} → deny-once`,
         });
@@ -918,6 +992,7 @@ export class ApprovalGate {
         reject,
         timer,
         trustOrigin: fullReq.trustOrigin ?? "unknown",
+        sessionId: fullReq.sessionId,
         toolName: fullReq.toolName,
         category: fullReq.category,
         kind: fullReq.kind,
@@ -965,7 +1040,7 @@ export class ApprovalGate {
       if (dlpHits.size > 0) {
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
-          sessionId: "approval-gate",
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
           output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} detections=${[...dlpHits].join(",")}`,
         });
@@ -979,7 +1054,7 @@ export class ApprovalGate {
         // §S8 phase: send-failed
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
-          sessionId: "approval-gate",
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
           output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
@@ -1013,7 +1088,7 @@ export class ApprovalGate {
       this.pending.delete(requestId);
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:nonce-mismatch] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
       });
@@ -1035,7 +1110,7 @@ export class ApprovalGate {
       this.pending.delete(requestId);
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:choice-not-allowed] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${decision.choice} allowed=${entry.allowedChoices.join(",")} → deny-once (forced)`,
       });
@@ -1074,7 +1149,7 @@ export class ApprovalGate {
     // §S8 phase: decided
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
-      sessionId: "approval-gate",
+      sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
       type: "approval",
       output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
     });
@@ -1101,7 +1176,7 @@ export class ApprovalGate {
     this.pending.delete(requestId);
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
-      sessionId: "approval-gate",
+      sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
       type: "approval",
       output: `[approval:cancelled] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} reason=${reason} → deny-once`,
     });
