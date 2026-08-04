@@ -75,6 +75,14 @@ export interface TelegramPollingIngressOptions {
   /** Terminal condition: the loop stops and the owner must act. */
   readonly onFatal: (code: TelegramPollingFatalCode) => void | Promise<void>;
   readonly onPaired?: (senderId: string) => void | Promise<void>;
+  /**
+   * Whether this sender is the already-paired owner. The shared core reports
+   * both a stranger and an unshared owner as `authorization-denied`, so this is
+   * the only way to tell them apart — and a stranger must never be answered.
+   */
+  readonly isPairedOwner?: (senderId: string) => boolean;
+  /** Best-effort, cooldown-gated host notice. Never carries conversation data. */
+  readonly notifyUnroutable?: (chatId: string) => void | Promise<void>;
   readonly log?: (message: string) => void;
   /** Test seam; production sleeps on a timer that the abort signal cancels. */
   readonly wait?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -221,7 +229,27 @@ async function handleUpdate(
   }
 
   const result = await options.gateway.handleWebhook({ rawBody: update.rawBody });
+  // The update is consumed either way. Without a notice the paired owner sees
+  // nothing at all, which reads as a dead bot rather than an idle surface.
+  if (result === "authorization-denied") {
+    await notifyIfPairedOwner(options, envelope.senderId);
+  }
   return ADVANCING_RESULTS.has(result) ? "advance" : "retry";
+}
+
+async function notifyIfPairedOwner(
+  options: TelegramPollingIngressOptions,
+  senderId: string,
+): Promise<void> {
+  if (options.isPairedOwner === undefined || options.notifyUnroutable === undefined) return;
+  try {
+    // Silence for anyone who is not the paired owner: answering a stranger
+    // would confirm that this bot is attached to a live desktop.
+    if (!options.isPairedOwner(senderId)) return;
+    await options.notifyUnroutable(senderId);
+  } catch {
+    options.log?.("[telegram-poll] control notice failed");
+  }
 }
 
 async function redeemPairing(
