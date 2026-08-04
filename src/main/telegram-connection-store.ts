@@ -3,8 +3,15 @@
  *
  * Telegram is an external cloud recipient, so this file is deliberately poor in
  * identity. It persists opaque digests and opaque ids only: the bot token, the
- * webhook secret, the bot handle, raw Telegram user/chat ids, raw conversation
- * ids, message text, and the raw pairing code are never written here.
+ * webhook secret, the bot handle, raw Telegram user/chat ids, message text, and
+ * the raw pairing code are never written here.
+ *
+ * The one plaintext exception is the host's own conversation id, which is local
+ * and never leaves this desktop. It is stored so the share survives a restart —
+ * the whole point of the feature is that the owner walked away — but it is a
+ * routing hint, never an authorization key. Every read re-derives its digest and
+ * discards the record unless the two agree, so editing the file by hand yields
+ * no approval rather than a re-pointed one.
  *
  * Pairing identifies one Telegram account and grants nothing on its own.
  * Sharing the open conversation is a separate, explicitly gestured owner action
@@ -24,6 +31,7 @@ import {
   TELEGRAM_PAIRING_CODE_TTL_MS,
   isTelegramConnectionErrorCode,
   isTelegramConnectionId,
+  isTelegramConversationId,
   type TelegramConnectionErrorCode,
 } from "../shared/telegram-connection.js";
 import {
@@ -103,7 +111,8 @@ export interface TelegramOwnerConnectionSnapshot {
   readonly activationEpoch: number;
   readonly botFingerprint: string | null;
   readonly pairing: TelegramOwnerPairingSummary | null;
-  readonly approvals: readonly TelegramOwnerApprovalSummary[];
+  /** The one shared conversation, or null when nothing is shared. */
+  readonly approval: TelegramOwnerApprovalSummary | null;
   readonly pendingCode: TelegramPendingCodeRecord | null;
   readonly lastErrorCode: TelegramConnectionErrorCode | null;
 }
@@ -113,6 +122,21 @@ export interface CreateTelegramConnectionStoreOptions {
   readonly fileName?: string;
   readonly now?: () => number;
   readonly randomUuid?: () => string;
+  /**
+   * Re-derive the digest a conversation's approval must be stored under.
+   *
+   * Required, and injected rather than imported: this store must not depend on
+   * the platform runtime's hashing, and a default would be a fallback path that
+   * silently decides authorization. Verifying the stored plaintext needs the
+   * derivation at READ time, which a store-and-compare-on-write design cannot
+   * do — nothing to compare a hand-edited file against — so the function itself
+   * has to be here.
+   *
+   * It takes the bot fingerprint rather than closing over one because an
+   * approval is bot-scoped and the store already holds the current fingerprint:
+   * a captured one would have to be rebuilt on every reconnect.
+   */
+  readonly conversationDigestFor: (botFingerprint: string, conversationId: string) => string;
 }
 
 interface CreateTelegramPendingCodeInput {
@@ -128,6 +152,13 @@ interface CompleteTelegramPairingInput {
 }
 
 interface CreateTelegramApprovalInput {
+  /** Local, never provider-visible. Persisted so the share survives a restart. */
+  readonly conversationId: string;
+  /**
+   * The caller's own derivation of the same conversation. Supplying both lets
+   * this store reject a grant whose two derivations disagree, which would
+   * otherwise be written once and be unresolvable forever after.
+   */
   readonly conversationDigest: string;
   readonly ttlMs?: number;
 }
@@ -173,6 +204,16 @@ export interface TelegramConnectionStore {
     actorDigest: string,
     conversationDigest: string,
   ): TelegramApprovalAuthority | null;
+  /**
+   * The conversation this actor's live share is bound to, in plaintext, or null.
+   *
+   * This is the durable binding: it answers the same after a restart, which is
+   * what stops the surface from following whichever conversation the owner
+   * happens to have open. It grants nothing — the caller still has to clear
+   * {@link TelegramConnectionStore.resolveActiveApproval} on the digest, which
+   * remains the sole authorization key.
+   */
+  resolveBoundConversation(actorDigest: string): string | null;
 }
 
 interface StoredPendingCode {
@@ -194,6 +235,8 @@ interface StoredApproval {
   readonly id: string;
   readonly pairingId: string;
   readonly pairingEpoch: number;
+  /** Tamper-evident routing hint; worthless unless it re-hashes to the digest. */
+  readonly conversationId: string;
   readonly conversationDigest: string;
   readonly scope: string;
   readonly state: "active" | "revoked" | "expired";
@@ -319,12 +362,15 @@ function validPairing(value: unknown): value is StoredPairing {
 function validApproval(value: unknown): value is StoredApproval {
   return record(value)
     && exactKeys(value, [
-      "id", "pairingId", "pairingEpoch", "conversationDigest", "scope",
+      "id", "pairingId", "pairingEpoch", "conversationId", "conversationDigest", "scope",
       "state", "epoch", "createdAt", "expiresAt",
     ])
     && isTelegramConnectionId(value.id)
     && isTelegramConnectionId(value.pairingId)
     && epochValue(value.pairingEpoch)
+    // Shape only. Whether this plaintext is the conversation the digest was
+    // granted for is decided per read, against the current bot identity.
+    && isTelegramConversationId(value.conversationId)
     && digest(value.conversationDigest)
     && isTelegramConnectionId(value.scope)
     && (value.state === "active" || value.state === "revoked" || value.state === "expired")
@@ -434,8 +480,20 @@ function prune(
   };
 }
 
-function liveApprovals(document: StoreDocument): readonly StoredApproval[] {
-  return document.approvals.filter((approval) => approval.state === "active");
+/**
+ * Which live grant is THE shared conversation, when a document somehow holds
+ * more than one. `createApproval` retires every other live grant, so state this
+ * store writes never produces a tie; a file written before that rule, or by
+ * hand, still has to resolve deterministically. The newest wins, and both the
+ * owner surface and `resolveBoundConversation` read it from here, so the screen
+ * and the phone can never name different conversations.
+ */
+function newestApproval(approvals: readonly StoredApproval[]): StoredApproval | null {
+  let newest: StoredApproval | null = null;
+  for (const approval of approvals) {
+    if (newest === null || approval.createdAt >= newest.createdAt) newest = approval;
+  }
+  return newest;
 }
 
 function authority(pairing: StoredPairing, approval: StoredApproval): TelegramApprovalAuthority {
@@ -494,17 +552,19 @@ function createMutex(): <T>(work: () => Promise<T>) => Promise<T> {
  * can resolve an approval synchronously.
  */
 export function createTelegramConnectionStore(
-  options: CreateTelegramConnectionStoreOptions = {},
+  options: CreateTelegramConnectionStoreOptions,
 ): TelegramConnectionStore {
   const namespace = options.namespace ?? openFeatureNamespace(TELEGRAM_BRIDGE_FEATURE);
   const fileName = options.fileName ?? DEFAULT_FILE_NAME;
   const clock = options.now ?? Date.now;
   const randomUuid = options.randomUuid ?? nodeRandomUuid;
+  const deriveConversationDigest = options.conversationDigestFor;
   const listeners = new Set<ChangeListener>();
   const runExclusive = createMutex();
   let document: StoreDocument | undefined;
 
   if (!FILE_NAME.test(fileName)) throw invalid();
+  if (typeof deriveConversationDigest !== "function") throw invalid();
 
   const checkedNow = (): number => {
     const value = clock();
@@ -525,6 +585,38 @@ export function createTelegramConnectionStore(
 
   /** Pruned view for reads. Reads never persist; the next mutation converges. */
   const currentView = (): StoreDocument => prune(requireDocument(), checkedNow()).document;
+
+  /** Null rather than a throw, so one bad derivation cannot break a read path. */
+  const conversationDigestOf = (
+    botFingerprint: string | null,
+    conversationId: string,
+  ): string | null => {
+    if (botFingerprint === null || !isTelegramConversationId(conversationId)) return null;
+    try {
+      const derived = deriveConversationDigest(botFingerprint, conversationId);
+      return digest(derived) ? derived : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Active AND self-consistent. Sole reader of `state === "active"`, so a record
+   * whose plaintext conversation id does not re-hash to its stored digest is not
+   * an approval anywhere: not to the egress fence, not to the owner surface, and
+   * not to the durable binding. Fail-closed on purpose — the digest is the
+   * authorization key, and a plaintext that disagrees with it is evidence the
+   * file was edited, not a hint worth following.
+   *
+   * The inconsistent record is left on disk untouched. Rewriting it here would
+   * turn a read into a write and destroy the only evidence of the edit.
+   */
+  const liveApprovals = (value: StoreDocument): readonly StoredApproval[] =>
+    value.approvals.filter((approval) => approval.state === "active"
+      && sameDigest(
+        conversationDigestOf(value.botFingerprint, approval.conversationId),
+        approval.conversationDigest,
+      ));
 
   const persist = async (value: StoreDocument): Promise<void> => {
     if (!validDocument(value)) throw invalid();
@@ -761,7 +853,11 @@ export function createTelegramConnectionStore(
   const createApproval = async (
     input: CreateTelegramApprovalInput,
   ): Promise<TelegramApprovalAuthority | null> => {
-    if (!record(input) || !digest(input.conversationDigest)) throw inputInvalid();
+    if (!record(input)
+      || !isTelegramConversationId(input.conversationId)
+      || !digest(input.conversationDigest)) {
+      throw inputInvalid();
+    }
     const ttlMs = input.ttlMs ?? DEFAULT_APPROVAL_TTL_MS;
     if (!validDuration(ttlMs, MAX_APPROVAL_TTL_MS)) throw inputInvalid();
     return await mutate((current, now) => {
@@ -769,10 +865,21 @@ export function createTelegramConnectionStore(
       if (pairing === null || pairing.state !== "active") {
         return { document: current, value: null, changed: false };
       }
-      // One live approval per conversation: a new grant supersedes the old one
-      // rather than stacking a second expiry the owner cannot see.
+      // The seam check. The caller derived the digest from its own injection; if
+      // that disagrees with this store's, the grant would be written and then be
+      // unresolvable forever, which is far harder to diagnose than a refusal.
+      if (!sameDigest(
+        conversationDigestOf(current.botFingerprint, input.conversationId),
+        input.conversationDigest,
+      )) {
+        throw inputInvalid();
+      }
+      // Exactly one live share at a time. The owner surface can express only one
+      // shared conversation, so a second live grant would be one the owner can
+      // neither see nor revoke — and "the phone talks to the conversation you
+      // shared" needs that conversation to be singular.
       const approvals = current.approvals.map((approval): StoredApproval => (
-        approval.state === "active" && sameDigest(approval.conversationDigest, input.conversationDigest)
+        approval.state === "active"
           ? { ...approval, state: "revoked", epoch: nextEpoch(approval.epoch) }
           : approval
       ));
@@ -781,6 +888,7 @@ export function createTelegramConnectionStore(
         id: nextUuid(),
         pairingId: pairing.id,
         pairingEpoch: pairing.epoch,
+        conversationId: input.conversationId,
         conversationDigest: input.conversationDigest,
         scope: nextUuid(),
         state: "active",
@@ -810,6 +918,21 @@ export function createTelegramConnectionStore(
     });
   };
 
+  /**
+   * The one gate on "is this actor allowed to be asking at all". Both the egress
+   * fence and the durable binding read it, so a paused or re-paired connection
+   * cannot answer one of them while denying the other.
+   */
+  const livePairingFor = (actorDigest: string, current: StoreDocument): StoredPairing | null => {
+    const pairing = current.pairing;
+    return current.desiredState !== "connected"
+      || pairing === null
+      || pairing.state !== "active"
+      || !sameDigest(pairing.actorDigest, actorDigest)
+      ? null
+      : pairing;
+  };
+
   const resolveActiveApproval = (
     actorDigest: string,
     conversationDigest: string,
@@ -817,15 +940,8 @@ export function createTelegramConnectionStore(
     try {
       if (!digest(actorDigest) || !digest(conversationDigest)) return null;
       const current = currentView();
-      const pairing = current.pairing;
-      if (
-        current.desiredState !== "connected"
-        || pairing === null
-        || pairing.state !== "active"
-        || !sameDigest(pairing.actorDigest, actorDigest)
-      ) {
-        return null;
-      }
+      const pairing = livePairingFor(actorDigest, current);
+      if (pairing === null) return null;
       // Only the conversation is matched here: prune() is the single authority
       // on liveness, so an approval that is still "active" in this view is
       // already known to be unexpired and bound to this pairing at this epoch.
@@ -840,9 +956,23 @@ export function createTelegramConnectionStore(
     }
   };
 
+  const resolveBoundConversation = (actorDigest: string): string | null => {
+    try {
+      if (!digest(actorDigest)) return null;
+      const current = currentView();
+      if (livePairingFor(actorDigest, current) === null) return null;
+      // liveApprovals() already rejected any record whose plaintext does not
+      // re-hash to its digest, so nothing hand-edited can be returned here.
+      return newestApproval(liveApprovals(current))?.conversationId ?? null;
+    } catch {
+      return null;
+    }
+  };
+
   const ownerSnapshot = (): TelegramOwnerConnectionSnapshot => {
     const current = currentView();
     const pairing = current.pairing;
+    const approval = newestApproval(liveApprovals(current));
     return Object.freeze({
       desiredState: current.desiredState,
       activationEpoch: current.activationEpoch,
@@ -853,11 +983,11 @@ export function createTelegramConnectionStore(
             id: pairing.id,
             accountFingerprint: pairing.actorDigest.slice(0, ACCOUNT_FINGERPRINT_CHARS),
           }),
-      approvals: Object.freeze(liveApprovals(current).map((approval) => Object.freeze({
+      approval: approval === null ? null : Object.freeze({
         id: approval.id,
         expiresAt: approval.expiresAt,
         conversationDigest: approval.conversationDigest,
-      }))),
+      }),
       pendingCode: current.pendingCode === null ? null : pendingCodeRecord(current.pendingCode),
       lastErrorCode: current.lastErrorCode,
     });
@@ -891,5 +1021,6 @@ export function createTelegramConnectionStore(
     createApproval,
     revokeApproval,
     resolveActiveApproval,
+    resolveBoundConversation,
   });
 }

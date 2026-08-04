@@ -71,11 +71,12 @@ and answering would confirm to a stranger that this bot is attached to a live
 desktop.
 
 The paired owner is a different case. When their message cannot be routed —
-because the conversation on the desktop is not shared — LVIS answers with a
-fixed host notice saying so. It carries no conversation material, goes only to
-the paired account, and is sent at most once every ten minutes per chat so a
-flood of unroutable messages cannot turn the bridge into a reply amplifier. A
-notice that fails to send is not retried; silence is preferable to a loop.
+because nothing is shared, or because the shared conversation is not the one
+open on the desktop — LVIS answers with a fixed host notice saying so. It
+carries no conversation material, goes only to the paired account, and is sent
+at most once every ten minutes per chat so a flood of unroutable messages cannot
+turn the bridge into a reply amplifier. A notice that fails to send is not
+retried; silence is preferable to a loop.
 
 This is deliberately a second, narrow egress path. The conversation delivery
 channel is fenced by the route guard, and that fence is precisely what is
@@ -89,11 +90,22 @@ A paired account still sees nothing. Sharing is a separate, explicitly
 gestured action that binds the conversation you have open, for a fixed
 duration.
 
-Because the host runs one active session, the shared conversation must be the
-one on screen. Opening a different conversation **pauses** the surface rather
-than following you into a conversation you never approved; returning to the
-shared one resumes it. Revoking the share, re-sharing under a new grant,
+That binding is durable and it is the whole point: your phone talks to the
+conversation you shared, not to whichever one you happen to have open. It
+survives closing the conversation and it survives restarting the app, and only
+one conversation is shared at a time — sharing another one replaces it, so
+there is never a grant you cannot see. LVIS stores that conversation's local
+identifier next to the opaque digest the share was granted under, and refuses
+the record unless the two still agree, so hand-editing the file yields no share
+rather than a re-pointed one. Revoking the share, re-sharing under a new grant,
 pausing, or disconnecting each invalidates the previous binding.
+
+Running a turn is a narrower question than being shared. Because the host runs
+one active session, replies run only while the shared conversation is the one on
+screen; open a different one and the desktop says so and answers Telegram with
+the host notice, without dropping the share. Opening the shared conversation
+again continues it. Running a shared conversation in the background is not
+something LVIS does today.
 
 ### What leaves this desktop
 

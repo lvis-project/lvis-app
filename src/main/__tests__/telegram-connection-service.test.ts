@@ -22,7 +22,7 @@ import {
   type TelegramConnectionStore,
 } from "../telegram-connection-store.js";
 import { mintTelegramPairingCode, telegramPairingCodeDigest } from "../telegram-pairing-code.js";
-import { namespaceAt } from "./telegram-connection-namespace.js";
+import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
 
 /** The service must mint codes the ingress-side authority can redeem. */
 function redeemableDigest(code: string): string {
@@ -51,11 +51,6 @@ afterEach(() => {
   directories = [];
 });
 
-
-function conversationDigestFor(conversationId: string): string {
-  return createHash("sha256").update("conversation", "utf8").update("\0", "utf8")
-    .update(conversationId, "utf8").digest("hex");
-}
 
 /** Records every store call so "never touches the store" is checkable. */
 function trackedStore(real: TelegramConnectionStore): {
@@ -135,6 +130,8 @@ interface Harness {
   readonly bot: ReturnType<typeof botApiFixture>;
   readonly bridge: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
   readonly conversation: { id: string };
+  /** The store's own bot identity, so a test can name a digest the way it does. */
+  digestOf(conversationId: string): string;
 }
 
 async function harness(
@@ -142,8 +139,18 @@ async function harness(
 ): Promise<Harness> {
   const directory = mkdtempSync(join(tmpdir(), "lvis-telegram-service-"));
   directories.push(directory);
-  const real = createTelegramConnectionStore({ namespace: namespaceAt(directory) });
+  const real = createTelegramConnectionStore({
+    namespace: namespaceAt(directory),
+    conversationDigestFor,
+  });
   await real.open();
+  // Mirrors main composition: the service resolves the bot from the store, so
+  // before a bot is verified there is no digest and no approval is possible.
+  const digestOf = (conversationId: string): string => {
+    const botFingerprint = real.botFingerprint();
+    if (botFingerprint === null) throw new Error("telegram-conversation-digest-unavailable");
+    return conversationDigestFor(botFingerprint, conversationId);
+  };
   const tracked = trackedStore(real);
   const secrets = secretsFixture(options.encrypted ?? true);
   const bot = botApiFixture();
@@ -154,11 +161,14 @@ async function harness(
     settingsService: secrets.service,
     bridgeControl: bridge,
     getCurrentConversationId: () => conversation.id,
-    conversationDigestFor,
+    conversationDigestFor: digestOf,
     envManaged: options.envManaged ?? false,
     createBotApiClient: bot.factory,
   });
-  return { service, store: real, directory, calls: tracked.calls, secrets, bot, bridge, conversation };
+  return {
+    service, store: real, directory, calls: tracked.calls,
+    secrets, bot, bridge, conversation, digestOf,
+  };
 }
 
 function snapshotOf(service: TelegramConnectionService): TelegramConnectionSnapshot {
@@ -344,11 +354,12 @@ describe("createTelegramConnectionService", () => {
     // A paired account sending a normal message resolves no authority.
     expect(h.store.resolveActiveApproval(
       ACTOR_DIGEST,
-      conversationDigestFor(CONVERSATION_ID),
+      h.digestOf(CONVERSATION_ID),
     )).toBeNull();
+    expect(h.store.resolveBoundConversation(ACTOR_DIGEST)).toBeNull();
   });
 
-  it("derives active only for the conversation on screen", async () => {
+  it("keeps the share active when the owner looks at another conversation", async () => {
     const h = await pairedHarness();
 
     expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
@@ -357,14 +368,54 @@ describe("createTelegramConnectionService", () => {
     expect(approved.approval?.matchesCurrentConversation).toBe(true);
     expect(h.store.resolveActiveApproval(
       ACTOR_DIGEST,
-      conversationDigestFor(CONVERSATION_ID),
+      h.digestOf(CONVERSATION_ID),
     )).not.toBeNull();
 
     h.conversation.id = OTHER_CONVERSATION_ID;
     const switched = snapshotOf(h.service);
-    expect(switched.state).toBe("paused-conversation-inactive");
+    // The share is durable: looking elsewhere is a property of the approval,
+    // not a state the connection falls into and has to be repaired from.
+    expect(switched.state).toBe("active");
     expect(switched.approval?.matchesCurrentConversation).toBe(false);
     expect(switched.approval?.id).toBe(approved.approval?.id);
+    // And it is still bound to the conversation that was actually shared.
+    expect(h.store.resolveBoundConversation(ACTOR_DIGEST)).toBe(CONVERSATION_ID);
+  });
+
+  it("shares the conversation on screen, replacing the previous share", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+    const first = snapshotOf(h.service).approval?.id;
+
+    h.conversation.id = OTHER_CONVERSATION_ID;
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+
+    const reshared = snapshotOf(h.service);
+    expect(reshared.state).toBe("active");
+    expect(reshared.approval?.matchesCurrentConversation).toBe(true);
+    expect(reshared.approval?.id).not.toBe(first);
+    expect(h.store.resolveBoundConversation(ACTOR_DIGEST)).toBe(OTHER_CONVERSATION_ID);
+    // The replaced grant is gone, not merely hidden behind the newer one.
+    expect(h.store.resolveActiveApproval(
+      ACTOR_DIGEST,
+      h.digestOf(CONVERSATION_ID),
+    )).toBeNull();
+  });
+
+  it("cannot report a conversation-inactive state the contract no longer has", () => {
+    const base = {
+      botUsername: null,
+      pairing: null,
+      approval: null,
+      pendingCode: null,
+      lastErrorCode: null,
+    };
+    // Retired with the durable binding: a producer that still emitted it would
+    // be rejected by the shared parser rather than reach a renderer.
+    expect(parseTelegramConnectionSnapshot({ ...base, state: "paused-conversation-inactive" }))
+      .toBeNull();
+    // Non-vacuous: the state that absorbed it parses through the same call.
+    expect(parseTelegramConnectionSnapshot({ ...base, state: "active" })).not.toBeNull();
   });
 
   it("never reports active while the owner has paused", async () => {
