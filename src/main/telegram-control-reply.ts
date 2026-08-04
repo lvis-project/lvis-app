@@ -26,10 +26,12 @@ import type { TelegramBotApiClient } from "./telegram-bot-api-client.js";
  * idle", which does not become more true by being repeated.
  */
 export const TELEGRAM_CONTROL_REPLY_COOLDOWN_MS = 10 * 60 * 1_000;
-/** Bounded so a stream of distinct chat ids cannot grow this map forever. */
-const MAX_TRACKED_CHATS = 64;
+/** Bounded so a stream of distinct chat/notice pairs cannot grow this forever. */
+const MAX_TRACKED_KEYS = 128;
 
-type TelegramControlNotice = "conversation-not-shared";
+export type TelegramControlNotice =
+  | "conversation-not-shared"
+  | "commands-not-supported";
 
 export interface TelegramControlReplySender {
   /**
@@ -62,16 +64,20 @@ export function createTelegramControlReplySender(
   return Object.freeze({
     async notify(chatId: string, notice: TelegramControlNotice): Promise<boolean> {
       const at = now();
-      const previous = lastSentAt.get(chatId);
+      // Keyed by notice as well as chat: "nothing is shared" and "commands are
+      // not supported" are different problems, and one must not silence the
+      // other for ten minutes.
+      const key = `${chatId}:${notice}`;
+      const previous = lastSentAt.get(key);
       if (previous !== undefined && at - previous < cooldownMs) return false;
 
       // Record before sending: a provider failure must still hold the cooldown,
       // or a persistently failing send would retry on every inbound message.
-      if (lastSentAt.size >= MAX_TRACKED_CHATS && !lastSentAt.has(chatId)) {
+      if (lastSentAt.size >= MAX_TRACKED_KEYS && !lastSentAt.has(key)) {
         const oldest = [...lastSentAt.entries()].sort((a, b) => a[1] - b[1])[0];
         if (oldest !== undefined) lastSentAt.delete(oldest[0]);
       }
-      lastSentAt.set(chatId, at);
+      lastSentAt.set(key, at);
 
       try {
         await options.client.sendMessage(chatId, noticeText(notice));
@@ -88,5 +94,7 @@ function noticeText(notice: TelegramControlNotice): string {
   switch (notice) {
     case "conversation-not-shared":
       return t("be_telegramBridge.conversationNotShared");
+    case "commands-not-supported":
+      return t("be_telegramBridge.commandsNotSupported");
   }
 }
