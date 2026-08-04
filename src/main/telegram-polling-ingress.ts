@@ -53,6 +53,48 @@ const ADVANCING_RESULTS: ReadonlySet<PlatformBridgeInboundResult> = new Set([
   "command-outcome-unknown",
 ]);
 
+/**
+ * Gateway outcomes decided before a verified envelope exists: the body could
+ * not be copied, was over the cap, failed verification, or did not normalize.
+ * Every one of them is also in {@link ADVANCING_RESULTS}, so reaching one means
+ * the update was consumed and nothing was done with it.
+ *
+ * `satisfies` rather than a bare literal list: these are members of the shared
+ * result union, and a rename there must break this file instead of silently
+ * leaving a category that can never match.
+ *
+ * `disabled` is deliberately absent. It is pre-envelope too, but it re-polls
+ * instead of advancing, so nothing is dropped and counting it would report a
+ * turned-off bridge as data loss.
+ */
+const PRE_ENVELOPE_GATEWAY_RESULTS = [
+  "invalid-request",
+  "request-too-large",
+  "verification-failed",
+  "invalid-envelope",
+] as const satisfies readonly PlatformBridgeInboundResult[];
+
+/**
+ * Why an update died before it could become an envelope. The vocabulary is
+ * fixed at compile time and carries no payload material: `unparsable-update`
+ * is a boolean fact about the adapter's return, and the rest are the shared
+ * core's own provider-safe admission outcomes.
+ */
+type PreEnvelopeDropReason =
+  | "unparsable-update"
+  | typeof PRE_ENVELOPE_GATEWAY_RESULTS[number];
+
+const PRE_ENVELOPE_GATEWAY_RESULT_SET: ReadonlySet<PlatformBridgeInboundResult> =
+  new Set(PRE_ENVELOPE_GATEWAY_RESULTS);
+
+function preEnvelopeGatewayReason(
+  result: PlatformBridgeInboundResult,
+): PreEnvelopeDropReason | undefined {
+  return PRE_ENVELOPE_GATEWAY_RESULT_SET.has(result)
+    ? result as PreEnvelopeDropReason
+    : undefined;
+}
+
 const RETRY_BACKOFF_MS = 2_000;
 const MAX_BACKOFF_MS = 60_000;
 const DEFAULT_RATE_LIMIT_BACKOFF_MS = 5_000;
@@ -136,6 +178,22 @@ async function run(
   signal: AbortSignal,
   wait: (ms: number, signal: AbortSignal) => Promise<void>,
 ): Promise<void> {
+  const drops = createPreEnvelopeDropCounter(options.log);
+  try {
+    await poll(options, signal, wait, drops);
+  } finally {
+    // Every exit is an activation ending — aborted, fatal, or thrown — and the
+    // final tally is the number an operator asks for after a bad session.
+    drops.finish();
+  }
+}
+
+async function poll(
+  options: TelegramPollingIngressOptions,
+  signal: AbortSignal,
+  wait: (ms: number, signal: AbortSignal) => Promise<void>,
+  drops: PreEnvelopeDropCounter,
+): Promise<void> {
   let offset = options.pollOffset();
   let backoffMs = 0;
 
@@ -176,7 +234,7 @@ async function run(
     // message as `streaming-active`.
     for (const update of result.value) {
       if (signal.aborted) return;
-      const disposition = await handleUpdate(options, update);
+      const disposition = await handleUpdate(options, update, drops);
       if (disposition === "retry") {
         backoffMs = RETRY_BACKOFF_MS;
         break;
@@ -212,15 +270,89 @@ async function seedOffset(
 
 type UpdateDisposition = "advance" | "retry";
 
+/**
+ * Runtime-only tally of updates consumed before an envelope existed.
+ *
+ * The gap it closes: those updates are the one class the merged notice path
+ * cannot reach. A notice needs a sender to answer, and these die before the
+ * host knows who sent them, so a schema change on Telegram's side turns every
+ * message into a silent no-op that looks exactly like a bot nobody is talking
+ * to. A counter distinguishes the two: zero means nothing arrived, climbing
+ * means updates are arriving and this host cannot read any of them.
+ *
+ * In memory and per activation by construction — the state is a closure created
+ * inside {@link run}, so it cannot be persisted, cannot enter the connection
+ * store, and has nothing to send to the renderer.
+ *
+ * Bounded output on purpose. Anyone who can message the bot can drive the
+ * count, so a line per drop would hand them the desktop log. Lines are emitted
+ * only when a reason is seen for the first time this activation, when the total
+ * crosses a power of ten, and once on exit — at most a dozen lines however many
+ * updates arrive.
+ */
+interface PreEnvelopeDropCounter {
+  record(reason: PreEnvelopeDropReason): void;
+  /** Final tally for an activation that ended between milestones. */
+  finish(): void;
+}
+
+function createPreEnvelopeDropCounter(
+  log: ((message: string) => void) | undefined,
+): PreEnvelopeDropCounter {
+  const counts = new Map<PreEnvelopeDropReason, number>();
+  let total = 0;
+  // The first drop of every reason already logs, so the first milestone that
+  // adds anything is ten.
+  let nextMilestone = 10;
+
+  const report = (prefix: string): void => {
+    const breakdown = [...counts]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([reason, count]) => `${reason}=${count}`)
+      .join(" ");
+    log?.(`[telegram-poll] ${prefix} total=${total} ${breakdown}`);
+  };
+
+  return {
+    record(reason: PreEnvelopeDropReason): void {
+      const seen = counts.get(reason);
+      counts.set(reason, (seen ?? 0) + 1);
+      total += 1;
+      if (seen === undefined) {
+        report("pre-envelope drop, first of this kind:");
+        return;
+      }
+      if (total >= nextMilestone) {
+        report("pre-envelope drops:");
+        nextMilestone *= 10;
+      }
+    },
+    finish(): void {
+      if (total === 0) return;
+      report("pre-envelope drops for this activation:");
+    },
+  };
+}
+
 async function handleUpdate(
   options: TelegramPollingIngressOptions,
   update: TelegramPolledUpdate,
+  drops: PreEnvelopeDropCounter,
 ): Promise<UpdateDisposition> {
   const envelope = parseTelegramTextUpdate(update.rawBody);
   // Anything that is not a private text message from a human — a channel post,
   // a membership change, an attachment — is permanently uninteresting. Not
   // advancing here would wedge the loop forever on the first such update.
-  if (envelope === undefined) return "advance";
+  //
+  // Counted anyway, and this is the bucket that matters: the adapter applies a
+  // strict key allow-list, so the day Telegram adds a field to `message` every
+  // real message lands here instead of in the routine sticker/channel-post
+  // trickle. The count is what separates those two, since the reason itself
+  // cannot — telling them apart would mean reading the payload.
+  if (envelope === undefined) {
+    drops.record("unparsable-update");
+    return "advance";
+  }
 
   if (looksLikeTelegramPairingCode(envelope.text)) {
     // Consumed and dropped whether or not it matches, so a near-miss
@@ -230,6 +362,13 @@ async function handleUpdate(
   }
 
   const result = await options.gateway.handleWebhook({ rawBody: update.rawBody });
+  // The shared core already draws the line this counter needs: everything in
+  // PRE_ENVELOPE_GATEWAY_RESULTS is returned before `normalizeVerifiedEnvelope`
+  // produces anything, and every later outcome had an envelope to refuse. The
+  // pairing branch above is not counted — that update is consumed on purpose,
+  // not lost.
+  const preEnvelope = preEnvelopeGatewayReason(result);
+  if (preEnvelope !== undefined) drops.record(preEnvelope);
   // The update is consumed either way. Without a notice the paired owner sees
   // nothing at all, which reads as a dead bot rather than an idle surface.
   //
