@@ -270,6 +270,10 @@ async function main() {
         if (digest === null) throw new Error("telegram-conversation-digest-unavailable");
         return digest;
       },
+      // The same source the conversation list is built from, so the owner is
+      // never told a share points at something they cannot see.
+      conversationExists: (conversationId: string) =>
+        services.memoryManager.hasSessionTranscript(conversationId),
       envManaged: telegramEnvManaged,
     });
   } catch (err) {
