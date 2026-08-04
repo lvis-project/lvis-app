@@ -51,6 +51,8 @@ const TELEGRAM_MAX_RAW_BODY_BYTES = 64 * 1024;
 const TELEGRAM_MAX_TEXT_CODE_POINTS = 4_096;
 /** The shared ingress core bounds UTF-16 units, so it needs the emoji-safe ceiling. */
 const TELEGRAM_MAX_TEXT_UTF16_UNITS = TELEGRAM_MAX_TEXT_CODE_POINTS * 2;
+/** Upper bound on how long a stop waits for already-queued safe deliveries. */
+const TELEGRAM_DELIVERY_DRAIN_TIMEOUT_MS = 2_000;
 
 export interface TelegramBridgeConfig {
   readonly port: number;
@@ -99,6 +101,8 @@ interface ActiveTelegramBridge {
   readonly runtime: TelegramPlatformRuntime;
   readonly delivery: PlatformBridgeDeliveryAdapter<TelegramDeliveryChannel>;
   readonly deliveryDestinations: Map<string, ActiveTelegramDeliveryDestination>;
+  /** Retained so a stop can drain open sends before the adapter is closed. */
+  readonly channels: Map<string, PlatformBridgeDeliveryChannel>;
 }
 
 let activeBridge: ActiveTelegramBridge | null = null;
@@ -107,7 +111,22 @@ let activeStartAttempt: number | null = null;
 let startAttemptSequence = 0;
 let stopPromise: Promise<void> | null = null;
 let lifecycleGeneration = 0;
-let stopped = false;
+/**
+ * Only app shutdown is terminal. An owner-initiated stop returns this module to
+ * a startable state so a later connect is a real reconnect rather than a silent
+ * permanent null.
+ */
+let shutdownRequested = false;
+let activationSequence = 0;
+
+/**
+ * Stable for the lifetime of this process, deliberately not per activation and
+ * deliberately not reset between activations. A receipt reserved before a
+ * disconnect is settled by the same owner after the reconnect; a per-gateway
+ * identity would leave that record `outcome-unknown` forever, and those records
+ * are never TTL-pruned, so they would accumulate against the receipt cap.
+ */
+const installationReceiptOwnerId = randomUUID();
 
 /**
  * Resolve the immutable launch configuration. Disabled is a zero-side-effect
@@ -172,12 +191,16 @@ async function startForBoot(
   if (config === null) return null;
 
   const deps = dependencies(options.dependencies);
+  // Consumed only past the disabled check, so a boot with the bridge off leaves
+  // the first real activation at epoch 1.
+  const activationEpoch = ++activationSequence;
   const runtime = await deps.createRuntime({
     allowedUserIds: config.allowedUserIds,
     botFingerprint: botFingerprint(config.botToken),
     getCurrentConversationId: options.getCurrentConversationId,
     getCurrentConversationEpoch: options.getCurrentConversationEpoch,
     routeEpoch: config.routeEpoch,
+    activationEpoch,
   });
   if (generation !== lifecycleGeneration) {
     runtime.dispose();
@@ -258,6 +281,7 @@ async function startForBoot(
     // PlatformBridgeInboundGateway uses UTF-16 code units; Telegram's verifier
     // separately enforces the stricter 4,096 Unicode-code-point contract.
     maxTextChars: TELEGRAM_MAX_TEXT_UTF16_UNITS,
+    receiptOwnerId: installationReceiptOwnerId,
   });
 
   let server: TelegramWebhookServer;
@@ -282,7 +306,7 @@ async function startForBoot(
     return null;
   }
 
-  activeBridge = { server, runtime, delivery, deliveryDestinations };
+  activeBridge = { server, runtime, delivery, deliveryDestinations, channels };
   options.log?.(
     "[telegram-bridge] loopback listener ready on 127.0.0.1:"
       + server.port
@@ -291,14 +315,17 @@ async function startForBoot(
   return Object.freeze({ port: server.port });
 }
 
-/** Idempotently start the explicitly configured Telegram bridge for this boot. */
+/** Idempotently start the explicitly configured Telegram bridge activation. */
 export async function maybeStartTelegramBridgeServer(
   options: StartTelegramBridgeServerOptions,
 ): Promise<TelegramBridgeServer | null> {
-  if (stopped) return null;
+  if (shutdownRequested) return null;
   if (stopPromise) {
+    // Wait for the owner's disconnect to finish, then start a real reconnect.
+    // Returning null here would silently swallow a connect issued in the same
+    // tick as the preceding disconnect.
     await stopPromise;
-    return null;
+    if (shutdownRequested) return null;
   }
   if (activeBridge) return Object.freeze({ port: activeBridge.server.port });
   if (startPromise) return await startPromise;
@@ -317,8 +344,7 @@ export async function maybeStartTelegramBridgeServer(
   }
 }
 
-async function stopForShutdown(): Promise<void> {
-  stopped = true;
+async function stopActivation(): Promise<void> {
   lifecycleGeneration += 1;
   const pending = startPromise;
   const current = takeActiveBridge();
@@ -339,14 +365,47 @@ async function closeBridge(bridge: ActiveTelegramBridge): Promise<void> {
   // cannot reserve a new command or publish a queued provider send afterwards.
   bridge.deliveryDestinations.clear();
   bridge.runtime.dispose();
+  // Drain before closing, not after: waitForIdle resolves immediately once a
+  // channel is closed, so the order decides whether this waits at all. The
+  // bound exists because an already-dispatched Bot API request owns its own
+  // timeout and cannot be recalled.
+  await drainOpenChannels(bridge.channels);
   bridge.delivery.close();
   await bridge.server.close();
 }
 
-/** Close Telegram ingress and egress before the shared host runtime is disposed. */
-export function stopTelegramBridgeServer(): Promise<void> {
+async function drainOpenChannels(
+  channels: ReadonlyMap<string, PlatformBridgeDeliveryChannel>,
+): Promise<void> {
+  const open = [...channels.values()].filter((channel) => !channel.state().closed);
+  if (open.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, TELEGRAM_DELIVERY_DRAIN_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([
+      Promise.all(open.map((channel) => channel.waitForIdle())),
+      deadline,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * Close Telegram ingress and egress. `"shutdown"` is terminal for the process;
+ * `"user"` leaves this module startable so the owner can reconnect.
+ */
+export function stopTelegramBridgeServer(
+  reason: "shutdown" | "user" = "shutdown",
+): Promise<void> {
+  // Latch synchronously at the entry point: a shutdown arriving while an
+  // owner-initiated stop is already in flight must still be terminal.
+  if (reason === "shutdown") shutdownRequested = true;
   if (stopPromise) return stopPromise;
-  const pending = stopForShutdown();
+  const pending = stopActivation();
   const tracked = pending.finally(() => {
     if (stopPromise === tracked) stopPromise = null;
   });
@@ -363,7 +422,8 @@ export function resetTelegramBridgeServerForTests(): void {
     throw new Error("telegram-bridge-test-reset-while-active");
   }
   lifecycleGeneration += 1;
-  stopped = false;
+  activationSequence = 0;
+  shutdownRequested = false;
 }
 
 function createTelegramBridgeReceiptStore(): TailnetControllerReceiptStore {

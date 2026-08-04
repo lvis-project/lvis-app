@@ -75,6 +75,7 @@ function createFixture(options: Readonly<{
   maxInboundRequestsPerWindow?: number;
   inboundRequestWindowMs?: number;
   maxTrackedInboundAuthorizedPairs?: number;
+  receiptOwnerId?: string;
   now?: () => number;
 }> = {}) {
   const directory = mkdtempSync(join(tmpdir(), "lvis-platform-bridge-inbound-"));
@@ -103,6 +104,7 @@ function createFixture(options: Readonly<{
     ...(options.maxTrackedInboundAuthorizedPairs === undefined
       ? {}
       : { maxTrackedInboundAuthorizedPairs: options.maxTrackedInboundAuthorizedPairs }),
+    ...(options.receiptOwnerId === undefined ? {} : { receiptOwnerId: options.receiptOwnerId }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   return { gateway, verify, authorize, submit, receiptStore, filePath };
@@ -350,6 +352,16 @@ describe("PlatformBridgeInboundGateway", () => {
     expect(() => createFixture({ now: "not-a-clock" as never })).toThrow(
       "platform-bridge-inbound-now-invalid",
     );
+  });
+
+  it("accepts only a well-formed host-minted receipt owner id", () => {
+    for (const receiptOwnerId of ["", "not-a-uuid", "1e7d0f3a-0000-4000-8000-00000000a00", 42 as never]) {
+      expect(() => createFixture({ receiptOwnerId })).toThrow(
+        "platform-bridge-inbound-receipt-owner-invalid",
+      );
+    }
+    expect(() => createFixture({ receiptOwnerId: "1e7d0f3a-0000-4000-8000-00000000a001" })).not.toThrow();
+    expect(() => createFixture({})).not.toThrow();
   });
 
   it("normalizes an admission throw as replay-unsafe and never exposes failure detail", async () => {
