@@ -445,6 +445,14 @@ export function createTelegramPairedPlatformRuntime(
    * shared conversation is closed is still refused here, and the owner is told
    * so by the control notice; running it in a conversation nobody is watching
    * is a separate decision with its own approval story.
+   *
+   * That third condition is the ONLY place "one conversation at a time" is
+   * enforced. The store does not enforce it and cannot: it holds up to 32
+   * grants and `createApproval` merely retires the previous live one, so a
+   * document written before that rule, or by hand, can hold several. Reading
+   * the store's shape and concluding the limit lives there is the mistake this
+   * paragraph exists to prevent — delete the line below and every stored grant
+   * becomes independently runnable from a phone, with no other check left.
    */
   const isRouteCurrent = (route: TelegramPlatformRoute): boolean => {
     if (disposed || routesByChatId.get(route.chatId) !== route) return false;

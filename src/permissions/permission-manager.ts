@@ -1148,6 +1148,18 @@ export class PermissionManager {
     // declared read — is an exact local one-shot decision: third-party tool
     // declarations are not a sufficient authority boundary for remote control.
     // Deferred and capability-expanding operations are not part of this P1.
+    //
+    // Running ABOVE the remembered-permission layers is the whole design, and
+    // the concrete failure it refuses has a name. AionUi's channel integration
+    // routes a remote message into the assistant and lets that turn inherit the
+    // owner's last local permission selection — including a mode their own copy
+    // documents as equivalent to `--dangerously-skip-permissions`. A click the
+    // owner made while sitting at the desk, for a tool they were watching, then
+    // silently covers a turn a message from elsewhere started. Placing this
+    // branch below any remembered decision reproduces exactly that, which is
+    // why "let a remote turn reuse the approval the owner already gave" is not
+    // a shortcut available to a later unattended mode: the remembering is the
+    // vulnerability, not the prompting.
     if (context.remoteControllerAuthority !== undefined) {
       if (resolvedCategory === "meta") {
         // Meta tools can create or continue child/agent execution outside the
