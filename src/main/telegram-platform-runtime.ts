@@ -82,6 +82,13 @@ export interface CreateTelegramPlatformRuntimeOptions {
   readonly encryption?: SafeStorageLike;
   /** Owner-configured route generation; changing it fences prior deliveries. */
   readonly routeEpoch?: number;
+  /**
+   * Host-minted generation for this activation of the bridge. It exists so a
+   * disconnect/reconnect with unchanged owner configuration cannot reproduce a
+   * byte-identical binding, which would let a binding captured before the
+   * disconnect satisfy the guard afterwards.
+   */
+  readonly activationEpoch: number;
 }
 
 /**
@@ -133,7 +140,11 @@ export function createTelegramPlatformRuntime(
   const routes = validated.allowedUserIds.map((chatId) => {
     const bridgeBinding = Object.freeze({
       bridgeId,
-      bridgeEpoch: 1,
+      bridgeEpoch: validated.activationEpoch,
+      // routeId deliberately excludes the activation epoch: it names *which*
+      // owner route this is, and the delivery layer keys open channels on it.
+      // sameBinding() compares bridgeEpoch, so a binding minted by an earlier
+      // activation already fails the guard without destabilizing that key.
       routeId: deterministicUuid(actorSecret, "route", [
         validated.botFingerprint,
         chatId,
@@ -145,6 +156,7 @@ export function createTelegramPlatformRuntime(
         chatId,
         conversationDigest,
         String(validated.routeEpoch),
+        String(validated.activationEpoch),
       ]),
     } satisfies PlatformBridgeBinding);
     const route = Object.freeze({
@@ -229,6 +241,7 @@ function validateOptions(
   secretStore: SecretStore | undefined;
   encryption: SafeStorageLike | undefined;
   routeEpoch: number;
+  activationEpoch: number;
 }> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("telegram-platform-runtime-invalid");
@@ -254,7 +267,7 @@ function validateOptions(
       allowedUserIds.push(userId);
     }
     const routeEpoch = value.routeEpoch ?? 1;
-    if (!positiveInteger(routeEpoch)) {
+    if (!positiveInteger(routeEpoch) || !positiveInteger(value.activationEpoch)) {
       throw new Error("telegram-platform-runtime-invalid");
     }
     return Object.freeze({
@@ -265,6 +278,7 @@ function validateOptions(
       secretStore: value.secretStore,
       encryption: value.encryption,
       routeEpoch,
+      activationEpoch: value.activationEpoch,
     });
   } catch (error) {
     if (error instanceof Error && error.message === "telegram-platform-runtime-invalid") {

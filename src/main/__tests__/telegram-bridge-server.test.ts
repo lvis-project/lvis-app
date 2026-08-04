@@ -1,7 +1,13 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTailnetControllerReceiptStore } from "../../api/tailnet-controller-receipt-store.js";
 import type { ConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
+import type { SharedConversationProjectionStore } from "../../engine/shared-conversation-projection.js";
+import type { PlatformBridgeBinding } from "../../shared/chat-origin.js";
 import type { ConversationCommandPort } from "../conversation-command-port.js";
-import type { TelegramPlatformRuntime } from "../telegram-platform-runtime.js";
+import type { TelegramPlatformRoute, TelegramPlatformRuntime } from "../telegram-platform-runtime.js";
 import {
   DEFAULT_TELEGRAM_BRIDGE_PORT,
   DEFAULT_TELEGRAM_WEBHOOK_PATH,
@@ -13,6 +19,72 @@ import {
 
 const BOT_TOKEN = "123456789:abcdefghijklmnopqrstuvwxyz_ABCDEF";
 const WEBHOOK_SECRET = "a".repeat(43);
+const OWNER_CHAT_ID = "123456789";
+const BOUND_CONVERSATION = "active-conversation";
+
+type WebhookGateway = { handleWebhook(input: unknown): Promise<string> };
+
+function webhookBody(updateId: number, text = "hello from Telegram"): Uint8Array {
+  return Buffer.from(JSON.stringify({
+    update_id: updateId,
+    message: {
+      message_id: updateId + 1,
+      date: 1_700_000_000,
+      from: { id: Number(OWNER_CHAT_ID), is_bot: false },
+      chat: { id: Number(OWNER_CHAT_ID), type: "private" },
+      text,
+    },
+  }), "utf8");
+}
+
+function startedGateway(startServer: { mock: { calls: unknown[][] } }): WebhookGateway {
+  const calls = startServer.mock.calls;
+  const [first] = calls[calls.length - 1] ?? [];
+  return (first as { gateway: WebhookGateway }).gateway;
+}
+
+function pairedRoute(): TelegramPlatformRoute {
+  const binding: PlatformBridgeBinding = Object.freeze({
+    bridgeId: "1e7d0f3a-0000-4000-8000-00000000a001",
+    bridgeEpoch: 1,
+    routeId: "1e7d0f3a-0000-4000-8000-00000000a002",
+    routeEpoch: 1,
+    scope: "1e7d0f3a-0000-4000-8000-00000000a003",
+  });
+  return Object.freeze({
+    chatId: OWNER_CHAT_ID,
+    conversationId: BOUND_CONVERSATION,
+    actorDigest: "c".repeat(64),
+    binding,
+    bridgeBinding: binding,
+  });
+}
+
+/** Minimal safe-projection stand-in: only snapshot/subscribe are ever called. */
+function projectionStore(): SharedConversationProjectionStore {
+  return {
+    snapshot: (conversationId: string) => ({
+      version: 1,
+      conversationId,
+      cursor: 1,
+      updatedAt: null,
+      busy: false,
+      awaitingLocalApproval: false,
+      assistantText: "safe assistant text",
+    }),
+    subscribe: () => ({
+      replay: {
+        conversationId: BOUND_CONVERSATION,
+        afterCursor: 1,
+        oldestRetainedCursor: null,
+        latestCursor: 1,
+        snapshotRequired: false,
+        events: [],
+      },
+      unsubscribe: () => {},
+    }),
+  } as unknown as SharedConversationProjectionStore;
+}
 
 function runtime(): ConversationSurfaceRuntime {
   return {
@@ -75,9 +147,61 @@ function fixture() {
   };
 }
 
+/**
+ * A fixture whose runtime admits the owner DM, so a webhook actually reaches
+ * authorization, opens a safe delivery channel, and reserves a durable receipt.
+ * `fixture()` deliberately authorizes nothing, which is the wrong shape for the
+ * reconnect and drain invariants.
+ */
+function pairedFixture(overrides: {
+  readonly receiptStore?: unknown;
+  readonly submit?: () => Promise<unknown>;
+} = {}) {
+  const route = pairedRoute();
+  const dispose = vi.fn();
+  const bridgeRuntime = {
+    authorize: vi.fn(() => ({
+      actorDigest: route.actorDigest,
+      conversationDigest: "d".repeat(64),
+      bridgeBinding: route.binding,
+      bridgeGuard: { isCurrent: () => true },
+    })),
+    routes: [route],
+    routeForEnvelope: vi.fn(() => route),
+    isRouteCurrent: vi.fn(() => true),
+    dispose,
+  } as unknown as TelegramPlatformRuntime;
+  const close = vi.fn(async (): Promise<void> => {});
+  const startServer = vi.fn(async (input: { port: number }) => ({ port: input.port, close }));
+  const submit = vi.fn(overrides.submit ?? (async () => ({ ok: true })));
+  return {
+    route,
+    dispose,
+    close,
+    startServer,
+    submit,
+    input: {
+      conversationSurfaceRuntime: {
+        sharedProjection: projectionStore(),
+        activity: { isBusy: () => false },
+      } as unknown as ConversationSurfaceRuntime,
+      conversationCommandPort: { submit } as unknown as ConversationCommandPort,
+      getCurrentConversationId: () => BOUND_CONVERSATION,
+      getCurrentConversationEpoch: () => 0,
+      env: configuredEnv(),
+      ...(overrides.receiptStore === undefined ? {} : { receiptStore: overrides.receiptStore as never }),
+      dependencies: {
+        createRuntime: vi.fn(() => bridgeRuntime) as never,
+        startServer: startServer as never,
+      },
+    },
+  };
+}
+
 afterEach(async () => {
   await stopTelegramBridgeServer();
   resetTelegramBridgeServerForTests();
+  vi.unstubAllGlobals();
 });
 
 describe("Telegram bridge lifecycle", () => {
@@ -195,5 +319,118 @@ describe("Telegram bridge lifecycle", () => {
     await stopping;
     expect(f.dispose).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("restarts after an owner disconnect but stays closed after app shutdown", async () => {
+    const f = fixture();
+    await expect(maybeStartTelegramBridgeServer(f.input)).resolves.toEqual({
+      port: DEFAULT_TELEGRAM_BRIDGE_PORT,
+    });
+
+    // An owner-initiated stop is not the end of the process. Reaching a second
+    // listener without the test-only reset is the whole point.
+    await stopTelegramBridgeServer("user");
+    await expect(maybeStartTelegramBridgeServer(f.input)).resolves.toEqual({
+      port: DEFAULT_TELEGRAM_BRIDGE_PORT,
+    });
+    expect(f.startServer).toHaveBeenCalledTimes(2);
+
+    // Same fixture, different reason: shutdown must still be terminal, so this
+    // assertion cannot pass merely because every stop became non-terminal.
+    await stopTelegramBridgeServer("shutdown");
+    await expect(maybeStartTelegramBridgeServer(f.input)).resolves.toBeNull();
+    expect(f.startServer).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts a reconnect issued in the same tick as the disconnect", async () => {
+    const f = fixture();
+    await maybeStartTelegramBridgeServer(f.input);
+
+    const stopping = stopTelegramBridgeServer("user");
+    const restarting = maybeStartTelegramBridgeServer(f.input);
+    await stopping;
+
+    await expect(restarting).resolves.toEqual({ port: DEFAULT_TELEGRAM_BRIDGE_PORT });
+    expect(f.startServer).toHaveBeenCalledTimes(2);
+  });
+
+  it("mints a fresh activation epoch for each connect", async () => {
+    const f = fixture();
+    await maybeStartTelegramBridgeServer(f.input);
+    await stopTelegramBridgeServer("user");
+    await maybeStartTelegramBridgeServer(f.input);
+
+    const epochs = (f.createRuntime.mock.calls as unknown as { activationEpoch: number }[][])
+      .map((call) => call[0]?.activationEpoch);
+    expect(epochs).toEqual([1, 2]);
+  });
+
+  it("settles a receipt reserved before a reconnect instead of stranding it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-telegram-receipts-"));
+    const receiptStore = createTailnetControllerReceiptStore({
+      filePath: join(dir, "command-receipts.json"),
+    });
+    try {
+      // The first activation reserves and never completes its turn, so the
+      // record is still `reserved` when the owner disconnects.
+      const first = pairedFixture({ receiptStore, submit: () => new Promise(() => {}) });
+      await maybeStartTelegramBridgeServer(first.input);
+      void startedGateway(first.startServer).handleWebhook({
+        rawBody: webhookBody(4_242),
+        headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      });
+      await vi.waitFor(() => expect(first.submit).toHaveBeenCalled());
+      await stopTelegramBridgeServer("user");
+
+      const second = pairedFixture({ receiptStore });
+      await maybeStartTelegramBridgeServer(second.input);
+      const replay = await startedGateway(second.startServer).handleWebhook({
+        rawBody: webhookBody(4_242),
+        headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      });
+
+      // A per-gateway owner id makes this "command-outcome-unknown" forever,
+      // and such records are deliberately never TTL-pruned.
+      expect(replay).toBe("duplicate");
+      expect(second.submit).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drains an in-flight safe delivery before closing the adapter", async () => {
+    let releaseSend: (() => void) | undefined;
+    const sent = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      sent();
+      await new Promise<void>((resolve) => {
+        releaseSend = resolve;
+      });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+
+    const f = pairedFixture();
+    await maybeStartTelegramBridgeServer(f.input);
+    void startedGateway(f.startServer).handleWebhook({
+      rawBody: webhookBody(9_100),
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+    });
+    await vi.waitFor(() => expect(sent).toHaveBeenCalled());
+
+    const stopping = stopTelegramBridgeServer("user");
+    const settled = await Promise.race([
+      stopping.then(() => "stopped" as const),
+      new Promise<"pending">((resolve) => { setTimeout(() => resolve("pending"), 60); }),
+    ]);
+    // Draining after `delivery.close()` would make waitForIdle a no-op and this
+    // would already read "stopped".
+    expect(settled).toBe("pending");
+
+    releaseSend?.();
+    await stopping;
+    expect(f.close).toHaveBeenCalledOnce();
   });
 });
