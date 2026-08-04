@@ -1214,6 +1214,11 @@ export async function authorizeToolInvocation(
             : {
                 remoteControllerAuthority:
                   invocationPermissionContext.remoteControllerAuthority,
+                // Every path, not the one below. `target.filePath` is the first
+                // extracted path and exists to be displayed; a scope check that
+                // read it would bind `move_file`'s source and let its
+                // destination go anywhere.
+                scopeTargetFilePaths: targetFilePaths,
               }),
           reviewerVerdict: permissionResult.reviewer?.verdict,
           ...(approvalPurpose ? { approvalPurpose } : {}),
