@@ -164,6 +164,30 @@ export function isRemoteControllerAuthorityCurrent(
     return false;
   }
 }
+
+/**
+ * Which remote controller stands behind a turn, as recorded by host-owned
+ * state. Derived from the authority union rather than re-declared, so a new
+ * controller kind cannot enter the system with no marker of its own.
+ */
+export type RemoteControllerOrigin = RemoteControllerAuthority["kind"];
+
+/**
+ * Project an admitted authority onto the marker a host record carries.
+ *
+ * The single authority for that value. A host record must never re-derive "this
+ * came from a remote turn" from a localizable free-text reason, from a renderer
+ * payload, or from a second copy of the authority's shape: the authority object
+ * is minted by the conversation command port and is the only non-forgeable
+ * evidence that a remote controller is behind the turn. `undefined` in means
+ * `undefined` out — a turn with no admitted controller is not remote, and there
+ * is no other value that could mean it.
+ */
+export function remoteControllerOriginOf(
+  authority: RemoteControllerAuthority | undefined,
+): RemoteControllerOrigin | undefined {
+  return authority?.kind;
+}
 /**
  * The origins whose text arrives inside a provenance envelope. Named so the
  * staged-origin registry can be a TOTAL `Record` over them: every lookup by a

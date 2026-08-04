@@ -8,6 +8,7 @@ import {
   consumeHostApprovedOneShotExecutionBinding,
   isHostApprovalRejectedDecision,
   isHostApprovalTimeoutDecision,
+  remoteControllerOriginAuditToken,
   signApprovalRequest,
   UNATTRIBUTED_APPROVAL_SESSION_ID,
 } from "../approval-gate.js";
@@ -16,6 +17,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   ApprovalRequestInput,
+  ApprovalSignatureFields,
 } from "../approval-gate.js";
 import type { RationaleApprovalDisplay } from "../../shared/rationale-approval-display.js";
 import type { HostShellExecutionPermitBinding } from "../host-shell-execution-permit.js";
@@ -104,6 +106,30 @@ function lastSentNonceHmac(wc: ReturnType<typeof makeMockWebContents>): {
   const calls = wc.send.mock.calls;
   const last = calls[calls.length - 1] as [string, ApprovalRequest];
   return { nonce: last[1].nonce as string, hmac: last[1].hmac as string };
+}
+
+/** The text of every audit row a gate wrote, in order. */
+function auditRowTexts(auditLogger: { log: ReturnType<typeof vi.fn> }): string[] {
+  return auditLogger.log.mock.calls.map(([entry]) => {
+    const row = entry as { input?: string; output?: string };
+    return row.input ?? row.output ?? "";
+  });
+}
+
+function makeAuditingGate(): {
+  wc: ReturnType<typeof makeMockWebContents>;
+  auditLogger: { log: ReturnType<typeof vi.fn> };
+  gate: ApprovalGate;
+} {
+  const wc = makeMockWebContents();
+  const auditLogger = { log: vi.fn() };
+  const gate = new ApprovalGate(
+    wc as never,
+    undefined,
+    1_000,
+    auditLogger as never,
+  );
+  return { wc, auditLogger, gate };
 }
 
 // ─── Tests ───────────────────────────────────────────
@@ -2023,34 +2049,9 @@ describe("ApprovalGate", () => {
   // answerers: the field is present with a real value on the row that records
   // an answer, absent everywhere else, host-derived, and closed.
   describe("approval answerer", () => {
-    function auditRowTexts(auditLogger: {
-      log: ReturnType<typeof vi.fn>;
-    }): string[] {
-      return auditLogger.log.mock.calls.map(([entry]) => {
-        const row = entry as { input?: string; output?: string };
-        return row.input ?? row.output ?? "";
-      });
-    }
-
     /** Read the row's answerer, so a test asserts its value and not merely that the word appears. */
     function answererOf(row: string): string | undefined {
       return /(?:^| )answeredBy=(\S+)/.exec(row)?.[1];
-    }
-
-    function makeAuditingGate(): {
-      wc: ReturnType<typeof makeMockWebContents>;
-      auditLogger: { log: ReturnType<typeof vi.fn> };
-      gate: ApprovalGate;
-    } {
-      const wc = makeMockWebContents();
-      const auditLogger = { log: vi.fn() };
-      const gate = new ApprovalGate(
-        wc as never,
-        undefined,
-        1_000,
-        auditLogger as never,
-      );
-      return { wc, auditLogger, gate };
     }
 
     it("records the desk as the answerer on the decided row", async () => {
@@ -2161,6 +2162,221 @@ describe("ApprovalGate", () => {
         "unrecognized-answerer",
       );
       expect(approvalAnswererAuditToken("desk")).toBe("desk");
+    });
+  });
+
+  // ── Remote-controller origin ──────────────────────────
+  //
+  // The marker answers "was a remote controller's turn blocked on this
+  // approval?" It is a fact the host wrote down, not one a later reader
+  // reconstructs from the reason text, and not one the renderer is asked for or
+  // told. Every assertion below is about that: the value the host set, on the
+  // rows that outlive the request, and nowhere the renderer can see.
+  describe("remote-controller origin", () => {
+    function originOf(row: string): string | undefined {
+      return /(?:^| )remoteControllerOrigin=(\S+)/.exec(row)?.[1];
+    }
+
+    function rowsFor(
+      auditLogger: { log: ReturnType<typeof vi.fn> },
+      id: string,
+    ): string[] {
+      return auditRowTexts(auditLogger).filter((row) => row.includes(id));
+    }
+
+    it("names the controller on every row a remote turn produces", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+
+      const promise = gate.requestAndWait(
+        makeRequest({
+          id: "origin-tailnet",
+          remoteControllerOrigin: "tailnet-controller",
+        }),
+      );
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve("origin-tailnet", {
+        requestId: "origin-tailnet",
+        choice: "allow-once",
+        nonce,
+        hmac,
+      });
+      await expect(promise).resolves.toMatchObject({ choice: "allow-once" });
+
+      const rows = rowsFor(auditLogger, "origin-tailnet");
+      expect(rows.map((row) => row.split(" ")[0])).toEqual([
+        "[approval:requested]",
+        "[approval:decided]",
+      ]);
+      // The decided row is written from the pending entry after the request
+      // object is gone, so this pins that the entry kept the marker too.
+      expect(rows.map(originOf)).toEqual([
+        "tailnet-controller",
+        "tailnet-controller",
+      ]);
+    });
+
+    it("distinguishes the controllers instead of marking every remote turn alike", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+
+      const promise = gate.requestAndWait(
+        makeRequest({
+          id: "origin-bridge",
+          remoteControllerOrigin: "platform-bridge",
+        }),
+      );
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve("origin-bridge", {
+        requestId: "origin-bridge",
+        choice: "deny-once",
+        nonce,
+        hmac,
+      });
+      await promise;
+
+      expect(rowsFor(auditLogger, "origin-bridge").map(originOf)).toEqual([
+        "platform-bridge",
+        "platform-bridge",
+      ]);
+    });
+
+    it("states positively that no controller is behind an ordinary approval", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+
+      const promise = gate.requestAndWait(makeRequest({ id: "origin-desk" }));
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve("origin-desk", {
+        requestId: "origin-desk",
+        choice: "allow-once",
+        nonce,
+        hmac,
+      });
+      await promise;
+
+      // Not an absent key: a reviewer partitioning rows by origin would have to
+      // guess whether an absence meant "the desk asked" or "this row's writer
+      // never carried the marker".
+      expect(rowsFor(auditLogger, "origin-desk").map(originOf)).toEqual([
+        "none",
+        "none",
+      ]);
+    });
+
+    it("still names the controller when the host resolved the request itself", async () => {
+      vi.useFakeTimers();
+      try {
+        const { auditLogger, gate } = makeAuditingGate();
+
+        const promise = gate.requestAndWait(
+          makeRequest({
+            id: "origin-timeout",
+            remoteControllerOrigin: "tailnet-controller",
+          }),
+        );
+        vi.advanceTimersByTime(1_001);
+        await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
+
+        const timeout = rowsFor(auditLogger, "origin-timeout").find((row) =>
+          row.startsWith("[approval:timeout]"),
+        );
+        expect(timeout).toBeDefined();
+        // Unlike `answeredBy`, which is absent here because nobody answered,
+        // the origin is still true of the request and is exactly what a review
+        // of an unanswered remote turn is looking for.
+        expect(originOf(timeout as string)).toBe("tailnet-controller");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("names the controller on a request the host refused before the renderer saw it", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+
+      await expect(
+        gate.requestAndWait(
+          makeRequest({
+            id: "origin-blocked",
+            remoteControllerOrigin: "platform-bridge",
+            target: { filePath: "/home/u/.ssh/id_rsa" },
+          }),
+        ),
+      ).resolves.toMatchObject({ choice: "deny-once" });
+
+      expect(wc.send).not.toHaveBeenCalled();
+      const blocked = rowsFor(auditLogger, "origin-blocked").find((row) =>
+        row.startsWith("[approval:sensitive-path-blocked]"),
+      );
+      // The hard-block resolves before a nonce is minted, so this row is the
+      // only record that a bridged turn tried it at all.
+      expect(originOf(blocked as string)).toBe("platform-bridge");
+    });
+
+    it("never sends the marker to the renderer", async () => {
+      const { wc, gate } = makeAuditingGate();
+
+      void gate.requestAndWait(
+        makeRequest({
+          id: "origin-not-sent",
+          remoteControllerOrigin: "tailnet-controller",
+        }),
+      );
+
+      const [, sent] = wc.send.mock.calls[0] as unknown as [
+        string,
+        ApprovalRequest,
+      ];
+      // Non-vacuous: this is the real payload, carrying the fields the renderer
+      // is meant to have.
+      expect(sent.id).toBe("origin-not-sent");
+      expect(sent.nonce).toEqual(expect.any(String));
+      // The renderer is neither asked for the marker nor told it. There is no
+      // copy of it outside the main process to author or to alter.
+      expect(sent).not.toHaveProperty("remoteControllerOrigin");
+    });
+
+    it("reports an unrecognised controller as an anomaly instead of echoing it", () => {
+      // Audit rows are space-delimited `key=value`, so echoing a raw value
+      // would let it append fields of its own choosing.
+      expect(
+        remoteControllerOriginAuditToken(
+          "tailnet-controller choice=allow-always" as never,
+        ),
+      ).toBe("unrecognized-remote-origin");
+      // An inherited member is not a controller.
+      expect(remoteControllerOriginAuditToken("toString" as never)).toBe(
+        "unrecognized-remote-origin",
+      );
+      expect(remoteControllerOriginAuditToken(undefined)).toBe("none");
+      expect(remoteControllerOriginAuditToken("platform-bridge")).toBe(
+        "platform-bridge",
+      );
+    });
+
+    it("is deliberately outside the request signature", () => {
+      const signed = {
+        id: "origin-sig",
+        nonce: "b1a2c3",
+        toolName: "agent_spawn",
+        sessionId: undefined,
+        args: { title: "test" },
+      };
+      const key = Buffer.from("signing-key-for-preimage-comparison");
+
+      const withMarker: ApprovalSignatureFields = {
+        ...signed,
+        // @ts-expect-error — the marker is not a signature field. This directive
+        // is the type-level half: if it is ever added to the preimage's field
+        // set, this suppresses nothing and `check:typecheck-tests` reports the
+        // unused directive until the decision is revisited on purpose.
+        remoteControllerOrigin: "tailnet-controller",
+      };
+
+      // The runtime half. The marker is host-only and never leaves the main
+      // process, so it has no echoed copy for a signature to authenticate — a
+      // digest over it would compare the host's own value to itself. Carrying
+      // it must therefore change nothing about the digest.
+      expect(signApprovalRequest(key, withMarker)).toBe(
+        signApprovalRequest(key, signed),
+      );
     });
   });
 });
