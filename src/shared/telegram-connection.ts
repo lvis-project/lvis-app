@@ -31,9 +31,11 @@ const TELEGRAM_CONNECTION_STATES = [
   "connected-unpaired",
   "pairing-pending",
   "paired-unapproved",
+  /**
+   * A share exists and survives a restart. Whether its conversation is the one
+   * on screen is a property of the approval, not a state of the connection.
+   */
   "active",
-  /** An approval exists, but its conversation is not the one on screen. */
-  "paused-conversation-inactive",
   "paused-by-owner",
   "error",
 ] as const;
@@ -66,8 +68,10 @@ interface TelegramApprovalSummary {
   readonly id: string;
   readonly expiresAt: number;
   /**
-   * Whether the approved conversation is the one currently on screen. The
-   * renderer must not compare conversation ids itself; it never receives one.
+   * Whether the shared conversation is the one currently on screen. The share
+   * itself is durable, so this says only whether replies can flow right now:
+   * execution still requires the shared conversation to be open. The renderer
+   * must not compare conversation ids itself; it never receives one.
    */
   readonly matchesCurrentConversation: boolean;
 }
@@ -167,6 +171,8 @@ export const TELEGRAM_PAIRING_CODE = /^lvis-tg-v1\.[A-Za-z0-9_-]{43}$/;
 const BOT_USERNAME = /^[A-Za-z][A-Za-z0-9_]{3,30}[Bb][Oo][Tt]$/;
 /** The bot token is bounded here only to reject obvious paste errors early. */
 const BOT_TOKEN = /^[0-9]{5,20}:[A-Za-z0-9_-]{20,220}$/;
+const MAX_CONVERSATION_CHARS = 4_096;
+const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -188,6 +194,24 @@ function counter(value: unknown): value is number {
 
 export function isTelegramConnectionId(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
+}
+
+/**
+ * The one grammar for a host conversation id on the Telegram path.
+ *
+ * A conversation id is never projected to a renderer, but three main-process
+ * owners have to agree on what one is: the service validates the id it is about
+ * to share, the connection store persists it as a routing hint, and the platform
+ * runtime compares the bound id against the one on screen. A second inline copy
+ * that admitted one more character would let a grant be written that the route
+ * fence could never match.
+ */
+export function isTelegramConversationId(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_CONVERSATION_CHARS
+    && value.trim().length > 0
+    && !UNSAFE_CONTROL_CHARACTERS.test(value);
 }
 
 function isTelegramConnectionState(value: unknown): value is TelegramConnectionState {

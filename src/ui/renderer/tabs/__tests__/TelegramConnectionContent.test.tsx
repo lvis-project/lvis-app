@@ -178,9 +178,9 @@ describe("TelegramConnectionContent", () => {
     await waitFor(() => expect(harness.approveCurrentConversation).toHaveBeenCalledWith("8h"));
   });
 
-  it("explains a paused surface instead of looking connected", async () => {
+  it("says the share survives while its conversation is closed", async () => {
     const { api } = makeApi(snapshotOf({
-      state: "paused-conversation-inactive",
+      state: "active",
       botUsername: "my_assistant_bot",
       pairing: { id: PAIRING_ID, accountFingerprint: "abc123def456" },
       approval: {
@@ -192,9 +192,34 @@ describe("TelegramConnectionContent", () => {
     render(<TelegramConnectionContent api={api} />);
 
     const content = await screen.findByTestId("telegram-connection-content");
-    expect(content).toHaveTextContent("not the one on screen");
-    // The owner can re-share the conversation they now have open.
+    expect(await screen.findByTestId("telegram-connection-shared-conversation-closed"))
+      .toHaveTextContent("stays shared, including after a restart");
+    // Named as a share that is not running, never as a lost or paused one.
+    expect(screen.getByTestId("telegram-connection-state"))
+      .toHaveTextContent("that conversation is not open");
+    // Nothing invites the owner to "start" a conversation that cannot run.
+    expect(content).not.toHaveTextContent("Send a message from Telegram to start");
+    // The owner can share the conversation they now have open instead.
     expect(screen.getByTestId("telegram-connection-approve")).toBeTruthy();
+  });
+
+  it("offers no re-share while the shared conversation is the open one", async () => {
+    const { api } = makeApi(snapshotOf({
+      state: "active",
+      botUsername: "my_assistant_bot",
+      pairing: { id: PAIRING_ID, accountFingerprint: "abc123def456" },
+      approval: {
+        id: APPROVAL_ID,
+        expiresAt: 1_800_000_000_000,
+        matchesCurrentConversation: true,
+      },
+    }));
+    render(<TelegramConnectionContent api={api} />);
+
+    expect(await screen.findByTestId("telegram-connection-state"))
+      .toHaveTextContent("Sharing this conversation");
+    expect(screen.queryByTestId("telegram-connection-shared-conversation-closed")).toBeNull();
+    expect(screen.queryByTestId("telegram-connection-approve")).toBeNull();
   });
 
   it("states what pausing and disconnecting cannot undo", async () => {
