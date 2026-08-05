@@ -880,7 +880,11 @@ export async function runToolInvocation(
             invocationPermissionContext,
             outOfAllowedTarget.filePath,
           );
-          decision = await services.approvalGate.requestAndWait(approvalRequest);
+          decision = await services.approvalGate.requestAndWait({
+            ...approvalRequest,
+            // A directory confirm parks the turn exactly like a tool ask does.
+            ...(abortSignal === undefined ? {} : { abortSignal }),
+          });
         } catch (approvalErr) {
           const msg = t("be_executor.dirPolicyError", { name: toolUse.name, error: approvalErr instanceof Error ? approvalErr.message : String(approvalErr) });
           const durationMs = Date.now() - startTime;
@@ -890,6 +894,18 @@ export async function runToolInvocation(
           return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
         }
 
+
+        // As on the tool-ask path: the gate's deny-once on an abort is the
+        // right permission answer but the wrong transcript entry. The user
+        // stopped the turn; they did not refuse this directory.
+        if (abortSignal?.aborted) {
+          return {
+            allowed: false,
+            result: withHostShellExecutionPlan(
+              await returnUserAbort(abortDeps(finalInput)),
+            ),
+          };
+        }
 
         // The directory prompt is also a local approval boundary. A revoked
         // paired share may not retain even this invocation-scoped expansion.

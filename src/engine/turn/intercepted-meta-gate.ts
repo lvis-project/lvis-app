@@ -77,6 +77,14 @@ export async function gateCrossAgentInterceptedMetaTools(
           isReadOnly: false,
           mode: "ask_all",
           trustOrigin,
+          // This ask parks the turn like any other, so the turn's Stop has to
+          // be able to end it rather than leave it on the gate's own timer.
+          // Read from the loop rather than threaded in: this is the same
+          // controller `runTurn` installed and the same signal it handed the
+          // executor, and the caller has no third one to offer.
+          ...(self.currentAbortController === null
+            ? {}
+            : { abortSignal: self.currentAbortController.signal }),
         });
         allowed = isApprovalChoiceAllowed(decision.choice);
       } catch {

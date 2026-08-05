@@ -8,10 +8,14 @@ const tailnetAuthority = Object.freeze({
   actorId: "tailnet:controller-digest" as `tailnet:${string}`,
 });
 
-function gateSelf(requestAndWait = vi.fn()) {
+function gateSelf(
+  requestAndWait = vi.fn(),
+  currentAbortController: AbortController | null = null,
+) {
   return {
     deps: { approvalGate: { requestAndWait } },
     auditLogger: { log: vi.fn() },
+    currentAbortController,
   } as unknown as LoopContext;
 }
 
@@ -48,5 +52,34 @@ describe("intercepted meta gate — Tailnet controller", () => {
       },
     ]);
     expect(requestAndWait).not.toHaveBeenCalled();
+  });
+});
+
+describe("intercepted meta gate — sub-agent ask", () => {
+  it("hands the turn's abort signal to the approval gate", async () => {
+    const turn = new AbortController();
+    const requestAndWait = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "allow-once" as const,
+    }));
+    const self = gateSelf(requestAndWait, turn);
+    const toolUses: ToolUseBlock[] = [
+      { id: "plugin-expand", name: "request_plugin", input: { pluginId: "helper" } },
+    ];
+
+    const result = await gateCrossAgentInterceptedMetaTools(
+      self,
+      toolUses,
+      "sub-agent helper",
+      "llm-tool-arg",
+      "sub-session",
+    );
+
+    expect(result.approved).toEqual(toolUses);
+    // This ask blocks the turn like any other, so a Stop has to be able to end
+    // it rather than leave it on the gate's own timer.
+    expect(requestAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({ abortSignal: turn.signal }),
+    );
   });
 });
