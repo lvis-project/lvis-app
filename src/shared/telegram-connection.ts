@@ -72,6 +72,22 @@ const TELEGRAM_CONNECTION_ERROR_CODES = [
   "telegram-managed-by-environment",
   "telegram-encryption-unavailable",
   "telegram-bot-token-rejected",
+  /**
+   * A token was stored and can no longer be read back. Distinct from
+   * `telegram-encryption-unavailable`, which says this machine cannot hold a
+   * secret at all: here the store reports itself encrypted and the saved value
+   * is simply gone, which an OS keychain reset or a restore onto another
+   * machine both cause. Also distinct from `telegram-bot-token-rejected`, which
+   * is Telegram's verdict on a token this desktop could read.
+   */
+  "telegram-bot-token-unreadable",
+  /**
+   * This desktop could not write the connection's own durable state. Nothing is
+   * wrong with the bot or with Telegram, so it is not a provider code — but
+   * receiving stops, because the alternative is a bridge whose pairing,
+   * approvals, and poll position can no longer be recorded.
+   */
+  "telegram-connection-state-unwritable",
   "telegram-provider-unreachable",
   "telegram-webhook-conflict",
   "telegram-poll-conflict",
