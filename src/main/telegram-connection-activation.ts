@@ -123,7 +123,16 @@ export async function startTelegramConnectionActivation(
     },
     notifyUnroutable: createUnroutableNotifier(controlReplies),
     onFatal: async (code) => {
-      await store.setLastError(code);
+      // Best-effort, and deliberately not allowed to skip the teardown below.
+      // One fatal code says the store itself cannot be written, so the call
+      // that records it is the one most likely to throw — and a throw here used
+      // to abandon the teardown, leaving egress attached for exactly the
+      // failure that needs it detached most.
+      try {
+        await store.setLastError(code);
+      } catch {
+        options.log?.("[telegram-activation] the fatal poll outcome could not be recorded");
+      }
       // A fatal poll outcome ends ingress but left egress attached, so a bridge
       // showing an error badge kept streaming assistant text to the phone.
       // Tear the activation down: a surface that cannot receive must not send.
