@@ -365,6 +365,17 @@ export function createTelegramConnectionService(
       if (actorDigest === null) return NO_BOUND_CONVERSATION;
       const id = store.resolveBoundConversation(actorDigest);
       if (id === null) return NO_BOUND_CONVERSATION;
+      // The conversation on screen exists whether or not it has been written
+      // yet. Existence is a transcript file, and a conversation gets one only
+      // when its first turn is saved — so sharing a conversation the owner just
+      // opened reported it as deleted the moment they shared it, next to a
+      // "Done." toast, and again on every refresh until they said something.
+      // Nothing was wrong: the share routed correctly the whole time, because
+      // routing asks whether the conversation is current, not whether it is
+      // on disk. This asks the same question first.
+      if (id === currentConversation()?.id) {
+        return Object.freeze({ kind: "resolved" as const, id });
+      }
       return options.conversationExists(id)
         ? Object.freeze({ kind: "resolved" as const, id })
         : MISSING_BOUND_CONVERSATION;
