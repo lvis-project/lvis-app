@@ -11,7 +11,11 @@ import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-
 import type { ConversationCommandPort } from "./conversation-command-port.js";
 import { createTelegramBotApiClient } from "./telegram-bot-api-client.js";
 import { maybeStartTelegramConnectionBridge } from "./telegram-bridge-server.js";
-import { createTelegramControlReplySender } from "./telegram-control-reply.js";
+import {
+  createTelegramControlReplySender,
+  type TelegramControlNotice,
+  type TelegramControlReplySender,
+} from "./telegram-control-reply.js";
 import type { TelegramConnectionStore } from "./telegram-connection-store.js";
 import { TELEGRAM_BOT_TOKEN_SECRET_KEY } from "./telegram-connection-service.js";
 import {
@@ -34,6 +38,30 @@ export interface StartTelegramConnectionActivationOptions {
   /** Test-only injection; production reads Electron's OS-encrypted store. */
   readonly secretStore?: SecretStore;
   readonly log?: (message: string) => void;
+}
+
+/**
+ * The composed answer to "this refusal deserves a word back".
+ *
+ * Extracted because the bug it replaces was invisible everywhere else. The
+ * ingress decides WHICH notice a refusal earns — "nothing is shared" and
+ * "commands are not supported" are different problems with different repairs —
+ * and passes it as the second argument. This binding was written taking only
+ * the chat id, so the notice was dropped and every refusal was answered with a
+ * hardcoded "nothing is shared". An owner mid-share who sent a slash command
+ * was told, falsely, that they had shared nothing.
+ *
+ * Nothing caught it: a callback declared with fewer parameters than it is
+ * handed is not a type error, and the ingress suite injects its own notifier,
+ * so its assertions never reached this composition. Making the binding a named
+ * function gives that seam somewhere to be tested.
+ */
+export function createUnroutableNotifier(
+  controlReplies: Pick<TelegramControlReplySender, "notify">,
+): (chatId: string, notice: TelegramControlNotice) => Promise<void> {
+  return async (chatId, notice) => {
+    await controlReplies.notify(chatId, notice);
+  };
 }
 
 /**
@@ -93,9 +121,7 @@ export async function startTelegramConnectionActivation(
       const actorDigest = digestActor.digestFor(senderId);
       return actorDigest !== null && store.activePairingActorDigest() === actorDigest;
     },
-    notifyUnroutable: async (chatId) => {
-      await controlReplies.notify(chatId, "conversation-not-shared");
-    },
+    notifyUnroutable: createUnroutableNotifier(controlReplies),
     onFatal: async (code) => {
       await store.setLastError(code);
       // A fatal poll outcome ends ingress but left egress attached, so a bridge
