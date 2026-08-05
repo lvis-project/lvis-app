@@ -2325,6 +2325,7 @@ describe("ApprovalGate", () => {
           id: "origin-not-sent",
           remoteControllerOrigin: "tailnet-controller",
           scopeTargetFilePaths: ["/srv/scope/report.md"],
+          abortSignal: new AbortController().signal,
         }),
       );
 
@@ -2343,6 +2344,11 @@ describe("ApprovalGate", () => {
       // what bounds an away answer, so a renderer that could see it is one
       // step from a renderer that could argue about it.
       expect(sent).not.toHaveProperty("scopeTargetFilePaths");
+      // And the abort signal. An AbortSignal is not structured-cloneable,
+      // so leaving it on the payload throws at `webContents.send` in
+      // production — loud rather than silent, but still a crash, and the
+      // mock here clones nothing so only this assertion would catch it.
+      expect(sent).not.toHaveProperty("abortSignal");
     });
 
     it("reports an unrecognised controller as an anomaly instead of echoing it", () => {
