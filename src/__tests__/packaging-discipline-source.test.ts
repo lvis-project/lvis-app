@@ -146,7 +146,7 @@ describe("installer smoke and packaging discipline", () => {
     expect(deploy).toContain("EXPECTED_BUNDLE_SHA256");
     expect(deploy).toContain("sha256sum -c bundle.sha256");
     expect(deploy).toContain(
-      "cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3",
+      "cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0",
     );
     expect(deploy).toContain('wranglerVersion: "4.114.0"');
     expect(deploy).not.toContain("actions/checkout");
