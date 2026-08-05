@@ -1346,8 +1346,14 @@ export async function authorizeToolInvocation(
               await returnUserAbort(abortDeps(finalInput)),
             );
           }
-          decision =
-            await services.approvalGate.requestAndWait(approvalRequest);
+          decision = await services.approvalGate.requestAndWait({
+            ...approvalRequest,
+            // The other half of the abort check just above. That one refuses
+            // to open a dialog for a turn already stopped; this one is what
+            // lets the gate stop waiting when the stop arrives afterwards,
+            // instead of holding the turn's lease until its own timer expires.
+            ...(abortSignal === undefined ? {} : { abortSignal }),
+          });
           if (hostShellExecutionPermitBinding !== undefined) {
             hostShellApprovalDecision = decision;
           }
@@ -1398,6 +1404,17 @@ export async function authorizeToolInvocation(
           });
         }
 
+
+        // A turn the user stopped did not deny anything. The gate answers
+        // deny-once when it unparks on the abort, which is the correct
+        // fail-closed permission answer, but recording it as the outcome would
+        // put the owner refusing this specific call into the transcript.
+        // Report the stop, exactly as the pre-ask check above does.
+        if (abortSignal?.aborted) {
+          return withHostShellExecutionPlan(
+            await returnUserAbort(abortDeps(finalInput)),
+          );
+        }
 
         // This is intentionally immediately after the local decision. A P2
         // share revoke that won while the modal was visible must beat the

@@ -368,6 +368,27 @@ export type ApprovalRequestInput = Omit<
    * out before the renderer payload is built.
    */
   readonly scopeTargetFilePaths?: readonly string[];
+  /**
+   * Host-only: the abort signal of the turn this ask belongs to.
+   *
+   * Without it a parked approval observes nothing but its own five-minute
+   * timer. The owner's Stop aborts the turn's controller and then waits that
+   * timer out, still holding the conversation's execution lease, which is what
+   * makes an unanswerable approval a lockout rather than a stalled tool call.
+   *
+   * It is the same signal the caller already tests immediately before asking,
+   * so this is the closing half of an existing check rather than a new
+   * mechanism: that test covers "already aborted", this covers "aborted while
+   * parked". The other interactive gates on the turn path take it already —
+   * `AskUserQuestionGate.ask` directly, and the rationale flow through
+   * {@link ApprovalGate.cancelPendingRationale} — so a wait that ignores the
+   * turn's abort is the outlier here, not the precedent.
+   *
+   * Like the fields above it, it never reaches the renderer, the pending
+   * entry, or an audit payload. Absent means the caller has no turn to be
+   * stopped, and the request then behaves exactly as it did without it.
+   */
+  readonly abortSignal?: AbortSignal;
 };
 
 export type ApprovalChoice =
@@ -959,6 +980,7 @@ export class ApprovalGate {
       remoteControllerOrigin,
       remoteControllerAuthority,
       scopeTargetFilePaths,
+      abortSignal,
       ...request
     } = req;
     // Do not forward the host-only binding to renderer or audit payloads.
@@ -972,7 +994,9 @@ export class ApprovalGate {
     // desk-originated, which is the claim a reviewer must not have to
     // second-guess. The authority object is never audited at all: it carries a
     // live guard closure, and a row's job is to state the fact, not to hold the
-    // capability that decided it.
+    // capability that decided it. `abortSignal` is destructured out for the
+    // first of those reasons and one more: it is a live object carrying a
+    // listener list, and the renderer payload crosses a structured clone.
     const auditFieldsFor = (
       fields: ApprovalAuditFields,
       executionPlan?: HostShellExecutionPlanAuditProjection,
@@ -1232,6 +1256,38 @@ export class ApprovalGate {
       input: `[approval:requested] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)}`,
     });
 
+    // ─── Turn abort ──────────────────────────────────
+    //
+    // One construction of the answer to "the turn behind this ask is over",
+    // shared by the already-aborted check just below and by the listener that
+    // covers an abort arriving while the request is parked. The row reuses the
+    // `[approval:cancelled]` marker the rationale cancel path already writes:
+    // to a reviewer both are the host retiring a request nobody answered, and
+    // `reason=` is what separates them.
+    //
+    // deny-once, and host-rejected rather than a deny the user authored — it
+    // is the fail-closed answer, and a stopped turn must not be readable as
+    // the owner refusing this particular call. No `rememberPattern`: the
+    // timeout, the other outcome the host reaches on its own, sets none, and
+    // that field's only consumers persist it as an allow/deny rule.
+    const denyForAbortedTurn = (): ApprovalDecision => {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:cancelled] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} reason=turn-abort → deny-once`,
+      });
+      return markHostApprovalRejectedDecision({
+        requestId: fullReq.id,
+        choice: "deny-once",
+      });
+    };
+    // Above the away answer, the OS notification and the renderer send, all
+    // for one reason: none of them should happen on behalf of a turn that is
+    // already over. An away grant in particular has a finite budget, and
+    // spending a unit of it to answer a dead turn spends it on nothing.
+    if (abortSignal?.aborted) return denyForAbortedTurn();
+
     // ─── Away Authority ──────────────────────────────
     //
     // The desk-armed second answerer. Its position is load-bearing: everything
@@ -1338,6 +1394,19 @@ export class ApprovalGate {
     };
 
     return new Promise<ApprovalDecision>((resolve, reject) => {
+      // One teardown authority for every way this request can end. `settle` is
+      // what the pending entry stores, so the renderer answer, the timeout,
+      // the rationale cancel and the shutdown sweep each detach the abort
+      // listener without any of them having to know it exists. Otherwise a
+      // turn that asks a hundred times leaves a hundred live listeners on one
+      // signal, and `AbortSignal` is an `EventTarget`, which starts warning
+      // about exactly that at eleven.
+      let detachAbortListener: (() => void) | undefined;
+      const settle = (decision: ApprovalDecision): void => {
+        detachAbortListener?.();
+        detachAbortListener = undefined;
+        resolve(decision);
+      };
       const timer = setTimeout(() => {
         this.pending.delete(fullReq.id);
         // Timeout: handle as deny-once for fail-safe behavior.
@@ -1353,11 +1422,25 @@ export class ApprovalGate {
           choice: "deny-once",
         };
         hostTimeoutDecisions.add(timeoutDecision);
-        resolve(timeoutDecision);
+        settle(timeoutDecision);
       }, this.timeoutMs);
 
+      if (abortSignal !== undefined) {
+        const onAbort = (): void => {
+          clearTimeout(timer);
+          // Drop the entry before resolving, so a renderer answer that crossed
+          // the abort in flight arrives as a harmless unknown-request replay
+          // instead of an answer to a turn that no longer exists.
+          this.pending.delete(fullReq.id);
+          settle(denyForAbortedTurn());
+        };
+        detachAbortListener = () =>
+          abortSignal.removeEventListener("abort", onAbort);
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
+
       this.pending.set(fullReq.id, {
-        resolve,
+        resolve: settle,
         reject,
         timer,
         trustOrigin: fullReq.trustOrigin ?? "unknown",
@@ -1431,7 +1514,7 @@ export class ApprovalGate {
           type: "approval",
           output: `[approval:send-failed] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
-        resolve(
+        settle(
           markHostApprovalRejectedDecision({
             requestId: fullReq.id,
             choice: "deny-once",

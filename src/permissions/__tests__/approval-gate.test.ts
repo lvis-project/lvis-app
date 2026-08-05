@@ -2758,4 +2758,121 @@ describe("ApprovalGate", () => {
       expect(rowFor(auditLogger, "[approval:away-answered]")).toBeUndefined();
     });
   });
+
+  describe("turn abort", () => {
+    /**
+     * A tool ask with nothing to short-circuit it on the way in: not
+     * read-only, no away grant armed, no sensitive target. It reaches the
+     * renderer and then waits, which is the only state a stop can be observed
+     * from.
+     */
+    function makeAbortableRequest(signal?: AbortSignal): RequestInput {
+      return makeRequest({
+        id: "abort-1",
+        toolName: "fs_write",
+        toolCategory: "write",
+        sessionId: "conv-stopped",
+        isReadOnly: false,
+        ...(signal === undefined ? {} : { abortSignal: signal }),
+      });
+    }
+
+    it("unparks a request nobody answered when the turn is stopped", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+      const turn = new AbortController();
+
+      const parked = gate.requestAndWait(makeAbortableRequest(turn.signal));
+      // The modal really was raised. Without this the rest of the test would
+      // also pass against a gate that refused the request on its way in.
+      expect(wc.send).toHaveBeenCalledTimes(1);
+      expect(gate.pendingCount).toBe(1);
+
+      turn.abort(new Error("user cancelled turn"));
+      const decision = await parked;
+
+      expect(decision.choice).toBe("deny-once");
+      // Host-generated, not a deny the owner authored, and not the timeout —
+      // the gate's five minutes never elapsed here.
+      expect(isHostApprovalRejectedDecision(decision)).toBe(true);
+      expect(isHostApprovalTimeoutDecision(decision)).toBe(false);
+      expect(decision.rememberPattern).toBeUndefined();
+      // The entry is gone, so a desk answer that crossed the abort in flight
+      // arrives as an unknown-request replay rather than an answer to a turn
+      // that no longer exists.
+      expect(gate.pendingCount).toBe(0);
+
+      const cancelled = auditRowTexts(auditLogger).find((row) =>
+        row.startsWith("[approval:cancelled]"),
+      );
+      expect(cancelled).toContain("abort-1");
+      expect(cancelled).toContain("reason=turn-abort");
+    });
+
+    it("does not raise a modal for a turn that is already over", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+      const turn = new AbortController();
+      turn.abort(new Error("user cancelled turn"));
+
+      const decision = await gate.requestAndWait(makeAbortableRequest(turn.signal));
+
+      expect(decision.choice).toBe("deny-once");
+      expect(wc.send).not.toHaveBeenCalled();
+      expect(gate.pendingCount).toBe(0);
+      const rows = auditRowTexts(auditLogger);
+      // The cancelled row keeps its requested row. An approval that leaves no
+      // trace at all reads exactly like one that was never asked for.
+      expect(rows.some((row) => row.startsWith("[approval:requested]"))).toBe(true);
+      expect(rows.some((row) => row.startsWith("[approval:cancelled]"))).toBe(true);
+    });
+
+    it("leaves a request that carries no signal parked", async () => {
+      const { gate } = makeAuditingGate();
+      const unrelated = new AbortController();
+
+      const parked = gate.requestAndWait(makeAbortableRequest());
+      let settled = false;
+      void parked.then(() => {
+        settled = true;
+      });
+
+      unrelated.abort(new Error("user cancelled turn"));
+      await Promise.resolve();
+
+      // The signal is the mechanism, not some ambient "any abort ends every
+      // wait" behaviour a passing test above could otherwise be crediting.
+      expect(settled).toBe(false);
+      expect(gate.pendingCount).toBe(1);
+
+      gate.disposeAll();
+      await expect(parked).resolves.toMatchObject({ choice: "deny-once" });
+    });
+
+    it("detaches from the signal once the desk answers", async () => {
+      const { wc, auditLogger, gate } = makeAuditingGate();
+      const turn = new AbortController();
+      const removeListener = vi.spyOn(turn.signal, "removeEventListener");
+
+      const parked = gate.requestAndWait(makeAbortableRequest(turn.signal));
+      const { nonce, hmac } = lastSentNonceHmac(wc);
+      gate.resolve("abort-1", {
+        requestId: "abort-1",
+        choice: "allow-once",
+        nonce,
+        hmac,
+      });
+      await expect(parked).resolves.toMatchObject({ choice: "allow-once" });
+
+      expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+
+      // A later stop of the same turn has nothing left to cancel here. One
+      // turn can ask many times, and an answered request that stayed attached
+      // would keep piling listeners onto the one signal it shares with them.
+      turn.abort(new Error("user cancelled turn"));
+      expect(
+        auditRowTexts(auditLogger).some((row) =>
+          row.startsWith("[approval:cancelled]"),
+        ),
+      ).toBe(false);
+    });
+  });
 });
