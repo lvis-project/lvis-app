@@ -47,6 +47,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "telegram-managed-by-environment": "formatIpcError.managed",
   "telegram-encryption-unavailable": "formatIpcError.telegramEncryptionUnavailable",
   "telegram-bot-token-rejected": "formatIpcError.telegramBotTokenRejected",
+  "telegram-bot-token-unreadable": "formatIpcError.telegramBotTokenUnreadable",
+  "telegram-connection-state-unwritable": "formatIpcError.telegramConnectionStateUnwritable",
   "telegram-provider-unreachable": "formatIpcError.telegramProviderUnreachable",
   "telegram-webhook-conflict": "formatIpcError.telegramWebhookConflict",
   "telegram-poll-conflict": "formatIpcError.telegramPollConflict",
