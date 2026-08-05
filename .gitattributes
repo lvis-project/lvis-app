@@ -1,8 +1,66 @@
+# Every blob in this repository is LF. That was already the rule; until now it
+# was enforced by a pre-commit whitespace check and by people remembering, which
+# is why CRLF kept arriving on Windows: `core.autocrlf=true` writes CRLF into the
+# working tree, and any tool that rewrites a file whole — a formatter, a script,
+# an editor saving with platform endings — hands those CRLF bytes back to git as
+# content. Without a rule here, git stores them.
+#
+# The default below normalises on the way in, so the working tree can be CRLF
+# and the blob is still LF. Everything after it is an exception that the
+# heuristic gets wrong in one direction or the other.
+* text=auto eol=lf
+
+# ---------------------------------------------------------------------------
+# Binary: never touch these bytes.
+#
+# `text=auto` already leaves most of them alone — git looks for a NUL in the
+# first 8k — but stating it is cheaper than trusting a heuristic with image
+# data, and it also stops diffs from trying to render them.
+# ---------------------------------------------------------------------------
+*.png binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.node binary
+*.exe binary
+*.dll binary
+*.dylib binary
+*.so binary
+*.wasm binary
+*.pdf binary
+
+# ---------------------------------------------------------------------------
+# Text the heuristic misreads as binary.
+#
+# These two suites embed a literal NUL to test that NUL is stripped from a
+# download filename and from a partition key. `text=auto` finds that NUL and
+# classifies the whole file as binary, which would exempt real TypeScript from
+# the rule above — the exact hole this file exists to close. Both are LF today
+# and must stay that way.
+# ---------------------------------------------------------------------------
+src/mcp/__tests__/mcp-app-download.test.ts text eol=lf
+src/shared/__tests__/mcp-app-partition.test.ts text eol=lf
+
+# ---------------------------------------------------------------------------
+# Kept from before `* text=auto eol=lf` existed. Redundant with it now, and
+# deliberately left in place: these are the files where a CRLF is not a
+# cosmetic problem but a broken build, so they are worth stating twice.
+# `sh` chokes on a CRLF shebang, and NSIS reads its own includes literally.
+# ---------------------------------------------------------------------------
 *.sh text eol=lf
 *.command text eol=lf
 build/**/*.txt text eol=lf
 build/*.svg text eol=lf
-build/*.ico binary
 resources/AGENTS.md* text eol=lf
 
 # App-owned git hook shims must stay LF (sh chokes on CRLF shebangs)
