@@ -352,6 +352,48 @@ describe("startTelegramPollingIngress", () => {
     running = undefined;
   });
 
+  it("ends the activation when a confirmed offset cannot be persisted", async () => {
+    // Both write sites, because they are separate calls: a fix applied to one
+    // leaves the other killing ingress without a word.
+    const sites = [
+      { name: "seeded offset", offset: null, batch: { ok: true as const, value: [] } },
+      {
+        name: "confirmed update",
+        offset: 100,
+        batch: { ok: true as const, value: [textUpdate(100, "hello")] },
+      },
+    ];
+
+    for (const site of sites) {
+      const failing = harness({
+        recordPollOffset: async () => {
+          throw new Error("telegram-connection-store-write-failed");
+        },
+      });
+      failing.setOffset(site.offset);
+      failing.queue(site.batch);
+      // Resolves only because the loop gave up. Reaching this line at all is
+      // half the assertion: a loop that carried on would park on the next poll
+      // until the test times out.
+      await start(failing.options).finished;
+      running = undefined;
+      expect(failing.onFatal.mock.calls, site.name)
+        .toEqual([["telegram-connection-state-unwritable"]]);
+
+      // Non-vacuous: the identical batch through a store that takes the write
+      // neither stops nor reports anything.
+      const healthy = harness();
+      healthy.setOffset(site.offset);
+      healthy.queue(site.batch);
+      const survivor = start(healthy.options);
+      await vi.waitFor(() => expect(healthy.recordPollOffset).toHaveBeenCalled());
+      expect(healthy.onFatal, site.name).not.toHaveBeenCalled();
+      survivor.stop();
+      await survivor.finished;
+      running = undefined;
+    }
+  });
+
   it("backs off for the interval Telegram asked for", async () => {
     const waits: number[] = [];
     const h = harness({ wait: async (ms) => { waits.push(ms); } });

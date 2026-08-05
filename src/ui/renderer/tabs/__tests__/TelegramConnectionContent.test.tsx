@@ -41,13 +41,14 @@ function makeApi(initial: TelegramConnectionSnapshot) {
   }));
   const approveCurrentConversation = vi.fn(async () => ({ ok: true as const }));
   const pause = vi.fn(async () => ({ ok: true as const }));
+  const resume = vi.fn(async () => ({ ok: true as const }));
   const api = {
     telegramConnection: {
       snapshot,
       connect,
       disconnect: vi.fn(async () => ({ ok: true as const })),
       pause,
-      resume: vi.fn(async () => ({ ok: true as const })),
+      resume,
       createPairingCode,
       revokePairing: vi.fn(async () => ({ ok: true as const })),
       approveCurrentConversation,
@@ -62,6 +63,7 @@ function makeApi(initial: TelegramConnectionSnapshot) {
     createPairingCode,
     approveCurrentConversation,
     pause,
+    resume,
     setSnapshot(next: TelegramConnectionSnapshot) {
       current = next;
     },
@@ -302,5 +304,42 @@ describe("TelegramConnectionContent", () => {
     const error = await screen.findByTestId("telegram-connection-last-error");
     expect(error).toHaveTextContent("Another app or machine is already receiving");
     expect(error).not.toHaveTextContent("telegram-poll-conflict");
+  });
+
+  it("offers a retry from a connection problem rather than only a disconnect", async () => {
+    // A failed activation now keeps the pairing and reports the failure, so the
+    // one control this state used to offer was Disconnect — which spends the
+    // pairing the failure deliberately preserved.
+    const { api, resume, pause } = makeApi(snapshotOf({
+      state: "error",
+      botUsername: "my_assistant_bot",
+      pairing: { id: PAIRING_ID, accountFingerprint: "abc123def456" },
+      lastErrorCode: "telegram-connection-unavailable",
+    }));
+    render(<TelegramConnectionContent api={api} />);
+
+    const retry = await screen.findByTestId("telegram-connection-retry");
+    expect(retry).toHaveTextContent("Try again");
+    // Pausing a bridge that is already not receiving says nothing.
+    expect(screen.queryByTestId("telegram-connection-pause")).toBeNull();
+
+    fireEvent.click(retry);
+    await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
+    expect(pause).not.toHaveBeenCalled();
+  });
+
+  it("offers the pause control while the connection is healthy", async () => {
+    // The control for the case above: same block, same buttons, and only the
+    // state differs.
+    const { api, resume } = makeApi(snapshotOf({
+      state: "paired-unapproved",
+      botUsername: "my_assistant_bot",
+      pairing: { id: PAIRING_ID, accountFingerprint: "abc123def456" },
+    }));
+    render(<TelegramConnectionContent api={api} />);
+
+    expect(await screen.findByTestId("telegram-connection-pause")).toBeTruthy();
+    expect(screen.queryByTestId("telegram-connection-retry")).toBeNull();
+    expect(resume).not.toHaveBeenCalled();
   });
 });

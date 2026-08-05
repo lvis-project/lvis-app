@@ -430,6 +430,19 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
                     <Button size="sm" disabled={busy} onClick={() => void run(() => api.telegramConnection.resume())} data-testid="telegram-connection-resume">
                       {t("telegramConnection.resume")}
                     </Button>
+                  ) : snapshot.state === "error" ? (
+                    /*
+                      The one repair for a connection that is down but still
+                      configured. It re-reads the token, re-verifies the bot and
+                      re-activates, and a successful activation clears the
+                      recorded error — so it is the non-destructive way back
+                      from a failure that kept the pairing, which the only other
+                      control here (Disconnect) would spend. Pausing a bridge
+                      that is already not receiving would say nothing.
+                    */
+                    <Button size="sm" disabled={busy} onClick={() => void run(() => api.telegramConnection.resume())} data-testid="telegram-connection-retry">
+                      {t("telegramConnection.retry")}
+                    </Button>
                   ) : (
                     <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => api.telegramConnection.pause())} data-testid="telegram-connection-pause">
                       {t("telegramConnection.pause")}
