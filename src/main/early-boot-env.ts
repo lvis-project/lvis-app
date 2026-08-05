@@ -5,7 +5,6 @@
  *   - plugin-asset custom protocol scheme registration
  *   - WSL / GPU command-line switches
  *   - app name + AppUserModelId
- *   - user-configured host-resolver rules
  *   - packaged env scrub
  *
  * `src/main.ts` calls `runEarlyBootEnv()` once, near the top of its module
@@ -17,7 +16,6 @@ import { createLogger } from "../lib/logger.js";
 import { ensureWorkspaceCwd } from "./ensure-workspace-cwd.js";
 import { registerPluginAssetProtocolScheme } from "./plugin-asset-protocol.js";
 import { registerMcpAppProtocolScheme } from "./mcp-app-protocol.js";
-import { applyManualHostResolverRules } from "./manual-host-resolver.js";
 import { scrubPackagedProcessEnv } from "./packaged-env-scrub.js";
 import { resolveAppIconPath } from "./app-icon.js";
 
@@ -90,12 +88,6 @@ export function runEarlyBootEnv(): void {
   // `LVIS_DEV_NO_SANDBOX`, which made it incorrectly look like a dev flag;
   // the rename moves it out of the dev mask but it's still hard-gated on
   // `!app.isPackaged` by `dev-flags.ts:devNoSandboxAllowed()`.
-  // Manual host-resolver map — applies the user-configured /etc/hosts-style
-  // mapping when configured. Reads the same settings file the SettingsService
-  // writes to (under app.getPath("userData")) so a map saved via Settings is
-  // the one applied on the next boot.
-  applyManualHostResolverRules(app, app.getPath("userData"));
-
   if (app.isPackaged) {
     scrubPackagedProcessEnv(process.env);
     // Force NODE_ENV=production in packaged builds so downstream gates

@@ -184,7 +184,11 @@ export interface WorkflowToolDeps {
   skillApprovalsStore?: SkillApprovalsStore;
   /** C2(d): ApprovalGate for first-use skill approval modal. */
   getApprovalGate?: () => ApprovalGate | undefined;
-  /** Electron network-stack fetch used when host-resolver-rules are active. */
+  /**
+   * Electron network-stack fetch (`net.fetch`) — routes builtin tool traffic
+   * through Chromium's network stack (system proxy/PAC, OS certificate store)
+   * rather than Node's global `fetch`.
+   */
   networkFetch?: typeof fetch;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
