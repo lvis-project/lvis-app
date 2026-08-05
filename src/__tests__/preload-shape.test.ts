@@ -221,7 +221,6 @@ describe("preload contextBridge world shape lock", () => {
           "addRoutineV2": "function",
           "addWorkBoardItem": "function",
           "applyClaudeDesktopMcpImport": "function",
-          "applyHostMap": "function",
           "approval": [
             "onRequest",
             "respond",

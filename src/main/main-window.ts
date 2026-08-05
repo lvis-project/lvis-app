@@ -67,9 +67,8 @@ export const rendererIndexUrl = () => pathToFileURL(resolve(mainDir, "..", "inde
  *
  * The first `createWindow()` runs BEFORE the async bootstrap assigns
  * `services`, so the in-memory `SettingsService` is not yet available. In that
- * window we read `system.appMode` straight from the settings file on disk
- * (mirrors `manual-host-resolver.ts`'s pre-`whenReady` sync read). Once the
- * service exists (re-create on macOS re-activation, recovery paths) we prefer
+ * window we read `system.appMode` straight from the settings file on disk via
+ * `readPersistedAppModeSync`. Once the service exists (re-create on macOS re-activation, recovery paths) we prefer
  * its in-memory value so an unsaved-to-disk in-session change is honored.
  *
  * Defaulting to "work" when nothing is persisted is the legitimate first-run

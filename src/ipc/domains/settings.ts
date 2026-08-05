@@ -2,7 +2,7 @@
  * Settings domain IPC handlers.
  * Covers: lvis:settings:*, lvis:shell:open-external, lvis:telemetry:consent-answer
  */
-import { app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
+import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import { validateExternalUrl } from "../../shared/external-url.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
@@ -714,16 +714,6 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
         error: "active-chat-runtime-requires-subscription-selection",
       };
     }
-    if (
-      llmPatch &&
-      Object.prototype.hasOwnProperty.call(llmPatch, "hostResolverMap")
-    ) {
-      return {
-        ok: false,
-        error: "host-map-requires-apply-host-map",
-        message: "hostResolverMap must be changed via applyHostMap",
-      };
-    }
     // LOW: validate vendors["azure-foundry"].baseUrl at write time so an invalid
     // Foundry endpoint is rejected before it reaches the settings store.
     const foundryVendorPatch = (llmPatch?.vendors as Record<string, unknown> | undefined)
@@ -1427,36 +1417,6 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteWebApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
     await broadcastSettingsSnapshot(deps);
-    return { ok: true };
-  });
-
-  // ─── Manual host-resolver map (requires relaunch) ─────────────────
-  //
-  // Chromium's `host-resolver-rules` command-line switch is frozen once
-  // the network service starts (`app.whenReady()`). Updating it therefore
-  // requires saving the new map then calling `app.relaunch()` + `app.exit()`
-  // so the next process reads the updated settings and installs the switch
-  // before any network service initialisation.
-  //
-  // The UI shows a confirm dialog before calling this IPC, so the user has
-  // already acknowledged the restart. The main process reacts immediately.
-  ipcMain.handle(SETTINGS.applyHostMap, async (e, hostResolverMap: unknown) => {
-    // Sensitive + relaunch-triggering channel: use the stricter host-renderer
-    // validator (fails closed on empty frame URLs, rejects plugin-ui-shell
-    // frames) rather than the base `validateSender`.
-    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, SETTINGS.applyHostMap, e); return UNAUTHORIZED_FRAME; }
-    // Payload guard — the renderer should only ever send a string, but reject
-    // a malformed payload before it reaches the settings store.
-    if (typeof hostResolverMap !== "string") {
-      return { ok: false, error: "invalid-host-map", message: "hostResolverMap must be a string" };
-    }
-    // Persist the new map before relaunch so the next boot reads it.
-    await settingsService.patch({ llm: { hostResolverMap } });
-    await broadcastSettingsSnapshot(deps);
-    // Arm and execute the relaunch. `app.relaunch()` queues the new process
-    // then `app.exit(0)` terminates the current one.
-    app.relaunch();
-    app.exit(0);
     return { ok: true };
   });
 

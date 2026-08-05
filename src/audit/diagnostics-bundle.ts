@@ -108,7 +108,7 @@ export interface BuildDiagnosticsBundleOptions {
 /**
  * DENY-BY-DEFAULT redacted settings snapshot. Only the keys explicitly listed
  * here are emitted; everything else — including every current AND future secret
- * field (apiKey, sentryDsn, endpoints, hostResolverMap, vertex creds) — is
+ * field (apiKey, sentryDsn, endpoints, vertex creds) — is
  * omitted by construction. This is the security property of the whole bundle:
  * we allowlist safe fields rather than denylist dangerous ones, so forgetting
  * to denylist a new secret cannot leak it.
@@ -116,7 +116,8 @@ export interface BuildDiagnosticsBundleOptions {
 export function pickRedactedSettings(settings: AppSettings): Record<string, unknown> {
   const out: Record<string, unknown> = {};
 
-  // llm — provider/model shape only. NO apiKey, NO hostResolverMap, NO vertex.
+  // llm — provider/model shape only. NO apiKey, NO vertex, and no key that a
+  // stale settings file may still carry from a removed feature.
   const llm = settings.llm;
   if (llm) {
     const vendors: Record<string, { model?: string; hasBaseUrl: boolean }> = {};
