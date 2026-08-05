@@ -2095,6 +2095,59 @@ describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
     expect(results.map((result) => result.tool_use_id)).toEqual(["pa", "pb"]);
     expect(results.map((result) => result.content)).toEqual(["A", "B"]);
   });
+
+  it("hands the turn's abort signal to the approval gate and reports a stop as a stop", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(makeGenericTool("tool_stop_probe", executeSpy));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "ask",
+      reason: "stop-while-parked probe",
+      layer: 5,
+    });
+
+    const turn = new AbortController();
+    let signalGivenToGate: AbortSignal | undefined;
+    const approvalGate = {
+      requestAndWait: vi.fn((req: { id: string; abortSignal?: AbortSignal }) => {
+        signalGivenToGate = req.abortSignal;
+        // The owner presses Stop while the modal is up.
+        queueMicrotask(() => turn.abort(new Error("user cancelled turn")));
+        return new Promise<{ requestId: string; choice: "deny-once" }>((resolve) => {
+          const denyOnce = () => resolve({ requestId: req.id, choice: "deny-once" });
+          // Stands in for the real gate, which answers deny-once when the turn
+          // it is blocking ends. With no signal it would instead sit on its own
+          // five-minute timer; answer the way that timer eventually does, so a
+          // regression in the wiring is reported by the assertions below rather
+          // than by hanging the suite.
+          if (req.abortSignal === undefined) denyOnce();
+          else req.abortSignal.addEventListener("abort", denyOnce, { once: true });
+        });
+      }),
+    };
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-stop-probe", name: "tool_stop_probe", input: { value: "a" } }],
+      {
+        sessionId: "sess-stop-probe",
+        abortSignal: turn.signal,
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    // Without this the gate has nothing to observe, and the turn's Stop waits
+    // out the gate's own timer while holding the conversation's lease.
+    expect(signalGivenToGate).toBe(turn.signal);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    // deny-once is the right permission answer to a stopped turn and the wrong
+    // transcript entry: the owner stopped the turn, they did not refuse this
+    // call. "취소" is the cancelled-tool text; the denial text is different.
+    expect(results[0].content).toContain("취소");
+  });
 });
 
 // ─── C1 regression — ask_user_question must NOT double-modal ──
@@ -2589,6 +2642,53 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(executeSpy).not.toHaveBeenCalled();
     expect(results[0].is_error).toBe(true);
     expect(results[0].content).toContain("디렉토리 정책 차단");
+  });
+
+  it("out-of-allowed-dir confirm nobody answers ends when the turn is stopped", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    // A one-second wait rather than the five-minute default: a Stop that only
+    // works because the gate's own timer fired is not a Stop, and this is what
+    // makes that difference visible in the assertions below instead of as a
+    // suite hang.
+    const gate = new ApprovalGate(wc as never, undefined, 1_000);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+    const turn = new AbortController();
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-stop",
+        name: "read_file",
+        input: { path: "/var/tmp/parked-area/notes.md" },
+      }],
+      {
+        sessionId: "sess-l1-stop",
+        abortSignal: turn.signal,
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    await waitForApprovalPayload<{ id: string }>(wc);
+    expect(gate.pendingCount).toBe(1);
+
+    // Nobody answers the directory confirm; the owner presses Stop instead.
+    turn.abort(new Error("user cancelled turn"));
+    // Checked here rather than after the await: the gate let go of the request
+    // as the abort was raised. Without the turn signal reaching it, the entry
+    // would still be sitting here waiting out the gate's own timer, which is
+    // the lockout — and the executor would still eventually produce a result,
+    // so only this moment can tell the two apart.
+    expect(gate.pendingCount).toBe(0);
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    // The cancelled-tool text. A gate that waited out its own timer would land
+    // on the directory-policy denial text the test above asserts instead.
+    expect(results[0].content).toContain("취소");
   });
 
   it("user grants out-of-allowed-dir → tool proceeds to Step 3", async () => {
