@@ -29,6 +29,50 @@ vi.mock("@anthropic-ai/sandbox-runtime", async (importOriginal) => {
   };
 });
 
+/**
+ * Whether ASRT still releases the Windows ACLs it took when `initialize` fails.
+ *
+ * The behaviour being pinned: a partially-initialized sandbox has already
+ * granted the sandbox user an ACE on the owner's files. If initialization then
+ * throws without revoking, that grant outlives the failure — a sandbox user
+ * that never started holding rights on files nobody sandboxed.
+ *
+ * Locating the block is the whole point, and the previous version of this test
+ * did not. It asserted `config = undefined;` and `throw e;` as bare substrings
+ * of a 1,500-line bundle, which proves only that those characters appear
+ * somewhere, and it pinned the literal
+ * `revokeWindowsAcl({ sandboxUserSid: sb, srtWin })` — which is the TEARDOWN
+ * call site, a different function from the failure path this test is named for.
+ * ASRT could have deleted the rollback from the failure path entirely and every
+ * assertion would still have passed, because the teardown call kept them true.
+ *
+ * So: find the catches that fail initialization closed — identified by clearing
+ * the config and rethrowing the value they caught, with a backreference so a
+ * rethrow of something else does not match — and require one of them to release
+ * the ACLs. ASRT has several such catches, one per subsystem it brings up, and
+ * only the filesystem one holds ACLs; scanning all of them and asking whether
+ * the release happens inside a failure path is what distinguishes that from the
+ * teardown function, which is not a failure path at all. Identifier names are
+ * minifier output and are deliberately not pinned; only the shape is.
+ */
+function rollsBackWindowsAclOnFailedInitialize(source: string): boolean {
+  const failClosed = new RegExp(
+    String.raw`catch\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{([\s\S]{0,1500}?)` +
+      String.raw`config\s*=\s*undefined\s*;\s*throw\s+\1\s*;`,
+    "g",
+  );
+  for (const match of source.matchAll(failClosed)) {
+    const body = match[2] ?? "";
+    if (
+      /revokeWindowsAcl\(\s*\{\s*sandboxUserSid\s*:/.test(body)
+      && /restoreWindowsAcl\(\s*\{\s*sandboxUserSid\s*:/.test(body)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function readAsrtSandboxManagerSource(): string {
   const require = createRequire(import.meta.url);
   const indexPath = require.resolve("@anthropic-ai/sandbox-runtime");
@@ -466,11 +510,91 @@ describe("asrt-windows-support adapter", () => {
 
   it("pins Windows filesystem ACL readiness to ASRT initialize fail-closed behavior", () => {
     const source = readAsrtSandboxManagerSource();
-    expect(source).toContain("grantWindowsAcl({");
-    expect(source).toContain("stampWindowsAcl({");
-    expect(source).toContain("revokeWindowsAcl({ sandboxUserSid: sb, srtWin })");
-    expect(source).toContain("restoreWindowsAcl({ sandboxUserSid: sb, srtWin })");
-    expect(source).toContain("config = undefined;");
-    expect(source).toContain("throw e;");
+    // Applied at all — whitespace-tolerant, because the argument formatting is
+    // the bundler's choice and not a behaviour we are pinning.
+    expect(source).toMatch(/grantWindowsAcl\(\s*\{/);
+    expect(source).toMatch(/stampWindowsAcl\(\s*\{/);
+    // And released again when initialization fails. This is the assertion the
+    // test is named for; see the helper for why locating the block matters.
+    expect(rollsBackWindowsAclOnFailedInitialize(source)).toBe(true);
+  });
+
+  // The assertion above reads a file this repo does not control, so it cannot
+  // be mutation-tested without editing `node_modules`. These drive the same
+  // predicate over fixtures instead: each is a shape ASRT could plausibly ship,
+  // and the first two are exactly what the previous assertions let through.
+  describe("the ACL rollback pin", () => {
+    /** The shape ASRT ships today, minified names and all. */
+    const FAIL_CLOSED = `
+      catch (e) {
+        if (windowsFsSbUserSid) {
+          revokeWindowsAcl({ sandboxUserSid: windowsFsSbUserSid, srtWin });
+          restoreWindowsAcl({ sandboxUserSid: windowsFsSbUserSid, srtWin });
+        }
+        windowsFsSbUserSid = undefined;
+        config = undefined;
+        throw e;
+      }`;
+    /** The teardown call site, in a different function. Not a rollback. */
+    const TEARDOWN = `
+      function releaseWindowsHolds() {
+        for (const e of revokeWindowsAcl({ sandboxUserSid: sb, srtWin }) ?? []) log(e);
+        for (const e of restoreWindowsAcl({ sandboxUserSid: sb, srtWin }) ?? []) log(e);
+      }`;
+
+    it("accepts the release-then-rethrow shape", () => {
+      expect(rollsBackWindowsAclOnFailedInitialize(FAIL_CLOSED)).toBe(true);
+    });
+
+    it("rejects a failure path that keeps the ACLs it took", () => {
+      // The regression that matters: initialization still fails closed, but the
+      // sandbox user keeps its ACE. Every assertion this test used to make was
+      // satisfied by a source in this state.
+      const kept = `
+      catch (e) {
+        windowsFsSbUserSid = undefined;
+        config = undefined;
+        throw e;
+      }`;
+      expect(rollsBackWindowsAclOnFailedInitialize(kept + TEARDOWN)).toBe(false);
+    });
+
+    it("does not accept the teardown call site as the failure path", () => {
+      // Both release calls are present in the file, just not where they matter.
+      expect(rollsBackWindowsAclOnFailedInitialize(TEARDOWN)).toBe(false);
+    });
+
+    it("does not pin the minifier's identifier names", () => {
+      const renamed = FAIL_CLOSED
+        .replaceAll("windowsFsSbUserSid", "q7")
+        .replaceAll("catch (e)", "catch(_x)")
+        .replaceAll("throw e;", "throw _x;");
+      expect(rollsBackWindowsAclOnFailedInitialize(renamed)).toBe(true);
+    });
+
+    it("rejects the shipped source once the release calls are taken out of it", () => {
+      // The fixtures above are hand-written, so they prove the predicate's logic
+      // and not that it is aimed at the real artifact. This mutates the shipped
+      // file in memory instead: strip the release calls and the same predicate
+      // that passes on ASRT as published must reject what is left.
+      const source = readAsrtSandboxManagerSource();
+      expect(rollsBackWindowsAclOnFailedInitialize(source)).toBe(true);
+
+      const stripped = source.replaceAll(
+        /^[^\n]*(?:revoke|restore)WindowsAcl\(\s*\{\s*sandboxUserSid[^\n]*\n/gm,
+        "",
+      );
+      // Non-vacuous: a strip that matched nothing would make the assertion
+      // below true for the wrong reason.
+      expect(stripped.length).toBeLessThan(source.length);
+      expect(rollsBackWindowsAclOnFailedInitialize(stripped)).toBe(false);
+    });
+
+    it("requires the rethrow to carry the value that was caught", () => {
+      // A catch that swallows its own error and throws something else is not
+      // failing closed, whatever else the block does.
+      const swallowed = FAIL_CLOSED.replace("throw e;", "throw new Error('boom');");
+      expect(rollsBackWindowsAclOnFailedInitialize(swallowed)).toBe(false);
+    });
   });
 });
