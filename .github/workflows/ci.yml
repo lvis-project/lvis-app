@@ -46,6 +46,15 @@ jobs:
       - name: Ensure uv toolchain
         working-directory: lvis-app
         run: node scripts/fetch-uv.mjs
+      # Source-only assertions over the release-signing workflow: the action
+      # pins, the trust boundaries, and the absence of privileged inputs on
+      # unprivileged jobs. It runs under `node --test`, not vitest, so it was
+      # invoked by nothing and sat red for twelve days after a batch
+      # dependency merge moved a pin without moving its assertion. Costs
+      # ~0.3s; a supply-chain control nothing executes is not a control.
+      - name: Verify release-signing workflow invariants
+        working-directory: lvis-app
+        run: bun run test:a2a-p4-5:evidence
       - name: Run deterministic Knip gate
         working-directory: lvis-app
         run: bun run check:knip && bun run test:knip-gate
