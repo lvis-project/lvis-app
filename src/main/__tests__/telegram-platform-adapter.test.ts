@@ -137,7 +137,7 @@ describe("Telegram platform adapter", () => {
     }
   });
 
-  it("enforces safe positive direct-message identifiers and text code-point bounds", () => {
+  it("enforces safe positive direct-message identifiers and text UTF-16 unit bounds", () => {
     const verifier = createTelegramWebhookVerifier({ secretToken: SECRET });
     const rejected: readonly [string, (candidate: Record<string, any>) => void][] = [
       ["zero update id", (candidate) => { candidate.update_id = 0; }],
@@ -147,7 +147,10 @@ describe("Telegram platform adapter", () => {
       ["empty text", (candidate) => { candidate.message.text = ""; }],
       ["C0 control", (candidate) => { candidate.message.text = "before\u0000after"; }],
       ["DEL", (candidate) => { candidate.message.text = "before\u007fafter"; }],
-      ["overlong emoji text", (candidate) => { candidate.message.text = "😀".repeat(4_097); }],
+      ["overlong BMP text", (candidate) => { candidate.message.text = "a".repeat(4_097); }],
+      // Telegram counts UTF-16 units, so one emoji spends two of the 4,096.
+      ["one emoji past the unit bound", (candidate) => { candidate.message.text = "😀".repeat(2_049); }],
+      ["a code-point-sized emoji message", (candidate) => { candidate.message.text = "😀".repeat(4_096); }],
     ];
 
     for (const [_name, mutate] of rejected) {
@@ -157,7 +160,8 @@ describe("Telegram platform adapter", () => {
     }
 
     const boundary = structuredClone(update()) as Record<string, any>;
-    boundary.message.text = "😀".repeat(4_096);
+    boundary.message.text = "😀".repeat(2_048);
+    expect(boundary.message.text).toHaveLength(4_096);
     expect(verifier.verify(signedRequest(boundary))).toMatchObject({ text: boundary.message.text });
 
     const whitespace = structuredClone(update()) as Record<string, any>;
@@ -178,7 +182,7 @@ describe("Telegram platform adapter", () => {
     })).toThrow("telegram-outbound-fetch-invalid");
   });
 
-  it("sends only Telegram's safe text payload, composes an AbortSignal, and truncates by Unicode code point", async () => {
+  it("sends only Telegram's safe text payload, composes an AbortSignal, and truncates by UTF-16 unit", async () => {
     const fetchSpy = successfulFetch();
     const transport = createTelegramOutboundTransport({
       botToken: BOT_TOKEN,
@@ -201,9 +205,13 @@ describe("Telegram platform adapter", () => {
     });
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     const body = JSON.parse(String(init?.body));
+    // 2,048 emoji are already Telegram's whole 4,096-unit budget. Sending
+    // 4,096 of them is 8,192 units and fails with 400 "message is too long",
+    // which closes the delivery channel and loses the reply.
+    expect(String(body.text)).toHaveLength(4_096);
     expect(body).toEqual({
       chat_id: "42",
-      text: "😀".repeat(4_096),
+      text: "😀".repeat(2_048),
       link_preview_options: { is_disabled: true },
       protect_content: true,
     });
@@ -277,7 +285,7 @@ describe("Telegram platform adapter", () => {
       sendOptions(),
     )).rejects.toMatchObject({ message: "telegram-delivery-failed" });
   });
-  it("coalesces adjacent safe text in order, chunks by code point, and retains meaningful status transitions", () => {
+  it("coalesces adjacent safe text in order, chunks by UTF-16 unit, and retains meaningful status transitions", () => {
     const combined = coalesceQueue([
       { cursor: 1, message: { kind: "text", cursor: 1, text: "first " } },
       { cursor: 2, message: { kind: "text", cursor: 2, text: "second" } },
@@ -299,20 +307,51 @@ describe("Telegram platform adapter", () => {
     ]);
     expect(Object.isFrozen(combined)).toBe(true);
 
+    // 4,097 emoji are 8,194 UTF-16 units: three chunks, not two, and every
+    // chunk has to fit the same unit budget the Bot API enforces.
     const original = "😀".repeat(4_097);
     const chunked = coalesceQueue([
       { cursor: 10, message: { kind: "text", cursor: 10, text: original } },
     ]);
-    expect(chunked).toHaveLength(2);
+    expect(chunked).toHaveLength(3);
     expect(chunked.map((entry) => entry.message.kind === "text" ? entry.message.text : "").join(""))
       .toBe(original);
-    expect([...((chunked[0]?.message.kind === "text" ? chunked[0].message.text : ""))]).toHaveLength(4_096);
-    expect(chunked[0]?.cursor).toBe(10);
-    expect(chunked[1]?.cursor).toBe(10);
+    expect(chunked.map((entry) => entry.message.kind === "text" ? entry.message.text.length : -1))
+      .toEqual([4_096, 4_096, 2]);
+    // No chunk may end on half of a surrogate pair.
+    for (const entry of chunked) {
+      expect(entry.cursor).toBe(10);
+      const text = entry.message.kind === "text" ? entry.message.text : "";
+      expect([...text].every((character) => character === "😀")).toBe(true);
+    }
 
     expect(() => coalesceQueue([
       { cursor: 11, message: { kind: "text", cursor: 12, text: "mismatched cursor" } },
     ])).toThrow("telegram-delivery-queue-entry-invalid");
+  });
+
+  it("keeps an over-long snapshot as one message holding its newest window", () => {
+    const oversized = coalesceQueue([
+      { cursor: 20, message: { kind: "snapshot", cursor: 20, status: "idle", text: `OLDEST${"x".repeat(8_000)}NEWEST` } },
+    ]);
+    // A reconnect snapshot stays one Bot API send. Splitting it would replay
+    // the retained window as several rate-limited messages on every inbound
+    // message, and the newest text is what the reader is waiting for.
+    expect(oversized).toHaveLength(1);
+    const snapshotText = oversized[0]?.message.kind === "snapshot" ? oversized[0].message.text : "";
+    expect(snapshotText).toHaveLength(4_096);
+    expect(snapshotText.endsWith("NEWEST")).toBe(true);
+    expect(snapshotText.startsWith("OLDEST")).toBe(false);
+
+    const surrogateBoundary = coalesceQueue([
+      { cursor: 21, message: { kind: "snapshot", cursor: 21, status: "idle", text: `${"😀".repeat(2_048)}x` } },
+    ]);
+    const boundaryText = surrogateBoundary[0]?.message.kind === "snapshot"
+      ? surrogateBoundary[0].message.text
+      : "";
+    // Retaining the last 4,096 units would start on half of a surrogate pair,
+    // so the bound gives back one unit instead of emitting a broken character.
+    expect(boundaryText).toBe(`${"😀".repeat(2_047)}x`);
   });
 
   it("throttles one chat and checks abort or revocation again after an injected wait", async () => {

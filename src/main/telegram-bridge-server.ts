@@ -59,10 +59,13 @@ export const DEFAULT_TELEGRAM_WEBHOOK_PATH = "/telegram/webhook";
 const TELEGRAM_BRIDGE_FEATURE = "telegram-bridge";
 const TELEGRAM_RECEIPT_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 const TELEGRAM_MAX_RAW_BODY_BYTES = 64 * 1024;
-/** Telegram's Bot API limit is 4,096 Unicode scalar values per text message. */
-const TELEGRAM_MAX_TEXT_CODE_POINTS = 4_096;
-/** The shared ingress core bounds UTF-16 units, so it needs the emoji-safe ceiling. */
-const TELEGRAM_MAX_TEXT_UTF16_UNITS = TELEGRAM_MAX_TEXT_CODE_POINTS * 2;
+/**
+ * Telegram's Bot API limit is 4,096 UTF-16 code units per text message, the
+ * same unit `String.length` and the shared ingress core count. A code-point
+ * bound is not stricter, it is up to twice as permissive: 4,096 emoji are
+ * 8,192 units, which the Bot API rejects outright.
+ */
+const TELEGRAM_MAX_TEXT_UTF16_UNITS = 4_096;
 /** Upper bound on how long a stop waits for already-queued safe deliveries. */
 const TELEGRAM_DELIVERY_DRAIN_TIMEOUT_MS = 2_000;
 
@@ -396,7 +399,7 @@ async function startActivation(
         return active.generation === generation && runtime.isRouteCurrent(active.route);
       },
     }),
-    maxTextChars: TELEGRAM_MAX_TEXT_CODE_POINTS,
+    maxTextChars: TELEGRAM_MAX_TEXT_UTF16_UNITS,
     coalesceQueuedMessages: coalesceTelegramDeliveryQueue,
     onBackpressure: (channel) => {
       releaseDeliveryDestination(channel);
@@ -447,10 +450,14 @@ async function startActivation(
     receiptStore,
     commandPort: options.conversationCommandPort,
     maxRawBodyBytes: TELEGRAM_MAX_RAW_BODY_BYTES,
-    // PlatformBridgeInboundGateway uses UTF-16 code units; Telegram's verifier
-    // separately enforces the stricter 4,096 Unicode-code-point contract.
+    // The gateway and Telegram's own verifier bound the same unit, so the core
+    // cannot admit a message the provider boundary would reject.
     maxTextChars: TELEGRAM_MAX_TEXT_UTF16_UNITS,
     receiptOwnerId: installationReceiptOwnerId,
+    // Without this, every receipt reserve/settle/release failure and every
+    // submit or completion-registration throw is silent — exactly the states
+    // in which an inbound message is permanently lost.
+    ...(options.log ? { log: options.log } : {}),
   });
 
   let ingress: TelegramIngressHandle;
