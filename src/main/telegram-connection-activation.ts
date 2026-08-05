@@ -65,11 +65,45 @@ export function createUnroutableNotifier(
 }
 
 /**
+ * Name this machine's actor key to the durable store, and let it retire a
+ * pairing that key can no longer derive.
+ *
+ * Separate from {@link startTelegramConnectionActivation} because of WHEN it has
+ * to run rather than what it does. The bot token and the actor key live in the
+ * same OS credential store, so the ordinary real failure — a keychain reset —
+ * takes both; an activation that reads the credential first never gets here at
+ * all, and the owner surface, which reads the store rather than the bridge,
+ * goes on claiming an account nothing on this machine can name. The connection
+ * service owns that ordering and calls this ahead of its own credential read.
+ *
+ * A store with no bot identity is a no-op: no digest could have been minted
+ * under an older key yet, and adopting a name here would be adopting one for a
+ * document that has nothing to lose.
+ */
+export async function reconcileTelegramActorKey(options: {
+  readonly store: TelegramConnectionStore;
+  /** Test-only injection; production reads Electron's OS-encrypted store. */
+  readonly secretStore?: SecretStore;
+}): Promise<void> {
+  const botFingerprint = options.store.botFingerprint();
+  if (botFingerprint === null) return;
+  const digestActor = createTelegramActorDigester({
+    botFingerprint,
+    ...(options.secretStore ? { secretStore: options.secretStore } : {}),
+  });
+  await options.store.reconcileActorKey(digestActor.actorKeyDigest);
+}
+
+/**
  * Bring up the owner-driven activation for whatever is currently stored.
  *
  * A missing credential or fingerprint is a no-op rather than an error: the
  * owner service is the only thing that decides whether a connection should
  * exist, and it reports that state through its own snapshot.
+ *
+ * The actor-key reconcile is deliberately NOT done here. It has to precede the
+ * credential read, and this function is only ever reached after the service has
+ * already made one — see {@link reconcileTelegramActorKey}.
  */
 export async function startTelegramConnectionActivation(
   options: StartTelegramConnectionActivationOptions,
@@ -78,15 +112,10 @@ export async function startTelegramConnectionActivation(
   const botFingerprint = store.botFingerprint();
   if (botFingerprint === null) return;
 
-  // Ahead of the credential read on purpose. A rotated actor key invalidates
-  // the pairing whether or not a token is still stored, and the owner surface
-  // reads the store, not the bridge — so a machine that cannot start the bridge
-  // at all must still stop claiming to recognise the paired account.
   const digestActor = createTelegramActorDigester({
     botFingerprint,
     ...(options.secretStore ? { secretStore: options.secretStore } : {}),
   });
-  await store.reconcileActorKey(digestActor.actorKeyDigest);
 
   const botToken = settingsService.getEncryptedSecret(TELEGRAM_BOT_TOKEN_SECRET_KEY);
   if (botToken === null) return;

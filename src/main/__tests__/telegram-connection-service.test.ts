@@ -43,6 +43,9 @@ const SECRET_KEY = "telegram.botToken.v1";
 
 const ACTOR_DIGEST = createHash("sha256").update("actor", "utf8")
   .update(RAW_TELEGRAM_USER_ID, "utf8").digest("hex");
+/** Stands in for the platform runtime's digest of this machine's actor key. */
+const ACTOR_KEY_DIGEST = createHash("sha256").update("actor-key", "utf8")
+  .update("the-key-this-machine-can-load", "utf8").digest("hex");
 
 let directories: string[] = [];
 
@@ -129,6 +132,13 @@ interface Harness {
   readonly secrets: ReturnType<typeof secretsFixture>;
   readonly bot: ReturnType<typeof botApiFixture>;
   readonly bridge: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
+  /**
+   * The composed reconcile, as a spy over the real store call. `digest` is the
+   * name of the key this machine can load right now, so a test rotates the key
+   * by changing it — the same evidence the platform runtime would hand over.
+   */
+  readonly reconcileActorKey: ReturnType<typeof vi.fn>;
+  readonly reconcile: { digest: string; fail: boolean };
   readonly conversation: { id: string };
   /**
    * The conversations that exist, as the app's own list would report them.
@@ -165,6 +175,13 @@ async function harness(
   const secrets = secretsFixture(options.encrypted ?? true);
   const bot = botApiFixture();
   const bridge = { start: vi.fn(async () => {}), stop: vi.fn(async () => {}) };
+  // Mirrors main composition: the reconcile names this machine's actor key to
+  // the store, and the store alone decides what a changed name costs.
+  const reconcile = { digest: ACTOR_KEY_DIGEST, fail: false };
+  const reconcileActorKey = vi.fn(async () => {
+    if (reconcile.fail) throw new Error("this machine could not name its actor key");
+    await real.reconcileActorKey(reconcile.digest);
+  });
   const conversation = { id: CONVERSATION_ID };
   // Both by default: a test that shares the other conversation is exercising a
   // reshare, not a deletion, and would otherwise dangle for the wrong reason.
@@ -175,6 +192,7 @@ async function harness(
     store: tracked.store,
     settingsService: secrets.service,
     bridgeControl: bridge,
+    reconcileActorKey,
     getCurrentConversationId: () => conversation.id,
     conversationDigestFor: digestOf,
     conversationExists: (conversationId: string) => existingConversations.has(conversationId),
@@ -183,7 +201,8 @@ async function harness(
   });
   return {
     service, store: real, directory, calls: tracked.calls,
-    secrets, bot, bridge, conversation, existingConversations, digestOf,
+    secrets, bot, bridge, reconcileActorKey, reconcile,
+    conversation, existingConversations, digestOf,
   };
 }
 
@@ -396,6 +415,63 @@ describe("createTelegramConnectionService", () => {
     // error code here would be answered as `error`, which withholds the
     // pairing affordance the owner needs. The test below pins that ordering.
     expect(lost.lastErrorCode).toBeNull();
+  });
+
+  it("reconciles the actor key before it reads the credential a resume needs", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+
+    // One keychain reset takes both secrets: the stored bot token is gone, and
+    // so is the key every stored actor digest was minted under.
+    h.secrets.values.delete(SECRET_KEY);
+    h.reconcile.digest = "f".repeat(64);
+    h.reconcileActorKey.mockClear();
+    h.secrets.service.getEncryptedSecret.mockClear();
+    h.bridge.start.mockClear();
+
+    await h.service.resumeStoredConnection();
+
+    // The resume gives up at the missing credential and never starts a bridge,
+    // so everything downstream of that return is unreachable — which is why
+    // the reconcile has to come before the read and not with the activation.
+    expect(h.bridge.start).not.toHaveBeenCalled();
+    expect(h.reconcileActorKey).toHaveBeenCalledTimes(1);
+    expect(h.secrets.service.getEncryptedSecret).toHaveBeenCalled();
+    expect(h.reconcileActorKey.mock.invocationCallOrder[0]!)
+      .toBeLessThan(h.secrets.service.getEncryptedSecret.mock.invocationCallOrder[0]!);
+
+    const lost = snapshotOf(h.service);
+    expect(lost.pairing).toBeNull();
+    // The lost token is still reported as itself; the reconcile does not
+    // swallow the failure that exposed it.
+    expect(lost.lastErrorCode).toBe("telegram-bot-token-unreadable");
+  });
+
+  it("names this machine's actor key on connect, so a later resume reads continuity", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+
+    // Nothing changed between the two: the same key still loads. A resume has
+    // to read that as continuity rather than as a rotation, which it can only
+    // do if the connect that preceded the pairing named the key to the store.
+    await h.service.resumeStoredConnection();
+
+    const still = snapshotOf(h.service);
+    expect(still.state).toBe("active");
+    expect(still.pairing).not.toBeNull();
+    expect(still.approval).not.toBeNull();
+  });
+
+  it("refuses to resume when the actor key cannot be named at all", async () => {
+    const h = await pairedHarness();
+    h.reconcile.fail = true;
+    h.bridge.start.mockClear();
+
+    expect(await h.service.resume()).toEqual({ ok: false, error: "telegram-connection-unavailable" });
+    // Unnameable is not the same as rotated: nothing was retired, and nothing
+    // was started either. A bridge whose pairing cannot be checked must not run.
+    expect(h.bridge.start).not.toHaveBeenCalled();
+    expect(snapshotOf(h.service).lastErrorCode).toBe("telegram-connection-unavailable");
   });
 
   it("answers a recorded error before any pairing state, whatever the pairing is", async () => {

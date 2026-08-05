@@ -23,7 +23,8 @@ import {
   type SafeStorageLike,
   type SecretStore,
 } from "../../audit/hmac-chain.js";
-import { startTelegramConnectionActivation } from "../telegram-connection-activation.js";
+import { reconcileTelegramActorKey } from "../telegram-connection-activation.js";
+import { createTelegramConnectionService } from "../telegram-connection-service.js";
 import {
   createTelegramConnectionStore,
   type TelegramConnectionStore,
@@ -138,10 +139,40 @@ function ownerEnvelope() {
   };
 }
 
-/** Everything activation does before it needs the bot token. */
+/** The production step, over whichever key this machine can load right now. */
 async function reconcile(store: TelegramConnectionStore, secretStore: SecretStore): Promise<void> {
-  const digester = createTelegramActorDigester({ botFingerprint: BOT_FINGERPRINT, secretStore });
-  await store.reconcileActorKey(digester.actorKeyDigest);
+  await reconcileTelegramActorKey({ store, secretStore });
+}
+
+/**
+ * The service as `main.ts` composes it, minus the parts a boot resume with no
+ * credential never reaches. A bridge start here would be the defect: this
+ * resume must give up at the missing token, and it must already have
+ * reconciled by then.
+ */
+function connectionService(store: TelegramConnectionStore, secretStore: SecretStore) {
+  return createTelegramConnectionService({
+    store,
+    settingsService: {
+      setSecret: async () => {},
+      // The keychain reset took the bot token along with the actor key.
+      getEncryptedSecret: () => null,
+      deleteSecret: async () => {},
+      isSecretStorageEncrypted: () => true,
+    },
+    bridgeControl: {
+      start: async () => {
+        throw new Error("the bridge must not start without a credential");
+      },
+      stop: async () => {},
+    },
+    reconcileActorKey: () => reconcileTelegramActorKey({ store, secretStore }),
+    getCurrentConversationId: () => CONVERSATION_ID,
+    conversationDigestFor: (conversationId: string) =>
+      telegramConversationDigest(BOT_FINGERPRINT, conversationId),
+    conversationExists: () => true,
+    envManaged: false,
+  });
 }
 
 describe("telegram actor key rotation", () => {
@@ -178,28 +209,23 @@ describe("telegram actor key rotation", () => {
     expect(pairedRuntime(store, secrets.store).authorize(ownerEnvelope())).toBeNull();
   });
 
-  it("reconciles before the bot token is read, so a lost token cannot hide the loss", async () => {
+  it("reconciles before the bot token is read on the composed boot resume", async () => {
     const secrets = encryptedSecrets();
     const store = await openStore(tempDirectory("lvis-telegram-rotation-store-"));
     await connectedAndPaired(store, secrets.store);
+    // One keychain reset takes both secrets: the token this resume needs and
+    // the key the pairing's digests were minted under.
     secrets.breakDecryption();
 
-    // A machine whose credential store was reset has usually lost the token
-    // too, so activation returns early — after the guard, never before it.
-    await startTelegramConnectionActivation({
-      store,
-      settingsService: { getEncryptedSecret: () => null },
-      conversationSurfaceRuntime: {} as never,
-      conversationCommandPort: {} as never,
-      getCurrentConversationId: () => CONVERSATION_ID,
-      // Never reached: this activation returns at the missing credential, well
-      // before anything that could go fatal.
-      stopBridge: async () => {},
-      secretStore: secrets.store,
-    });
+    // Through the composition boot actually runs, not around it. The resume
+    // gives up at the missing credential, and everything the bridge would have
+    // done — the reconcile included — is downstream of that return.
+    await connectionService(store, secrets.store).resumeStoredConnection();
 
     expect(store.ownerSnapshot().pairing).toBeNull();
     expect(store.ownerSnapshot().pairingUnrecognized).toBe(true);
+    // The resume still reports its own failure; the reconcile does not mask it.
+    expect(store.ownerSnapshot().lastErrorCode).toBe("telegram-bot-token-unreadable");
   });
 
   it("round-trips the actor key digest without ever writing the key itself", async () => {
