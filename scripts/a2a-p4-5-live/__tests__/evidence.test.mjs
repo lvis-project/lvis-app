@@ -880,7 +880,7 @@ test("evidence workflow separates secret-free unsigned candidate execution from 
   for (const existingBehavior of [
     "skip_code_sign:",
     "publish-release:",
-    "softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1",
+    "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2",
   ]) {
     assert.ok(releaseWorkflow.includes(existingBehavior), `existing installer workflow behavior changed: ${existingBehavior}`);
   }
