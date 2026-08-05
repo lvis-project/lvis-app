@@ -43,7 +43,7 @@ function settingsOrchestrationApi(updateResult: Awaited<ReturnType<LvisApi["upda
   return api as unknown as LvisApi;
 }
 
-function makeSettingsWithVendor(vendor: string, hostResolverMap?: string): AppSettings {
+function makeSettingsWithVendor(vendor: string): AppSettings {
   const base = makeSettings();
   return {
     ...base,
@@ -58,7 +58,6 @@ function makeSettingsWithVendor(vendor: string, hostResolverMap?: string): AppSe
           thinkingBudgetTokens: 10_000,
         },
       },
-      ...(hostResolverMap !== undefined ? { hostResolverMap } : {}),
     },
   } as AppSettings;
 }
@@ -96,33 +95,6 @@ describe("useSettingsOrchestration", () => {
     await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
     // After hydration: vendor must be "openai", not "claude".
     expect(result.current.vendor).toBe("openai");
-  });
-
-  it("hydrates hostResolverMap from persisted settings on mount", async () => {
-    const expectedMap = "10.1.2.3 api.example.com\n10.4.5.6 cdn.example.com";
-    const settings = makeSettingsWithVendor("openai", expectedMap);
-    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
-    Object.assign(api, {
-      hasWebApiKey: vi.fn(async () => false),
-      hasMarketplaceApiKey: vi.fn(async () => false),
-    });
-
-    const { result } = renderHook(() => useSettingsOrchestration(api as unknown as LvisApi, vi.fn()));
-    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
-    expect(result.current.hostResolverMap).toBe(expectedMap);
-  });
-
-  it("defaults hostResolverMap to empty string when not present in settings", async () => {
-    const settings = makeSettingsWithVendor("openai");
-    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
-    Object.assign(api, {
-      hasWebApiKey: vi.fn(async () => false),
-      hasMarketplaceApiKey: vi.fn(async () => false),
-    });
-
-    const { result } = renderHook(() => useSettingsOrchestration(api as unknown as LvisApi, vi.fn()));
-    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
-    expect(result.current.hostResolverMap).toBe("");
   });
 
   it("aborts LLM key persistence when settings:update returns reviewer-rewire-failed", async () => {

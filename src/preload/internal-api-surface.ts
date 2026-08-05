@@ -187,7 +187,6 @@ export function buildInternalApiSurface() {
   // ─── Settings ────────────────────────────────────
   getSettings: async () => ipcRenderer.invoke(CHANNELS.settings.get),
   updateSettings: async (partial: unknown) => ipcRenderer.invoke(CHANNELS.settings.update, partial),
-  applyHostMap: async (hostResolverMap: string) => ipcRenderer.invoke(SETTINGS.applyHostMap, hostResolverMap),
   remoteA2a: {
     targets: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.targets),
     status: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.status),

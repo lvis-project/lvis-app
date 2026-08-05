@@ -102,7 +102,7 @@ describe("web_fetch SSRF guard", () => {
     expect(result.output).toMatch(/non-public address/i);
   });
 
-  it("uses the injected network fetch so host resolver rules apply to tool calls", async () => {
+  it("uses the injected Electron network fetch for tool calls", async () => {
     const networkFetch = vi.fn(async () =>
       new Response("<html><body>resolved through electron</body></html>", { status: 200 }),
     );
