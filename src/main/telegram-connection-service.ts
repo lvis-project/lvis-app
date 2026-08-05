@@ -139,6 +139,7 @@ const UNAVAILABLE = failure("telegram-connection-unavailable");
 const ENCRYPTION_UNAVAILABLE = failure("telegram-encryption-unavailable");
 const INPUT_INVALID = failure("telegram-connection-input-invalid");
 const REJECTED = failure("telegram-connection-operation-rejected");
+const TOKEN_UNREADABLE = failure("telegram-bot-token-unreadable");
 
 /**
  * Classify a Bot API failure. A 401 is the token itself; a 409 means another
@@ -394,6 +395,35 @@ export function createTelegramConnectionService(
     }
   };
 
+  const readDesiredState = (): TelegramDesiredState | null => {
+    try {
+      return store.desiredState();
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Undo a connect attempt's `setConnected`, and nothing more.
+   *
+   * Guarded on the state the attempt started from, because `setDisconnected`
+   * erases the pairing and its approvals. A store that was already
+   * `disconnected` holds neither — that state is only ever reached by the reset
+   * itself or by a fresh document — so restoring it there destroys nothing.
+   * Anything else, including a state this facade could not read, is left alone
+   * and reported through `lastErrorCode` instead.
+   */
+  const restorePreviousDesiredState = async (
+    previous: TelegramDesiredState | null,
+  ): Promise<void> => {
+    if (previous !== "disconnected") return;
+    try {
+      await store.setDisconnected();
+    } catch {
+      /* the bridge is not running either way */
+    }
+  };
+
   const readStoredToken = (): string | null => {
     try {
       const value = settingsService.getEncryptedSecret(SECRET_KEY);
@@ -451,6 +481,22 @@ export function createTelegramConnectionService(
     return Object.freeze({ ok: true as const, username: identity.value.username });
   };
 
+  /**
+   * Bring the bridge up for a verified bot.
+   *
+   * A failed start leaves the store exactly as it found it. That is the whole
+   * point: `setDisconnected` is not the inverse of `setConnected`, it is a
+   * destructive reset that erases the pairing, every approval, the pending code
+   * and the poll offset. Undoing all of that because a bridge failed to start —
+   * a Windows EPERM, a busy namespace, a locked file — spends the owner's
+   * pairing on a condition that is usually gone by the next attempt, and it
+   * does it on the unattended boot-resume path where nobody chose it.
+   *
+   * The caller records the returned code instead, which `deriveState` answers
+   * as `error`: the owner is told the connection is down, keeps what they had,
+   * and can retry. A caller that really is rolling back an attempt with nothing
+   * behind it — `connect` — restores the previous state itself.
+   */
   const activate = async (
     botToken: string,
     username: string,
@@ -463,11 +509,6 @@ export function createTelegramConnectionService(
     try {
       await bridgeControl.start();
     } catch {
-      try {
-        await store.setDisconnected();
-      } catch {
-        /* the bridge is not running either way */
-      }
       return UNAVAILABLE;
     }
     botUsername = username;
@@ -517,7 +558,11 @@ export function createTelegramConnectionService(
       }
       if (!encrypted) return ENCRYPTION_UNAVAILABLE;
 
+      // Both halves of "put it back the way it was", read before the first
+      // write so a failed attempt can restore the credential and the state it
+      // replaced.
       const previous = readStoredToken();
+      const previousDesired = readDesiredState();
       try {
         await settingsService.setSecret(SECRET_KEY, botToken);
       } catch (error) {
@@ -535,6 +580,7 @@ export function createTelegramConnectionService(
       const activated = await activate(botToken, verified.username);
       if (isFailure(activated)) {
         await restoreSecret(previous);
+        await restorePreviousDesiredState(previousDesired);
         await noteError(activated.error);
       }
       return activated;
@@ -602,8 +648,18 @@ export function createTelegramConnectionService(
       if (!encrypted) return ENCRYPTION_UNAVAILABLE;
       // Disconnect deletes the token, so a resumable bridge is exactly one that
       // still has a stored credential.
+      //
+      // Recorded, not merely returned. Every other failure here notes itself,
+      // and this one has to most of all: it is reached from the boot resume
+      // with nobody at the keyboard to read a return value, and leaving
+      // `lastErrorCode` null there let `deriveState` answer `active` for a
+      // connection with no poll loop behind it — which the surface renders as a
+      // live share, down to enabling the Away Authority arm control.
       const botToken = readStoredToken();
-      if (botToken === null) return UNAVAILABLE;
+      if (botToken === null) {
+        await noteError(TOKEN_UNREADABLE.error);
+        return TOKEN_UNREADABLE;
+      }
       const verified = await verifyBot(botToken);
       if (!verified.ok) {
         await noteError(verified.error);
