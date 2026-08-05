@@ -15,6 +15,11 @@ import type {
 
 const DEFAULT_MAX_CHANNELS = 128;
 const DEFAULT_MAX_PENDING_MESSAGES_PER_CHANNEL = 64;
+/**
+ * UTF-16 code units, not Unicode code points: every provider length limit this
+ * module has to respect is expressed in the same unit as `String.length`, and
+ * counting scalar values instead silently doubles an emoji-heavy payload.
+ */
 const DEFAULT_MAX_TEXT_CHARS = 4_096;
 
 /** The only coarse status values a bridge provider may render. */
@@ -156,7 +161,7 @@ export interface CreatePlatformBridgeDeliveryAdapterOptions<TChannel> {
   readonly maxChannels?: number;
   /** Bound undelivered messages per channel, including an in-flight send; defaults to 64. */
   readonly maxPendingMessagesPerChannel?: number;
-  /** Bound each outgoing text chunk independently of projection retention; defaults to 4,096 Unicode code points. */
+  /** Bound each outgoing text chunk independently of projection retention; defaults to 4,096 UTF-16 code units. */
   readonly maxTextChars?: number;
   /**
    * Optional provider-owned compaction of not-yet-sent safe messages. It is
@@ -580,7 +585,9 @@ function toSnapshotMessage(
       : snapshot.busy
         ? "running"
         : "idle",
-    text: safeText(snapshot.assistantText, maxTextChars),
+    // The projection retains the tail of a long assistant reply; keeping the
+    // head here would resend its oldest retained window on every reconnect.
+    text: safeTrailingText(snapshot.assistantText, maxTextChars),
   };
 }
 
@@ -632,20 +639,44 @@ function discardQueuedAtOrBefore<TChannel>(record: ChannelRecord<TChannel>, curs
   record.queue = inFlight === undefined ? later : [inFlight, ...later];
 }
 
+/**
+ * Sanitize and keep the OLDEST `maxTextChars` UTF-16 code units.
+ *
+ * A surrogate pair is kept or dropped whole, so the bound stops one unit early
+ * rather than emitting half of an astral character.
+ */
 function safeText(value: string, maxTextChars: number): string {
   let output = "";
-  let codePointCount = 0;
-  for (let index = 0; index < value.length && codePointCount < maxTextChars;) {
+  let unitCount = 0;
+  for (let index = 0; index < value.length && unitCount < maxTextChars;) {
     const codePoint = value.codePointAt(index);
     if (codePoint === undefined) break;
     const width = codePoint > 0xffff ? 2 : 1;
     if (!isUnsafeSharedTextCodePoint(codePoint) && !(codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+      if (unitCount + width > maxTextChars) break;
       output += value.slice(index, index + width);
-      codePointCount += 1;
+      unitCount += width;
     }
     index += width;
   }
   return output;
+}
+
+/**
+ * Sanitize and keep the NEWEST `maxTextChars` UTF-16 code units.
+ *
+ * Snapshot text is the retained tail of a long reply, so bounding its head
+ * would deliver the oldest retained words and drop the ones the reader is
+ * waiting for. Exported so a provider coalescer applies this identical rule
+ * instead of deriving a second, drifting one.
+ */
+export function safeTrailingText(value: string, maxTextChars: number): string {
+  const sanitized = safeText(value, Number.MAX_SAFE_INTEGER);
+  if (sanitized.length <= maxTextChars) return sanitized;
+  const start = sanitized.length - maxTextChars;
+  // Never begin on the trailing half of a surrogate pair.
+  const unit = sanitized.charCodeAt(start);
+  return sanitized.slice(unit >= 0xdc00 && unit <= 0xdfff ? start + 1 : start);
 }
 
 function isUnsafeSharedTextCodePoint(codePoint: number): boolean {

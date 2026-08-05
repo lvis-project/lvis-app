@@ -105,6 +105,39 @@ describe("PlatformBridgeDeliveryAdapter", () => {
     expect(wire).not.toContain("never-forward");
   });
 
+  it("bounds text by UTF-16 unit and keeps the newest end of a snapshot", async () => {
+    const sent: PlatformBridgeOutboundMessage[] = [];
+    const adapter = createPlatformBridgeDeliveryAdapter({
+      transport: { send: async (_channel: string, message) => void sent.push(message) },
+      maxTextChars: 8,
+    });
+
+    // The projection retains the TAIL of a long reply, so a head-bounded
+    // snapshot delivers its oldest retained words and drops the newest.
+    const tail = adapter.openChannel("telegram:tail-chat", CONVERSATION_ID);
+    tail.enqueueSnapshot(snapshot({ cursor: 1, assistantText: "oldest-middle-newest" }));
+    // Six emoji are twelve UTF-16 units: a code-point bound would send all six.
+    tail.enqueueEvent(event(2, { kind: "assistant.text.delta", text: "😀".repeat(6) }));
+    await tail.waitForIdle();
+
+    // Neither end may be cut through the middle of a surrogate pair.
+    const pairs = adapter.openChannel("telegram:pair-chat", CONVERSATION_ID);
+    pairs.enqueueSnapshot(snapshot({ cursor: 1, assistantText: `${"😀".repeat(4)}a` }));
+    pairs.enqueueEvent(event(2, { kind: "assistant.text.delta", text: `a${"😀".repeat(4)}` }));
+    await pairs.waitForIdle();
+
+    expect(sent).toEqual([
+      { kind: "snapshot", cursor: 1, status: "idle", text: "e-newest" },
+      { kind: "text", cursor: 2, text: "😀".repeat(4) },
+      { kind: "snapshot", cursor: 1, status: "idle", text: `${"😀".repeat(3)}a` },
+      { kind: "text", cursor: 2, text: `a${"😀".repeat(3)}` },
+    ]);
+    for (const message of sent) {
+      if (message.kind === "status") continue;
+      expect(message.text.length).toBeLessThanOrEqual(8);
+    }
+  });
+
   it("suppresses duplicate and out-of-order cursors before provider delivery", async () => {
     const sent: PlatformBridgeOutboundMessage[] = [];
     const adapter = createPlatformBridgeDeliveryAdapter({

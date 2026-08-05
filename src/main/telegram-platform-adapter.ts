@@ -18,11 +18,18 @@ import type {
   PlatformBridgeDeliveryTransportSendOptions,
   PlatformBridgeOutboundMessage,
 } from "./platform-bridge-delivery.js";
+import { safeTrailingText } from "./platform-bridge-delivery.js";
 
 const TELEGRAM_SECRET_HEADER = "x-telegram-bot-api-secret-token";
 const MAX_TELEGRAM_SECRET_TOKEN_CHARS = 256;
 const MAX_TELEGRAM_BOT_TOKEN_CHARS = 256;
-const MAX_TELEGRAM_TEXT_CODE_POINTS = 4_096;
+/**
+ * Telegram measures `sendMessage` text in UTF-16 code units, the same unit its
+ * MessageEntity offsets use. Counting Unicode code points instead lets an
+ * emoji-heavy reply reach 8,192 units, which the Bot API rejects with
+ * 400 "message is too long" — and a rejected send closes the delivery channel.
+ */
+const MAX_TELEGRAM_TEXT_UTF16_UNITS = 4_096;
 const DEFAULT_MIN_TELEGRAM_DELIVERY_INTERVAL_MS = 1_000;
 // Telegram FAQ documents an approximate free broadcast limit of 30 messages/s.
 const FREE_TELEGRAM_GLOBAL_MESSAGES_PER_SECOND = 30;
@@ -169,8 +176,8 @@ export type TelegramDeliveryQueueEntry = PlatformBridgeDeliveryQueuedMessage;
 /**
  * Coalesce a pending Telegram queue without looking at a raw conversation
  * timeline. Adjacent text deltas retain their exact order but are packed into
- * Bot API-sized Unicode code-point chunks. Only adjacent transient progress
- * statuses are collapsed; approval and terminal statuses remain visible.
+ * Bot API-sized UTF-16 chunks. Only adjacent transient progress statuses are
+ * collapsed; approval and terminal statuses remain visible.
  */
 export function coalesceTelegramDeliveryQueue(
   queued: readonly TelegramDeliveryQueueEntry[],
@@ -180,26 +187,26 @@ export function coalesceTelegramDeliveryQueue(
   if (!Array.isArray(queued)) {
     throw new TypeError("telegram-delivery-queue-invalid");
   }
-  const maxCodePoints = Math.min(
+  const maxUnits = Math.min(
     positiveSafeInteger(maxTextChars, "telegram-delivery-queue-max-text-invalid"),
-    MAX_TELEGRAM_TEXT_CODE_POINTS,
+    MAX_TELEGRAM_TEXT_UTF16_UNITS,
   );
 
   const output: TelegramDeliveryQueueEntry[] = [];
   let pendingText = "";
-  let pendingTextCodePoints = 0;
+  let pendingTextUnits = 0;
   let pendingTextCursor = 0;
   let pendingStatus: TelegramDeliveryQueueEntry | undefined;
 
   const flushText = (): void => {
-    if (pendingTextCodePoints === 0) return;
+    if (pendingTextUnits === 0) return;
     output.push(freezeQueueEntry(pendingTextCursor, {
       kind: "text",
       cursor: pendingTextCursor,
       text: pendingText,
     }));
     pendingText = "";
-    pendingTextCodePoints = 0;
+    pendingTextUnits = 0;
   };
   const appendText = (text: string, cursor: number): void => {
     for (let index = 0; index < text.length;) {
@@ -207,10 +214,13 @@ export function coalesceTelegramDeliveryQueue(
       if (codePoint === undefined) break;
       const width = codePoint > 0xffff ? 2 : 1;
       if (!isUnsafeTelegramCodePoint(codePoint) && !(codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+        // Chunk before, never inside, a surrogate pair: a split pair is neither
+        // valid text nor within the unit bound the Bot API actually applies.
+        if (pendingTextUnits + width > maxUnits) flushText();
         pendingText += text.slice(index, index + width);
-        pendingTextCodePoints += 1;
+        pendingTextUnits += width;
         pendingTextCursor = cursor;
-        if (pendingTextCodePoints === maxCodePoints) flushText();
+        if (pendingTextUnits === maxUnits) flushText();
       }
       index += width;
     }
@@ -240,7 +250,13 @@ export function coalesceTelegramDeliveryQueue(
       case "snapshot":
         flushText();
         flushStatus();
-        appendTelegramSnapshot(output, normalized, maxCodePoints);
+        // One reconnect snapshot stays one Bot API message. Splitting it would
+        // replay the retained window as several rate-limited sends on every
+        // inbound message, so the newest bounded window is kept instead.
+        output.push(freezeQueueEntry(normalized.cursor, {
+          ...normalized.message,
+          text: safeTrailingText(normalized.message.text, maxUnits),
+        }));
         break;
     }
   }
@@ -524,18 +540,17 @@ export function parseTelegramTextUpdate(
 
 function isSafeTelegramText(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0) return false;
-  let codePointCount = 0;
+  // `String.length` already is the UTF-16 unit count Telegram itself bounds.
+  if (value.length > MAX_TELEGRAM_TEXT_UTF16_UNITS) return false;
   for (let index = 0; index < value.length;) {
     const codePoint = value.codePointAt(index);
     if (codePoint === undefined || isUnsafeTelegramCodePoint(codePoint)) return false;
     // A lone surrogate is not a Unicode scalar value. Telegram normally cannot
-    // send one, but rejecting it preserves the stated Unicode-code-point bound.
+    // send one, but rejecting it keeps the decoded envelope well formed.
     if (codePoint >= 0xd800 && codePoint <= 0xdfff) return false;
-    codePointCount += 1;
-    if (codePointCount > MAX_TELEGRAM_TEXT_CODE_POINTS) return false;
     index += codePoint > 0xffff ? 2 : 1;
   }
-  return codePointCount > 0;
+  return true;
 }
 
 function isUnsafeTelegramCodePoint(codePoint: number): boolean {
@@ -614,51 +629,6 @@ function freezeQueueEntry(
     cursor,
     message: Object.freeze({ ...message }) as PlatformBridgeOutboundMessage,
   });
-}
-
-function appendTelegramSnapshot(
-  output: TelegramDeliveryQueueEntry[],
-  entry: TelegramDeliveryQueueEntry,
-  maxCodePoints: number,
-): void {
-  if (entry.message.kind !== "snapshot") return;
-  const chunks = telegramTextChunks(entry.message.text, maxCodePoints);
-  if (chunks.length === 0) {
-    output.push(freezeQueueEntry(entry.cursor, { ...entry.message, text: "" }));
-    return;
-  }
-  const [first, ...rest] = chunks;
-  output.push(freezeQueueEntry(entry.cursor, { ...entry.message, text: first ?? "" }));
-  for (const text of rest) {
-    output.push(freezeQueueEntry(entry.cursor, {
-      kind: "text",
-      cursor: entry.cursor,
-      text,
-    }));
-  }
-}
-
-function telegramTextChunks(value: string, maxCodePoints: number): string[] {
-  const chunks: string[] = [];
-  let current = "";
-  let codePointCount = 0;
-  for (let index = 0; index < value.length;) {
-    const codePoint = value.codePointAt(index);
-    if (codePoint === undefined) break;
-    const width = codePoint > 0xffff ? 2 : 1;
-    if (!isUnsafeTelegramCodePoint(codePoint) && !(codePoint >= 0xd800 && codePoint <= 0xdfff)) {
-      current += value.slice(index, index + width);
-      codePointCount += 1;
-      if (codePointCount === maxCodePoints) {
-        chunks.push(current);
-        current = "";
-        codePointCount = 0;
-      }
-    }
-    index += width;
-  }
-  if (codePointCount > 0) chunks.push(current);
-  return chunks;
 }
 
 function isTelegramSnapshotStatus(value: unknown): value is TelegramSnapshotMessage["status"] {
@@ -854,16 +824,18 @@ function telegramOutboundText(message: unknown): string | undefined {
   return undefined;
 }
 
+/** Last bound before the wire: Telegram rejects the whole send past this. */
 function boundedOutboundText(value: string): string {
   let output = "";
-  let codePointCount = 0;
-  for (let index = 0; index < value.length && codePointCount < MAX_TELEGRAM_TEXT_CODE_POINTS;) {
+  let unitCount = 0;
+  for (let index = 0; index < value.length && unitCount < MAX_TELEGRAM_TEXT_UTF16_UNITS;) {
     const codePoint = value.codePointAt(index);
     if (codePoint === undefined) break;
     const width = codePoint > 0xffff ? 2 : 1;
     if (!isUnsafeTelegramCodePoint(codePoint) && !(codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+      if (unitCount + width > MAX_TELEGRAM_TEXT_UTF16_UNITS) break;
       output += value.slice(index, index + width);
-      codePointCount += 1;
+      unitCount += width;
     }
     index += width;
   }
