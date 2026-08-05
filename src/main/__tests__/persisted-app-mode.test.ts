@@ -5,8 +5,7 @@
  * `system.appMode` to `<userData>/lvis-settings.json`, and
  * `readPersistedAppModeSync` (reader, called before the async bootstrap assigns
  * `services`) must read from the same file so a mode saved via the UI is the
- * one restored on the next launch. Same regression class as the
- * manual-host-resolver reader/writer-path bug.
+ * one restored on the next launch.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

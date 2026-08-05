@@ -546,6 +546,63 @@ describe("SettingsService removes plugin-specific legacy host settings", () => {
   });
 });
 
+describe("SettingsService removed manual host-resolver map", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-host-map-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  // The manual host-resolver map was removed with the private-endpoint access
+  // path. A value written by an older build is inert, but it is a user-authored
+  // internal-hostname mapping — the load path must drop it so the next write
+  // erases it from disk rather than leaving it persisted with nothing acting
+  // on it.
+  it("drops a persisted llm.hostResolverMap on load and on the next write", async () => {
+    const settingsPath = join(userDataPath, "lvis-settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        llm: {
+          provider: "openai",
+          hostResolverMap: "10.0.0.10 internal-endpoint.example.com",
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    // Sibling llm fields still load — the drop is selective, not the whole block.
+    expect(service.get("llm").provider).toBe("openai");
+    expect(service.get("llm")).not.toHaveProperty("hostResolverMap");
+
+    await service.patch({ llm: { streamSmoothing: "word" } });
+    expect(service.get("llm").streamSmoothing).toBe("word");
+    expect(service.get("llm")).not.toHaveProperty("hostResolverMap");
+    const onDisk = JSON.parse(readFileSync(settingsPath, "utf-8")) as { llm: Record<string, unknown> };
+    expect(onDisk.llm).not.toHaveProperty("hostResolverMap");
+    expect(JSON.stringify(onDisk)).not.toContain("internal-endpoint.example.com");
+  });
+
+  // A patch cannot reintroduce the key either — `llm` is rebuilt field by field
+  // from a fixed literal, so an unknown key never survives normalization.
+  it("ignores an attempt to write llm.hostResolverMap back", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({ llm: { hostResolverMap: "10.0.0.11 other.example.com" } } as never);
+
+    expect(service.get("llm")).not.toHaveProperty("hostResolverMap");
+    const settingsPath = join(userDataPath, "lvis-settings.json");
+    expect(readFileSync(settingsPath, "utf-8")).not.toContain("other.example.com");
+  });
+});
+
 describe("SettingsService plugin uninstall cleanup", () => {
   let userDataPath: string;
 

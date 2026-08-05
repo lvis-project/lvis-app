@@ -472,8 +472,12 @@ export function mergeLlmPatch(
       installedProviderIds,
       installedProviderPresets,
     ),
-    // `undefined` means "no mapping"; an explicit empty string clears the map.
-    hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
+    // `llm.hostResolverMap` is deliberately NOT carried forward. The manual
+    // Chromium host-resolver map was removed with the private-endpoint access
+    // path, so a value still on disk from an older build is inert. Dropping it
+    // here means the next settings write erases it rather than leaving a
+    // user-authored internal-hostname mapping persisted with nothing acting on
+    // it. Do not reintroduce the key.
   };
 }
 
