@@ -88,6 +88,16 @@ export interface CreateTelegramConnectionServiceOptions {
   readonly store: TelegramConnectionStore;
   readonly settingsService: TelegramConnectionSecretService;
   readonly bridgeControl: TelegramConnectionBridgeControl;
+  /**
+   * Reconcile the durable pairing against the actor key this machine can load
+   * right now, retiring it when that key is gone.
+   *
+   * Required rather than optional: this facade owns the order the two secrets
+   * are touched in, and a composition that left it out would report a pairing
+   * nothing can derive as a working one. See {@link reconcileActorKeyFailure}
+   * for where it is sequenced and why.
+   */
+  readonly reconcileActorKey: () => Promise<void>;
   /** Read at the moment of an approval; a renderer can never choose this id. */
   readonly getCurrentConversationId: () => string;
   readonly conversationDigestFor: (conversationId: string) => string;
@@ -304,6 +314,7 @@ export function createTelegramConnectionService(
     || !isStore(options.store)
     || !isSecretService(options.settingsService)
     || !isBridgeControl(options.bridgeControl)
+    || typeof options.reconcileActorKey !== "function"
     || typeof options.getCurrentConversationId !== "function"
     || typeof options.conversationDigestFor !== "function"
     || typeof options.envManaged !== "boolean"
@@ -352,8 +363,9 @@ export function createTelegramConnectionService(
    * It reads through `resolveBoundConversation`, the same function the phone's
    * egress path uses, so the screen and the phone cannot name different
    * conversations. That resolver returns a plaintext id only after the store
-   * has re-derived its digest and matched, so nothing hand-edited into the file
-   * can be resolved here.
+   * has re-derived its digest and matched, so an id edited into the file on its
+   * own cannot be resolved here. The store's own header records what that check
+   * does and does not rule out.
    *
    * A throw from the existence check is `missing` rather than `resolved`: an
    * unanswerable existence question is not evidence the conversation is there,
@@ -403,6 +415,35 @@ export function createTelegramConnectionService(
       await store.setLastError(error);
     } catch {
       /* the returned code is the authority; the stored note is a convenience */
+    }
+  };
+
+  /**
+   * Run the actor-key reconcile, and report a failure the way every other step
+   * here does — as a code, never as a throw.
+   *
+   * It is called from two places because it answers two questions that cannot
+   * be asked at the same moment:
+   *
+   * - in `resume`, BEFORE the credential is read. Both secrets live in the same
+   *   OS credential store, so the failure that actually happens in the field —
+   *   a keychain reset, or app data restored onto another machine — loses both
+   *   at once. Reading the credential first ends the resume at "token
+   *   unreadable" and leaves the owner surface, which reads the store and not
+   *   the bridge, still naming a paired account this machine cannot derive.
+   * - in `activate`, AFTER `setConnected`. That is where a first connect adopts
+   *   the key's name; before it there is no bot identity in the document, so
+   *   the reconcile has nothing to reconcile and returns without adopting.
+   *
+   * The decision itself is the store's and is idempotent, so the two calls are
+   * one authority asked twice, not two rules.
+   */
+  const reconcileActorKeyFailure = async (): Promise<TelegramConnectionFailure | null> => {
+    try {
+      await options.reconcileActorKey();
+      return null;
+    } catch {
+      return UNAVAILABLE;
     }
   };
 
@@ -517,6 +558,10 @@ export function createTelegramConnectionService(
     } catch {
       return UNAVAILABLE;
     }
+    // The document now names a bot, which is what a first connect needs before
+    // the actor key can be adopted for it.
+    const reconciled = await reconcileActorKeyFailure();
+    if (reconciled !== null) return reconciled;
     try {
       await bridgeControl.start();
     } catch {
@@ -657,6 +702,13 @@ export function createTelegramConnectionService(
         return ENCRYPTION_UNAVAILABLE;
       }
       if (!encrypted) return ENCRYPTION_UNAVAILABLE;
+      // Ahead of the credential read on purpose; `reconcileActorKeyFailure`
+      // records why the order is the whole point of this call.
+      const reconciled = await reconcileActorKeyFailure();
+      if (reconciled !== null) {
+        await noteError(reconciled.error);
+        return reconciled;
+      }
       // Disconnect deletes the token, so a resumable bridge is exactly one that
       // still has a stored credential.
       //
