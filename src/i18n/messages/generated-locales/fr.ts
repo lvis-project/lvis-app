@@ -4,12 +4,14 @@ import { en as remoteSurfacesTabEn } from "../generated/remoteSurfacesTab.js";
 import { en as beTelegramBridgeEn } from "../generated/be_telegramBridge.js";
 import { en as telegramConnectionEn } from "../generated/telegramConnection.js";
 import { en as tailnetAccessTabEn } from "../generated/tailnetAccessTab.js";
+import { en as awayAuthorityEn } from "../generated/awayAuthority.js";
 export const frMessages: Record<string, string> = {
   ...approvalAttributionEn,
   ...remoteSurfacesTabEn,
   ...beTelegramBridgeEn,
   ...telegramConnectionEn,
   ...tailnetAccessTabEn,
+  ...awayAuthorityEn,
   "formatIpcError.invalidPath": "Ce chemin n'est pas valide.",
   "formatIpcError.cannotRemoveDefaultRoot": "Le dossier de projet par défaut ne peut pas être retiré.",
   "formatIpcError.notAnAdditionalRoot": "Ce dossier n'est pas un dossier de projet amovible.",

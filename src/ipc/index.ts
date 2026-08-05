@@ -47,6 +47,7 @@ import { registerDevHandlers } from "./domains/dev.js";
 import { registerRemoteA2AHandlers } from "./domains/remote-a2a.js";
 import { registerTailnetSharingHandlers } from "./domains/tailnet-sharing.js";
 import { registerTelegramConnectionHandlers } from "./domains/telegram-connection.js";
+import { registerAwayAuthorityHandlers } from "./domains/away-authority.js";
 import type { IpcDeps } from "./types.js";
 import type { AppServices } from "../boot/types.js";
 import type { BrowserWindow } from "electron";
@@ -109,6 +110,7 @@ export function registerIpcHandlers(
   registerRemoteA2AHandlers(deps);
   registerTailnetSharingHandlers(deps);
   registerTelegramConnectionHandlers(deps);
+  registerAwayAuthorityHandlers(deps);
   // Dev IPC is *not* registered in packaged builds — the channels never
   // exist on `ipcMain`, so a compromised renderer/preload cannot probe them.
   if (!getIsPackaged()) {
