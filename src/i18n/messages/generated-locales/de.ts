@@ -4,12 +4,14 @@ import { en as remoteSurfacesTabEn } from "../generated/remoteSurfacesTab.js";
 import { en as beTelegramBridgeEn } from "../generated/be_telegramBridge.js";
 import { en as telegramConnectionEn } from "../generated/telegramConnection.js";
 import { en as tailnetAccessTabEn } from "../generated/tailnetAccessTab.js";
+import { en as awayAuthorityEn } from "../generated/awayAuthority.js";
 export const deMessages: Record<string, string> = {
   ...approvalAttributionEn,
   ...remoteSurfacesTabEn,
   ...beTelegramBridgeEn,
   ...telegramConnectionEn,
   ...tailnetAccessTabEn,
+  ...awayAuthorityEn,
   "formatIpcError.invalidPath": "Dieser Pfad ist ungültig.",
   "formatIpcError.cannotRemoveDefaultRoot": "Der Standard-Projektordner kann nicht entfernt werden.",
   "formatIpcError.notAnAdditionalRoot": "Dieser Ordner ist kein entfernbarer Projektordner.",

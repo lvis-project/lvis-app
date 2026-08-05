@@ -9,6 +9,7 @@ import { ko as ko_assistantCard } from "../generated/assistantCard.js";
 import { ko as ko_attachmentChip } from "../generated/attachmentChip.js";
 import { ko as ko_auditPanel } from "../generated/auditPanel.js";
 import { ko as ko_auditTab } from "../generated/auditTab.js";
+import { ko as ko_awayAuthority } from "../generated/awayAuthority.js";
 import { ko as ko_be_agentList } from "../generated/be_agentList.js";
 import { ko as ko_be_agentModeMap } from "../generated/be_agentModeMap.js";
 import { ko as ko_be_agentSpawn } from "../generated/be_agentSpawn.js";
@@ -61,6 +62,7 @@ import { ko as ko_be_streamCollector } from "../generated/be_streamCollector.js"
 import { ko as ko_be_structuredCompact } from "../generated/be_structuredCompact.js";
 import { ko as ko_be_subagentRunner } from "../generated/be_subagentRunner.js";
 import { ko as ko_be_systemPromptBuilder } from "../generated/be_systemPromptBuilder.js";
+import { ko as ko_be_telegramBridge } from "../generated/be_telegramBridge.js";
 import { ko as ko_be_todoSessionWrite } from "../generated/be_todoSessionWrite.js";
 import { ko as ko_be_toolSearch } from "../generated/be_toolSearch.js";
 import { ko as ko_be_tools } from "../generated/be_tools.js";
@@ -138,6 +140,7 @@ import { ko as ko_postTourFirstTask } from "../generated/postTourFirstTask.js";
 import { ko as ko_privacyTab } from "../generated/privacyTab.js";
 import { ko as ko_reasoningCard } from "../generated/reasoningCard.js";
 import { ko as ko_remoteA2aActionButton } from "../generated/remoteA2aActionButton.js";
+import { ko as ko_remoteSurfacesTab } from "../generated/remoteSurfacesTab.js";
 import { ko as ko_rolesTab } from "../generated/rolesTab.js";
 import { ko as ko_rosePine } from "../generated/rosePine.js";
 import { ko as ko_routinePanel } from "../generated/routinePanel.js";
@@ -159,10 +162,8 @@ import { ko as ko_subscriptionProvidersSection } from "../generated/subscription
 import { ko as ko_suggestedRepliesChipRow } from "../generated/suggestedRepliesChipRow.js";
 import { ko as ko_suggestedRepliesGhost } from "../generated/suggestedRepliesGhost.js";
 import { ko as ko_summaryToast } from "../generated/summaryToast.js";
-import { ko as ko_remoteSurfacesTab } from "../generated/remoteSurfacesTab.js";
-import { ko as ko_be_telegramBridge } from "../generated/be_telegramBridge.js";
-import { ko as ko_telegramConnection } from "../generated/telegramConnection.js";
 import { ko as ko_tailnetAccessTab } from "../generated/tailnetAccessTab.js";
+import { ko as ko_telegramConnection } from "../generated/telegramConnection.js";
 import { ko as ko_tokenCostBadge } from "../generated/tokenCostBadge.js";
 import { ko as ko_tokenProgressRing } from "../generated/tokenProgressRing.js";
 import { ko as ko_tokyoNight } from "../generated/tokyoNight.js";
@@ -199,6 +200,7 @@ export const koMessages: Record<string, string> = {
   ...ko_attachmentChip,
   ...ko_auditPanel,
   ...ko_auditTab,
+  ...ko_awayAuthority,
   ...ko_be_agentList,
   ...ko_be_agentModeMap,
   ...ko_be_agentSpawn,
@@ -251,6 +253,7 @@ export const koMessages: Record<string, string> = {
   ...ko_be_structuredCompact,
   ...ko_be_subagentRunner,
   ...ko_be_systemPromptBuilder,
+  ...ko_be_telegramBridge,
   ...ko_be_todoSessionWrite,
   ...ko_be_toolSearch,
   ...ko_be_tools,
@@ -328,6 +331,7 @@ export const koMessages: Record<string, string> = {
   ...ko_privacyTab,
   ...ko_reasoningCard,
   ...ko_remoteA2aActionButton,
+  ...ko_remoteSurfacesTab,
   ...ko_rolesTab,
   ...ko_rosePine,
   ...ko_routinePanel,
@@ -349,10 +353,8 @@ export const koMessages: Record<string, string> = {
   ...ko_suggestedRepliesChipRow,
   ...ko_suggestedRepliesGhost,
   ...ko_summaryToast,
-  ...ko_remoteSurfacesTab,
-  ...ko_be_telegramBridge,
-  ...ko_telegramConnection,
   ...ko_tailnetAccessTab,
+  ...ko_telegramConnection,
   ...ko_tokenCostBadge,
   ...ko_tokenProgressRing,
   ...ko_tokyoNight,

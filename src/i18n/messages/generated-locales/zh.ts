@@ -4,12 +4,14 @@ import { en as remoteSurfacesTabEn } from "../generated/remoteSurfacesTab.js";
 import { en as beTelegramBridgeEn } from "../generated/be_telegramBridge.js";
 import { en as telegramConnectionEn } from "../generated/telegramConnection.js";
 import { en as tailnetAccessTabEn } from "../generated/tailnetAccessTab.js";
+import { en as awayAuthorityEn } from "../generated/awayAuthority.js";
 export const zhMessages: Record<string, string> = {
   ...approvalAttributionEn,
   ...remoteSurfacesTabEn,
   ...beTelegramBridgeEn,
   ...telegramConnectionEn,
   ...tailnetAccessTabEn,
+  ...awayAuthorityEn,
   "actionPanel.closeAriaLabel": "关闭工具活动面板",
   "actionPanel.closeTooltip": "关闭工具活动面板",
   "actionPanel.copyPath": "复制路径",
