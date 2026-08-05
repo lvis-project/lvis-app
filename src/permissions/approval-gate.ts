@@ -357,6 +357,17 @@ export type ApprovalRequestInput = Omit<
    * audit payload, or pending state.
    */
   readonly remoteControllerAuthority?: RemoteControllerAuthority;
+  /**
+   * Host-only: EVERY path this call would touch, for scope checks that must not
+   * be satisfied by the single path the modal happens to display.
+   *
+   * `target.filePath` is a display field and is the FIRST extracted path only.
+   * A tool declaring more than one path field — `move_file` names a source and
+   * a destination — would pass a check that read the display value while the
+   * other path went anywhere. Like the other host-only fields it is destructured
+   * out before the renderer payload is built.
+   */
+  readonly scopeTargetFilePaths?: readonly string[];
 };
 
 export type ApprovalChoice =
@@ -947,6 +958,7 @@ export class ApprovalGate {
       sandboxCapability: requestedSandboxCapability,
       remoteControllerOrigin,
       remoteControllerAuthority,
+      scopeTargetFilePaths,
       ...request
     } = req;
     // Do not forward the host-only binding to renderer or audit payloads.
@@ -1250,7 +1262,9 @@ export class ApprovalGate {
         durableApprovalRecordAllowed,
         hostShellExecutionPermitBound:
           hostShellExecutionPermitBinding !== undefined,
-        targetFilePath: fullReq.target?.filePath,
+        // The full set, not `target.filePath` — that is the display value and
+        // is only the first extracted path.
+        targetFilePaths: scopeTargetFilePaths ?? [],
       } satisfies AwayAuthorityCandidate,
       Date.now(),
     );
