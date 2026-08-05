@@ -10,8 +10,16 @@
  * and never leaves this desktop. It is stored so the share survives a restart —
  * the whole point of the feature is that the owner walked away — but it is a
  * routing hint, never an authorization key. Every read re-derives its digest and
- * discards the record unless the two agree, so editing the file by hand yields
- * no approval rather than a re-pointed one.
+ * discards the record unless the two agree, which catches a file edited in one
+ * place: move the id and the stored digest stops matching it.
+ *
+ * That is all it catches. `conversationDigest` is an UNKEYED sha256 over the bot
+ * fingerprint and the conversation id, and both inputs sit in this same file, so
+ * whoever can write the file can recompute it and re-point a share consistently.
+ * What stands in the way of that is elsewhere: the pairing's `actorDigest` is a
+ * keyed HMAC under a key kept in the OS credential store, so the account a share
+ * answers to cannot be forged here, and the runtime still runs a shared
+ * conversation only while it is the one on screen.
  *
  * Pairing identifies one Telegram account and grants nothing on its own.
  * Sharing the open conversation is a separate, explicitly gestured owner action
@@ -48,6 +56,13 @@ const MAX_PENDING_CODE_ATTEMPTS = 16;
 const MAX_PENDING_CODE_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_APPROVAL_TTL_MS = 8 * 60 * 60 * 1_000;
 const MAX_APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
+/**
+ * Bound on the approvals a foreign document may present. State this store
+ * writes never approaches it: `createApproval` retires every live grant and
+ * prune() drops the retired ones on the same pass, so a document this store
+ * wrote holds at most one. It is an input bound, not a capacity the owner can
+ * exhaust.
+ */
 const MAX_APPROVALS = 32;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 const FILE_NAME = /^[a-z0-9][a-z0-9._-]{0,127}\.json$/i;
@@ -199,8 +214,10 @@ export interface TelegramConnectionStore {
    * still reports it, this retires it and records why. Returns true only when
    * that happened, so the caller can tell adoption from loss.
    *
-   * Called on every activation, before the bridge starts: a pairing that
-   * survived a keychain reset must never get as far as an egress decision.
+   * The connection service sequences the call, on every lifecycle entry that
+   * could reach the bridge and ahead of its own credential read: a pairing that
+   * survived a keychain reset must never get as far as an egress decision, and
+   * that reset usually takes the bot token with it.
    */
   reconcileActorKey(actorKeyDigest: string): Promise<boolean>;
 
@@ -265,7 +282,11 @@ interface StoredApproval {
   readonly id: string;
   readonly pairingId: string;
   readonly pairingEpoch: number;
-  /** Tamper-evident routing hint; worthless unless it re-hashes to the digest. */
+  /**
+   * Routing hint, discarded unless it re-hashes to the digest beside it. That
+   * rejects a record edited in one place, not one edited consistently — the
+   * file header says why.
+   */
   readonly conversationId: string;
   readonly conversationDigest: string;
   readonly scope: string;
@@ -306,10 +327,6 @@ function inputInvalid(): Error {
 
 function notOpen(): Error {
   return new Error("telegram-connection-store-not-open");
-}
-
-function capacity(): Error {
-  return new Error("telegram-connection-store-capacity-reached");
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -504,9 +521,13 @@ function prune(
       ? { ...approval, state: "expired", epoch: nextEpoch(approval.epoch) }
       : approval;
     if (entry !== approval) changed = true;
-    // Terminal entries stay as tombstones until their original expiry so the
-    // owner surface can still explain a just-revoked approval, then vanish.
-    if (entry.state !== "active" && entry.expiresAt <= now) {
+    // Terminal entries go on the pass that retires them, rather than lingering
+    // until their original expiry. Nothing reads one: {@link liveApprovals}
+    // gates every consuming path on `state === "active"`, so a kept record is
+    // unreachable state that still holds the plaintext conversation id of a
+    // share the owner has ended, and still occupies room in a document whose
+    // size is bounded.
+    if (entry.state !== "active") {
       changed = true;
       continue;
     }
@@ -954,12 +975,19 @@ export function createTelegramConnectionStore(
       // shared conversation, so a second live grant would be one the owner can
       // neither see nor revoke — and "the phone talks to the conversation you
       // shared" needs that conversation to be singular.
-      const approvals = current.approvals.map((approval): StoredApproval => (
-        approval.state === "active"
-          ? { ...approval, state: "revoked", epoch: nextEpoch(approval.epoch) }
-          : approval
-      ));
-      if (approvals.length >= MAX_APPROVALS) throw capacity();
+      //
+      // The retirement goes back through prune(), the way revokePairing's does,
+      // so the retired grants leave on this same pass. Keeping them would make
+      // re-sharing inside one TTL window walk the document toward its bound
+      // for records no reader can see.
+      const retired = prune({
+        ...current,
+        approvals: current.approvals.map((approval): StoredApproval => (
+          approval.state === "active"
+            ? { ...approval, state: "revoked", epoch: nextEpoch(approval.epoch) }
+            : approval
+        )),
+      }, now).document;
       const approval: StoredApproval = {
         id: nextUuid(),
         pairingId: pairing.id,
@@ -973,7 +1001,7 @@ export function createTelegramConnectionStore(
         expiresAt: addDuration(now, ttlMs),
       };
       return {
-        document: { ...current, approvals: [...approvals, approval] },
+        document: { ...retired, approvals: [...retired.approvals, approval] },
         value: authority(pairing, approval),
         changed: true,
       };
@@ -982,7 +1010,7 @@ export function createTelegramConnectionStore(
 
   const revokeApproval = async (id: string): Promise<boolean> => {
     if (!isTelegramConnectionId(id)) return false;
-    return await mutate((current) => {
+    return await mutate((current, now) => {
       const index = current.approvals.findIndex((approval) => approval.id === id);
       const approval = current.approvals[index];
       if (approval === undefined || approval.state !== "active") {
@@ -990,7 +1018,13 @@ export function createTelegramConnectionStore(
       }
       const approvals = [...current.approvals];
       approvals[index] = { ...approval, state: "revoked", epoch: nextEpoch(approval.epoch) };
-      return { document: { ...current, approvals }, value: true, changed: true };
+      // prune() drops the record it just retired, so the plaintext conversation
+      // id of an ended share does not outlive the share on disk.
+      return {
+        document: prune({ ...current, approvals }, now).document,
+        value: true,
+        changed: true,
+      };
     });
   };
 
@@ -1038,7 +1072,8 @@ export function createTelegramConnectionStore(
       const current = currentView();
       if (livePairingFor(actorDigest, current) === null) return null;
       // liveApprovals() already rejected any record whose plaintext does not
-      // re-hash to its digest, so nothing hand-edited can be returned here.
+      // re-hash to its digest, so a file edited in one place cannot be followed
+      // here. A consistently edited one can; see the file header.
       return newestApproval(liveApprovals(current))?.conversationId ?? null;
     } catch {
       return null;
