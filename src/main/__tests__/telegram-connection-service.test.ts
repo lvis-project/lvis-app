@@ -431,6 +431,33 @@ describe("createTelegramConnectionService", () => {
     expect(h.store.resolveBoundConversation(ACTOR_DIGEST)).toBe(CONVERSATION_ID);
   });
 
+  it("does not call a conversation deleted just because it has never been saved", async () => {
+    const h = await pairedHarness();
+    // A conversation the owner just opened: on screen, routable, but with no
+    // transcript file until its first turn is written.
+    h.existingConversations.delete(CONVERSATION_ID);
+
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+
+    // This used to report `shared-conversation-missing` the instant the owner
+    // shared it — beside a success toast — and on every refresh until they
+    // said something. The share was routing correctly the entire time.
+    expect(snapshotOf(h.service).state).toBe("active");
+  });
+
+  it("still reports a deleted conversation once the owner looks elsewhere", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
+
+    // Non-vacuous: the exemption above is scoped to the conversation on screen,
+    // so a share that is genuinely gone must still be reported. Without this,
+    // the fix could have been "never report missing".
+    h.existingConversations.delete(CONVERSATION_ID);
+    h.conversation.id = OTHER_CONVERSATION_ID;
+
+    expect(snapshotOf(h.service).state).toBe("shared-conversation-missing");
+  });
+
   it("says the shared conversation is gone instead of calling it merely closed", async () => {
     const h = await pairedHarness();
     expect(await h.service.approveCurrentConversation("1h")).toEqual({ ok: true });
@@ -441,7 +468,11 @@ describe("createTelegramConnectionService", () => {
     expect(live.approval?.id).toBeDefined();
 
     // Deleted from the app, not from the connection store: the share is still a
-    // live grant, which is precisely why it can dangle.
+    // live grant, which is precisely why it can dangle. The owner is looking
+    // elsewhere, because a conversation cannot be both deleted and on screen —
+    // the resolver treats the current conversation as existing whether or not
+    // it has a transcript yet.
+    h.conversation.id = OTHER_CONVERSATION_ID;
     h.existingConversations.delete(CONVERSATION_ID);
 
     const dangling = snapshotOf(h.service);
@@ -480,6 +511,10 @@ describe("createTelegramConnectionService", () => {
     // A Set whose lookup throws stands in for a conversation store that cannot
     // answer. "I could not check" is not evidence the conversation is there,
     // and defaulting to healthy would hide the loss it was asked about.
+    // Off the shared conversation first: the current-conversation shortcut
+    // answers before the existence check, so the throwing path is only
+    // reachable for a share the owner is not looking at.
+    h.conversation.id = OTHER_CONVERSATION_ID;
     const broken = h.existingConversations as unknown as { has: () => boolean };
     const original = broken.has;
     broken.has = () => {
