@@ -244,8 +244,6 @@ export type AppSettings = {
     streamSmoothing: "none" | "word" | "char";
     fallbackChain: Array<{ provider: string; model: string }>;
     modelListCache?: LlmModelListCache;
-    /** Manual-mode Chromium host-resolver map (persisted /etc/hosts-style text). */
-    hostResolverMap?: string;
   };
   chat: { systemPrompt: string; autoCompact: boolean };
   webSearch: { provider: string };
@@ -573,10 +571,6 @@ export type LvisApi = {
   }) => Promise<{ ok: boolean; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
-  /** Save the manual host-resolver map and relaunch the app to apply it. */
-  applyHostMap: (
-    hostResolverMap: string,
-  ) => Promise<{ ok: boolean; error?: string; message?: string }>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
   onSubscriptionRuntimeStatusUpdated: (
     handler: (event: SubscriptionRuntimeStatusUpdatedEvent) => void,
