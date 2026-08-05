@@ -14,6 +14,7 @@ import { ipcUserKeyboardIntent } from "./gesture-intent.js";
 import { mcpApiSurface } from "./mcp-api-surface.js";
 import { buildTelegramConnectionApiSurface } from "./telegram-connection-api-surface.js";
 import { buildTailnetSharingApiSurface } from "./tailnet-sharing-api-surface.js";
+import { buildAwayAuthorityApiSurface } from "./away-authority-api-surface.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "../plugins/capabilities.js";
 import type {
   PermissionReviewSuggestionPayload,
@@ -199,6 +200,7 @@ export function buildInternalApiSurface() {
   },
   tailnetSharing: buildTailnetSharingApiSurface(),
   telegramConnection: buildTelegramConnectionApiSurface(),
+  awayAuthority: buildAwayAuthorityApiSurface(),
   onSettingsUpdated: (handler: (settings: unknown) => void) => {
     const listener = (_event: unknown, settings: unknown) => handler(settings);
     ipcRenderer.on(SETTINGS.updated, listener);
