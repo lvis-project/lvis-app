@@ -407,23 +407,29 @@ describe("createTelegramConnectionStore", () => {
     expect(fromIntact.resolveActiveApproval(ACTOR, CONVERSATION)).not.toBeNull();
   });
 
-  it("refuses to persist a document that fails validation and keeps the last good file", async () => {
+  it("re-shares under an id source that can only mint the id already in use", async () => {
     const clock = { value: 1_700_000_000_000 };
     const directory = tempDirectory();
-    // A degenerate id source mints a duplicate approval id on the second grant.
+    // The most hostile id source there is: every grant, pairing and scope gets
+    // the same uuid. A re-share reuses the id of the grant it replaces, which
+    // the document's own validator refuses as a duplicate — so this only works
+    // because the replaced grant leaves on the pass that retires it.
     const store = await openStore(directory, clock, { randomUuid: () => APPROVAL_ID });
     await connectedAndApproved(store);
-    const good = readText(directory);
 
-    await expect(store.createApproval({
+    clock.value += 1_000;
+    expect(await store.createApproval({
       conversationId: OTHER_CONVERSATION_ID,
       conversationDigest: OTHER_CONVERSATION,
-    }))
-      .rejects.toThrow("telegram-connection-store-invalid");
-    expect(readText(directory)).toBe(good);
-    expect(store.ownerSnapshot().approval?.conversationDigest).toBe(CONVERSATION);
-    expect(store.resolveActiveApproval(ACTOR, OTHER_CONVERSATION)).toBeNull();
-    expect(store.resolveActiveApproval(ACTOR, CONVERSATION)).not.toBeNull();
+    })).not.toBeNull();
+
+    expect(readDocument(directory).approvals).toHaveLength(1);
+    expect(store.resolveActiveApproval(ACTOR, OTHER_CONVERSATION)).not.toBeNull();
+    expect(store.resolveActiveApproval(ACTOR, CONVERSATION)).toBeNull();
+    // Non-vacuous proof that the file the store wrote passes validation: a
+    // fresh store over an invalid one falls back to a disconnected document.
+    const reopened = await openStore(directory, clock);
+    expect(reopened.resolveActiveApproval(ACTOR, OTHER_CONVERSATION)).not.toBeNull();
   });
 
   it("leaves in-memory state untouched when the write fails", async () => {
@@ -575,6 +581,51 @@ describe("createTelegramConnectionStore", () => {
     // The replaced grant stops being an authority, not merely stops being shown.
     expect(store.resolveActiveApproval(ACTOR, CONVERSATION)).toBeNull();
     expect(store.resolveActiveApproval(ACTOR, OTHER_CONVERSATION)).not.toBeNull();
+  });
+
+  it("keeps re-sharing working past the document's approval bound", async () => {
+    const clock = { value: 1_700_000_000_000 };
+    const directory = tempDirectory();
+    const store = await openStore(directory, clock);
+    await connectedAndApproved(store, { ttlMs: 8 * HOUR_MS });
+
+    // Far more re-shares than the document's bound, all inside one TTL window
+    // so nothing expires on its own. A retired grant that held its slot until
+    // its original expiry made this refuse partway through, and the owner was
+    // told only that Telegram was unavailable.
+    const shares = 40;
+    for (let index = 0; index < shares; index += 1) {
+      clock.value += 1_000;
+      const conversationId = `sentinel-reshare-${index}`;
+      expect(await store.createApproval({
+        conversationId,
+        conversationDigest: conversationDigestFor(BOT_FINGERPRINT, conversationId),
+        ttlMs: 8 * HOUR_MS,
+      })).not.toBeNull();
+    }
+
+    const newest = `sentinel-reshare-${shares - 1}`;
+    expect(store.resolveBoundConversation(ACTOR)).toBe(newest);
+    // One live share, and nothing else: the retired grants are gone rather
+    // than filling the document with records no reader can reach.
+    expect(readDocument(directory).approvals).toHaveLength(1);
+    expect(readDocument(directory).approvals[0]?.conversationId).toBe(newest);
+  });
+
+  it("leaves no trace of a share the owner revoked", async () => {
+    const clock = { value: 1_700_000_000_000 };
+    const directory = tempDirectory();
+    const store = await openStore(directory, clock);
+    await connectedAndApproved(store, { ttlMs: 8 * HOUR_MS });
+    // Positive control: the plaintext conversation id is on disk while shared.
+    expect(readText(directory)).toContain(RAW_CONVERSATION_ID);
+
+    expect(await store.revokeApproval(store.ownerSnapshot().approval!.id)).toBe(true);
+
+    // The share ended hours before the grant would have expired, and the
+    // conversation it named does not outlive it on disk.
+    expect(readDocument(directory).approvals).toHaveLength(0);
+    expect(readText(directory)).not.toContain(RAW_CONVERSATION_ID);
   });
 
   it("reports no bound conversation once the share or the connection ends", async () => {
