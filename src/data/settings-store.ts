@@ -80,10 +80,11 @@ export type { ShortcutSettings, ShortcutSettingsPatch };
 
 /**
  * Single source of truth for the settings file path. Both `SettingsService`
- * (writer) and the pre-`whenReady` manual host-resolver reader derive the
- * settings path from this helper so the two can never drift onto different
- * files. `userDataPath` is `app.getPath("userData")` (e.g. on macOS
- * `~/Library/Application Support/LVIS`).
+ * (writer) and the pre-`whenReady` synchronous readers (e.g.
+ * `readPersistedAppModeSync`) derive the settings path from this helper so the
+ * two can never drift onto different files. `userDataPath` is
+ * `app.getPath("userData")` (e.g. on macOS `~/Library/Application
+ * Support/LVIS`).
  */
 export function settingsFilePath(userDataPath: string): string {
   return resolve(userDataPath, "lvis-settings.json");
@@ -132,18 +133,6 @@ export interface LLMSettings {
    * settings remount or offline restart.
    */
   modelListCache: LlmModelListCache;
-  /**
-   * Chromium host-resolver map. Persisted as /etc/hosts-style
-   * text (one "IP hostname" entry per line; blank lines and # comments
-   * ignored). Applied via Chromium `host-resolver-rules` command-line switch
-   * on next launch.
-   *
-   * Stored under the top-level `llm` namespace in the app settings file
-   * (`<userData>/lvis-settings.json`, where `<userData>` is
-   * `app.getPath("userData")`) to keep host-routing paired with the LLM
-   * endpoint it affects.
-   */
-  hostResolverMap?: string;
 }
 
 /**
@@ -159,7 +148,6 @@ export interface LLMSettingsPatch {
   streamSmoothing?: "none" | "word" | "char";
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
   modelListCache?: LlmModelListCache;
-  hostResolverMap?: string;
 }
 
 export interface ChatSettings {

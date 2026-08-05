@@ -60,7 +60,7 @@ describe("boot LLM fetch wiring regression guards", () => {
     // Boot injects the Electron network-stack fetch into the tool factory…
     expect(bootToolsSource).toContain("createWebFetchTool(networkFetch)");
     // …and the tool threads it straight into the SSRF guard rather than the
-    // global fetch, so host-resolver-rules stay honored.
+    // global fetch, so tool traffic uses Chromium's network stack.
     expect(webFetchSource).toContain(
       "export function createWebFetchTool(networkFetch: typeof fetch)",
     );

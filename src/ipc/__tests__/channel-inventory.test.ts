@@ -381,7 +381,6 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:settings:acp-subscription:start-login",
         "lvis:settings:acp-subscription:status",
         "lvis:settings:acp-subscription:verify",
-        "lvis:settings:apply-host-map",
         "lvis:settings:codex-subscription:cancel-login",
         "lvis:settings:codex-subscription:list-models",
         "lvis:settings:codex-subscription:logout",

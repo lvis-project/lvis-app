@@ -42,8 +42,8 @@ export {
  *
  * NOTE: groups whose channels already had a SOT const in
  * `src/shared/ipc-channels.ts` (permissions, work-board, routines, ui,
- * marketplace announcements, overlay, suggested-replies, settings.updated /
- * settings.applyHostMap) are re-exported above rather than duplicated here.
+ * marketplace announcements, overlay, suggested-replies, settings.updated)
+ * are re-exported above rather than duplicated here.
  */
 export const CHANNELS = {
   chat: {
