@@ -634,9 +634,93 @@ describe("createTelegramConnectionService", () => {
     expect(await h.service.disconnect()).toEqual({ ok: true });
     expect(await h.service.resume()).toEqual({
       ok: false,
-      error: "telegram-connection-unavailable",
+      error: "telegram-bot-token-unreadable",
     });
     expect(h.bridge.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an unreadable token instead of a live share nothing is behind", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation()).toEqual({ ok: true });
+    expect(snapshotOf(h.service).state).toBe("active");
+    // A keychain reset or a restore onto another machine: storage still reports
+    // itself encrypted, and the value it held no longer comes back.
+    h.secrets.values.delete(SECRET_KEY);
+    h.bridge.start.mockClear();
+
+    await h.service.resumeStoredConnection();
+
+    const snapshot = snapshotOf(h.service);
+    // `active` here is the whole defect: it is what the settings screen reads to
+    // claim a live share, and what enables the Away Authority arm control, while
+    // no poll loop exists.
+    expect(snapshot.state).toBe("error");
+    expect(snapshot.lastErrorCode).toBe("telegram-bot-token-unreadable");
+    expect(h.bridge.start).not.toHaveBeenCalled();
+    // Only the credential is gone; the pairing and the share are still the
+    // owner's, and re-entering the same token adopts them again.
+    expect(snapshot.pairing).not.toBeNull();
+    expect(snapshot.approval).not.toBeNull();
+
+    // Non-vacuous: the identical boot continuation resumes to a live share the
+    // moment the credential reads back.
+    h.secrets.values.set(SECRET_KEY, BOT_TOKEN);
+    await h.service.resumeStoredConnection();
+    expect(snapshotOf(h.service).state).toBe("active");
+    expect(snapshotOf(h.service).lastErrorCode).toBeNull();
+  });
+
+  it("keeps the pairing when the bridge fails to start on a boot resume", async () => {
+    const h = await pairedHarness();
+    expect(await h.service.approveCurrentConversation()).toEqual({ ok: true });
+    await h.store.recordPollOffset(4_242);
+    const pairingId = snapshotOf(h.service).pairing?.id;
+    // A Windows EPERM/EBUSY, a locked feature namespace, an unreadable actor
+    // key: transient, unattended, and none of it the owner's doing.
+    h.bridge.start.mockRejectedValueOnce(new Error("EPERM"));
+
+    await h.service.resumeStoredConnection();
+
+    const snapshot = snapshotOf(h.service);
+    // Not `disconnected`. That state was produced by a reset which is not the
+    // inverse of connecting: it erases the pairing, every approval, the pending
+    // code and the poll offset, none of which the failure touched.
+    expect(snapshot.state).toBe("error");
+    expect(snapshot.lastErrorCode).toBe("telegram-connection-unavailable");
+    expect(snapshot.pairing?.id).toBe(pairingId);
+    expect(snapshot.approval).not.toBeNull();
+    expect(h.store.desiredState()).toBe("connected");
+    expect(h.store.activePairingActorDigest()).toBe(ACTOR_DIGEST);
+    expect(h.store.pollOffset()).toBe(4_242);
+
+    // And the state says so rather than merely preserving things quietly: the
+    // recorded error is what the surface renders, and the retry it offers is
+    // this same resume, which clears the error once the condition passes.
+    expect(await h.service.resume()).toEqual({ ok: true });
+    expect(snapshotOf(h.service).state).toBe("active");
+    expect(snapshotOf(h.service).lastErrorCode).toBeNull();
+  });
+
+  it("rolls a failed first connect back to the state it started from", async () => {
+    const h = await harness();
+    h.bridge.start.mockRejectedValueOnce(new Error("EPERM"));
+
+    expect(await h.service.connect(BOT_TOKEN)).toEqual({
+      ok: false,
+      error: "telegram-connection-unavailable",
+    });
+    // Symmetric with the credential rollback, and safe for the same reason: a
+    // store that was `disconnected` holds no pairing and no approval, so putting
+    // it back destroys nothing and leaves the Connect control on screen.
+    expect(h.secrets.values.size).toBe(0);
+    expect(h.store.desiredState()).toBe("disconnected");
+    const snapshot = snapshotOf(h.service);
+    expect(snapshot.state).toBe("disconnected");
+    expect(snapshot.lastErrorCode).toBe("telegram-connection-unavailable");
+
+    // Non-vacuous: the same call connects once the bridge starts.
+    expect(await h.service.connect(BOT_TOKEN)).toEqual({ ok: true });
+    expect(snapshotOf(h.service).state).toBe("connected-unpaired");
   });
 
   it("rejects pause when nothing is connected", async () => {

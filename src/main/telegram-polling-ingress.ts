@@ -102,7 +102,14 @@ const DEFAULT_RATE_LIMIT_BACKOFF_MS = 5_000;
 export type TelegramPollingFatalCode =
   | "telegram-bot-token-rejected"
   | "telegram-webhook-conflict"
-  | "telegram-poll-conflict";
+  | "telegram-poll-conflict"
+  /**
+   * The durable store refused the confirmed offset. Fatal rather than ignored:
+   * the write is this connection's own state, so a store that cannot take it
+   * cannot record a pairing, an approval, or the error either — and continuing
+   * would leave a bridge that looks connected while nothing it learns survives.
+   */
+  | "telegram-connection-state-unwritable";
 
 export interface TelegramPollingIngressOptions {
   readonly client: TelegramBotApiClient;
@@ -164,7 +171,12 @@ export function startTelegramPollingIngress(
   const { signal } = controller;
   const wait = options.wait ?? defaultWait;
 
-  const finished = run(options, signal, wait).catch(() => undefined);
+  const finished = run(options, signal, wait).catch(() => {
+    // Reached only by a throw this module did not classify. It still ends
+    // ingress, so it must leave a trace rather than resolving as if the loop
+    // had been asked to stop.
+    options.log?.("[telegram-poll] the poll loop ended unexpectedly");
+  });
   return Object.freeze({
     finished,
     stop(): void {
@@ -216,7 +228,7 @@ async function poll(
         continue;
       }
       offset = seeded;
-      await options.recordPollOffset(offset);
+      if (!await confirmOffset(options, offset)) return;
       continue;
     }
 
@@ -240,8 +252,32 @@ async function poll(
         break;
       }
       offset = update.updateId + 1;
-      await options.recordPollOffset(offset);
+      if (!await confirmOffset(options, offset)) return;
     }
+  }
+}
+
+/**
+ * Confirm the offset durably, or end the activation saying why.
+ *
+ * This is the one injected callback whose failure used to escape the loop
+ * unclassified: the throw unwound past every handler here and was swallowed by
+ * the caller's `catch`, so ingress died while the owner surface still read
+ * `connected` and egress stayed attached. Routing it through the same fatal
+ * path as a rejected token makes the stop visible and, because that path tears
+ * the activation down, leaves the bridge startable again.
+ */
+async function confirmOffset(
+  options: TelegramPollingIngressOptions,
+  offset: number,
+): Promise<boolean> {
+  try {
+    await options.recordPollOffset(offset);
+    return true;
+  } catch {
+    options.log?.("[telegram-poll] the poll offset could not be saved; stopping");
+    await safeFatal(options, "telegram-connection-state-unwritable");
+    return false;
   }
 }
 
