@@ -63,6 +63,7 @@ import { createTelegramConnectionStore } from "./main/telegram-connection-store.
 import { createTelegramConnectionService } from "./main/telegram-connection-service.js";
 import { createTelegramShareChangeWatcher } from "./main/telegram-share-identity.js";
 import {
+  reconcileTelegramActorKey,
   startTelegramConnectionActivation,
   telegramConversationDigest,
   telegramConversationDigestFor,
@@ -263,6 +264,10 @@ async function main() {
         }),
         stop: (reason: "shutdown" | "user") => stopTelegramBridgeServer(reason),
       },
+      // Sequenced by the service ahead of its own credential read: one keychain
+      // reset takes the bot token and the actor key together, and only the
+      // service can put the reconcile before the read that would abandon it.
+      reconcileActorKey: () => reconcileTelegramActorKey({ store: telegramStore }),
       getCurrentConversationId,
       conversationDigestFor: (conversationId: string) => {
         const digest = telegramConversationDigestFor(telegramStore, conversationId);

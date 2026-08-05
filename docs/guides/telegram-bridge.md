@@ -96,9 +96,14 @@ survives closing the conversation and it survives restarting the app, and only
 one conversation is shared at a time — sharing another one replaces it, so
 there is never a grant you cannot see. LVIS stores that conversation's local
 identifier next to the opaque digest the share was granted under, and refuses
-the record unless the two still agree, so hand-editing the file yields no share
-rather than a re-pointed one. Revoking the share, re-sharing under a new grant,
-pausing, or disconnecting each invalidates the previous binding.
+the record unless the two still agree, so editing one of them in that file
+yields no share at all. That digest is a plain hash of values that are both in
+the same file, so it is not a defence against someone who can rewrite the file:
+what protects the share is that the paired account is named by a key held in
+this machine's credential store, which the file does not contain, and that a
+shared conversation only runs while it is the one on screen. Revoking the
+share, re-sharing under a new grant, pausing, or disconnecting each invalidates
+the previous binding.
 
 Running a turn is a narrower question than being shared. Because the host runs
 one active session, replies run only while the shared conversation is the one on
