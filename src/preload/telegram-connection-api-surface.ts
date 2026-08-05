@@ -5,8 +5,13 @@
  * not receive it. Mutating calls mint their own live keyboard intent in preload
  * so a renderer cannot replay or fabricate an owner decision.
  *
- * The bot token travels one way only. There is no read-back channel, and no
- * reply shape carries it, the webhook secret, a Telegram id, or a raw code.
+ * The bot token travels one way only: there is no read-back channel, and no
+ * reply shape carries it, the webhook secret, or a Telegram id.
+ *
+ * One reply does carry a secret, by design. `createPairingCode` returns the raw
+ * code once, because the owner has to read it off the screen and send it to the
+ * bot themselves. It is short-lived and attempt-limited, and no other reply —
+ * the snapshot included — can hand it back afterwards.
  */
 import { ipcRenderer } from "electron";
 import { CHANNELS } from "../contract/app-contract.js";
