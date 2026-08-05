@@ -273,30 +273,47 @@ describe("Telegram bridge lifecycle", () => {
     expect(f.dispose.mock.invocationCallOrder[0]).toBeLessThan(f.close.mock.invocationCallOrder[0]!);
   });
 
-  it("admits Telegram's full 4,096-code-point text bound through the UTF-16 core", async () => {
+  it("admits Telegram's 4,096-UTF-16-unit text bound and no more", async () => {
     const f = fixture();
     await maybeStartTelegramBridgeServer(f.input);
-    const started = f.startServer.mock.calls[0]?.[0] as unknown as {
-      gateway: { handleWebhook(input: unknown): Promise<string> };
-    };
-    const text = "😀".repeat(4_096);
-    const result = await started.gateway.handleWebhook({
-      rawBody: Buffer.from(JSON.stringify({
-        update_id: 777,
-        message: {
-          message_id: 778,
-          date: 1_700_000_000,
-          from: { id: 123456789, is_bot: false },
-          chat: { id: 123456789, type: "private" },
-          text,
-        },
-      }), "utf8"),
+    const gateway = startedGateway(f.startServer);
+    const admit = (text: string): Promise<string> => gateway.handleWebhook({
+      rawBody: webhookBody(777, text),
       headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
     });
 
-    // The fixture has no paired authorization, so reaching this result proves
-    // the valid Telegram text passed both provider and shared-core validation.
-    expect(result).toBe("authorization-denied");
+    // The fixture has no paired authorization, so "authorization-denied" is
+    // the deepest result reachable: the text passed provider AND core validation.
+    expect("😀".repeat(2_048)).toHaveLength(4_096);
+    await expect(admit("😀".repeat(2_048))).resolves.toBe("authorization-denied");
+
+    // 4,096 emoji are 8,192 units. Admitting them means the reply Telegram
+    // rejects with 400 "message is too long" never reaches the owner.
+    await expect(admit("😀".repeat(4_096))).resolves.toBe("invalid-envelope");
+    await expect(admit("😀".repeat(2_049))).resolves.toBe("invalid-envelope");
+  });
+
+  it("gives the shared inbound core its logger so a permanently lost delivery is not silent", async () => {
+    const log = vi.fn();
+    const reserve = vi.fn(() => {
+      throw new Error("receipt store unavailable");
+    });
+    const f = pairedFixture({
+      receiptStore: { reserve, releaseReserved: vi.fn(), settle: vi.fn() },
+    });
+    await maybeStartTelegramBridgeServer({ ...f.input, log });
+
+    const result = await startedGateway(f.startServer).handleWebhook({
+      rawBody: webhookBody(6_310),
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+    });
+
+    expect(result).toBe("receipt-unavailable");
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(f.submit).not.toHaveBeenCalled();
+    expect(log.mock.calls.flat()).toContain(
+      "platform bridge receipt reserve failed; inbound command was not submitted",
+    );
   });
   it("closes a listener that completes startup after shutdown begins", async () => {
     const f = fixture();
