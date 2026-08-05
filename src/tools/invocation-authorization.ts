@@ -1203,6 +1203,23 @@ export async function authorizeToolInvocation(
           ...(remoteControllerOrigin === undefined
             ? {}
             : { remoteControllerOrigin }),
+          // The live authority object itself, host-only for the same reason.
+          // The marker above says WHICH controller; this says the controller is
+          // still current, which only the object can answer — a string cannot
+          // go stale. Away Authority requires both and refuses when they
+          // disagree, so they are projected from one context together rather
+          // than left to be wired separately.
+          ...(invocationPermissionContext.remoteControllerAuthority === undefined
+            ? {}
+            : {
+                remoteControllerAuthority:
+                  invocationPermissionContext.remoteControllerAuthority,
+                // Every path, not the one below. `target.filePath` is the first
+                // extracted path and exists to be displayed; a scope check that
+                // read it would bind `move_file`'s source and let its
+                // destination go anywhere.
+                scopeTargetFilePaths: targetFilePaths,
+              }),
           reviewerVerdict: permissionResult.reviewer?.verdict,
           ...(approvalPurpose ? { approvalPurpose } : {}),
           args: finalInput,

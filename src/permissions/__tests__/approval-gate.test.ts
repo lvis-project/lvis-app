@@ -2324,6 +2324,7 @@ describe("ApprovalGate", () => {
         makeRequest({
           id: "origin-not-sent",
           remoteControllerOrigin: "tailnet-controller",
+          scopeTargetFilePaths: ["/srv/scope/report.md"],
         }),
       );
 
@@ -2338,6 +2339,10 @@ describe("ApprovalGate", () => {
       // The renderer is neither asked for the marker nor told it. There is no
       // copy of it outside the main process to author or to alter.
       expect(sent).not.toHaveProperty("remoteControllerOrigin");
+      // Same property, same reason. The scope list is host-only too: it is
+      // what bounds an away answer, so a renderer that could see it is one
+      // step from a renderer that could argue about it.
+      expect(sent).not.toHaveProperty("scopeTargetFilePaths");
     });
 
     it("reports an unrecognised controller as an anomaly instead of echoing it", () => {
@@ -2413,6 +2418,10 @@ describe("ApprovalGate", () => {
         remoteControllerOrigin: "platform-bridge",
         remoteControllerAuthority: makePlatformBridgeAuthority(),
         target: { filePath: AWAY_FILE },
+        // The host-only scope list. `target` is the display path; the
+        // answerer reads this, so a fixture that set only `target` would
+        // test a request the real producer never builds.
+        scopeTargetFilePaths: [AWAY_FILE],
         isReadOnly: false,
         ...overrides,
       });

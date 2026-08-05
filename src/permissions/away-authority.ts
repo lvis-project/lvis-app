@@ -161,7 +161,17 @@ export interface AwayAuthorityCandidate {
   readonly durableApprovalRecordAllowed: boolean;
   /** Whether a host-shell one-shot permit binding rides with this request. */
   readonly hostShellExecutionPermitBound: boolean;
-  readonly targetFilePath: string | undefined;
+  /**
+   * EVERY path this call would touch, not just the one the modal displays.
+   *
+   * Plural because binding the first path alone is not a bound: `move_file`
+   * declares `["sourcePath", "destinationPath"]`, so an in-scope source would
+   * carry an out-of-scope destination past a singular check.
+   *
+   * An empty list is a call that names no path at all, which is refused rather
+   * than waved through — see {@link AwayAuthority.targetScopeRefusal}.
+   */
+  readonly targetFilePaths: readonly string[];
 }
 
 /**
@@ -181,7 +191,7 @@ type AwayAuthorityRefusal =
   | "not-one-shot-contract"
   | "durable-record-allowed"
   | "host-shell-permit-bound"
-  | "write-target-unresolved"
+  | "target-unresolved"
   | "target-out-of-scope";
 
 export type AwayAuthorityEvaluation =
@@ -471,31 +481,44 @@ export class AwayAuthority {
    * write with no resolvable target is a write whose scope cannot be checked,
    * and an unbounded write is exactly what the grant is not.
    *
-   * A `read` is not required to name one — reads that leave the allowed
-   * directories arrive as `kind === "out-of-allowed-dir"`, which is already
-   * refused above, so an armed read is bounded by the Layer 1 scope the user
-   * configured. When a read DOES name a target, it is held to the armed
-   * directories as well: the grant names where the owner agreed work would
-   * happen, and there is no reason to read outside it.
+   * A `read` is held to exactly the same rule, and an earlier version of this
+   * module was wrong about that. It waved through a read that named no path,
+   * reasoning that a read leaving the allowed directories would arrive as
+   * `kind === "out-of-allowed-dir"` and be refused above. That reasoning holds
+   * only for tools that touch the filesystem. A tool that touches no path has
+   * no directory scope to leave, so nothing refused it and nothing bounded it —
+   * and `web_fetch` is `category: "read"`, escalating to `network` only for
+   * private-network hosts. A read-only grant therefore auto-approved arbitrary
+   * public egress: read the secret from an armed directory, then post it out,
+   * both answered. That is the exact chain the `network` exclusion above is
+   * documented as preventing.
+   *
+   * So the rule is one rule: a call is in scope only if it names at least one
+   * path and EVERY path it names resolves inside the armed directories. What
+   * the grant authorizes is file work in named folders, and a call that is not
+   * file work in a named folder is not a smaller version of that — it is
+   * something else, and it waits for the desk.
    */
   private targetScopeRefusal(
     grant: AwayAuthorityGrant,
     candidate: AwayAuthorityCandidate,
   ): AwayAuthorityRefusalOutcome | null {
-    const raw = candidate.targetFilePath;
-    if (typeof raw !== "string" || raw.length === 0) {
-      return candidate.toolCategory === "write"
-        ? refuse("write-target-unresolved", true)
-        : null;
+    const raw = candidate.targetFilePaths;
+    if (raw.length === 0) return refuse("target-unresolved", true);
+    for (const path of raw) {
+      if (typeof path !== "string" || path.length === 0) {
+        return refuse("target-unresolved", true);
+      }
+      let folded: string;
+      try {
+        folded = caseFoldForMatch(canonicalizePathForMatch(path));
+      } catch {
+        return refuse("target-unresolved", true);
+      }
+      if (!isPathAllowed(folded, { directories: grant.directories })) {
+        return refuse("target-out-of-scope", true);
+      }
     }
-    let folded: string;
-    try {
-      folded = caseFoldForMatch(canonicalizePathForMatch(raw));
-    } catch {
-      return refuse("write-target-unresolved", true);
-    }
-    return isPathAllowed(folded, { directories: grant.directories })
-      ? null
-      : refuse("target-out-of-scope", true);
+    return null;
   }
 }
