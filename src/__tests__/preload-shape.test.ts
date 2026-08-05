@@ -230,6 +230,11 @@ describe("preload contextBridge world shape lock", () => {
             "getStats",
             "search",
           ],
+          "awayAuthority": [
+            "arm",
+            "disarm",
+            "status",
+          ],
           "callPluginMethod": "function",
           "captureUserKeyboardIntent": "function",
           "chatAbort": "function",

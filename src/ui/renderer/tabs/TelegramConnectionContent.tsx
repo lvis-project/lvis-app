@@ -15,6 +15,7 @@ import {
 } from "../../../shared/telegram-connection.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { formatIpcError } from "../format-ipc-error.js";
+import { AwayAuthorityContent } from "./AwayAuthorityContent.js";
 import type { LvisApi } from "../types.js";
 
 export interface TelegramConnectionContentProps {
@@ -406,6 +407,19 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
 
             {snapshot.state === "active" && sharedConversationIsOpen(snapshot) ? (
               <p className="text-[11px] text-muted-foreground">{t("telegramConnection.sendFirstMessage")}</p>
+            ) : null}
+
+            {/*
+              Arming lives here rather than in its own tab because it is only
+              meaningful once something is shared: the answerer refuses every
+              turn that is not a paired-platform turn, so a control for it on a
+              disconnected desktop would offer an authority over nothing.
+            */}
+            {snapshot.approval !== null && !readOnly ? (
+              <AwayAuthorityContent
+                api={api}
+                shareIsLive={snapshot.state === "active" && sharedConversationIsOpen(snapshot)}
+              />
             ) : null}
 
             {connected ? (
