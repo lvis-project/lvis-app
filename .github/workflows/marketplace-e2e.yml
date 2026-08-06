@@ -5,11 +5,14 @@ name: Marketplace E2E (publish ↔ install)
 # without submodules, and runs only the trusted control program from
 # github.workflow_sha. Candidate code executes later on fresh, secret-free
 # runners and only inside containers.
+# Dispatch only, and deliberately not `workflow_dispatch`. This suite is a
+# pre-PR smoke check to be run when someone wants it, by someone holding a
+# token — `repository_dispatch` requires an API call with repo scope, where a
+# `workflow_dispatch` button would offer it to anyone with write access. The
+# restriction is the point, not an accident of how it was first written.
 on:
   repository_dispatch:
     types: [marketplace-e2e]
-  schedule:
-    - cron: "30 17 * * *"
 
 permissions:
   contents: read
