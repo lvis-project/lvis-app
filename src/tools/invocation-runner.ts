@@ -11,7 +11,7 @@ import { isCanonicalPowerShellTool } from "./powershell.js";
 // executor runs in no frame → `undefined`. That is the one signal separating a
 // governed card/panel invocation from the model lane (MAJOR-1). Leaf module (imports
 // only node:async_hooks) — no cycle.
-import { currentInvocationOrigin } from "../plugins/runtime/origin-chain.js";
+import { currentInvocationOrigin, runWithInvocationReporting } from "../plugins/runtime/origin-chain.js";
 import type {
   ToolSource,
   TrustLevel,
@@ -1410,9 +1410,15 @@ export async function runToolInvocation(
     });
     };
     try {
-      return generationAccess && generationLease
-        ? await generationAccess.runWithLease(generationLease, executeAdmitted)
-        : await executeAdmitted();
+      // Publish this invocation's sink for the whole subtree. A plugin handler
+      // running inside `executeAdmitted` may call `ctx.callTool`, which builds
+      // its own execute options; without an ambient sink those nested calls —
+      // including every permission denial — report to nobody.
+      return await runWithInvocationReporting(callbacks, async () =>
+        generationAccess && generationLease
+          ? await generationAccess.runWithLease(generationLease, executeAdmitted)
+          : await executeAdmitted(),
+      );
     } finally {
       generationLease?.release();
     }

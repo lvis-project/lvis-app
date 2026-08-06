@@ -27,6 +27,7 @@ import { isActiveSandboxFilesystemContainedForPluginEffects } from "../../permis
 import type { PluginToolInvocationContext } from "../../plugins/runtime.js";
 import {
   currentInvocationOrigin,
+  currentInvocationReporting,
   runWithInvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
 import {
@@ -541,6 +542,11 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           }],
           {
             sessionId: invocationSessionId,
+            // Report to whatever surface the outer invocation is reporting to.
+            // A nested plugin call is a real tool call with real permission
+            // effects; before this it built options with no sink at all, so its
+            // denials were invisible while the audit log recorded them.
+            callbacks: currentInvocationReporting(),
             ...(pluginAuthLifecycle ? { pluginAuthLifecycle } : {}),
             permissionContext: pluginSurfacePermissionScope.createPermissionContext(context, {
               // headless follows the *effective* chain origin (#664 P2):
