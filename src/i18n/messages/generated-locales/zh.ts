@@ -2026,6 +2026,7 @@ export const zhMessages: Record<string, string> = {
   "pluginConfigTab.doctorButton": "医生",
   "pluginConfigTab.doctorDescription": "重启后该插件未加载。 Doctor 可以重新安装最新的市场软件包或删除损坏的本地安装。",
   "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName}：诊断完成 - 没有可用的本地修复，并且插件仍然无法运行。",
+  "pluginConfigTab.doctorNoNewerPackage": "{displayName}：应用市场没有比已安装版本更新的包，重新安装无法解决。请等待发布者提供修复版本，或移除该插件。",
   "pluginConfigTab.doctorFailureDetailLabel": "错误详情",
   "pluginConfigTab.doctorGrantMismatchDescription": "医生确认下载的工件清单与目录批准的拨款不匹配。无法在本地修复；在使用匹配的授权重新发布市场包后重新安装，或删除本地安装。",
   "pluginConfigTab.doctorGrantMismatchTitle": "市场包不匹配",

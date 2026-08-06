@@ -2041,6 +2041,7 @@ export const esMessages: Record<string, string> = {
   "pluginConfigTab.errorDoctor": "Falló el Doctor del plugin",
   "pluginConfigTab.successDoctor": "{displayName} reparado",
   "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName}: diagnóstico completado; no se puede reparar localmente y aún no se puede ejecutar",
+  "pluginConfigTab.doctorNoNewerPackage": "{displayName}: el marketplace no tiene ningún paquete más nuevo que el instalado, así que reinstalar no lo soluciona. Espera una corrección del editor o elimina el complemento.",
   "pluginConfigTab.errorSave": "No se pudo guardar",
   "pluginConfigTab.errorSaveSecret": "No se pudo guardar el valor secreto",
   "pluginConfigTab.errorToggleEnabled": "No se pudo cambiar el estado activo del complemento",

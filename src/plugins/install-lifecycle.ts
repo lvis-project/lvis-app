@@ -192,7 +192,7 @@ interface PluginInstallMarketplace extends PluginLifecycleMarketplace {
       networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
       admission?: MarketplaceInstallAdmission;
     },
-  ): Promise<{ pluginId: string; installed: true }>;
+  ): Promise<{ pluginId: string; installed: true; unchanged?: true }>;
 }
 
 interface MarketplaceInstallAdmission {
@@ -921,7 +921,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
   emitPluginInstalled?: (payload: { pluginId: string; source: "marketplace" }) => void;
   refreshPluginNotifications?: () => void;
   log?: InstallLifecycleLogger;
-}): Promise<{ pluginId: string; installed: true }> {
+}): Promise<{ pluginId: string; installed: true; unchanged?: true }> {
   const {
     requestedPluginId,
     eventSlug,
