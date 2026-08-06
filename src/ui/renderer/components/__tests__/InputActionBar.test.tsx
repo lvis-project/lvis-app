@@ -69,6 +69,7 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     onSelectPreset: vi.fn(),
     isBusy: false,
     isSendDisabled: false,
+    hasDraft: false,
     onSend: vi.fn(),
     onCancel: vi.fn(),
     enableThinkingChat: false,
@@ -164,36 +165,86 @@ describe("InputActionBar (unified bar)", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the cancel button only while busy", () => {
-    const { queryByTestId, rerender, getByTestId } = renderBar({ isBusy: false });
+  // The turn control is ONE button, not a send button beside a cancel button.
+  // Which verb it carries is decided by the draft, not by `isBusy` alone.
+  it("idle with an empty draft keeps a single disabled send button", () => {
+    const { getByTestId, queryByTestId } = renderBar({
+      isBusy: false,
+      hasDraft: false,
+      isSendDisabled: true,
+    });
     expect(queryByTestId("composer-cancel-button")).toBeNull();
-    rerender(
-      <TooltipProvider>
-        <InputActionBar
-          plugins={[]}
-          onSelectPlugin={vi.fn()}
-          onInsertSlashCommand={vi.fn()}
-          commandActions={[]}
-          commandPopoverOpen={false}
-          onCommandPopoverOpenChange={vi.fn()}
-          ringSlot={<span data-testid="ring-slot" />}
-          onAttach={vi.fn()}
-          attachDisabled={false}
-          rolePresets={[mockPreset]}
-          activePreset={mockPreset}
-          activePresetId="default"
-          onSelectPreset={vi.fn()}
-          isBusy
-          isSendDisabled={false}
-          onSend={vi.fn()}
-          onCancel={vi.fn()}
-          enableThinkingChat={false}
-          onToggleThinking={vi.fn()}
-          statusRow={defaultStatusRow}
-        />
-      </TooltipProvider>,
-    );
-    expect(getByTestId("composer-cancel-button")).not.toBeNull();
+    const send = getByTestId("composer-send-button") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    // A disabled SOLID primary is a near-black disc at 50% opacity — the grey
+    // blob this redesign is replacing. With nothing to send the control goes
+    // quiet instead, matching the outline treatment of the leading cluster.
+    expect(send.className).toContain("bg-input-bar-subtle");
+    expect(send.className).not.toContain("bg-primary");
+  });
+
+  it("goes quiet for a runtime block too, not just for an empty draft", () => {
+    // `isSendDisabled` also folds in the runtime blocks (no API key, runtime
+    // unavailable). The button cannot act in those states either, so it must
+    // not sit there as a disabled SOLID disc — the quiet treatment and the
+    // `disabled` attribute are driven by the same flag and cannot disagree.
+    const { getByTestId } = renderBar({
+      isBusy: false,
+      hasDraft: true,
+      isSendDisabled: true,
+    });
+    const send = getByTestId("composer-send-button") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(send.className).toContain("bg-input-bar-subtle");
+  });
+
+  it("busy with an empty draft turns the one button into stop", () => {
+    const onCancel = vi.fn();
+    const onSend = vi.fn();
+    const { getByTestId, queryByTestId } = renderBar({
+      isBusy: true,
+      hasDraft: false,
+      isSendDisabled: true,
+      onCancel,
+      onSend,
+    });
+    expect(queryByTestId("composer-send-button")).toBeNull();
+    const stop = getByTestId("composer-cancel-button") as HTMLButtonElement;
+    // Stop stays clickable even though sending is blocked by the empty draft,
+    // and it is solid — it is the one thing the user can act on right now.
+    expect(stop.disabled).toBe(false);
+    expect(stop.className).toContain("bg-primary");
+    fireEvent.click(stop);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("typing during a run flips the stop button back to send", () => {
+    const onCancel = vi.fn();
+    const onSend = vi.fn();
+    const { getByTestId, queryByTestId } = renderBar({
+      isBusy: true,
+      hasDraft: true,
+      isSendDisabled: false,
+      onCancel,
+      onSend,
+    });
+    expect(queryByTestId("composer-cancel-button")).toBeNull();
+    fireEvent.click(getByTestId("composer-send-button"));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("the turn control carries no text label — icon plus accessible name only", () => {
+    const { getByTestId } = renderBar({ hasDraft: true, isSendDisabled: false });
+    const send = getByTestId("composer-send-button");
+    // The old markup shipped a "전송" span plus a ⏎ keycap whose background and
+    // text both resolved to `primary-foreground`, so the glyph read as an
+    // empty box. Nothing but the icon may live inside the button now.
+    expect(send.textContent?.trim()).toBe("");
+    expect(send.querySelector("kbd")).toBeNull();
+    expect(send.querySelector("svg")).not.toBeNull();
+    expect(send.getAttribute("aria-label")).toBeTruthy();
   });
 
   it("opens the shortcuts popover listing the composer shortcuts on click", async () => {
